@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -12,6 +12,10 @@ import { http, HttpResponse } from "msw";
  * Three defects on the Manager's group page, all of them things the Workforce
  * board — the other surface for the same data — already got right.
  */
+
+// The transcript auto-scrolls as a stream arrives; jsdom implements neither.
+window.HTMLElement.prototype.scrollIntoView = vi.fn();
+window.HTMLElement.prototype.scrollTo = vi.fn();
 
 function renderGroupDetail(search = "?version=1", id = "grp1") {
   return renderPage(
@@ -151,5 +155,348 @@ describe("GroupDetailPage — configuration on a narrow viewport", () => {
     const trigger = await screen.findByTestId("open-config-sheet");
     await userEvent.click(trigger);
     expect(await screen.findByTestId("config-sheet")).toBeInTheDocument();
+  });
+
+});
+
+/**
+ * "New Discussion" was a no-op on a group that had ever held one.
+ *
+ * The handler cleared the selection; the auto-select effect, which lists
+ * `selectedConvId` in its dependencies, immediately put the newest conversation
+ * back. Worse than cosmetic: attachments are accepted only on a NEW discussion
+ * (the backend rejects a continuation carrying any), so the upload control is
+ * not rendered while a conversation is selected — a group with any history
+ * could never accept a file again, with no error to explain it.
+ */
+describe("GroupDetailPage — New Discussion", () => {
+  it("auto-selects the newest discussion on a plain load", async () => {
+    renderGroupDetail();
+    const ids = await conversationIds();
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`discussion-item-${ids[0]}`)).toHaveAttribute("aria-current", "true");
+    });
+  });
+
+  it("clears the selection and keeps it cleared", async () => {
+    renderGroupDetail();
+    const ids = await conversationIds();
+    await waitFor(() => {
+      expect(screen.getByTestId(`discussion-item-${ids[0]}`)).toHaveAttribute("aria-current", "true");
+    });
+
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+
+    await waitFor(() => {
+      for (const id of ids) {
+        expect(screen.getByTestId(`discussion-item-${id}`)).not.toHaveAttribute("aria-current", "true");
+      }
+    });
+    // And it stays cleared — the effect used to re-run on the very change the
+    // handler made and undo it within a tick.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    for (const id of ids) {
+      expect(screen.getByTestId(`discussion-item-${id}`)).not.toHaveAttribute("aria-current", "true");
+    }
+  });
+
+  it("restores the attachment control, which is the property that was broken", async () => {
+    renderGroupDetail();
+    const ids = await conversationIds();
+    await waitFor(() => {
+      expect(screen.getByTestId(`discussion-item-${ids[0]}`)).toHaveAttribute("aria-current", "true");
+    });
+    // A continuation cannot carry files, so the affordance is absent here.
+    // Wait for the composer to settle into continue mode first: the detail
+    // query resolves a tick after the selection, and asserting before it lands
+    // would pass against the bug.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Continue this discussion/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("discussion-attach-btn")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("discussion-attach-btn")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("discussion-file-input")).toBeInTheDocument();
+  });
+
+  it("drops the conversation from the URL, so a reload does not restore it", async () => {
+    let search = "";
+    function LocationProbe() {
+      search = useLocation().search;
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={["/manage/groups/grp1?version=1"]}>
+        <QueryClientProvider client={createTestQueryClient()}>
+          <Routes>
+            <Route
+              path="/manage/groups/:id"
+              element={
+                <>
+                  <GroupDetailPage />
+                  <LocationProbe />
+                </>
+              }
+            />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await conversationIds();
+    await waitFor(() => {
+      expect(new URLSearchParams(search).get("conversation")).not.toBeNull();
+    });
+
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+
+    await waitFor(() => {
+      expect(new URLSearchParams(search).get("conversation")).toBeNull();
+    });
+  });
+
+  it("a deliberate pick after New Discussion selects again", async () => {
+    renderGroupDetail();
+    const ids = await conversationIds();
+    await userEvent.click(screen.getByTestId("new-discussion-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("discussion-attach-btn")).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByTestId(`discussion-item-${ids[1] ?? ids[0]}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`discussion-item-${ids[1] ?? ids[0]}`)).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    });
+  });
+});
+
+/**
+ * Rejecting a paused discussion has to leave the page on that discussion.
+ *
+ * The stream hook reports the state the backend puts on `group_complete`, and a
+ * HITL rejection ends a run as REJECTED. The page's settle effect used to list
+ * COMPLETED / AWAITING_APPROVAL / AWAITING_HUMAN_INPUT by hand, so REJECTED
+ * matched nothing: the transcript stayed on the live stream, no conversation
+ * was selected, the composer invited a *new* discussion, the Close action — the
+ * one action a rejected run offers — was unreachable, and the sidebar went on
+ * saying "Awaiting Approval" indefinitely, because the conversation-list poll
+ * only runs while a discussion is IN_PROGRESS/SYNTHESIZING and nothing
+ * invalidated it.
+ *
+ * None of the New Discussion cases above exercise the approve path, which is
+ * how the regression got in: `userClearedRef` is set on approve and only the
+ * settle effect clears it.
+ */
+describe("GroupDetailPage — rejecting a paused discussion", () => {
+  /** An approve/stream that ends the run as REJECTED, as the backend now does. */
+  function rejectionStream() {
+    // The document the page reads changes when the decision lands, exactly as it
+    // does against a real backend: AWAITING_APPROVAL until the resume commits,
+    // REJECTED afterwards. A fixture stuck on one or the other cannot show the
+    // bug, which is about the transition.
+    let decided = false;
+    server.use(
+      http.get("*/groups/:groupId/conversations", () =>
+        HttpResponse.json([
+          {
+            id: "gconv-paused",
+            groupId: "grp1",
+            userId: "manager-user",
+            state: "AWAITING_APPROVAL",
+            originalQuestion: "Fund the modernization grant?",
+            transcript: [],
+            memberConversationIds: {},
+            currentPhaseIndex: 1,
+            currentPhaseName: "Synthesis",
+            synthesizedAnswer: "Recommend funding.",
+            availableActions: [],
+            depth: 0,
+            taskList: null,
+            dynamicMembers: [],
+            createdAgentIds: [],
+            retainedAgentIds: [],
+            created: new Date(Date.now() - 600_000).toISOString(),
+            lastModified: new Date(Date.now() - 60_000).toISOString(),
+          },
+        ]),
+      ),
+      http.get("*/groups/:groupId/conversations/:convId", () =>
+        HttpResponse.json({
+          id: "gconv-paused",
+          groupId: "grp1",
+          userId: "manager-user",
+          state: decided ? "REJECTED" : "AWAITING_APPROVAL",
+          pausedAt: decided ? null : new Date(Date.now() - 60_000).toISOString(),
+          hitlPauseType: decided ? null : "PHASE",
+          pausedPhaseName: decided ? null : "Synthesis",
+          originalQuestion: "Fund the modernization grant?",
+          transcript: [],
+          memberConversationIds: {},
+          currentPhaseIndex: 1,
+          currentPhaseName: "Synthesis",
+          synthesizedAnswer: "Recommend funding.",
+          // What the backend computes for each state.
+          availableActions: decided ? ["close"] : [],
+          depth: 0,
+          taskList: null,
+          dynamicMembers: [],
+          createdAgentIds: [],
+          retainedAgentIds: [],
+          created: new Date(Date.now() - 600_000).toISOString(),
+          lastModified: new Date().toISOString(),
+        }),
+      ),
+      http.post("*/groups/:groupId/conversations/:gcId/approve/stream", () => {
+        decided = true;
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                'event: hitl_resume\ndata: {"verdict":"REJECTED","decidedBy":"manager-user"}\n\n',
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                'event: group_complete\ndata: {"state":"REJECTED","synthesizedAnswer":"Recommend funding."}\n\n',
+              ),
+            );
+            controller.close();
+          },
+        });
+        return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+    );
+  }
+
+  it("lands back on the rejected discussion, with its Close action reachable", async () => {
+    rejectionStream();
+    renderGroupDetail("?version=1&conversation=gconv-paused");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("reject-button")).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByTestId("reject-button"));
+    // No destructive HITL action fires on a single click.
+    await userEvent.click(await screen.findByTestId("alert-dialog-confirm"));
+
+    // The settle effect must re-select the discussion the stream just ended, or
+    // nothing on the page addresses it any more.
+    await waitFor(() => {
+      expect(screen.getByTestId("discussion-item-gconv-paused")).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    });
+    // The one action a rejected run offers.
+    await waitFor(() => {
+      expect(screen.getByTestId("action-close")).toBeInTheDocument();
+    });
+  });
+});
+
+/**
+ * Approval clears the selection so the transcript follows the resumed stream,
+ * which also disabled the persisted-conversation query the Overview reads. The
+ * stream is seeded from none of the stored document and a fresh page load holds
+ * nothing from before the pause, so the Overview lost the paused rounds' spend
+ * and every member's stance until the stream settled.
+ */
+describe("GroupDetailPage — the overview while an approved discussion resumes", () => {
+  const MEMBER = "agent-finance";
+
+  let resumed = false;
+
+  function pausedWithHistory() {
+    resumed = false;
+    const paused = {
+      id: "gconv-paused",
+      groupId: "grp1",
+      userId: "manager-user",
+      state: "AWAITING_APPROVAL",
+      pausedAt: new Date(Date.now() - 60_000).toISOString(),
+      hitlPauseType: "PHASE",
+      pausedPhaseName: "Synthesis",
+      originalQuestion: "Fund the modernization grant?",
+      transcript: [
+        {
+          speakerAgentId: MEMBER,
+          speakerDisplayName: "Finance",
+          content: "Fund it, but in two tranches.",
+          phaseIndex: 0,
+          phaseName: "Opinions",
+          type: "OPINION",
+          timestamp: new Date(Date.now() - 120_000).toISOString(),
+          errorReason: null,
+          targetAgentId: null,
+        },
+      ],
+      memberConversationIds: {},
+      memberDisplayNames: { [MEMBER]: "Finance" },
+      memberCosts: { [MEMBER]: 0.42 },
+      memberStances: {
+        [MEMBER]: {
+          text: "Backs funding, split into two tranches.",
+          coveredContributions: 1,
+          llmGenerated: true,
+          updated: new Date(Date.now() - 90_000).toISOString(),
+        },
+      },
+      currentPhaseIndex: 1,
+      currentPhaseName: "Synthesis",
+      synthesizedAnswer: null,
+      availableActions: [],
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date(Date.now() - 600_000).toISOString(),
+      lastModified: new Date(Date.now() - 60_000).toISOString(),
+    };
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => HttpResponse.json([paused])),
+      http.get("*/groups/:groupId/conversations/:convId", () => HttpResponse.json(paused)),
+      // Resumes and stays open: the discussion is still running, which is the
+      // window in which the Overview had nothing to read.
+      http.post("*/groups/:groupId/conversations/:gcId/approve/stream", () => {
+        resumed = true;
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode('event: hitl_resume\ndata: {"verdict":"APPROVED","decidedBy":"manager-user"}\n\n'),
+            );
+          },
+        });
+        return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+    );
+  }
+
+  it("keeps the paused rounds' stances and spend", async () => {
+    pausedWithHistory();
+    renderGroupDetail("?version=1&conversation=gconv-paused");
+
+    const approve = await screen.findByTestId("approve-button");
+    await waitFor(() => expect(approve).toBeEnabled());
+    await userEvent.click(approve);
+    await userEvent.click(await screen.findByTestId("alert-dialog-confirm"));
+
+    // The resume is in flight, so the selection has been handed to the stream.
+    await waitFor(() => expect(resumed).toBe(true));
+
+    await userEvent.click(screen.getByTestId("discussion-view-overview"));
+    expect(await screen.findByText("Backs funding, split into two tranches.")).toBeInTheDocument();
+    // Once as the headline total, once against the member.
+    expect(screen.getAllByText("$0.42").length).toBeGreaterThan(0);
   });
 });

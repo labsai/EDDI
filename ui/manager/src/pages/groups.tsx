@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
-import { Boxes, Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown, LayoutTemplate } from "lucide-react";
+import { Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown, LayoutTemplate, Users } from "lucide-react";
 import { toast } from "sonner";
 import {
   useEnrichedGroupDescriptors,
@@ -50,6 +51,7 @@ function setStoredSort(field: SortField, dir: SortDir) {
   } catch { /* ignore */ }
 }
 
+/** The group conversations list page: search, sort, card/table view, create and delete. */
 export function GroupsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -64,7 +66,15 @@ export function GroupsPage() {
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("groups"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
-  const { data: enrichedGroups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(100, 0, search);
+  // Debounced: every distinct filter is a fresh enriched listing — one
+  // descriptor request plus one config read per listed group, up to 101 — so
+  // querying on each keystroke fired that whole fan-out per character typed.
+  const debouncedSearch = useDebounce(search.trim(), 300);
+  const { data: enrichedGroups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(
+    100,
+    0,
+    debouncedSearch,
+  );
   const deleteMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
   const duplicateMutation = useDuplicateGroup();
@@ -111,7 +121,7 @@ export function GroupsPage() {
   const groupedGroups = useMemo(() => {
     const list = enrichedGroups ?? [];
     return [...list].sort((a, b) => {
-      let cmp = 0;
+      let cmp: number;
       if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
       else if (sortField === "style") cmp = (a.style ?? "").localeCompare(b.style ?? "");
       else if (sortField === "members") cmp = (a.members?.length ?? a.memberCount) - (b.members?.length ?? b.memberCount);
@@ -225,7 +235,7 @@ export function GroupsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-            <Boxes className="h-8 w-8 text-primary" />
+            <Users className="h-8 w-8 text-primary" />
             {t("pages.groups.title", "Groups")}
           </h1>
           <p className="mt-1 text-muted-foreground">
@@ -287,7 +297,7 @@ export function GroupsPage() {
       {/* Empty */}
       {!isLoading && !isError && groupedGroups.length === 0 && (
         <EmptyState
-          icon={Boxes}
+          icon={Users}
           title={search ? t("common.noResults") : t("groups.empty", "No groups yet")}
           description={!search ? t("groups.emptyDescription", "Groups let multiple agents collaborate on structured discussions.") : undefined}
           actionLabel={!search ? t("groups.createGroup", "Create Group") : undefined}

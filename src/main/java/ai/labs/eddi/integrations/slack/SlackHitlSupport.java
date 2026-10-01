@@ -48,13 +48,16 @@ public final class SlackHitlSupport {
     public static final String GROUP_VALUE_PREFIX = "group:";
 
     /**
-     * Separator between the owning integration name and the subject in an approval
-     * button value: {@code <integrationName>|<conversationId>} or
-     * {@code <integrationName>|group:<groupConversationId>}. Carrying the owning
-     * integration in the value binds the HITL decision to a specific integration —
-     * so signature verification and authorization use THAT integration's secret and
-     * approver list, closing the cross-integration IDOR (a shared approval channel
-     * can no longer let one integration's secret govern another's decision).
+     * Separator between the parts of an approval button value:
+     * {@code <integrationName>|<subject>|<cardId>}, where the subject is a
+     * conversationId or {@code group:<groupConversationId>} and the card id binds
+     * the click to the one card it was posted on (see
+     * {@link ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore}).
+     * Carrying the owning integration in the value binds the HITL decision to a
+     * specific integration — so signature verification and authorization use THAT
+     * integration's secret and approver list, closing the cross-integration IDOR (a
+     * shared approval channel can no longer let one integration's secret govern
+     * another's decision).
      */
     public static final String VALUE_SEPARATOR = "|";
 
@@ -94,28 +97,44 @@ public final class SlackHitlSupport {
     // ─── Action value (button payload) ───
 
     /**
-     * Build the approval button value that carries the owning integration name so
-     * the decision can be bound to that integration:
-     * {@code <integrationName>|<subject>}. {@code subject} is a plain
-     * conversationId or {@code group:<groupConversationId>}.
+     * Build the approval button value {@code <integrationName>|<subject>|<cardId>},
+     * which binds a click to the owning integration and to the one card it was
+     * posted on. {@code subject} is a plain conversationId or
+     * {@code group:<groupConversationId>}; {@code cardId} is the id recorded for
+     * the card.
      * <p>
-     * When {@code integrationName} is null/blank the legacy bare-subject form is
-     * produced (backward compat with cards posted before this change).
+     * Without an integration name the bare subject is produced, and without a card
+     * id the card id part is left off. The interactivity handler refuses both, so
+     * such a value is only ever useful on a card that has no buttons.
      */
-    public static String buildActionValue(String integrationName, String subject) {
+    /**
+     * Whether an approval card of the integration named {@code integrationName} can
+     * carry buttons: the name is the first field of the button value, so it must be
+     * present and must not contain the {@code |} separator. The integration store
+     * refuses such a name on save, but a configuration stored before that rule is
+     * loaded as it is — its buttons would be split at the wrong place and every
+     * click refused, so its cards are posted without buttons instead.
+     */
+    public static boolean isBindableIntegrationName(String integrationName) {
+        return integrationName != null && !integrationName.isBlank() && !integrationName.contains(VALUE_SEPARATOR);
+    }
+
+    public static String buildActionValue(String integrationName, String subject, String cardId) {
         if (integrationName == null || integrationName.isBlank()) {
             return subject;
         }
-        return integrationName + VALUE_SEPARATOR + subject;
+        String bound = integrationName + VALUE_SEPARATOR + subject;
+        return cardId == null || cardId.isBlank() ? bound : bound + VALUE_SEPARATOR + cardId;
     }
 
     /**
-     * Parse an approval button value into the owning integration name (may be null
-     * for legacy bare values) and the subject (conversationId or
-     * {@code group:<id>}). Only the FIRST separator splits — integration names must
-     * not contain {@code |} (validated at the integration store), but a subject id
-     * never does, so splitting on the first separator is safe. Returns {@code null}
-     * only for a null/blank value.
+     * Parse an approval button value into the owning integration name (null for a
+     * legacy bare value), the subject (conversationId or {@code group:<id>}) and
+     * the card id (null for a value posted before card binding). Integration names
+     * must not contain {@code |} (validated at the integration store), subject ids
+     * never do, and card ids are URL-safe base64, so the first separator ends the
+     * name and a second one starts the card id. Returns {@code null} only for a
+     * null/blank value.
      */
     public static ActionValue parseActionValue(String value) {
         if (value == null || value.isBlank()) {
@@ -124,11 +143,19 @@ public final class SlackHitlSupport {
         int sep = value.indexOf(VALUE_SEPARATOR);
         if (sep < 0) {
             // Legacy bare value — no integration binding available.
-            return new ActionValue(null, value);
+            return new ActionValue(null, value, null);
         }
         String integrationName = value.substring(0, sep);
-        String subject = value.substring(sep + VALUE_SEPARATOR.length());
-        return new ActionValue(integrationName.isBlank() ? null : integrationName, subject);
+        String rest = value.substring(sep + VALUE_SEPARATOR.length());
+        String subject = rest;
+        String cardId = null;
+        int cardSep = rest.indexOf(VALUE_SEPARATOR);
+        if (cardSep >= 0) {
+            subject = rest.substring(0, cardSep);
+            cardId = rest.substring(cardSep + VALUE_SEPARATOR.length());
+        }
+        return new ActionValue(integrationName.isBlank() ? null : integrationName, subject,
+                cardId == null || cardId.isBlank() ? null : cardId);
     }
 
     /**
@@ -139,8 +166,11 @@ public final class SlackHitlSupport {
      *            value (no integration binding — treated as unverifiable)
      * @param subject
      *            the conversationId, or {@code group:<groupConversationId>}
+     * @param cardId
+     *            the id of the card the button was on, or {@code null} for a value
+     *            posted before card binding (refused)
      */
-    public record ActionValue(String integrationName, String subject) {
+    public record ActionValue(String integrationName, String subject, String cardId) {
         /** Whether the subject targets a group discussion. */
         public boolean isGroup() {
             return subject != null && subject.startsWith(GROUP_VALUE_PREFIX);

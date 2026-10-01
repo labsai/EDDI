@@ -7,7 +7,7 @@ import {
   PanelRightOpen, PanelRightClose,
   PanelLeftOpen, PanelLeftClose,
   Maximize2, Minimize2, History, X,
-  AlertTriangle, Plus, Boxes,
+  AlertTriangle, Plus, SquareKanban,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -16,12 +16,17 @@ import {
   useGroupConversation,
   useDeleteGroupConversation,
 } from "@/hooks/use-groups";
-import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
+import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
+import { DiscussionInsights } from "@/components/groups/discussion-insights";
+import { TaskBoard, PersistedTaskBoard } from "@/components/groups/task-board";
+import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { DiscussionActions } from "@/components/groups/discussion-actions";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
+import { hasDisplayableDecision } from "@/lib/group-config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,9 +43,11 @@ import {
   type DiscussionStyle,
   type AgentGroupConfiguration,
   type GroupAttachmentRef,
+  type GroupConversation,
+  type GroupConversationState,
 } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
-import { STYLE_THEME } from "@/components/groups/discussion-transcript";
+import { STYLE_THEME } from "@/components/groups/discussion-style-theme";
 import { safeFormatDate } from "@/components/groups/group-utils";
 
 const DEFAULT_STATE = { label: "Created", color: "text-muted-foreground", dot: "bg-muted-foreground" } as const;
@@ -50,12 +57,40 @@ const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }
   IN_PROGRESS: { label: "In Progress", color: "text-amber-500", dot: "bg-amber-500" },
   SYNTHESIZING: { label: "Synthesizing", color: "text-amber-500", dot: "bg-amber-500" },
   FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
+  // Muted, not destructive: a human declined the recommendation, nothing broke.
+  REJECTED: { label: "Rejected", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   CREATED: DEFAULT_STATE,
   AWAITING_APPROVAL: { label: "Awaiting Approval", color: "text-orange-500", dot: "bg-orange-500" },
   AWAITING_HUMAN_INPUT: { label: "Awaiting Human Input", color: "text-primary", dot: "bg-primary" },
   CANCELLED: { label: "Cancelled", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };
+
+/**
+ * States in which a live stream has stopped producing, so the persisted
+ * conversation is the better thing to render and the sidebar needs a refetch.
+ *
+ * REJECTED is the reason this is a named list rather than three inline
+ * comparisons. The stream hook reports the state the backend puts on
+ * `group_complete`, and a HITL rejection ends a run as REJECTED — which matched
+ * none of the arms, so the page never switched off the live stream: the sidebar
+ * went on saying "Awaiting Approval" forever (the conversation-list poll only
+ * runs while a discussion is IN_PROGRESS/SYNTHESIZING, and nothing invalidated
+ * it), the composer invited a *new* discussion because no conversation was
+ * selected, and the Close action — the one action a rejected run offers — was
+ * unreachable. Only a manual click on the sidebar item recovered.
+ *
+ * FAILED and CANCELLED are deliberately absent: their detail lives on
+ * `streamState` (the error message, and the config-drift banner below), and
+ * switching to the persisted document would drop it. They ARE in the
+ * invalidation arm's reach via this list, which is all the sidebar needs.
+ */
+const STREAM_SETTLED_STATES: GroupConversationState[] = [
+  "COMPLETED",
+  "REJECTED",
+  "AWAITING_APPROVAL",
+  "AWAITING_HUMAN_INPUT",
+];
 
 /**
  * Map a lifecycle-action failure (followup / continue / close) to a friendly,
@@ -94,11 +129,30 @@ export function GroupDetailPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   // Backend requires version — default to 1 if missing from URL (e.g. wizard link).
-  // To update after a save: call
-  // setSearchParams(p => { p.set("version", String(newVersion)); return p }, { replace: true })
   const version = useMemo(
     () => (searchParams.get("version") ? Number(searchParams.get("version")) : 1),
     [searchParams],
+  );
+  /**
+   * Move the page onto the version a config save created.
+   *
+   * Every save makes a new version. Staying on the old one — as this page did —
+   * refetched the pre-save document (the edit appeared to revert), and the next
+   * save or delete 409'd; "Delete group + members" got as far as soft-deleting
+   * every member agent before the group delete failed.
+   */
+  const setVersion = useCallback(
+    (next: number) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          params.set("version", String(next));
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
   );
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -175,6 +229,20 @@ export function GroupDetailPage() {
   const { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream } =
     useGroupDiscussionStream(groupId);
 
+  /**
+   * The paused conversation as it stood when the user approved it.
+   *
+   * Approval clears the selection so the transcript follows the resumed stream,
+   * and that disables the persisted-conversation query too. The stream is seeded
+   * from none of the stored document, and after a reload the store holds nothing
+   * from before the pause. So without this the Overview lost the paused rounds'
+   * spend and every member's stance until the stream settled. It is a snapshot,
+   * not a query: those figures only change through the live frames the digest
+   * already overlays, so polling a transcript-sized document for them would buy
+   * nothing.
+   */
+  const [resumedConversation, setResumedConversation] = useState<GroupConversation | null>(null);
+
   const deleteConvMutation = useDeleteGroupConversation();
   const cancelDiscussionMutation = useCancelGroupDiscussion();
   const submitHumanInputMutation = useSubmitHumanInput();
@@ -183,9 +251,32 @@ export function GroupDetailPage() {
   // (hitl_resume ack / FAILED) rather than optimistically.
   const pendingDecisionRef = useRef<HitlVerdict | null>(null);
 
-  // Auto-select the first conversation on load — but never override the
-  // conversation the stream is driving (its settle effect handles selection).
+  /**
+   * Set when the user explicitly asked for an empty composer ("New Discussion"),
+   * cleared the moment a conversation is deliberately selected again.
+   *
+   * Without it "New Discussion" was a no-op: the handler cleared the selection,
+   * and the auto-select effect below — which lists `selectedConvId` in its
+   * dependencies — immediately put the newest conversation back. That is worse
+   * than cosmetic. Attachments are accepted only on a NEW discussion (the backend
+   * rejects a continuation carrying any), so the upload control is not rendered
+   * while a conversation is selected: a group that had ever held one discussion
+   * could never accept a file again, with no error to explain it.
+   */
+  const userClearedRef = useRef(false);
+  // It is a choice about ONE group. The page stays mounted when the route moves
+  // to another group, and a "New Discussion" pressed on the last one used to
+  // leave the next group's newest discussion unselected on arrival.
+  // Declared before the auto-select effect so it runs first on a group switch.
   useEffect(() => {
+    userClearedRef.current = false;
+  }, [groupId]);
+
+  // Auto-select the first conversation on load — but never override the
+  // conversation the stream is driving (its settle effect handles selection),
+  // and never undo an explicit "New Discussion".
+  useEffect(() => {
+    if (userClearedRef.current) return;
     if (
       !selectedConvId &&
       !streamState.isStreaming &&
@@ -213,6 +304,7 @@ export function GroupDetailPage() {
     if (!selectedConversation) return t("common.loading", "Loading…");
     const state = selectedConversation.state;
     if (state === "CLOSED") return t("groups.inputDisabledClosed", "This discussion is closed");
+    if (state === "REJECTED") return t("groups.inputDisabledRejected", "This recommendation was rejected");
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
     if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
     if (state === "AWAITING_HUMAN_INPUT") return t("groups.inputDisabledHumanTurn", "Awaiting a member's turn…");
@@ -228,20 +320,28 @@ export function GroupDetailPage() {
       // the backend only shares files with member agents when a discussion
       // starts, and rejects a continuation carrying any. DiscussionInput hides
       // the affordance in this mode, so there should be none to drop.
-      continueStream(groupId, selectedConvId, question);
+      // The stored document seeds the stream: the continue endpoint replays
+      // nothing, so after a reload the live view would otherwise hold only the
+      // new round.
+      continueStream(groupId, selectedConvId, question, selectedConversation);
       toast.info(t("groups.continueStreamStarted", "Continuation started — streaming live"));
     } else {
       // New discussion
       pendingDecisionRef.current = null;
+      // Same guard as handleNewDiscussion: the clear must survive until the
+      // stream owns the selection, or the auto-select effect wins the gap
+      // between here and startStream flipping isStreaming.
+      userClearedRef.current = true;
       setSelectedConvId(null);
       startStream(groupId, question, attachments);
       toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
     }
-  }, [groupId, inputMode, selectedConvId, continueStream, startStream, setSelectedConvId, t]);
+  }, [groupId, inputMode, selectedConvId, selectedConversation, continueStream, startStream, setSelectedConvId, t]);
 
   const handleNewDiscussion = useCallback(() => {
     resetStream();
     pendingDecisionRef.current = null;
+    userClearedRef.current = true;
     setSelectedConvId(null);
   }, [resetStream, setSelectedConvId]);
 
@@ -253,10 +353,16 @@ export function GroupDetailPage() {
       // Feedback is driven off the resume outcome (see effect below), not fired
       // optimistically — the resume can fail (409 stale, 400 invalid decision).
       pendingDecisionRef.current = verdict;
+      userClearedRef.current = true; // hold the clear until the stream takes over
+      const paused = selectedConversation?.id === gcId ? selectedConversation : null;
+      setResumedConversation(paused);
       setSelectedConvId(null); // switch the transcript to the live resumed stream
-      approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals });
+      // Seeded for the same reason as the snapshot above: the approve endpoint
+      // replays nothing, so without it the first resumed turn made the live
+      // transcript the ONLY transcript, and every earlier phase left the view.
+      approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals }, paused);
     },
-    [groupId, approveAndStream, setSelectedConvId],
+    [groupId, approveAndStream, setSelectedConvId, selectedConversation],
   );
 
   // Toast the decision outcome once the resumed stream confirms (hitl_resume) or
@@ -264,7 +370,11 @@ export function GroupDetailPage() {
   useEffect(() => {
     const verdict = pendingDecisionRef.current;
     if (!verdict) return;
-    if (streamState.hitlResume) {
+    // A rejection never produces `hitl_resume`: the backend ends the run on the
+    // spot and reports it with `group_complete` carrying state REJECTED. Waiting
+    // for the ack alone meant a rejection was never confirmed at all, and the
+    // pending decision lingered into whatever the page did next.
+    if (streamState.hitlResume || (verdict === "REJECTED" && streamState.state === "REJECTED")) {
       toast.success(
         verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected"),
       );
@@ -375,32 +485,36 @@ export function GroupDetailPage() {
     followupMutation.isPending ||
     closeMutation.isPending;
 
-  // Invalidate conversation list when stream starts (so the new entry appears in sidebar)
-  // AND when it completes (so the state updates to COMPLETED)
+  // Invalidate conversation list when stream starts (so the new entry appears in
+  // sidebar) AND whenever it reaches a state the sidebar renders differently.
   useEffect(() => {
     if (
       streamState.conversationId &&
       groupId &&
-      (streamState.state === "IN_PROGRESS" ||
-        streamState.state === "COMPLETED" ||
-        streamState.state === "AWAITING_APPROVAL" ||
-        streamState.state === "AWAITING_HUMAN_INPUT")
+      (streamState.state === "IN_PROGRESS" || STREAM_SETTLED_STATES.includes(streamState.state))
     ) {
       queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
     }
-    // When the stream settles (completed) or pauses (awaiting approval / a
-    // member's turn), switch the transcript to the persisted conversation so it
-    // shows the full pause metadata (pausedAt, timeout policy/countdown,
-    // per-task awaiting list, or — for a human turn — the rendered prompt).
+    // When the stream settles (completed, rejected) or pauses (awaiting approval
+    // / a member's turn), switch the transcript to the persisted conversation so
+    // it shows the full pause metadata (pausedAt, timeout policy/countdown,
+    // per-task awaiting list, or — for a human turn — the rendered prompt) and
+    // the lifecycle actions that state offers.
+    //
+    // A connection that dropped without a terminal event is handed over the
+    // same way: the discussion may still be running, and the persisted
+    // conversation polls while it is, whereas the stream is frozen for good.
     if (
-      (streamState.state === "COMPLETED" ||
-        streamState.state === "AWAITING_APPROVAL" ||
-        streamState.state === "AWAITING_HUMAN_INPUT") &&
+      (STREAM_SETTLED_STATES.includes(streamState.state) || streamState.interrupted) &&
       streamState.conversationId
     ) {
+      userClearedRef.current = false; // the stream owns the selection now
       setSelectedConvId(streamState.conversationId);
+      if (streamState.interrupted && groupId) {
+        queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+      }
     }
-  }, [streamState.state, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
+  }, [streamState.state, streamState.interrupted, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
 
   function handleDeleteConversation(convId: string) {
     if (!groupId) return;
@@ -419,6 +533,7 @@ export function GroupDetailPage() {
   function handleSelectConversation(convId: string) {
     if (streamState.isStreaming) abortStream();
     pendingDecisionRef.current = null; // abandon any un-acked prior decision
+    userClearedRef.current = false; // a deliberate pick re-arms the auto-select
     setSelectedConvId(convId);
     setHistoryOpen(false);
   }
@@ -455,16 +570,53 @@ export function GroupDetailPage() {
 
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
+  // What the overview and insights build on: the selected document, or, while
+  // an approved discussion resumes with nothing selected, the snapshot taken at
+  // approval. Matched on the stream's id, so "New Discussion" or a fresh start
+  // (both of which move the stream off it) cannot surface a stale snapshot.
+  const panelConversation =
+    selectedConversation ??
+    (resumedConversation && resumedConversation.id === streamState.conversationId ? resumedConversation : null);
+  // The task board for the overview's `extras` band. Live plan while
+  // streaming, the stored list otherwise; null when there is neither.
+  const persistedTaskBoard =
+    isStreamActive && streamState.taskPlan ? (
+      <TaskBoard
+        taskPlan={streamState.taskPlan}
+        tasksInProgress={streamState.tasksInProgress}
+        tasksCompleted={streamState.tasksCompleted}
+        taskVerifications={streamState.taskVerifications}
+        isStreaming={streamState.isStreaming}
+      />
+    ) : (selectedConversation?.taskList?.tasks?.length ?? 0) > 0 ? (
+      <PersistedTaskBoard
+        taskList={selectedConversation!.taskList!}
+        memberDisplayNames={selectedConversation?.memberDisplayNames}
+      />
+    ) : null;
+
+  // The live stream's decision while it is running, the persisted one
+  // afterwards — same precedence the transcript already applies internally.
+  const displayDecision = isStreamActive
+    ? (streamState.decision ?? selectedConversation?.decision ?? null)
+    : (selectedConversation?.decision ?? null);
 
   // On a live pause/complete the settle effect switches to the persisted
   // conversation, whose detail may not be cached yet. Keep showing the live
   // streamState (banner from hitlPause) instead of a loading skeleton until the
   // persisted conversation has loaded — avoids a flash at the decision moment.
+  //
+  // The same holds after a dropped connection: the page hands over to the
+  // stored conversation at once, but that copy can be behind what the stream
+  // already showed. Until it has caught up (it polls while the run goes on),
+  // keep the live rows rather than let them vanish — the rule the Workforce
+  // board applies too.
   const showStreamFallback =
     !isStreamActive &&
-    convLoading &&
     streamState.state !== "CREATED" &&
-    selectedConvId === streamState.conversationId;
+    selectedConvId === streamState.conversationId &&
+    (convLoading ||
+      (streamState.interrupted && !persistedHasCaughtUp(selectedConversation, streamState)));
 
   const conversationCount = conversations?.length ?? 0;
 
@@ -683,7 +835,7 @@ export function GroupDetailPage() {
               title={t("groupWorkspace.title", "Standing Team Workspace")}
               data-testid="open-workspace-btn"
             >
-              <Boxes className="h-4 w-4" />
+              <SquareKanban className="h-4 w-4" />
               <span className="hidden sm:inline">{t("groupWorkspace.navLabel", "Workspace")}</span>
             </Button>
           )}
@@ -765,22 +917,58 @@ export function GroupDetailPage() {
               </div>
             </div>
           )}
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <DiscussionTranscript
-              conversation={isStreamActive ? null : (selectedConversation ?? null)}
-              streamState={isStreamActive || showStreamFallback ? streamState : undefined}
-              isLoading={convLoading && !!selectedConvId && !showStreamFallback}
-              discussionStyle={groupConfig.style as DiscussionStyle}
-              preConfiguredTasks={groupConfig.tasks}
-              rosterDisplayNames={rosterDisplayNames}
-              onApprove={handleApproveDiscussion}
-              onCancelDiscussion={handleCancelDiscussion}
-              isDeciding={cancelDiscussionMutation.isPending}
-              onSubmitHumanInput={handleSubmitHumanInput}
-              isSubmittingHumanInput={submitHumanInputMutation.isPending}
-              humanTurnTimeout={groupConfig.humanMemberConfig?.turnTimeout}
-            />
-          </div>
+          {/* The transcript is passed through untouched — DiscussionPanel only
+              adds the transcript / overview / split switch around it, so
+              approvals, human turns and the composer keep working unchanged. */}
+          <DiscussionPanel
+            className="flex-1 min-h-0 overflow-hidden"
+            surface="group-detail"
+            // The PERSISTED document, even while streaming — unlike the
+            // transcript below. The digest overlays live frames onto it per
+            // key, and `continueStream` seeds neither its cost nor its stance
+            // map from the stored document, so nulling this made a
+            // continuation drop the previous round's spend and positions.
+            conversation={panelConversation}
+            streamState={isStreamActive || showStreamFallback ? streamState : undefined}
+            configPhases={safeConfig.phases}
+            rosterDisplayNames={rosterDisplayNames}
+            style={groupConfig.style as DiscussionStyle}
+            outcome={
+              hasDisplayableDecision(displayDecision) ? (
+                <DecisionRecordCard decision={displayDecision} />
+              ) : undefined
+            }
+            extras={
+              <>
+                {/* The task board lives inside DiscussionTranscript, which is
+                    unmounted in Overview mode — so without this a TASK_FORCE
+                    discussion loses the very surface the style recipe puts
+                    first. */}
+                {persistedTaskBoard}
+                <DiscussionInsights
+                  conversation={panelConversation}
+                  retroRecorded={isStreamActive ? streamState.retroRecorded : undefined}
+                  artifactUpdates={isStreamActive ? streamState.artifactUpdates : undefined}
+                />
+              </>
+            }
+            transcript={
+              <DiscussionTranscript
+                conversation={isStreamActive ? null : (selectedConversation ?? null)}
+                streamState={isStreamActive || showStreamFallback ? streamState : undefined}
+                isLoading={convLoading && !!selectedConvId && !showStreamFallback}
+                discussionStyle={groupConfig.style as DiscussionStyle}
+                preConfiguredTasks={groupConfig.tasks}
+                rosterDisplayNames={rosterDisplayNames}
+                onApprove={handleApproveDiscussion}
+                onCancelDiscussion={handleCancelDiscussion}
+                isDeciding={cancelDiscussionMutation.isPending}
+                onSubmitHumanInput={handleSubmitHumanInput}
+                isSubmittingHumanInput={submitHumanInputMutation.isPending}
+                humanTurnTimeout={groupConfig.humanMemberConfig?.turnTimeout}
+              />
+            }
+          />
           {/* Post-COMPLETED lifecycle action bar — driven entirely by the
               backend's availableActions (never hardcoded). Hidden while a live
               stream is active and absent once the conversation is CLOSED (empty
@@ -828,7 +1016,14 @@ export function GroupDetailPage() {
                 <PanelRightClose className="h-3.5 w-3.5" />
               </button>
             </div>
-            <GroupConfigPanel key={groupId} config={safeConfig} groupId={groupId} groupVersion={version} className="flex-1 min-h-0" />
+            <GroupConfigPanel
+              key={groupId}
+              config={safeConfig}
+              groupId={groupId}
+              groupVersion={version}
+              onVersionChange={setVersion}
+              className="flex-1 min-h-0"
+            />
           </div>
         )}
       </div>
@@ -847,6 +1042,7 @@ export function GroupDetailPage() {
             config={safeConfig}
             groupId={groupId}
             groupVersion={version}
+            onVersionChange={setVersion}
           />
         </div>
       </AccessibleDialog>

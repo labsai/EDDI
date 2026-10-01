@@ -6,6 +6,7 @@ import { server } from "@/test/mocks/server";
 import { OperatorActivation } from "../operator-activation";
 import { extractVaultKeyName } from "@/lib/operator/vault-ref";
 import { defaultOperatorConfig } from "@/lib/api/operator";
+import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 
 const authState = { method: "none" as "none" | "keycloak" };
 vi.mock("@/hooks/use-auth", () => ({
@@ -279,6 +280,77 @@ describe("OperatorActivation", () => {
         expect(screen.getByTestId("operator-next")).toBeDisabled(),
       );
     });
+
+    const QWEN_CN = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+
+    it("shows the stored region instead of silently falling back to the default", async () => {
+      renderActivation({
+        initial: {
+          ...defaultOperatorConfig("Body text."),
+          provider: "qwen",
+          model: "qwen3.7-plus",
+          credentialKey: "operator-llm-key",
+          llmBaseUrl: QWEN_CN,
+        },
+      });
+      expect(screen.getByTestId("operator-region")).toHaveValue("cn");
+      await userEvent.click(await screen.findByTestId("operator-next"));
+      expect(await screen.findByText(QWEN_CN)).toBeInTheDocument();
+    });
+
+    it("persists the chosen endpoint on the config and sends it to the backend", async () => {
+      const { onActivate } = renderActivation({
+        initial: {
+          ...defaultOperatorConfig("Body text."),
+          provider: "qwen",
+          model: "qwen3.7-plus",
+          credentialKey: "operator-llm-key",
+        },
+      });
+      await userEvent.selectOptions(screen.getByTestId("operator-region"), "cn");
+      await userEvent.click(await screen.findByTestId("operator-next"));
+      await userEvent.click(await screen.findByTestId("operator-activate"));
+
+      expect(onActivate).toHaveBeenCalledTimes(1);
+      const [config, , baseUrl] = onActivate.mock.calls[0] ?? [];
+      expect(config.llmBaseUrl).toBe(QWEN_CN);
+      expect(baseUrl).toBe(QWEN_CN);
+    });
+
+    it("does not submit a hidden base URL left over from the previous provider", async () => {
+      const { onActivate } = renderActivation({
+        initial: {
+          ...defaultOperatorConfig("Body text."),
+          provider: "ollama",
+          model: "llama3.3:70b",
+          llmBaseUrl: "http://localhost:11434",
+        },
+      });
+      expect(screen.getByTestId("operator-base-url")).toHaveValue("http://localhost:11434");
+
+      await userEvent.selectOptions(screen.getByTestId("operator-provider"), "openai");
+      await userEvent.type(screen.getByTestId("operator-api-key-input"), "sk-test-key");
+      await userEvent.click(await screen.findByTestId("operator-next"));
+      await userEvent.click(await screen.findByTestId("operator-activate"));
+
+      const [config, , baseUrl] = onActivate.mock.calls[0] ?? [];
+      expect(baseUrl).toBeUndefined();
+      expect(config.llmBaseUrl).toBeNull();
+    });
+
+    it("restores the stored endpoint when switching back to the stored provider", async () => {
+      renderActivation({
+        initial: {
+          ...defaultOperatorConfig("Body text."),
+          provider: "qwen",
+          credentialKey: "operator-llm-key",
+          llmBaseUrl: QWEN_CN,
+        },
+      });
+      await userEvent.selectOptions(screen.getByTestId("operator-provider"), "xai");
+      await userEvent.selectOptions(screen.getByTestId("operator-provider"), "qwen");
+      expect(screen.getByTestId("operator-region")).toHaveValue("cn");
+    });
   });
 
   it("shows the write-gated posture up front — the default scope chip reads Read & write", () => {
@@ -494,5 +566,36 @@ describe("extractVaultKeyName", () => {
 
   it("returns null for a plain-text secret, so no secret is stored as a 'key name'", () => {
     expect(extractVaultKeyName("sk-actual-secret-value")).toBeNull();
+  });
+});
+
+describe("OperatorActivation — stored provider the setup flow no longer offers", () => {
+  beforeEach(() => {
+    authState.method = "none";
+    server.use(
+      http.get("*/secretstore/secrets/health", () =>
+        HttpResponse.json({ status: "UP", provider: "local", available: true }),
+      ),
+      http.get("*/secretstore/secrets/default", () => HttpResponse.json([])),
+    );
+  });
+
+  // An operator configured on gemini-vertex before it was hidden rendered a
+  // select with no matching option: it showed one provider and held another.
+  it("falls back to an offered provider with its default model and no carried key", () => {
+    renderActivation({
+      initial: {
+        ...defaultOperatorConfig("Body text."),
+        provider: "gemini-vertex",
+        model: "gemini-2.5-flash",
+        credentialKey: "vertex-key",
+      },
+    });
+
+    const select = screen.getByTestId("operator-provider") as HTMLSelectElement;
+    expect(select.value).toBe("anthropic");
+    // The fallback provider's own default — derived, so a default bump cannot strand it.
+    expect(screen.getByTestId("operator-model")).toHaveValue(LLM_PROVIDERS[0].defaultModel);
+    expect(screen.getByTestId("operator-api-key-input")).toHaveValue("");
   });
 });

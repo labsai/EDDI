@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
 import ai.labs.eddi.backup.model.ImportPreview;
@@ -67,6 +69,14 @@ class StructuralMatcherTypedExtensionTest {
 
         matcher = new StructuralMatcher(agentStore, documentDescriptorStore, snippetStore,
                 workflowStore, restInterfaceFactory, jsonSerialization);
+
+        // The matcher resolves the target's current version from its descriptor and
+        // refuses to guess when it cannot — previewing version 1 of a target that
+        // may be at any version is what showed operators pre-sync content labelled
+        // "target". These fixtures are about matching, not versioning, so every
+        // resource simply reports version 1.
+        lenient().when(documentDescriptorStore.readCurrentDescriptor(anyString()))
+                .thenAnswer(invocation -> descriptorAtVersionOne(invocation.getArgument(0)));
 
         doReturn(Collections.emptyList()).when(snippetStore)
                 .readSnippetDescriptors(anyString(), anyInt(), anyInt());
@@ -387,5 +397,12 @@ class StructuralMatcherTypedExtensionTest {
             // workflow + dict + llm = 3 CREATE diffs (plus agent diff)
             assertTrue(createCount >= 3, "Should have at least 3 CREATE diffs (wf + 2 extensions)");
         }
+    }
+
+    /** A descriptor naming version 1 of {@code resourceId}. */
+    private static DocumentDescriptor descriptorAtVersionOne(String resourceId) {
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + resourceId + "?version=1"));
+        return descriptor;
     }
 }

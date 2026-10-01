@@ -38,6 +38,12 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
 @Provider
 public class DocumentDescriptorFilter implements ContainerResponseFilter {
+
+    /**
+     * Root of every export/import/sync endpoint — see {@link #isBackupEndpoint}.
+     */
+    private static final String BACKUP_PATH_PREFIX = "backup";
+
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final ResourceAccessGuard resourceAccessGuard;
@@ -62,6 +68,21 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
             int httpStatus = contextResponse.getStatus();
 
             if (httpStatus < 200 || httpStatus >= 300) {
+                return;
+            }
+
+            // Backup writes their own descriptors and must not be second-guessed here.
+            // Import and sync call the configuration stores in-process, so nothing they
+            // write passes through this filter; they keep the descriptors in step
+            // themselves (RestImportService.createNewAgent,
+            // UpgradeExecutor.bumpDescriptor).
+            // What does reach this filter is their *own* answer, and a sync that
+            // upgraded an existing agent answers 201 with that agent's new-version URI
+            // — which looked exactly like a creation. The branch below then tried to
+            // create a second descriptor under an id that already had one, and the
+            // duplicate key turned a sync that had already written everything
+            // correctly into a 500.
+            if (isBackupEndpoint(uriInfo.getPath())) {
                 return;
             }
 
@@ -111,7 +132,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                     }
                 }
 
-                if (isDELETE(invokedHttpMethod)) {
+                if (isDELETE(invokedHttpMethod) && addressesResourceItself(uriInfo.getPath())) {
                     String currentResourceURI = uriInfo.getRequestUri().toString();
                     var descriptorStore = getDescriptorStore(currentResourceURI);
                     IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(currentResourceURI));
@@ -159,6 +180,45 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
 
     private static boolean isDescriptorStore(String uriPath) {
         return uriPath != null && uriPath.startsWith(DESCRIPTOR_STORE_PATH);
+    }
+
+    /**
+     * Whether this response came from {@code /backup/**} — export, import or live
+     * sync.
+     * <p>
+     * Matched with and without a leading slash because {@code UriInfo.getPath()} is
+     * relative to the application root and JAX-RS implementations differ on whether
+     * they keep the separator.
+     */
+    static boolean isBackupEndpoint(String uriPath) {
+        if (uriPath == null) {
+            return false;
+        }
+        String path = uriPath.startsWith("/") ? uriPath.substring(1) : uriPath;
+        return path.equals(BACKUP_PATH_PREFIX) || path.startsWith(BACKUP_PATH_PREFIX + "/");
+    }
+
+    /**
+     * Whether a request path addresses a configuration resource itself —
+     * {@code {store}/{collection}/{id}} — rather than something beneath one.
+     * <p>
+     * A DELETE deeper than that removes a sub-resource, not the configuration, and
+     * its last segment is not a configuration id. {@code DELETE
+     * /ragstore/rags/{id}/sources/{sourceId}/files/{fileId}?version=1} ends in a
+     * 32-hex file id that {@link RestUtilities#extractResourceId} accepts, so the
+     * descriptor lookup ran on it after the file was already gone — and answered a
+     * completed delete with a 400 ("hexString has 24 characters") on MongoDB, or a
+     * 404 wherever the lookup merely misses.
+     */
+    static boolean addressesResourceItself(String uriPath) {
+        if (uriPath == null) {
+            return false;
+        }
+        String path = uriPath.startsWith("/") ? uriPath.substring(1) : uriPath;
+        if (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return !path.isEmpty() && path.split("/").length == 3;
     }
 
     private static boolean isPUT(String resourceMethod) {

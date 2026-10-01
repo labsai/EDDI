@@ -89,7 +89,8 @@ class RestAgentEngineHitlTest {
                 identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
                 conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
-                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
+                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, hitlToolJournalStore, mock(AgentDisplayNameResolver.class),
+                AGENT_TIMEOUT);
     }
 
     // =========================================================================
@@ -238,6 +239,36 @@ class RestAgentEngineHitlTest {
 
             assertEquals(400, response.getStatus(), "oversized note must be rejected with 400");
             verify(conversationService, never()).resumeConversation(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("H4b: a decision for a pause that is no longer current → 409 naming the changed pause")
+        void pauseMismatchIs409() throws Exception {
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
+            decision.setPauseId("1000");
+            doThrow(new IConversationService.PauseMismatchException("changed"))
+                    .when(conversationService).resumeConversation(eq(CONVERSATION_ID), any(), any());
+
+            Response response = restAgentEngine.resumeConversation(CONVERSATION_ID, decision);
+
+            assertEquals(409, response.getStatus());
+            assertTrue(String.valueOf(response.getEntity()).contains("pauseId no longer current"));
+        }
+
+        @Test
+        @DisplayName("H4b: approval-status reports the pauseId a decision passes back")
+        void approvalStatusReportsPauseId() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(Instant.ofEpochMilli(1_700_000_000_123L));
+            doReturn(snapshot).when(conversationService).getConversationMemorySnapshot(CONVERSATION_ID);
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, null);
+
+            @SuppressWarnings("unchecked")
+            var summary = (Map<String, Object>) response.getEntity();
+            assertEquals("1700000000123", summary.get("pauseId"));
         }
 
         @Test

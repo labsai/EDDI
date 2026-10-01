@@ -161,11 +161,23 @@ kubectl apply -k k8s/overlays/mongodb/    # MongoDB backend
 kubectl apply -k k8s/overlays/postgres/   # PostgreSQL backend
 ```
 
+Both need their Secrets first — the vault key (`bash k8s/create-secrets.sh`) and
+the database credentials, which are not shipped; the
+[Kubernetes Deployment Guide](kubernetes.md) has the commands.
+
 **Using Helm:**
 
 ```bash
-helm install eddi ./helm/eddi --namespace eddi --create-namespace
+helm install eddi ./helm/eddi \
+  --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+  --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+  --set eddi.security.allowUnauthenticatedMcp=true \
+  --set eddi.security.allowUnauthenticatedSecretStore=true \
+  --namespace eddi --create-namespace
 ```
+
+That is the local, port-forward-only shape (no OIDC); the chart refuses to render
+without each of those values. Enable OIDC for anything others can reach.
 
 See the [Kubernetes Deployment Guide](kubernetes.md) for full details including auth, monitoring, NATS, Ingress, and production hardening.
 
@@ -190,7 +202,7 @@ Setup a local MongoDB (≥ 6.0) or PostgreSQL instance.
 On a terminal, under project root folder, run the following command:
 
 ```shell
-./mvnw compile quarkus:dev
+./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 ```
 
 1. Go to Browser --> [http://localhost:7070](http://localhost:7070)

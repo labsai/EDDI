@@ -11,13 +11,20 @@ import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import org.jboss.logging.Logger;
 
+import java.util.Collection;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -62,15 +69,23 @@ public class ResourceAccessGuard {
     private final SpaceContext spaceContext;
     private final WorkspaceSettings settings;
     private final IDocumentDescriptorStore documentDescriptorStore;
+    private final UserDirectory directory;
 
     @Inject
     public ResourceAccessGuard(SecurityIdentity identity, OwnershipValidator ownershipValidator, SpaceContext spaceContext,
-            WorkspaceSettings settings, IDocumentDescriptorStore documentDescriptorStore) {
+            WorkspaceSettings settings, IDocumentDescriptorStore documentDescriptorStore, UserDirectory directory) {
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.spaceContext = spaceContext;
         this.settings = settings;
         this.documentDescriptorStore = documentDescriptorStore;
+        this.directory = directory;
+    }
+
+    /** Without a user directory: owners are never labelled. Test seam. */
+    public ResourceAccessGuard(SecurityIdentity identity, OwnershipValidator ownershipValidator, SpaceContext spaceContext,
+            WorkspaceSettings settings, IDocumentDescriptorStore documentDescriptorStore) {
+        this(identity, ownershipValidator, spaceContext, settings, documentDescriptorStore, null);
     }
 
     /**
@@ -96,6 +111,25 @@ public class ResourceAccessGuard {
     }
 
     /**
+     * {@link #listingScope()} narrowed to one space and by ownership — the two view
+     * filters a listing endpoint accepts.
+     *
+     * @param space
+     *            a space id, or blank for every space
+     * @param ownership
+     *            {@code mine}, {@code shared}, or blank
+     * @throws BadRequestException
+     *             for an unrecognised ownership value
+     */
+    public AccessScope listingScope(String space, String ownership) {
+        Ownership parsed = Ownership.parseOrNull(ownership);
+        if (parsed == null) {
+            throw new BadRequestException("ownership must be 'mine', 'shared' or blank — was '" + sanitize(ownership) + "'");
+        }
+        return listingScope().withinSpace(space).withOwnership(parsed, spaceContext.currentPrincipal());
+    }
+
+    /**
      * What the caller may do with an already-loaded descriptor, or {@code null} for
      * nothing. Returns {@link AccessLevel#OWN} whenever {@link #seesEverything()}.
      */
@@ -113,6 +147,51 @@ public class ResourceAccessGuard {
      */
     public boolean canAccess(DocumentDescriptor descriptor, AccessLevel required) {
         AccessLevel granted = effectiveLevel(descriptor);
+        return granted != null && granted.includes(required);
+    }
+
+    /**
+     * What the caller holds on a resource addressed by id, decided against its
+     * <em>current</em> descriptor — the non-throwing twin of
+     * {@link #requireAccess}, for listings that hold only ids (deployment statuses,
+     * schedules, triggers) and must drop what the caller could not address
+     * directly.
+     * <p>
+     * A resource with no descriptor answers exactly what {@link #requireAccess}'s
+     * legacy fallback would admit: under the legacy-visibility policy it admits
+     * every level below EDIT, so the answer is {@link AccessLevel#VIEW}, which
+     * {@link AccessLevel#includes includes} USE as well. {@code hasAccess(id, USE)}
+     * and {@code hasAccess(id, VIEW)} are therefore true exactly when
+     * {@code requireUseAccess} / {@code requireAccess(VIEW)} would pass, and EDIT
+     * or OWN stays refused. A descriptor that cannot be read answers {@code null}:
+     * a listing omits what it cannot verify rather than failing wholesale.
+     *
+     * @return the caller's level, or {@code null} for none
+     */
+    public AccessLevel currentLevel(String resourceId) {
+        if (seesEverything()) {
+            return AccessLevel.OWN;
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            return null;
+        }
+        try {
+            DocumentDescriptor descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+            return DescriptorAccess.effectiveLevel(descriptor, spaceContext.current(), settings.admitsLegacy());
+        } catch (ResourceNotFoundException e) {
+            return settings.admitsLegacy() ? AccessLevel.VIEW : null;
+        } catch (ResourceStoreException e) {
+            LOGGER.debugf("Could not load descriptor for access lookup on %s: %s", sanitize(resourceId), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Non-throwing {@link #requireAccess}: whether the caller holds at least
+     * {@code required} on the resource. See {@link #currentLevel(String)}.
+     */
+    public boolean hasAccess(String resourceId, AccessLevel required) {
+        AccessLevel granted = currentLevel(resourceId);
         return granted != null && granted.includes(required);
     }
 
@@ -221,6 +300,72 @@ public class ResourceAccessGuard {
             throw new ForbiddenException("Access denied: you do not have access to this " + resourceTypeLabel
                     + ". Ask its owner to share it with you, or have them publish it if it is meant to be public.");
         }
+    }
+
+    /**
+     * {@link #requireUseAccess} for every id in a caller-supplied list; blank
+     * entries are skipped. For inputs that <em>scope</em> a read by naming
+     * resources, such as the group ids of a memory recall, where naming one the
+     * caller may not use must not widen what they see.
+     */
+    public void requireUseAccessToEach(Collection<String> resourceIds, String resourceTypeLabel) {
+        if (resourceIds == null || seesEverything()) {
+            return;
+        }
+        for (String resourceId : resourceIds) {
+            if (resourceId != null && !resourceId.isBlank()) {
+                requireUseAccess(resourceId.trim(), resourceTypeLabel);
+            }
+        }
+    }
+
+    /**
+     * Whether the named principal — <em>not</em> the current request's caller — may
+     * use a resource. For engine code that acts on behalf of a user with no request
+     * around it: a group member's tool running on a coordinator thread holds no
+     * {@link SecurityIdentity}, so {@link #requireUseAccess} cannot answer there.
+     * <p>
+     * Deliberately narrower than the request-scoped check. The principal's team
+     * memberships are claims on a token nobody is presenting, so only the
+     * principal's own resources, direct grants to them and published resources
+     * count; a resource shared with one of their teams is refused. Never throws: an
+     * unreadable descriptor is {@code false}, the same fail-closed answer
+     * {@link #requireUseAccess} gives, and with enforcement off everything is
+     * admitted, as everywhere else.
+     * <p>
+     * An administrator is admitted only through
+     * {@link #principalMayUse(String, String, boolean)}: whether a principal holds
+     * {@code eddi-admin} is a claim on their token, which this method cannot see.
+     */
+    public boolean principalMayUse(String resourceId, String principal) {
+        return principalMayUse(resourceId, principal, false);
+    }
+
+    /**
+     * {@link #principalMayUse(String, String)}, with the caller's word on whether
+     * {@code principal} is an administrator — which admits everything, exactly as
+     * {@link #seesEverything()} does on the request path. The flag must come from
+     * the principal's own captured identity
+     * ({@code CallerIdentity.isAdminActingAs}), never from anyone else's.
+     */
+    public boolean principalMayUse(String resourceId, String principal, boolean principalIsAdmin) {
+        if (!settings.isEnforcing() || principalIsAdmin) {
+            return true;
+        }
+        if (resourceId == null || resourceId.isBlank()) {
+            return false;
+        }
+        DocumentDescriptor descriptor;
+        try {
+            descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+        } catch (ResourceNotFoundException e) {
+            return settings.admitsLegacy();
+        } catch (ResourceStoreException e) {
+            LOGGER.warnf("Could not load descriptor for use check on %s: %s", sanitize(resourceId), e.getMessage());
+            return false;
+        }
+        AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, CallerSpaces.of(principal, Set.of()), settings.admitsLegacy());
+        return granted != null && granted.includes(AccessLevel.USE);
     }
 
     /**
@@ -334,6 +479,30 @@ public class ResourceAccessGuard {
     }
 
     /**
+     * {@link #redactForCaller} for a whole page, looking every owner up in the user
+     * directory with one query rather than one per row.
+     *
+     * @return the same list, for chaining
+     */
+    public List<DocumentDescriptor> redactAllForCaller(List<DocumentDescriptor> descriptors) {
+        if (descriptors == null || descriptors.isEmpty()) {
+            return descriptors;
+        }
+        if (directory != null && settings.isEnforcing()) {
+            Set<String> owners = new HashSet<>();
+            for (DocumentDescriptor descriptor : descriptors) {
+                if (descriptor != null && descriptor.getOwnerId() != null) {
+                    owners.add(descriptor.getOwnerId());
+                }
+            }
+            // Warms the directory's cache, so the per-row lookups below are hits.
+            directory.lookup(owners);
+        }
+        descriptors.forEach(this::redactForCaller);
+        return descriptors;
+    }
+
+    /**
      * As {@link #redactForCaller}, but told what the caller holds instead of
      * working it out from the descriptor in hand.
      * <p>
@@ -372,6 +541,9 @@ public class ResourceAccessGuard {
      */
     private DocumentDescriptor applyCallerLevel(DocumentDescriptor descriptor, AccessLevel granted) {
         descriptor.setCallerLevel(settings.isEnforcing() && granted != null ? granted.name() : null);
+        // Same rule as the level: present only under enforcement, so a listing stays
+        // byte-identical to a deployment that has never heard of workspaces.
+        descriptor.setOwnerName(settings.isEnforcing() ? ownerLabel(descriptor.getOwnerId()) : null);
 
         if (mayReadGrants(descriptor, granted)) {
             return descriptor;
@@ -411,6 +583,14 @@ public class ResourceAccessGuard {
             return structural != null && structural.includes(AccessLevel.OWN);
         }
         return granted != null && granted.includes(AccessLevel.OWN);
+    }
+
+    private String ownerLabel(String ownerId) {
+        if (directory == null || ownerId == null || ownerId.isBlank()) {
+            return null;
+        }
+        DirectoryUser owner = directory.lookup(List.of(ownerId)).get(ownerId);
+        return owner == null ? null : owner.label();
     }
 
     /** The caller's principal name, or {@code null} when unauthenticated. */

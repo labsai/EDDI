@@ -118,7 +118,27 @@ class GroupConversationStoreTest {
         when(storage.newResource("gc-1", 1, conversation)).thenReturn(resource);
 
         assertDoesNotThrow(() -> store.update(conversation));
-        verify(storage).store(resource);
+        // A replace of the existing row only — never the upserting store().
+        verify(storage).storeIfCurrentVersion(resource, 1);
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
+    /**
+     * H9b: update() was an upsert, so a discussion still running when a GDPR
+     * erasure (or the delete endpoint) removed its document wrote the whole
+     * transcript back on its next phase.
+     */
+    @Test
+    @DisplayName("update — a deleted document is not recreated; the writer is told it is gone")
+    void updateDoesNotResurrectADeletedDocument() throws Exception {
+        GroupConversation conversation = new GroupConversation();
+        conversation.setId("gc-1");
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource("gc-1", 1, conversation)).thenReturn(resource);
+        doThrow(new IResourceStore.ResourceModifiedException("no row")).when(storage).storeIfCurrentVersion(resource, 1);
+
+        assertThrows(GroupConversationGoneException.class, () -> store.update(conversation));
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
     }
 
     // ==================== delete ====================
@@ -159,6 +179,35 @@ class GroupConversationStoreTest {
 
         List<GroupConversation> result = store.listByGroupId("group-1", 0, 10);
         assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("listByGroupId(owner) — the owner is part of the QUERY, escaped and re-checked exactly")
+    void listByGroupId_ownerRestrictedInTheQuery() throws Exception {
+        IResourceStore.IResourceId ownId = mock(IResourceStore.IResourceId.class);
+        when(ownId.getId()).thenReturn("gc-own");
+        IResourceStore.IResourceId foreignId = mock(IResourceStore.IResourceId.class);
+        when(foreignId.getId()).thenReturn("gc-foreign");
+        ArgumentCaptor<IResourceFilter.QueryFilters[]> filters = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        when(storage.findResources(filters.capture(), anyString(), eq(20), eq(10))).thenReturn(List.of(ownId, foreignId));
+        GroupConversation own = new GroupConversation();
+        own.setUserId("bob.smith");
+        GroupConversation foreign = new GroupConversation();
+        foreign.setUserId("bobXsmith");
+        IResourceStorage.IResource<GroupConversation> ownResource = mock(IResourceStorage.IResource.class);
+        when(ownResource.getData()).thenReturn(own);
+        IResourceStorage.IResource<GroupConversation> foreignResource = mock(IResourceStorage.IResource.class);
+        when(foreignResource.getData()).thenReturn(foreign);
+        when(storage.read("gc-own", 1)).thenReturn(ownResource);
+        when(storage.read("gc-foreign", 1)).thenReturn(foreignResource);
+
+        List<GroupConversation> result = store.listByGroupId("group-1", "bob.smith", 20, 10);
+
+        assertEquals(List.of(own), result, "a regex over-match never reaches the caller");
+        var queryFilters = filters.getValue()[0].getQueryFilters();
+        assertEquals(2, queryFilters.size(), "group AND owner, so paging covers only the owner's conversations");
+        assertEquals("userId", queryFilters.get(1).getField());
+        assertEquals("^bob\\.smith$", queryFilters.get(1).getFilter());
     }
 
     // ==================== compareAndSetState ====================

@@ -8,6 +8,7 @@ import io.quarkus.security.Authenticated;
 import io.quarkus.vertx.http.runtime.security.HttpSecurityUtils;
 import io.quarkus.vertx.http.runtime.security.ImmutablePathMatcher;
 import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.Path;
 import org.junit.jupiter.api.BeforeAll;
@@ -95,7 +96,7 @@ class A2aEndpointPermissionsTest {
                 // builds it; the accumulator merges entries sharing a path.
                 var entries = new ArrayList<Entry>();
                 entries.add(new Entry(name, resolveExpression(policy), methods));
-                builder.addPath(HttpSecurityUtils.normalizePath(path), entries);
+                builder.addPath(HttpSecurityUtils.normalizePath(expandPath(properties, path)), entries);
             }
         }
         matcher = builder.build();
@@ -143,8 +144,12 @@ class A2aEndpointPermissionsTest {
         }
 
         @Test
-        @DisplayName("POST /a2a/agents/{agentId} — the JSON-RPC surface that actually runs conversations")
+        @DisplayName("POST /a2a/agents/{agentId} — the JSON-RPC surface: authenticated at the path layer, role-gated by RBAC on top")
         void jsonRpc() {
+            // The path policy requires authentication (catch-all); @RolesAllowed on
+            // handleJsonRpc additionally requires a real EDDI role, so an authenticated
+            // but role-less token is refused (403) rather than allowed to run a
+            // conversation. The path layer only expresses "authenticated" here.
             assertPolicies("/a2a/agents/" + SAMPLE_AGENT_ID, "POST", AUTHENTICATED);
         }
 
@@ -161,11 +166,23 @@ class A2aEndpointPermissionsTest {
 
     @Test
     @DisplayName("/.well-known is not wildcarded — a future sibling must be decided, not inherited")
-    void wellKnownIsEnumerated() {
-        // RFC 9728 protected-resource metadata is planned under this prefix
-        // (planning/saas-connectors-plan.md §6.3). A /.well-known/* permit would
-        // open it, and anything else later dropped there, with nobody deciding to.
-        assertPolicies("/.well-known/oauth-protected-resource", "GET", AUTHENTICATED);
+    void wellKnownIsEnumerated() throws Exception {
+        // This test was written with RFC 9728 protected-resource metadata as its
+        // example of the sibling a /.well-known/* permit would open with nobody
+        // deciding to. That decision has since been taken deliberately: EDDI
+        // advertises /mcp as an OAuth protected resource, so the document is
+        // permitted by its own narrow entry (exact paths, GET/HEAD), asserted in
+        // McpOAuthDiscoveryConfigTest. The guard this test exists for is the line
+        // below it: a path nobody decided on still resolves to authenticated.
+        assertPolicies("/.well-known/oauth-protected-resource", "GET", PERMIT);
+        // And the path-inserted document beside it, whose permit path interpolates
+        // the MCP root path. Asserting it through the same matcher is what makes
+        // that derivation load-bearing: read the root path from the config rather
+        // than writing /mcp, or this passes on a deployment where the endpoint has
+        // moved and the document has been left behind the catch-all.
+        assertPolicies("/.well-known/oauth-protected-resource"
+                + applicationProperties().getProperty("quarkus.mcp.server.http.root-path").trim(),
+                "GET", PERMIT);
         assertPolicies("/.well-known/anything-else", "GET", AUTHENTICATED);
     }
 
@@ -212,11 +229,24 @@ class A2aEndpointPermissionsTest {
                         method.getName() + " is @Authenticated, but the path policy does not require"
                                 + " authentication — a permit entry is overriding the annotation");
                 checked++;
+            } else if (method.isAnnotationPresent(RolesAllowed.class)) {
+                // @RolesAllowed is a strengthening of @Authenticated: the HTTP path layer
+                // must still resolve to authenticated (so an anonymous request is 401'd
+                // before RBAC), and the specific role is then enforced on top by the
+                // declarative RBAC interceptor — which is what refuses an authenticated
+                // but role-less token (403). If the path resolved to permit instead, an
+                // anonymous caller would reach the endpoint and only the RBAC layer would
+                // stand between them and it; requiring authenticated here keeps the two
+                // layers agreeing.
+                assertPolicies(resolved, httpVerbOf(method), AUTHENTICATED,
+                        method.getName() + " is @RolesAllowed, so its path must require authentication"
+                                + " (the role is enforced by RBAC on top) — a permit entry is overriding it");
+                checked++;
             }
         }
         assertEquals(6, checked,
-                "Expected the four @PermitAll cards/capabilities plus the two @Authenticated endpoints;"
-                        + " if an endpoint was added or removed, say so here deliberately");
+                "Expected the four @PermitAll cards/capabilities, the @Authenticated agent listing and the"
+                        + " @RolesAllowed JSON-RPC endpoint; if an endpoint was added or removed, say so here deliberately");
     }
 
     // ==================== Helpers ====================
@@ -348,6 +378,47 @@ class A2aEndpointPermissionsTest {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /**
+     * Expand {@code ${some.property}} references embedded in a path.
+     *
+     * <p>
+     * The OAuth metadata permit entry derives its second path from
+     * {@code ${quarkus.mcp.server.http.root-path}}, so the rule follows the MCP
+     * endpoint if an operator moves it. Left unexpanded, that path would enter the
+     * matcher as a literal and this model would answer {@code authenticated} for
+     * the document Quarkus actually permits — a wrong answer that reads like a
+     * finding.
+     */
+    private static String expandPath(Properties properties, String value) {
+        var expanded = new StringBuilder();
+        int cursor = 0;
+        while (cursor < value.length()) {
+            int start = value.indexOf("${", cursor);
+            if (start < 0) {
+                expanded.append(value, cursor, value.length());
+                break;
+            }
+            int end = value.indexOf('}', start);
+            assertTrue(end > start, "unterminated property expression in path: " + value);
+            expanded.append(value, cursor, start);
+            expanded.append(lookup(properties, value.substring(start + 2, end)));
+            cursor = end + 1;
+        }
+        return expanded.toString();
+    }
+
+    /** {@code key} or {@code key:default}, resolved against the shipped config. */
+    private static String lookup(Properties properties, String reference) {
+        int colon = reference.indexOf(':');
+        var key = colon >= 0 ? reference.substring(0, colon) : reference;
+        var configured = properties.getProperty(key);
+        if (configured != null && !configured.isBlank()) {
+            return configured.trim();
+        }
+        assertTrue(colon >= 0, "a permission path references ${" + key + "}, which this file does not set");
+        return reference.substring(colon + 1);
     }
 
     /**

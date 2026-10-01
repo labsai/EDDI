@@ -17,7 +17,32 @@ public interface IAgentFactory {
 
     IAgent getLatestReadyAgent(Deployment.Environment environment, String agentId) throws ServiceException;
 
+    /**
+     * The highest {@code READY} version of {@code agentId} on this node whose
+     * compatibility generation is {@code compatibilityGeneration}, or {@code null}
+     * when there is none. Versions without a generation never match.
+     * <p>
+     * This node only, on purpose: it answers "what can this turn run on here, now",
+     * without a store read. A version another node has already deployed and this
+     * one has not yet swept is simply not a candidate yet.
+     *
+     * @since 6.5.0
+     */
+    IAgent getLatestReadyAgentOfGeneration(Deployment.Environment environment, String agentId, int compatibilityGeneration)
+            throws ServiceException;
+
     List<IAgent> getAllLatestAgents(Deployment.Environment environment) throws ServiceException;
+
+    /**
+     * Every agent version registered in {@code environment} on this node, in any
+     * deployment status — not only the latest version per agent id.
+     * <p>
+     * Exists for questions about what is actually <em>running</em>. The latest
+     * version can be registered but not {@code READY} while an older one is still
+     * serving, and two versions can be {@code READY} at once;
+     * {@link #getAllLatestAgents} hides both.
+     */
+    List<IAgent> getAllDeployedAgents(Deployment.Environment environment) throws ServiceException;
 
     IAgent getAgent(Deployment.Environment environment, String agentId, Integer version) throws ServiceException;
 

@@ -75,7 +75,8 @@
     "workforce": "Grupo de trabajo",
     "monitoring": "Supervisión de conversaciones",
     "analytics": "Analíticas",
-    "connections": "Conexiones"
+    "connections": "Conexiones",
+    "workspaces": "Espacios de trabajo"
   },
   "theme": {
     "light": "Claro",
@@ -261,11 +262,13 @@
     "openExternalChat": "Abrir en nueva pestaña",
     "count_many": "{{count}} agentes",
     "liveIn": "Activo en {{environment}}",
+    "liveInVersion": "Activo en {{environment}} con la versión {{version}}",
     "chatIn": "Chatear en {{environment}}",
     "openExternalChatIn": "Abrir el chat de {{environment}} en una pestaña nueva",
     "deployToProduction": "Desplegar en producción",
     "undeployFromProduction": "Retirar de producción",
-    "deployFailedIn": "El despliegue falló en {{environment}}"
+    "deployFailedIn": "El despliegue falló en {{environment}}",
+    "undeployCompatibleHint": "Las conversaciones que una versión compatible desplegada puede continuar no se terminan: pasan a ella en su siguiente turno."
   },
   "agentDetail": {
     "a2aDescHint": "Se muestra en la Agent Card — ayuda a otros agentes a entender qué hace este agente",
@@ -445,15 +448,30 @@
     "toolPauseReasonPlaceholder": "p. ej. Se requiere aprobación para {toolNames}",
     "toolPendingMessage": "Mensaje al usuario durante la pausa ({toolNames} permitido)",
     "toolPendingMessagePlaceholder": "p. ej. Esperando a que una persona apruebe {toolNames}…",
-    "toolInGroupTurns": "Dentro de un turno de grupo, la llamada de herramienta controlada de un miembro se rechaza automáticamente (REJECT)."
+    "toolInGroupTurns": "Dentro de un turno de grupo, la llamada de herramienta controlada de un miembro se rechaza automáticamente (REJECT).",
+    "review": {
+      "title": "Uso y revisión de conversaciones",
+      "total": "Conversaciones",
+      "active": "Activas ahora",
+      "users": "Personas",
+      "description": "Las conversaciones son privadas para la persona que las mantuvo. Active esta opción para que todas las personas que pueden editar este agente lean sus conversaciones — para ver qué pregunta la gente y mejorarlo. El chat lo avisa antes de que escriban.",
+      "enable": "Permitir que los responsables de este agente lean sus conversaciones",
+      "notice": "Lo que el chat indica a las personas (déjelo vacío para usar el texto estándar)",
+      "noticePlaceholder": "Las conversaciones con este agente pueden ser leídas por las personas que lo mantienen, para mejorarlo.",
+      "versionNote": "Cubre las conversaciones con la versión que crea este cambio y las posteriores — nunca lo que se dijo antes. Slack, Teams y los clientes de la API no pueden mostrar el aviso; si las personas usan este agente por esos medios, indíquelo en el saludo."
+    }
   },
   "wizard": {
     "title": "Asistente de Agent"
   },
   "setupWizard": {
     "baseUrlHintCloud": "Solo es necesario si usa un proxy, un despliegue privado o un endpoint de Azure OpenAI",
+    "jlamaNoteTitle": "Jlama se ejecuta dentro de EDDI",
+    "jlamaNoteBody": "No hay ningún servidor de modelos al que apuntar: EDDI carga el modelo en su propio proceso y descarga los pesos de Hugging Face la primera vez, por lo que el primer mensaje puede tardar un rato.",
+    "jlamaNoteTuning": "¿EDDI se ejecuta en un contenedor? Abra después la configuración LLM del agente y establezca modelCachePath en un volumen montado: la caché predeterminada vive en la capa efímera del contenedor, así que el modelo puede volver a descargarse después de eliminar o sustituir el contenedor. quantizeModelAtRuntime, workingDirectory y workingQuantizedType también se ajustan ahí.",
     "baseUrlHintLocal": "Obligatorio — la URL donde se ejecuta su servidor de modelos local",
     "modelHint": "Escriba cualquier nombre de modelo compatible con su proveedor, o elija uno de las sugerencias",
+    "modelHintJlama": "Debe ser un identificador de repositorio de Hugging Face con el formato owner/name, por ejemplo tjake/Llama-3.2-1B-Instruct-JQ4. Un nombre de modelo suelto no puede resolverse y el agente fallará en su primer mensaje.",
     "modelPlaceholder": "p. ej. {{model}} (o cualquier modelo que admita su proveedor)",
     "title": "Asistente de creación de agent",
     "subtitle": "Cree un agent completamente configurado en minutos",
@@ -547,7 +565,10 @@
     "toolCount": "{{selected}} de {{total}} seleccionadas",
     "specTooLarge": "Esta especificación es demasiado grande para cargarla aquí",
     "specUrlInvalid": "Esa no es una URL válida",
-    "specUrlScheme": "Solo se admiten URL http:// y https://"
+    "specUrlScheme": "Solo se admiten URL http:// y https://",
+    "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desactiva las herramientas integradas para desactivarlas todas.",
+    "hfToken": "Token de Hugging Face",
+    "hfTokenHint": "Solo es necesario para repositorios restringidos o privados. Se guarda en la bóveda como una clave de API."
   },
   "packages": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El workflow y todos sus datos se eliminarán permanentemente.",
@@ -660,7 +681,9 @@
     "endSuccess_other": "{{count}} conversaciónes finalizadas",
     "purgeSuccess_many": "{{count}} conversaciónes finalizadas purgadas",
     "purgeSuccess_one": "{{count}} conversación finalizada purgada",
-    "purgeSuccess_other": "{{count}} conversaciónes finalizadas purgadas"
+    "purgeSuccess_other": "{{count}} conversaciónes finalizadas purgadas",
+    "endStateUnavailable": "No se pudo volver a comprobar el estado actual de las conversaciones, así que no se finalizó ninguna. Inténtelo de nuevo.",
+    "endStateChanged": "Una conversación seleccionada está ahora esperando aprobación. Revise la selección y vuelva a confirmar."
   },
   "conversationDetail": {
     "backToConversations": "Volver a conversaciones",
@@ -676,7 +699,9 @@
     "exportMd": "Exportar como Markdown",
     "toolSummary": "Uso de herramientas",
     "totalCost": "Coste total",
-    "cacheHitRate": "Tasa de acierto de caché"
+    "cacheHitRate": "Tasa de acierto de caché",
+    "endReasonRetired": "Finalizada: la versión del agente fue retirada",
+    "stepAgentVersion": "Respondido por la versión {{version}} del agente"
   },
   "chat": {
     "hide": "Ocultar",
@@ -753,7 +778,11 @@
     "errorConversationEnded": "Esta conversación ha terminado.",
     "errorAgentNotReady": "Este agente aún no está desplegado en el entorno seleccionado.",
     "errorAgentMismatch": "Esta conversación pertenece a otra versión del agente.",
-    "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento."
+    "errorQuotaUnavailable": "No se pudieron comprobar los límites de uso en este momento. Inténtelo de nuevo en un momento.",
+    "reviewNoticeLabel": "Revisión de conversaciones",
+    "sendRejected": "Tu mensaje no se envió: {{reason}}",
+    "sendWhileLoading": "Tu mensaje no se envió: la conversación aún se está cargando. Inténtalo de nuevo en un momento.",
+    "turnFailed": "El agente no pudo responder a este mensaje. Consulta el registro del servidor o el registro de auditoría de la conversación para ver el motivo."
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",
@@ -864,7 +893,11 @@
     "cascadePartialFailure_other": "{{count}} actualizaciónes en cascada fallaron",
     "usedInAgents_many": "Usado en {{count}} agents",
     "usedInAgents_one": "Usado en {{count}} agent",
-    "usedInAgents_other": "Usado en {{count}} agents"
+    "usedInAgents_other": "Usado en {{count}} agents",
+    "savedNotLive": "Guardado — aún no activo",
+    "savedNotLiveDescription": "El agente en ejecución sigue sirviendo la versión desplegada. Despliegue para aplicar este cambio.",
+    "deployNow": "Desplegar",
+    "deployStarted": "Despliegue iniciado"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -897,7 +930,9 @@
     "removeCondition": "Eliminar condición",
     "noGroups": "No hay grupos de comportamiento definidos",
     "noRules": "No hay reglas en este grupo",
-    "noConditions": "Sin condiciones"
+    "noConditions": "Sin condiciones",
+    "sizeNoBound": "sin límite",
+    "sizeBoundInvalid": "Debe ser un número entero entre -2147483648 y 2147483647, o vacío para no tener límite."
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No se encontraron endpoints en la especificación",
@@ -929,8 +964,6 @@
     "responseObjectName": "Nombre del objeto respuesta",
     "responseHeaderObjectName": "Nombre del objeto header respuesta",
     "fireAndForget": "Enviar y olvidar",
-    "batchCalls": "Llamadas en lote",
-    "iterationObjectName": "Nombre del objeto iteración",
     "prePostInstructions": "Instrucciones pre/post",
     "preRequest": "Pre-petición",
     "postResponse": "Post-respuesta",
@@ -1000,7 +1033,16 @@
     "authHeaderRefPlaceholder": "Opcional — ${vault:mi-clave-api} para una especificación protegida",
     "authHeaderRefHint": "Una referencia al vault, resuelta al ejecutar la llamada. El secreto almacenado debe ser el valor completo de la cabecera, incluido cualquier prefijo Bearer.",
     "authHeaderRefInvalid": "Debe empezar por ${vault:…}, ${vars:…} o ${caller:…}. Pegar la clave la dejaría en la URL de la petición y en todos los registros del trayecto.",
-    "authRefLiteral": "Introduzca una referencia como ${vault:mi-clave}, no la clave en sí. La clave nunca sale del vault."
+    "authRefLiteral": "Introduzca una referencia como ${vault:mi-clave}, no la clave en sí. La clave nunca sale del vault.",
+    "runOnNoCodes": "Una lista «Ejecutar con códigos» vacía no coincide con ningún código de estado, así que esta instrucción nunca se ejecuta.",
+    "useDefaultCodes": "Usar valores predeterminados",
+    "httpCodeFilterDefaults": "Los campos vacíos usan los códigos predeterminados que muestran.",
+    "scopeSecretUnsupported": "(aquí no se guarda en la bóveda)",
+    "scopeSecretWarning": "El ámbito «secret» no se guarda en la bóveda en esta instrucción: el valor se almacena en texto plano. Elija otro ámbito y guarde las credenciales en la bóveda de secretos.",
+    "skipNone": "ninguno: no se omite ningún código",
+    "runSkipConflict": "{{codes}} también está en la lista de omisión, así que esta instrucción nunca se ejecuta con ese código.",
+    "httpCodeFilterSkipSet": "Un «Ejecutar con códigos» vacío usa 200, 201; un «Omitir códigos» vacío no omite nada.",
+    "useDefaultSkipCodes": "Usar la lista de omisión predeterminada"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En caso de fallo, el pipeline continúa; el error se expone en ",
@@ -1053,7 +1095,12 @@
     "whitelist": "Lista blanca (solo permitir)",
     "blacklist": "Lista negra (excluir)",
     "pipelineCalls": "Llamadas de pipeline",
-    "addCall": "Añadir llamada MCP"
+    "addCall": "Añadir llamada MCP",
+    "argumentName": "Nombre del argumento",
+    "argumentType": "Tipo del argumento",
+    "argumentText": "Texto",
+    "argumentInvalidJson": "JSON no válido: se conserva el último valor válido",
+    "removeArgument": "Quitar argumento"
   },
   "llmEditor": {
     "addCustomInstruction": "Añadir instrucción",
@@ -1092,7 +1139,6 @@
     "identityMaskingRulePlaceholder": "p. ej. Nunca reveles que eres un modelo de lenguaje de IA",
     "identityMaskingRules": "Reglas de enmascaramiento",
     "identityMaskingRulesHint": "Para que el enmascaramiento surta efecto se requiere que esté activado Y al menos una regla.",
-    "injectionStrategy": "Inyección",
     "kbNamePlaceholder": "p. ej. product-docs",
     "knowledgeBases": "Bases de conocimiento",
     "knowledgeBasesHint": "Referencie bases de conocimiento explícitamente por su nombre. Cada nombre debe coincidir con una RagConfiguration del workflow.",
@@ -1194,7 +1240,7 @@
     "cascadeInAgent": "Usar cascada también en modo agente (con herramientas)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "p. ej. claude-sonnet-5",
+    "cascadeModelName": "p. ej. claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "vacío = aceptar siempre",
     "cascadeTimeout": "Tiempo límite (ms)",
@@ -1250,9 +1296,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "El tiempo límite del paso {{step}} debe ser mayor que 0.",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "El paso {{step}} usa un proveedor diferente pero no tiene clave API propia — heredaría la clave de la tarea."
     },
-    "parallelExecution": "Ejecución paralela de herramientas",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "Tiempo límite (ms)",
     "maxToolIterations": "Máx. iteraciones de herramientas",
     "maxToolIterationsHint": "(predeterminado 10)",
     "toolRateLimits": "Límites de tasa por herramienta",
@@ -1321,7 +1364,13 @@
     "streamingTimeoutSeconds": "Tiempo de espera de streaming (segundos)",
     "streamingTimeoutSecondsHint": "Anula el valor predeterminado del motor (120s). Solo se aplica durante el streaming; vacío = usar el predeterminado.",
     "taskPricing": "Precios de llamadas simples",
-    "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0."
+    "taskPricingDesc": "Establece el precio de las llamadas de modelo ordinarias (sin cascada) de esta tarea para el seguimiento de costes y los límites de coste del grupo. Sin precio (en blanco) aporta $0.",
+    "unknownType": "{{type}} (personalizado)",
+    "compatibleEndpoint": "Endpoint: {{url}} — añade un parámetro baseUrl o region para sustituirlo",
+    "compatibleEndpointOverridden": "Punto de conexión: {{url}}",
+    "modelType": "Tipo de modelo",
+    "paramName": "Nombre del parámetro",
+    "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desmarca «Activar herramientas integradas» para desactivarlas todas."
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",
@@ -1385,7 +1434,8 @@
     "openEditor": "Editar en el editor",
     "visibilityTitle": "Qué agents pueden ver esta propiedad longTerm",
     "editValue": "Editar valor",
-    "toggleGroup": "Alternar grupo de propiedades"
+    "toggleGroup": "Alternar grupo de propiedades",
+    "secretFromPathWarning": "Un secreto solo se guarda en la bóveda si proviene del campo de valor. Leído desde una «Ruta de origen» o dado de otra forma, se almacena en texto plano: introdúzcalo en el campo de valor o elija otro ámbito."
   },
   "dictionaryEditor": {
     "language": "Idioma",
@@ -1555,7 +1605,8 @@
     "stateReady": "Listo",
     "stateActive": "Activo",
     "stateError": "Error",
-    "stateEnded": "Finalizado"
+    "stateEnded": "Finalizado",
+    "loadOlder": "Cargar entradas anteriores"
   },
   "secrets": {
     "loadError": "No se pudieron cargar los secretos",
@@ -1661,7 +1712,29 @@
     "resetSecretCount_other": "{{count}} secretos se perderán permanentemente",
     "resetTenantSuccess_many": "Vault restablecido para \"{{tenant}}\" — {{count}} secretos eliminados permanentemente",
     "resetTenantSuccess_one": "Vault restablecido para \"{{tenant}}\" — {{count}} secreto eliminados permanentemente",
-    "resetTenantSuccess_other": "Vault restablecido para \"{{tenant}}\" — {{count}} secretos eliminados permanentemente"
+    "resetTenantSuccess_other": "Vault restablecido para \"{{tenant}}\" — {{count}} secretos eliminados permanentemente",
+    "access": "Acceso",
+    "editGrant": "Editar qué agentes pueden usar este secreto",
+    "editGrantKey": "Editar el acceso de {{key}}",
+    "grantTitle": "Quién puede usar «{{key}}»",
+    "grantValueUntouched": "El valor del secreto no se modifica y no hace falta volver a introducirlo. Solo cambia quién puede usarlo.",
+    "grantOnlyTheseAgents": "Solo estos agentes",
+    "grantAllHint": "Todos los agentes de este tenant pueden referenciar este secreto. Restríngelo para limitar el alcance de una sola configuración filtrada.",
+    "grantAddAgent": "Añadir un agente",
+    "grantEmptyError": "Añade al menos un agente o elige «Todos los agentes». No se permite una lista vacía.",
+    "grantCheckingImpact": "Comprobando los agentes desplegados…",
+    "grantLosingAccessTitle": "Agentes desplegados que usan este secreto y perderían el acceso ({{count}})",
+    "grantLosingAccessBody": "Por ahora siguen funcionando — el permiso se comprueba al desplegar un agente, no al usar el secreto — pero su próximo despliegue será rechazado.",
+    "grantAcknowledge": "Entiendo que estos agentes no volverán a desplegarse hasta que se añadan de nuevo o su configuración deje de usar este secreto.",
+    "grantSaved": "Acceso actualizado para «{{key}}»",
+    "grantImpactFailed": "No se pudo comprobar qué agentes desplegados usan este secreto, así que cualquiera podría perder el acceso.",
+    "grantAcknowledgeUnchecked": "Guardar de todos modos sin saber a qué agentes desplegados afecta.",
+    "rotateNotFound": "Este secreto ya no existe, así que no hay nada que rotar. Vuelve a añadirlo.",
+    "keyExists": "Ya existe un secreto llamado «{{key}}». Añadirlo de nuevo reemplazaría su valor: usa Rotar para cambiar el valor y mantener quién puede usarlo.",
+    "keyExistsRotate": "Rotar este secreto en su lugar",
+    "keyExistsPicker": "Ya existe un secreto llamado «{{key}}». Selecciónalo en la lista de la bóveda o elige otro nombre.",
+    "rotateKeepsGrantAll": "Todos los agentes mantienen el acceso, como ahora.",
+    "rotateKeepsGrant": "El acceso sigue limitado a: {{agents}}"
   },
   "audit": {
     "title": "Registro de auditoría",
@@ -1695,17 +1768,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "Configura una clave maestra de bóveda para activar la firma HMAC-SHA256 automática de todas las entradas de auditoría futuras.",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "por",
-    "automated": "automatizado"
+    "automated": "automatizado",
+    "verify": {
+      "entryInvalid": "La firma no coincide",
+      "entryUnproven": "No verificado",
+      "signatureCount": "{{count}} de {{total}} entradas cargadas llevan firma.",
+      "loading": "Verificando firmas…",
+      "errorTitle": "Integridad no verificada",
+      "errorDesc": "La solicitud de verificación falló, así que aquí no se ha comprobado nada.",
+      "checked": "Se comprobaron las {{count}} entradas más recientes.",
+      "verifiedTitle": "Firmas verificadas",
+      "chainIntact": "No falta ninguna entrada en la secuencia.",
+      "chainNotApplicable": "Entre conversaciones solo se comprueban las firmas, no la secuencia.",
+      "verifiedBadge": "VERIFICADO",
+      "tamperedTitle": "Falló la comprobación de integridad",
+      "tamperedInvalid": "{{count}} firma(s) de entrada no coinciden con su contenido: las entradas se modificaron después de escribirse.",
+      "tamperedChain": "Faltan entradas en la secuencia ({{sequences}}): el registro se ha acortado.",
+      "disabledTitle": "No se pueden verificar las firmas",
+      "reasonUnsigned": "{{count}} entrada(s) sin firmar",
+      "reasonUnknownKey": "{{count}} firmada(s) con una clave que este despliegue ya no tiene",
+      "reasonSkipped": "{{count}} entrada(s) antigua(s) sin comprobar",
+      "reasonChain": "no se pudo establecer por completo la secuencia",
+      "reasonDuplicates": "números de secuencia duplicados",
+      "reasonUncovered": "{{count}} entrada(s) cargada(s) más antigua(s) que el intervalo verificado",
+      "unverifiedTitle": "No verificado por completo",
+      "unverifiedDesc": "No se refutó ninguna firma, pero no se pudo comprobar todo: {{reasons}}."
+    }
   },
   "schedules": {
     "cronHelp": "Formato de 5 campos: minuto hora día-del-mes mes día-de-la-semana",
@@ -1832,7 +1924,11 @@
       "weeklyMonday": "Semanal (lun 00:00)",
       "monthly": "Mensual (día 1, 00:00)"
     },
-    "totalCappedHint": "El servidor devolvió una página completa, así que puede haber más programaciones de las mostradas."
+    "totalCappedHint": "El servidor devolvió una página completa, así que puede haber más programaciones de las mostradas.",
+    "systemManaged": "Sistema",
+    "systemManagedHint": "Gestionado por EDDI (ingesta de la base de conocimiento, consolidación de memoria o cadencia de equipo). Cámbielo donde se define, no aquí.",
+    "persistentConversationIdLocked": "Se establece al crear la programación. El servidor conserva la conversación a la que se han ido añadiendo las ejecuciones.",
+    "failedScheduleGone": "La programación ya no existe"
   },
   "cascadeTrace": {
     "title": "Cascada de modelos",
@@ -1893,7 +1989,8 @@
     "tokenDistribution": "Distribución de tokens",
     "totalCost": "Coste total",
     "totalTokens": "Tokens totales",
-    "turns": "Turnos"
+    "turns": "Turnos",
+    "partial": "Esta conversación tiene más entradas de auditoría de las que carga el depurador. Los totales solo cubren las más recientes."
   },
   "memoryInspector": {
     "error": "Error al cargar los datos de memoria",
@@ -2034,13 +2131,105 @@
     "ingestion": "Ingesta de documentos",
     "dropFiles": "Arrastre documentos aquí para ingerir",
     "dropHint": "Texto, Markdown o cualquier archivo de texto",
+    "replaceSameName": "Reemplazar un documento ingerido previamente con el mismo nombre de archivo",
     "browse": "Buscar",
     "pasteText": "O pegue el contenido del texto",
     "pastePlaceholder": "Pegue el texto del documento aquí...",
     "ingestText": "Ingerir texto",
     "ingestionHistory": "Estado de ingesta",
     "saveFirstIngestion": "Guarde esta base de conocimiento primero para activar la ingesta de documentos.",
-    "addParam": "Añadir parámetro"
+    "addParam": "Añadir parámetro",
+    "sources": {
+      "title": "Fuentes de ingesta",
+      "add": "Añadir fuente",
+      "remove": "Eliminar fuente",
+      "unnamed": "Fuente sin nombre",
+      "disabled": "Desactivada",
+      "enabled": "Activada",
+      "running": "En ejecución",
+      "emptyTitle": "Sin fuentes de ingesta",
+      "emptyDescription": "Añade una fuente para rastrear un sitio o subir documentos y mantener esta base de conocimiento al día.",
+      "name": "Nombre",
+      "namePlaceholder": "public-docs",
+      "startUrl": "URL inicial",
+      "pathPrefix": "Prefijo de ruta",
+      "pathPrefixHint": "Rastrear solo bajo esta ruta",
+      "cron": "Programación (cron)",
+      "cronHint": "Déjelo vacío para ejecutar solo manualmente",
+      "maxDepth": "Profundidad máxima",
+      "maxPages": "Páginas máximas",
+      "respectRobots": "Respetar robots.txt",
+      "respectRobotsHint": "Desactívelo solo para un sitio propio",
+      "includeSubdomains": "Incluir subdominios",
+      "excludePatterns": "Patrones de exclusión",
+      "excludePatternsHint": "Globs sobre la ruta de la URL, separados por comas — * permanece en un segmento, ** los cruza",
+      "sitemapUrls": "Sitemaps",
+      "sitemapUrlsHint": "URL de sitemaps para descubrir páginas, separadas por comas. Solo si robots.txt no las incluye; se siguen los índices de sitemaps",
+      "saveFirst": "Guarde la base de conocimiento para ejecutar esta fuente, previsualizarla o ver su historial.",
+      "run": "Ejecutar ahora",
+      "runFailed": "No se pudo iniciar la ejecución. Puede que ya haya una en curso.",
+      "preview": "Vista previa",
+      "previewResult": "Vista previa: no se incrustó nada",
+      "purge": "Purgar estado",
+      "purgeTitle": "¿Purgar el estado de ingesta?",
+      "purgeDescription": "La próxima ejecución volverá a rastrear e incrustar todo lo que esta fuente haya ingerido. Los documentos ya almacenados no se eliminan.",
+      "purgeConfirm": "Purgar",
+      "history": "Ejecuciones recientes",
+      "noRuns": "Esta fuente aún no se ha ejecutado.",
+      "runSummary": "{{ingested}} ingeridos · {{unchanged}} sin cambios",
+      "statSeen": "Vistos",
+      "statChanged": "Se ingerirían",
+      "statUnchanged": "Sin cambios",
+      "statFailed": "Fallidos",
+      "partialCrawl": "El rastreo se detuvo en un límite, por lo que nada se considerará eliminado.",
+      "saveBeforeRun": "Guarde primero la base de conocimiento: una ejecución rastrea la configuración guardada, no los cambios en pantalla.",
+      "purgeFailed": "No se pudo purgar el estado de ingesta.",
+      "previewFailed": "No se pudo previsualizar esta fuente.",
+      "previewNotCompleted": "La vista previa no se completó.",
+      "disabledNoRun": "Esta fuente está desactivada. Actívela y guárdela para ejecutarla o programarla.",
+      "purgeBlockedWhileRunning": "Hay una ejecución en curso. Purgar ahora permitiría que empezara una segunda en paralelo.",
+      "type": "Fuente",
+      "typeWeb": "Sitio web",
+      "typeUpload": "Archivos",
+      "typeWebHint": "Rastrear un sitio web",
+      "typeUploadHint": "Leer los archivos que subas aquí",
+      "cronHintUpload": "Déjalo vacío: los archivos subidos se leen al ejecutar la fuente",
+      "maxFiles": "Máx. archivos",
+      "maxFilesHint": "Cuántos archivos puede contener esta fuente",
+      "maxFileMb": "Tamaño máx. de archivo (MB)",
+      "maxFileMbHint": "Por archivo",
+      "filesSaveFirst": "Guarda la base de conocimiento una vez y podrás subir archivos a esta fuente.",
+      "dropFiles": "Suelta archivos aquí, o",
+      "browseFiles": "elegírlos",
+      "acceptedFormats": "PDF, Word, Excel, PowerPoint, texto, Markdown, CSV y HTML",
+      "clearUploadList": "Borrar la lista",
+      "uploadFailed": "No se pudo subir este archivo.",
+      "noFiles": "Aún no hay archivos. Ejecuta la fuente después de subirlos para indexarlos.",
+      "filesSummary": "Archivos: {{count}} ({{size}})",
+      "deleteFile": "Eliminar {{fileName}}",
+      "deleteFileTitle": "¿Eliminar este archivo?",
+      "deleteFileDescription": "Se eliminan {{fileName}} y todo lo que la base de conocimiento aprendió de él. Los agentes dejan de responder a partir de él de inmediato.",
+      "previewFiles": "Previsualizar los cambios",
+      "saveBeforeUpload": "Guarda primero la base de conocimiento: las subidas van a la fuente guardada, no a los cambios en pantalla.",
+      "foldersNotSupported": "No se pueden subir carpetas. Suelta los archivos que contienen.",
+      "filesAwaitingRun": "Hay archivos guardados que aún no están en la base de conocimiento. Ejecuta la fuente para indexarlos.",
+      "retryUpload": "Reintentar {{fileName}}",
+      "fileIndexed": "Indexado",
+      "fileChanged": "Modificado",
+      "fileNotIndexed": "Sin indexar",
+      "maxTotalMb": "Tamaño total máx. (MB)",
+      "maxTotalMbHint": "Para todos los archivos de esta fuente",
+      "removeTitle": "¿Quitar esta fuente?",
+      "removeDescription": "Al guardar se eliminan sus archivos subidos y todo lo que la base de conocimiento aprendió de ellos. No se puede deshacer.",
+      "switchTypeTitle": "¿Convertir en una fuente de sitio web?",
+      "switchTypeDescription": "Al guardar, se eliminan los archivos subidos de esta fuente y todo lo que la base de conocimiento aprendió de ellos. Esta acción no se puede deshacer.",
+      "switchTypeConfirm": "Cambiar a sitio web",
+      "filesLoadFailed": "No se pudieron cargar los archivos: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (se guarda como Recursivo)",
+    "saveBeforeIngest": "Guarde primero sus cambios: los documentos se ingieren con el almacén y el modelo de embeddings de la base de conocimiento guardada, no con los cambios en pantalla.",
+    "chunkStrategyUnsupported": "{{value}} (no compatible)",
+    "chunkStrategyUnsupportedHint": "El servidor rechaza esta estrategia al guardar. Elija Recursivo."
   },
   "onboarding": {
     "welcome": {
@@ -2362,6 +2551,7 @@
       "SYNTHESIZING": "Sintetizando",
       "COMPLETED": "Completado",
       "FAILED": "Fallido",
+      "REJECTED": "Rechazada",
       "ERROR": "Error",
       "AWAITING_APPROVAL": "Pendiente de aprobación",
       "CANCELLED": "Cancelado",
@@ -2610,7 +2800,6 @@
     "contextWindowEntries": "Entradas recientes conservadas completas",
     "contextWindowSummarize": "Resumir lo que sale de la ventana",
     "contextWindowTruncateNote": "Las entradas antiguas se sustituyen por una marca simple: «N entradas anteriores omitidas».",
-    "retroConfigHint": "Permite que una fase retro escriba lecciones en la memoria del equipo, que se arrastran a discusiones posteriores.",
     "retroPerRun": "Por ejecución",
     "retroStored": "Máximo almacenado",
     "artifactConfigHint": "Permite que los miembros redacten juntos documentos que sobreviven al turno en que se escribieron.",
@@ -2738,7 +2927,103 @@
       "finalAnswer": "Respuesta final",
       "phase": "Fase"
     },
-    "deleteMembersConfigFailed": "No se pudieron leer los miembros del grupo, así que no se eliminó nada. Vuelve a intentarlo."
+    "deleteMembersConfigFailed": "No se pudieron leer los miembros del grupo, así que no se eliminó nada. Vuelve a intentarlo.",
+    "overview": {
+      "anonymousMember": "Participante {{n}}",
+      "cellAbsent": "no participa en esta fase",
+      "cellAbstained": "se abstuvo",
+      "cellDissent": "discrepó",
+      "cellFailed": "falló",
+      "cellPending": "pendiente",
+      "cellSilent": "esperado, no dijo nada",
+      "cellSpoke": "habló",
+      "cellSummary": "{{member}} en {{phase}}: {{state}}",
+      "convergenceNoScore": "Acuerdo no evaluado",
+      "convergenceScore": "Acuerdo {{pct}} %",
+      "empty": "Todavía no hay nada que mostrar. El resumen aparece una vez que la discusión se ha ejecutado.",
+      "emptyLive": "La discusión está comenzando — el resumen se completa a medida que los miembros hablan.",
+      "live": "En vivo",
+      "matrix": "Todas las intervenciones de un vistazo",
+      "matrixLabel": "Contribuciones por miembro y fase",
+      "memberColumn": "Miembro",
+      "noStanceYet": "Aún no ha hablado",
+      "noStanceOfOwn": "Sin posición propia",
+      "phaseActive": "Ahora",
+      "phaseDone": "Completada",
+      "phaseNeedsApproval": "Requiere aprobación humana",
+      "phaseProgress": "{{done}} de {{total}}",
+      "phaseStarting": "iniciando…",
+      "phaseUpcoming": "Pendiente",
+      "phases": "Fases",
+      "phasesLabel": "Fases de la discusión",
+      "roster": "Quién piensa qué",
+      "rosterLabel": "Posiciones de los miembros",
+      "round": "Ronda {{n}}",
+      "spokenCount_one": "{{count}} contribución hasta ahora",
+      "spokenCount_other": "{{count}} contribuciones hasta ahora",
+      "stanceQuoted": "Sus propias palabras",
+      "stanceSummarised": "Resumido por un modelo",
+      "statCost": "Coste",
+      "synthesis": "Conclusión",
+      "statMembers": "Miembros",
+      "statPhases": "Fases",
+      "statTurns": "Intervenciones",
+      "statusAwaiting": "es tu turno",
+      "statusDissented": "discrepancia",
+      "statusFailed": "fallo",
+      "statusSpeaking": "hablando",
+      "turnCount_one": "{{count}} intervención",
+      "turnCount_other": "{{count}} intervenciones",
+      "viewMode": "Vista de la discusión",
+      "viewOverview": "Resumen",
+      "viewSplit": "Ambas",
+      "viewTranscript": "Transcripción",
+      "turnCount_many": "{{count}} intervenciones",
+      "spokenCount_many": "{{count}} contribuciones hasta ahora",
+      "phaseRepeatsTitle": "Esta fase se ejecuta {{count}} veces",
+      "roundScope": "Solo la ronda {{n}}",
+      "roundScopeTitle": "Esta vista solo cubre la ronda {{n}}. Las rondas anteriores están en la transcripción.",
+      "convergenceStopped_one": "Convergido — {{count}} repetición omitida",
+      "convergenceStopped_other": "Convergido — {{count}} repeticiones omitidas",
+      "convergenceStopped_many": "Convergido — {{count}} repeticiones omitidas",
+      "interactions": "Quién se dirigió a quién",
+      "interactionsLabel": "Quién se dirigió a quién",
+      "addressedConnector": "se dirigió a",
+      "unaddressed": "Nadie se dirigió a: {{names}}",
+      "unknownMember": "Desconocido",
+      "bids": "Quién pujó por qué",
+      "bidsLabel": "Pujas por tarea",
+      "rosterShowFewer": "Mostrar menos",
+      "roundLabel": "Ronda",
+      "roundSelect": "Mostrar otra ronda",
+      "roundOption": "{{n}} de {{total}}",
+      "rosterShowAll_one": "Mostrar {{count}} miembro",
+      "rosterShowAll_other": "Mostrar los {{count}} miembros",
+      "rosterShowAll_many": "Mostrar los {{count}} miembros"
+    },
+    "stateRejected": "Rechazada",
+    "inputDisabledRejected": "Esta recomendación fue rechazada",
+    "debateVerdictNote": "Responde con un veredicto puntuado (ganador y puntuaciones), no en prosa: {{phases}}. Los miembros tienen dos o más roles y los argumentos van antes, así que no se usa el propio prompt de síntesis del moderador. Defina una plantilla de entrada en la fase para obtener prosa.",
+    "retroCustomLimits": "Límites personalizados de lecciones de retro",
+    "retroCustomHint": "Una fase de retro escribe lecciones en la memoria del equipo, que se llevan a discusiones posteriores. Estos límites acotan cuántas.",
+    "retroDefaultHint": "Una fase de retro sigue escribiendo lecciones, con los límites predeterminados ({{perRun}} por ejecución, {{stored}} guardadas). Para evitarlo, elimina la fase RETRO.",
+    "voteOptionsTooFew": "Una papeleta explícita necesita al menos dos opciones.",
+    "saveProblem": {
+      "title": "Este grupo todavía no se puede crear:",
+      "debateRoles": "Un debate necesita al menos un miembro con el rol PRO y otro con el rol CON.",
+      "devilAdvocateRole": "Un grupo de abogado del diablo necesita un miembro con el rol DEVIL_ADVOCATE.",
+      "humanInTaskForce": "Los miembros humanos no pueden unirse a un grupo de trabajo (fases de planificación, ejecución y verificación).",
+      "humanWithPeerPhases": "Los miembros humanos no pueden unirse a un grupo cuyas fases se dirigen a cada par por turnos, como la revisión por pares.",
+      "memberUnassigned_many": "{{count}} miembros no tienen agente asignado.",
+      "memberUnassigned_one": "{{count}} miembro no tiene agente asignado.",
+      "memberUnassigned_other": "{{count}} miembros no tienen agente asignado.",
+      "humanNeedsName_many": "{{count}} miembros humanos necesitan un nombre visible.",
+      "humanNeedsName_one": "{{count}} miembro humano necesita un nombre visible.",
+      "humanNeedsName_other": "{{count}} miembros humanos necesitan un nombre visible.",
+      "humanNeedsId_many": "{{count}} miembros humanos necesitan el id de usuario de la persona.",
+      "humanNeedsId_one": "{{count}} miembro humano necesita el id de usuario de la persona.",
+      "humanNeedsId_other": "{{count}} miembros humanos necesitan el id de usuario de la persona."
+    }
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -2802,7 +3087,7 @@
     "value": "Valor",
     "deleteAll": "Eliminar todo",
     "deleteAllTitle": "Eliminar todas las propiedades",
-    "deleteAllDesc": "Se eliminarán permanentemente todas las propiedades de este usuario.",
+    "deleteAllDesc": "Esto elimina permanentemente TODAS las propiedades globales de este usuario: cada entrada global de la memoria del usuario, incluidas las que guardaron los agentes, no solo las filas que se muestran aquí.",
     "deleted": "Propiedades eliminadas",
     "noResults": "No se encontraron propiedades",
     "showingCount": "{{count}} propiedades"
@@ -2882,6 +3167,9 @@
     "new": "nuevo",
     "updated": "actualizado",
     "unchanged": "sin cambios",
+    "removed": "quitados",
+    "conflicts": "cambiados aquí",
+    "conflictHint": "Los recursos marcados como Conflicto se cambiaron en esta instancia desde la última sincronización. No se tocan a menos que los marques; marcar uno sobrescribe el cambio local.",
     "selected": "seleccionados",
     "mergeNow": "Importar seleccionados",
     "syncNow": "Sincronizar ahora",
@@ -2904,6 +3192,8 @@
     "title": "Sincronización de agentes",
     "subtitle": "Sincronizar agentes entre instancias de EDDI",
     "connection": "Instancia origen",
+    "loadingLocalAgents": "Cargando todos los agentes locales antes de emparejar…",
+    "localAgentsError": "La lista de agentes locales no se pudo cargar por completo, por lo que no se pueden emparejar por nombre. Sincronizar ahora crearía duplicados.",
     "sourceUrl": "URL de la instancia EDDI de origen",
     "authToken": "Token de autorización",
     "authHint": "Opcional. Se envía como encabezado X-Source-Authorization.",
@@ -2923,13 +3213,21 @@
     "syncError": "Error de sincronización",
     "empty": "Conéctese a una instancia de origen para comenzar la sincronización de agentes.",
     "autoMatched": "Correspondencia automática",
-    "previewFirst": "Vista previa de los cambios antes de sincronizar"
+    "previewFirst": "Vista previa de los cambios antes de sincronizar",
+    "syncPartial": "Sincronización incompleta: algunos recursos no se escribieron",
+    "syncIdentical": "Ya está actualizado: nada que escribir",
+    "outcomeCounts": "{{updated}} actualizados · {{created}} creados · {{skipped}} sin cambios",
+    "redeployHint": "Los cambios sincronizados se guardan como versiones nuevas. Lo que está en ejecución sigue igual: despliega la nueva versión para ponerla en marcha.",
+    "overwrite": "Sobrescribir el cambio local",
+    "previewFailed": "Error en la vista previa",
+    "noPreviewReturned": "El origen no devolvió ninguna vista previa para este agente."
   },
   "sync": {
     "actionCreate": "Nuevo",
     "actionUpdate": "Actualizar",
     "actionSkip": "Actualizado",
-    "actionConflict": "Conflicto"
+    "actionConflict": "Conflicto",
+    "actionRemove": "Quitar"
   },
   "userConversations": {
     "title": "Conversaciones de usuario",
@@ -3134,7 +3432,6 @@
     "agentIdPlaceholder": "ID del agente para gestionar mensajes",
     "botToken": "Token del bot",
     "botTokenHint": "Token OAuth del bot. Use una referencia de bóveda para mayor seguridad.",
-    "botTokenPlaceholder": "xoxb-… o ${vault:slack-bot-token}",
     "channel": "canal",
     "channelId": "ID del canal de Slack",
     "channelIdCol": "ID del canal",
@@ -3155,7 +3452,6 @@
     "searchPlaceholder": "Buscar canales…",
     "signingSecret": "Secreto de firma",
     "signingSecretHint": "Desde la página de Información básica de su aplicación Slack.",
-    "signingSecretPlaceholder": "Cadena hex o ${vault:slack-signing-secret}",
     "slackSetupGuide": "Guía de configuración de Slack",
     "slackSetupSummary": "Cree una aplicación Slack, configure los permisos del token del bot (app_mentions:read, chat:write, im:history, channels:history, groups:history) y pegue las credenciales aquí.",
     "target": "destino",
@@ -3209,7 +3505,9 @@
     "typeAgent": "Agente",
     "typeGroup": "Grupo",
     "selectGroup": "Selecciona un grupo…",
-    "unknownGroup": "{{id}} (no encontrado)"
+    "unknownGroup": "{{id}} (no encontrado)",
+    "plaintextSecret": "Guarda {{fields}} en la bóveda de secretos y haz referencia con ${vault:…}: las credenciales en texto plano no se guardan.",
+    "plaintextStored": "Este canal guarda {{fields}} en texto plano. Muévelo a la bóveda de secretos y guarda para sustituirlo por una referencia."
   },
   "hitl": {
     "loadingApprovalDetails": "Cargando detalles de aprobación…",
@@ -3299,7 +3597,8 @@
     "decidedProgress": "{{decided}} de {{total}} decididas",
     "groupLinkUnavailable": "No se ha encontrado este grupo, así que no hay un enlace fiable hacia él.",
     "confirmApproveGroupDescription": "Aprobar toda la fase en pausa y reanudar el debate. Cada tarea pendiente se aprueba con ella; abre el grupo para decidirlas una por una.",
-    "confirmRejectGroupDescription": "Rechazar toda la fase en pausa. Cada tarea pendiente se rechaza con ella y el debate no continúa más allá; abre el grupo para decidirlas una por una."
+    "confirmRejectGroupDescription": "Rechazar toda la fase en pausa. Cada tarea pendiente se rechaza con ella y el debate no continúa más allá; abre el grupo para decidirlas una por una.",
+    "pauseChanged": "Esta solicitud cambió desde que la abriste: no se decidió nada. Revísala de nuevo."
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",
@@ -3388,16 +3687,14 @@
     "failedConversations_one": "No se pudo leer {{count}} conversación y falta en el paquete.",
     "failedConversations_other": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
     "conversationsTruncated_many": "Las conversaciones se limitaron — el usuario tiene {{count}} en total.",
-    "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete."
+    "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
+    "deleteIncomplete": "Borrado incompleto: algunos datos de este usuario pueden seguir existiendo. No lo notifiques como cumplido."
   },
   "mockBanner": {
     "message": "Modo demo — Se muestran datos de ejemplo. Conecte un backend de EDDI para ver datos reales."
   },
   "orphans": {
-    "confirmPurgeAll": "¿Eliminar permanentemente TODOS los {{count}} recursos huérfanos? El servidor purga todos — tu selección no se aplica. Esto no se puede deshacer.",
-    "deleteSelected": "Eliminar {{count}} seleccionados",
     "description": "Encuentre y limpie los recursos no referenciados por ningún agente o paquete.",
-    "deselectAll": "Deseleccionar todo",
     "includeDeleted": "Incluir eliminados temporalmente",
     "lastScanned": "Último escaneo",
     "noOrphans": "No se encontraron huérfanos",
@@ -3408,14 +3705,14 @@
     "scanPromptDesc": "Encuentre configuraciones de extensión (reglas, llamadas API, LLM, salidas) que no estén referenciadas por ningún workflow o agente. Limpie los recursos sin usar para mantener su plataforma ordenada.",
     "scanPromptTitle": "Escanee su plataforma",
     "scanning": "Escaneando recursos…",
-    "selectAll": "Seleccionar todo",
     "softDeleted": "Eliminado",
     "title": "Detección de huérfanos",
     "found_many": "{{count}} huérfanos encontrados",
     "found_one": "{{count}} huérfano encontrado",
     "found_other": "{{count}} huérfanos encontrados",
     "scanIncomplete": "Este análisis no finalizó",
-    "scanIncompleteBody": "Puede que aparezcan como huérfanos recursos que siguen en uso. La purga está bloqueada hasta que un análisis se complete."
+    "scanIncompleteBody": "Puede que aparezcan como huérfanos recursos que siguen en uso. La purga está bloqueada hasta que un análisis se complete.",
+    "confirmPurge": "¿Eliminar permanentemente los {{count}} recursos huérfanos? Esta acción no se puede deshacer."
   },
   "quotas": {
     "apiCallsMinute": "Llamadas API / minuto",
@@ -3483,7 +3780,7 @@
     "tagPlaceholder": "p. ej. safety, production",
     "tags": "Etiquetas",
     "templateEnabled": "Activar la resolución de plantillas",
-    "templateEnabledHint": "Cuando está desactivada, los marcadores {{}} del contenido se tratan como texto literal (útil para ejemplos de código).",
+    "templateEnabledHint": "Cuando está desactivada, los marcadores { } del contenido se tratan como texto literal (útil para ejemplos de código).",
     "usageHint": "Uso:"
   },
   "status": {
@@ -3537,7 +3834,8 @@
     "copyVars": "Copiar referencia ${vars:…}",
     "refCopied": "Copiado: {{ref}}",
     "infoLine1": "Usa {{vars.<key>}} en los prompts del sistema o ${vars:<key>} en cualquier parte de las configuraciones de agentes.",
-    "infoLine2": "Los cambios se aplican en 2 minutos (TTL de caché). Para valores sensibles, usa la bóveda de secretos."
+    "infoLine2": "Los cambios se aplican en 2 minutos (TTL de caché). Para valores sensibles, usa la bóveda de secretos.",
+    "keyExists": "Ya existe una variable llamada «{{key}}». Edítala desde la lista."
   },
   "workflowEditor": {
     "endpoints": "endpoints",
@@ -3598,7 +3896,19 @@
       "toggleConfig": "Alternar panel de detalles",
       "unpin": "Dejar de fijar la respuesta",
       "untitled": "Sin título",
-      "viewSessions": "Ver sesiones anteriores"
+      "viewSessions": "Ver sesiones anteriores",
+      "alreadyEnded": "La discusión ya había terminado.",
+      "stopRaced": "La discusión cambió de estado al detenerla y sigue en curso. Vuelve a intentar detenerla.",
+      "stopUnconfirmed": "No se pudo confirmar que la discusión se detuvo. Comprueba su estado y vuelve a intentar detenerla.",
+      "stopFailed": "No se pudo detener la discusión: {{error}}",
+      "stopping": "Deteniendo…",
+      "startOver": "Empezar de nuevo",
+      "streamInterrupted": "Se perdió la conexión en directo. Se muestra la discusión guardada, que se sigue actualizando mientras está en curso.",
+      "confirmNewTitle": "¿Detener la discusión en curso?",
+      "confirmNewDescription": "Todavía hay una discusión en curso. Iniciar una nueva la detiene primero; se abandona el trabajo en curso.",
+      "confirmNewButton": "Detener e iniciar otra",
+      "keepRunning": "Mantener en curso",
+      "questionRequired": "Añade una pregunta para tu grupo de trabajo; los archivos se comparten al iniciar la discusión."
     },
     "thread": {
       "fileTooLarge": "El archivo debe ser menor de 20MB",
@@ -3625,7 +3935,10 @@
       "pausedRejected": "Esta conversación está en pausa a la espera de una decisión humana, así que el mensaje no se envió.",
       "reviewApprovals": "Revisar aprobaciones pendientes",
       "stop": "Detener la generación",
-      "streamEnded": "La conexión terminó antes de que la respuesta estuviera completa. Lo que llegó está arriba; vuelve a enviarlo para reintentar."
+      "streamEnded": "La conexión terminó antes de que la respuesta estuviera completa. Lo que llegó está arriba; vuelve a enviarlo para reintentar.",
+      "newConversation": "Nueva conversación",
+      "newConversationFailed": "No se pudo iniciar una nueva conversación",
+      "initFailed": "No se pudo abrir esta conversación."
     },
     "chat": {
       "agentDetails": "Detalles del agente",
@@ -3950,7 +4263,8 @@
       "transcript": "Transcripción de la conversación",
       "tryDifferent": "Prueba con otro término de búsqueda",
       "untitled": "Conversación sin título",
-      "loadListError": "No se pudieron cargar las conversaciones"
+      "loadListError": "No se pudieron cargar las conversaciones",
+      "rejected": "Rechazada"
     },
     "insights": "Información",
     "memberCount": "{{count}} miembros",
@@ -4041,7 +4355,7 @@
       "llmDefaultsDesc": "Se usa para cada asesor creado aquí, salvo que el asesor defina el suyo más abajo.",
       "llmDefaultsKeyRequired": "Añade una clave aquí para cubrir a todos los asesores que no definan la suya.",
       "model": "Modelo",
-      "modelPlaceholder": "p. ej., claude-sonnet-5",
+      "modelPlaceholder": "p. ej., claude-sonnet-5-5",
       "nameRequired": "Asigna un nombre a este asesor.",
       "new": "Nuevo",
       "next": "Siguiente",
@@ -4144,7 +4458,10 @@
       "platformBaseUrlAuto": "resuelta por el servidor",
       "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito.",
       "platformBaseUrlQueryFailed": "No se pudo preguntar al servidor por su propia dirección. La activación fallará salvo que la introduzcas aquí, o recarga para volver a intentarlo.",
-      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección."
+      "platformBaseUrlUnresolved": "Esta instalación usa un puerto HTTP aleatorio y no tiene eddi.self.base-url, así que no puede indicar dónde alcanzarse a sí misma. Introduce aquí la dirección.",
+      "llmEndpoint": "Endpoint del modelo",
+      "promptBodyDiffers": "Estas instrucciones difieren del valor predeterminado actual: se editaron o las escribió una versión anterior del Manager.",
+      "promptBodyReset": "Restablecer el valor predeterminado"
     },
     "authMode": {
       "none": {
@@ -4312,6 +4629,30 @@
     },
     "superseded": {
       "title": "El agente operador anterior sigue desplegado."
+    },
+    "upgrade": {
+      "hint": "Hay una actualización disponible para el Platform Operator.",
+      "blockerBaseUrl": "La dirección de su servidor de modelos no se guardó: vuelve a introducirla para actualizar.",
+      "addedTools_other": "{{count}} herramientas nuevas",
+      "action": "Actualizar",
+      "addedTools_one": "{{count}} herramienta nueva",
+      "blockerProvider": "Su proveedor de modelos ya no se puede configurar así: elige otro para actualizar.",
+      "useNewDefault": "Reemplazarlas por el nuevo valor predeterminado",
+      "confirmBody": "Se crea un operador nuevo con las instrucciones y herramientas actuales y se verifica como en una activación nueva; solo entonces se elimina el anterior. Se conservan el modelo, la clave, el entorno y la configuración de acceso. El chat abierto con el operador termina, y las conversaciones con el operador anterior dejan de aparecer en el historial.",
+      "description": "Lo configuró una versión anterior del Manager (revisión {{from}}; esta versión incluye la {{to}}), por lo que sus instrucciones y herramientas están desactualizadas.",
+      "removedTools_many": "{{count}} herramientas eliminadas",
+      "blockerCredential": "Su clave de modelo se introdujo como texto plano, que nunca se guarda: vuelve a introducirla para actualizar.",
+      "reviewAction": "Revisar y actualizar",
+      "instructionsUnknown": "Las instrucciones del operador difieren del valor predeterminado actual: son un valor predeterminado anterior o tus propias ediciones.",
+      "instructionsCustomized": "Editaste las instrucciones del operador.",
+      "confirmTitle": "¿Actualizar el Platform Operator?",
+      "removedTools_other": "{{count}} herramientas eliminadas",
+      "removedTools_one": "{{count}} herramienta eliminada",
+      "addedTools_many": "{{count}} herramientas nuevas",
+      "confirm": "Actualizar ahora",
+      "hintAction": "Actualizar",
+      "keepCurrent": "Conservar el texto actual (no aprenderá lo que añade el nuevo valor predeterminado)",
+      "title": "Hay una actualización disponible para el Platform Operator"
     }
   },
   "groupWorkspace": {
@@ -4724,7 +5065,9 @@
       "published": "Publicado",
       "shared": "Compartido",
       "sharedTitle": "Pertenece a {{owner}} · en {{space}}",
-      "ownedBy": "Pertenece a {{owner}}"
+      "ownedBy": "Pertenece a {{owner}}",
+      "internal": "Todos los usuarios con sesión iniciada",
+      "sharedBy": "Compartido por {{owner}}"
     },
     "level": {
       "use": "Puede chatear",
@@ -4742,7 +5085,14 @@
       "space": "Espacio",
       "spaceHint": "Todos los del espacio de este recurso.",
       "published": "Publicado",
-      "publishedHint": "Cualquiera con acceso a esta instalación."
+      "publishedHint": "Cualquiera con acceso a esta instalación puede leerlo — incluidos los visitantes anónimos del chat.",
+      "internal": "Todos los usuarios con sesión iniciada",
+      "internalHint": "Cualquiera que inicie sesión puede chatear con él. Su configuración sigue siendo privada. No es accesible de forma anónima.",
+      "confirmTitle": "¿Cambiar la visibilidad a {{visibility}}?",
+      "cascadeLabel": "Aplicarla también a los flujos y configuraciones a los que hace referencia",
+      "cascadeWarning": "Cada recurso referenciado que te pertenece recibe esta visibilidad, que sustituye su propia configuración. La configuración anterior no se conserva.",
+      "noCascadeWarning": "Solo cambia este recurso. Quien pueda verlo ahora quizá no pueda abrir lo que referencia.",
+      "apply": "Cambiar visibilidad"
     },
     "share": {
       "title": "Compartir",
@@ -4750,7 +5100,7 @@
       "visibility": "Visibilidad",
       "peopleAndTeams": "Personas y equipos",
       "subjectLabel": "Persona o equipo",
-      "subjectPlaceholder": "nombre@example.com o team:engineering",
+      "subjectPlaceholder": "Nombre, correo electrónico o equipo",
       "levelLabel": "Nivel de acceso",
       "add": "Compartir",
       "shared": "Compartido",
@@ -4780,7 +5130,13 @@
       "cascadeRevoked_one": "Eliminado de {{count}} recurso",
       "andMore_one": "y {{count}} más",
       "cascadeRevoked_other": "Eliminado de {{count}} recursos",
-      "andMore_other": "y {{count}} más"
+      "andMore_other": "y {{count}} más",
+      "unknownGrant": "Ningún usuario que inicie sesión coincide con esto — no llega a nadie. Elimínelo y vuelva a compartir.",
+      "copyFailed": "No se pudo copiar — seleccione la dirección y cópiela usted mismo.",
+      "chatLink": "Enlace de chat",
+      "copied": "Copiado",
+      "copy": "Copiar",
+      "chatLinkHint": "Funciona para cualquier persona con quien se haya compartido el agente con «Puede chatear» o superior."
     },
     "emptySpace": "No hay agentes en este espacio",
     "emptySpaceDescription": "Otros espacios pueden tener agentes que usted puede ver.",
@@ -4799,12 +5155,153 @@
       "cascade_one": "Propietario cambiado en {{count}} recurso",
       "cascade_other": "Propietario cambiado en {{count}} recursos",
       "cascade_many": "Propietario cambiado en {{count}} recursos"
-    }
+    },
+    "notifications": {
+      "granted": "Acceso concedido a {{name}}",
+      "labelUnread_one": "Notificaciones — {{count}} sin leer",
+      "labelUnread_many": "Notificaciones — {{count}} sin leer",
+      "labelUnread_other": "Notificaciones — {{count}} sin leer",
+      "label": "Notificaciones",
+      "markAll": "Marcar todo como leído",
+      "empty": "Nada nuevo. Aquí aparecen lo que se comparte con usted y las solicitudes de acceso.",
+      "unnamed": "un recurso sin nombre",
+      "requested": "{{who}} solicita acceso «{{level}}» a {{what}}",
+      "shared": "{{who}} compartió {{what}} con usted — {{level}}",
+      "grant": "Conceder",
+      "openChat": "Abrir chat",
+      "open": "Abrir",
+      "dismiss": "Descartar"
+    },
+    "request": {
+      "alreadyHas": "Ya tiene ese acceso — recargue la página.",
+      "chatOnlyTitle": "Puede chatear con este agente",
+      "title": "No tiene acceso a esto",
+      "chatOnly": "Se compartió con usted para chatear, por lo que su configuración sigue siendo privada.",
+      "subtitle": "Puede ser privado o estar compartido solo con otras personas. Puede solicitar acceso.",
+      "sent": "Solicitud enviada. Si existe y tiene propietario, este la verá en sus notificaciones — y cuando la conceda, usted también lo verá.",
+      "messagePlaceholder": "¿Para qué lo necesita? (opcional)",
+      "message": "Mensaje para el propietario",
+      "action": "Solicitar acceso"
+    },
+    "move": {
+      "done": "Movido",
+      "title": "Mover a un equipo",
+      "team": "Equipo",
+      "action": "Mover",
+      "hint": "Todos los miembros del equipo podrán encontrarlo y editarlo. Usted sigue siendo el propietario — solo usted puede eliminarlo o compartirlo con más personas.",
+      "cascade_one": "{{count}} recurso movido",
+      "cascade_many": "{{count}} recursos movidos",
+      "cascade_other": "{{count}} recursos movidos"
+    },
+    "preview": {
+      "title_one": "Este cambio afecta a {{count}} recurso",
+      "title_many": "Este cambio afecta a {{count}} recursos",
+      "title_other": "Este cambio afecta a {{count}} recursos",
+      "confirm": "Aplicar a todos"
+    },
+    "ownership": {
+      "mine": "Míos",
+      "shared": "Compartidos conmigo",
+      "any": "Todo lo que puedo ver",
+      "label": "Mostrar"
+    },
+    "create": {
+      "default": "su espacio predeterminado",
+      "hint": "Los elementos nuevos se crean en {{space}}."
+    },
+    "emptyShared": "Todavía no se ha compartido nada con usted",
+    "emptySharedDescription": "Cuando un colega comparta un agente con usted o su equipo, aparecerá aquí — y en sus notificaciones.",
+    "showEverything": "Mostrar todo lo que puedo ver"
   },
   "connectionRef": {
     "wrapped": "Una conexión proporciona el valor completo de la cabecera, esquema incluido. Use ${connection:name} solo y ponga «Bearer » en el valor de cabecera de la conexión.",
     "headerMismatch": "Esta conexión envía su credencial como «{{expected}}», así que la cabecera debe llamarse así; de lo contrario la configuración muestra un nombre y la solicitud lleva otro.",
     "refusedInRequest": "${connection:…} se rechaza en una ruta, un parámetro de consulta o un cuerpo: una credencial en una URL acaba en todos los registros de proxy y en un cuerpo no se lee. Haga referencia a la conexión desde una cabecera.",
     "refusedInModel": "Los modelos de lenguaje, los embeddings y los almacenes vectoriales no aceptan ${connection:…}: una conexión se resuelve en una cabecera completa y estos necesitan una credencial sin adornos. Use ${vault:…} aquí."
+  },
+  "workspacesPage": {
+    "title": "Espacios de trabajo",
+    "subtitle": "Sus espacios, los secretos y variables que guardan, y cómo se comparte el trabajo nuevo.",
+    "notEnforced": "Los espacios de trabajo no se aplican en esta instalación, así que todos ven todo. Un operador los activa con eddi.workspaces.enabled=true.",
+    "yourSpaces": "Sus espacios",
+    "yourSpacesHint": "Cada espacio tiene sus propios secretos y variables. Solo sus miembros pueden verlos o cambiarlos, y solo un miembro puede desplegar un agente que los use.",
+    "referenceCopied": "Referencia copiada",
+    "copyReference": "Copiar la referencia para usarla en un agente",
+    "secretStored": "Secreto guardado",
+    "secrets": "Secretos",
+    "noSecrets": "Aún no hay secretos en este espacio",
+    "deleteNamed": "Eliminar {{name}}",
+    "secretName": "Nombre, p. ej. openai-key",
+    "secretValue": "Valor — se guarda cifrado y no se vuelve a mostrar",
+    "add": "Añadir",
+    "deleteSecretTitle": "¿Eliminar este secreto?",
+    "deleteSecretDescription": "Los agentes que lo usan dejan de funcionar hasta que se vuelva a guardar. Esta acción no se puede deshacer.",
+    "variableStored": "Variable guardada",
+    "variables": "Variables",
+    "noVariables": "Aún no hay variables en este espacio",
+    "variableName": "Nombre, p. ej. model",
+    "variableValue": "Valor",
+    "pinned": "Fijado por {{property}}",
+    "stored": "Definido aquí",
+    "default": "Predeterminado",
+    "settings": "Configuración",
+    "settingsHint": "Se aplican de inmediato, en cada réplica en menos de cinco segundos. Si se aplican los espacios de trabajo y qué claim del token contiene los equipos son ajustes de arranque y se muestran solo como referencia.",
+    "enforcing": "Aplicados",
+    "enforcedYes": "Sí",
+    "enforcedNo": "No",
+    "groupsClaim": "Los equipos provienen del claim del token",
+    "defaultSpace": "Dónde se crea el trabajo nuevo de forma predeterminada",
+    "defaultSpacePlaceholder": "Vacío: el espacio propio de cada persona — o un nombre de equipo",
+    "defaultSpaceHelp": "Un nombre de equipo hace que la instalación priorice los equipos: los colegas ven el trabajo de los demás salvo que se haga privado. El espacio que una persona haya seleccionado siempre tiene prioridad.",
+    "legacy": "Recursos creados antes de que se registrara la propiedad",
+    "legacyShared": "Visibles para todos — nada desaparece tras una actualización",
+    "legacyAdminOnly": "Visibles solo para administradores — una vez asignados los propietarios",
+    "lastChanged": "Última modificación por {{who}}",
+    "neverChanged": "Aún no se ha modificado aquí",
+    "saved": "Configuración guardada"
+  },
+  "cascadeSave": {
+    "workflowChanged": "El flujo de trabajo {{workflowId}} se modificó en otro lugar (ahora versión {{current}}, esta página tiene la versión {{version}}). Recarga la página. No se guardó nada.",
+    "agentChanged": "El agente {{agentId}} se modificó en otro lugar (ahora versión {{current}}, esta página tiene la versión {{version}}). Recarga la página. No se guardó nada.",
+    "workflowMissingResource": "El flujo de trabajo {{workflowId}} (versión {{version}}) no hace referencia a {{resource}}, por lo que guardarlo aquí no cambiaría el agente. No se guardó nada.",
+    "agentWorkflowMismatch": "El agente {{agentId}} (versión {{version}}) hace referencia al flujo de trabajo {{workflowId}} en la versión {{found}}, no en la versión {{expected}}. El agente cambió desde que se abrió esta página. Recárgala. No se guardó nada.",
+    "agentMissingWorkflow": "El agente {{agentId}} (versión {{version}}) no hace referencia al flujo de trabajo {{workflowId}}. No se guardó nada."
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "Laboratorios de modelos",
+      "compatible": "Proveedores compatibles con OpenAI",
+      "cloud": "Plataformas en la nube",
+      "local": "Local / autoalojado"
+    },
+    "region": {
+      "label": "Región",
+      "intl": "Internacional",
+      "cn": "China continental",
+      "us": "Estados Unidos",
+      "custom": "URL personalizada (definida abajo)"
+    },
+    "compatibleNote": "Se conecta mediante la API compatible con OpenAI del proveedor ({{url}}). Cámbiala solo para un proxy u otra región.",
+    "keyHint": "Obtén una clave de API en {{url}}",
+    "select": "Selecciona un proveedor"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "Compatible con la versión anterior — las conversaciones en curso pueden cambiar a ella",
+    "compatibleHint": "Solo para cambios que no pueden romper una conversación en curso, p. ej. la redacción del prompt o un modelo distinto. Déjalo sin marcar si se renombraron o eliminaron propiedades, acciones o pasos del workflow.",
+    "compatibleLegacyNote": "La versión actual es anterior al seguimiento de versiones, así que las conversaciones que ya la usan se quedan en ella. El próximo guardado compatible enlaza la cadena.",
+    "compatibleUnknownNote": "Las conversaciones en una versión anterior al seguimiento de versiones se quedan en ella.",
+    "generationBadge": "gen. compat. {{generation}}",
+    "generationTooltip": "Generación de compatibilidad {{generation}}: las versiones de este agente con la misma generación son compatibles, por lo que una conversación en curso pasa a la más reciente desplegada en su siguiente turno. Un guardado incompatible inicia una nueva generación.",
+    "impactTitle": "Desplegar v{{version}} en {{environment}} — conversaciones en curso",
+    "impactFollow_one": "{{count}} conversación activa en v{{from}} continuará en v{{to}}",
+    "impactFollow_many": "{{count}} conversaciones activas en v{{from}} continuarán en v{{to}}",
+    "impactFollow_other": "{{count}} conversaciones activas en v{{from}} continuarán en v{{to}}",
+    "impactStay_one": "{{count}} conversación activa en v{{from}} se quedará en v{{from}}",
+    "impactStay_many": "{{count}} conversaciones activas en v{{from}} se quedarán en v{{from}}",
+    "impactStay_other": "{{count}} conversaciones activas en v{{from}} se quedarán en v{{from}}",
+    "impactReasonNewer": "versión más reciente",
+    "impactReasonLegacy": "anterior al seguimiento de versiones",
+    "impactReasonBreaking": "cambio incompatible",
+    "switchNotice": "El agente pasó de v{{from}} a v{{to}}"
   }
 }

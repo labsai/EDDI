@@ -136,6 +136,10 @@ function FilterDropdown<T extends string>({
 const ALL_OUTCOMES: GroupConversationState[] = [
   "COMPLETED",
   "FAILED",
+  // The outcome ring renders a REJECTED segment and passes it to the same
+  // setter, so leaving it out here made a filter reachable from one control and
+  // not the other -- and invisible to anyone looking for it in the dropdown.
+  "REJECTED",
   "IN_PROGRESS",
   "SYNTHESIZING",
   "CREATED",
@@ -148,6 +152,7 @@ const ALL_OUTCOMES: GroupConversationState[] = [
 const OUTCOME_LABELS: Record<GroupConversationState, string> = {
   COMPLETED: "Completed",
   FAILED: "Failed",
+  REJECTED: "Rejected",
   IN_PROGRESS: "In Progress",
   SYNTHESIZING: "Synthesizing",
   CREATED: "Created",

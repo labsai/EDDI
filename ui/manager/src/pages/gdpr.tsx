@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ShieldAlert,
   Download,
   Trash2,
   AlertTriangle,
@@ -11,6 +10,7 @@ import {
   CheckCircle2,
   Ban,
   ShieldCheck,
+  ShieldUser,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -91,9 +91,21 @@ export function GdprPage() {
       onSuccess: (data) => {
         setResult(data);
         setShowConfirm(false);
-        toast.success(
-          t("gdpr.deleteSuccess", "User data deleted successfully"),
-        );
+        // A 207 is inside 2xx, so this runs for a partial erasure too — and a
+        // green "deleted successfully" over a panel listing failed steps is
+        // the message someone repeats to the data subject.
+        if (data.complete) {
+          toast.success(
+            t("gdpr.deleteSuccess", "User data deleted successfully"),
+          );
+        } else {
+          toast.warning(
+            t(
+              "gdpr.deleteIncomplete",
+              "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled.",
+            ),
+          );
+        }
       },
       onError: (error) => {
         setShowConfirm(false);
@@ -132,7 +144,7 @@ export function GdprPage() {
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/10">
-            <ShieldAlert className="h-5 w-5 text-red-500" />
+            <ShieldUser className="h-5 w-5 text-red-500" />
           </div>
           {t("gdpr.title", "Privacy & Compliance")}
         </h1>

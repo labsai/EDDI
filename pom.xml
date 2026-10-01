@@ -5,9 +5,9 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.4.0</version>
+    <version>6.5.0</version>
     <properties>
-        <compiler-plugin.version>3.15.0</compiler-plugin.version>
+        <compiler-plugin.version>3.16.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <maven.compiler.release>25</maven.compiler.release>
@@ -15,7 +15,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.39.3</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1</quarkus.platform.version>
         <!-- langchain4j ships two release lines from the same reactor. Every
              dev.langchain4j artifact below is pinned to ONE of these two, and
              they must be bumped together: a split leaves modules resolving
@@ -25,14 +25,19 @@
              langchain4j-community.version were byte-identical duplicates of
              langchain4j.version and langchain4j-beta.version), which made a
              half-finished bump the likely outcome of any upgrade. -->
-        <langchain4j.version>1.20.0</langchain4j.version>
-        <langchain4j-beta.version>1.20.0-beta30</langchain4j-beta.version>
+        <langchain4j.version>1.20.2</langchain4j.version>
+        <langchain4j-beta.version>1.20.2-beta30</langchain4j-beta.version>
+        <!-- langchain4j-community-oci-genai is published on its own schedule: its newest release is
+             1.20.0-beta30, with no 1.20.2-beta30. Pinned separately so the rest of the beta line can
+             move; a patch-level core difference is binary compatible. Rejoin the beta property when
+             the module catches up. -->
+        <langchain4j-community-oci.version>1.20.0-beta30</langchain4j-community-oci.version>
         <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
-        <surefire-plugin.version>3.5.6</surefire-plugin.version>
-        <failsafe-plugin.version>3.5.6</failsafe-plugin.version>
+        <surefire-plugin.version>3.6.0</surefire-plugin.version>
+        <failsafe-plugin.version>3.6.0</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
-        <quarkus-mcp-server.version>1.13.2</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>2.0.1</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
         <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
              unit-test coverage data Build & Test already produced (target/jacoco.exec)
@@ -46,17 +51,28 @@
              package, verify and install always build both UIs unless -DskipUi=true.
              CI's Build Image job is the build that ships them. -->
         <skipUi>false</skipUi>
-        <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
-        <!-- Node 22 matches CI (ci.yml, the ui-* jobs) and mise.toml. The floor is
-             22.18: Vitest 5 needs 22.12, and Stryker 10's Babel 8 declares
-             `^22.18.0 || >=24.11.0`. Node 22 is Maintenance LTS until 2027-04-30;
-             20 reached end of life on 2026-04-30. -->
-        <node.version>v22.23.2</node.version>
+        <!-- 2.x needs Java 17 and Maven 3.6 (both far below this build) and changes no
+             goal or parameter we use; 2.0.0 also fixed archive extraction on Windows
+             under Java 25. Since 2.0.2 everything npm and Vite write to stderr is logged
+             as [ERROR] - their warnings included - so read BUILD SUCCESS/FAILURE, not
+             the [ERROR] count. -->
+        <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
+        <!-- Node 24 (LTS "Krypton") matches CI (ci.yml NODE_VERSION) and mise.toml;
+             change all three together, and ci.yml's NODE_SHA256_LINUX_X64 with them. Node 24 is LTS until 2028-04-30,
+             Node 22 only until 2027-04-30. The UIs' own floor is lower - 22.18: Vitest 5
+             needs 22.12, and Stryker 10's Babel 8 declares `^22.18.0 || >=24.11.0` -
+             so a contributor still on Node 22 can run `npm run dev`.
+             frontend-maven-plugin checks no checksum on the archive it downloads. CI's
+             Build Image job (the build that ships) places and verifies it first against
+             NODE_SHA256_LINUX_X64 in ci.yml, whose NODE_VERSION must equal this value
+             (BuildQualityGatesTest). A local build, and src/main/docker/Dockerfile.demo, still
+             download it unverified and trust nodejs.org over TLS alone. -->
+        <node.version>v24.21.0</node.version>
         <!-- Pinned: Maven only warns when a declared plugin carries no version, then
              takes whatever its default lifecycle binding says, which moves with the
              Maven wrapper. -->
-        <maven-resources-plugin.version>3.3.1</maven-resources-plugin.version>
-        <maven-clean-plugin.version>3.2.0</maven-clean-plugin.version>
+        <maven-resources-plugin.version>3.5.0</maven-resources-plugin.version>
+        <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -70,7 +86,7 @@
             <dependency>
                 <groupId>io.github.classgraph</groupId>
                 <artifactId>classgraph</artifactId>
-                <version>4.8.194</version>
+                <version>4.8.196</version>
             </dependency>
             <!-- Override jinjava to fix CVE-2026-25526 (pulled by jlama-core via jlama) -->
             <dependency>
@@ -84,7 +100,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>2.22.2</version>
+                <version>2.22.3</version>
             </dependency>
             <!-- Override jackson-databind to fix GHSA-5gvw-p9qm-jgwh (@JsonView bypassed for
                  @JsonUnwrapped containers) and GHSA-5jmj-h7xm-6q6v (case-insensitive
@@ -92,11 +108,13 @@
                  Managed by the Quarkus BOM at 2.22.0, same as jackson-core above. Neither is
                  reachable from our code — @JsonView is unused and every @JsonIgnoreProperties
                  is class-level ignoreUnknown — but OpenSSF Scorecard counts advisories
-                 regardless of reachability. -->
+                 regardless of reachability. 2.22.3 also fixes CVE-2026-91776 and CVE-2026-91777
+                 (TypeDeserializerBase._findDeserializer, @JsonIdentityInfo forward references),
+                 which Trivy blocks on. -->
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>2.22.2</version>
+                <version>2.22.3</version>
             </dependency>
             <!-- Keep the two jackson-dataformat modules we declare on the same patch
                  as jackson-core/databind above. The Quarkus BOM manages the whole
@@ -105,18 +123,23 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-csv</artifactId>
-                <version>2.22.2</version>
+                <version>2.22.3</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-xml</artifactId>
-                <version>2.22.2</version>
+                <version>2.22.3</version>
             </dependency>
-            <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai) -->
+            <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai).
+                 Stay on the 1.2 line while Quarkus manages Netty 4.1 (4.1.138.Final in 3.39.5):
+                 1.3.x is built against Netty 4.2 (Import-Package io.netty [4.2,5)) and its default
+                 event loop needs io.netty.channel.MultiThreadIoEventLoopGroup, so the Azure client's
+                 first request fails with NoClassDefFoundError. ReactorNettyNettyCompatibilityTest
+                 creates that event loop. Move to 1.3 only together with a Quarkus on Netty 4.2. -->
             <dependency>
                 <groupId>io.projectreactor.netty</groupId>
                 <artifactId>reactor-netty-http</artifactId>
-                <version>1.2.8</version>
+                <version>1.2.18</version>
             </dependency>
             <!-- Override postgresql to fix CVE-2026-42198 (SCRAM iteration count DoS, ≤42.7.10)
                  and CVE-2026-54291 (auth downgrade, ≤42.7.11).
@@ -133,7 +156,7 @@
             <dependency>
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-lts8on</artifactId>
-                <version>2.73.12.1</version>
+                <version>2.73.13</version>
             </dependency>
             <!-- swagger-annotations is a VERSION PIN, not a usage. No source imports
                  io.swagger.v3.oas.annotations, so the direct <dependency> was removed
@@ -151,7 +174,7 @@
             <dependency>
                 <groupId>io.swagger.core.v3</groupId>
                 <artifactId>swagger-annotations</artifactId>
-                <version>2.2.54</version>
+                <version>2.2.55</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -319,7 +342,7 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-community-oci-genai</artifactId>
-            <version>${langchain4j-beta.version}</version>
+            <version>${langchain4j-community-oci.version}</version>
         </dependency>
         <!-- RAG Provider Expansion: additional embedding stores + models -->
         <dependency>
@@ -445,13 +468,13 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.20.0</version>
+            <version>3.21.0</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>com.jayway.jsonpath</groupId>
             <artifactId>json-path</artifactId>
-            <version>2.10.0</version>
+            <version>3.0.0</version>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -502,36 +525,35 @@
             <version>0.30.0</version>
             <scope>test</scope>
         </dependency>
-        <!-- Testcontainers: container-based integration testing for E2E agent tests -->
+        <!-- Testcontainers: container-based integration testing for E2E agent tests.
+             Testcontainers 2 prefixes every module artifact with "testcontainers-".
+             Versions come from the Quarkus BOM, which manages the whole 2.x family,
+             so they cannot drift from the Testcontainers Quarkus Dev Services use. -->
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
-            <version>1.21.4</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>1.21.4</version>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>mongodb</artifactId>
-            <version>1.21.4</version>
+            <artifactId>testcontainers-mongodb</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
-            <version>1.21.4</version>
+            <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- NATS JetStream client for async conversation processing (Phase 5) -->
         <dependency>
             <groupId>io.nats</groupId>
             <artifactId>jnats</artifactId>
-            <version>2.26.2</version>
+            <version>2.26.3</version>
         </dependency>
         <!-- PostgreSQL JDBC driver + Agroal connection pool (Phase 6.31) -->
         <dependency>
@@ -552,7 +574,7 @@
         <dependency>
             <groupId>io.swagger.parser.v3</groupId>
             <artifactId>swagger-parser</artifactId>
-            <version>2.1.47</version>
+            <version>2.1.48</version>
         </dependency>
 
     </dependencies>
@@ -582,6 +604,18 @@
                     <exclude>META-INF/resources/fonts/**</exclude>
                     <exclude>META-INF/resources/img/**</exclude>
                 </excludes>
+            </resource>
+            <!-- The Platform Operator's provisioning revision, owned by the Manager
+                 (ui/manager/src/lib/operator/operator-revision.json). Copied onto the
+                 backend classpath on EVERY build, -DskipUi included, so
+                 OperatorRevisionCheck can warn at startup when the deployed operator
+                 predates the Manager this jar ships. One file, read by both halves. -->
+            <resource>
+                <directory>ui/manager/src/lib/operator</directory>
+                <targetPath>eddi-manager</targetPath>
+                <includes>
+                    <include>operator-revision.json</include>
+                </includes>
             </resource>
         </resources>
         <plugins>
@@ -654,8 +688,14 @@
                 <version>${surefire-plugin.version}</version>
                 <configuration>
                     <skipTests>${skipUTs}</skipTests>
-                    <!-- @{argLine} preserves JaCoCo's injected agent arg -->
-                    <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED</argLine>
+                    <!-- @{argLine} preserves JaCoCo's injected agent arg.
+                         The jdk.incubator.vector add-modules flag mirrors the container
+                         image (src/main/docker/Dockerfile) and mise.toml, so the test JVM
+                         is the same shape as production. JlamaRuntimeSupportTest asserts
+                         the Vector API is actually reachable here, so dropping the flag
+                         fails the build rather than silently un-testing Jlama's SIMD
+                         path. -->
+                    <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector</argLine>
                     <excludes>
                         <exclude>**/*IT.java</exclude>
                     </excludes>
@@ -686,7 +726,20 @@
                     <!-- NOTE: @{argLine} for JaCoCo IT instrumentation is intentionally NOT added here.
                          On Windows, the JaCoCo agent path with backslashes breaks the Quarkus
                          FacadeClassLoader. CI (Linux) uses the quarkus-jacoco extension instead.
-                         See ContainerBaseIT.java line 24 for details. -->
+                         See ContainerBaseIT.java line 24 for details.
+                         Note what that does NOT mean. Failsafe's argLine PARAMETER defaults to
+                         the ${argLine} property, which both jacoco:prepare-agent-integration
+                         and the Quarkus Maven extension populate. Omitting the element is
+                         therefore not the same as running without the agent: the agent IS
+                         there, and jacoco-it.exec IS produced for the merged coverage gate.
+                         Declaring an explicit argLine element here replaces all of it at once,
+                         dropping the JaCoCo IT agent, the add-opens/add-exports that Quarkus
+                         injects, and the serialized app-model path (Quarkus prints a warning
+                         saying so). So there is deliberately no argLine element here. The
+                         Jlama Vector API flag lives on surefire only: ITs exercise the image
+                         over HTTP, the image carries the flag in its own ENV, and no IT builds
+                         a Jlama model in the test JVM, so adding it here would buy nothing and
+                         cost the IT coverage data. -->
                     <!-- Kill the forked test process if it hasn't completed in 15 minutes.
                          Prevents CI from hanging indefinitely when Docker image builds
                          or container startup fails to propagate errors. -->
@@ -951,8 +1004,15 @@
                 <configuration>
                     <skip>${skipUi}</skip>
                     <nodeVersion>${node.version}</nodeVersion>
-                    <!-- Node lands in ui/node (gitignored), shared by both UIs. -->
-                    <installDirectory>${project.basedir}/ui</installDirectory>
+                    <!-- Node lands in ui/node/<node.version>/node (all of ui/node is gitignored),
+                         shared by both UIs. One directory PER VERSION: the plugin swaps in a new
+                         node binary over an existing install but unpacks the new npm over the old
+                         one without clearing it, and the mixed npm tree crashes ("Class extends
+                         value undefined"). A fixed ui/node therefore broke `package` on every
+                         existing checkout at the Node 22 -> 24 bump, while fresh clones and CI
+                         were fine. A new version now gets a new directory; an old one is simply
+                         never used again. -->
+                    <installDirectory>${project.basedir}/ui/node/${node.version}</installDirectory>
                 </configuration>
                 <!-- prepare-package, not generate-resources: `./mvnw compile`, `test` and
                      `quarkus:dev` never need the UI, and binding it earlier made every one of

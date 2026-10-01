@@ -18,7 +18,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Link } from "react-router-dom";
 import type { WorkflowExtension } from "@/lib/api/workflows";
-import { ArrowUpCircle, ExternalLink, GripVertical, Pencil, Puzzle, Trash2 } from "lucide-react";
+import { ArrowUpCircle, ExternalLink, GripVertical, Pencil, Trash2, Workflow } from "lucide-react";
 import { getExtensionIcon, getExtensionLabel } from "@/lib/api/extensions";
 
 /** Parse an eddi:// URI to extract the resource type slug and ID */
@@ -126,7 +126,7 @@ export function PipelineBuilder({
         className="flex flex-col items-center justify-center py-12 text-muted-foreground"
         data-testid="pipeline-empty"
       >
-        <Puzzle className="h-10 w-10 opacity-50" />
+        <Workflow className="h-10 w-10 opacity-50" />
         <p className="mt-3 text-sm">
           {t("packageEditor.noTasks", "No tasks in this workflow")}
         </p>

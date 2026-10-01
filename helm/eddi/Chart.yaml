@@ -12,6 +12,14 @@ type: application
 # three releases because nothing enforces this; nothing packages the chart yet,
 # which is the only reason that was harmless.
 #
+# A release does not edit this file by hand: `python scripts/bump-version.py
+# release <x.y.z>` moves appVersion and bumps this version with it (a minor, or
+# a patch for a patch release). A MAJOR bump, for a values file that stops
+# rendering, stays a human decision — pass --chart-bump major.
+#
+# appVersion is also the image tag: values.yaml leaves eddi.image.tag empty and
+# the chart falls back to it (the eddi.imageTag helper).
+#
 # 2.0.0, not 1.1.0: this release is BREAKING for an existing values file.
 # `manager.*`, `monitoring.*` and `namespace` are removed outright,
 # `eddi.oidc.authServerUrl` loses its default and becomes `required` when you
@@ -19,7 +27,7 @@ type: application
 # `eddi.oidc.publicUrl` when OIDC is on, `nats.buildProfileImage` when
 # messagingType is not in-memory. An upgrade that keeps an old values file
 # either fails to render or silently drops a setting.
-version: 2.0.0
+version: 2.3.0
 appVersion: "6.4.0"
 home: https://eddi.labs.ai
 sources:

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.properties.rest;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -36,13 +37,37 @@ class RestUserMemoryStoreTest {
     private SecurityIdentity identity;
     private OwnershipValidator ownershipValidator;
     private RestUserMemoryStore rest;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() {
         store = mock(IUserMemoryStore.class);
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
-        rest = new RestUserMemoryStore(store, identity, ownershipValidator);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
+        rest = new RestUserMemoryStore(store, identity, ownershipValidator, resourceAccessGuard);
+    }
+
+    // === group scoping of a recall (H3) ===
+
+    @Test
+    void getVisibleMemories_namingAGroupTheCallerMayNotUse_isRefusedBeforeTheStoreIsRead() throws Exception {
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard)
+                .requireUseAccessToEach(List.of("other-team"), "group");
+
+        assertThrows(ForbiddenException.class,
+                () -> rest.getVisibleMemories("user-1", "agent-1", List.of("other-team"), "most_recent", 50));
+
+        verify(store, never()).getVisibleEntries(any(), any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void getVisibleMemories_checksEveryNamedGroup() throws Exception {
+        when(store.getVisibleEntries("user-1", "agent-1", List.of("g1", "g2"), "most_recent", 50)).thenReturn(List.of());
+
+        rest.getVisibleMemories("user-1", "agent-1", List.of("g1", "g2"), "most_recent", 50);
+
+        verify(resourceAccessGuard).requireUseAccessToEach(List.of("g1", "g2"), "group");
     }
 
     // === getAllMemories ===
@@ -207,11 +232,48 @@ class RestUserMemoryStoreTest {
 
     @Test
     void deleteAllForUser_shouldReturn204() throws Exception {
-        doNothing().when(store).deleteAllForUser("user-1");
-
         Response response = rest.deleteAllForUser("user-1");
 
         assertEquals(204, response.getStatus());
+        // H9c: a user clearing their memories must not lift their own Art. 18 flag.
+        verify(store).deleteAllExceptReserved("user-1");
+        verify(store, never()).deleteAllForUser(any());
+    }
+
+    @Test
+    void upsertMemory_refusesAReservedKeyWith400() throws Exception {
+        var entry = new UserMemoryEntry(null, "user-1", "_gdpr_processing_restricted", "false", "fact",
+                Visibility.global, null, List.of(), null, false, 0, null, null);
+
+        Response response = rest.upsertMemory(entry);
+
+        assertEquals(400, response.getStatus());
+        verify(store, never()).upsert(any());
+    }
+
+    /**
+     * Review N3: a caller without access gets the ordinary 403, not a 400 revealing
+     * key rules.
+     */
+    @Test
+    void upsertMemory_checksOwnershipBeforeTheReservedKeyRule() {
+        var entry = new UserMemoryEntry(null, "someone-else", "_gdpr_processing_restricted", "false", "fact",
+                Visibility.global, null, List.of(), null, false, 0, null, null);
+        doThrow(new ForbiddenException("no")).when(ownershipValidator).validateUserAccess(any(), eq("someone-else"));
+
+        assertThrows(ForbiddenException.class, () -> rest.upsertMemory(entry));
+    }
+
+    @Test
+    void deleteMemory_refusesTheRestrictionRowWith400() throws Exception {
+        var row = new UserMemoryEntry("e1", "user-1", "_gdpr_processing_restricted", "true", "gdpr",
+                Visibility.global, null, List.of(), null, false, 0, Instant.now(), Instant.now());
+        when(store.findEntryById("e1")).thenReturn(Optional.of(row));
+
+        Response response = rest.deleteMemory("e1");
+
+        assertEquals(400, response.getStatus());
+        verify(store, never()).deleteEntry(any());
     }
 
     // === countMemories ===

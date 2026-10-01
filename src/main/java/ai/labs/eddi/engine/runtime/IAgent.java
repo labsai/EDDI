@@ -36,11 +36,18 @@ public interface IAgent {
             throws InstantiationException, IllegalAccessException;
 
     /**
-     * User memory config from agent deployment. {@code null} when memory is
-     * disabled.
+     * User memory config from agent deployment. {@code null} when the agent
+     * declares no {@code userMemoryConfig} and does not enable the memory tools.
      */
     default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
         return null;
+    }
+
+    /**
+     * Whether the agent enables the LLM memory tools ({@code enableMemoryTools}).
+     */
+    default boolean isMemoryToolsEnabled() {
+        return getUserMemoryConfig() != null;
     }
 
     /**
@@ -50,6 +57,18 @@ public interface IAgent {
      * @since 6.0.0
      */
     default AgentConfiguration.MemoryPolicy getMemoryPolicy() {
+        return null;
+    }
+
+    /**
+     * The deployed version's compatibility generation — see
+     * {@link AgentConfiguration#getCompatibilityGeneration()}. {@code null} for a
+     * version stored before generations existed, which is compatible only with
+     * itself.
+     *
+     * @since 6.5.0
+     */
+    default Integer getCompatibilityGeneration() {
         return null;
     }
 }

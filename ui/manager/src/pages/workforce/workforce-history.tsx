@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
-  useEnrichedGroupDescriptors,
+  useResolvedGroupVersion,
   useGroup,
   useGroupConversations,
   useDeleteGroupConversation,
@@ -33,6 +33,8 @@ const STATE_BADGE: Record<
   SYNTHESIZING: { label: "Synthesizing", variant: "warning" },
   CREATED: { label: "Created", variant: "secondary" },
   FAILED: { label: "Failed", variant: "destructive" },
+  // A recorded human decision, not a fault — neutral, never destructive.
+  REJECTED: { label: "Rejected", variant: "secondary" },
   CANCELLED: { label: "Cancelled", variant: "secondary" },
   AWAITING_APPROVAL: { label: "Awaiting Approval", variant: "warning" },
   AWAITING_HUMAN_INPUT: { label: "Awaiting Human Input", variant: "warning" },
@@ -46,6 +48,7 @@ function stateI18nKey(state: GroupConversationState): string {
     SYNTHESIZING: "Workforce.history.synthesizing",
     CREATED: "Workforce.history.created",
     FAILED: "Workforce.history.failed",
+    REJECTED: "Workforce.history.rejected",
     CANCELLED: "Workforce.history.cancelled",
     AWAITING_APPROVAL: "Workforce.history.awaitingApproval",
     AWAITING_HUMAN_INPUT: "Workforce.history.awaitingHumanInput",
@@ -244,15 +247,13 @@ function WorkforceHistory() {
   // whichever task force produced it.
   // Nothing links here with a `version`, and `getGroup` sends one, so a fixed
   // 1 read the group's FIRST version — a renamed task force would export under
-  // its original name. The descriptor list carries the current version.
-  const { data: boardDescriptors } = useEnrichedGroupDescriptors(200);
-  const boardVersion = useMemo(
-    () => boardDescriptors?.find((g) => g.id === boardId)?.version,
-    [boardDescriptors, boardId],
-  );
-  // Left unfetched until the descriptor names a version. Falling back to 1
-  // reads the group's FIRST version, so the export would be titled with the
-  // name the group was created under until the descriptors arrive.
+  // its original name. The current version used to be learned from the
+  // enriched descriptor listing, which fetches every listed group's full
+  // config (up to 201 requests) to find one number; `currentversion` is one.
+  const boardVersion = useResolvedGroupVersion(boardId, searchParams.get("version"));
+  // Left unfetched until the version is known. Falling back to 1 reads the
+  // group's FIRST version, so the export would be titled with the name the
+  // group was created under until the lookup lands.
   const { data: boardConfig } = useGroup(boardVersion ? (boardId ?? "") : "", boardVersion);
   const { data: conversations, isLoading, isError } = useGroupConversations(
     boardId ?? "",
@@ -508,6 +509,7 @@ function WorkforceHistory() {
               conversationId={selectedId}
               groupName={boardConfig?.name}
               preConfiguredTasks={boardConfig?.tasks}
+              style={boardConfig?.style}
               onClose={() => {
                 setSelectedId(null);
                 setShowViewer(false);

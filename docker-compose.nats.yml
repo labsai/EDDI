@@ -27,9 +27,12 @@ services:
   nats:
     image: nats:2.10-alpine
     command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
+    # Loopback-only host bindings: NATS runs here with no auth, and the monitoring
+    # endpoint (8222) exposes server/connection state. EDDI reaches the broker
+    # container-to-container as nats://nats:4222 regardless of these bindings.
     ports:
-      - "4222:4222"   # Client connections
-      - "8222:8222"   # HTTP monitoring
+      - "127.0.0.1:4222:4222"   # Client connections
+      - "127.0.0.1:8222:8222"   # HTTP monitoring
     volumes:
       - nats-data:/data
     restart: unless-stopped

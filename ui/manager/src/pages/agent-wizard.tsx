@@ -8,7 +8,6 @@ import {
   Bot,
   Globe,
   Brain,
-  Settings2,
   Rocket,
   RefreshCw,
   Upload,
@@ -25,18 +24,32 @@ import {
   ListFilter,
   Info,
   KeyRound,
+  Shapes,
+  IdCard,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
 import {
-  LLM_PROVIDERS,
   getProviderConfig,
   type SetupAgentRequest,
   type CreateApiAgentRequest,
   type SetupResult,
 } from "@/lib/api/agent-setup";
-import { MODEL_SUGGESTIONS, isBaseUrlRequired } from "@/lib/model-suggestions";
+import {
+  MODEL_SUGGESTIONS,
+  acceptsOptionalToken,
+  isBaseUrlRequired,
+  isProvisionableBySetup,
+  supportsBaseUrl,
+} from "@/lib/model-suggestions";
+import {
+  getApiKeyUrl,
+  getDefaultBaseUrl,
+  getKeyPlaceholder,
+} from "@/lib/llm-provider-catalog";
+import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -102,25 +115,35 @@ const INITIAL_STATE: WizardState = {
 
 
 const STEPS_STANDARD = [
-  { id: "type", icon: Sparkles, label: "Type" },
-  { id: "info", icon: Brain, label: "Identity" },
-  { id: "llm", icon: Settings2, label: "Model" },
+  { id: "type", icon: Shapes, label: "Type" },
+  { id: "info", icon: IdCard, label: "Identity" },
+  { id: "llm", icon: Brain, label: "Model" },
   { id: "features", icon: Wrench, label: "Features" },
-  { id: "review", icon: Rocket, label: "Review" },
+  { id: "review", icon: ClipboardCheck, label: "Review" },
 ] as const;
 
 const STEPS_API = [
-  { id: "type", icon: Sparkles, label: "Type" },
-  { id: "info", icon: Brain, label: "Identity" },
+  { id: "type", icon: Shapes, label: "Type" },
+  { id: "info", icon: IdCard, label: "Identity" },
   { id: "apispec", icon: Globe, label: "API Spec" },
-  { id: "llm", icon: Settings2, label: "Model" },
+  { id: "llm", icon: Brain, label: "Model" },
   { id: "features", icon: Wrench, label: "Features" },
-  { id: "review", icon: Rocket, label: "Review" },
+  { id: "review", icon: ClipboardCheck, label: "Review" },
 ] as const;
 
 /* ================================================================
    Main Wizard Component
    ================================================================ */
+
+/**
+ * True when either side of a provider switch is a named OpenAI-compatible
+ * provider. Their base URL is a per-provider endpoint (or a region of it), so
+ * carrying it to another provider would send that provider's traffic, and its
+ * key, to the wrong host.
+ */
+function isCompatibleSwitch(from: string, to: string): boolean {
+  return getDefaultBaseUrl(from) !== undefined || getDefaultBaseUrl(to) !== undefined;
+}
 
 export function AgentWizardPage() {
   const { t } = useTranslation();
@@ -143,11 +166,22 @@ export function AgentWizardPage() {
   );
 
   function handleProviderChange(providerId: string) {
-    const config = getProviderConfig(providerId);
     update({
       provider: providerId,
       model: "",
-      apiKey: config?.needsKey === false ? "" : state.apiKey,
+      // A key is issued by one vendor. Carried across a provider switch it would be
+      // sent to another vendor's endpoint — an OpenAI key to DeepSeek, or a Jlama
+      // Hugging Face token to OpenAI and back — so any switch clears it (the
+      // operator form does the same).
+      apiKey: "",
+      // A provider with no endpoint hides the field, so a URL left over from
+      // the previous provider would be submitted with no way to see or clear
+      // it. What the user cannot see, the wizard does not send. The same goes
+      // for a named compatible provider's endpoint (see isCompatibleSwitch).
+      baseUrl:
+        supportsBaseUrl(providerId) && !isCompatibleSwitch(state.provider, providerId)
+          ? state.baseUrl
+          : "",
     });
   }
 
@@ -194,6 +228,10 @@ export function AgentWizardPage() {
           model: state.model,
           apiKey: state.apiKey || undefined,
           apiBaseUrl: state.apiBaseUrl || undefined,
+          // The LLM's OWN endpoint (Ollama, a proxy). The Model step collects it
+          // for both modes, but this request never sent it, so an API agent on
+          // Ollama was created with the backend's default URL whatever was typed.
+          llmBaseUrl: state.baseUrl || undefined,
           apiAuth: state.apiAuth || undefined,
           endpoints: state.endpoints || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
@@ -743,6 +781,10 @@ function LlmStep({
   const suggestions = useMemo(() => MODEL_SUGGESTIONS[provider] ?? [], [provider]);
   const datalistId = `model-suggestions-${provider}`;
   const baseUrlRequired = isBaseUrlRequired(provider);
+  const baseUrlSupported = supportsBaseUrl(provider);
+  const inProcess = !baseUrlSupported;
+  const defaultBaseUrl = getDefaultBaseUrl(provider);
+  const apiKeyUrl = getApiKeyUrl(provider);
 
   return (
     <div>
@@ -756,25 +798,32 @@ function LlmStep({
       <div className="mt-6 space-y-5">
         {/* Provider */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">
+          <label
+            htmlFor="wizard-provider"
+            className="mb-1.5 block text-sm font-medium text-foreground"
+          >
             {t("setupWizard.provider", "Provider")}
           </label>
           <div className="relative">
-            <select
+            <ProviderSelect
               value={provider}
-              onChange={(e) => onProviderChange(e.target.value)}
+              onChange={onProviderChange}
               className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 pe-10 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-              data-testid="wizard-provider"
-            >
-              {LLM_PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              id="wizard-provider"
+              testId="wizard-provider"
+              include={isProvisionableBySetup}
+            />
             <ChevronDown className="pointer-events-none absolute inset-e-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           </div>
         </div>
+
+        {/* Region — only for compatible providers with more than one endpoint.
+            A non-default region fills the base URL below; the default clears it. */}
+        <ProviderRegionSelect
+          provider={provider}
+          baseUrl={baseUrl}
+          onBaseUrlChange={onBaseUrlChange}
+        />
 
         {/* Model — combobox with autocomplete suggestions */}
         <div>
@@ -801,10 +850,15 @@ function LlmStep({
             ))}
           </datalist>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t(
-              "setupWizard.modelHint",
-              "Type any model name supported by your provider, or pick one from the suggestions"
-            )}
+            {inProcess
+              ? t(
+                  "setupWizard.modelHintJlama",
+                  "Must be a Hugging Face repository id in owner/name form, e.g. tjake/Llama-3.2-1B-Instruct-JQ4. A bare model name cannot be resolved and the agent will fail on its first message."
+                )
+              : t(
+                  "setupWizard.modelHint",
+                  "Type any model name supported by your provider, or pick one from the suggestions"
+                )}
           </p>
         </div>
 
@@ -820,55 +874,130 @@ function LlmStep({
             <SecretKeyPicker
               value={apiKey}
               onChange={onApiKeyChange}
-              placeholder="sk-..."
+              placeholder={getKeyPlaceholder(provider)}
               testId="wizard-apikey"
             />
+            {apiKeyUrl && (
+              <p className="mt-1 text-xs text-muted-foreground" data-testid="wizard-key-hint">
+                <a
+                  href={apiKeyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-foreground"
+                >
+                  {t("llmProviders.keyHint", "Get an API key at {{url}}", { url: apiKeyUrl })}
+                </a>
+              </p>
+            )}
           </div>
         )}
 
-        {/* Base URL */}
-        <div>
-          <label
-            htmlFor="wizard-baseurl"
-            className="mb-1.5 block text-sm font-medium text-foreground"
-          >
-            {t("setupWizard.baseUrl", "Base URL")}{" "}
-            {!baseUrlRequired && (
+        {/* Optional token (Jlama: Hugging Face access token for gated or
+            private repositories). The backend writes it to the builder's
+            authToken; without this field there was no way to set it here. */}
+        {acceptsOptionalToken(provider) && (
+          <div>
+            <label
+              htmlFor="wizard-apikey"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {t("setupWizard.hfToken", "Hugging Face token")}{" "}
               <span className="text-muted-foreground font-normal">
                 ({t("setupWizard.optional", "optional")})
               </span>
-            )}
-            {baseUrlRequired && (
-              <span className="text-primary font-normal">*</span>
-            )}
-          </label>
-          <input
-            id="wizard-baseurl"
-            type="url"
-            value={baseUrl}
-            onChange={(e) => onBaseUrlChange(e.target.value)}
-            placeholder={
-              provider === "ollama"
-                ? "http://localhost:11434"
-                : provider === "jlama"
-                  ? "http://localhost:8080"
-                  : t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL")
-            }
-            className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-            data-testid="wizard-baseurl"
-          />
-          <p className="mt-1 text-xs text-muted-foreground">
-            {baseUrlRequired
-              ? t(
-                  "setupWizard.baseUrlHintLocal",
-                  "Required — the URL where your local model server is running"
-                )
-              : t(
-                  "setupWizard.baseUrlHintCloud",
-                  "Only needed if using a proxy, private deployment, or Azure OpenAI endpoint"
+            </label>
+            <SecretKeyPicker
+              value={apiKey}
+              onChange={onApiKeyChange}
+              placeholder="hf_..."
+              testId="wizard-apikey"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(
+                "setupWizard.hfTokenHint",
+                "Only needed for gated or private repositories. It is stored in the vault like an API key."
+              )}
+            </p>
+          </div>
+        )}
+
+        {/* Base URL — omitted entirely for in-process providers, which have no
+            endpoint to address. Offering the field there is worse than useless:
+            the backend drops the value, so the agent silently ignores it. */}
+        {baseUrlSupported && (
+          <div>
+            <label
+              htmlFor="wizard-baseurl"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {t("setupWizard.baseUrl", "Base URL")}{" "}
+              {!baseUrlRequired && (
+                <span className="text-muted-foreground font-normal">
+                  ({t("setupWizard.optional", "optional")})
+                </span>
+              )}
+              {baseUrlRequired && (
+                <span className="text-primary font-normal">*</span>
+              )}
+            </label>
+            <input
+              id="wizard-baseurl"
+              type="url"
+              value={baseUrl}
+              onChange={(e) => onBaseUrlChange(e.target.value)}
+              placeholder={
+                provider === "ollama"
+                  ? "http://localhost:11434"
+                  : (defaultBaseUrl ?? t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL"))
+              }
+              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+              data-testid="wizard-baseurl"
+            />
+            {defaultBaseUrl && (
+              <p className="mt-1 text-xs text-muted-foreground" data-testid="wizard-compatible-note">
+                {t(
+                  "llmProviders.compatibleNote",
+                  "Connects through the provider's OpenAI-compatible API ({{url}}). Override only for a proxy or another region.",
+                  { url: defaultBaseUrl },
                 )}
-          </p>
-        </div>
+              </p>
+            )}
+            <p className="mt-1 text-xs text-muted-foreground">
+              {baseUrlRequired
+                ? t(
+                    "setupWizard.baseUrlHintLocal",
+                    "Required — the URL where your local model server is running"
+                  )
+                : t(
+                    "setupWizard.baseUrlHintCloud",
+                    "Only needed if using a proxy, private deployment, or Azure OpenAI endpoint"
+                  )}
+            </p>
+          </div>
+        )}
+
+        {inProcess && (
+          <div
+            className="rounded-lg border border-border bg-muted/40 p-4 text-xs text-muted-foreground"
+            data-testid="wizard-jlama-note"
+          >
+            <p className="font-medium text-foreground">
+              {t("setupWizard.jlamaNoteTitle", "Jlama runs inside EDDI")}
+            </p>
+            <p className="mt-1.5">
+              {t(
+                "setupWizard.jlamaNoteBody",
+                "There is no model server to point at — EDDI loads the model into its own process and downloads the weights from Hugging Face on first use, so the first message can take a while."
+              )}
+            </p>
+            <p className="mt-1.5">
+              {t(
+                "setupWizard.jlamaNoteTuning",
+                "Running EDDI in a container? Open the agent's LLM configuration afterwards and set modelCachePath to a mounted volume — the default cache lives on the container's ephemeral layer, so the model may be re-downloaded after the container is removed or replaced. quantizeModelAtRuntime, workingDirectory and workingQuantizedType can be tuned there too."
+              )}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1358,18 +1487,34 @@ function FeaturesStep({
                       <div className="flex flex-wrap gap-1.5" data-testid="wizard-tools-whitelist">
                         {BUILT_IN_TOOLS.map((tool) => {
                           const selected = currentTools.includes(tool);
+                          // The last selected tool cannot be deselected. An
+                          // empty whitelist is not "no tools" to the backend but
+                          // "no whitelist", i.e. EVERY tool, so emptying the
+                          // list used to silently grant all of them. Turning
+                          // built-in tools off is the way to have none.
+                          const isLastSelected = selected && currentTools.length === 1;
                           return (
                             <button
                               key={tool}
                               type="button"
                               aria-pressed={selected}
+                              disabled={isLastSelected}
+                              title={
+                                isLastSelected
+                                  ? t(
+                                      "setupWizard.lastToolHint",
+                                      "At least one tool must stay selected. Turn built-in tools off to disable them all.",
+                                    )
+                                  : undefined
+                              }
                               onClick={() => {
+                                if (isLastSelected) return;
                                 const next = selected
                                   ? currentTools.filter((item) => item !== tool)
                                   : [...currentTools, tool];
-                                onChange({ builtInToolsWhitelist: next.length > 0 ? next.join(",") : "" });
+                                onChange({ builtInToolsWhitelist: next.join(",") });
                               }}
-                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium transition-all ${
+                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium transition-all disabled:cursor-not-allowed ${
                                 selected
                                   ? "bg-primary/15 text-primary border border-primary/30 shadow-sm"
                                   : "bg-secondary/50 text-muted-foreground border border-transparent hover:border-border hover:text-foreground"

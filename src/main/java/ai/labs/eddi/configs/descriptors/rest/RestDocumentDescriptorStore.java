@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
+import ai.labs.eddi.utils.RestUtilities;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.jboss.logging.Logger;
 
@@ -20,6 +21,9 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 /**
@@ -40,15 +44,15 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
     }
 
     @Override
-    public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, String space) {
+    public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, String space, String ownership) {
         try {
             // The cross-resource listing: it takes the descriptor type as a query
             // parameter rather than deriving it from a store, which makes it the one
             // endpoint that can enumerate every configuration type in the deployment. It
             // has to carry the caller's scope for the same reason each typed store does.
             List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(type, filter, index, limit, false,
-                    accessGuard.listingScope().withinSpace(space));
-            descriptors.forEach(accessGuard::redactForCaller);
+                    accessGuard.listingScope(space, ownership));
+            accessGuard.redactAllForCaller(descriptors);
             return descriptors;
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
@@ -116,6 +120,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
         }
 
         try {
+            version = patchTargetVersion(id, version);
             DocumentDescriptor documentDescriptor = documentDescriptorStore.readDescriptor(id, version);
             DocumentDescriptor patch = patchInstruction.getDocument();
 
@@ -144,11 +149,64 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
             // the backfill migration.
             accessGuard.stampModification(documentDescriptor);
             documentDescriptorStore.setDescriptor(id, version, documentDescriptor);
+            requireStillCurrent(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * The descriptor version a patch addressed at {@code version} must write.
+     * <p>
+     * A name is metadata of the resource, so a patch belongs on the current
+     * descriptor. Addressing an older version used to rewrite that history row -
+     * or, before the store wrote history rows at all, nothing - and answer 204
+     * either way, so a rename from a stale tab silently went nowhere. It is a 409
+     * now. Descriptor versions drift from resource versions (a merge import bumps
+     * one before the other), so the version of the resource the current descriptor
+     * points at is accepted as naming the current descriptor too; that is the
+     * number every client holds.
+     */
+    private Integer patchTargetVersion(String id, Integer version)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        IResourceStore.IResourceId current = documentDescriptorStore.getCurrentResourceId(id);
+        if (version == null || current == null || current.getVersion() == null || current.getVersion().equals(version)) {
+            return version;
+        }
+        DocumentDescriptor currentDescriptor = documentDescriptorStore.readDescriptor(id, current.getVersion());
+        IResourceStore.IResourceId live = currentDescriptor == null || currentDescriptor.getResource() == null
+                ? null
+                : RestUtilities.extractResourceId(currentDescriptor.getResource());
+        if (live != null && live.getVersion() != null && live.getVersion().equals(version)) {
+            return current.getVersion();
+        }
+        String message = "Version " + version + " of '" + id + "' is not its current version; patch the current version ("
+                + (live != null && live.getVersion() != null ? live.getVersion() : current.getVersion()) + ").";
+        throw conflict(message);
+    }
+
+    /**
+     * A {@code PUT} on the resource that lands between {@link #patchTargetVersion}
+     * and the write moves the descriptor on, and the rename then went into the
+     * history row of the version it was aimed at, answered with 204. Checked after
+     * the write, as {@code ResourceSharingService.writeBack} does, and reported as
+     * the 409 it is, so the client can re-read and retry.
+     */
+    private void requireStillCurrent(String id, Integer writtenVersion) throws IResourceStore.ResourceNotFoundException {
+        IResourceStore.IResourceId current = documentDescriptorStore.getCurrentResourceId(id);
+        if (writtenVersion != null && current != null && current.getVersion() != null && !current.getVersion().equals(writtenVersion)) {
+            throw conflict("The descriptor of '" + id + "' moved to version " + current.getVersion()
+                    + " while it was being patched; the change did not reach it. Re-read and patch again.");
+        }
+    }
+
+    private static WebApplicationException conflict(String message) {
+        return new WebApplicationException(message, Response.status(Response.Status.CONFLICT)
+                .entity(message)
+                .type(MediaType.TEXT_PLAIN)
+                .build());
     }
 }

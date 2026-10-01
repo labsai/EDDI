@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
+
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -80,7 +82,7 @@ class ApiCallExecutorPathEncodingTest {
         // Real templating: the point of these tests.
         var realEngine = Engine.builder().addDefaults().strictRendering(false).build();
         var prePostUtils = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class),
-                new TemplatingEngine(realEngine), mock(IDataFactory.class));
+                new TemplatingEngine(realEngine), mock(IDataFactory.class), mock(SecretPropertyVault.class));
 
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
                 secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver),

@@ -9,6 +9,7 @@ import type {
   QuickRepliesBuildingInstruction,
 } from "../apicalls-editor";
 import type { ToolApprovalsConfig } from "@/lib/api/hitl";
+import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 
 // ─── Types matching LlmConfiguration backend model ───────────────────────────
 
@@ -118,7 +119,6 @@ export interface LlmTask {
   ragDefaults?: {
     maxResults?: number;
     minScore?: number;
-    injectionStrategy?: string;
   };
   httpCallRag?: string;
   retry?: {
@@ -133,8 +133,6 @@ export interface LlmTask {
   enableRateLimiting?: boolean;
   defaultRateLimit?: number;
   toolRateLimits?: Record<string, number>;
-  enableParallelExecution?: boolean;
-  parallelExecutionTimeoutMs?: number;
   maxToolIterations?: number;
   modelCascade?: ModelCascadeConfig;
 
@@ -268,7 +266,6 @@ export interface KnowledgeBaseReference {
   name?: string;
   maxResults?: number;
   minScore?: number;
-  injectionStrategy?: string;
   contextTemplate?: string;
 }
 
@@ -284,19 +281,7 @@ export type LangchainConfig = LlmConfig;
 /** Parameter keys that have dedicated UI controls and should not appear in the generic key-value grid */
 export const HIDDEN_PARAM_KEYS = new Set(["systemMessage"]);
 
-export const MODEL_TYPES = [
-  "openai",
-  "anthropic",
-  "gemini",
-  "gemini-vertex",
-  "ollama",
-  "huggingface",
-  "jlama",
-  "mistral",
-  "azure-openai",
-  "bedrock",
-  "oracle-genai",
-] as const;
+export const MODEL_TYPES: readonly string[] = LLM_PROVIDERS.map((p) => p.id);
 
 /**
  * Built-in tool names the backend recognises in `builtInToolsWhitelist`

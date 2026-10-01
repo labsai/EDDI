@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationLogResult;
@@ -277,6 +278,60 @@ class McpConversationToolsOwnershipTest {
             asOwner().readAuditTrail(CONV_ID, null);
 
             verify(auditStore).getAuditTrail(eq(CONV_ID), anyInt(), anyInt());
+        }
+
+        private void conversationPermanentlyDeleted() throws Exception {
+            // Audit entries outlive the conversation; its descriptors do not.
+            doThrow(new ResourceNotFoundException("gone")).when(descriptorStore).readDescriptor(anyString(), anyInt());
+            doThrow(new ResourceNotFoundException("gone")).when(descriptorStore).readDescriptorWithHistory(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("C1: the audit trail of a permanently deleted conversation is not readable by a non-admin")
+        void deletedConversationAuditDeniedToNonAdmin() throws Exception {
+            // The missing descriptor used to wave every eddi-viewer through, exposing
+            // the deleted conversation's prompts, responses and tool calls.
+            conversationPermanentlyDeleted();
+
+            String result = asIntruder().readAuditTrail(CONV_ID, null);
+
+            // #7: an expected not-found, answered uniformly (and logged at debug).
+            assertEquals("{\"error\":\"Conversation not found\"}", result);
+            verify(auditStore, never()).getAuditTrail(anyString(), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("C1: the logs of a permanently deleted conversation are not readable by a non-admin")
+        void deletedConversationLogsDeniedToNonAdmin() throws Exception {
+            conversationPermanentlyDeleted();
+
+            String result = asIntruder().readAgentLogs(null, CONV_ID, null, null);
+
+            assertEquals("{\"error\":\"Conversation not found\"}", result);
+            verify(boundedLogStore, never()).getEntries(any(), any(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an admin can still read the audit trail of a deleted conversation (compliance)")
+        void deletedConversationAuditReadableByAdmin() throws Exception {
+            conversationPermanentlyDeleted();
+            when(auditStore.getAuditTrail(eq(CONV_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+            asAdmin().readAuditTrail(CONV_ID, null);
+
+            verify(auditStore).getAuditTrail(eq(CONV_ID), anyInt(), anyInt());
+        }
+
+        @Test
+        @DisplayName("C1a: a soft-deleted conversation's audit trail stays owner-only")
+        void softDeletedConversationAuditDeniedToNonOwner() throws Exception {
+            var archived = new ConversationDescriptor();
+            archived.setUserId(OWNER);
+            doThrow(new ResourceNotFoundException("archived")).when(descriptorStore).readDescriptor(anyString(), anyInt());
+            doReturn(archived).when(descriptorStore).readDescriptorWithHistory(anyString(), anyInt());
+
+            assertDenied(asIntruder().readAuditTrail(CONV_ID, null));
+            verify(auditStore, never()).getAuditTrail(anyString(), anyInt(), anyInt());
         }
     }
 

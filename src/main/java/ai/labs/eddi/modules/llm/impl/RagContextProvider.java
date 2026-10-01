@@ -16,6 +16,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.KnowledgeBaseReference;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.RagDefaults;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
@@ -154,7 +155,10 @@ public class RagContextProvider {
 
             try {
                 // Step 4: Build EmbeddingModel + EmbeddingStore + ContentRetriever
-                EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig);
+                // QUERY: this vector is the search key, not a stored document. Passing
+                // DOCUMENT here (which is what a shared instance did) measurably
+                // costs recall on an asymmetric model.
+                EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.QUERY);
                 EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfig, kbName);
 
                 ContentRetriever retriever = EmbeddingStoreContentRetriever.builder().embeddingStore(store).embeddingModel(embeddingModel)

@@ -18,14 +18,20 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-      # Pins the issuer and the discovery document's endpoints to the name EDDI
-      # uses on the compose network, whatever host the request arrived on. The
-      # tests fetch tokens through the published port on localhost:8180, and
-      # without this pin Keycloak would derive `iss` from that request's Host
-      # header — so every token would claim an issuer EDDI does not accept, and
-      # the tier would report 401 for a reason that has nothing to do with the
-      # code under test.
-      KC_HOSTNAME: http://keycloak:8080
+      # The issuer Keycloak stamps into tokens, pinned rather than derived from
+      # each request's Host header — otherwise a token fetched through the
+      # published port claims an issuer EDDI does not accept, and the tier reports
+      # 401 for a reason that has nothing to do with the code under test.
+      #
+      # It is the BROWSER-reachable URL, matching docker-compose.auth.yml, so that
+      # what this tier advertises to an MCP client is what a real deployment
+      # advertises: EDDI's resource metadata names this issuer as the place to
+      # authenticate, and a document naming `keycloak:8080` would be unresolvable
+      # to every client outside the compose network. BACKCHANNEL_DYNAMIC keeps
+      # EDDI's own discovery fetch on the in-cluster address, and the token issuer
+      # pin below tells it to accept the public `iss` in return.
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_HOSTNAME_STRICT: "false"
       KC_HEALTH_ENABLED: "true"
     volumes:
@@ -63,10 +69,22 @@ services:
       QUARKUS_OIDC_TENANT_ENABLED: "true"
       QUARKUS_OIDC_AUTH_SERVER_URL: "http://keycloak:8080/realms/eddi"
       QUARKUS_OIDC_CLIENT_ID: "eddi-backend"
+      # Keycloak stamps the browser-reachable issuer into tokens (KC_HOSTNAME
+      # above) while EDDI fetches discovery over the compose-network address, so
+      # the two disagree unless the issuer is pinned. Same reasoning, and the same
+      # value shape, as docker-compose.auth.yml.
+      QUARKUS_OIDC_TOKEN_ISSUER: "http://localhost:8180/realms/eddi"
       # What /manage/__auth_config__.js hands the browser, so the SPA redirects to
       # a Keycloak the browser can actually reach — the container name above is
       # only resolvable inside the compose network.
       EDDI_KEYCLOAK_PUBLIC_URL: "http://localhost:8180"
+      # application.properties forces the advertised OAuth resource identifier to
+      # https, because a deployment with authentication on belongs behind TLS and
+      # the scheme would otherwise be read from a request that a terminating proxy
+      # already downgraded. This tier is plain http on loopback, so leaving it on
+      # would advertise a URL nothing here can fetch and the discovery assertions
+      # would be testing a document no client could follow.
+      QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME: "false"
       QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173,http://localhost:7070"
       # No EDDI_SECURITY_ALLOW_UNAUTHENTICATED here, deliberately: OIDC is
       # configured, so AuthStartupGuard is satisfied and the opt-out would only

@@ -10,10 +10,11 @@ import {
   useGroup,
   useGroupConversations,
   useGroupConversation,
+  useResolvedGroupVersion,
   isActiveConversationState,
   GROUP_CONVERSATIONS_KEY,
 } from "@/hooks/use-groups";
-import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { BoardTranscript } from "@/components/workforce/board-transcript";
 import { BoardInput } from "@/components/workforce/board-input";
 import { SessionHistory } from "@/components/workforce/session-history";
@@ -21,15 +22,21 @@ import { MembersSheet } from "@/components/workforce/members-sheet";
 import { ExportMenu } from "@/components/workforce/export-menu";
 import { DiscussionActions } from "@/components/groups/discussion-actions";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
+import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
+import { DecisionRecordCard } from "@/components/groups/decision-record-card";
+import { hasDisplayableDecision } from "@/lib/group-config";
 import { HumanTurnBanner } from "@/components/groups/human-turn-banner";
 import { TaskBoard, PersistedTaskBoard } from "@/components/groups/task-board";
 import { Button } from "@/components/ui/button";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
 import {
   followupGroupMember,
   closeGroupConversation,
+  getGroupConversation,
   type GroupAttachmentRef,
+  type GroupConversationState,
 } from "@/lib/api/groups";
 import { useSubmitHumanInput } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
@@ -102,11 +109,39 @@ function StopIcon() {
 
 // ─── Component ───────────────────────────────────────────────────
 
+/** States the backend never cancels out of; a 409 on one of them is a real "already ended". */
+const ENDED_STATES: ReadonlySet<GroupConversationState> = new Set<GroupConversationState>([
+  "COMPLETED",
+  "FAILED",
+  "REJECTED",
+  "CANCELLED",
+  "CLOSED",
+]);
+
+/**
+ * After a cancel answered 409: did the discussion in fact end? The backend
+ * answers 409 both for a terminal discussion and for a cancel that lost a state
+ * race (`GroupHitlCoordinator.cancelDiscussion`), so only the stored state can
+ * say. A read that fails says nothing — `unknown`, never taken as "ended": the
+ * run may well still be going.
+ */
+async function stateAfterConflict(groupId: string, gcId: string): Promise<"ended" | "going" | "unknown"> {
+  try {
+    const doc = await getGroupConversation(groupId, gcId);
+    return ENDED_STATES.has(doc.state) ? "ended" : "going";
+  } catch {
+    return "unknown";
+  }
+}
+
 function WorkforceBoard() {
   const { t } = useTranslation();
   const { boardId } = useParams<{ boardId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const version = Number(searchParams.get("version")) || 1;
+  // Resolved rather than defaulted to 1: a version-less link used to open the
+  // group's FIRST version (see `useResolvedGroupVersion`).
+  const resolvedVersion = useResolvedGroupVersion(boardId, searchParams.get("version"));
+  const version = resolvedVersion ?? 1;
 
   // ─── Selected conversation (URL-backed) ────────────────────────
   // The selection lives in the URL so a page reload — or a shared link — lands
@@ -136,7 +171,12 @@ function WorkforceBoard() {
   const panelTriggerRef = useRef<HTMLElement | null>(null);
 
   // ─── Data ──────────────────────────────────────────────────────
-  const { data: groupConfig, isLoading: configLoading } = useGroup(boardId ?? "", version);
+  const { data: groupConfig, isLoading: groupLoading } = useGroup(
+    resolvedVersion ? (boardId ?? "") : "",
+    resolvedVersion,
+  );
+  // A disabled query reports isLoading false, so the version lookup counts too.
+  const configLoading = groupLoading || resolvedVersion === undefined;
   const { data: conversations } = useGroupConversations(boardId ?? "");
   const { data: selectedConversation } = useGroupConversation(
     boardId ?? "",
@@ -144,7 +184,7 @@ function WorkforceBoard() {
   );
   // Bound to this board, so a discussion started here keeps streaming (and
   // stays visible) after navigating away and back.
-  const { streamState, startStream, continueStream, abortStream, resetStream } =
+  const { streamState, startStream, continueStream, cancelStream, clearCancelError, resetStream } =
     useGroupDiscussionStream(boardId);
   const queryClient = useQueryClient();
 
@@ -249,9 +289,24 @@ function WorkforceBoard() {
   const streamIsForCurrentView =
     !selectedConvId || selectedConvId === streamState.conversationId;
 
-  // Show the live transcript for the conversation the stream is driving; when
-  // the user browses another session, show that one from the server instead.
-  const viewingStream = hasStreamTranscript && streamIsForCurrentView;
+  /**
+   * The stored document has everything the stream showed.
+   *
+   * Once a stream stops — it finished, paused, was stopped, or the connection
+   * dropped — its transcript is frozen at the last frame, while the stored
+   * document keeps moving: follow-ups and closes are appended to it over REST,
+   * and a run whose connection dropped goes on writing phases the stream never
+   * delivers. Holding on to the live copy after that froze the board on it for
+   * good. It is only kept while the refetched document is still behind it, so
+   * the switch does not flash an older transcript.
+   */
+  const persistedCaughtUp = persistedHasCaughtUp(selectedConversation, streamState);
+
+  // Show the live transcript for the conversation the stream is driving while
+  // it is running; when the user browses another session, or once the stream
+  // has stopped and the stored document has caught up, show the server's copy.
+  const viewingStream =
+    hasStreamTranscript && streamIsForCurrentView && (isStreaming || !persistedCaughtUp);
 
   const displayTranscript = viewingStream
     ? streamState.transcript
@@ -341,6 +396,8 @@ function WorkforceBoard() {
     if (!selectedConversation) return t("common.loading", "Loading…");
     const state = selectedConversation.state;
     if (state === "CLOSED") return t("groups.inputDisabledClosed", "This discussion is closed");
+    // Not "ended": a rejection is a decision someone made, and the Manager says so.
+    if (state === "REJECTED") return t("groups.inputDisabledRejected", "This recommendation was rejected");
     if (state === "FAILED" || state === "CANCELLED") return t("groups.inputDisabledEnded", "This discussion has ended");
     if (state === "AWAITING_APPROVAL") return t("groups.inputDisabledApproval", "Awaiting approval…");
     if (state === "AWAITING_HUMAN_INPUT") return t("groups.inputDisabledHumanTurn", "Awaiting a member's turn…");
@@ -358,14 +415,17 @@ function WorkforceBoard() {
         // with member agents only when a discussion starts and rejects a
         // continuation carrying any. `BoardInput` hides the affordance in this
         // mode, so there should be none to drop.
-        continueStream(boardId, selectedConvId, question);
+        // The stored document seeds the stream: the continue endpoint replays
+        // nothing, so after a reload the live view would otherwise hold only
+        // the new round.
+        continueStream(boardId, selectedConvId, question, selectedConversation);
         toast.success(t("groups.continueStreamStarted", "Continuation started — streaming live"));
       } else {
         setSelectedConvId(null);
         startStream(boardId, question, attachments);
       }
     },
-    [boardId, inputMode, selectedConvId, continueStream, startStream, setSelectedConvId, t],
+    [boardId, inputMode, selectedConvId, selectedConversation, continueStream, startStream, setSelectedConvId, t],
   );
 
   const handleSelectConversation = useCallback(
@@ -376,13 +436,178 @@ function WorkforceBoard() {
     [setSelectedConvId],
   );
 
-  const handleNewDiscussion = useCallback(() => {
+  const startFresh = useCallback(() => {
     resetStream();
     setSelectedConvId(null);
     // Whichever slide-over was open is about the discussion being left behind.
     setShowHistory(false);
     setShowMembers(false);
   }, [resetStream, setSelectedConvId]);
+
+  /**
+   * Which stop the confirmation dialog is asking about: `stop` (the Stop
+   * button) or `new` ("+ New" while a discussion is streaming, which stops it
+   * and then clears the board), and the discussion it addresses — fixed when
+   * the dialog opens, so a selection that settles or changes while it is open
+   * cannot redirect the cancel to another run. `targetId` undefined means this
+   * tab's live stream.
+   *
+   * It belongs to the board it was asked on and is dismissed when the board
+   * changes. Switching boards keeps this page mounted, and `cancelStream`
+   * addresses the board on screen, so a confirmation carried over would send
+   * the old board's discussion id under the new board's group — cancelling
+   * nothing there and leaving the old run going.
+   */
+  const [confirmStop, setConfirmStop] = useState<{ kind: "stop" | "new"; targetId?: string } | null>(null);
+  const [isStopping, setIsStopping] = useState(false);
+  /**
+   * "Stop and start new" was confirmed before `group_start` had named the
+   * conversation, so the cancel is still pending. The board is cleared once it
+   * lands, not left on the run the user chose to leave. Holds the board it was
+   * asked on: the landing it waits for is that board's stream, and clearing
+   * another board would discard what the user moved on to.
+   */
+  const [newAfterCancel, setNewAfterCancel] = useState<string | null>(null);
+  /** The board on screen now, for a stop that settles after the user moved on. */
+  const currentBoardRef = useRef(boardId);
+  useEffect(() => {
+    currentBoardRef.current = boardId;
+    setConfirmStop(null);
+    setNewAfterCancel(null);
+  }, [boardId]);
+
+  /**
+   * The discussion on screen is running, whether or not this tab holds its
+   * stream. A connection that dropped (`interrupted`) and a discussion adopted
+   * from the stored list after a reload both run on without one, and both need
+   * a Stop — and a "+ New" that asks first — as much as a live stream does.
+   */
+  const canStop = isStreaming || viewingRunningConversation;
+  /**
+   * The Stop button is about the discussion on screen: the stream when it is
+   * the one on screen, otherwise the selected discussion if it is running. A
+   * finished discussion browsed while another one streams gets no Stop — that
+   * Stop would cancel a run the user is not looking at ("Back to live
+   * discussion" leads to it).
+   */
+  const canStopView = streamingCurrentView || viewingRunningConversation;
+  /**
+   * What each stop addresses. `undefined` is this tab's stream before
+   * `group_start` has named it; the stop is then deferred until it does.
+   *
+   * Stop cancels the discussion on screen: the stream when it is that one,
+   * otherwise the selected discussion — including while ANOTHER discussion
+   * streams here, which it must leave running. "+ New" stops the stream when
+   * there is one, because clearing the board detaches from it; only without
+   * one does it stop the selection.
+   */
+  const streamTargetId = streamState.conversationId ?? undefined;
+  const selectedRunningId = viewingRunningConversation ? (selectedConversation?.id ?? undefined) : undefined;
+  const stopTargetId = streamingCurrentView ? streamTargetId : selectedRunningId;
+  const newTargetId = isStreaming ? streamTargetId : selectedRunningId;
+
+  /**
+   * Cancel the running discussion on the server.
+   *
+   * Stop and "+ New" used to close this tab's connection and nothing else: the
+   * discussion went on running and spending, the board froze on the aborted
+   * stream while still saying new answers would appear, and "+ New" could start
+   * a second run beside it. Returns whether the discussion is no longer running.
+   */
+  const stopDiscussion = useCallback(async (targetId: string | undefined): Promise<boolean> => {
+    setIsStopping(true);
+    try {
+      const outcome = await cancelStream(targetId);
+      if (outcome === "cancelled") {
+        toast.success(t("hitl.discussionCancelled", "Discussion cancelled"));
+      } else if (outcome === "alreadyEnded") {
+        // A 409 also means the cancel lost a state race on a paused discussion
+        // (an approval, resume or timeout landed first). The stored state says
+        // which: "already ended" is only claimed when it has. Until it has, the
+        // Stop did not take effect — Stop stays on offer, and "Stop and start
+        // new" does not clear the board.
+        const gcId = targetId ?? streamState.conversationId;
+        const after = boardId && gcId ? await stateAfterConflict(boardId, gcId) : "unknown";
+        if (after !== "ended") {
+          toast.error(
+            after === "going"
+              ? t(
+                  "Workforce.board.stopRaced",
+                  "The discussion changed state as you stopped it and is still going. Try Stop again.",
+                )
+              : t(
+                  "Workforce.board.stopUnconfirmed",
+                  "Could not confirm that the discussion stopped. Check its state and try Stop again.",
+                ),
+          );
+          if (boardId) queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
+          return false;
+        }
+        toast.info(t("Workforce.board.alreadyEnded", "The discussion had already ended."));
+      }
+      if (boardId) queryClient.invalidateQueries({ queryKey: [...GROUP_CONVERSATIONS_KEY, boardId] });
+      return outcome !== "pending";
+    } catch (err) {
+      toast.error(
+        t("Workforce.board.stopFailed", "Could not stop the discussion: {{error}}", {
+          error: getErrorMessage(err),
+        }),
+      );
+      return false;
+    } finally {
+      setIsStopping(false);
+    }
+  }, [cancelStream, streamState.conversationId, boardId, queryClient, t]);
+
+  // A Stop pressed before `group_start` is sent later, from the stream, so its
+  // failure cannot reach the catch above. Reported the same way, as a failed
+  // Stop: the discussion is still running, and the stream's `error` banner would
+  // have read as the discussion itself failing.
+  useEffect(() => {
+    if (!streamState.cancelError) return;
+    toast.error(
+      t("Workforce.board.stopFailed", "Could not stop the discussion: {{error}}", {
+        error: streamState.cancelError,
+      }),
+    );
+    clearCancelError();
+  }, [streamState.cancelError, clearCancelError, t]);
+
+  const handleNewDiscussion = useCallback(() => {
+    // A running discussion is stopped first, and only after asking: "+ New"
+    // alone must not leave it spending in the background.
+    if (canStop) {
+      setConfirmStop({ kind: "new", targetId: newTargetId });
+      return;
+    }
+    startFresh();
+  }, [canStop, newTargetId, startFresh]);
+
+  const handleConfirmStop = useCallback(async () => {
+    if (!confirmStop) return;
+    const { kind, targetId } = confirmStop;
+    const askedOn = boardId;
+    const pendingBefore = !streamState.conversationId && isStreaming;
+    const stopped = await stopDiscussion(targetId);
+    // The user moved to another board while the cancel was in flight: the
+    // board change already dismissed the dialog, and clearing now would clear
+    // the board they are looking at instead of the one they asked about.
+    if (currentBoardRef.current !== askedOn) return;
+    setConfirmStop(null);
+    if (kind !== "new") return;
+    if (stopped) startFresh();
+    else if (pendingBefore && askedOn) setNewAfterCancel(askedOn);
+  }, [confirmStop, boardId, stopDiscussion, startFresh, streamState.conversationId, isStreaming]);
+
+  // The pending cancel has landed (or the run ended some other way): the
+  // stream is no longer running, so the new discussion the user asked for can
+  // start. A cancel that failed leaves the stream running and drops the intent
+  // — the discussion was not stopped, so nothing should be cleared.
+  useEffect(() => {
+    if (!newAfterCancel || newAfterCancel !== boardId || streamState.cancelRequested) return;
+    setNewAfterCancel(null);
+    if (!streamState.isStreaming) startFresh();
+  }, [newAfterCancel, boardId, streamState.cancelRequested, streamState.isStreaming, startFresh]);
 
   // ─── Lifecycle mutations ──────────────────────────────────────
   const invalidateConversations = useCallback(() => {
@@ -469,14 +694,35 @@ function WorkforceBoard() {
   }
 
   // ─── Error state ───────────────────────────────────────────────
+  // A discussion that could not even start (the request was refused). The
+  // error lives in the per-board stream store, which outlives navigation, so
+  // this screen used to be a dead end: no way back to the composer short of a
+  // full reload. Starting over clears it.
   if (streamState.error && !hasStreamTranscript) {
     return (
-      <div className="flex h-full items-center justify-center p-8">
+      <div className="flex h-full items-center justify-center p-8" data-testid="board-start-error">
         <div className="text-center max-w-md">
           <p className="text-sm text-destructive mb-2">
             {t("Workforce.board.error", "Something went wrong")}
           </p>
           <p className="text-xs text-muted-foreground">{streamState.error}</p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <Button size="sm" onClick={startFresh} data-testid="board-error-start-over">
+              {t("Workforce.board.startOver", "Start over")}
+            </Button>
+            {conversations && conversations.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  resetStream();
+                  setShowHistory(true);
+                }}
+              >
+                {t("Workforce.board.viewSessions", "View past sessions")}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -559,15 +805,19 @@ function WorkforceBoard() {
         </div>
 
         <div className="flex items-center gap-1">
-          {isStreaming && (
+          {canStopView && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={abortStream}
+              onClick={() => setConfirmStop({ kind: "stop", targetId: stopTargetId })}
+              disabled={isStopping || (streamingCurrentView && streamState.cancelRequested)}
               className="text-destructive gap-1"
+              data-testid="board-stop-btn"
             >
               <StopIcon />
-              {t("Workforce.board.stop", "Stop")}
+              {isStopping || (streamingCurrentView && streamState.cancelRequested)
+                ? t("Workforce.board.stopping", "Stopping…")
+                : t("Workforce.board.stop", "Stop")}
             </Button>
           )}
           <Button
@@ -654,27 +904,26 @@ function WorkforceBoard() {
           {/* Transcript area — BoardTranscript owns the scroll box so it can
               keep itself pinned to the newest message while streaming. */}
           {displayTranscript.length > 0 || showAnyTaskBoard ? (
-            <BoardTranscript
-              transcript={displayTranscript}
-              boardId={boardId}
-              synthesizedAnswer={displaySynthesis}
-              isLive={isOngoing}
-              className="flex-1 min-h-0 ps-4 pe-4 pt-4 pb-4"
-              // Debate verdict / vote tally / agreement, with minority report.
-              decision={displayDecision}
-              memberDisplayNames={selectedConversation?.memberDisplayNames ?? rosterDisplayNames}
-              // A pre-configured plan is recorded as a one-line summary; the
-              // tasks it stands for live in the group's config.
-              preConfiguredTasks={groupConfig?.tasks}
-              // Per-phase convergence checks (I2) — live-stream state only.
-              convergence={viewingStream ? streamState.convergence : undefined}
-              // Task board + artifacts / negotiation ledger / windowing summary,
-              // plus the live retro + artifact-write badges. Same shared
-              // components the Manager transcript and history viewer use. Passed
-              // as a header so it scrolls with the transcript rather than
-              // sitting pinned.
-              header={
+            <DiscussionPanel
+              className="flex-1 min-h-0"
+              surface="workforce-board"
+              conversation={selectedConversation ?? null}
+              streamState={viewingStream ? streamState : undefined}
+              configPhases={groupConfig?.phases}
+              rosterDisplayNames={rosterDisplayNames}
+              style={groupConfig?.style}
+              outcome={
+                hasDisplayableDecision(displayDecision) ? (
+                  <DecisionRecordCard decision={displayDecision} />
+                ) : undefined
+              }
+              extras={
                 <>
+                  {/* Reuses the states computed above rather than deciding
+                      again. The board normally renders these inside the
+                      transcript header, which Overview mode unmounts — so a
+                      TASK_FORCE discussion would lose the surface its style
+                      recipe puts first. */}
                   {showPersistedTaskBoard && (
                     <PersistedTaskBoard
                       taskList={persistedTaskList!}
@@ -690,21 +939,67 @@ function WorkforceBoard() {
                       isStreaming={isStreaming}
                     />
                   )}
-                  {showTaskBoardPlaceholder && (
-                    <TaskBoard
-                      taskPlan={null}
-                      tasksInProgress={new Set<string>()}
-                      tasksCompleted={new Set<string>()}
-                      taskVerifications={new Map()}
-                      isStreaming={true}
-                    />
-                  )}
                   <DiscussionInsights
                     conversation={selectedConversation}
                     retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
                     artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
                   />
                 </>
+              }
+              transcript={
+                <BoardTranscript
+                  transcript={displayTranscript}
+                  boardId={boardId}
+                  synthesizedAnswer={displaySynthesis}
+                  isLive={isOngoing}
+                  className="flex-1 min-h-0 ps-4 pe-4 pt-4 pb-4"
+                  // Debate verdict / vote tally / agreement, with minority report.
+                  decision={displayDecision}
+                  memberDisplayNames={selectedConversation?.memberDisplayNames ?? rosterDisplayNames}
+                  // A pre-configured plan is recorded as a one-line summary; the
+                  // tasks it stands for live in the group's config.
+                  preConfiguredTasks={groupConfig?.tasks}
+                  // Per-phase convergence checks (I2) — live-stream state only.
+                  convergence={viewingStream ? streamState.convergence : undefined}
+                  // Task board + artifacts / negotiation ledger / windowing summary,
+                  // plus the live retro + artifact-write badges. Same shared
+                  // components the Manager transcript and history viewer use. Passed
+                  // as a header so it scrolls with the transcript rather than
+                  // sitting pinned.
+                  header={
+                    <>
+                      {showPersistedTaskBoard && (
+                        <PersistedTaskBoard
+                          taskList={persistedTaskList!}
+                          memberDisplayNames={selectedConversation?.memberDisplayNames}
+                        />
+                      )}
+                      {showLiveTaskBoard && (
+                        <TaskBoard
+                          taskPlan={streamState.taskPlan}
+                          tasksInProgress={streamState.tasksInProgress}
+                          tasksCompleted={streamState.tasksCompleted}
+                          taskVerifications={streamState.taskVerifications}
+                          isStreaming={isStreaming}
+                        />
+                      )}
+                      {showTaskBoardPlaceholder && (
+                        <TaskBoard
+                          taskPlan={null}
+                          tasksInProgress={new Set<string>()}
+                          tasksCompleted={new Set<string>()}
+                          taskVerifications={new Map()}
+                          isStreaming={true}
+                        />
+                      )}
+                      <DiscussionInsights
+                        conversation={selectedConversation}
+                        retroRecorded={isStreaming ? streamState.retroRecorded : undefined}
+                        artifactUpdates={isStreaming ? streamState.artifactUpdates : undefined}
+                      />
+                    </>
+                  }
+                />
               }
             />
           ) : (
@@ -759,6 +1054,24 @@ function WorkforceBoard() {
           {streamState.error && hasStreamTranscript && (
             <div className="mx-4 mb-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3">
               <p className="text-xs text-destructive">{streamState.error}</p>
+            </div>
+          )}
+
+          {/* The live connection dropped without the server saying the run
+              ended. It may still be going, so this is a notice, not an error:
+              the board follows the stored discussion from here. */}
+          {streamState.interrupted && streamIsForCurrentView && (
+            <div
+              className="mx-4 mb-3 rounded-xl border border-warning/30 bg-warning/5 p-3"
+              role="status"
+              data-testid="board-stream-interrupted"
+            >
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "Workforce.board.streamInterrupted",
+                  "The live connection was lost. Showing the saved discussion, which keeps updating while it runs.",
+                )}
+              </p>
             </div>
           )}
 
@@ -932,6 +1245,36 @@ function WorkforceBoard() {
         </>
       )}
       </div>
+
+      {/* Stopping cancels the discussion on the server — every member's work in
+          progress is abandoned, so it is confirmed like the Manager's cancel. */}
+      <AlertDialog
+        open={confirmStop !== null}
+        onOpenChange={(open) => {
+          if (!open && !isStopping) setConfirmStop(null);
+        }}
+        title={
+          confirmStop?.kind === "new"
+            ? t("Workforce.board.confirmNewTitle", "Stop the running discussion?")
+            : t("hitl.confirmCancelGroupTitle", "Cancel discussion?")
+        }
+        description={
+          confirmStop?.kind === "new"
+            ? t(
+                "Workforce.board.confirmNewDescription",
+                "A discussion is still running. Starting a new one stops it first — any work in progress is abandoned.",
+              )
+            : t("hitl.confirmCancelGroupDescription", "Cancel this discussion? Any in-progress work is aborted.")
+        }
+        confirmLabel={
+          confirmStop?.kind === "new"
+            ? t("Workforce.board.confirmNewButton", "Stop and start new")
+            : t("hitl.confirmCancelGroupButton", "Cancel discussion")
+        }
+        cancelLabel={t("Workforce.board.keepRunning", "Keep running")}
+        onConfirm={() => void handleConfirmStop()}
+        isPending={isStopping}
+      />
     </div>
   );
 }

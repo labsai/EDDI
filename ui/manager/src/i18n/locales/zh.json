@@ -75,7 +75,8 @@
     "workforce": "团队",
     "monitoring": "对话监控",
     "analytics": "分析",
-    "connections": "连接"
+    "connections": "连接",
+    "workspaces": "工作区"
   },
   "theme": {
     "light": "浅色",
@@ -260,11 +261,13 @@
     "deployAndChat": "部署并聊天",
     "openExternalChat": "在新标签页中打开",
     "liveIn": "在 {{environment}} 中运行",
+    "liveInVersion": "在 {{environment}} 中以版本 {{version}} 运行",
     "chatIn": "在 {{environment}} 中聊天",
     "openExternalChatIn": "在新标签页中打开 {{environment}} 聊天",
     "deployToProduction": "部署到生产环境",
     "undeployFromProduction": "从生产环境移除",
-    "deployFailedIn": "在 {{environment}} 中部署失败"
+    "deployFailedIn": "在 {{environment}} 中部署失败",
+    "undeployCompatibleHint": "可由兼容的已部署版本继续的会话不会被结束：它们会在下一轮切换到该版本。"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -444,15 +447,30 @@
     "toolPauseReasonPlaceholder": "例如：{toolNames} 需要审批",
     "toolPendingMessage": "暂停期间显示给终端用户的消息（允许使用 {toolNames}）",
     "toolPendingMessagePlaceholder": "例如：正在等待人工审批 {toolNames}…",
-    "toolInGroupTurns": "在群组回合中，成员被拦截的工具调用将被自动拒绝 (REJECT)。"
+    "toolInGroupTurns": "在群组回合中，成员被拦截的工具调用将被自动拒绝 (REJECT)。",
+    "review": {
+      "title": "使用情况与对话审阅",
+      "total": "对话",
+      "active": "当前活跃",
+      "users": "用户",
+      "description": "对话仅对进行对话的本人可见。开启后，所有能编辑此智能体的人都可以阅读它的对话——以了解用户在问什么并加以改进。聊天会在用户输入前告知他们。",
+      "enable": "允许此智能体的维护者阅读其对话",
+      "notice": "聊天向用户显示的提示（留空则使用标准措辞）",
+      "noticePlaceholder": "与此智能体的对话可能会被其维护者阅读，以便改进它。",
+      "versionNote": "适用于此次更改所创建版本及之后版本上的对话——绝不包括之前的内容。Slack、Teams 和 API 客户端无法显示此提示；如果用户通过这些渠道使用此智能体，请在问候语中说明。"
+    }
   },
   "wizard": {
     "title": "Agent 向导"
   },
   "setupWizard": {
     "baseUrlHintCloud": "仅在使用代理、私有部署或 Azure OpenAI 端点时需要",
+    "jlamaNoteTitle": "Jlama 在 EDDI 内部运行",
+    "jlamaNoteBody": "没有可指向的模型服务器——EDDI 将模型加载到自身进程中，并在首次使用时从 Hugging Face 下载权重，因此第一条消息可能需要一段时间。",
+    "jlamaNoteTuning": "在容器中运行 EDDI？请在创建后打开该智能体的 LLM 配置，将 modelCachePath 指向挂载的卷——默认缓存位于容器的临时层，容器被移除或替换后模型可能会重新下载。quantizeModelAtRuntime、workingDirectory 和 workingQuantizedType 也可在那里调整。",
     "baseUrlHintLocal": "必填——本地模型服务器运行的 URL",
     "modelHint": "输入您的提供商支持的任何模型名称，或从建议中选择一个",
+    "modelHintJlama": "必须是 owner/name 形式的 Hugging Face 仓库 ID，例如 tjake/Llama-3.2-1B-Instruct-JQ4。仅填模型名称无法解析，智能体会在第一条消息时失败。",
     "modelPlaceholder": "例如 {{model}}（或您的提供商支持的任何模型）",
     "title": "Agent 创建向导",
     "subtitle": "几分钟内创建一个完全配置的 Agent",
@@ -546,7 +564,10 @@
     "toolCount": "已选 {{selected}}/{{total}}",
     "specTooLarge": "该规范过大，无法在此加载",
     "specUrlInvalid": "这不是有效的 URL",
-    "specUrlScheme": "仅支持 http:// 和 https:// 网址"
+    "specUrlScheme": "仅支持 http:// 和 https:// 网址",
+    "lastToolHint": "至少必须保留一个已选工具。关闭内置工具即可全部禁用。",
+    "hfToken": "Hugging Face 令牌",
+    "hfTokenHint": "仅在访问受限或私有仓库时需要。它会像 API 密钥一样存储在保管库中。"
   },
   "packages": {
     "confirmDeleteDescription": "此操作无法撤销。该工作流及其所有数据将被永久删除。",
@@ -652,7 +673,9 @@
     "endSuccess_other": "已结束 {{count}} 个对话",
     "endSuccess_one": "已结束 {{count}} 个对话",
     "purgeSuccess_other": "已清除 {{count}} 个已结束对话",
-    "purgeSuccess_one": "已清除 {{count}} 个已结束对话"
+    "purgeSuccess_one": "已清除 {{count}} 个已结束对话",
+    "endStateUnavailable": "无法重新检查对话的当前状态，因此未结束任何对话。请重试。",
+    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。"
   },
   "conversationDetail": {
     "backToConversations": "返回对话列表",
@@ -668,7 +691,9 @@
     "exportMd": "导出为 Markdown",
     "toolSummary": "工具使用概览",
     "totalCost": "总成本",
-    "cacheHitRate": "缓存命中率"
+    "cacheHitRate": "缓存命中率",
+    "endReasonRetired": "已结束：该智能体版本已被停用",
+    "stepAgentVersion": "由智能体版本 {{version}} 回答"
   },
   "chat": {
     "hide": "隐藏",
@@ -743,7 +768,11 @@
     "errorConversationEnded": "该会话已结束。",
     "errorAgentNotReady": "该智能体尚未部署到所选环境。",
     "errorAgentMismatch": "该会话属于该智能体的另一个版本。",
-    "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。"
+    "errorQuotaUnavailable": "当前无法检查使用限额，请稍后重试。",
+    "reviewNoticeLabel": "对话审阅",
+    "sendRejected": "您的消息未发送：{{reason}}",
+    "sendWhileLoading": "您的消息未发送：对话仍在加载中。请稍后再试。",
+    "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -850,7 +879,11 @@
     "cascadePartialFailure_other": "{{count}} 个级联更新失败",
     "cascadePartialFailure_one": "{{count}} 个级联更新失败",
     "usedInAgents_other": "在 {{count}} 个 Agent 中使用",
-    "usedInAgents_one": "在 {{count}} 个 Agent 中使用"
+    "usedInAgents_one": "在 {{count}} 个 Agent 中使用",
+    "savedNotLive": "已保存 — 尚未生效",
+    "savedNotLiveDescription": "运行中的智能体仍在使用已部署的版本。请部署以使此更改生效。",
+    "deployNow": "部署",
+    "deployStarted": "部署已开始"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -883,7 +916,9 @@
     "removeCondition": "移除条件",
     "noGroups": "未定义行为组",
     "noRules": "此组中没有规则",
-    "noConditions": "无条件"
+    "noConditions": "无条件",
+    "sizeNoBound": "无限制",
+    "sizeBoundInvalid": "必须是 -2147483648 到 2147483647 之间的整数，留空表示无限制。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "在规范中未找到端点",
@@ -915,8 +950,6 @@
     "responseObjectName": "响应对象名称",
     "responseHeaderObjectName": "响应 Header 对象名称",
     "fireAndForget": "发送后不等待",
-    "batchCalls": "批量调用",
-    "iterationObjectName": "迭代对象名称",
     "prePostInstructions": "前置/后置指令",
     "preRequest": "请求前",
     "postResponse": "响应后",
@@ -986,7 +1019,16 @@
     "authHeaderRefPlaceholder": "可选 — 对需要认证的规范使用 ${vault:my-api-key}",
     "authHeaderRefHint": "密钥库引用，在调用时解析。存储的密钥必须是完整的请求头值，包含 Bearer 前缀。",
     "authHeaderRefInvalid": "必须以 ${vault:…}、${vars:…} 或 ${caller:…} 开头。直接粘贴密钥会将其写入请求 URL 以及沿途的每一条日志。",
-    "authRefLiteral": "请输入如 ${vault:my-key} 的引用，而不是密钥本身。密钥不会离开密钥库。"
+    "authRefLiteral": "请输入如 ${vault:my-key} 的引用，而不是密钥本身。密钥不会离开密钥库。",
+    "runOnNoCodes": "空的“运行状态码”列表不匹配任何状态码，因此此指令永远不会运行。",
+    "useDefaultCodes": "使用默认值",
+    "httpCodeFilterDefaults": "留空的字段使用其中显示的默认状态码。",
+    "scopeSecretUnsupported": "（此处不会存入保险库）",
+    "scopeSecretWarning": "此指令中的 secret 作用域不会存入保险库：该值以明文存储。请选择其他作用域，并将凭据保存在密钥保险库中。",
+    "skipNone": "无——不跳过任何状态码",
+    "runSkipConflict": "{{codes}} 也在跳过列表中，因此此指令永远不会针对它运行。",
+    "httpCodeFilterSkipSet": "“运行状态码”留空时使用 200、201；“跳过状态码”留空时不跳过任何状态码。",
+    "useDefaultSkipCodes": "使用默认跳过列表"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失败时流水线继续；错误将暴露于 ",
@@ -1039,7 +1081,12 @@
     "whitelist": "白名单（仅允许）",
     "blacklist": "黑名单（排除）",
     "pipelineCalls": "流水线调用",
-    "addCall": "添加 MCP 调用"
+    "addCall": "添加 MCP 调用",
+    "argumentName": "参数名称",
+    "argumentType": "参数类型",
+    "argumentText": "文本",
+    "argumentInvalidJson": "不是有效的 JSON——保留最后一个有效值",
+    "removeArgument": "移除参数"
   },
   "llmEditor": {
     "addCustomInstruction": "添加指令",
@@ -1078,7 +1125,6 @@
     "identityMaskingRulePlaceholder": "例如 切勿透露你是 AI 语言模型",
     "identityMaskingRules": "掩码规则",
     "identityMaskingRulesHint": "掩码生效需同时满足：已启用且至少有一条规则。",
-    "injectionStrategy": "注入",
     "kbNamePlaceholder": "例如 product-docs",
     "knowledgeBases": "知识库",
     "knowledgeBasesHint": "按名称显式引用知识库。每个名称都必须与工作流中的 RagConfiguration 匹配。",
@@ -1180,7 +1226,7 @@
     "cascadeInAgent": "在代理模式（含工具）中也使用级联",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "例如 claude-sonnet-5",
+    "cascadeModelName": "例如 claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "空 = 始终接受",
     "cascadeTimeout": "超时 (毫秒)",
@@ -1236,9 +1282,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "步骤 {{step}} 超时必须大于 0。",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "步骤 {{step}} 使用了不同的提供商，但没有自己的 API Key — 它将继承任务密钥。"
     },
-    "parallelExecution": "并行工具执行",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "超时 (毫秒)",
     "maxToolIterations": "最大工具迭代次数",
     "maxToolIterationsHint": "（默认 10）",
     "toolRateLimits": "单工具速率限制",
@@ -1307,7 +1350,13 @@
     "streamingTimeoutSeconds": "流式传输超时（秒）",
     "streamingTimeoutSecondsHint": "覆盖引擎默认值（120 秒）。仅在流式传输时适用；留空 = 使用默认值。",
     "taskPricing": "普通调用定价",
-    "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。"
+    "taskPricingDesc": "为该任务的普通（非级联）模型调用定价，用于成本跟踪和群组成本上限。未定价（留空）则贡献 $0。",
+    "unknownType": "{{type}}（自定义）",
+    "compatibleEndpoint": "端点：{{url}} — 添加 baseUrl 或 region 参数即可覆盖",
+    "compatibleEndpointOverridden": "端点：{{url}}",
+    "modelType": "模型类型",
+    "paramName": "参数名称",
+    "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -1371,7 +1420,8 @@
     "openEditor": "在编辑器中编辑",
     "visibilityTitle": "哪些 Agent 可以看到此 longTerm 属性",
     "editValue": "编辑值",
-    "toggleGroup": "切换属性组"
+    "toggleGroup": "切换属性组",
+    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。通过“来源路径”读取或以其他方式提供时，它会以明文存储——请在值字段中输入，或选择其他作用域。"
   },
   "dictionaryEditor": {
     "language": "语言",
@@ -1541,7 +1591,8 @@
     "stateReady": "就绪",
     "stateActive": "活跃",
     "stateError": "错误",
-    "stateEnded": "已结束"
+    "stateEnded": "已结束",
+    "loadOlder": "加载更早的条目"
   },
   "secrets": {
     "loadError": "无法加载密钥",
@@ -1639,7 +1690,29 @@
     "resetSecretCount_other": "{{count}} 个 Secret 将永久丢失",
     "resetSecretCount_one": "{{count}} 个 Secret 将永久丢失",
     "resetTenantSuccess_other": "已重置“{{tenant}}”的 Vault — 已永久删除 {{count}} 个 Secret",
-    "resetTenantSuccess_one": "已重置“{{tenant}}”的 Vault — 已永久删除 {{count}} 个 Secret"
+    "resetTenantSuccess_one": "已重置“{{tenant}}”的 Vault — 已永久删除 {{count}} 个 Secret",
+    "access": "访问权限",
+    "editGrant": "编辑哪些智能体可以使用此密钥",
+    "editGrantKey": "编辑 {{key}} 的访问权限",
+    "grantTitle": "谁可以使用“{{key}}”",
+    "grantValueUntouched": "密钥值不会改变，也无需重新输入。仅改变谁可以使用它。",
+    "grantOnlyTheseAgents": "仅这些智能体",
+    "grantAllHint": "此租户中的每个智能体都可以引用此密钥。缩小范围可限制单个泄露配置所能触及的内容。",
+    "grantAddAgent": "添加智能体",
+    "grantEmptyError": "请至少添加一个智能体，或选择“所有智能体”。不允许空列表。",
+    "grantCheckingImpact": "正在检查已部署的智能体…",
+    "grantLosingAccessTitle": "使用此密钥并将失去访问权限的已部署智能体（{{count}}）",
+    "grantLosingAccessBody": "它们目前仍在运行 — 授权在智能体部署时检查，而不是在使用密钥时 — 但下一次部署将被拒绝。",
+    "grantAcknowledge": "我明白，除非重新添加这些智能体，或其配置不再使用此密钥，它们将无法再次部署。",
+    "grantSaved": "已更新“{{key}}”的访问权限",
+    "grantImpactFailed": "无法检查哪些已部署的智能体使用此密钥，因此其中任何一个都可能失去访问权限。",
+    "grantAcknowledgeUnchecked": "仍然保存，但不知道会影响哪些已部署的智能体。",
+    "rotateNotFound": "此密钥已不存在，因此无需轮换。请重新添加。",
+    "keyExists": "名为“{{key}}”的密钥已存在。再次添加会替换其值 — 请使用“轮换”来更改值并保留可使用者。",
+    "keyExistsRotate": "改为轮换此密钥",
+    "keyExistsPicker": "名为“{{key}}”的密钥已存在。请从保险库列表中选择它，或换一个名称。",
+    "rotateKeepsGrantAll": "所有代理保持访问权限，与现在相同。",
+    "rotateKeepsGrant": "访问权限仍仅限于：{{agents}}"
   },
   "audit": {
     "title": "审计日志",
@@ -1673,17 +1746,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "配置保险库主密钥，以便对今后所有审计条目自动进行 HMAC-SHA256 签名。",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "由",
-    "automated": "自动"
+    "automated": "自动",
+    "verify": {
+      "entryInvalid": "签名不匹配",
+      "entryUnproven": "未验证",
+      "signatureCount": "已加载的 {{total}} 个条目中有 {{count}} 个带有签名。",
+      "loading": "正在验证签名…",
+      "errorTitle": "完整性未验证",
+      "errorDesc": "验证请求失败，因此此处的内容均未经过检查。",
+      "checked": "已检查最近的 {{count}} 个条目。",
+      "verifiedTitle": "签名已验证",
+      "chainIntact": "序列中没有缺失的条目。",
+      "chainNotApplicable": "跨对话时仅检查签名，不检查序列。",
+      "verifiedBadge": "已验证",
+      "tamperedTitle": "完整性检查失败",
+      "tamperedInvalid": "{{count}} 个条目的签名与其内容不匹配 — 这些条目在写入后被修改过。",
+      "tamperedChain": "序列中缺少条目（{{sequences}}）— 记录已被截短。",
+      "disabledTitle": "无法验证签名",
+      "reasonUnsigned": "{{count}} 个未签名条目",
+      "reasonUnknownKey": "{{count}} 个使用本部署已不再持有的密钥签名",
+      "reasonSkipped": "{{count}} 个较早条目未检查",
+      "reasonChain": "无法完整确定序列",
+      "reasonDuplicates": "重复的序列号",
+      "reasonUncovered": "{{count}} 条已加载的条目早于已检查的范围",
+      "unverifiedTitle": "未完全验证",
+      "unverifiedDesc": "没有签名被证伪，但并非所有内容都能检查：{{reasons}}。"
+    }
   },
   "schedules": {
     "cronHelp": "5 字段格式：分 时 日 月 星期",
@@ -1810,7 +1902,11 @@
       "weeklyMonday": "每周（周一 00:00）",
       "monthly": "每月（1 日 00:00）"
     },
-    "totalCappedHint": "服务器返回了完整的一页，因此实际计划任务可能多于此处显示的数量。"
+    "totalCappedHint": "服务器返回了完整的一页，因此实际计划任务可能多于此处显示的数量。",
+    "systemManaged": "系统",
+    "systemManagedHint": "由 EDDI 管理（知识库摄取、记忆整合或团队节奏）。请在其定义处修改，而不是在这里。",
+    "persistentConversationIdLocked": "在创建计划时设置。服务器会保留各次触发一直追加到的那个对话。",
+    "failedScheduleGone": "该计划已不存在"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -1871,7 +1967,8 @@
     "tokenDistribution": "令牌分布",
     "totalCost": "总成本",
     "totalTokens": "令牌总数",
-    "turns": "轮次"
+    "turns": "轮次",
+    "partial": "此对话的审计条目多于调试器加载的数量。合计仅涵盖最近的条目。"
   },
   "memoryInspector": {
     "error": "加载记忆数据失败",
@@ -2012,13 +2109,105 @@
     "ingestion": "文档摄入",
     "dropFiles": "将文档拖放到此处进行摄入",
     "dropHint": "文本，Markdown或任何基于文本的文件",
+    "replaceSameName": "替换之前导入的同名文档",
     "browse": "浏览",
     "pasteText": "或粘贴文本内容",
     "pastePlaceholder": "在此粘贴文档文本...",
     "ingestText": "摄入文本",
     "ingestionHistory": "摄入状态",
     "saveFirstIngestion": "使用前请先保存此知识库。",
-    "addParam": "添加参数"
+    "addParam": "添加参数",
+    "sources": {
+      "title": "采集源",
+      "add": "添加源",
+      "remove": "移除源",
+      "unnamed": "未命名的源",
+      "disabled": "已禁用",
+      "enabled": "已启用",
+      "running": "运行中",
+      "emptyTitle": "暂无采集源",
+      "emptyDescription": "添加来源以抓取网站或上传文档，让这个知识库保持最新。",
+      "name": "名称",
+      "namePlaceholder": "public-docs",
+      "startUrl": "起始 URL",
+      "pathPrefix": "路径前缀",
+      "pathPrefixHint": "仅抓取此路径下的内容",
+      "cron": "计划 (cron)",
+      "cronHint": "留空则仅手动运行",
+      "maxDepth": "最大深度",
+      "maxPages": "最大页数",
+      "respectRobots": "遵循 robots.txt",
+      "respectRobotsHint": "仅对自己拥有的网站关闭",
+      "includeSubdomains": "包含子域名",
+      "excludePatterns": "排除模式",
+      "excludePatternsHint": "针对 URL 路径的通配符，以逗号分隔 — * 限于一个路径段，** 可跨段",
+      "sitemapUrls": "站点地图",
+      "sitemapUrlsHint": "用于发现页面的站点地图 URL，以逗号分隔。仅当 robots.txt 未列出时需要；会跟踪站点地图索引",
+      "saveFirst": "请先保存知识库，然后才能运行、预览此源或查看其历史记录。",
+      "run": "立即运行",
+      "runFailed": "无法启动运行。可能已有一次运行正在进行。",
+      "preview": "预览",
+      "previewResult": "预览 — 未嵌入任何内容",
+      "purge": "清除状态",
+      "purgeTitle": "清除采集状态？",
+      "purgeDescription": "下次运行将重新抓取并重新嵌入此源已采集的全部内容。已存储的文档不会因此被删除。",
+      "purgeConfirm": "清除",
+      "history": "最近运行",
+      "noRuns": "此源尚未运行。",
+      "runSummary": "已采集 {{ingested}} · 未变更 {{unchanged}}",
+      "statSeen": "已发现",
+      "statChanged": "将采集",
+      "statUnchanged": "未变更",
+      "statFailed": "失败",
+      "partialCrawl": "抓取因达到限制而停止，因此不会将任何内容视为已删除。",
+      "saveBeforeRun": "请先保存知识库——运行将抓取已保存的配置，而不是屏幕上的修改。",
+      "purgeFailed": "无法清除摄取状态。",
+      "previewFailed": "无法预览此来源。",
+      "previewNotCompleted": "预览未完成。",
+      "disabledNoRun": "此来源已禁用。启用并保存后才能运行或调度。",
+      "purgeBlockedWhileRunning": "有一次运行正在进行。此时清除会让第二次运行同时开始。",
+      "type": "来源",
+      "typeWeb": "网站",
+      "typeUpload": "文件",
+      "typeWebHint": "抓取网站",
+      "typeUploadHint": "读取你在此上传的文件",
+      "cronHintUpload": "留空 — 运行来源时会读取已上传的文件",
+      "maxFiles": "最大文件数",
+      "maxFilesHint": "此来源可保存的文件数量",
+      "maxFileMb": "最大文件大小（MB）",
+      "maxFileMbHint": "每个文件",
+      "filesSaveFirst": "先保存一次知识库，就可以向此来源上传文件。",
+      "dropFiles": "将文件拖到此处，或",
+      "browseFiles": "选择文件",
+      "acceptedFormats": "PDF、Word、Excel、PowerPoint、文本、Markdown、CSV 和 HTML",
+      "clearUploadList": "清空列表",
+      "uploadFailed": "无法上传此文件。",
+      "noFiles": "尚无文件。上传后运行来源以建立索引。",
+      "filesSummary": "文件：{{count}}（{{size}}）",
+      "deleteFile": "删除 {{fileName}}",
+      "deleteFileTitle": "删除此文件？",
+      "deleteFileDescription": "{{fileName}} 以及知识库从中学到的内容将被删除，智能体会立即停止据此作答。",
+      "previewFiles": "预览变更",
+      "saveBeforeUpload": "请先保存知识库 — 上传会发往已保存的来源，而不是屏幕上的修改。",
+      "foldersNotSupported": "无法上传文件夹。请改为拖入其中的文件。",
+      "filesAwaitingRun": "文件已存储，但尚未进入知识库。运行来源以建立索引。",
+      "retryUpload": "重试 {{fileName}}",
+      "fileIndexed": "已索引",
+      "fileChanged": "已更改",
+      "fileNotIndexed": "未索引",
+      "maxTotalMb": "总大小上限（MB）",
+      "maxTotalMbHint": "此来源所有文件合计",
+      "removeTitle": "移除此来源？",
+      "removeDescription": "保存后，其上传的文件以及知识库从中学到的内容将被删除，且无法撤销。",
+      "switchTypeTitle": "要改为网站来源吗？",
+      "switchTypeDescription": "保存时，此来源已上传的文件以及知识库从中学到的所有内容都会被删除。此操作无法撤消。",
+      "switchTypeConfirm": "切换为网站",
+      "filesLoadFailed": "无法加载文件：{{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}}（保存为递归）",
+    "saveBeforeIngest": "请先保存更改——文档会使用已保存知识库的存储和嵌入模型导入，而不是屏幕上的编辑内容。",
+    "chunkStrategyUnsupported": "{{value}}（不支持）",
+    "chunkStrategyUnsupportedHint": "保存时服务器会拒绝此策略。请选择递归。"
   },
   "onboarding": {
     "welcome": {
@@ -2340,6 +2529,7 @@
       "SYNTHESIZING": "正在合成",
       "COMPLETED": "已完成",
       "FAILED": "已失败",
+      "REJECTED": "已否决",
       "ERROR": "错误",
       "AWAITING_APPROVAL": "等待审批",
       "CANCELLED": "已取消",
@@ -2586,7 +2776,6 @@
     "contextWindowEntries": "完整保留的最近条目",
     "contextWindowSummarize": "为移出窗口的内容生成摘要",
     "contextWindowTruncateNote": "较早的条目将改为替换成简单的“已省略 N 条早前条目”标记。",
-    "retroConfigHint": "允许复盘阶段将经验写入团队记忆，并带入后续讨论。",
     "retroPerRun": "每次运行",
     "retroStored": "存储上限",
     "artifactConfigHint": "允许成员共同撰写文档，并在写入的那一轮结束后继续保留。",
@@ -2709,7 +2898,96 @@
       "finalAnswer": "最终答案",
       "phase": "阶段"
     },
-    "deleteMembersConfigFailed": "无法读取该群组的成员，因此未删除任何内容。请重试。"
+    "deleteMembersConfigFailed": "无法读取该群组的成员，因此未删除任何内容。请重试。",
+    "overview": {
+      "anonymousMember": "参与者 {{n}}",
+      "cellAbsent": "未参与此阶段",
+      "cellAbstained": "弃权",
+      "cellDissent": "提出异议",
+      "cellFailed": "失败",
+      "cellPending": "待定",
+      "cellSilent": "本应发言但未发言",
+      "cellSpoke": "已发言",
+      "cellSummary": "{{member}}，{{phase}}：{{state}}",
+      "convergenceNoScore": "未评分一致度",
+      "convergenceScore": "一致度 {{pct}}%",
+      "empty": "暂无内容。讨论运行后将显示概览。",
+      "emptyLive": "讨论正在开始 — 成员发言后概览会逐步填充。",
+      "live": "实时",
+      "matrix": "所有发言一览",
+      "matrixLabel": "按成员和阶段划分的发言",
+      "memberColumn": "成员",
+      "noStanceYet": "尚未发言",
+      "noStanceOfOwn": "没有提出自己的立场",
+      "phaseActive": "进行中",
+      "phaseDone": "已完成",
+      "phaseNeedsApproval": "需要人工审批",
+      "phaseProgress": "{{total}} 中的 {{done}}",
+      "phaseStarting": "即将开始…",
+      "phaseUpcoming": "即将开始",
+      "phases": "阶段",
+      "phasesLabel": "讨论阶段",
+      "roster": "谁怎么看",
+      "rosterLabel": "成员立场",
+      "round": "第 {{n}} 轮",
+      "spokenCount_one": "迄今 {{count}} 条发言",
+      "spokenCount_other": "迄今 {{count}} 条发言",
+      "stanceQuoted": "他们的原话",
+      "stanceSummarised": "由模型总结",
+      "statCost": "成本",
+      "synthesis": "结论",
+      "statMembers": "成员",
+      "statPhases": "阶段",
+      "statTurns": "发言",
+      "statusAwaiting": "轮到你",
+      "statusDissented": "异议",
+      "statusFailed": "失败",
+      "statusSpeaking": "发言中",
+      "turnCount_one": "{{count}} 次发言",
+      "turnCount_other": "{{count}} 次发言",
+      "viewMode": "讨论视图",
+      "viewOverview": "概览",
+      "viewSplit": "两者",
+      "viewTranscript": "逐字记录",
+      "phaseRepeatsTitle": "此阶段运行 {{count}} 次",
+      "roundScope": "仅第 {{n}} 轮",
+      "roundScopeTitle": "此视图仅涵盖第 {{n}} 轮。更早的轮次见逐字记录。",
+      "convergenceStopped_one": "已收敛 — 跳过 {{count}} 次重复",
+      "convergenceStopped_other": "已收敛 — 跳过 {{count}} 次重复",
+      "interactions": "谁回应了谁",
+      "interactionsLabel": "谁回应了谁",
+      "addressedConnector": "回应了",
+      "unaddressed": "无人回应：{{names}}",
+      "unknownMember": "未知",
+      "bids": "谁认领了什么",
+      "bidsLabel": "按任务列出的认领",
+      "rosterShowFewer": "收起",
+      "roundLabel": "轮次",
+      "roundSelect": "显示其他轮次",
+      "roundOption": "第 {{n}} / {{total}} 轮",
+      "rosterShowAll_one": "显示全部 {{count}} 位成员",
+      "rosterShowAll_other": "显示全部 {{count}} 位成员"
+    },
+    "stateRejected": "已否决",
+    "inputDisabledRejected": "该建议已被否决",
+    "debateVerdictNote": "将以评分裁决（获胜方与分数）作答，而非散文：{{phases}}。成员拥有两个或更多角色且论证在前，因此不会使用主持人自己的综述提示词。若需散文，请为该阶段设置输入模板。",
+    "retroCustomLimits": "自定义复盘经验上限",
+    "retroCustomHint": "复盘阶段会把经验写入团队记忆，并带入后续讨论。这些上限限制写入的数量。",
+    "retroDefaultHint": "复盘阶段仍会按默认上限写入经验（每次运行 {{perRun}} 条，最多保存 {{stored}} 条）。如需停止，请删除 RETRO 阶段。",
+    "voteOptionsTooFew": "明确的选票至少需要两个选项。",
+    "saveProblem": {
+      "title": "此小组暂时无法创建：",
+      "debateRoles": "辩论至少需要一名角色为 PRO 的成员和一名角色为 CON 的成员。",
+      "devilAdvocateRole": "“魔鬼代言人”小组需要一名角色为 DEVIL_ADVOCATE 的成员。",
+      "humanInTaskForce": "人类成员不能加入任务组（规划、执行和验证阶段）。",
+      "humanWithPeerPhases": "人类成员不能加入各阶段依次针对每位同伴的小组，例如同行评审。",
+      "memberUnassigned_one": "{{count}} 名成员未分配代理。",
+      "memberUnassigned_other": "{{count}} 名成员未分配代理。",
+      "humanNeedsName_one": "{{count}} 名人类成员需要显示名称。",
+      "humanNeedsName_other": "{{count}} 名人类成员需要显示名称。",
+      "humanNeedsId_one": "{{count}} 名人类成员需要此人的用户 ID。",
+      "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。"
+    }
   },
   "taskBoard": {
     "title": "任务看板",
@@ -2773,7 +3051,7 @@
     "value": "值",
     "deleteAll": "全部删除",
     "deleteAllTitle": "删除所有属性",
-    "deleteAllDesc": "将永久删除该用户的所有属性。",
+    "deleteAllDesc": "这将永久删除该用户的所有全局属性：包括代理保存的每一条全局用户记忆条目，而不仅是此处列出的行。",
     "deleted": "属性已删除",
     "noResults": "未找到属性",
     "showingCount": "{{count}} 个属性"
@@ -2853,6 +3131,9 @@
     "new": "新",
     "updated": "已更新",
     "unchanged": "未更改",
+    "removed": "移除",
+    "conflicts": "已在此处更改",
+    "conflictHint": "标记为“冲突”的资源在上次同步后已在此实例上被更改。除非勾选，否则不会改动它们——勾选即会覆盖本地更改。",
     "selected": "已选择",
     "mergeNow": "导入所选",
     "syncNow": "立即同步",
@@ -2874,6 +3155,8 @@
     "title": "智能体同步",
     "subtitle": "在 EDDI 实例之间同步智能体",
     "connection": "源实例",
+    "loadingLocalAgents": "正在加载所有本地代理后再进行匹配…",
+    "localAgentsError": "无法完整加载本地代理列表，因此无法按名称匹配代理。现在同步会创建重复项。",
     "sourceUrl": "源 EDDI 实例 URL",
     "authToken": "授权 Token",
     "authHint": "可选，将作为 X-Source-Authorization 请求头发送。",
@@ -2893,13 +3176,21 @@
     "syncError": "同步失败",
     "empty": "连接到源实例以开始智能体同步。",
     "autoMatched": "自动匹配",
-    "previewFirst": "同步前预览变更"
+    "previewFirst": "同步前预览变更",
+    "syncPartial": "同步未完成 — 部分资源未写入",
+    "syncIdentical": "已是最新 — 无需写入",
+    "outcomeCounts": "{{updated}} 个已更新 · {{created}} 个已创建 · {{skipped}} 个未更改",
+    "redeployHint": "同步的更改会保存为新版本。正在运行的内容保持不变——部署新版本后才会生效。",
+    "overwrite": "覆盖本地更改",
+    "previewFailed": "预览失败",
+    "noPreviewReturned": "源实例未返回此代理的预览。"
   },
   "sync": {
     "actionCreate": "新建",
     "actionUpdate": "更新",
     "actionSkip": "已是最新",
-    "actionConflict": "冲突"
+    "actionConflict": "冲突",
+    "actionRemove": "移除"
   },
   "userConversations": {
     "title": "用户对话",
@@ -3103,7 +3394,6 @@
     "agentIdPlaceholder": "处理消息的代理 ID",
     "botToken": "机器人令牌",
     "botTokenHint": "机器人用户 OAuth 令牌。使用保管库引用以提高安全性。",
-    "botTokenPlaceholder": "xoxb-… 或 ${vault:slack-bot-token}",
     "channel": "频道",
     "channelId": "Slack 频道 ID",
     "channelIdCol": "频道 ID",
@@ -3124,7 +3414,6 @@
     "searchPlaceholder": "搜索频道…",
     "signingSecret": "签名密钥",
     "signingSecretHint": "来自您的 Slack 应用基本信息页面。",
-    "signingSecretPlaceholder": "十六进制字符串或 ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack 设置指南",
     "slackSetupSummary": "创建 Slack 应用，配置机器人令牌范围（app_mentions:read、chat:write、im:history、channels:history、groups:history），然后在此处粘贴凭据。",
     "target": "目标",
@@ -3178,7 +3467,9 @@
     "typeAgent": "智能体",
     "typeGroup": "群组",
     "selectGroup": "选择群组…",
-    "unknownGroup": "{{id}}（未找到）"
+    "unknownGroup": "{{id}}（未找到）",
+    "plaintextSecret": "请将 {{fields}} 存入密钥保险库，并以 ${vault:…} 引用 — 明文凭据不会被保存。",
+    "plaintextStored": "此渠道以明文存储 {{fields}}。请将其移入密钥保险库并保存，以替换为引用。"
   },
   "hitl": {
     "loadingApprovalDetails": "正在加载审批详情…",
@@ -3268,7 +3559,8 @@
     "decidedProgress": "已决定 {{decided}}/{{total}}",
     "groupLinkUnavailable": "未找到该群组，因此无法提供可靠的链接。",
     "confirmApproveGroupDescription": "批准整个暂停阶段并继续讨论。该暂停下等待的每项任务都会一并批准；如需逐项决定，请打开该群组。",
-    "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。"
+    "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。",
+    "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -3355,16 +3647,14 @@
     "conversationsTruncated_other": "会话已被截断 — 该用户共有 {{count}} 个。",
     "failedConversations_other": "有 {{count}} 个会话无法读取，未包含在数据包中。",
     "conversationsTruncated_one": "会话已被截断 — 该用户共有 {{count}} 个。",
-    "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。"
+    "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。",
+    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。"
   },
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
   },
   "orphans": {
-    "confirmPurgeAll": "永久删除全部 {{count}} 个孤立资源？服务器会清除所有孤立项——不应用您的选择。此操作无法撤销。",
-    "deleteSelected": "删除所选的 {{count}} 项",
     "description": "查找并清理未被任何智能体或工作流引用的资源。",
-    "deselectAll": "取消全选",
     "includeDeleted": "包含软删除项",
     "lastScanned": "上次扫描",
     "noOrphans": "未找到孤立项",
@@ -3375,13 +3665,13 @@
     "scanPromptDesc": "查找未被任何工作流或智能体引用的扩展配置（规则、API 调用、LLM、输出）。清理未使用的资源以保持平台整洁。",
     "scanPromptTitle": "扫描您的平台",
     "scanning": "正在扫描资源…",
-    "selectAll": "全选",
     "softDeleted": "已删除",
     "title": "孤立项检测",
     "found_other": "找到 {{count}} 个孤立项",
     "found_one": "找到 {{count}} 个孤立项",
     "scanIncomplete": "本次扫描未完成",
-    "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。"
+    "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。",
+    "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",
@@ -3449,7 +3739,7 @@
     "tagPlaceholder": "例如 safety、production",
     "tags": "标签",
     "templateEnabled": "启用模板解析",
-    "templateEnabledHint": "禁用后，内容中的 {{}} 标记将被视为纯文本（对代码示例很有用）。",
+    "templateEnabledHint": "禁用后，内容中的 { } 标记将被视为纯文本（对代码示例很有用）。",
     "usageHint": "用法："
   },
   "status": {
@@ -3502,7 +3792,8 @@
     "copyVars": "复制 ${vars:…} 引用",
     "refCopied": "已复制：{{ref}}",
     "infoLine1": "在系统提示中使用 {{vars.<key>}}，或在代理配置的任何位置使用 ${vars:<key>}。",
-    "infoLine2": "更改将在 2 分钟内生效（缓存 TTL）。敏感值请改用密钥保管库。"
+    "infoLine2": "更改将在 2 分钟内生效（缓存 TTL）。敏感值请改用密钥保管库。",
+    "keyExists": "名为“{{key}}”的变量已存在。请改为在列表中编辑它。"
   },
   "workflowEditor": {
     "endpoints": "端点",
@@ -3563,7 +3854,19 @@
       "toggleConfig": "切换详情面板",
       "unpin": "取消置顶回复",
       "untitled": "无标题",
-      "viewSessions": "查看历史会话"
+      "viewSessions": "查看历史会话",
+      "alreadyEnded": "讨论已经结束。",
+      "stopRaced": "停止时讨论状态已发生变化，讨论仍在进行。请再次尝试停止。",
+      "stopUnconfirmed": "无法确认讨论已停止。请检查其状态并再次尝试停止。",
+      "stopFailed": "无法停止讨论：{{error}}",
+      "stopping": "正在停止…",
+      "startOver": "重新开始",
+      "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。",
+      "confirmNewTitle": "停止正在进行的讨论？",
+      "confirmNewDescription": "仍有讨论在进行中。开始新的讨论会先将其停止——所有进行中的工作都将被放弃。",
+      "confirmNewButton": "停止并开始新的讨论",
+      "keepRunning": "继续运行",
+      "questionRequired": "请为你的任务组添加一个问题——文件会在讨论开始时共享给它。"
     },
     "thread": {
       "fileTooLarge": "文件必须小于20MB",
@@ -3590,7 +3893,10 @@
       "pausedRejected": "该对话正在等待人工决定，因此消息未发送。",
       "reviewApprovals": "查看待处理的审批",
       "stop": "停止生成",
-      "streamEnded": "回复尚未完成，连接已中断。已收到的内容显示在上方，可再次发送重试。"
+      "streamEnded": "回复尚未完成，连接已中断。已收到的内容显示在上方，可再次发送重试。",
+      "newConversation": "新建对话",
+      "newConversationFailed": "无法开始新对话",
+      "initFailed": "无法打开此对话。"
     },
     "chat": {
       "agentDetails": "智能体详情",
@@ -3913,7 +4219,8 @@
       "transcript": "对话记录",
       "tryDifferent": "请尝试其他搜索词",
       "untitled": "无标题对话",
-      "loadListError": "加载对话失败"
+      "loadListError": "加载对话失败",
+      "rejected": "已否决"
     },
     "insights": "洞察",
     "memberCount": "{{count}} 名成员",
@@ -4004,7 +4311,7 @@
       "llmDefaultsDesc": "在此创建的每位顾问都会使用该设置，除非顾问在下方自行设置。",
       "llmDefaultsKeyRequired": "在此添加一个密钥，以覆盖所有未自行设置密钥的顾问。",
       "model": "模型",
-      "modelPlaceholder": "例如 claude-sonnet-5",
+      "modelPlaceholder": "例如 claude-sonnet-5-5",
       "nameRequired": "请为该顾问填写名称。",
       "new": "新建",
       "next": "下一步",
@@ -4107,7 +4414,10 @@
       "platformBaseUrlAuto": "由服务器解析",
       "platformBaseUrlDiffers": "此部署当前报告的自身地址为 {{serverUrl}}。上方的值与之不同——仅在你有意设置时才保留。",
       "platformBaseUrlQueryFailed": "无法向服务器查询其自身地址。除非在此处填写，否则激活将失败；也可刷新页面重试。",
-      "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。"
+      "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。",
+      "llmEndpoint": "模型端点",
+      "promptBodyDiffers": "这些说明与当前默认值不同——它们已被编辑，或由较早版本的 Manager 编写。",
+      "promptBodyReset": "重置为默认值"
     },
     "authMode": {
       "none": {
@@ -4273,6 +4583,28 @@
     },
     "superseded": {
       "title": "之前的运维助手智能体仍处于部署状态。"
+    },
+    "upgrade": {
+      "hint": "Platform Operator 有可用更新。",
+      "blockerBaseUrl": "其模型服务器地址未被记录——请重新输入以进行升级。",
+      "addedTools_other": "{{count}} 个新工具",
+      "action": "升级",
+      "addedTools_one": "{{count}} 个新工具",
+      "blockerProvider": "其模型提供商已无法通过此方式设置——请选择其他提供商以进行升级。",
+      "useNewDefault": "替换为新的默认值",
+      "confirmBody": "将使用当前的说明和工具构建一个新的 Operator，并像新激活一样进行检查；之后才会移除旧的 Operator。模型、密钥、环境和访问设置保持不变。当前打开的 Operator 聊天将结束，与旧 Operator 的对话将不再显示在历史记录中。",
+      "description": "它由较早版本的 Manager 设置（修订版 {{from}}；此版本提供 {{to}}），因此其说明和工具已过时。",
+      "blockerCredential": "其模型密钥以明文输入，明文从不保存——请重新输入以进行升级。",
+      "reviewAction": "检查并升级",
+      "instructionsUnknown": "Operator 的说明与当前默认值不同——可能是较旧的默认值，也可能是你自己的修改。",
+      "instructionsCustomized": "你编辑过 Operator 的说明。",
+      "confirmTitle": "升级 Platform Operator？",
+      "removedTools_other": "已移除 {{count}} 个工具",
+      "removedTools_one": "已移除 {{count}} 个工具",
+      "confirm": "立即升级",
+      "hintAction": "升级",
+      "keepCurrent": "保留当前文本（它不会学到新默认值新增的内容）",
+      "title": "Platform Operator 有可用更新"
     }
   },
   "groupWorkspace": {
@@ -4684,7 +5016,9 @@
       "published": "已发布",
       "shared": "已共享",
       "sharedTitle": "归 {{owner}} 所有 · 位于 {{space}}",
-      "ownedBy": "归 {{owner}} 所有"
+      "ownedBy": "归 {{owner}} 所有",
+      "internal": "所有已登录用户",
+      "sharedBy": "由 {{owner}} 共享"
     },
     "level": {
       "use": "可对话",
@@ -4702,7 +5036,14 @@
       "space": "工作区",
       "spaceHint": "该资源所在工作区的所有人。",
       "published": "已发布",
-      "publishedHint": "所有能访问此部署的人。"
+      "publishedHint": "所有能访问此部署的人都可以阅读——包括匿名的聊天访客。",
+      "internal": "所有已登录用户",
+      "internalHint": "任何登录的人都可以与它对话。其配置保持私有。无法匿名访问。",
+      "confirmTitle": "将可见性更改为{{visibility}}？",
+      "cascadeLabel": "同时应用于其引用的工作流和配置",
+      "cascadeWarning": "你拥有的每个被引用资源都会采用此可见性，替换其各自的设置。之前的设置不会保留。",
+      "noCascadeWarning": "只更改此资源。现在能看到它的人可能仍无法打开它引用的内容。",
+      "apply": "更改可见性"
     },
     "share": {
       "title": "共享",
@@ -4710,7 +5051,7 @@
       "visibility": "可见性",
       "peopleAndTeams": "人员和团队",
       "subjectLabel": "人员或团队",
-      "subjectPlaceholder": "name@example.com 或 team:engineering",
+      "subjectPlaceholder": "姓名、电子邮件或团队",
       "levelLabel": "访问级别",
       "add": "共享",
       "shared": "已共享",
@@ -4736,7 +5077,13 @@
       "cascadeRevoked_other": "已从 {{count}} 项资源中移除",
       "andMore_other": "另有 {{count}} 项",
       "cascadeRevoked_one": "已从 {{count}} 项资源中移除",
-      "andMore_one": "另有 {{count}} 项"
+      "andMore_one": "另有 {{count}} 项",
+      "unknownGrant": "没有任何登录用户与此匹配——它不会到达任何人。请删除后重新共享。",
+      "copyFailed": "无法复制——请选中地址后自行复制。",
+      "chatLink": "聊天链接",
+      "copied": "已复制",
+      "copy": "复制",
+      "chatLinkHint": "适用于以“可对话”或更高权限共享了该智能体的所有人。"
     },
     "emptySpace": "此工作区中没有智能体",
     "emptySpaceDescription": "其他工作区可能有您可以查看的智能体。",
@@ -4754,12 +5101,148 @@
       "warning": "这将取代当前所有者（{{owner}}），其将失去对该资源的控制权。",
       "cascade_other": "已更改 {{count}} 项资源的所有者",
       "cascade_one": "已更改 {{count}} 项资源的所有者"
-    }
+    },
+    "notifications": {
+      "granted": "已向 {{name}} 授予访问权限",
+      "labelUnread_one": "通知 — {{count}} 条未读",
+      "labelUnread_other": "通知 — {{count}} 条未读",
+      "label": "通知",
+      "markAll": "全部标为已读",
+      "empty": "暂无新内容。与您共享的内容和访问请求会显示在这里。",
+      "unnamed": "未命名的资源",
+      "requested": "{{who}} 请求对 {{what}} 的“{{level}}”访问权限",
+      "shared": "{{who}} 与您共享了 {{what}} — {{level}}",
+      "grant": "授予",
+      "openChat": "打开聊天",
+      "open": "打开",
+      "dismiss": "忽略"
+    },
+    "request": {
+      "alreadyHas": "您已拥有该访问权限——请重新加载页面。",
+      "chatOnlyTitle": "您可以与此智能体对话",
+      "title": "您无权访问此内容",
+      "chatOnly": "它是为对话而与您共享的，因此其配置保持私有。",
+      "subtitle": "它可能是私有的，或仅与其他人共享。您可以申请访问。",
+      "sent": "请求已发送。如果该内容存在且有所有者，所有者会在通知中看到——一旦授予，您也会收到通知。",
+      "messagePlaceholder": "您为什么需要它？（可选）",
+      "message": "给所有者的留言",
+      "action": "申请访问"
+    },
+    "move": {
+      "done": "已移动",
+      "title": "移动到团队",
+      "team": "团队",
+      "action": "移动",
+      "hint": "之后团队中的每个人都可以找到并编辑它。您仍是所有者——只有您可以删除或进一步共享它。",
+      "cascade_one": "已移动 {{count}} 项资源",
+      "cascade_other": "已移动 {{count}} 项资源"
+    },
+    "preview": {
+      "title_one": "此更改将影响 {{count}} 项资源",
+      "title_other": "此更改将影响 {{count}} 项资源",
+      "confirm": "全部应用"
+    },
+    "ownership": {
+      "mine": "我的",
+      "shared": "与我共享",
+      "any": "我能看到的全部",
+      "label": "显示"
+    },
+    "create": {
+      "default": "您的默认工作区",
+      "hint": "新项目将在 {{space}} 中创建。"
+    },
+    "emptyShared": "还没有人与您共享任何内容",
+    "emptySharedDescription": "当同事与您或您的团队共享智能体时，它会显示在这里——以及您的通知中。",
+    "showEverything": "显示我能看到的全部"
   },
   "connectionRef": {
     "wrapped": "连接提供完整的标头值（含方案）。请单独使用 ${connection:name}，并把“Bearer ”放到连接的标头值中。",
     "headerMismatch": "此连接以“{{expected}}”发送其凭据，因此标头必须使用该名称——否则配置显示一个名称而请求携带另一个。",
     "refusedInRequest": "${connection:…} 在路径、查询参数或请求体中会被拒绝——URL 中的凭据会进入每个代理日志，请求体中的凭据不会被读取。请改为在标头中引用连接。",
     "refusedInModel": "语言模型、嵌入和向量存储不接受 ${connection:…}：连接会解析为完整标头，而它们需要裸凭据。请在此使用 ${vault:…}。"
+  },
+  "workspacesPage": {
+    "title": "工作区",
+    "subtitle": "您的工作区、其中保存的密钥和变量，以及新工作的共享方式。",
+    "notEnforced": "此部署未强制启用工作区，因此所有人都能看到所有内容。运维人员可通过 eddi.workspaces.enabled=true 启用。",
+    "yourSpaces": "您的工作区",
+    "yourSpacesHint": "每个工作区都有自己的密钥和变量。只有其成员可以查看或更改它们，也只有成员可以部署使用它们的智能体。",
+    "referenceCopied": "引用已复制",
+    "copyReference": "复制引用以在智能体中使用",
+    "secretStored": "密钥已保存",
+    "secrets": "密钥",
+    "noSecrets": "此工作区中还没有密钥",
+    "deleteNamed": "删除 {{name}}",
+    "secretName": "名称，例如 openai-key",
+    "secretValue": "值——加密存储，之后不再显示",
+    "add": "添加",
+    "deleteSecretTitle": "删除此密钥？",
+    "deleteSecretDescription": "使用它的智能体将停止工作，直到重新保存。此操作无法撤销。",
+    "variableStored": "变量已保存",
+    "variables": "变量",
+    "noVariables": "此工作区中还没有变量",
+    "variableName": "名称，例如 model",
+    "variableValue": "值",
+    "pinned": "由 {{property}} 固定",
+    "stored": "在此设置",
+    "default": "默认",
+    "settings": "设置",
+    "settingsHint": "立即生效，五秒内同步到每个副本。是否强制启用工作区，以及哪个令牌声明携带团队信息，属于启动设置，仅供参考。",
+    "enforcing": "已强制启用",
+    "enforcedYes": "是",
+    "enforcedNo": "否",
+    "groupsClaim": "团队来自令牌声明",
+    "defaultSpace": "新工作的默认位置",
+    "defaultSpacePlaceholder": "留空：每个人自己的工作区——或填写团队名称",
+    "defaultSpaceHelp": "填写团队名称会让部署以团队优先：除非设为私有，同事之间可以看到彼此的工作。个人所选的工作区始终优先。",
+    "legacy": "在记录所有权之前创建的资源",
+    "legacyShared": "所有人可见——升级后不会有任何内容消失",
+    "legacyAdminOnly": "仅管理员可见——在分配所有者之后",
+    "lastChanged": "最后由 {{who}} 更改",
+    "neverChanged": "尚未在此更改",
+    "saved": "设置已保存"
+  },
+  "cascadeSave": {
+    "workflowChanged": "工作流 {{workflowId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
+    "agentChanged": "智能体 {{agentId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
+    "workflowMissingResource": "工作流 {{workflowId}}（版本 {{version}}）未引用 {{resource}}，因此在此保存不会改变智能体。未保存任何内容。",
+    "agentWorkflowMismatch": "智能体 {{agentId}}（版本 {{version}}）引用的是工作流 {{workflowId}} 的版本 {{found}}，而不是版本 {{expected}}。自本页打开以来智能体已被修改。请重新加载。未保存任何内容。",
+    "agentMissingWorkflow": "智能体 {{agentId}}（版本 {{version}}）未引用工作流 {{workflowId}}。未保存任何内容。"
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "模型实验室",
+      "compatible": "兼容 OpenAI 的提供商",
+      "cloud": "云平台",
+      "local": "本地 / 自托管"
+    },
+    "region": {
+      "label": "区域",
+      "intl": "国际",
+      "cn": "中国大陆",
+      "us": "美国",
+      "custom": "自定义 URL(见下方)"
+    },
+    "compatibleNote": "通过提供商兼容 OpenAI 的 API（{{url}}）连接。仅在使用代理或其他区域时才需要覆盖。",
+    "keyHint": "在 {{url}} 获取 API 密钥",
+    "select": "选择提供商"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "与上一版本兼容 — 进行中的会话可以切换到此版本",
+    "compatibleHint": "仅适用于不会破坏进行中会话的更改，例如提示词措辞或更换模型。如果重命名或删除了属性、动作或工作流步骤，请不要勾选。",
+    "compatibleLegacyNote": "当前版本早于版本跟随功能，因此已在其上运行的会话会保留在该版本。下一次兼容保存将连接起版本链。",
+    "compatibleUnknownNote": "运行在早于版本跟随功能的版本上的会话会保留在该版本。",
+    "generationBadge": "兼容代 {{generation}}",
+    "generationTooltip": "兼容代 {{generation}}：此智能体中兼容代相同的版本彼此兼容，因此进行中的会话会在下一轮切换到最新部署的版本。不兼容的保存会开始新的兼容代。",
+    "impactTitle": "将 v{{version}} 部署到{{environment}} — 进行中的会话",
+    "impactFollow_other": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
+    "impactStay_other": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}",
+    "impactReasonNewer": "更新的版本",
+    "impactReasonLegacy": "早于版本跟随功能",
+    "impactReasonBreaking": "不兼容的更改",
+    "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
+    "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
+    "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
   }
 }

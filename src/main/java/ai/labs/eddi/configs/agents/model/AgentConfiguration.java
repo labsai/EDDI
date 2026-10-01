@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -58,6 +60,24 @@ public class AgentConfiguration {
 
     /** Human-readable description for the A2A Agent Card */
     private String description;
+
+    /**
+     * Which versions of this agent a running conversation may move between. Two
+     * versions with the same generation are compatible, and a conversation follows
+     * the newest deployed version of its generation from its next turn; a different
+     * generation is a breaking change, and conversations stay where they are.
+     * <p>
+     * <strong>Owned by the store.</strong> {@code AgentStore} assigns it on every
+     * create and update from the save request's {@code compatible} flag and ignores
+     * whatever the submitted body carries, so copying a configuration forward,
+     * exporting it or syncing it can never carry a compatibility claim into a
+     * version nobody declared compatible. {@code null} on every version stored
+     * before the field existed: such a version is compatible only with itself, so
+     * its conversations stay pinned exactly as they always were.
+     *
+     * @since 6.5.0
+     */
+    private Integer compatibilityGeneration;
 
     /**
      * Cryptographic identity for inter-agent trust. Auto-generated on agent
@@ -158,6 +178,14 @@ public class AgentConfiguration {
         this.description = description;
     }
 
+    public Integer getCompatibilityGeneration() {
+        return compatibilityGeneration;
+    }
+
+    public void setCompatibilityGeneration(Integer compatibilityGeneration) {
+        this.compatibilityGeneration = compatibilityGeneration;
+    }
+
     public List<Capability> getCapabilities() {
         return capabilities;
     }
@@ -253,6 +281,101 @@ public class AgentConfiguration {
     }
 
     /**
+     * Set only on an agent that {@code create_sub_agent} provisioned: who created
+     * it, from where. {@code null} on every agent a person created.
+     * <p>
+     * {@code teardown_agent} can undeploy and <em>permanently delete</em> an agent,
+     * and it used to decide "may I?" from a list of created ids alone — a list that
+     * could be seeded from client-supplied context. It now also requires this
+     * marker to name the calling conversation (or the discussion it belongs to), so
+     * an agent a person built can never qualify, whatever a list says.
+     * <p>
+     * Written by {@code AgentSetupService} on the agent's first version and by
+     * nothing else. {@code RestAgentStore.updateAgent} keeps the stored value
+     * whatever the request body says, so an edit (a PUT, a merge import, an
+     * upgrade) can neither erase nor forge it; {@code duplicateAgent} and a ZIP
+     * import that creates a new agent drop it, since the copy is a new agent a
+     * person made, not one {@code create_sub_agent} provisioned here.
+     */
+    private DynamicOrigin dynamicOrigin;
+
+    public DynamicOrigin getDynamicOrigin() {
+        return dynamicOrigin;
+    }
+
+    public void setDynamicOrigin(DynamicOrigin dynamicOrigin) {
+        this.dynamicOrigin = dynamicOrigin;
+    }
+
+    /**
+     * Provenance of a dynamically created sub-agent — see
+     * {@link AgentConfiguration#getDynamicOrigin()}.
+     */
+    public static class DynamicOrigin {
+        /** The agent whose {@code create_sub_agent} call created this one. */
+        private String createdByAgentId;
+        /** The conversation that call ran in. */
+        private String createdInConversationId;
+        /** The group discussion that conversation belonged to, if any. */
+        private String createdInGroupConversationId;
+        /** The user that conversation belonged to. */
+        private String createdForUserId;
+
+        public DynamicOrigin() {
+        }
+
+        public DynamicOrigin(String createdByAgentId, String createdInConversationId, String createdInGroupConversationId,
+                String createdForUserId) {
+            this.createdByAgentId = createdByAgentId;
+            this.createdInConversationId = createdInConversationId;
+            this.createdInGroupConversationId = createdInGroupConversationId;
+            this.createdForUserId = createdForUserId;
+        }
+
+        public String getCreatedByAgentId() {
+            return createdByAgentId;
+        }
+
+        public void setCreatedByAgentId(String createdByAgentId) {
+            this.createdByAgentId = createdByAgentId;
+        }
+
+        public String getCreatedInConversationId() {
+            return createdInConversationId;
+        }
+
+        public void setCreatedInConversationId(String createdInConversationId) {
+            this.createdInConversationId = createdInConversationId;
+        }
+
+        public String getCreatedInGroupConversationId() {
+            return createdInGroupConversationId;
+        }
+
+        public void setCreatedInGroupConversationId(String createdInGroupConversationId) {
+            this.createdInGroupConversationId = createdInGroupConversationId;
+        }
+
+        public String getCreatedForUserId() {
+            return createdForUserId;
+        }
+
+        public void setCreatedForUserId(String createdForUserId) {
+            this.createdForUserId = createdForUserId;
+        }
+
+        /**
+         * Whether this origin names {@code conversationId} as the creating
+         * conversation, or {@code groupConversationId} as the discussion it ran in. A
+         * {@code null} argument never matches.
+         */
+        public boolean namesConversationOrDiscussion(String conversationId, String groupConversationId) {
+            return (conversationId != null && conversationId.equals(createdInConversationId))
+                    || (groupConversationId != null && groupConversationId.equals(createdInGroupConversationId));
+        }
+    }
+
+    /**
      * Human-in-the-loop (HITL) configuration. Controls approval timeouts and
      * timeout policies for paused conversations.
      *
@@ -266,6 +389,68 @@ public class AgentConfiguration {
 
     public void setHitlConfig(HitlConfig hitlConfig) {
         this.hitlConfig = hitlConfig;
+    }
+
+    /**
+     * Whether the people who maintain this agent may read the conversations others
+     * have with it. Absent or disabled — the default — keeps every conversation
+     * private to the person who had it, as it has always been.
+     *
+     * @since 6.5.0
+     */
+    private ConversationReview conversationReview;
+
+    public ConversationReview getConversationReview() {
+        return conversationReview;
+    }
+
+    public void setConversationReview(ConversationReview conversationReview) {
+        this.conversationReview = conversationReview;
+    }
+
+    /**
+     * Opt-in review of this agent's conversations by its maintainers — everyone who
+     * holds {@code EDIT} on the agent (its owner, people it was shared with at edit
+     * level, and the members of the team space it is filed in).
+     *
+     * <h3>Why an opt-in, and why it is announced</h3> A conversation is personal
+     * data of the person who had it. Letting whoever maintains an agent read it is
+     * useful — it is how an agent gets better — but it is a decision about other
+     * people's data, so it is off unless the agent's designer turns it on. When it
+     * is on, the Chat UI and the Manager's chat show the person chatting a notice
+     * before they type ({@code GET /agents/{id}/profile} carries it). Channels EDDI
+     * does not render — Slack, Teams, the {@code /v1} API, MCP clients — cannot
+     * show it, so an agent reachable there should say so itself, in its greeting.
+     * Only conversations started while the agent version they ran on had review
+     * enabled are readable: switching it on later does not expose what was said
+     * before anybody was told.
+     * <p>
+     * Every review read is logged with who read what. Reviewers can read; they
+     * cannot continue, delete or otherwise act on somebody else's conversation.
+     */
+    public static class ConversationReview {
+        private boolean enabled = false;
+        private String notice;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /**
+         * What the person chatting is told. Absent uses a standard wording; a designer
+         * may replace it to name who reviews and why.
+         */
+        public String getNotice() {
+            return notice;
+        }
+
+        public void setNotice(String notice) {
+            this.notice = notice;
+        }
     }
 
     /**
@@ -433,6 +618,17 @@ public class AgentConfiguration {
         private int maxEntriesPerUser = 500;
         private String onCapReached = "evict_oldest";
         private String recallOrder = "most_recent";
+        /**
+         * <b>Reserved — not applied.</b> Every visible entry is recalled at
+         * conversation start, whatever this lists.
+         * <p>
+         * It cannot be switched on retroactively: the store serializes the whole block,
+         * so this default is written into every stored agent that has a
+         * {@code userMemoryConfig}, and a stored {@code ["preference", "fact"]} is
+         * indistinguishable from an explicit one. Enforcing it would silently stop
+         * recalling {@code context}, {@code legacy} (migrated v5) and {@code property}
+         * entries for every such agent.
+         */
         private List<String> autoRecallCategories = List.of("preference", "fact");
         private Guardrails guardrails = new Guardrails();
         private DreamConfig dream = new DreamConfig();
@@ -510,6 +706,23 @@ public class AgentConfiguration {
         private int maxValueLength = 1000;
         private int maxWritesPerTurn = 10;
         private List<String> allowedCategories = List.of("preference", "fact", "context");
+        /**
+         * Which memory visibilities the LLM {@code rememberFact} tool may write.
+         * Defaults to {@code self} only: an agent must be explicitly configured before
+         * the model can persist {@code group}- or {@code global}-visible memories, so a
+         * prompt-injected model cannot broadcast a fact to every other agent by
+         * default. The configured {@code defaultVisibility} is always permitted, so
+         * setting it is never self-blocking.
+         */
+        private List<String> allowedVisibilities = List.of("self");
+        /**
+         * Whether the {@code rememberFact} tool may overwrite the value of a
+         * {@code global} memory whose key is already owned by a <em>different</em>
+         * agent. Defaults to {@code false}: the store preserves the original owner on a
+         * cross-agent global write but still lets the value be overwritten, so this
+         * refuses that overwrite unless an operator opts in.
+         */
+        private boolean allowGlobalKeyOverwrite = false;
 
         public int getMaxKeyLength() {
             return maxKeyLength;
@@ -541,6 +754,22 @@ public class AgentConfiguration {
 
         public void setAllowedCategories(List<String> allowedCategories) {
             this.allowedCategories = allowedCategories;
+        }
+
+        public List<String> getAllowedVisibilities() {
+            return allowedVisibilities;
+        }
+
+        public void setAllowedVisibilities(List<String> allowedVisibilities) {
+            this.allowedVisibilities = allowedVisibilities;
+        }
+
+        public boolean isAllowGlobalKeyOverwrite() {
+            return allowGlobalKeyOverwrite;
+        }
+
+        public void setAllowGlobalKeyOverwrite(boolean allowGlobalKeyOverwrite) {
+            this.allowGlobalKeyOverwrite = allowGlobalKeyOverwrite;
         }
     }
 
@@ -663,7 +892,13 @@ public class AgentConfiguration {
          * LLM instructions for memory consolidation. Customizable by the agent
          * designer. Entries are appended as JSON after this prompt.
          */
-        private String summarizationPrompt = "You are a memory consolidation assistant. Given a list of remembered facts "
+        private String summarizationPrompt = DEFAULT_SUMMARIZATION_PROMPT;
+
+        /**
+         * The built-in consolidation prompt — the field's default, and what Dream uses
+         * when a stored config sets {@code summarizationPrompt} to null or blank.
+         */
+        public static final String DEFAULT_SUMMARIZATION_PROMPT = "You are a memory consolidation assistant. Given a list of remembered facts "
                 + "about a user, distill them into fewer, non-redundant entries. Preserve all "
                 + "important details. Remove duplicates and merge related facts. Each entry "
                 + "should be a single, clear statement.\n\n"
@@ -823,9 +1058,25 @@ public class AgentConfiguration {
          *             {@link #isMaxSummarizationCallsSet()} — see
          *             {@link #getMaxCostPerRun()} for the real budget.
          */
+        @JsonIgnore
         @Deprecated(since = "6.1.0", forRemoval = true)
         public int getMaxSummarizationCalls() {
             return maxSummarizationCalls;
+        }
+
+        /**
+         * The serialized form of {@link #getMaxSummarizationCalls()}: present only when
+         * the ceiling was explicitly configured. The plain getter serialized the
+         * default {@code 10} into every stored agent, and reading that document back
+         * called the setter — so after one save/load round trip every config counted as
+         * having "set" the deprecated ceiling, the opposite of what
+         * {@link #isMaxSummarizationCallsSet()} exists to distinguish.
+         */
+        @JsonProperty("maxSummarizationCalls")
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @Deprecated(since = "6.1.0", forRemoval = true)
+        Integer getMaxSummarizationCallsIfSet() {
+            return maxSummarizationCallsSet ? maxSummarizationCalls : null;
         }
 
         /**
@@ -833,6 +1084,7 @@ public class AgentConfiguration {
          *             this marks the ceiling as explicitly configured, which keeps it
          *             enforced as a backstop until the field is removed.
          */
+        @JsonProperty("maxSummarizationCalls")
         @Deprecated(since = "6.1.0", forRemoval = true)
         public void setMaxSummarizationCalls(int maxSummarizationCalls) {
             this.maxSummarizationCalls = maxSummarizationCalls;
@@ -915,6 +1167,24 @@ public class AgentConfiguration {
     public static class StrictWriteDiscipline {
         private boolean enabled = false;
         private String onFailure = "digest";
+        /**
+         * Keep running the remaining workflow tasks after a task failed (its output
+         * already rolled back and replaced by the digest / {@code task_failed_*}
+         * action). Off by default — the turn then ends in {@code ERROR}, as it always
+         * has. On, a later task can answer in the SAME turn: an output set keyed on
+         * {@code task_failed_<taskId>} renders a fallback, an LLM task placed after a
+         * failed HTTP call sees the digest. Without it a failing task returned an empty
+         * reply and a fallback rule could only react on the following turn.
+         */
+        private boolean continueOnFailure = false;
+
+        public boolean isContinueOnFailure() {
+            return continueOnFailure;
+        }
+
+        public void setContinueOnFailure(boolean continueOnFailure) {
+            this.continueOnFailure = continueOnFailure;
+        }
 
         public boolean isEnabled() {
             return enabled;

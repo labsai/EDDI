@@ -4,8 +4,10 @@ import { Save, X, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useUpdateGroup } from "@/hooks/use-groups";
+import { getErrorMessage } from "@/lib/api-client";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
+import { ProviderSelect } from "@/components/shared/provider-select";
 import {
   ARTIFACT_DEFAULT_MAX_PER_DISCUSSION,
   CONTEXT_WINDOW_DEFAULT_MAX_RECENT_ENTRIES,
@@ -78,11 +80,14 @@ export function GroupAdvancedEditor({
   groupId,
   groupVersion,
   onDone,
+  onSaved,
 }: {
   config: AgentGroupConfiguration;
   groupId: string;
   groupVersion: number;
   onDone: () => void;
+  /** The version the save created — the page must move onto it (see `useUpdateGroup`). */
+  onSaved?: (version: number) => void;
 }) {
   const { t } = useTranslation();
   const update = useUpdateGroup();
@@ -209,8 +214,14 @@ export function GroupAdvancedEditor({
             llmModel: summarizerModel.trim() || null,
           }
         : undefined,
+      // Not an on/off switch, whatever the checkbox looks like: the backend has
+      // no "off" for retro. A RETRO phase always harvests lessons, and a null
+      // `retroConfig` means "the default caps" (3 per run, 50 stored), not
+      // "disabled". Unticking therefore only drops the custom caps. Spread so a
+      // field this editor does not show (`maxLessonChars`) survives a save.
       retroConfig: retroEnabled
         ? {
+            ...config.retroConfig,
             maxLessonsPerRun: boundedInt(
               maxLessonsPerRun,
               RETRO_DEFAULT_MAX_PER_RUN,
@@ -259,11 +270,13 @@ export function GroupAdvancedEditor({
     update.mutate(
       { id: groupId, version: groupVersion, config: next },
       {
-        onSuccess: () => {
+        onSuccess: ({ version }) => {
+          if (version !== null) onSaved?.(version);
           toast.success(t("groups.advancedSaved", "Collaboration settings saved"));
           onDone();
         },
-        onError: () => toast.error(t("common.error", "Something went wrong")),
+        // The backend names the field and the rule it broke; keep its sentence.
+        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
   };
@@ -335,11 +348,10 @@ export function GroupAdvancedEditor({
                   <label htmlFor={`${uid}-sum-provider`} className="text-[10px] text-muted-foreground">
                     {t("groups.contextWindowSummarizer", "Summarizer")}
                   </label>
-                  <select
+                  <ProviderSelect
                     id={`${uid}-sum-provider`}
                     value={summarizerProvider}
-                    onChange={(e) => {
-                      const next = e.target.value;
+                    onChange={(next) => {
                       setSummarizerProvider(next);
                       // Seed the provider's default model so picking a provider is
                       // enough to make summarization actually run.
@@ -347,15 +359,11 @@ export function GroupAdvancedEditor({
                       if (preset && !summarizerModel.trim()) setSummarizerModel(preset.defaultModel);
                     }}
                     className={`${inputCls} w-40`}
-                    data-testid="adv-window-provider"
-                  >
-                    <option value="">{t("groups.contextWindowNoSummarizer", "None")}</option>
-                    {LLM_PROVIDERS.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    testId="adv-window-provider"
+                    leadingOptions={
+                      <option value="">{t("groups.contextWindowNoSummarizer", "None")}</option>
+                    }
+                  />
                   <input
                     value={summarizerModel}
                     onChange={(e) => setSummarizerModel(e.target.value)}
@@ -389,13 +397,19 @@ export function GroupAdvancedEditor({
             className="h-3.5 w-3.5 rounded border-input accent-primary"
             data-testid="adv-retro-enable"
           />
-          {t("groups.retroConfigLabel", "Retro lessons")}
+          {t("groups.retroCustomLimits", "Custom retro lesson limits")}
         </label>
-        <p className="text-[10px] text-muted-foreground">
-          {t(
-            "groups.retroConfigHint",
-            "Lets a retro phase write lessons into the team's memory, carried into later discussions.",
-          )}
+        <p className="text-[10px] text-muted-foreground" data-testid="adv-retro-hint">
+          {retroEnabled
+            ? t(
+                "groups.retroCustomHint",
+                "A retro phase writes lessons into the team's memory, carried into later discussions. These caps bound how many.",
+              )
+            : t(
+                "groups.retroDefaultHint",
+                "A retro phase still writes lessons, with the default caps ({{perRun}} per run, {{stored}} stored). To stop it, remove the RETRO phase.",
+                { perRun: RETRO_DEFAULT_MAX_PER_RUN, stored: RETRO_DEFAULT_MAX_STORED },
+              )}
         </p>
         {retroEnabled && (
           <div className="flex flex-wrap items-center gap-3 ps-5">

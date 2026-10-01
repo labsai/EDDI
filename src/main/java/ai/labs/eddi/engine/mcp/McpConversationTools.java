@@ -34,6 +34,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -44,6 +45,7 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.NotFoundException;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -98,6 +100,10 @@ public class McpConversationTools {
     @Inject
     MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
+    // Same pattern: the strict default for directly constructed unit tests.
+    @Inject
+    ClientContextGuard clientContextGuard = ClientContextGuard.strict();
+
     @Inject
     public McpConversationTools(IConversationService conversationService, IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
             IRestInterfaceFactory restInterfaceFactory, IJsonSerialization jsonSerialization, BoundedLogStore boundedLogStore,
@@ -132,6 +138,17 @@ public class McpConversationTools {
         LOGGER.infof("%s denied: caller does not own conversation %s", tool, LogSanitizer.sanitize(conversationId));
         meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", tool).increment();
         return errorJson("Access denied: you do not own this conversation");
+    }
+
+    /**
+     * Uniform answer when the conversation guard reports that a conversation has no
+     * descriptor (never existed, or deleted) and the caller is not an admin. An
+     * expected outcome of probing an id, so it is logged at debug, not as an error
+     * with a stack trace — enumerating ids must not flood the log.
+     */
+    private String conversationNotFound(String tool, String conversationId) {
+        LOGGER.debugf("%s: conversation %s not found", tool, LogSanitizer.sanitize(conversationId));
+        return errorJson("Conversation not found");
     }
 
     @Tool(name = "list_agents", description = "List all deployed agents with their status, version, and name. "
@@ -224,6 +241,8 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
             return accessDenied("talk_to_agent", conversationId);
+        } catch (NotFoundException e) {
+            return conversationNotFound("talk_to_agent", conversationId);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             // Finding 25: already-paused at submit — say() rejects the input
             // synchronously. Report the pending approval instead of a generic error.
@@ -291,6 +310,8 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
             return accessDenied("chat_with_agent", convId);
+        } catch (NotFoundException e) {
+            return conversationNotFound("chat_with_agent", convId);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             // Finding 25: already-paused at submit — say() rejects the input
             // synchronously. Report the pending approval instead of a generic error.
@@ -368,6 +389,8 @@ public class McpConversationTools {
             return jsonSerialization.serialize(snapshot);
         } catch (ForbiddenException e) {
             return accessDenied("read_conversation", conversationId);
+        } catch (NotFoundException e) {
+            return conversationNotFound("read_conversation", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation", e);
@@ -387,6 +410,8 @@ public class McpConversationTools {
             return result.content().toString();
         } catch (ForbiddenException e) {
             return accessDenied("read_conversation_log", conversationId);
+        } catch (NotFoundException e) {
+            return conversationNotFound("read_conversation_log", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
             return errorJson("Failed to read conversation log", e);
@@ -534,6 +559,8 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
             return accessDenied("read_agent_logs", conversationId);
+        } catch (NotFoundException e) {
+            return conversationNotFound("read_agent_logs", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_agent_logs failed", e);
             return errorJson("Failed to read Agent logs", e);
@@ -564,6 +591,8 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
             return accessDenied("read_audit_trail", conversationId);
+        } catch (NotFoundException e) {
+            return conversationNotFound("read_audit_trail", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
             return errorJson("Failed to read audit trail", e);
@@ -833,6 +862,12 @@ public class McpConversationTools {
             try {
                 agentTriggerStore.readAgentTrigger(intent);
             } catch (Exception triggerEx) {
+                if (triggerEx instanceof IRestAgentTriggerStore.TriggerNotVisibleException) {
+                    // The trigger still exists but now routes to an agent this caller may
+                    // not use. Refuse, but keep the mapping: it is not stale, and deleting
+                    // it would destroy the user's standing conversation over a sharing change.
+                    throw new RuntimeException("Agent trigger for intent '" + intent + "' is not available to you");
+                }
                 if (triggerEx instanceof IResourceStore.ResourceNotFoundException) {
                     userConversationStore.deleteUserConversation(intent, userId);
                     throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");
@@ -848,8 +883,12 @@ public class McpConversationTools {
                 if (!ConversationState.ENDED.equals(state)) {
                     return existing;
                 }
-            } catch (IConversationService.ConversationNotFoundException stateEx) {
-                // Conversation not found in DB — stale mapping, fall through to create fresh
+            } catch (IConversationService.ConversationNotFoundException | NotFoundException stateEx) {
+                // Conversation not found — stale mapping, fall through to create fresh.
+                // NotFoundException is the conversation guard's answer for a
+                // conversation with no descriptor left (permanently deleted or swept
+                // by retention, neither of which removes this mapping); without it a
+                // stale mapping failed every chat_managed call for that user forever.
                 LOGGER.warnv("Stale UserConversation for intent={0}, userId={1}: conversation {2} not found, recreating",
                         intent, userId, existing.getConversationId());
             }
@@ -872,7 +911,10 @@ public class McpConversationTools {
         // the JAX-RS layer which converts exceptions to HTTP responses that are
         // hard to inspect programmatically.
         resourceAccessGuard.requireAgentUseAccess(agentId);
-        var initialContext = new HashMap<String, Context>(deployment.getInitialContext());
+        // The same boundary the REST trigger path applies (RestAgentManagement goes
+        // through RestAgentEngine): engine-reserved keys are never taken from a
+        // trigger's initial context — see ClientContextGuard.
+        var initialContext = new HashMap<String, Context>(clientContextGuard.strip(deployment.getInitialContext()));
         var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
         String conversationId = convResult.conversationId();
 

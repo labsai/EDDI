@@ -7,11 +7,13 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -26,10 +28,15 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
+import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceGuard;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -47,7 +54,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.regex.Pattern;
-import dev.langchain4j.data.message.SystemMessage;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
@@ -224,9 +232,11 @@ public class LlmTask implements ILifecycleTask {
 
             var templateDataObjects = memoryItemConverter.convert(memory);
 
-            // Inject prompt snippets into template data — makes all snippets
-            // auto-available as {{snippets.<name>}} in system prompts
-            Map<String, Object> snippets = promptSnippetService.getAll();
+            // Inject prompt snippets into template data — makes the snippets this
+            // agent may use available as {{snippets.<name>}} in system prompts. Scoped
+            // to the agent's workspace: getAll() would hand every workspace's snippets
+            // to every agent, and let a same-named snippet elsewhere replace this one's.
+            Map<String, Object> snippets = promptSnippetService.getForAgent(memory.getAgentId());
             if (!snippets.isEmpty()) {
                 templateDataObjects.put("snippets", snippets);
             }
@@ -307,7 +317,7 @@ public class LlmTask implements ILifecycleTask {
                     memory.getAgentToolApprovalsConfig(), task.getToolApprovals());
         }
 
-        var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
+        var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);
 
         // Parse history parameters
         String systemMessage = processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "");
@@ -335,7 +345,7 @@ public class LlmTask implements ILifecycleTask {
                 String httpCallContext = capRagContext(executeHttpCallRag(memory, httpCallRag, userInput, templateDataObjects), maxRagContextChars,
                         "httpCall RAG '" + httpCallRag + "'");
                 if (httpCallContext != null) {
-                    systemMessage += "\n\n## Search Results:\n" + httpCallContext;
+                    systemMessage += "\n\n## Search Results:\n" + markRetrievedContext(task, "httpcall:" + httpCallRag, httpCallContext);
                     LOGGER.infof("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
                     var traceData = dataFactory.createData("rag:httpcall:trace:" + taskId,
                             Map.of("httpCall", httpCallRag, "contextLength", httpCallContext.length()));
@@ -352,7 +362,7 @@ public class LlmTask implements ILifecycleTask {
                 String ragContext = capRagContext(ragContextProvider.retrieveContext(memory, task, userInput), maxRagContextChars,
                         "vector RAG for task '" + taskId + "'");
                 if (ragContext != null) {
-                    systemMessage += "\n\n## Relevant Context:\n" + ragContext;
+                    systemMessage += "\n\n## Relevant Context:\n" + markRetrievedContext(task, "knowledge-base", ragContext);
                     LOGGER.infof("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
                 }
             } catch (Exception e) {
@@ -372,7 +382,7 @@ public class LlmTask implements ILifecycleTask {
         if (channelData != null && channelData.getResult() != null) {
             channelTag = channelData.getResult();
         }
-        systemMessage = counterweightService.apply(systemMessage, task.getCounterweight(), channelTag);
+        systemMessage = counterweightService.apply(systemMessage, task.getCounterweight(), channelTag, memory.getAgentId());
 
         // When structured JSON output is expected, reinforce the format instruction.
         // If a responseSchema is provided, include it explicitly so the LLM knows the
@@ -423,7 +433,7 @@ public class LlmTask implements ILifecycleTask {
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
             // Resolve model name from provider-specific parameter keys
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             var estimator = tokenCounterFactory.getEstimator(resolvedType, resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
                     anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
@@ -447,7 +457,7 @@ public class LlmTask implements ILifecycleTask {
             var audio = mm != null
                     ? ModelCapabilityService.Support.parse(mm.getAudio())
                     : ModelCapabilityService.Support.AUTO;
-            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams),
+            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams, resolvedType),
                     vision, documents, audio);
         }
 
@@ -492,16 +502,20 @@ public class LlmTask implements ILifecycleTask {
         // Real model name of the cascade-selected step, for the audit ledger (#5).
         String cascadeAuditModel = null;
 
-        // Build chat messages without system message for agent mode
-        // (agent orchestrator adds system message internally)
-        List<ChatMessage> chatMessagesWithoutSystem = messages.stream().filter(m -> !(m instanceof SystemMessage))
-                .toList();
+        // Agent mode: the orchestrator adds the system message itself, so hand it the
+        // system message the history builder actually emitted — WITH the rolling
+        // summary — and strip only that leading message. Passing the pre-summary
+        // prompt and filtering every SystemMessage used to drop the summary, all the
+        // turns it covered (skipSteps had already cut them from the history), the
+        // windowing gap marker and system-role log parts.
+        String agentSystemMessage = ConversationHistoryBuilder.composeSystemMessage(systemMessage, summaryPrefix);
+        List<ChatMessage> chatMessagesWithoutSystem = ConversationHistoryBuilder.withoutLeadingSystemMessage(messages, agentSystemMessage);
 
         // === Multi-Model Cascade Branch ===
         if (cascadeActive) {
             boolean convertToObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
             boolean allowLiveStreaming = eventSink != null && !addToOutputExplicitlyFalse;
-            var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, systemMessage, processedParams, task, memory,
+            var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                     agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                     effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
 
@@ -588,7 +602,7 @@ public class LlmTask implements ILifecycleTask {
         } else if (skipCascade) {
             // Agent mode with cascade disabled — use normal agent flow. The streaming
             // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
-            var outcome = runToolLoopIfEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+            var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
                     effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
                     resolvedType, processedParams);
             if (outcome != null) {
@@ -609,7 +623,7 @@ public class LlmTask implements ILifecycleTask {
 
         } else {
             // === Standard (non-cascade) execution path ===
-            var outcome = runToolLoopIfEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
+            var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
                     effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
                     resolvedType, processedParams);
 
@@ -665,15 +679,7 @@ public class LlmTask implements ILifecycleTask {
         currentStep.storeData(langchainData);
 
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            String trimmed = responseContent != null ? responseContent.trim() : "";
-            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-                var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
-                templateDataObjects.put(responseObjectName, contentAsObject);
-            } else {
-                // LLM returned plain text despite structured output instruction
-                LOGGER.warn("convertToObject=true but LLM response is not JSON, storing as string");
-                templateDataObjects.put(responseObjectName, responseContent);
-            }
+            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId()));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -695,7 +701,7 @@ public class LlmTask implements ILifecycleTask {
             // resolveModelName, not params["model"]: most providers take "modelName", so
             // the
             // ledger recorded the provider type ("anthropic") instead of the model id.
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             String modelName = cascadeAuditModel != null ? cascadeAuditModel : resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
@@ -770,7 +776,8 @@ public class LlmTask implements ILifecycleTask {
                 // decided by resolveInheritedSummaryParameters — a summary config naming a
                 // different vendor gets the neutral tuning values and none of the
                 // credentials.
-                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType, resolveModelName(processedParams));
+                var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType,
+                        resolveModelName(processedParams, resolvedType));
                 conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
                         resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()));
             } catch (Exception e) {
@@ -1001,6 +1008,63 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
+     * Retrieved context, wrapped in a provenance envelope unless the task turned
+     * that off ({@code markRagProvenance: false}). See
+     * {@link ToolResultProvenance#markRetrieved}.
+     */
+    static String markRetrievedContext(Task task, String source, String context) {
+        return Boolean.FALSE.equals(task.getMarkRagProvenance()) ? context : ToolResultProvenance.markRetrieved(source, context);
+    }
+
+    /**
+     * The {@code convertToObject} view of a response: a JSON object becomes a Map,
+     * a JSON array a List, and anything else — plain text, or JSON the model
+     * truncated or malformed — stays the raw string.
+     * <p>
+     * An array used to be deserialized as a Map and a malformed object thrown
+     * straight out of the task, so a model that answered {@code [...]} or ran out
+     * of tokens mid-object failed the whole turn — after it had been paid for, and
+     * although the plain-text fallback right beside it existed for exactly this.
+     */
+    Object convertResponseToObject(String responseContent, String taskId) {
+        String trimmed = responseContent != null ? responseContent.trim() : "";
+        Class<?> target = trimmed.startsWith("{") ? Map.class : trimmed.startsWith("[") ? List.class : null;
+        if (target == null) {
+            // LLM returned plain text despite structured output instruction
+            LOGGER.warnf("convertToObject=true but the response of task '%s' is not JSON, storing as string", taskId);
+            return responseContent;
+        }
+        try {
+            return jsonSerialization.deserialize(trimmed, target);
+        } catch (IOException | RuntimeException e) {
+            LOGGER.warnf("convertToObject=true but the response of task '%s' is not valid JSON (%s), storing as string", taskId,
+                    e.getMessage());
+            return responseContent;
+        }
+    }
+
+    /**
+     * The cascade step whose tool loop raised this pause, or null to resume on the
+     * task's own model: no step recorded (no cascade, or a batch persisted before
+     * the field existed), the cascade since disabled, or the index out of range
+     * because the config changed during the pause — in which case the base model is
+     * the only defensible choice, and the drift is logged.
+     */
+    static CascadeStep pausedCascadeStep(Task task, PendingToolCallBatch batch) {
+        Integer stepIndex = batch.getCascadeStepIndex();
+        if (stepIndex == null) {
+            return null;
+        }
+        var cascade = task.getModelCascade();
+        var steps = cascade != null && cascade.isEnabled() ? cascade.getSteps() : null;
+        if (steps == null || stepIndex < 0 || stepIndex >= steps.size()) {
+            LOGGER.warnf("Paused cascade step %d of task '%s' no longer exists; resuming on the task's base model", stepIndex, task.getId());
+            return null;
+        }
+        return steps.get(stepIndex);
+    }
+
+    /**
      * Re-enter the paused LLM task after a HITL tool pause was resolved by a human.
      * <p>
      * This is the RESUME mirror of {@link #executeTask}: it rebuilds the chat model
@@ -1048,8 +1112,18 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // === Rebuild the chat model for THIS task only (normal-path parity) ===
-        var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
+        Map<String, String> processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);
         var resolvedType = globalVariableResolver.resolveValue(task.getType());
+        // M-L1: a pause raised inside a cascade step resumes on THAT step's model.
+        // Rebuilding the task's base model continued an escalated step's tool loop
+        // on the cheaper model the cascade had already judged not good enough.
+        var cascadeStep = pausedCascadeStep(task, batch);
+        if (cascadeStep != null) {
+            var stepModel = cascadingModelExecutor.resolveStepModel(cascadeStep, task, processedParams, templateDataObjects, memory,
+                    "Cascade step");
+            resolvedType = stepModel.modelType();
+            processedParams = stepModel.params();
+        }
         var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
 
         // === Hand off to the resume loop (Task 9) ===
@@ -1067,8 +1141,20 @@ public class LlmTask implements ILifecycleTask {
         var resumeBridge = createToolLoopStreamingBridge(memory.getEventSink(),
                 "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
 
-        var result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
-                toolHitlEnabled, jsonPolicy);
+        AgentOrchestrator.ExecutionResult result;
+        try {
+            result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
+                    toolHitlEnabled, jsonPolicy);
+        } catch (ToolApprovalRequiredException rePause) {
+            // The continuation hit another gated call and paused again. The loop
+            // builds that batch from scratch, and it knows nothing about cascades, so
+            // carry the step over: without it the SECOND resume of an escalated step
+            // would run on the base model again (M-L1, multi-pause path).
+            if (rePause.getBatch() != null && rePause.getBatch().getCascadeStepIndex() == null) {
+                rePause.getBatch().setCascadeStepIndex(batch.getCascadeStepIndex());
+            }
+            throw rePause;
+        }
 
         String responseContent = result != null ? result.response() : null;
         List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();
@@ -1097,14 +1183,7 @@ public class LlmTask implements ILifecycleTask {
         currentStep.storeData(langchainData);
 
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            String trimmed = responseContent != null ? responseContent.trim() : "";
-            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-                var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
-                templateDataObjects.put(responseObjectName, contentAsObject);
-            } else {
-                LOGGER.warn("convertToObject=true but resumed LLM response is not JSON, storing as string");
-                templateDataObjects.put(responseObjectName, responseContent);
-            }
+            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId()));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -1123,7 +1202,7 @@ public class LlmTask implements ILifecycleTask {
                 var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
-            String resolvedModelName = resolveModelName(processedParams);
+            String resolvedModelName = resolveModelName(processedParams, resolvedType);
             String modelName = resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
@@ -1179,15 +1258,46 @@ public class LlmTask implements ILifecycleTask {
     private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
     /**
-     * A vault reference MENTIONED in an LLM parameter — {@code {vault:key-name}},
-     * with or without the leading {@code $} (which is plain text to Qute either
-     * way).
+     * A configuration reference MENTIONED in an LLM parameter —
+     * {@code {vault:key-name}}, {@code {vars:key}}, {@code {connection:name}} or
+     * {@code {caller:token}}, with or without the leading {@code $} (which is plain
+     * text to Qute either way).
+     * <p>
+     * All four namespaces are resolved AFTER templating, by
+     * {@code ChatModelRegistry} and {@code SecretResolver}, and none of them has a
+     * Qute namespace resolver — so to Qute every one of them is an unresolvable
+     * namespaced expression, not just {@code vault}.
      */
-    private static final Pattern VAULT_REF_MENTION = Pattern.compile("\\{vault:[^}]*\\}");
+    static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
-     * Wraps {@code {vault:...}} mentions in Qute raw sections so a PROMPT may talk
-     * about the syntax without crashing templating.
+     * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
+     * against — the cheap pre-check, so the common no-reference value never pays
+     * for a regex.
+     * <p>
+     * This is a superset filter, not the namespace list: it must match everything
+     * the pattern can match, and may match more. The legacy {@code eddivault:}
+     * namespace is deliberately absent because {@code "eddivault:"} CONTAINS
+     * {@code "vault:"}, so it is already covered — dropping {@code "vault:"} from
+     * this list would silently stop escaping the legacy prefix too. Any namespace
+     * added to the pattern must have a substring of it present here;
+     * {@code LlmTaskVaultMentionTest} fails if one does not.
+     */
+    private static final List<String> CONFIG_REF_NAMESPACES = List.of("vault:", "vars:", "connection:", "caller:");
+
+    /**
+     * Wraps configuration-reference mentions ({@code vault}, {@code vars},
+     * {@code connection}, {@code caller}) in Qute raw sections, so a parameter may
+     * CARRY or TALK ABOUT one without crashing templating.
+     * <p>
+     * Two shapes hit this. A prompt that documents the syntax, and a parameter
+     * whose value IS a reference — {@code "modelName": "${vars:gemini-model}"} is
+     * resolved by {@code ChatModelRegistry} after templating, but Qute sees it
+     * first. Before this escaped more than {@code vault}, such an agent logged "No
+     * namespace resolver found for [vars]" on every single turn (observed live),
+     * and the parameter fell back to its raw value — which happens to be right for
+     * a value that is ONLY a reference, and silently wrong for one that also
+     * contains a real expression, since the whole render is abandoned.
      * <p>
      * The Platform Operator's system prompt instructs the model to write secrets as
      * {@code ${vault:key-name}} references. Qute parses the brace part as a
@@ -1199,42 +1309,98 @@ public class LlmTask implements ILifecycleTask {
      * templating for that parameter and fell back to the RAW string, skipping every
      * legitimate {@code {memory...}} expression alongside it.
      * <p>
-     * Escaping HERE, for LLM parameters only, threads that needle: these values go
-     * to the model, never through vault resolution, so a literal
-     * {@code ${vault:key-name}} in a prompt is inert documentation. Httpcall
-     * templating does not pass through this method and keeps failing loudly,
-     * exactly as that security decision requires.
+     * Escaping HERE, for LLM parameters only, threads that needle. The prompts
+     * ({@code systemMessage}, {@code prompt}) go to the model and never through
+     * vault resolution, so a literal {@code ${vault:key-name}} there is inert
+     * documentation. Every OTHER parameter does reach vault resolution —
+     * {@code ChatModelRegistry} resolves {@code ${vars:…}} and {@code ${vault:…}}
+     * in the builder parameters after templating — which is why
+     * {@link #runTemplateEngineOnParams} refuses a reference in those that the
+     * configuration did not write. Httpcall templating does not pass through this
+     * method and keeps failing loudly, exactly as that security decision requires.
      * <p>
      * Known limit: a mention already inside a {@code {|raw|}} section would be
      * double-wrapped and render its markers. Prompts do not write Qute raw
      * sections; accepting that beats parsing Qute here.
      */
-    static String escapeVaultMentions(String value) {
-        if (value == null || !value.contains("vault:")) {
+    static String escapeConfigReferenceMentions(String value) {
+        if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
-        return VAULT_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+        return CONFIG_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
     }
 
-    private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {
+    /**
+     * Parameters that go to the model as text and are never resolved against the
+     * vault, so conversation data in them may carry anything — including the
+     * characters of a vault reference — without releasing a secret.
+     */
+    static final Set<String> PROMPT_PARAMS = Set.of(KEY_SYSTEM_MESSAGE, KEY_PROMPT);
+
+    /**
+     * Render the task parameters, refusing a credential reference that came from
+     * conversation data.
+     * <p>
+     * Every parameter except the prompts is resolved by {@code ChatModelRegistry}
+     * after templating: global variables first, then {@code ${vault:…}}. A
+     * parameter such as {@code "modelName": "{context.model}"} or {@code "baseUrl":
+     * "{properties.endpoint}"} therefore used to resolve a
+     * {@code ${vault:another-agents-key}} a user typed into it — with no grant
+     * check — and hand the plaintext to the provider client, whose errors routinely
+     * echo the value back. A reference is resolved only where the configuration
+     * wrote it (the same rule {@link ConfigReferenceGuard} applies to httpcalls),
+     * or where a named property holds this conversation's own auto-vaulted secret.
+     *
+     * @throws LifecycleException
+     *             when a rendered builder parameter carries a vault, connection,
+     *             caller or global-variable reference its configured template does
+     *             not
+     */
+    private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects,
+                                                              IConversationMemory memory)
+            throws LifecycleException {
 
         var processedParams = new HashMap<>(parameters);
         processedParams.forEach((key, value) -> {
             try {
                 if (!isNullOrEmpty(value) && !TEMPLATE_SKIP_PARAMS.contains(key)) {
-                    processedParams.put(key, templatingEngine.processTemplate(escapeVaultMentions(value), templateDataObjects));
+                    processedParams.put(key, templatingEngine.processTemplate(escapeConfigReferenceMentions(value), templateDataObjects));
                 }
             } catch (ITemplatingEngine.TemplateEngineException e) {
                 LOGGER.errorf(e, "Template processing failed for LLM parameter '%s': %s", key, e.getLocalizedMessage());
             }
         });
+        Map<String, Property> conversationProperties = memory != null && memory.getConversationProperties() != null
+                ? memory.getConversationProperties()
+                : Map.of();
+        guardRenderedParameters(parameters, processedParams, templateDataObjects, conversationProperties);
         return processedParams;
+    }
+
+    /**
+     * {@link ConfigReferenceGuard#requireConfiguredParameters} for the task
+     * parameters: every one of them reaches vault resolution except
+     * {@link #PROMPT_PARAMS}.
+     *
+     * @throws LifecycleException
+     *             naming the first parameter that carries a reference its template
+     *             did not write
+     */
+    static void guardRenderedParameters(Map<String, String> configured, Map<String, String> rendered, Map<String, Object> templateData,
+                                        Map<String, Property> conversationProperties)
+            throws LifecycleException {
+        try {
+            ConfigReferenceGuard.requireConfiguredParameters(configured, rendered, PROMPT_PARAMS, "LLM", templateData, conversationProperties);
+        } catch (IllegalArgumentException e) {
+            throw new LifecycleException(e.getMessage(), e);
+        }
     }
 
     /**
      * Extracts the current user input text from conversation memory. Used as the
      * query for RAG retrieval.
      */
+
     private String extractUserInput(IConversationMemory memory) {
         var currentStep = memory.getCurrentStep();
         IData<String> inputData = currentStep.getLatestData("input");
@@ -1270,11 +1436,19 @@ public class LlmTask implements ILifecycleTask {
         var effective = new LlmConfiguration.ConversationSummaryConfig();
         effective.setEnabled(configured.isEnabled());
         effective.setLlmProvider(providerMissing ? parentProvider : configured.getLlmProvider());
-        effective.setLlmModel(modelMissing ? parentModel : configured.getLlmModel());
+        // The parent's model is only meaningful to the parent's provider: a summary
+        // config naming another vendor with no model of its own would otherwise send,
+        // say, an xAI parent's grok-4.7 to Anthropic. Left unset, the summary
+        // provider's builder applies its own default.
+        boolean sameProvider = providerMissing
+                || (!isNullOrEmpty(parentProvider) && configured.getLlmProvider().trim().equalsIgnoreCase(parentProvider.trim()));
+        effective.setLlmModel(modelMissing ? (sameProvider ? parentModel : null) : configured.getLlmModel());
         effective.setMaxSummaryTokens(configured.getMaxSummaryTokens());
         effective.setExcludePropertiesFromSummary(configured.isExcludePropertiesFromSummary());
         effective.setRecentWindowSteps(configured.getRecentWindowSteps());
         effective.setMaxRecallTurns(configured.getMaxRecallTurns());
+        effective.setMaxTurnsPerUpdate(configured.getMaxTurnsPerUpdate());
+        effective.setMaxCharsPerUpdate(configured.getMaxCharsPerUpdate());
         effective.setSummarizationPrompt(configured.getSummarizationPrompt());
         return effective;
     }
@@ -1316,15 +1490,18 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * Parameter keys that belong to the provider that issued them: credentials and
-     * the endpoint coordinates that address that provider's account. Everything
-     * else (temperature, maxTokens, timeout, …) is vendor-neutral and safe to carry
-     * across a provider boundary.
+     * Parameter keys that belong to the provider that issued them: credentials, the
+     * endpoint coordinates that address that provider's account, and the model keys
+     * ({@link ModelParameterKeys#MODEL_KEYS}) — a model id means nothing to another
+     * vendor, and an inherited {@code modelName} would override the summary
+     * provider's own default. Everything else (temperature, maxTokens, timeout, …)
+     * is vendor-neutral and safe to carry across a provider boundary.
      */
-    private static final Set<String> PROVIDER_BOUND_PARAMETERS = Set.of(
+    private static final Set<String> PROVIDER_BOUND_PARAMETERS = Stream.concat(Stream.of(
             "apiKey", "accessToken", "authToken", "nonAzureApiKey", "signingSecret", "appPassword", "botToken",
-            "baseUrl", "endpoint", "deploymentName",
-            "compartmentId", "configProfile", "projectId", "region", "location");
+            "baseUrl", "endpoint",
+            "compartmentId", "configProfile", "projectId", "region", "location"),
+            ModelParameterKeys.MODEL_KEYS.stream()).collect(Collectors.toUnmodifiableSet());
 
     /**
      * The second half of the F13 inheritance decision: <em>which</em> of the parent
@@ -1377,7 +1554,7 @@ public class LlmTask implements ILifecycleTask {
 
         if (!dropped.isEmpty()) {
             LOGGER.warnf("[SUMMARY] conversationSummary runs on provider '%s' while the task runs on '%s' — not inheriting %s. "
-                    + "Credentials must never cross a provider boundary; configure them for '%s' "
+                    + "Credentials, endpoints and model ids never cross a provider boundary; configure them for '%s' "
                     + "(global variable or vault-backed default), or omit llmProvider to reuse the task's model.",
                     sanitize(summaryProvider), sanitize(parentProvider), dropped, sanitize(summaryProvider));
         }
@@ -1618,6 +1795,7 @@ public class LlmTask implements ILifecycleTask {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
                 CascadeConfigValidator.validate(llmConfiguration);
+                warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
@@ -1626,6 +1804,49 @@ public class LlmTask implements ILifecycleTask {
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Reports deprecated parameters once per configuration load, at the moment the
+     * configuration is read.
+     * <p>
+     * {@code includeFirstAgentMessage} is deprecated: it exists to satisfy an
+     * Anthropic rule that a conversation may not open on an assistant turn, and the
+     * Messages API no longer documents that rule. It is still honoured -- agent
+     * behaviour lives in stored JSON, and silently ignoring a parameter an author
+     * set on purpose would start sending a greeting they chose to withhold with no
+     * diagnostic.
+     * <p>
+     * <b>Here rather than in {@code execute}</b>, and static rather than instance.
+     * An {@link ILifecycleTask} is an application-scoped singleton shared by every
+     * conversation and MUST be stateless (AGENTS.md §4.1 rule 2), so the obvious
+     * "warn once, remember that we did" needs a field this class may not have.
+     * Keying such a field on the task id would have been wrong twice over: two
+     * tasks that both omit an id collapse to the same key, so the second one would
+     * never have warned at all.
+     * <p>
+     * Config load is the honest boundary anyway. It is where the mistake is
+     * fixable, it is already where deploy-time validation runs, and it visits every
+     * task in the document individually -- including two that share, or omit, an
+     * id.
+     */
+    static void warnOnDeprecatedParameters(LlmConfiguration llmConfiguration) {
+        // A record: the accessor is tasks(), not getTasks().
+        if (llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        for (var task : llmConfiguration.tasks()) {
+            if (task == null || task.getParameters() == null) {
+                continue;
+            }
+            if (isNullOrEmpty(task.getParameters().get(KEY_INCLUDE_FIRST_AGENT_MESSAGE))) {
+                continue;
+            }
+            LOGGER.warnf("LLM task '%s' sets the deprecated parameter '%s'. It exists to satisfy an Anthropic "
+                    + "first-message rule that no longer applies, and it is honoured unchanged for now. Remove it from new "
+                    + "configurations; keep it only if this agent must genuinely withhold its opening greeting.",
+                    sanitize(task.getId() != null ? task.getId() : "<unnamed>"), KEY_INCLUDE_FIRST_AGENT_MESSAGE);
+        }
     }
 
     /**
@@ -1650,6 +1871,23 @@ public class LlmTask implements ILifecycleTask {
         if (name != null)
             return name;
         return processedParams.get("deploymentName");
+    }
+
+    /**
+     * As {@link #resolveModelName(Map)}, but a named OpenAI-compatible provider
+     * (xAI, DeepSeek, ...) configured without a model resolves to its preset's
+     * default model — the same one its builder will send. Without this, vision
+     * forwarding and the audit/cost records saw no model at all.
+     *
+     * @param resolvedType
+     *            the task type after global-variable resolution
+     */
+    public static String resolveModelName(Map<String, String> processedParams, String resolvedType) {
+        String name = resolveModelName(processedParams);
+        if (name == null || name.isBlank()) {
+            return OpenAiCompatibleProviders.find(resolvedType).map(OpenAiCompatibleProvider::defaultModel).orElse(name);
+        }
+        return name;
     }
 
     /**

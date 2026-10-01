@@ -121,13 +121,13 @@ class LlmTaskCoverage2Test {
     void setUp() throws Exception {
         openMocks(this);
 
-        lenient().when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        lenient().when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
         lenient().when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         // Identity/counterweight pass through unchanged by default; individual tests
         // can verify they were invoked with a specific config.
-        lenient().when(counterweightService.apply(anyString(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(identityMaskingService.apply(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
@@ -281,7 +281,7 @@ class LlmTaskCoverage2Test {
         agentReturns("done");
         var templateData = new HashMap<String, Object>();
         when(memoryItemConverter.convert(memory)).thenReturn(templateData);
-        when(promptSnippetService.getAll()).thenReturn(Map.of("cautious_mode", "be careful"));
+        when(promptSnippetService.getForAgent(any())).thenReturn(Map.of("cautious_mode", "be careful"));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of("default-model", "gpt-4"));
 
         var t = task("taskA", List.of("action1"), null);
@@ -395,7 +395,7 @@ class LlmTaskCoverage2Test {
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
         verify(identityMaskingService).apply(anyString(), same(masking));
-        verify(counterweightService).apply(anyString(), same(counterweight), any());
+        verify(counterweightService).apply(anyString(), same(counterweight), any(), any());
     }
 
     @Test
@@ -410,7 +410,7 @@ class LlmTaskCoverage2Test {
         var t = task("taskA", List.of("action1"), null);
         llmTask.execute(memory, new LlmConfiguration(List.of(t)));
 
-        verify(counterweightService).apply(anyString(), any(), eq("scheduled"));
+        verify(counterweightService).apply(anyString(), any(), eq("scheduled"), any());
     }
 
     // ============================================================
@@ -666,7 +666,7 @@ class LlmTaskCoverage2Test {
         wireStandardMemory(List.of("action1"));
         // Agent mode cascade calls the orchestrator (8-arg overload) inside the cascade
         // step.
-        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent cascade answer", new ArrayList<>()));
 
         var cascade = new ModelCascadeConfig();
@@ -693,7 +693,7 @@ class LlmTaskCoverage2Test {
     void cascadeEnabled_agentMode_threadsTranscriptCap() throws Exception {
         llmTask.toolTranscriptMaxBytes = 54321;
         wireStandardMemory(List.of("action1"));
-        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent cascade answer", new ArrayList<>()));
 
         var cascade = new ModelCascadeConfig();
@@ -713,7 +713,7 @@ class LlmTaskCoverage2Test {
 
         var capCaptor = ArgumentCaptor.forClass(Integer.class);
         verify(agentOrchestrator).executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(),
-                capCaptor.capture(), any());
+                capCaptor.capture(), any(), any());
         assertEquals(54321, capCaptor.getValue());
     }
 
@@ -908,7 +908,7 @@ class LlmTaskCoverage2Test {
         AgentOrchestrator o = mock(AgentOrchestrator.class);
         try {
             lenient().doReturn(null).when(o)
-                    .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any());
+                    .executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

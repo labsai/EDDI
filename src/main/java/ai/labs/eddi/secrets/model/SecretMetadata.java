@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets.model;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -51,4 +52,48 @@ import java.util.List;
 public record SecretMetadata(String tenantId, String keyName, @JsonFormat(shape = JsonFormat.Shape.STRING) Instant createdAt,
         @JsonFormat(shape = JsonFormat.Shape.STRING) Instant lastAccessedAt, @JsonFormat(shape = JsonFormat.Shape.STRING) Instant lastRotatedAt,
         String checksum, String description, List<String> allowedAgents) {
+
+    /**
+     * The one spelling of "every agent may use this secret". Defined here, next to
+     * the field it describes, because several layers need it — the provider's
+     * default, the persistence default, the deploy-time check and the grant-edit
+     * endpoint — and a second definition drifting from this one would mean a grant
+     * that looks narrow in one layer and open in another.
+     */
+    public static final String WILDCARD_AGENT = "*";
+
+    /**
+     * Whether {@code allowedAgents} leaves the secret open to every agent.
+     * <p>
+     * Three shapes mean that, and all three predate this method: {@code null} and
+     * empty (documented on this record as "unrestricted, not deny all", and treated
+     * as such by {@link ai.labs.eddi.secrets.VaultGrantChecker}), and a list
+     * containing {@link #WILDCARD_AGENT}.
+     */
+    public static boolean grantsAllAgents(List<String> allowedAgents) {
+        return allowedAgents == null || allowedAgents.isEmpty() || allowedAgents.contains(WILDCARD_AGENT);
+    }
+
+    /**
+     * The canonical storage form of a grant list: {@code ["*"]} when it means every
+     * agent, otherwise the list as given.
+     * <p>
+     * This collapses the existing spellings of "everyone" onto the documented one
+     * rather than adding another. It matters most for the mixed case —
+     * {@code ["*", "someAgentId"]} — which the deploy-time check already reads as
+     * unrestricted: stored verbatim it reads to a human as a narrow grant that
+     * happens to contain a wildcard, which is the opposite of what it does.
+     */
+    public static List<String> canonicalGrant(List<String> allowedAgents) {
+        return grantsAllAgents(allowedAgents) ? List.of(WILDCARD_AGENT) : List.copyOf(allowedAgents);
+    }
+
+    /**
+     * Whether two grants mean the same thing: equal as sets, with every spelling of
+     * the wildcard equal to every other. The order ids happen to be listed in is
+     * not part of what a grant means.
+     */
+    public static boolean sameGrant(List<String> left, List<String> right) {
+        return new HashSet<>(canonicalGrant(left)).equals(new HashSet<>(canonicalGrant(right)));
+    }
 }

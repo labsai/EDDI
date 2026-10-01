@@ -28,7 +28,7 @@ import java.util.LinkedHashMap;
 import org.bson.codecs.*;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.junit.jupiter.api.*;
-import org.testcontainers.containers.MongoDBContainer;
+import org.testcontainers.mongodb.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -256,6 +256,23 @@ class MongoConversationMemoryStoreTest {
             List<String> ended = store.getEndedConversationIds();
             assertEquals(1, ended.size());
             assertEquals(endedId, ended.getFirst());
+        }
+
+        @Test
+        @DisplayName("getConversationUsage — counts across versions, active only non-ended, distinct users")
+        void usage() throws IResourceStore.ResourceStoreException {
+            store.storeConversationMemorySnapshot(createSnapshot(null, "usageAgent", 1, "u1", ConversationState.IN_PROGRESS));
+            store.storeConversationMemorySnapshot(createSnapshot(null, "usageAgent", 2, "u1", ConversationState.IN_PROGRESS));
+            String endedId = store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "usageAgent", 2, "u2", ConversationState.IN_PROGRESS));
+            store.setConversationState(endedId, ConversationState.ENDED);
+            store.storeConversationMemorySnapshot(createSnapshot(null, "otherAgent", 1, "u3", ConversationState.IN_PROGRESS));
+
+            var usage = store.getConversationUsage("usageAgent");
+
+            assertEquals(3, usage.total());
+            assertEquals(2, usage.active());
+            assertEquals(2, usage.distinctUsers());
         }
     }
 

@@ -233,17 +233,23 @@ class DocumentationAccuracyTest {
     // ----------------------------------------------------------------- backup
 
     /**
-     * AGENTS.md §5.5 is the stated reference for hand-building an import ZIP. It
-     * listed seven of the twelve file extensions the importer handles, so the most
-     * common case — an agent with a regular dictionary — could not be built from
-     * the file that tells you how to build one.
+     * agent-config-authoring.md is the stated reference for hand-building an import
+     * ZIP (AGENTS.md §5 sends AI sessions there). When that section lived in
+     * AGENTS.md it listed seven of the twelve file extensions the importer handles,
+     * so the most common case — an agent with a regular dictionary — could not be
+     * built from the file that tells you how to build one.
      */
     @Test
-    @DisplayName("AGENTS.md's ZIP section names every backup file extension")
+    @DisplayName("agent-config-authoring.md's ZIP section names every backup file extension")
     void everyBackupExtensionIsDocumented() {
-        // §5.5 only: the URI table further down names some of the same types, and would
-        // otherwise satisfy this check for an extension the ZIP block no longer lists.
-        String agents = section(read("AGENTS.md"), "### 5.5 ZIP Structure for Agent Import", "### 5.6 ");
+        // The ZIP block only: the URI table right after it names some of the same
+        // types, and would otherwise satisfy this check for an extension the ZIP
+        // block no longer lists. section() falls back to the rest of the page when
+        // the end heading is missing, which would quietly re-admit that table.
+        String page = read("docs/agent-config-authoring.md");
+        assertTrue(page.contains("### URI format"),
+                "agent-config-authoring.md no longer has a '### URI format' heading to end the ZIP block at");
+        String agents = section(page, "## ZIP Structure for Agent Import", "### URI format");
         String backup = read("src/main/java/ai/labs/eddi/backup/impl/AbstractBackupService.java");
         Matcher m = Pattern.compile("String\\s+\\w+_EXT\\s*=\\s*\"([^\"]+)\"").matcher(backup);
         Set<String> missing = new TreeSet<>();
@@ -256,7 +262,7 @@ class DocumentationAccuracyTest {
             }
         }
         assertTrue(found >= 12, "expected at least 12 *_EXT constants, found " + found);
-        assertTrue(missing.isEmpty(), "AGENTS.md's ZIP structure omits these file extensions: " + missing);
+        assertTrue(missing.isEmpty(), "agent-config-authoring.md's ZIP structure omits these file extensions: " + missing);
     }
 
     /**
@@ -267,11 +273,11 @@ class DocumentationAccuracyTest {
      * {@code {properties.agentName}} to end users.
      */
     @Test
-    @DisplayName("AGENTS.md's workflow step table names the templating and mcpcalls steps")
+    @DisplayName("agent-config-authoring.md's workflow step table names the templating and mcpcalls steps")
     void workflowStepTableIsComplete() {
-        String agents = read("AGENTS.md");
-        int table = agents.indexOf("#### Workflow step types");
-        assertTrue(table > 0, "AGENTS.md no longer has a 'Workflow step types' section");
+        String agents = read("docs/agent-config-authoring.md");
+        int table = agents.indexOf("### Workflow step types");
+        assertTrue(table > 0, "agent-config-authoring.md no longer has a 'Workflow step types' section");
         String section = agents.substring(table, Math.min(agents.length(), table + 2000));
         for (String step : List.of("ai.labs.parser", "ai.labs.behavior", "ai.labs.property",
                 "ai.labs.httpcalls", "ai.labs.output", "ai.labs.llm",

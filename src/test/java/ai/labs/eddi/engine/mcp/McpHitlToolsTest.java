@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
@@ -13,7 +14,9 @@ import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -28,6 +31,7 @@ import java.util.Map;
 import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -136,6 +140,22 @@ class McpHitlToolsTest {
     }
 
     @Test
+    void resume_withPauseId_bindsTheDecisionToThatPause() throws Exception {
+        tools.resumeConversation("c1", "APPROVED", null, " 1700000000123 ");
+        ArgumentCaptor<HitlDecision> captor = ArgumentCaptor.forClass(HitlDecision.class);
+        verify(conversationService).resumeConversation(eq("c1"), captor.capture(), isNull());
+        assertEquals("1700000000123", captor.getValue().getPauseId());
+    }
+
+    @Test
+    void resume_pauseChanged_returnsPauseChanged() throws Exception {
+        doThrow(new IConversationService.PauseMismatchException("changed"))
+                .when(conversationService).resumeConversation(eq("c1"), any(), isNull());
+        String out = tools.resumeConversation("c1", "APPROVED", null, "1000");
+        assertTrue(out.contains("\"errorCode\":\"PAUSE_CHANGED\""), out);
+    }
+
+    @Test
     void cancel_disabledByKillSwitch_returnsDisabled() {
         tools = build(true, false);
         String out = tools.cancelConversation("c1");
@@ -210,6 +230,40 @@ class McpHitlToolsTest {
     }
 
     @Test
+    void approveGroup_withPauseId_bindsTheDecisionToThatPause() throws Exception {
+        when(json.serialize(any())).thenReturn("{\"ok\":true}");
+        tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, " 1700000000123 ");
+        ArgumentCaptor<GroupApprovalRequest> cap = ArgumentCaptor.forClass(GroupApprovalRequest.class);
+        verify(groupConversationService).resumeDiscussion(eq("gc1"), cap.capture(), isNull());
+        assertEquals("1700000000123", cap.getValue().getDecision().getPauseId());
+    }
+
+    @Test
+    void approveGroup_blankPauseId_leavesTheDecisionUnbound() throws Exception {
+        when(json.serialize(any())).thenReturn("{\"ok\":true}");
+        tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, "  ");
+        ArgumentCaptor<GroupApprovalRequest> cap = ArgumentCaptor.forClass(GroupApprovalRequest.class);
+        verify(groupConversationService).resumeDiscussion(eq("gc1"), cap.capture(), isNull());
+        assertNull(cap.getValue().getDecision().getPauseId());
+    }
+
+    @Test
+    void approveGroup_pauseChanged_returnsPauseChanged() throws Exception {
+        doThrow(new IGroupConversationService.GroupPauseMismatchException("changed"))
+                .when(groupConversationService).resumeDiscussion(eq("gc1"), any(), isNull());
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, "1000");
+        assertTrue(out.contains("\"errorCode\":\"PAUSE_CHANGED\""), out);
+    }
+
+    @Test
+    void approveGroup_notAwaiting_stillReturnsWrongState() throws Exception {
+        doThrow(new IGroupConversationService.GroupDiscussionException("not awaiting"))
+                .when(groupConversationService).resumeDiscussion(eq("gc1"), any(), isNull());
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, "1000");
+        assertTrue(out.contains("\"errorCode\":\"WRONG_STATE\""), out);
+    }
+
+    @Test
     void listAllGroupPendingApprovals_delegatesToGuardWithNullGroup() throws Exception {
         when(guard.listScopedGroupPendingApprovals(isNull(), anyInt())).thenReturn(List.of());
         when(json.serialize(any())).thenReturn("[]");
@@ -268,6 +322,41 @@ class McpHitlToolsTest {
         String out = tools.getApprovalStatus("c1", "full");
         assertTrue(out.contains("full"), out);
         assertFalse(out.contains("FORBIDDEN"), out);
+    }
+
+    /**
+     * The MCP mirror of {@code approval-status?detail=full} must serve the same
+     * approver projection as the REST surface. It used to strip only the request
+     * fingerprint, so the raw tool arguments and the frozen LLM transcript — both
+     * resume machinery carrying clear-text arguments — reached any MCP caller the
+     * gate admitted. Serialized for real: a mocked serializer would hide exactly
+     * which fields ride along.
+     */
+    @Test
+    void getApprovalStatus_detailFull_neverServesRawArgumentsOrTranscript() throws Exception {
+        String canary = "canary-raw-4f1d9c";
+        var batch = new PendingToolCallBatch();
+        batch.setChatTranscriptJson("{\"messages\":[{\"text\":\"" + canary + "-transcript\"}]}");
+        batch.setTraceSoFar(List.of(Map.of("arguments", canary + "-trace")));
+        var call = new PendingToolCallBatch.PendingToolCall();
+        call.setCallId("call-1");
+        call.setToolName("setupAgent");
+        call.setArgumentsRaw("{\"note\":\"" + canary + "-args\"}");
+        call.setArgumentsRedacted("{\"note\":\"visible-to-approver\"}");
+        batch.setCalls(List.of(call));
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        snapshot.setHitlPendingToolCalls(batch);
+        when(guard.requireConversationHitlAccess("c1")).thenReturn("someone-else");
+        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        json = new JsonSerialization(new ObjectMapper());
+        tools = build(true, true);
+
+        String out = tools.getApprovalStatus("c1", "full");
+
+        assertFalse(out.contains(canary), "raw arguments, transcript or trace leaked: " + out);
+        assertTrue(out.contains("visible-to-approver"),
+                "the redacted arguments are the approver's contract and must still be served: " + out);
     }
 
     @Test

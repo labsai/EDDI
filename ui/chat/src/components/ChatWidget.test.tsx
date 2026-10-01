@@ -604,7 +604,7 @@ describe("ChatWidget — round-3 regressions", () => {
     expect(JSON.parse(bodies[0]).context.attachment_0.value.storageRef).toBe("ref-1");
   });
 
-  it("does not put a secret back into the unmasked composer after a 409", async () => {
+  it("puts a refused secret back only into the masked composer after a 409", async () => {
     globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
       const href = String(url);
       if (href.includes("/start")) {
@@ -628,12 +628,18 @@ describe("ChatWidget — round-3 regressions", () => {
     fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
 
     await screen.findByText(/reviewer must resolve/i);
-    // Let the restore effect run before asserting — checking immediately after
-    // the error text appears races it, and the assertion passes vacuously.
-    await waitFor(() => {});
 
-    const composer = screen.getByTestId("chat-input") as HTMLTextAreaElement;
-    expect(composer.value).toBe("");
+    // Handed back — the server never consumed it — but masked and still in
+    // secret mode, so a resend goes out with secretInput again.
+    await waitFor(() =>
+      expect((screen.getByTestId("chat-input") as HTMLInputElement).value).toBe("hunter2"),
+    );
+    const composer = screen.getByTestId("chat-input") as HTMLInputElement;
+    expect(composer.type).toBe("password");
+    expect(screen.getByTestId("chat-secret-toggle")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Secret mode ON"),
+    );
     expect(screen.queryByText("hunter2")).toBeNull();
   });
 });
@@ -732,6 +738,8 @@ describe("ChatWidget — resume after approval", () => {
         return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
       }
       if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+      // Not a conversation read: kept out of the count below.
+      if (href.includes("/profile")) return new Response("{}", { status: 200 });
       if (href.includes("/approval-status")) {
         approvalPolls += 1;
         // First poll: still paused. Second: settled, so the widget refreshes.
@@ -809,43 +817,43 @@ describe("ChatWidget — resume after approval", () => {
   }, 15000);
 });
 
-describe("ChatWidget — model cascade", () => {
-  /**
-   * Backend whose stream emits the given frames and then stays open, so the
-   * transient indicator state is still on screen when we assert.
-   */
-  function mockOpenStream(frames: string[]) {
-    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
-      const href = String(url);
-      if (href.includes("/start")) {
-        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
-      }
-      if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
-      if (href.includes("/stream")) {
-        return new Response(
-          new ReadableStream({
-            start(c) {
-              const enc = new TextEncoder();
-              for (const f of frames) c.enqueue(enc.encode(f));
-            },
-          }),
-          { status: 200, headers: { "Content-Type": "text/event-stream" } },
-        );
-      }
+/**
+ * Backend whose stream emits the given frames and then stays open, so the
+ * transient indicator state is still on screen when we assert.
+ */
+function mockOpenStream(frames: string[]) {
+  globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+    const href = String(url);
+    if (href.includes("/start")) {
+      return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+    }
+    if (href.includes("/agentstore/")) return new Response("{}", { status: 200 });
+    if (href.includes("/stream")) {
       return new Response(
-        JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
-        { status: 200 },
+        new ReadableStream({
+          start(c) {
+            const enc = new TextEncoder();
+            for (const f of frames) c.enqueue(enc.encode(f));
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
       );
-    }) as typeof fetch;
-  }
+    }
+    return new Response(
+      JSON.stringify({ conversationState: "READY", conversationSteps: [] }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+}
 
-  async function send(text = "hello") {
-    renderWidget();
-    const input = await screen.findByTestId("chat-input");
-    fireEvent.change(input, { target: { value: text } });
-    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
-  }
+async function sendOnOpenStream(text = "hello") {
+  renderWidget();
+  const input = await screen.findByTestId("chat-input");
+  fireEvent.change(input, { target: { value: text } });
+  fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+}
 
+describe("ChatWidget — model cascade", () => {
   it("says the agent is thinking harder once the cascade escalates", async () => {
     // A buffered cascade emits its whole answer as a single token, so the wait
     // after an escalation is completely silent — without this the user watches
@@ -853,7 +861,7 @@ describe("ChatWidget — model cascade", () => {
     mockOpenStream([
       'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"reason":"low_confidence"}\n\n',
     ]);
-    await send();
+    await sendOnOpenStream();
 
     expect(await screen.findByTestId("escalating-indicator")).toBeInTheDocument();
     expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
@@ -864,7 +872,7 @@ describe("ChatWidget — model cascade", () => {
       'event: cascade_escalation\ndata: {"toStep":1}\n\n',
       "event: token\ndata: Here is the answer\n\n",
     ]);
-    await send();
+    await sendOnOpenStream();
 
     await screen.findByText("Here is the answer");
     expect(screen.queryByTestId("escalating-indicator")).not.toBeInTheDocument();
@@ -880,7 +888,7 @@ describe("ChatWidget — model cascade", () => {
       'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"confidence":0.61,' +
         '"threshold":0.7,"reason":"low_confidence","durationMs":812}\n\n',
     ]);
-    await send();
+    await sendOnOpenStream();
 
     await screen.findByTestId("escalating-indicator");
     expect(document.body.textContent).not.toMatch(
@@ -898,7 +906,7 @@ describe("ChatWidget — model cascade", () => {
       "event: token\ndata: partial answer\n\n",
       'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"reason":"timeout"}\n\n',
     ]);
-    await send();
+    await sendOnOpenStream();
 
     await screen.findByTestId("escalating-indicator");
     expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
@@ -915,11 +923,120 @@ describe("ChatWidget — model cascade", () => {
       "event: token\ndata: Partial answer\n\n",
       'event: cascade_step_start\ndata: {"stepIndex":1,"modelName":"gpt-4o"}\n\n',
     ]);
-    await send();
+    await sendOnOpenStream();
 
     await screen.findByText("Partial answer");
     expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
     expect(screen.queryByTestId("escalating-indicator")).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatWidget — live tool calls", () => {
+  it("says which tool the agent is using", async () => {
+    // Without handling, the event was dropped and a slow tool looked like the
+    // agent thinking for no reason.
+    mockOpenStream([
+      'event: task_start\ndata: {"taskId":"ai.labs.llm","taskType":"llm","index":0}\n\n',
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    const indicator = await screen.findByTestId("tool-indicator");
+    expect(indicator).toHaveTextContent("Using calculator…");
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
+  });
+
+  it("follows the newest tool when the agent calls several", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"websearch"}\n\n',
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using calculator…"),
+    );
+    expect(document.body.textContent).not.toMatch(/websearch/);
+  });
+
+  it("clears the tool status as soon as text resumes", async () => {
+    // No event says a tool finished — resumed output is the only signal.
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      "event: token\ndata: The answer is 4\n\n",
+    ]);
+    await sendOnOpenStream();
+
+    await screen.findByText("The answer is 4");
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Using calculator/);
+  });
+
+  it("clears the tool status when the turn completes", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      'event: done\ndata: {"conversationState":"READY","conversationOutputs":[{"output":["4"]}]}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await screen.findByText("4");
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
+  });
+
+  it("names a tool called after text has already streamed", async () => {
+    // A model may write a sentence and THEN call a tool. The silence while it
+    // runs is the wait worth explaining, so the event is not token-gated the
+    // way task_start is.
+    mockOpenStream([
+      "event: token\ndata: Let me check that.\n\n",
+      'event: tool_call\ndata: {"tool":"weather"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using weather…");
+    expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
+    expect(screen.getByText("Let me check that.")).toBeInTheDocument();
+  });
+
+  it("ignores a malformed payload rather than rendering a broken name", async () => {
+    mockOpenStream([
+      'event: task_start\ndata: {"taskId":"ai.labs.llm","taskType":"llm","index":0}\n\n',
+      "event: tool_call\ndata: not json\n\n",
+    ]);
+    await sendOnOpenStream();
+
+    await screen.findByTestId("thinking-indicator");
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Using /);
+  });
+
+  it("announces the tool from outside the busy transcript", async () => {
+    // The transcript is aria-busy for the whole turn, and a status region
+    // inside a busy one may not be announced — so the tool state, which only
+    // exists mid-turn, would never reach a screen reader.
+    mockOpenStream(['event: tool_call\ndata: {"tool":"calculator"}\n\n']);
+    await sendOnOpenStream();
+
+    const status = await screen.findByTestId("chat-activity-status");
+    await waitFor(() => expect(status).toHaveTextContent("Using calculator…"));
+    expect(status).toHaveAttribute("role", "status");
+    expect(status.closest("[aria-busy='true']")).toBeNull();
+    expect(screen.getByTestId("chat-transcript")).toHaveAttribute("aria-busy", "true");
+    // The visual copy stays put but is not a second announcement.
+    expect(screen.getByTestId("tool-indicator")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("gives way to the escalation hint when the cascade escalates", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      'event: cascade_escalation\ndata: {"fromStep":0,"toStep":1,"reason":"low_confidence"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    expect(await screen.findByTestId("escalating-indicator")).toBeInTheDocument();
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
   });
 });
 
@@ -1024,5 +1141,158 @@ describe("ChatWidget — New Conversation during a live stream", () => {
     const fresh = screen.getByTestId("chat-input");
     fireEvent.change(fresh, { target: { value: "second turn" } });
     await waitFor(() => expect(screen.getByTestId("chat-send")).toBeEnabled());
+  });
+});
+
+describe("ChatWidget — conversation review notice", () => {
+  const snapshot = {
+    conversationState: "READY",
+    conversationSteps: [{ conversationStep: [{ key: "output:text:P:1", value: ["Hello!"] }], timestamp: "2026-07-21T10:00:00Z" }],
+  };
+
+  function backendWithProfile(profile: Response) {
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      calls.push(href);
+      if (href.includes("/profile")) return profile.clone();
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (href.includes("/descriptorstore/") || href.includes("/agentstore/")) {
+        return new Response(JSON.stringify({ name: "Descriptor Name" }), { status: 200 });
+      }
+      return new Response(JSON.stringify(snapshot), { status: 200 });
+    }) as typeof fetch;
+    return calls;
+  }
+
+  it("tells the person, before they type, that the maintainers may read the chat", async () => {
+    backendWithProfile(
+      new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this conversation." }), {
+        status: 200,
+      }),
+    );
+
+    renderWidget();
+
+    expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent(
+      "The support team may read this conversation.",
+    );
+  });
+
+  it("keeps the input closed until the notice has had its chance to appear", async () => {
+    // A slow profile let somebody type before they were told the conversation
+    // may be read. The input now waits for the lookup to settle.
+    let answer: (r: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => { answer = resolve; });
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("/profile")) return pending;
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      return new Response(JSON.stringify(snapshot), { status: 200 });
+    }) as typeof fetch;
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
+
+    answer(new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 }));
+
+    expect(await screen.findByTestId("chat-review-notice")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
+  });
+
+  it("shows no notice for an agent that did not opt in", async () => {
+    backendWithProfile(new Response(JSON.stringify({ name: "Support", reviewNotice: null }), { status: 200 }));
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
+  });
+
+  it("shows no notice, and still chats, on an EDDI without the profile endpoint", async () => {
+    // The agent's name comes from the conversation (loadAgentName); the profile
+    // is only asked about review, and a 404 there must not get in the way.
+    const calls = backendWithProfile(new Response(JSON.stringify({ message: "not found" }), { status: 404 }));
+
+    renderWidget();
+
+    expect(await screen.findByText("Hello!")).toBeInTheDocument();
+    await waitFor(() => expect(calls.some((c) => c.includes("/profile"))).toBe(true));
+    expect(screen.queryByTestId("chat-review-notice")).not.toBeInTheDocument();
+  });
+
+  it("sends no quick reply before the notice has had its chance to appear", async () => {
+    // Only the composer waited; a quick reply calls handleSend directly.
+    let answer: (r: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => { answer = resolve; });
+    const sends: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/profile")) return pending;
+      if (href.includes("/start")) {
+        return new Response(null, { status: 201, headers: { Location: "/agents/conv-1" } });
+      }
+      if (init?.method === "POST") sends.push(href);
+      return new Response(
+        JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [{ output: ["Pick one"], quickReplies: [{ value: "Yes" }] }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    renderWidget();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Yes" }));
+    expect(sends).toEqual([]);
+
+    answer(new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 }));
+    expect(await screen.findByTestId("chat-review-notice")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(sends.length).toBeGreaterThan(0));
+  });
+
+  it("shows the notice of the agent behind a managed route", async () => {
+    // The managed route names an intent, not an agent; the snapshot names the agent.
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      calls.push(href);
+      if (href.includes("/profile")) {
+        return new Response(JSON.stringify({ name: "Support", reviewNotice: "The support team may read this." }), { status: 200 });
+      }
+      if (href.includes("/agentstore/") || href.includes("/descriptorstore/")) return new Response("{}", { status: 200 });
+      return new Response(
+        JSON.stringify({
+          conversationId: "managed-conv-9",
+          agentId: "agent-9",
+          agentVersion: 1,
+          conversationState: "READY",
+          conversationSteps: [{ conversationStep: [{ key: "output:text:P:1", value: ["Hi from managed"] }], timestamp: "2026-07-21T10:00:00Z" }],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    render(
+      <MemoryRouter initialEntries={["/chat/managed/support/user-7"]}>
+        <ChatProvider>
+          <Routes>
+            <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
+          </Routes>
+        </ChatProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent("The support team may read this.");
+    expect(calls.some((c) => c.includes("/agents/agent-9/profile"))).toBe(true);
   });
 });

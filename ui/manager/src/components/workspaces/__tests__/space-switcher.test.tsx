@@ -88,10 +88,38 @@ describe("SpaceSwitcher", () => {
     expect(screen.queryByTestId("space-switcher")).not.toBeInTheDocument();
   });
 
-  it("hides itself when there is only one space to choose", async () => {
+  it("stays available with a single space, because \"Shared with me\" is still a choice", async () => {
+    // It used to hide with one space. A user with no team still receives
+    // shares, and the ownership filter is how they find them.
     await render(info({ spaces: [PERSONAL] }));
 
-    expect(screen.queryByTestId("space-switcher")).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId("space-switcher"));
+
+    expect(screen.getByTestId("ownership-option-shared")).toBeInTheDocument();
+  });
+
+  it("filters by ownership and says so on the trigger", async () => {
+    await render();
+
+    await userEvent.click(await screen.findByTestId("space-switcher"));
+    await userEvent.click(screen.getByTestId("ownership-option-shared"));
+
+    expect(screen.getByTestId("space-switcher")).toHaveTextContent("Shared with me");
+    expect(localStorage.getItem("eddi.workspace.ownership")).toBe("shared");
+
+    await userEvent.click(screen.getByTestId("space-switcher"));
+    await userEvent.click(screen.getByTestId("ownership-option-any"));
+    expect(screen.getByTestId("space-switcher")).not.toHaveTextContent("Shared with me");
+  });
+
+  it("says where new items are created, following the workspace in view", async () => {
+    await render();
+
+    await userEvent.click(await screen.findByTestId("space-switcher"));
+    await userEvent.click(screen.getByTestId(`space-option-${TEAM.id}`));
+    await userEvent.click(screen.getByTestId("space-switcher"));
+
+    expect(screen.getByTestId("space-create-hint")).toHaveTextContent("engineering");
   });
 
   it("calls the personal space the same thing in the trigger as in the menu", async () => {

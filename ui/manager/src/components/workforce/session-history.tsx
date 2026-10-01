@@ -27,6 +27,8 @@ const STATE_BADGE: Record<GroupConversationState, { label: string; variant: "suc
   SYNTHESIZING: { label: "Synthesizing", variant: "warning" },
   CREATED: { label: "Created", variant: "secondary" },
   FAILED: { label: "Failed", variant: "destructive" },
+  // A recorded human decision, not a fault — neutral, never destructive.
+  REJECTED: { label: "Rejected", variant: "secondary" },
   CANCELLED: { label: "Cancelled", variant: "secondary" },
   AWAITING_APPROVAL: { label: "Awaiting Approval", variant: "warning" },
   AWAITING_HUMAN_INPUT: { label: "Awaiting Human Input", variant: "warning" },

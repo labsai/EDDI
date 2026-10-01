@@ -14,6 +14,8 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
@@ -21,6 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -55,6 +58,13 @@ class ChangelogFragmentTest {
     private static final Path AGENTS = Path.of("AGENTS.md");
 
     /**
+     * U+FEFF, the byte-order mark, written numerically on purpose: the project
+     * formatter rewrites a {@code \}{@code uXXXX} escape into the raw character it
+     * denotes, which would put an invisible BOM into this source file.
+     */
+    private static final char BOM = 0xFEFF;
+
+    /**
      * A real calendar month and day, stated declaratively — mirrors
      * {@code changelog_common.MONTH} and {@code DAY}, and the same shape
      * {@link ChangelogRotationTest} uses for an archive name.
@@ -74,9 +84,10 @@ class ChangelogFragmentTest {
      * The date an entry carries in its own heading.
      * <p>
      * The closing parenthesis is deliberately not required, matching
-     * {@code changelog_common.DATE}: entries already in the live file and its
-     * archives are headed {@code (2026-07-02, after the revert)}, and demanding
-     * {@code ')'} would report as undated a heading the collator accepts.
+     * {@code changelog_common.DATE}: fourteen entries already in the live file and
+     * its archives are headed {@code (2026-07-02, session 2)} or
+     * {@code (2026-04-08 cont.)}, and demanding {@code ')'} would report as undated
+     * a heading the collator accepts.
      */
     private static final Pattern HEADING_DATE = Pattern.compile("\\((\\d{4}-" + MONTH + "-" + DAY + ")");
 
@@ -92,7 +103,15 @@ class ChangelogFragmentTest {
     /**
      * A fenced block carrying register rows — mirrors the collator's REGISTER_INFO.
      */
-    private static final Pattern REGISTER_FENCE = Pattern.compile("^(`{3,})(decision-log|regression-note)[ \t]*$");
+    private static final Pattern REGISTER_FENCE = Pattern.compile("^(`{3,}|~{3,})(decision-log|regression-note)[ \t]*$");
+
+    /**
+     * The right intent with the wrong spelling — mirrors the collator's
+     * REGISTER_TYPO, which refuses the fragment rather than leave the rows in the
+     * entry as an ordinary code block.
+     */
+    private static final Pattern REGISTER_TYPO = Pattern.compile("^(?:decision[-_ ]?logs?|regression[-_ ]?notes?)$",
+            Pattern.CASE_INSENSITIVE);
 
     /** A markdown table's separator row, which is not data. */
     private static final Pattern SEPARATOR_ROW = Pattern.compile("^\\|[\\s\\-:|]+\\|\\s*$");
@@ -109,8 +128,15 @@ class ChangelogFragmentTest {
      */
     private static final Pattern SPAN = Pattern.compile("(`+)(?:(?!\\1).)*?\\1");
 
-    /** A fence marker, mirroring {@code changelog_common.FENCE_MARK}. */
-    private static final Pattern FENCE_MARK = Pattern.compile("^(`{3,})(.*)$");
+    /**
+     * A fence marker, mirroring {@code changelog_common.FENCE_MARK}.
+     * <p>
+     * Tildes as well as backticks: CommonMark allows both, and a {@code ~~~} fence
+     * was invisible to every scan here and in the collator — an example heading
+     * inside one split an entry in two, and an example register row inside one was
+     * filed into the live Decision Log.
+     */
+    private static final Pattern FENCE_MARK = Pattern.compile("^(`{3,}|~{3,})(.*)$");
 
     /**
      * A reference-style link definition. {@link #LINK} cannot see the path in one,
@@ -176,6 +202,11 @@ class ChangelogFragmentTest {
             }
 
             for (String heading : headings) {
+                Matcher date = HEADING_DATE.matcher(heading);
+                if (date.find() && !isRealDate(date.group(1))) {
+                    problems.add(name + " — dated " + date.group(1)
+                            + ", which is not a day that exists: " + heading);
+                }
                 if (!HEADING_DATE.matcher(heading).find()) {
                     // Reported apart, because "undated" sends the author looking
                     // for a missing bracket when the real problem is a month of
@@ -250,29 +281,45 @@ class ChangelogFragmentTest {
 
         for (Path fragment : fragments()) {
             String name = fragment.getFileName().toString();
-            String[] lines = read(fragment).split("\n", -1);
+            // Every fence is tracked, not just register ones. Opening only on a
+            // register fence made this STRICTER than the collator: a
+            // ```decision-log nested inside a ````markdown block — the shape
+            // docs/changelog.d/README.md uses to document the format — was
+            // graded as real rows, so the placeholder '| YYYY-MM-DD |' in an
+            // example failed a test whose Javadoc promises it "enforces exactly
+            // what the collator enforces". The collator nests correctly.
+            char fenceChar = 0;
             int openRun = 0;
             String kind = null;
-            for (String line : lines) {
+            for (String line : read(fragment).split("\n", -1)) {
                 String stripped = line.strip();
-                Matcher fence = REGISTER_FENCE.matcher(stripped);
+                Matcher mark = FENCE_MARK.matcher(stripped);
+                boolean isMark = mark.matches();
+
                 if (openRun == 0) {
-                    if (fence.matches()) {
-                        openRun = fence.group(1).length();
-                        kind = fence.group(2);
+                    if (isMark) {
+                        fenceChar = mark.group(1).charAt(0);
+                        openRun = mark.group(1).length();
+                        Matcher register = REGISTER_FENCE.matcher(stripped);
+                        kind = register.matches() ? register.group(2) : null;
                     }
                     continue;
                 }
-                Matcher mark = FENCE_MARK.matcher(stripped);
-                if (mark.matches() && mark.group(1).length() >= openRun && mark.group(2).isBlank()) {
+                if (isMark && mark.group(1).charAt(0) == fenceChar
+                        && mark.group(1).length() >= openRun && mark.group(2).isBlank()) {
                     openRun = 0;
+                    kind = null;
                     continue;
                 }
-                if (stripped.isEmpty() || SEPARATOR_ROW.matcher(stripped).matches()) {
-                    continue; // a copied header separator, not a row
+                if (kind == null || stripped.isEmpty() || SEPARATOR_ROW.matcher(stripped).matches()) {
+                    continue; // inside an ordinary fence, or a copied header separator
                 }
-                if (!ROW_DATE.matcher(stripped).find()) {
-                    problems.add(name + " — ```" + kind + " row: " + stripped);
+                Matcher rowDate = ROW_DATE.matcher(stripped);
+                if (!rowDate.find()) {
+                    problems.add(name + " — " + kind + " row does not start with a date: " + stripped);
+                } else if (!isRealDate(rowDate.group(1))) {
+                    problems.add(name + " — " + kind + " row dated " + rowDate.group(1)
+                            + ", which is not a day that exists: " + stripped);
                 }
             }
         }
@@ -310,6 +357,89 @@ class ChangelogFragmentTest {
                         + "fenced ```decision-log or ```regression-note block, which is collated into the "
                         + "table at the bottom of docs/changelog.md:\n  "
                         + String.join("\n  ", problems));
+    }
+
+    /**
+     * Three things {@code collate-changelog.py} refuses that nothing above looked
+     * at, so a fragment could pass {@code mvnw test} and then stop the nightly job:
+     * text above the first heading (collation would drop it, so the script exits
+     * instead), a fence that never closes, and a register block spelt almost right
+     * ({@code ```decision_log}), whose rows would otherwise never reach the table.
+     * CI's Changelog Discipline job now also runs {@code collate-changelog.py
+     * --check} itself; this is the half that fails the author's own build.
+     */
+    @Test
+    @DisplayName("every fragment passes the checks the collator exits on")
+    void fragmentsPassTheCollatorsStructuralChecks() {
+        var problems = new TreeSet<String>();
+        for (Path fragment : fragments()) {
+            problems.addAll(collationProblems(fragment.getFileName().toString(), read(fragment)));
+        }
+        assertTrue(problems.isEmpty(), "collate-changelog.py would refuse these fragment(s):\n  "
+                + String.join("\n  ", problems));
+    }
+
+    @Test
+    @DisplayName("the collator's structural checks catch what the collator refuses")
+    void collationProblemsMirrorTheCollator() {
+        String entry = "## Title (2026-09-26)\n\nBody.\n";
+
+        assertEquals(List.of(), collationProblems("ok.md", entry));
+        assertEquals(List.of(), collationProblems("ok.md",
+                "```decision-log\n| 2026-09-26 | a | b | c |\n```\n\n" + entry),
+                "a register block may sit above the first entry — the collator lifts it out first");
+        assertEquals(List.of(), collationProblems("ok.md", entry + "\n````markdown\n```decision_log\n```\n````\n"),
+                "a near-miss inside an outer fence is an example, not a register block");
+
+        assertEquals(1, collationProblems("x.md", "Intro line.\n\n" + entry).size(), "text above the first heading");
+        assertEquals(1, collationProblems("x.md", entry + "\n```java\nint x;\n").size(), "an unterminated fence");
+        assertEquals(1, collationProblems("x.md", entry + "\n```decision_log\n| 2026-09-26 | a |\n```\n").size(),
+                "a misspelt register block");
+        assertEquals(1, collationProblems("x.md", entry + "\n~~~Regression-Notes\n| 2026-09-26 | a |\n~~~\n").size(),
+                "a misspelt register block, tilde-fenced and capitalised");
+    }
+
+    /**
+     * The fragment-level refusals of {@code collate-changelog.py} that the other
+     * tests here do not already cover: {@code entries_of}'s preamble check and
+     * {@code take_register_rows}' unterminated-fence and {@code REGISTER_TYPO}
+     * checks, walked with the same fence rules as {@link #proseLines}.
+     */
+    private static List<String> collationProblems(String name, String body) {
+        var problems = new ArrayList<String>();
+        char fenceChar = 0;
+        int openRun = 0;
+        String openedAt = null;
+        boolean seenHeading = false;
+        for (String line : body.split("\n", -1)) {
+            String stripped = line.strip();
+            Matcher mark = FENCE_MARK.matcher(stripped);
+            boolean isMark = mark.matches();
+            if (openRun == 0) {
+                if (isMark) {
+                    fenceChar = mark.group(1).charAt(0);
+                    openRun = mark.group(1).length();
+                    openedAt = stripped;
+                    String info = mark.group(2).strip();
+                    if (!REGISTER_FENCE.matcher(stripped).matches() && REGISTER_TYPO.matcher(info).matches()) {
+                        problems.add(name + " — opens a " + stripped + " block; only ```decision-log and "
+                                + "```regression-note are filed into the register tables");
+                    }
+                } else if (line.startsWith("## ")) {
+                    seenHeading = true;
+                } else if (!seenHeading && !stripped.isEmpty()) {
+                    problems.add(name + " — text above the first '## ' heading, which collation would discard: "
+                            + stripped);
+                }
+            } else if (isMark && mark.group(1).charAt(0) == fenceChar
+                    && mark.group(1).length() >= openRun && mark.group(2).isBlank()) {
+                openRun = 0;
+            }
+        }
+        if (openRun != 0) {
+            problems.add(name + " — the " + openedAt + " block is never closed");
+        }
+        return problems;
     }
 
     @Test
@@ -410,21 +540,41 @@ class ChangelogFragmentTest {
      */
     private static List<String> proseLines(String body) {
         var prose = new ArrayList<String>();
+        char fenceChar = 0;
         int openRun = 0;
         for (String line : body.split("\n", -1)) {
             Matcher mark = FENCE_MARK.matcher(line.strip());
             boolean isMark = mark.matches();
             if (openRun == 0) {
                 if (isMark) {
+                    fenceChar = mark.group(1).charAt(0);
                     openRun = mark.group(1).length();
                 } else {
                     prose.add(line);
                 }
-            } else if (isMark && mark.group(1).length() >= openRun && mark.group(2).isBlank()) {
+            } else if (isMark && mark.group(1).charAt(0) == fenceChar
+                    && mark.group(1).length() >= openRun && mark.group(2).isBlank()) {
                 openRun = 0;
             }
         }
         return prose;
+    }
+
+    /**
+     * Whether {@code YYYY-MM-DD} is a day that exists — mirrors
+     * {@code changelog_common.is_real_date}.
+     * <p>
+     * {@link #MONTH} and {@link #DAY} bound the fields, which is enough to keep the
+     * rotation script from crashing, but they still admit 2026-02-30. Ordering
+     * survives that; a reader finding it in the changelog does not.
+     */
+    private static boolean isRealDate(String text) {
+        try {
+            LocalDate.parse(text);
+            return true;
+        } catch (DateTimeParseException e) {
+            return false;
+        }
     }
 
     /**
@@ -465,7 +615,12 @@ class ChangelogFragmentTest {
 
     private static String read(Path file) {
         try {
-            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            // The leading BOM is stripped for the same reason the scripts read
+            // with utf-8-sig: left in place it keeps the opening "## " off the
+            // start of line 1, and the file is reported as having no heading
+            // while the heading is plainly there.
+            String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+            return !text.isEmpty() && text.charAt(0) == BOM ? text.substring(1) : text;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

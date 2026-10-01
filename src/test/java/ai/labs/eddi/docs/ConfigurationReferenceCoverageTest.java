@@ -15,7 +15,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Collection;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -87,9 +89,12 @@ class ConfigurationReferenceCoverageTest {
 
     /**
      * A constant being used as a property name: injected, looked up, or read
-     * through {@code getConfig()}. {@code %s} is the constant's identifier.
+     * through {@code getConfig()}. {@code %s} is the identifier to look for — bare
+     * inside the declaring file, and qualified with the declaring class
+     * ({@code SourceUrlValidator.REQUIRE_HTTPS_PROPERTY}) anywhere else, so a
+     * same-named constant in an unrelated class cannot vouch for this one.
      */
-    private static final String CONFIG_USE = "(?:@ConfigProperty\\(\\s*name\\s*=\\s*|getOptionalValue\\(\\s*|getValue\\(\\s*)%s\\b";
+    private static final String CONFIG_USE = "(?:@ConfigProperty\\(\\s*name\\s*=\\s*|getOptionalValue\\(\\s*|getValue\\(\\s*)(?:\\w+\\.)*%s\\b";
 
     /**
      * Any {@code `eddi.…`} code span in the reference — how every property is
@@ -125,7 +130,15 @@ class ConfigurationReferenceCoverageTest {
             // so no runtime injection point reads the value itself.
             "eddi.messaging.type",
             // Consumed by the NATS extension's own configuration, not by EDDI code.
-            "eddi.nats.ack-wait-seconds");
+            "eddi.nats.ack-wait-seconds",
+            // The next three are read by Quarkus HTTP configuration through
+            // ${...} expressions in application.properties, not by Java: the /chat
+            // CSP filter's frame-ancestors, the application CSP's connect-src, and
+            // the /q/metrics permission policy. CspPolicyTest pins the first two to
+            // their filters, MetricsHttpPolicyConfigTest the third to its rule.
+            "eddi.chat.frame-ancestors",
+            "eddi.csp.extra-connect-sources",
+            "eddi.metrics.http-policy");
 
     @Test
     @DisplayName("every eddi.* property the code reads is in the configuration reference")
@@ -181,6 +194,13 @@ class ConfigurationReferenceCoverageTest {
         for (String property : collectProperties(root).keySet()) {
             valid.add(property.replaceAll("[^A-Za-z0-9]", "_").toUpperCase(Locale.ROOT));
         }
+        // Real properties too, read through ${...} expressions rather than by Java (see
+        // DECLARED_BUT_UNREAD), so collectProperties cannot see them. Without this, a
+        // doc
+        // could not name EDDI_CHAT_FRAME_ANCESTORS, which the Helm chart itself sets.
+        for (String property : DECLARED_BUT_UNREAD) {
+            valid.add(property.replaceAll("[^A-Za-z0-9]", "_").toUpperCase(Locale.ROOT));
+        }
 
         var wrong = new TreeSet<String>();
         for (Path file : documentationFiles(root)) {
@@ -226,7 +246,10 @@ class ConfigurationReferenceCoverageTest {
             "EDDI_API_KEY", "EDDI_API_URL", "EDDI_URL", "EDDI_PORT", "EDDI_HTTPS_PORT", "EDDI_DOMAIN",
             "EDDI_SCHEME", "EDDI_DIR", "EDDI_CONFIG", "EDDI_NAMESPACE", "EDDI_BRANCH", "EDDI_RELEASE",
             "EDDI_CLI", "EDDI_REPO_ROOT", "EDDI_ALREADY_RUNNING", "EDDI_URI_PATTERN", "EDDI_AUTH",
-            "EDDI_DEMO_LLM_API_KEY", "EDDI_DEMO_LLM_MODEL", "EDDI_DEMO_LLM_TYPE");
+            "EDDI_DEMO_LLM_API_KEY", "EDDI_DEMO_LLM_MODEL", "EDDI_DEMO_LLM_TYPE",
+            // The host address the compose files publish EDDI's ports on (127.0.0.1 by
+            // default).
+            "EDDI_BIND");
 
     /**
      * Names a document quotes deliberately because they do <em>not</em> work.
@@ -279,32 +302,64 @@ class ConfigurationReferenceCoverageTest {
      */
     private static TreeMap<String, String> propertiesReadByJava(Path root) {
         var found = new TreeMap<String, String>();
+        var bodies = new LinkedHashMap<String, String>();
         for (Path file : javaSources(root.resolve(Path.of("src", "main", "java")))) {
-            String body = read(file);
-            String relative = root.relativize(file).toString().replace('\\', '/');
-            record(INJECTED.matcher(body), found, relative);
-            record(LOOKED_UP.matcher(body), found, relative);
-            record(EXPRESSION.matcher(body), found, relative);
-            recordConstants(body, found, relative);
+            bodies.put(root.relativize(file).toString().replace('\\', '/'), read(file));
+        }
+        for (var entry : bodies.entrySet()) {
+            record(INJECTED.matcher(entry.getValue()), found, entry.getKey());
+            record(LOOKED_UP.matcher(entry.getValue()), found, entry.getKey());
+            record(EXPRESSION.matcher(entry.getValue()), found, entry.getKey());
+        }
+        // Constants last, and against every source: a constant is only evidence
+        // once something hands it to the config API, and that may be another file.
+        for (var entry : bodies.entrySet()) {
+            recordConstants(entry.getValue(), found, entry.getKey(), bodies.values());
         }
         return found;
     }
 
     /**
      * Records a property named by a constant, but only when that constant is
-     * actually handed to the config API somewhere in the same file. Without the
-     * second half, a name prefix or a request-context key would be
-     * indistinguishable from a configuration property.
+     * actually handed to the config API. Without the second half, a name prefix or
+     * a request-context key would be indistinguishable from a configuration
+     * property.
+     * <p>
+     * The use may be in any source file, not only the one that declares the
+     * constant: a property name defined next to the code that <em>validates</em> it
+     * and injected where it is <em>read</em> is one property with two call sites,
+     * not an invented one. Requiring both halves in one file made
+     * {@code eddi.backup.sync.*} — declared on {@code SourceUrlValidator}, injected
+     * into {@code RestImportService} — look undocumentable. What the rule is
+     * actually for, the evidence that this string is a property at all, is
+     * unchanged.
      */
-    private static void recordConstants(String body, TreeMap<String, String> into, String source) {
+    private static void recordConstants(String body, TreeMap<String, String> into, String source,
+                                        Collection<String> allSources) {
+        String declaringClass = classNameOf(source);
         Matcher m = CONSTANT.matcher(body);
         while (m.find()) {
             String identifier = m.group(1);
             String property = m.group(2);
-            if (Pattern.compile(String.format(CONFIG_USE, Pattern.quote(identifier))).matcher(body).find()) {
+            Pattern hereUse = Pattern.compile(String.format(CONFIG_USE, Pattern.quote(identifier)));
+            // Qualified elsewhere: TIMEOUT_PROPERTY declared by two classes must not
+            // let a use of A.TIMEOUT_PROPERTY vouch for B's.
+            Pattern elsewhereUse = Pattern.compile(
+                    String.format(CONFIG_USE, Pattern.quote(declaringClass + "." + identifier)));
+            boolean used = hereUse.matcher(body).find()
+                    || allSources.stream().anyMatch(candidate -> elsewhereUse.matcher(candidate).find());
+            if (used) {
                 into.putIfAbsent(property, source);
             }
         }
+    }
+
+    /**
+     * {@code ai/labs/.../SourceUrlValidator.java} to {@code SourceUrlValidator}.
+     */
+    private static String classNameOf(String relativePath) {
+        String name = relativePath.substring(relativePath.lastIndexOf('/') + 1);
+        return name.endsWith(".java") ? name.substring(0, name.length() - ".java".length()) : name;
     }
 
     private static void record(Matcher matcher, TreeMap<String, String> into, String source) {

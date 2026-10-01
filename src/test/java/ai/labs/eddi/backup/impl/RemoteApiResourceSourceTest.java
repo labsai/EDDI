@@ -26,6 +26,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
@@ -40,6 +41,13 @@ class RemoteApiResourceSourceTest {
 
     private static final String BASE_URL = "https://staging.example.com";
     private static final String AGENT_ID = "aaaaaaaaaaaaaaaaaaaaaaaa";
+
+    /**
+     * What the agent's own document is taken to say. readSnippets offers only the
+     * snippets this text names, so a test that wants a snippet back has to have the
+     * agent reference it — which is the behaviour under test.
+     */
+    private String agentDocumentJson = "{\"systemMessage\":\"{snippets.greeting}\"}";
 
     @BeforeEach
     void setUp() {
@@ -255,6 +263,10 @@ class RemoteApiResourceSourceTest {
         mockHttpResponse("/agentstore/agents/" + AGENT_ID + "?version=1", "{agentJson}");
         when(jsonSerialization.deserialize("{agentJson}", AgentConfiguration.class))
                 .thenReturn(agentConfig);
+        // readSnippets scans the agent's own documents for {snippets.<name>} to
+        // decide which snippets belong to it, and the scan serializes the config
+        // it just read back — so the serializer has to answer for it.
+        lenient().when(jsonSerialization.serialize(agentConfig)).thenReturn(agentDocumentJson);
 
         mockHttpResponse("/agentstore/agents/descriptors?index=0&limit=0", "[]");
         when(jsonSerialization.deserialize("[]", DocumentDescriptor[].class))

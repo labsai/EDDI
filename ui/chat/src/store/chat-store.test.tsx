@@ -265,6 +265,58 @@ describe("cascade escalation", () => {
   });
 });
 
+/* ─── Live tool call ─────────────────────────── */
+
+describe("active tool", () => {
+  it("SET_ACTIVE_TOOL sets and clears the name", () => {
+    const on = chatReducer(initialState, { type: "SET_ACTIVE_TOOL", tool: "calculator" });
+    expect(on.activeTool).toBe("calculator");
+
+    expect(chatReducer(on, { type: "SET_ACTIVE_TOOL", tool: null }).activeTool).toBeNull();
+  });
+
+  it("SET_ACTIVE_TOOL returns the SAME state object when unchanged", () => {
+    // Cleared on every token — must not re-render the store per token.
+    expect(chatReducer(initialState, { type: "SET_ACTIVE_TOOL", tool: null })).toBe(
+      initialState,
+    );
+  });
+
+  it("FINISH_STREAMING clears it — no tool is running once the turn is over", () => {
+    const state: ChatState = {
+      ...initialState,
+      activeTool: "calculator",
+      isProcessing: true,
+      messages: [makeMsg({ isStreaming: true })],
+    };
+
+    expect(chatReducer(state, { type: "FINISH_STREAMING" }).activeTool).toBeNull();
+  });
+
+  it("CLEAR_MESSAGES clears it, so a new conversation never inherits it", () => {
+    const state: ChatState = { ...initialState, activeTool: "calculator" };
+
+    expect(chatReducer(state, { type: "CLEAR_MESSAGES" }).activeTool).toBeNull();
+  });
+
+  it("an escalation drops the tool the abandoned model was running", () => {
+    const state: ChatState = { ...initialState, activeTool: "calculator" };
+
+    const next = chatReducer(state, { type: "SET_ESCALATING", value: true });
+
+    expect(next.isEscalating).toBe(true);
+    expect(next.activeTool).toBeNull();
+  });
+
+  it("lowering escalation leaves a running tool alone", () => {
+    // SET_ESCALATING false is dispatched on every token; it must neither wipe
+    // the tool nor allocate a new state when nothing changed.
+    const state: ChatState = { ...initialState, activeTool: "calculator" };
+
+    expect(chatReducer(state, { type: "SET_ESCALATING", value: false })).toBe(state);
+  });
+});
+
 describe("CLEAR_MESSAGES resets the turn flags", () => {
   it("clears isProcessing — a cleared conversation is not mid-turn", () => {
     // This was only ever lowered as a side effect of the abandoned stream's
@@ -678,9 +730,10 @@ describe("withdrawing a SECRET turn", () => {
     messages: [{ id: "u1", role: "user" as const, content: "●●●●●●●●", timestamp: 1 }],
   };
 
-  it("does not hand the secret back as a restorable draft", () => {
-    // The composer that would receive it is unmasked, and the secret marking
-    // is lost — so the value would be shown in clear and re-sent unmarked.
+  it("hands a secret back only into a masked, secret-mode composer", () => {
+    // Restoring it into the plain composer would show it in clear and re-send
+    // it unmarked; dropping it made the user retype a key the server never
+    // consumed. Secret mode ON keeps it masked and re-sends it as secret.
     const next = chatReducer(secretState, {
       type: "WITHDRAW_LAST_USER_MESSAGE",
       messageId: "u1",
@@ -688,7 +741,8 @@ describe("withdrawing a SECRET turn", () => {
       wasSecret: true,
     });
 
-    expect(next.restoreDraft).toBeNull();
+    expect(next.restoreDraft).toBe("hunter2");
+    expect(next.isSecretMode).toBe(true);
     expect(next.messages).toHaveLength(0);
   });
 

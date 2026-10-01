@@ -16,11 +16,53 @@ import java.util.Objects;
  * @author ginccc
  */
 public interface IConversationMemoryStore {
+    /**
+     * Persist the full snapshot under optimistic concurrency.
+     * <p>
+     * A full-document write whose snapshot is not itself {@code ENDED} is also
+     * refused while the stored conversation is {@code ENDED}: ending a conversation
+     * is a narrow state write that does not move the revision, so the revision
+     * guard alone would let a turn that was already running (a rerun, or a memory
+     * whose append baseline is unknown) replace the terminal state and resurrect
+     * the conversation. The refusal is reported like any other conflict.
+     * <p>
+     * The write is guarded on {@link ConversationMemorySnapshot#getRevision()} —
+     * the revision the snapshot was loaded at — and increments it. A snapshot whose
+     * conversationId is {@code null} is inserted instead, at revision 1.
+     * <p>
+     * <strong>The guard is the point.</strong> Without it the write matched on the
+     * conversation id alone, so two turns whose load/save windows overlapped both
+     * started from the same snapshot and the last writer won: the earlier turn's
+     * step vanished while both writes reported success and both callers had already
+     * been handed their reply. Implementations MUST refuse such a write rather than
+     * apply it, and MUST distinguish the two zero-match causes — a
+     * {@link ConcurrentConversationModificationException} when the conversation is
+     * still there at a different revision (a retry from a fresh load can still
+     * land), and a plain {@link IResourceStore.ResourceStoreException} when it is
+     * gone (deleted mid-turn — nothing to retry against).
+     * <p>
+     * On refusal, implementations MUST leave {@code snapshot.getRevision()} at the
+     * value they were called with, so a caller that retries re-presents the
+     * revision it actually loaded.
+     *
+     * @param snapshot
+     *            the full conversation snapshot to persist
+     * @return the conversation id (generated on insert)
+     * @throws ConcurrentConversationModificationException
+     *             another writer committed first; nothing was written
+     * @throws IResourceStore.ResourceStoreException
+     *             the conversation no longer exists, or the write failed
+     */
     String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException;
 
     /**
      * Store the full snapshot ONLY IF the conversation is still in
-     * {@code expectedState} — an atomic compare-and-store. Returns true if the
+     * {@code expectedState} <em>and</em> still holds the snapshot's
+     * {@link ConversationMemorySnapshot#getRevision() revision} — an atomic
+     * compare-and-store on both. The state half stops a concurrent terminal writer
+     * from being overwritten; the revision half stops a concurrent NON-terminal
+     * writer from being overwritten, which the state filter alone cannot detect
+     * because both writers leave the same state behind. Returns true if the
      * snapshot was persisted, false if the current persisted state no longer
      * matched (a concurrent terminal writer won).
      * <p>
@@ -52,12 +94,58 @@ public interface IConversationMemoryStore {
 
     void setConversationState(String conversationId, ConversationState conversationState);
 
+    /**
+     * Record why a conversation ended, as a narrow field update that — like
+     * {@link #setConversationState} — does not bump the document revision.
+     * Best-effort by contract: a caller ends the conversation first and a failure
+     * here must not undo that.
+     */
+    void setConversationEndReason(String conversationId, String endReason);
+
     void deleteConversationMemorySnapshot(String conversationId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     ConversationState getConversationState(String conversationId);
 
+    /**
+     * The optimistic-concurrency revision the stored conversation currently holds —
+     * a projection read, never the whole document.
+     * <p>
+     * A queued turn uses it to learn whether the memory it was loaded with has been
+     * superseded while it waited behind an earlier turn of the same conversation: a
+     * turn built on the older snapshot would evaluate its rules, its LLM history
+     * and its property writes without the earlier turn, and its commit would
+     * re-apply the stale properties over the ones that turn wrote.
+     *
+     * @param conversationId
+     *            the conversation identifier
+     * @return the stored revision
+     *         ({@link ConversationMemorySnapshot#UNVERSIONED_REVISION} for a
+     *         document written before revisions existed), or {@code null} when the
+     *         conversation does not exist or the backend cannot answer — callers
+     *         must treat {@code null} as "unknown", not as "changed"
+     */
+    Long getRevision(String conversationId);
+
     Long getActiveConversationCount(String agentId, Integer agentVersion);
+
+    /**
+     * How much an agent is used, across all its versions — counts only, no content.
+     * What an agent's maintainers may see without being able to read anybody's
+     * conversation.
+     *
+     * @param total
+     *            conversations ever started
+     * @param active
+     *            conversations not yet ended
+     * @param distinctUsers
+     *            how many different users started them
+     */
+    record ConversationUsage(long total, long active, long distinctUsers) {
+    }
+
+    /** Usage counts for one agent — see {@link ConversationUsage}. */
+    ConversationUsage getConversationUsage(String agentId);
 
     List<String> getEndedConversationIds();
 

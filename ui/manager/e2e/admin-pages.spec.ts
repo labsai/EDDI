@@ -172,7 +172,7 @@ test.describe("Variables Page", () => {
   // string (`${eddivar:default-model}`), which trips Playwright strict mode —
   // and the old probes hid that inside `.isVisible().catch(() => false)`, so a
   // strict-mode violation came back as `false` and skipped the test. A testid
-  // resolves to exactly one node, which is what AGENTS.md §247 asks for anyway.
+  // resolves to exactly one node, which is what AGENTS.md (Tests: assert on `data-testid`) asks for anyway.
   const variableRow = (key: string) => `variable-row-${key}`;
 
   test("shows variables from MSW mock data", async ({ page }) => {

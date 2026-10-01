@@ -1377,21 +1377,21 @@ class McpAdminToolsExtendedTest {
 
     @Test
     void applyAgentChanges_blankAgentId_returnsError() {
-        String result = tools.applyAgentChanges("  ", 1, "[{}]", false, null);
+        String result = tools.applyAgentChanges("  ", 1, "[{}]", false, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("agentId is required"));
     }
 
     @Test
     void applyAgentChanges_nullMappings_returnsError() {
-        String result = tools.applyAgentChanges(AGENT_ID, 1, null, false, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, null, false, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("resourceMappings is required"));
     }
 
     @Test
     void applyAgentChanges_blankMappings_returnsError() {
-        String result = tools.applyAgentChanges(AGENT_ID, 1, "  ", false, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, "  ", false, null, null);
         assertTrue(result.contains("error"));
         assertTrue(result.contains("resourceMappings is required"));
     }
@@ -1415,7 +1415,7 @@ class McpAdminToolsExtendedTest {
 
         when(workflowStore.updateWorkflow(eq("wf1"), eq(1), any()))
                 .thenReturn(Response.ok().header("Location", "/workflowstore/workflows/wf1?version=2").build());
-        when(agentStore.updateAgent(eq(AGENT_ID), eq(1), any()))
+        when(agentStore.updateAgent(eq(AGENT_ID), eq(1), any(), any()))
                 .thenReturn(Response.ok().header("Location", "/agentstore/agents/" + AGENT_ID + "?version=2").build());
 
         // Redeploy fails
@@ -1429,7 +1429,7 @@ class McpAdminToolsExtendedTest {
         when(jsonSerialization.deserialize(mappingsJson, List.class)).thenReturn(mappings);
         when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"cascaded\",\"redeployed\":false}");
 
-        String result = tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, true, "production");
+        String result = tools.applyAgentChanges(AGENT_ID, 1, mappingsJson, true, "production", null);
 
         // Should still return success with redeployed=false
         assertNotNull(result);

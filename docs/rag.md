@@ -8,6 +8,8 @@ EDDI's RAG system is a first-class workflow extension that adds contextual knowl
 
 At execution time, the `LlmTask` discovers RAG configurations from the agent's workflow, performs vector similarity search against the user's query, and injects the retrieved context into the LLM system message — all automatically and transparently.
 
+> **Start here:** a knowledge base reaches an agent through **three** configurations, not two. Naming a KB on the LLM task is not enough to bind it — the agent's workflow must also carry an `eddi://ai.labs.rag` step. See [Configuration](#configuration) for all three, and [Troubleshooting](#troubleshooting) if retrieval is silently doing nothing.
+
 ## Architecture
 
 ```
@@ -32,7 +34,23 @@ User Query
 
 ## Configuration
 
-### RagConfiguration (Knowledge Base)
+A knowledge base reaches an agent through **three** configurations. All three are required for
+vector RAG (Options 1 and 2 below); only `httpCallRag` (Option 3) works without them.
+
+| # | What | Where | Purpose |
+|---|---|---|---|
+| 1 | `RagConfiguration` | `/ragstore/rags/{id}` | Defines the KB — embedding provider, vector store, chunking |
+| 2 | **Workflow step** `eddi://ai.labs.rag` | the agent's workflow | **Binds** the KB to the agent. This is what retrieval actually discovers |
+| 3 | `knowledgeBases` / `enableWorkflowRag` | the LLM task (`langchain.json`) | Selects which bound KBs *this task* retrieves from |
+
+> **The most common failure is configuring 1 and 3 but not 2.** `RagContextProvider` matches
+> `knowledgeBases[].name` against RAG configs discovered **from the workflow document**, so with no
+> `eddi://ai.labs.rag` step there is nothing to match against. Retrieval then returns nothing at
+> all — no context, no `rag:trace:*` entry, no error, and no log line above `DEBUG`. The KB config
+> and the task reference can both be perfectly correct and the agent will still answer "I don't
+> know". See [Troubleshooting](#troubleshooting).
+
+### 1. RagConfiguration (Knowledge Base)
 
 A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 
@@ -67,10 +85,61 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 | `maxResults` | `5` | Default top-K results |
 | `minScore` | `0.6` | Default minimum similarity score (0.0–1.0) |
 
-### LLM Task RAG Configuration
+### 2. Workflow Step (binds the KB to the agent)
+
+The agent's workflow must declare the knowledge base as a step. This is the binding that retrieval
+discovers — without it, Options 1 and 2 below retrieve nothing.
+
+```json
+{
+  "workflowSteps" : [ {
+    "type" : "eddi://ai.labs.parser",
+    "extensions" : { },
+    "config" : { }
+  }, {
+    "type" : "eddi://ai.labs.behavior",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.rules/rulestore/rulesets/{rulesId}?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.rag",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.rag/ragstore/rags/{ragId}?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.llm",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.llm/llmstore/llms/{llmId}?version=1"
+    }
+  } ]
+}
+```
+
+Order does not matter for the RAG step — retrieval reads the workflow document rather than running
+in pipeline order — but keeping it before the LLM step matches how the rest of the pipeline reads.
+
+Add one step per knowledge base the agent should be able to retrieve from. In a ZIP export the
+configuration file is `{ragId}.rag.json`.
+
+The step does no work at conversation time: `RagTask.execute()` is deliberately a no-op, because
+retrieval happens inside the LLM task where the user's query is known. The step exists to *declare*
+the binding, and `RagTask.configure()` resolves the referenced KB so a broken URI fails when the
+workflow is deployed rather than silently returning no context on the first conversation.
+
+> **Requires EDDI with `ai.labs.rag` registered.** `WorkflowStoreClientLibrary` rejects any workflow
+> step whose type is not a registered lifecycle extension, so on a build without it a workflow
+> containing a RAG step cannot be deployed at all, and the Manager's step chooser never offers one.
+> Confirm with `GET /extensionstore/extensions` — if `eddi://ai.labs.rag` is absent, vector RAG
+> cannot be wired up on that deployment at all and only `httpCallRag` works end to end.
+
+### 3. LLM Task RAG Configuration
 
 RAG is wired into LLM tasks via four fields on `LlmConfiguration.Task`. Three of them choose what
-is retrieved:
+is retrieved, one per option below — `knowledgeBases` (Option 1), `enableWorkflowRag` with
+`ragDefaults` (Option 2), and `httpCallRag` (Option 3).
 
 The fourth bounds the result. `maxRagContextChars` (default `20000`) caps the assembled
 RAG context in characters, across every matched knowledge base and any `httpCallRag` response.
@@ -95,7 +164,8 @@ or `0` to disable the cap.
 }
 ```
 
-Each reference names a KB from the workflow and optionally overrides retrieval parameters.
+Each reference names a KB **that the workflow binds via an `eddi://ai.labs.rag` step** (see [step 2](#2-workflow-step-binds-the-kb-to-the-agent)) and optionally overrides retrieval
+parameters. The `name` must match the `name` field of the `RagConfiguration`, not its id. A name that matches no bound KB is skipped silently.
 
 #### Option 2: Auto-Discovery
 
@@ -108,7 +178,7 @@ Each reference names a KB from the workflow and optionally overrides retrieval p
 }
 ```
 
-When `enableWorkflowRag` is `true`, the system discovers all RAG steps from the workflow automatically.
+When `enableWorkflowRag` is `true`, the system retrieves from every KB the workflow binds, with no per-KB list to maintain. It still discovers those KBs from the workflow's `eddi://ai.labs.rag` steps — an agent with no such step has nothing to auto-discover.
 
 #### Option 3: httpCall RAG (Phase 8c-0)
 
@@ -120,7 +190,9 @@ When `enableWorkflowRag` is `true`, the system discovers all RAG steps from the 
 }
 ```
 
-Zero-infrastructure RAG: execute a named httpCall and inject its response as `## Search Results:` context. The user's input is available as `{userInput}` in httpCall templates. No vector store needed. Both httpCall RAG and vector RAG can be active simultaneously.
+Zero-infrastructure RAG: execute a named httpCall and inject its response as `## Search Results:` context. The user's input is available as `{userInput}` in httpCall templates. No vector store and no workflow RAG step needed. Both httpCall RAG and vector RAG can be active simultaneously.
+
+> This calls an **external** search API. It cannot be pointed at an EDDI knowledge base: `/ragstore/rags/` exposes configuration and ingestion only, with no retrieval endpoint — see [REST API](#rest-api).
 
 #### Context Injection
 
@@ -142,12 +214,19 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | `POST` | `/ragstore/rags/{id}?version=N` | Duplicate a KB |
 | `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB |
 
+> **There is no retrieval endpoint.** `/ragstore/rags/` covers configuration and ingestion only —
+> there is no `/query`, `/search` or `/retrieve`, and requests to those return `404`. Retrieval is
+> reachable only from inside a conversation, through the LLM task. That also means `httpCallRag`
+> cannot be used as a workaround to search an EDDI knowledge base; it needs an external search API.
+
 ### Document Ingestion
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/ragstore/rags/{id}/ingest?version=N&kbId=...&documentName=...` | Ingest a text document (returns 202 + ingestion ID) |
+| `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). Also accepts `kbId` — **see the warning below before using it** |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
+
+> **Leave `kbId` unset.** It overrides the key the documents are stored under, and it defaults to the knowledge base's `name`, which is the key **retrieval always uses** — `RagContextProvider` keys the store on `ragConfig.getName()` and has no way to be pointed anywhere else. So passing a `kbId` that is anything other than the KB's exact `name` ingests into a store nothing reads: the call returns `202`, the status goes to `completed`, the documents are really embedded and really stored, and retrieval finds nothing, permanently. Ingestion *sources* are not affected — `IngestionPipeline` keys on the name and cannot diverge.
 
 **Example: Ingest a document**
 
@@ -181,6 +260,501 @@ Response:
 
 Status values: `pending` → `processing` → `completed` | `failed: <error message>`
 
+**Re-ingesting a document.** By default this endpoint only adds: ingesting the same `documentName`
+twice stores both copies, and retrieval returns both — the old text alongside the new. Pass
+`replace=true` to supersede instead:
+
+```bash
+curl -X POST "http://localhost:7070/ragstore/rags/abc123/ingest?version=1&documentName=pricing.md&replace=true" \
+  -H "Content-Type: text/plain" --data-binary @pricing.md
+```
+
+The new chunks are stored first and the previous ones removed afterwards, so a failure part-way
+leaves the old version retrievable rather than leaving the document with no vectors. Chunks from
+before this option existed are superseded too. `replace=true` needs an explicit `documentName` and
+is refused with a `400` without one: every document ingested without a name shares `unnamed`, and
+replacing that would delete all of them. On a vector store that cannot delete by metadata, the
+ingestion still completes and the status response carries a `warning` saying the previous version is
+still retrievable. The Manager's drop zone offers the same thing as a checkbox.
+
+For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
+better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs
+the originals again.
+
+## Ingestion Sources
+
+A knowledge base can pull its own documents instead of being fed one at a time. Sources live on the
+knowledge base (`sources[]` on the RAG configuration), because the vector store is keyed by the
+knowledge base — a source that named its target by string could, and in an earlier draft did, write to
+one table while retrieval read another.
+
+There are two kinds, set by `type`:
+
+| `type` | Where documents come from | Config block |
+| --- | --- | --- |
+| `web` (default) | A crawl of a website | `web` |
+| `upload` | Files an operator uploaded, held by EDDI | `upload` (optional) |
+
+Everything that is not about *fetching* is the same for both: `settings`, `cron`, run history,
+preview, purge, and the deletion rules below.
+
+```json
+{
+  "name": "product-docs",
+  "sources": [{
+    "name": "public-docs",
+    "type": "web",
+    "cron": "0 2 * * *",
+    "web": {
+      "startUrl": "https://example.com/docs/",
+      "pathPrefix": "/docs/",
+      "maxDepth": 3,
+      "maxPages": 200,
+      "excludePatterns": ["*.pdf", "**/changelog/**"],
+      "requestDelayMs": 500,
+      "respectRobots": true
+    },
+    "settings": {
+      "tombstoneAfterMissedRuns": 2,
+      "maxSegmentsPerRun": 20000,
+      "timeBudgetMinutes": 10
+    }
+  }]
+}
+```
+
+**Three fields have no default and are rejected when missing:** `name`, the `web` block, and its
+`startUrl`. Everything else may be omitted — `type` defaults to `web` (the other type is [`upload`](#uploaded-files-type-upload)),
+`id` is generated and then never changes, and omitting `settings` entirely means "all defaults". Two
+optional fields are simply absent rather than defaulted: without `cron` the source runs only when
+somebody asks, and without `costPerThousandSegments` a run reports no dollar figure.
+`excludePatterns` are globs matched against the URL **path** (`*` stays inside one segment, `**`
+crosses them).
+
+**`cron` is a standard five-field expression** — `min hour dom month dow` — the same form the schedule
+API takes. Six- and seven-field Quartz expressions with a seconds column are **refused when the
+knowledge base is saved**, with a 400 naming the source: stored, they would have become a schedule
+that never fires while every screen showed the source as scheduled. So is an expression that parses
+but can never match a date (`0 0 30 2 *`). The same check runs when a knowledge base arrives in an
+import archive, which used to be the way around it. Omit `cron` for a source that only runs when
+someone asks.
+
+The cron is read in **UTC**, which is written onto the schedule rather than left to the deployment's
+`eddi.schedule.default-timezone`, so the first run and every later one are computed the same way. It
+is held to the deployment's `eddi.schedule.min-interval-seconds` like every other schedule: a cron
+that fires more often is refused with a 400 naming the source.
+
+**A scheduled run is started by its fire, not run inside it.** The fire claims the run and hands it to
+its own worker, exactly as **Run now** does, and returns. The scheduler cancels a fire it has waited
+a lease for (five minutes by default) while a crawl's default budget is ten, so a crawl run inside the
+fire was interrupted mid-run and never reconciled a deletion. The fire log therefore records that the
+run started; if the run later fails, a second `FAILED` entry for the same fire says so (it does not
+count towards the schedule's retries or dead-lettering — see [scheduling.md](scheduling.md#fire-logging)).
+What the run did in detail is in the source's run history. Runs in flight when an instance shuts
+down gracefully are closed as `CANCELLED` rather than left to be reaped.
+
+#### Every field
+
+`web` — what to crawl:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `startUrl` | required | Where the crawl begins |
+| `sameSiteOnly` | `true` | Stay on the seed's site. Turning it off lets links take the crawl anywhere the other limits allow |
+| `includeSubdomains` | `false` | Treat `docs.example.com` as the same site as `example.com` |
+| `pathPrefix` | `/` | Only paths under this prefix are ingested |
+| `maxDepth` | `3` | How many links from the seed |
+| `maxPages` | `200` | Pages ingested per run |
+| `excludePatterns` | empty | Globs matched against the path |
+| `sitemapUrls` | empty | Sitemaps to discover pages from, besides any robots.txt lists — see [Sitemaps](#sitemaps). At most 20 |
+| `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
+| `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
+| `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.labs.ai)` | Sent on every request, and matched against robots.txt groups |
+| `respectRobots` | `true` | Honour robots.txt, its `Crawl-delay` and its `Sitemap` entries |
+
+`settings` — what to do with what was crawled:
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `maxContentLength` | `100000` | Characters kept per document after conversion to Markdown. A longer page is truncated, never split across documents |
+| `maxBytesPerPage` | `5242880` | Cap on one response body. Must be positive — a non-positive value would read as "no cap" |
+| `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control |
+| `costPerThousandSegments` | unset | Optional rate used to report a run's cost in the run history |
+| `tombstoneAfterMissedRuns` | `2` | Consecutive complete runs a document may be missing before its vectors go |
+| `timeBudgetMinutes` | `10` | Wall-clock ceiling for one run, 1–1440 |
+
+`enabled` (default `true`) is on the source itself: a disabled source keeps its configuration and its
+history, loses its schedule, and is **refused** by a manual run with a 409 — rather than accepted and
+then recorded as a failure.
+
+**What a run does.** Crawls within the scope, converts each page to Markdown, compares a content hash
+against the last successful ingest, and re-embeds only what changed — replacing that document's chunks
+rather than adding to them. Pages that disappear from the source lose their vectors after
+`tombstoneAfterMissedRuns` consecutive *complete* runs miss them; a run that stopped at a limit
+concludes nothing.
+
+**Conditional requests are made only where a 304 hides nothing.** ETag and Last-Modified from the
+previous run are sent back for a page at `maxDepth`, whose links the crawl would not follow anyway, so
+such a page that has not changed costs one 304. A page above that depth is downloaded in full,
+because a 304 has no body and so no links: its children were never reached, a crawl that otherwise
+covered the site called them missing, and a couple of runs later every page below an unchanged parent
+had lost its vectors. Whether a downloaded page is re-embedded is still decided by its content hash —
+an unchanged page costs a download, never an embedding — and the validators it came with replace the
+stored ones, so a server that rotates its ETag without changing the text is revalidated with the ETag
+it issued last.
+
+**A page is stored under the URL that served it.** A `<link rel="canonical">` is honoured as
+de-duplication, not as identity: a page naming another page on the same host (and inside the scope)
+as canonical defers to it — that page is fetched and stored under its own URL, with its own content —
+and is stored itself only if the page it names produced nothing. The links of a deferring page are
+still followed, so the second page of a listing that names the first as canonical still leads to the
+entries it lists. (Taking the canonical as the identity let any page store its content under another
+page's id.)
+
+`robots.txt` is honoured by default, including `Crawl-delay` and `Sitemap` discovery. When robots.txt
+names no sitemap — or is not read, because `respectRobots` is off — the conventional `/sitemap.xml`
+on the seed's host is tried instead, unless robots.txt disallows it. A sitemap index is followed to
+the sitemaps it lists; every sitemap read counts against the same cap of 20. Turn `respectRobots` off
+only for a site you own.
+
+Pages listed in a sitemap are queued at depth 0, so `maxDepth` does not narrow them: a source that
+stayed under `maxPages` by depth alone can reach the page limit once its site's sitemap is read — and
+a crawl that stops at a limit reconciles no deletions. Such a crawl logs a warning naming the sitemap;
+raise `maxPages`, or narrow the scope with `pathPrefix` or `excludePatterns`.
+
+#### Sitemaps
+
+A sitemap lists a site's pages, so a crawl finds pages nothing links to and does not depend on link
+structure. Before the first page is fetched, a run reads — in this order, each at most once:
+
+1. the sitemaps in `web.sitemapUrls`, for a site that publishes one without listing it in robots.txt
+   (and for a crawl with `respectRobots` off, which reads no robots.txt at all);
+2. every `Sitemap:` line in robots.txt — a relative one is resolved against robots.txt;
+3. only when neither gave anything, the conventional `/sitemap.xml`, at the cost of one 404 where
+   there is none.
+
+Every form the [sitemap protocol](https://www.sitemaps.org/protocol.html) allows is read:
+
+| Form | What is taken |
+| --- | --- |
+| `<urlset>` | each `url/loc`. The `loc` of the image, video and news extensions sits under its own element and is **not** a page; `xhtml:link` hreflang alternates are not followed either — the scope decides which languages are crawled |
+| `<sitemapindex>` | each `sitemap/loc` **on the index's own host**, read as a further sitemap — indexes of indexes included. A child on another host is skipped, as the protocol requires, so a site cannot point the crawler at arbitrary hosts; configured and robots.txt sitemaps may be on any host |
+| RSS 2.0 / Atom | each `item/link`, or each `entry/link` whose `rel` is absent or `alternate` |
+| Plain text | one URL per line |
+| gzip | any of the above compressed (`.xml.gz`), recognised by its content rather than its name or Content-Type |
+
+Namespace prefixes (`<sm:urlset>`), entities, CDATA, surrounding whitespace, a byte-order mark and
+UTF-16 are all handled; only absolute `http(s)` URLs are taken. What a sitemap lists is held to the
+same scope as a linked page — `pathPrefix`, `sameSiteOnly` and `excludePatterns` all apply — because a
+sitemap is written by the site, not by the operator.
+
+Bounds: 20 sitemaps per run, indexes and their children included; 5,000 page URLs across all of them;
+1 MB per sitemap as fetched and 16 MB once decompressed, so a small gzip body cannot inflate without
+limit. `maxPages` still decides how many pages are ingested.
+
+A run that hit one of these bounds — or found a sitemap it could not read (a 5xx, 429, 401 or 403,
+a transport error, a body that would not parse) or that arrived cut short (past the 1 MB fetch cap,
+or an XML sitemap that does not end with its closing root tag — trailing comments, processing
+instructions and a self-closing root are fine) — **concludes nothing about deletions**, like a run
+that stopped at a limit: the unread part may list pages the crawl never queued. A sitemap answering
+404 is not such a case; that is a definite "no sitemap here".
+
+**When absence counts as deletion.** Removing a document is the one irreversible thing a run does, so
+it happens only when the crawl actually saw the source. A run that stopped at a limit, was cancelled,
+or reached nothing at all concludes nothing. "Reached nothing" is deliberate: an unreachable seed, a
+connection failure, a 5xx, a 429, and a 401 or 403 are the server saying nothing about its content, and
+a robots.txt that disallows everything is the same. A **404 or 410 is the opposite** — the server
+saying the page is gone — so a start page that 404s does reconcile, and one dead link on a site that
+otherwise answered never blocks reconciliation.
+
+**A page that could not be read is not a page that is gone.** A document behind a 5xx, a 429, a 401 or
+a 403, or one whose response could not be parsed, does not count as missing: the run records that it
+looked and learned nothing. Without that, the tail of a rate-limited site is deleted after
+`tombstoneAfterMissedRuns` runs while every run reports success.
+
+**A crawl that learns nothing definitive concludes nothing.** If a run produces no usable document and
+every failure was of the kind above — a site behind a JavaScript challenge or a maintenance page, which
+answers 200 for everything — the run reports `tombstoningSkipped` and removes nothing.
+
+**Vectors are replaced by adding first and removing afterwards.** A provider failure or a crash leaves
+the previous version of the document retrievable rather than leaving it with no vectors at all, and
+chunks record which source ingested them, so two sources of one knowledge base that overlap on a URL
+keep their own copies instead of deleting each other's.
+
+**A document is tombstoned only after its vectors are actually gone.** On a store that refuses the
+delete, the document stays live and the next run tries again, rather than being marked gone with its
+chunks still retrievable.
+
+**One run at a time per source.** A run is claimed before the request is answered, so a second "run
+now" while one is in flight gets a 409 rather than a second crawl into the same store. A purge takes
+the same claim, so it is refused with a 409 while a run is in flight — decided by the claim itself,
+not by a check made first, which let a run start between the check and the purge. A run whose process
+died is reaped — for that source only, so a short-budget source cannot reap the live run of one
+configured for hours.
+
+**A run that loses its source stops.** If the source's state is cleared under a run — the source was
+removed, or the knowledge base renamed — or the run is reaped, it notices before its next embedding
+and stops, instead of carrying on to the end of its crawl writing chunks and state rows for a source
+that has just been cleared. When it has stopped, what it wrote in the meantime is settled: a removed
+source's content is removed again, and a renamed knowledge base's state is cleared again. The rename
+frees the source, so a new run may already hold it by then and may have read a row the old run wrote
+as "unchanged"; the state cannot be purged from under that run, so every document's content hash and
+validators are forgotten instead, and the next run embeds each page into the store the new name
+addresses.
+
+**A purge forgets what a source ingested, and later complete runs remove what it no longer has.**
+Chunks stay retrievable after a purge, so there is no gap while the next run re-embeds everything it
+finds. A document that had disappeared before the purge is never found again, and with its state gone
+nothing would reconcile it, so the first run after a purge (a run that starts from no state at all)
+leaves a marker in the state. The marker is missed by every complete run, exactly like a vanished
+page, and once it has been missed `tombstoneAfterMissedRuns` times a run removes every chunk of the
+source that no run since the purge wrote. A page only briefly absent after the purge therefore gets
+the same grace as any other: once it is back it is re-embedded and survives. The sweep runs only on a
+complete run that read every document it found: a document the server would not serve (a timeout, a
+5xx, a 429, a 401 or 403) or that failed to embed still has only its old chunks, so such a run leaves
+them alone and the next run without one sweeps. A failure that answered the question does not hold it
+back — a 404 or 410 says the page is gone, and an uploaded file with no readable text has had its old
+version retired already — so one dead link does not keep every orphan retrievable.
+
+A run counts as dead once it has been in flight for its `timeBudgetMinutes` plus 15 minutes — the
+budget it was **started** under, recorded as its deadline when the run is claimed, so lowering a
+source's budget while it runs cannot have the live run declared dead. It is reaped at that point by whatever touches the source next — a run starting, **reading the run history,
+or a purge or file delete** — and shows as `FAILED` with "Run abandoned". Only a run starting used to
+reap, so on a source with no cron a dead run read as `RUNNING`, and refused purges and file deletes
+with a 409, until someone started another. Before that threshold a crashed run is indistinguishable
+from a live one on another instance, and still shows as `RUNNING`.
+
+**Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
+the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
+new, empty store. Clearing the state makes the next run repopulate it. The chunks under the old name
+are left where they are.
+
+**Removing a source takes what the knowledge base learned from it.** Dropping a source from
+`sources[]`, changing its `type`, or deleting the last version of the knowledge base removes its chunks
+from the vector store and forgets its state — for a crawl as much as for uploaded files. A crawl used
+to be skipped on the theory that its documents come back on the next run; a removed source has no next
+run, so its chunks stayed retrievable with nothing left to list or delete them.
+
+**Ingestion schedules are minted by EDDI, not by clients.** A schedule whose metadata declares
+`ragIngestion` is refused by the schedule API on create and update, firing one by hand requires EDIT on
+the knowledge base it names, and a fire refuses a schedule whose name does not match that metadata.
+Without those, anyone who could create a schedule could have the server crawl, re-embed and delete from
+a knowledge base they have no access to.
+
+### Uploaded files (`type: "upload"`)
+
+An upload source reads files EDDI holds on its behalf. Dropping a file in stores it; **running the
+source** is what extracts its text and embeds it — the same verb every other source answers to.
+
+```json
+{
+  "name": "handbooks",
+  "type": "upload",
+  "upload": {
+    "maxFiles": 500,
+    "maxFileBytes": 26214400,
+    "maxTotalBytes": 524288000
+  },
+  "settings": { "maxContentLength": 100000 }
+}
+```
+
+| Field | Default | What it does |
+| --- | --- | --- |
+| `maxFiles` | `500` | Files this source may hold |
+| `maxFileBytes` | `25 MB` | Size of one file. Refused above 50 MB at save time: the request carrying it has to fit inside `quarkus.http.limits.max-body-size` (60 MB), and a larger file is refused by the server with a bare 413 before anything can explain why. That 60 MB applies to this upload only — every other endpoint is held to `eddi.http.limits.default-max-body-size` (25 MB) |
+| `maxTotalBytes` | `500 MB` | Size of everything the source holds |
+
+**The files are kept, not just their embeddings.** That is what makes this a source rather than a
+one-way import: changing the embedding model or the chunk size and re-running re-ingests from what is
+stored, a purge is recoverable, and deleting a file removes its vectors through the same reconciliation
+a crawl uses. Embedding on upload and keeping nothing would make each of those "ask the operator to
+upload two hundred files again".
+
+**A file is identified by its name.** Uploading `handbook.pdf` twice replaces it — the blob, the
+ingestion-state row and the vectors all key on an id derived from the name, so the corrected version
+supersedes the old one everywhere at once. A generated id would leave both retrievable with nothing to
+say which is current.
+
+**A run compares the file's bytes, not its text.** An unchanged 20 MB manual costs one metadata query
+per run rather than a download and a full parse, and improving an extractor does not silently re-embed
+every file in the knowledge base.
+
+**A file is read when it is uploaded, and refused if it yields no text.** The upload runs the same
+extraction a run will, stopped after the first few characters, so an encrypted PDF, a scan with no text
+layer, a damaged file or one whose name claims a format its content is not (a text file renamed
+`.pdf`) is refused with the reason, rather than stored, listed as waiting to be indexed and skipped by
+every run with nothing saying why. A file over `maxFileBytes` is refused on the size the request
+declares, before its bytes are read. The probe runs on the upload request, so it gets 10 seconds per
+file rather than a run's 60; a file that cannot show text in that time is refused. Images are never
+decoded by it, so a large image does not count against a PDF.
+
+**A replacement that cannot be read retires the version it replaced.** If a file stored before these
+checks — or one that changes under an extractor — turns out unreadable or empty when a run reads it,
+the run reports it as failed and removes the previous version's chunks: the stored file is all an
+upload source has, so reading it and failing is a definitive answer, not a page that failed to load.
+Keeping the old text left a document the operator had replaced answering questions for good.
+
+#### What can be read
+
+| Format | Extensions | What comes out |
+| --- | --- | --- |
+| PDF | `.pdf` | Text, page by page. An encrypted PDF is refused, and so is a scan with no text layer — at upload, with a message saying so |
+| Word | `.docx` | Paragraphs, with headings kept as Markdown headings and numbered paragraphs as list items |
+| Excel | `.xlsx` | One Markdown table per sheet, under the sheet's name. Dates and currency are stored as numbers with a display format applied elsewhere, so a date reads as its serial |
+| PowerPoint | `.pptx` | One section per slide, in the order the presentation's own index lists them — not the part numbering, which survives a reorder — headed `## Slide N` |
+| Text | `.txt`, `.md`, `.markdown`, `.json`, `.xml`, `.yaml`, `.yml`, `.log` | As written. UTF-8 unless a byte-order mark says otherwise (UTF-8, UTF-16 either way round), or the bytes are not valid UTF-8, in which case Windows-1252 |
+| Tabular | `.csv`, `.tsv` | A Markdown table. RFC 4180 quoting, and the delimiter (comma, semicolon or tab) is taken from the first line |
+| HTML | `.html`, `.htm` | Through the same converter the crawler uses, so a page saved to disk ingests as it would if crawled |
+
+The **content decides the format**, not the name or the MIME type the browser attached: `.docx`,
+`.xlsx` and `.pptx` are all ZIP archives, so neither distinguishes them, and a spreadsheet saved under
+a `.docx` name would otherwise be refused as corrupt. The extension is consulted only for the text
+formats, which have no signature to read.
+
+Older `.doc`, `.xls` and `.ppt` files are **not** supported — the message says to save them as the
+modern format. Images and scanned pages carry no text layer and there is no OCR; a PDF of scans
+produces an empty document.
+
+#### Limits, and why each one is there
+
+An uploaded file is not the operator's own data in any useful sense — it is whatever somebody dragged
+into a browser — so extraction is bounded in these ways:
+
+- **100,000 characters** per document (`settings.maxContentLength`, shared with the crawl), so one file
+  cannot fill a knowledge base. A document that hits it is logged by name — it is embedded truncated,
+  and silently embedding the first third of a manual as though it were the whole thing is the failure
+  worth naming.
+- **500 pages, slides or sheets**, and **5,000 rows × 64 columns** per sheet. A sheet can declare cells
+  out at column XFD whether or not anything was ever typed there.
+- **64 MB decompressed per archive** — counted across *every* entry the reader walks over, not only the
+  ones it keeps. Moving to the next ZIP entry decompresses the rest of the current one, so an entry
+  nobody wants is otherwise the cheapest place to hide a bomb: the work happens either way and nothing
+  counts it. The same budget applies while merely working out which Office format a file is, because
+  that runs inside the upload request.
+- **DTDs and external entities are refused** outright, so an Office file cannot expand entities into
+  gigabytes (the billion-laughs attack) or reach out to a URL while being parsed.
+- **A PDF may decode at most 128 MB in total, and gets 60 seconds.** PDFBox decodes a compressed stream
+  whole into memory with no limit of its own, and deflate expands about a thousandfold. So every
+  filter PDFBox uses is wrapped, while a document is read, in one that counts what it writes: the count
+  covers every stream, every stage of a filter chain, every time a stream is referenced (one stream
+  named twenty times in a page's `/Contents` is decoded twenty times at once), and encrypted streams
+  after decryption. Past twice `maxUncompressedBytes` — 128 MB — the document is refused. Before that,
+  a cheap scan of the raw bytes refuses one stream that alone expands past 64 MB, without letting
+  PDFBox allocate anything; it decodes each stream's declared filter chain (Flate, LZW, RunLength,
+  ASCIIHex, ASCII85) and passes over image streams, which text extraction never decodes. A page's
+  program is checked against the deadline as it runs, and a page that lays out far more glyphs than
+  the character cap could ever keep is stopped rather than held in memory whole — keeping the text it
+  laid out up to that point, so a dense first page is not mistaken for a scan.
+- **An archive naming the same part twice is refused.** A real Office file never does, and two entries
+  under one name means two readers can disagree about the contents.
+
+Apache POI would read these formats too — at seven extra jars and about 14 MB, built on reflection and
+with a long history of parser CVEs. For pulling text out of a handful of known parts, the JDK's own ZIP
+and StAX readers are the smaller surface and the one whose limits can be stated exactly, as above. PDF
+goes through PDFBox, which EDDI already depends on.
+
+#### File endpoints
+
+| Method | Path | Access | Purpose |
+| ------ | ---- | ------ | ------- |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/files?version=N` | EDIT | Store files (`multipart/form-data`, parts named `files`). Each file is accepted or refused on its own |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/files?version=N` | VIEW | What the source holds: names, types, sizes, content hashes |
+| `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/files/{fileId}?version=N` | EDIT | Remove a file **and the vectors it produced**, at once |
+
+The upload answers `200` with `{"stored": [...], "rejected": [{"fileName", "reason"}]}` when anything
+was stored, and `400` with the same body when nothing was — a batch where one file of thirty failed is
+a success with a caveat, and a client that treats `4xx` as "nothing happened" would have the operator
+re-uploading files that are already there. `409` means the source is not of type `upload`.
+
+Deleting removes the vectors **before** the file, and immediately rather than at the next run: an
+operator who removes a document because it should not have been there is told it is gone, and a source
+with no cron has no next run to make that true. Where the vector store cannot delete by metadata, the
+answer carries a `warning` saying the text is still retrievable — the Manager shows it rather than
+reporting a clean success. Where the store accepts the delete and then fails it, the answer is `503`
+and **the file is kept**, so the delete can be tried again once the store recovers; deleting the file
+anyway stranded its chunks for good, since nothing would ever reconcile a document that is gone.
+
+A delete takes the source's **run claim**, the same one a run takes, and answers `409` if it cannot get
+it. Merely checking for a run first is not enough: one that starts between the check and the delete
+lists the file, loads the bytes that are about to go, embeds them, and records the document as
+ingested — clearing the tombstone the delete just wrote. The file would be gone and its content still
+retrievable, for a source with no cron indefinitely. The claim is released as a maintenance claim,
+which the run history does not list: it used to appear as a successful run that saw nothing, and push
+the source's real last run out of sight.
+
+Uploads to one source are measured against its limits one file at a time, against a fresh listing and
+under a lock, so two uploads arriving together cannot both fill the same headroom. Across instances a
+new file that finds the source over its limit once stored is taken back out.
+
+**Removing an upload source takes its files *and* what the knowledge base learned from them.** Dropping
+it from `sources[]`, changing its `type` to `web`, or deleting the last version of the knowledge base
+all delete its files and remove its chunks from the vector store. Deleting the files and leaving the
+vectors would be the worst of the three outcomes: agents would keep citing a document the operator
+believes is gone, and no endpoint could list or delete it, because the source it belonged to is no
+longer in the configuration. The Manager confirms before removing an upload source, and says what goes.
+
+A **purge** deliberately does none of that: it forgets what was ingested so the next run re-ingests,
+which is only useful because the files are still there.
+
+**A ZIP export does not carry uploaded files,** and neither does duplicating a knowledge base. An
+imported or duplicated upload source arrives empty and its files have to be uploaded again — the backup
+format carries configuration, and a knowledge base's documents can be hundreds of megabytes of
+somebody's contracts.
+
+**A run over uploaded files honours `settings.timeBudgetMinutes`,** as a crawl does. A run that
+outlived its budget would eventually be treated as abandoned, and the next fire would start a second
+worker embedding into the same store — each deleting the other's fresh chunks, because replacement
+filters on the run id.
+
+### Ingestion source endpoints
+
+| Method | Path | Access | Purpose |
+| ------ | ---- | ------ | ------- |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202, or 409 if one is in flight) |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After` |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors |
+| `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
+
+Running needs EDIT rather than VIEW because a published knowledge base grants VIEW to everyone by
+design, and a run rewrites what every agent using it retrieves.
+
+A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
+the configuration whenever the knowledge base is saved and removed when it is deleted. `{sourceId}` is
+the source's id, or its name when it has none. A ZIP import writes through the store rather than the
+REST layer, so it assigns the ids, validates the sources and creates their schedules itself — without
+that, an imported source was addressed by name, and the first save in the Manager re-keyed it, orphaned
+its history and re-embedded everything.
+
+### In the Manager
+
+The knowledge-base editor has an **Ingestion Sources** section: add and remove sources, choose between
+**Website** and **Files**, edit the scope and the limits, and for a source that has been saved once,
+**Run now**, **Preview**, **Purge state** and the run history with its counters and errors.
+
+A **Files** source shows a drop zone instead of the crawl settings. Files can be dropped or chosen,
+several at once, and each is uploaded on its own request with its own progress bar — so a batch that
+fails three quarters of the way through does not lose what had already arrived, and a file the server
+refuses shows the server's own sentence ("This PDF is encrypted") rather than a generic failure. Below
+it, the files the source holds, each marked **Indexed**, **Changed** or **Not indexed** — so an
+uploaded file, one that is in the knowledge base, and one that was replaced after it was indexed are
+told apart without running the source and comparing counters. While anything is waiting, a line says so
+with a **Run now** beside it. Deleting a file confirms first and says what it removes.
+
+Run and Preview address the source by id and version, so they crawl the **saved** configuration. While
+the editor has unsaved changes both are disabled, with a line saying why — otherwise editing a start
+URL and pressing Run would silently crawl the old one. A source that has never been saved shows the
+same explanation instead of the buttons, because it has no id for the endpoints to address.
+
+### Store support for replacement
+
+Replacing a document's chunks needs `removeAll(Filter)` on the vector store, with a compound filter
+(document id and owning source). Verified for `in-memory` and `pgvector`. The other supported stores —
+`mongodb-atlas`, `elasticsearch`, `qdrant`, `chroma` — are expected to support it through their
+langchain4j drivers but are not covered by these tests. Where a store does not, the run still succeeds
+and reports `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that
+backend.
+
 ## Observability
 
 RAG operations write audit traces to conversation memory:
@@ -192,6 +766,54 @@ RAG operations write audit traces to conversation memory:
 | `rag:httpcall:trace:{taskId}` | httpCall RAG execution metadata (httpCall name, context length) |
 
 These are visible in the conversation memory snapshot and the audit ledger.
+
+## Troubleshooting
+
+### No context is injected, and there is no error
+
+Symptoms: the model answers as though it had never seen the corpus, the compiled prompt carries no
+`## Relevant Context:` block, conversation memory holds no `rag:trace:*` or `rag:context:*` entry,
+and the logs show nothing from `RagContextProvider` or `EmbeddingStoreFactory` while other providers
+log on every turn.
+
+That combination means **no context was produced** — but three different causes produce it, and from
+the outside they look identical. If the task's `knowledgeBases` is null or empty *and*
+`enableWorkflowRag` is not `true`, `RagContextProvider.retrieveContext` returns before it even
+discovers workflow steps — no discovery, no trace, no store build, no INFO log, and no DEBUG message,
+regardless of what the workflow itself binds. Otherwise discovery does run, and the other two causes
+apply: either the workflow binds no `eddi://ai.labs.rag` step at all, or it binds one whose name none
+of `knowledgeBases[].name` matches. In both of those, the trace entry, the store build and the INFO
+log are still downstream of a match, so none of them appear either.
+
+At `DEBUG` only the missing-step cause is distinguishable: `No RAG steps found in workflow` is logged
+once discovery runs and finds nothing. The task-level early return and the unmatched-name case log
+nothing at any level — so before raising the level, first confirm the task actually asks for RAG at
+all. Otherwise work through it in this order:
+
+| # | Check | How |
+|---|---|---|
+| 1 | Does the task request RAG at all? | Task config: `knowledgeBases` must be non-empty, or `enableWorkflowRag: true`. Neither means `RagContextProvider` returns immediately — no discovery, no trace, no log line at any level |
+| 2 | Is `ai.labs.rag` a registered extension? | `GET /extensionstore/extensions`. If absent, this build cannot deploy a RAG step at all — upgrade; only `httpCallRag` works until then |
+| 3 | Does the agent's workflow carry an `eddi://ai.labs.rag` step? | Read the workflow config. **This is the usual cause** — see [step 2](#2-workflow-step-binds-the-kb-to-the-agent) |
+| 4 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
+| 5 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
+| 6 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, confirm nothing has evicted it since (see [Vector Stores](#vector-stores)) |
+| 7 | Did ingestion write where retrieval reads? | If you passed `kbId` to `/ingest`, it must equal the KB's `name` exactly, or the documents are in a store retrieval never opens (see [Document Ingestion](#document-ingestion)) |
+
+Raise `RagContextProvider` to `DEBUG` to see the missing-step early return directly (it will not show
+the task-level or unmatched-name cases — rule those out with checks 1 and 4 above):
+
+```properties
+quarkus.log.category."ai.labs.eddi.modules.llm.impl.RagContextProvider".level=DEBUG
+```
+
+### Context is retrieved but the answer ignores it
+
+Check `rag:context:{taskId}` in conversation memory for what was actually injected. If it ends in a
+`[... N further retrieved passage(s) omitted: RAG context limit (X chars) reached ...]` marker, the
+block hit `maxRagContextChars` — raise it, or lower `maxResults` or the number of knowledge bases.
+If the passages are present but irrelevant, lower `minScore` to widen the search or raise it to
+tighten it.
 
 ## Embedding Providers
 
@@ -206,16 +828,73 @@ These are visible in the conversation memory snapshot and the audit ledger.
 | `gemini` | `gemini-embedding-2` | `apiKey` | Google Gemini embeddings |
 | `vertex` | `text-embedding-005` | `project` | `location` (default: `us-central1`); uses GCP credentials |
 
+### Asymmetric models: queries and documents are embedded differently
+
+Some embedding models are **asymmetric** — they produce a different vector for the same
+text depending on whether it is a document being *stored* or a query being *searched
+with*, and the retrieval quality they advertise assumes you tell them which. Google's
+Gemini is the clearest example: it exposes `RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` as
+distinct task types.
+
+**EDDI handles this for you, and there is nothing to configure.** Ingestion asks for a
+`DOCUMENT` model and retrieval asks for a `QUERY` one; the two are cached separately, and
+the role travels with the model instance because `EmbeddingStoreContentRetriever` offers
+no way to pass a per-call parameter.
+
+The role is only applied to providers that accept one. In langchain4j 1.20.0 that is
+**`gemini` and `cohere`**; the other six declare no `INPUT_TYPE` parameter and are handed
+the provider's model unchanged. This is not a hard-coded list — EDDI reads each model's
+own `supportedParameters()`, so it cannot drift out of date when the dependency is
+upgraded. The distinction matters because langchain4j *rejects* an unsupported per-call
+parameter rather than ignoring it.
+
+> **Upgrading an existing Gemini knowledge base.** Before this behaviour existed, EDDI
+> built one model per knowledge base and used it for both roles — so with Gemini's
+> `taskType` defaulting to `RETRIEVAL_DOCUMENT`, queries were embedded as documents.
+> Stored vectors were always correct; only the query side was wrong, so **no
+> re-ingestion is needed**. Retrieval quality should improve on the next query.
+
+> **A deliberately pinned `taskType` still wins.** Gemini's `taskType` is a build-time
+> default that langchain4j consults *only when no role is given* — a role maps
+> unconditionally onto `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY`. So if EDDI attached a role
+> unconditionally, a `taskType` of `SEMANTIC_SIMILARITY`, `CLASSIFICATION` or `CLUSTERING`
+> that you had set on purpose would stop reaching the provider, and everything ingested
+> afterwards would land in the same index with a different geometry from what is already
+> there. EDDI therefore leaves the role off when you have configured a non-retrieval
+> `taskType`, and your setting continues to apply to both sides.
+>
+> `RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` are **not** treated that way.
+> `RETRIEVAL_DOCUMENT` is the default EDDI applies when you configure nothing, and it is
+> exactly the value that caused queries to be embedded as documents — writing it out by
+> hand must not opt back into the defect. Both values say "this knowledge base is for
+> retrieval", which is what the role refines.
+>
+> This only applies where `taskType` reaches Google at all. `gemini-embedding-2` — the
+> default model — does not accept `task_type`; langchain4j sends none and prefixes a
+> role-specific instruction to the text instead, so a `taskType` set there was already
+> inert and the role is always attached.
+
 ## Vector Stores
 
 | Store Type | Required Parameters | Notes |
 |---|---|---|
-| `in-memory` | — | Ephemeral, for dev/test only |
+| `in-memory` | — | Ephemeral, for dev/test only — **loses every ingested document** on restart, after 30 minutes without a query, or on any secret rotation (see below) |
 | `pgvector` | `password` | PostgreSQL + pgvector; `host`, `port`, `database`, `user`, `table`, `dimension` |
 | `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
 | `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
 | `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName` |
+
+> **`in-memory` is not a small-corpus option, it is a dev/test option.** For this store the cached
+> object *is* the data, and `EmbeddingStoreFactory` holds it in a bounded Caffeine cache — max 50
+> stores, `expireAfterAccess` of 30 minutes, and a full invalidation whenever a vault secret or a
+> global variable changes. So an in-memory KB silently empties itself after 30 minutes with no
+> retrieval, on every restart, and on any credential rotation, and the next query returns no context
+> rather than an error. Re-ingesting refills it until the next eviction. Any agent expected to answer
+> from a knowledge base tomorrow needs a persistent store. Note that `storeType` still **defaults to**
+> `in-memory`, so persistence is opt-in: `pgvector` is the recommended choice, and — with `in-memory`
+> — one of the two stores whose document-replacement semantics are verified (see
+> [Ingestion Sources](#ingestion-sources)).
 
 ## Status
 
@@ -225,8 +904,13 @@ These are visible in the conversation memory snapshot and the audit ledger.
 - ✅ **Phase 8c-γ**: RAG provider expansion (8 embedding models + 6 vector stores)
 - ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
 - ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
+- ✅ **Workflow step registration**: `eddi://ai.labs.rag` is a registered lifecycle extension, so a workflow can declare a knowledge-base step and the Manager offers it. On a build without it, [Options 1 and 2](#3-llm-task-rag-configuration) can be saved but not deployed, and only `httpCallRag` works end to end — check with `GET /extensionstore/extensions`
+- ✅ **Scheduled ingestion sources**: crawl a website, or upload PDF, Word, Excel, PowerPoint,
+  text, Markdown, CSV and HTML files
 
 ## Future Enhancements
 
+- More ingestion source types — email, Google Drive, OneDrive (sitemap discovery already ships with web sources — see [Sitemaps](#sitemaps))
+- OCR for scanned PDFs and images
 - Advanced retrieval: re-ranking, hybrid search, metadata filtering
 - ONNX in-process embeddings (air-gapped / edge deployments)

@@ -25,12 +25,14 @@ import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.runtime.Startup;
@@ -44,6 +46,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -51,12 +55,16 @@ import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.undeployed;
 import static ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import static ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static java.lang.String.format;
 import static java.time.temporal.ChronoUnit.DAYS;
 
@@ -86,6 +94,90 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(AgentDeploymentManagement.class);
     private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+    /** Whether the "sweep parked" warning has been logged; see checkDeployments. */
+    private final AtomicBoolean sweepParkedLogged = new AtomicBoolean();
+    /**
+     * Set when the startup path could not report ready because the rename migration
+     * was still pending, and taken by the first scheduled sweep that completes once
+     * it is not. Only the taker grants readiness, so however many ticks follow, it
+     * happens exactly once.
+     */
+    private final AtomicBoolean readinessDeferred = new AtomicBoolean();
+    /**
+     * Set when startup parked the document-level migrations behind a pending rename
+     * migration, and taken by the first sweep that sees it complete — which runs
+     * them before it deploys anything or grants readiness. Without this, a
+     * migration-log read that failed transiently at boot skipped them until the
+     * next restart while the sweep went on to deploy agents and report ready.
+     * <p>
+     * Guarded by {@link #documentMigrationsLock}, and cleared only once the run has
+     * finished: the startup callback and the scheduled sweep can both be in
+     * {@link #checkDeployments()} at once (the scheduler's SKIP only keeps sweeps
+     * from overlapping each other), and a flag cleared when the run STARTED let the
+     * second caller deploy from documents the first was still migrating.
+     */
+    private boolean documentMigrationsDeferred;
+    /**
+     * Held while the deferred document migrations run, so every caller of
+     * {@link #checkDeployments()} waits for them before deploying anything or
+     * granting readiness. Never held across anything that re-enters this class.
+     */
+    private final Object documentMigrationsLock = new Object();
+
+    /** The wait before the first retry of a deployment that failed. */
+    static final Duration FIRST_RETRY_DELAY = Duration.ofSeconds(10);
+    /** The longest wait between two retries of a deployment that keeps failing. */
+    static final Duration MAX_RETRY_DELAY = Duration.ofMinutes(5);
+
+    /**
+     * Deployments that failed, and when each may be tried again.
+     *
+     * <p>
+     * A deployment used to be recorded as handled whatever its outcome:
+     * {@code deployAgent} reports some failures by leaving the agent in ERROR and
+     * returning normally, so the record went into {@link #deploymentInfos} and no
+     * later sweep looked at it again. The agent stayed in ERROR until a restart,
+     * even after its cause — a missing index, a vault secret — had been fixed under
+     * the running instance. It is now recorded only once it is READY, and a failure
+     * is retried with a doubling delay, capped at {@link #MAX_RETRY_DELAY}, for as
+     * long as its deployment record says it should be deployed. The ERROR is logged
+     * once when the deployment starts failing and once more when it recovers, not
+     * on every retry.
+     * </p>
+     */
+    private final Map<DeploymentInfo, RetryState> failingDeployments = new ConcurrentHashMap<>();
+
+    /** What is known about one failing deployment. */
+    record RetryState(int failures, Instant nextAttempt) {
+    }
+
+    /** Replaced in tests, so that the backoff can be stepped through. */
+    Clock clock = Clock.systemUTC();
+
+    /**
+     * True while {@link #autoDeployAgents()} runs the startup migrations.
+     *
+     * <p>
+     * The sweep used to wait for the rename migration only. The scheduled tick that
+     * followed its completion then deployed agents while the startup thread was
+     * still converting their Thymeleaf templates to Qute; such an agent kept the
+     * templates it had loaded, was READY, and so was never redeployed — it rendered
+     * its templates as literal text until a restart. The sweep now waits for all of
+     * them.
+     * </p>
+     */
+    private final AtomicBoolean startupMigrationsRunning = new AtomicBoolean();
+
+    /** Whether the startup path reached the point where it grants readiness. */
+    private final AtomicBoolean startupCallbackRan = new AtomicBoolean();
+
+    /**
+     * Serializes {@link #checkDeployments()}. {@code SKIP} only stops one scheduled
+     * tick overlapping the next; the startup path calls the sweep itself, and two
+     * passes deploying the same agents at once shared an unsynchronized list and
+     * could record a deployment the other pass then failed.
+     */
+    private final Object sweepLock = new Object();
 
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -111,7 +203,44 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         this.maximumLifeTimeOfIdleConversationsInDays = maximumLifeTimeOfIdleConversationsInDays;
     }
 
+    /**
+     * Whether the daily sweep ends conversations for being idle.
+     *
+     * <p>
+     * A limit below one day turns it off. It used to be taken literally: the check
+     * is {@code DAYS.between(lastInteraction, today) >= limit}, which every
+     * conversation passes for a limit of {@code 0} or {@code -1}, so both ENDED
+     * every conversation the sweep reached. {@code -1} is how the neighbouring
+     * {@code deleteEndedConversationsOnceOlderThanDays} and
+     * {@code eddi.usermemories.deleteOlderThanDays} say "never", and an operator
+     * copying that idiom closed every open conversation five minutes after boot.
+     * The same threshold as the retention sweep ({@code < 1} is off), so all three
+     * settings read {@code -1} the same way.
+     * </p>
+     *
+     * <p>
+     * Only the ENDING is switched off. The sweep still deploys the latest version
+     * of each agent, still retires an old version whose conversations can move to a
+     * newer compatible one, and still undeploys an old version that has <em>no</em>
+     * active conversation left. None of that ends a conversation or loses anything
+     * — a version with no active conversation serves nobody, and
+     * {@code getActiveConversationCount} counts idle-but-open conversations as
+     * active, so an old version keeps its deployment for exactly as long as one of
+     * them is still open. Stopping those too would leave superseded versions
+     * holding memory for ever, which is a different decision from "don't close
+     * conversations" and would need a setting of its own.
+     * </p>
+     */
+    boolean idleEndingEnabled() {
+        return maximumLifeTimeOfIdleConversationsInDays >= 1;
+    }
+
     void onStart(@Observes StartupEvent ev) {
+        if (!idleEndingEnabled()) {
+            LOGGER.infof("Idle conversations are never ended: eddi.conversations.maximumLifeTimeOfIdleConversationsInDays=%d "
+                    + "(below 1 disables it). Old agent versions with no active conversation are still undeployed.",
+                    maximumLifeTimeOfIdleConversationsInDays);
+        }
         runtime.getScheduledExecutorService().schedule(() -> {
             autoDeployAgents();
 
@@ -122,6 +251,27 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     @Override
     public void autoDeployAgents() {
         LOGGER.info("Starting deployment of agents...");
+        startupMigrationsRunning.set(true);
+        try {
+            runStartupMigrationsAndDeploy();
+        } finally {
+            // Also when a migration threw past its own guard: a sweep parked for good
+            // would never deploy anything, which is worse than deploying on configs
+            // a failed migration left as they were.
+            startupMigrationsRunning.set(false);
+            if (!startupCallbackRan.get()) {
+                // The startup path never got to grant readiness. Hand it to the first
+                // sweep that completes, as for a pending rename migration, rather than
+                // leave the instance DOWN while the sweep deploys and serves its agents.
+                LOGGER.error("The startup deployment did not complete (logged above); readiness is granted by the first "
+                        + "scheduled deployment sweep that does.");
+                readinessDeferred.set(true);
+            }
+        }
+        LOGGER.info("Finished deployment of agents.");
+    }
+
+    private void runStartupMigrationsAndDeploy() {
 
         // V6 rename migration must run before document-level migrations.
         // Each migration is independently guarded: a failure logs the error
@@ -132,6 +282,52 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (Exception e) {
             LOGGER.error("V6 rename migration failed — will retry on next startup", e);
         }
+        // E3: the document-level migrations read the v6 collections the rename
+        // migration creates. Running them while it is still pending (it failed above,
+        // or its log could not be read) let each one scan empty collections, find
+        // nothing to do and record itself as COMPLETE — so it never ran again, and
+        // the documents the rename later moved into place were never migrated. Park
+        // them instead; they are unflagged, and the first deployment sweep that sees
+        // the rename complete runs them before it deploys anything.
+        if (v6RenameMigration.isPending()) {
+            synchronized (documentMigrationsLock) {
+                documentMigrationsDeferred = true;
+            }
+            LOGGER.error("Deferring the V6 Qute, channel connector and workspace access-index migrations: the V6 rename "
+                    + "migration has not completed, and they would run against collections it has not populated yet. "
+                    + "They run as soon as the deployment sweep sees the rename migration complete.");
+        } else {
+            runDocumentMigrations();
+        }
+
+        migrationManager.startMigrationIfFirstTimeRun(() -> {
+            startupCallbackRan.set(true);
+            startupMigrationsRunning.set(false);
+            checkDeployments();
+            if (v6RenameMigration.isPending()) {
+                // The sweep above was parked, so nothing has been deployed yet.
+                // Reporting ready now would send traffic to an instance with no agents.
+                //
+                // Deferred rather than abandoned. isPending() is fail-safe: a
+                // migration-log read that fails answers "pending", because guessing
+                // "not pending" would let the sweep read every agent config as
+                // deleted and retire its deployment row. That is the right answer
+                // for the sweep and the wrong one to hang readiness on for ever —
+                // this used to be the only call site of setAgentsReadiness in the
+                // process, so a read that failed in this one second left the
+                // instance permanently not-ready while checkDeployments() deployed
+                // its agents ten seconds later and served them correctly.
+                LOGGER.error("Not reporting ready yet: the V6 rename migration has not completed, so no agent has "
+                        + "been deployed. Its own error is logged above. The scheduled deployment sweep reports "
+                        + "ready if the migration completes; if it does not, resolve it and restart.");
+                readinessDeferred.set(true);
+                return;
+            }
+            reportReady();
+        });
+    }
+
+    private void runDocumentMigrations() {
         try {
             v6QuteMigration.runIfNeeded();
         } catch (Exception e) {
@@ -149,13 +345,41 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (Exception e) {
             LOGGER.error("Workspace access-index migration failed — will retry on next startup", e);
         }
+    }
 
-        migrationManager.startMigrationIfFirstTimeRun(() -> {
-            checkDeployments();
-            agentsReadiness.setAgentsReadiness(true);
-        });
+    /**
+     * Runs the document migrations startup parked, if it parked them — before the
+     * sweep deploys agents and before readiness is granted, the same order the
+     * startup path uses. A caller that arrives while another is running them blocks
+     * here until they have finished, then finds nothing left to do.
+     */
+    private void runDeferredDocumentMigrations() {
+        synchronized (documentMigrationsLock) {
+            if (!documentMigrationsDeferred) {
+                return;
+            }
+            LOGGER.info("The V6 rename migration has completed — running the deferred document-level migrations.");
+            try {
+                runDocumentMigrations();
+            } finally {
+                documentMigrationsDeferred = false;
+            }
+        }
+    }
 
-        LOGGER.info("Finished deployment of agents.");
+    /**
+     * Grants readiness once, and logs the line that says so in the same place.
+     *
+     * <p>
+     * The two used to be independent: the flag was set inside the startup lambda
+     * and {@code E.D.D.I is ready!} was logged afterwards from a second
+     * {@code isPending()} call, so a migration-log read that failed in the first
+     * and succeeded in the second logged "ready" against an instance whose
+     * readiness flag was false.
+     * </p>
+     */
+    private void reportReady() {
+        agentsReadiness.setAgentsReadiness(true);
         LOGGER.info("E.D.D.I is ready!");
     }
 
@@ -164,10 +388,47 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     // SKIP because a slow pass must not overlap the next tick and double-deploy.
     @Scheduled(every = "10s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void checkDeployments() {
+        synchronized (sweepLock) {
+            sweep();
+        }
+    }
+
+    private void sweep() {
+        if (startupMigrationsRunning.get()) {
+            LOGGER.debug("Deployment sweep parked: the startup migrations are still running.");
+            return;
+        }
+        // This sweep retires — deletes — the deployment row of any agent whose config
+        // it cannot read, and it runs on its own schedule rather than after the
+        // startup migrations. While the 6.x rename migration is outstanding the agent
+        // configs are still in `bots` and `agents` does not exist, so every deployed
+        // agent reads as deleted: on a real staging upgrade this deleted the
+        // deployment rows of both deployed agents before the migration had started. A
+        // migration that failed keeps the sweep parked deliberately — the collection
+        // names are then genuinely unknown, and not deploying beats deleting the
+        // record of what was deployed.
+        if (v6RenameMigration.isPending()) {
+            // Logged once: this runs every ten seconds, and a migration that takes minutes
+            // would otherwise print the same warning over and over.
+            if (sweepParkedLogged.compareAndSet(false, true)) {
+                LOGGER.warn("Deployment sweep parked: the V6 rename migration has not completed, so agent configs "
+                        + "cannot be read yet and every deployment would look stale. It stays parked until the "
+                        + "migration completes.");
+            } else {
+                LOGGER.debug("Deployment sweep still parked: the V6 rename migration has not completed.");
+            }
+            return;
+        }
+        runDeferredDocumentMigrations();
         try {
-            deploymentStore.readDeploymentInfos(deployed).stream()
-                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null)
-                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo)).forEach(deploymentInfo -> {
+            List<DeploymentInfo> meantToBeDeployed = deploymentStore.readDeploymentInfos(deployed).stream()
+                    .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
+            // A deployment that is no longer meant to be deployed is no longer failing.
+            failingDeployments.keySet().retainAll(meantToBeDeployed);
+            Instant now = clock.instant();
+            meantToBeDeployed.stream()
+                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo))
+                    .filter(deploymentInfo -> isRetryDue(deploymentInfo, now)).forEach(deploymentInfo -> {
                         try {
                             // A deployment record can outlive its Agent. deployAgent reports that by
                             // logging an ERROR and returning normally, so the catch blocks below never
@@ -189,19 +450,31 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             agentFactory.deployAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
                                     null);
 
+                            Deployment.Status outcome = deployedStatus(deploymentInfo);
+                            if (outcome == Deployment.Status.ERROR) {
+                                recordFailure(deploymentInfo, "the deployment ended in ERROR — its cause is logged above", null);
+                                return;
+                            }
+                            if (outcome != Deployment.Status.READY) {
+                                // Still in progress elsewhere (a REST deploy), or not registered:
+                                // not done, and not a failure either — the next sweep looks again.
+                                LOGGER.debugf("Deployment of agent %s version %d not confirmed yet (%s); checked again on the next sweep",
+                                        deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), outcome);
+                                return;
+                            }
+                            recordSuccess(deploymentInfo);
                             this.deploymentInfos.add(deploymentInfo);
 
                             lintInertHitlConfig(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
                         } catch (ServiceException | IllegalAccessException e) {
-                            LOGGER.error(e.getLocalizedMessage(), e);
+                            recordFailure(deploymentInfo, e.getLocalizedMessage(), e);
                         } catch (Exception e) {
                             // Catch any other exception (e.g. IllegalStateException wrapping
                             // ResourceNotFoundException) so one broken Agent doesn't block all others
-                            LOGGER.error(format("Failed to deploy Agent (id=%s, version=%d, environment=%s), skipping. Cause: %s",
-                                    deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), e.getMessage()));
-
                             // If the root cause is a missing resource, auto-clean the stale record
-                            if (isCausedByResourceNotFound(e)) {
+                            if (!isCausedByResourceNotFound(e)) {
+                                recordFailure(deploymentInfo, e.getMessage(), null);
+                            } else {
                                 LOGGER.warn(format("Agent config not found for id=%s version=%d — marking deployment as undeployed",
                                         deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion()));
                                 deploymentStore.setDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
@@ -209,9 +482,78 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             }
                         }
                     });
+            // The sweep ran to completion with the migration no longer pending, so
+            // the agents this instance is supposed to serve are deployed. If the
+            // startup path had to defer readiness, this is where it is granted —
+            // there is no other scheduled path that would, and without this the
+            // instance stays not-ready for the life of the process after a single
+            // transient migration-log read failure at boot.
+            if (readinessDeferred.compareAndSet(true, false)) {
+                reportReady();
+            }
+            agentsReadiness.setAgentsInError(failingDeployments.keySet().stream()
+                    .map(info -> info.getEnvironment() + "/" + info.getAgentId() + "/" + info.getAgentVersion()).sorted().toList());
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    private boolean isRetryDue(DeploymentInfo deploymentInfo, Instant now) {
+        RetryState state = failingDeployments.get(deploymentInfo);
+        return state == null || !now.isBefore(state.nextAttempt());
+    }
+
+    /**
+     * The status the registry reports after {@code deployAgent} returned, or
+     * {@code null} when it has none. {@code deployAgent} reports a workflow that
+     * cannot be built by leaving the agent in ERROR and returning normally, and it
+     * returns at once when another caller holds the deployment IN_PROGRESS — so
+     * only READY means this deployment is done.
+     */
+    private Deployment.Status deployedStatus(DeploymentInfo deploymentInfo) {
+        try {
+            var agent = agentFactory.getAgent(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
+            return agent == null ? null : agent.getDeploymentStatus();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void recordFailure(DeploymentInfo deploymentInfo, String cause, Throwable error) {
+        RetryState previous = failingDeployments.get(deploymentInfo);
+        int failures = previous == null ? 1 : previous.failures() + 1;
+        Duration delay = retryDelay(failures);
+        failingDeployments.put(deploymentInfo, new RetryState(failures, clock.instant().plus(delay)));
+        String message = format("Agent %s version %d (%s) failed to deploy: %s. Retrying with a growing delay (next in %ds, at most "
+                + "every %d min) while its deployment record says it is deployed.", deploymentInfo.getAgentId(),
+                deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), cause, delay.toSeconds(), MAX_RETRY_DELAY.toMinutes());
+        if (previous == null) {
+            // Once per state change: the retries below would otherwise repeat this
+            // every few seconds for as long as the agent stays broken.
+            LOGGER.error(message, error);
+        } else {
+            LOGGER.debugf("%s (failure %d)", message, failures);
+        }
+    }
+
+    private void recordSuccess(DeploymentInfo deploymentInfo) {
+        RetryState previous = failingDeployments.remove(deploymentInfo);
+        if (previous != null) {
+            LOGGER.infof("Agent %s version %d (%s) deployed after %d failed attempt(s)", deploymentInfo.getAgentId(),
+                    deploymentInfo.getAgentVersion(), deploymentInfo.getEnvironment(), previous.failures());
+        }
+    }
+
+    /**
+     * {@link #FIRST_RETRY_DELAY}, doubled per further failure, capped at
+     * {@link #MAX_RETRY_DELAY}.
+     */
+    static Duration retryDelay(int failures) {
+        Duration delay = FIRST_RETRY_DELAY;
+        for (int i = 1; i < failures && delay.compareTo(MAX_RETRY_DELAY) < 0; i++) {
+            delay = delay.multipliedBy(2);
+        }
+        return delay.compareTo(MAX_RETRY_DELAY) > 0 ? MAX_RETRY_DELAY : delay;
     }
 
     /**
@@ -367,6 +709,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
                                     return (UndeploymentExecutor) () -> {
                                         try {
+                                            // Evaluated here, after every current version has been
+                                            // deployed above, so a newer compatible version is ready.
+                                            if (retireIfConversationsCanMove(environment, agentId, agentVersion)) {
+                                                return;
+                                            }
                                             // attempt to undeploy Agent if this Agent version is no longer in use
                                             endOldConversationsWithOldAgents(agentId, agentVersion);
 
@@ -397,6 +744,43 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
+    /**
+     * Retires an old version at once when its conversations have somewhere to go: a
+     * newer version of the same compatibility generation that is ready on this
+     * node.
+     * <p>
+     * Without this the sweep treated such a version like any other old one — it
+     * ENDED its idle conversations and kept it deployed while any were left. Those
+     * conversations can simply continue on the newer version whenever they return,
+     * so ending them destroys exactly what version following exists to keep, and
+     * keeping the old version deployed for them serves no one. A version without a
+     * generation, or with no newer compatible version ready, takes the old path.
+     *
+     * @return {@code true} when the version was undeployed here
+     */
+    boolean retireIfConversationsCanMove(Environment environment, String agentId, Integer agentVersion)
+            throws ServiceException, IllegalAccessException {
+        Integer generation;
+        try {
+            var configuration = agentStore.read(agentId, agentVersion);
+            generation = configuration != null ? configuration.getCompatibilityGeneration() : null;
+        } catch (ResourceNotFoundException | ResourceStoreException | RuntimeException e) {
+            return false;
+        }
+        if (generation == null) {
+            return false;
+        }
+        IAgent successor = agentFactory.getLatestReadyAgentOfGeneration(environment, agentId, generation);
+        if (successor == null || successor.getAgentVersion() <= agentVersion) {
+            return false;
+        }
+        agentFactory.undeployAgent(environment, agentId, agentVersion);
+        deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
+        LOGGER.info(format("Retired Agent (id: %s, version: %d): its conversations continue on compatible version %d", sanitize(agentId),
+                agentVersion, successor.getAgentVersion()));
+        return true;
+    }
+
     private void manageDeploymentOfOldAgent(Environment environment, String agentId, Integer agentVersion)
             throws ServiceException, IllegalAccessException {
 
@@ -415,6 +799,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     }
 
     private void endOldConversationsWithOldAgents(String agentId, Integer agentVersion) throws ResourceStoreException, ResourceNotFoundException {
+        if (!idleEndingEnabled()) {
+            // Disabled (see idleEndingEnabled): no conversation is loaded, let alone
+            // ended. The caller's undeploy check still runs, and keeps this version
+            // deployed while it has any conversation open.
+            return;
+        }
 
         var conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
 
@@ -507,7 +897,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 }
                 var message = format(
                         "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
-                                + "because it is %d days older than the maximum idle time of %d days",
+                                + "because it has been idle for %d days, longer than the maximum idle time of %d days",
                         conversationId, descriptorNameOf(conversationMemory), agentId, agentVersion,
                         DAYS.between(lastInteractionDate, today), maximumLifeTimeOfIdleConversationsInDays);
 

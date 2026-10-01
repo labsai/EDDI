@@ -15,29 +15,31 @@ import {
   ExternalLink,
   BookOpen,
   FileJson,
-  Activity,
   CalendarClock,
   Link2Off,
   ScrollText,
   KeyRound,
   ShieldCheck,
   SlidersHorizontal,
-  Boxes,
+  Building2,
   HelpCircle,
   Check,
   RotateCcw,
-  Layers,
-  ShieldAlert,
   Zap,
-  RefreshCw,
   ChevronRight,
   Users,
   Cable,
   Variable,
-  HandMetal,
   Sparkles,
   ArrowUpCircle,
   Plug,
+  Blocks,
+  Radio,
+  Network,
+  Hand,
+  UserRoundSearch,
+  ArrowRightLeft,
+  ShieldUser,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -64,9 +66,9 @@ const navSections = [
       { path: "/manage/operator", icon: Sparkles, labelKey: "nav.operator" },
       { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
       { path: "/manage/workflows", icon: Workflow, labelKey: "nav.packages" },
-      { path: "/manage/groups", icon: Boxes, labelKey: "nav.groups" },
+      { path: "/manage/groups", icon: Users, labelKey: "nav.groups" },
       { path: "/manage/channels", icon: Cable, labelKey: "nav.channels" },
-      { path: "/manage/capabilities", icon: Layers, labelKey: "nav.capabilities" },
+      { path: "/manage/capabilities", icon: Blocks, labelKey: "nav.capabilities" },
     ],
   },
   {
@@ -82,15 +84,16 @@ const navSections = [
     items: [
       { path: "/manage/logs", icon: ScrollText, labelKey: "nav.logs" },
       { path: "/manage/conversations", icon: MessagesSquare, labelKey: "nav.conversations" },
-      { path: "/manage/conversations/monitoring", icon: Activity, labelKey: "nav.activeConversations", fallback: "Active Conversations" },
-      { path: "/manage/coordinator", icon: Activity, labelKey: "nav.coordinator" },
-      { path: "/manage/approvals", icon: HandMetal, labelKey: "nav.approvals" },
+      { path: "/manage/conversations/monitoring", icon: Radio, labelKey: "nav.activeConversations", fallback: "Active Conversations" },
+      { path: "/manage/coordinator", icon: Network, labelKey: "nav.coordinator" },
+      { path: "/manage/approvals", icon: Hand, labelKey: "nav.approvals" },
       { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
     ],
   },
   {
     labelKey: "nav.sectionAdmin",
     items: [
+      { path: "/manage/workspaces", icon: Building2, labelKey: "nav.workspaces", fallback: "Workspaces" },
       { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
       // Shown to everybody, like the nine other admin-only entries around it.
       // `navSections` is a static const and nothing here is role-gated, so
@@ -102,10 +105,10 @@ const navSections = [
       { path: "/manage/variables", icon: Variable, labelKey: "nav.variables" },
       { path: "/manage/quotas", icon: SlidersHorizontal, labelKey: "nav.quotas" },
       { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
-      { path: "/manage/userdata", icon: Users, labelKey: "nav.userData" },
+      { path: "/manage/userdata", icon: UserRoundSearch, labelKey: "nav.userData" },
       { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
-      { path: "/manage/sync", icon: RefreshCw, labelKey: "nav.sync" },
-      { path: "/manage/gdpr", icon: ShieldAlert, labelKey: "nav.gdpr" },
+      { path: "/manage/sync", icon: ArrowRightLeft, labelKey: "nav.sync" },
+      { path: "/manage/gdpr", icon: ShieldUser, labelKey: "nav.gdpr" },
       { path: "/manage/updates", icon: ArrowUpCircle, labelKey: "nav.updates", fallback: "Updates" },
     ],
   },
@@ -476,6 +479,10 @@ const CHAPTER_ROUTES: Record<TourChapterId, string> = {
   orphans: "/manage/orphans",
 };
 
+/**
+ * Sidebar "Help & Tour" popover: replays one onboarding chapter (jumping to
+ * its page) or resets them all. Closes on an outside click or Escape.
+ */
 function HelpMenu({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -534,7 +541,7 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
     const itemArray = Array.from(items);
     const currentIndex = itemArray.indexOf(document.activeElement as HTMLElement);
 
-    let nextIndex: number | null = null;
+    let nextIndex: number;
     switch (e.key) {
       case "ArrowDown":
         nextIndex = (currentIndex + 1) % itemArray.length;

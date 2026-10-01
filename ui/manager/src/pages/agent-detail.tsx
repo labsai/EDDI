@@ -1,6 +1,9 @@
+import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
+import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
+import { isForbidden } from "@/lib/access";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { deployedEnvironments, preferredChatEnvironment } from "@/lib/deployment-environments";
+import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
 import type { Environment } from "@/lib/constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -9,7 +12,6 @@ import {
   Bot,
   Workflow,
   Rocket,
-  Square,
   Clock,
   AlertTriangle,
   Plus,
@@ -30,8 +32,11 @@ import {
   ArrowUpCircle,
   Sparkles,
   Info,
+  CircleDashed,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -45,9 +50,11 @@ import {
   useDeleteAgent,
   useDuplicateAgent,
   useAgentVersions,
-  useUpdateAgent,
 } from "@/hooks/use-agents";
+import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
+import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
+import { DeploymentImpactPanel } from "@/components/agents/deployment-impact-panel";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
 import { parseResourceUri, type EnvironmentStatus, type Agent, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
@@ -68,7 +75,7 @@ const statusIcons = {
   READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10" },
   IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
-  NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted" },
+  NOT_FOUND: { icon: CircleDashed, color: "text-muted-foreground", bg: "bg-muted" },
 };
 
 const envLabels: Record<string, string> = {
@@ -101,11 +108,17 @@ export function AgentDetailPage() {
   }, [id]);
 
   const { data: versions } = useAgentVersions(id!);
+  // Delete (and sharing) need OWN. An EDIT grantee was offered Delete here and
+  // met a 403 — the agents list already hid it for them via the same level.
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(versions, id, workspacesEnforced);
 
   // Default to latest version once loaded
   const resolvedVersion = version ?? versions?.[0]?.version ?? 1;
 
-  const { data: agent, isLoading, isError, refetch } = useAgent(id!, resolvedVersion);
+  const { data: agent, isLoading, isError, error: loadError, refetch } = useAgent(id!, resolvedVersion);
   const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
   const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
@@ -276,14 +289,29 @@ export function AgentDetailPage() {
     );
   }
 
-  const handleVersionChange = useCallback((v: number) => {
-    setVersion(v);
-  }, []);
+  const handleVersionChange = useCallback(
+    (v: number) => {
+      // Choosing the latest version means "follow the latest", not "pin this
+      // number": pinned, the page stayed on it after the next inline save
+      // created a newer one, and every section went on editing the old one.
+      setVersion(v === versions?.[0]?.version ? undefined : v);
+    },
+    [versions],
+  );
 
   if (isLoading && !agent) {
     return (
       <div className="flex items-center justify-center py-20" data-testid="agent-detail-loading">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (isForbidden(loadError)) {
+    return (
+      <div className="space-y-4">
+        <BackLink />
+        <RequestAccessPanel resourceId={id!} isAgent />
       </div>
     );
   }
@@ -326,6 +354,7 @@ export function AgentDetailPage() {
                 <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
                   v{resolvedVersion}
                 </span>
+                <CompatibilityGenerationBadge generation={agent.compatibilityGeneration} />
               </p>
             </div>
           </div>
@@ -382,7 +411,9 @@ export function AgentDetailPage() {
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
-                  drawerStore.open(id!, agentDisplayName);
+                  // Named, not defaulted: this branch deploys to production, and
+                  // the drawer's "New conversation" must start there too.
+                  drawerStore.open(id!, agentDisplayName, "production");
                   drawerStore.setStep("deploying");
                   try {
                     await deployAgent("production", id!, resolvedVersion);
@@ -423,7 +454,11 @@ export function AgentDetailPage() {
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
                   const chatStore = useChatStore.getState();
-                  drawerStore.open(id!, agentDisplayName);
+                  // The environment the conversation is started in, so the
+                  // drawer's "New conversation" lands there as well. Left to
+                  // the default it restarted a test-only agent in production,
+                  // where it is not deployed.
+                  drawerStore.open(id!, agentDisplayName, chatEnvironment);
                   if (isChatReachable) {
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
@@ -490,14 +525,16 @@ export function AgentDetailPage() {
               <Download className="h-3.5 w-3.5" />
               {t("agents.export", "Export")}
             </button>
-            <button
-              onClick={() => setShowDeleteDialog(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors"
-              data-testid="delete-agent-btn"
-              aria-label={t("agents.deleteAgent", "Delete agent")}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            {access.canOwn && (
+              <button
+                onClick={() => setShowDeleteDialog(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 transition-colors"
+                data-testid="delete-agent-btn"
+                aria-label={t("agents.deleteAgent", "Delete agent")}
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -540,6 +577,8 @@ export function AgentDetailPage() {
       {/* Environment Status Badges */}
       {envStatuses && envStatuses.length > 0 && (
         <EnvironmentBadges
+          agentId={id!}
+          version={resolvedVersion}
           statuses={envStatuses}
           onDeploy={(env) => deployMutation.mutate(
             { environment: env, agentId: id!, version: resolvedVersion },
@@ -685,6 +724,9 @@ export function AgentDetailPage() {
       {/* Session Management */}
       <SessionManagementSection agent={agent} agentId={id!} version={resolvedVersion} />
 
+      {/* Usage, and opt-in review of conversations by the agent's maintainers */}
+      <ConversationReviewSection agent={agent} agentId={id!} version={resolvedVersion} />
+
       {/* Human-in-the-Loop */}
       <HitlConfigSection agent={agent} agentId={id!} version={resolvedVersion} />
 
@@ -734,6 +776,12 @@ export function AgentDetailPage() {
                 {t(
                   "agents.undeployEndConversationsHint",
                   "Immediately terminates every in-progress conversation on this deployment. This cannot be undone."
+                )}
+              </span>
+              <span className="mt-0.5 block text-xs" data-testid="undeploy-compatible-hint">
+                {t(
+                  "agents.undeployCompatibleHint",
+                  "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn.",
                 )}
               </span>
             </span>
@@ -843,11 +891,15 @@ function VersionSelect({
 
 /* ─── Environment Status Badges ─── */
 function EnvironmentBadges({
+  agentId,
+  version,
   statuses,
   onDeploy,
   onUndeploy,
   isBusy,
 }: {
+  agentId: string;
+  version: number;
   statuses: EnvironmentStatus[];
   onDeploy: (env: string) => void;
   onUndeploy: (env: string) => void;
@@ -870,10 +922,17 @@ function EnvironmentBadges({
         </h2>
       </div>
       <div className="grid grid-cols-1 gap-0 divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-        {statuses.map(({ environment, status }) => {
+        {statuses.map((entry) => {
+          const { environment, status, deployedVersion } = entry;
           const conf = statusIcons[status];
           const Icon = conf.icon;
-          const isUp = status === "READY";
+          // The button acts on the version this page shows. An environment
+          // live at an OLDER version is shown as deployed (with its version),
+          // but its action is Deploy: undeploying the page's version would hit
+          // a version that is not running — the backend still answers 202 and
+          // disables every schedule of the agent, while the old version keeps
+          // serving.
+          const isUp = isLiveAtRequestedVersion(entry);
           return (
             <div key={environment} className="flex items-center justify-between gap-3 px-5 py-3">
               <div className="flex items-center gap-2">
@@ -886,12 +945,25 @@ function EnvironmentBadges({
                   </p>
                   <p className={cn("text-xs", conf.color)}>
                     {envStatusLabels[status] ?? status}
+                    {deployedVersion !== undefined && (
+                      <span
+                        className="ms-1 tabular-nums opacity-75"
+                        data-testid={`env-badge-version-${environment}`}
+                        title={t("agents.liveInVersion", "Live in {{environment}} at version {{version}}", {
+                          environment: t(envLabels[environment] ?? environment),
+                          version: deployedVersion,
+                        })}
+                      >
+                        v{deployedVersion}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => (isUp ? onUndeploy(environment) : onDeploy(environment))}
                 disabled={isBusy}
+                data-testid={`env-toggle-${environment}`}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                   isUp
@@ -905,6 +977,19 @@ function EnvironmentBadges({
             </div>
           );
         })}
+      </div>
+      {/* What deploying this version does to conversations on the agent's
+          other deployed versions. Each panel hides itself when there are none. */}
+      <div className="divide-y divide-border border-t border-border empty:hidden">
+        {statuses.map(({ environment }) => (
+          <DeploymentImpactPanel
+            key={environment}
+            agentId={agentId}
+            version={version}
+            environment={environment}
+            environmentLabel={t(envLabels[environment] ?? environment)}
+          />
+        ))}
       </div>
     </section>
   );
@@ -1086,7 +1171,7 @@ function A2ASection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [skillInput, setSkillInput] = useState("");
   const [localDesc, setLocalDesc] = useState(agent.description ?? "");
   const [showCard, setShowCard] = useState(false);

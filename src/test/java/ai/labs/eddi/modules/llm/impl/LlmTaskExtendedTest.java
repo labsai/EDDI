@@ -28,6 +28,7 @@ import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -79,7 +80,7 @@ class LlmTaskExtendedTest {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
         builders.put("openai", () -> parameters -> new ChatModel() {
             @Override
-            public ChatResponse chat(List<ChatMessage> messages) {
+            public ChatResponse doChat(ChatRequest chatRequest) {
                 return ChatResponse.builder().aiMessage(aiMessage(TEST_MESSAGE)).build();
             }
         });
@@ -91,10 +92,10 @@ class LlmTaskExtendedTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
-        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         promptSnippetService = mock(PromptSnippetService.class);
-        when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(
                 promptSnippetService, new SimpleMeterRegistry());
@@ -411,7 +412,7 @@ class LlmTaskExtendedTest {
         @Test
         @DisplayName("Non-empty snippets should be injected into template data")
         void snippetsInjected() throws Exception {
-            when(promptSnippetService.getAll()).thenReturn(Map.of("greeting", "Hello!"));
+            when(promptSnippetService.getForAgent(any())).thenReturn(Map.of("greeting", "Hello!"));
 
             var memory = createMemoryWithAction("action1");
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());

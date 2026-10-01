@@ -146,13 +146,16 @@ export function usePreviewSync() {
       sourceVersion,
       targetAgentId,
       sourceAuth,
+      createNew = false,
     }: {
       sourceUrl: string;
       sourceAgentId: string;
       sourceVersion: number | null;
       targetAgentId: string | null;
       sourceAuth: string;
-    }) => previewSync(sourceUrl, sourceAgentId, sourceVersion, targetAgentId, sourceAuth),
+      /** Create a new agent even when one was promoted from this source before. */
+      createNew?: boolean;
+    }) => previewSync(sourceUrl, sourceAgentId, sourceVersion, targetAgentId, sourceAuth, createNew),
   });
 }
 
@@ -181,6 +184,7 @@ export function useExecuteSync() {
       selectedResources,
       workflowOrder,
       sourceAuth,
+      createNew = false,
     }: {
       sourceUrl: string;
       sourceAgentId: string;
@@ -189,6 +193,7 @@ export function useExecuteSync() {
       selectedResources: string[] | null;
       workflowOrder: string[] | null;
       sourceAuth: string;
+      createNew?: boolean;
     }) =>
       executeSync(
         sourceUrl,
@@ -197,7 +202,8 @@ export function useExecuteSync() {
         targetAgentId,
         selectedResources,
         workflowOrder,
-        sourceAuth
+        sourceAuth,
+        createNew
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.all });

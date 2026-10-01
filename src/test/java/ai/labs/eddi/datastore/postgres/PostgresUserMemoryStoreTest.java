@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -13,8 +14,13 @@ import org.junit.jupiter.api.*;
 import javax.sql.DataSource;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -45,6 +51,54 @@ class PostgresUserMemoryStoreTest extends PostgresTestBase {
     }
 
     // ─── Flat property view ─────────────────────────────────────
+
+    @Nested
+    @DisplayName("insertIfAbsent")
+    class InsertIfAbsent {
+
+        private UserMemoryEntry entry(String key, Object value, Visibility visibility, String agent) {
+            return new UserMemoryEntry(null, "user-1", key, value, "fact", visibility, agent, List.of(), null, false, 0, null, null);
+        }
+
+        @Test
+        @DisplayName("inserts when absent and returns the new id")
+        void insertsWhenAbsent() throws Exception {
+            String id = store.insertIfAbsent(entry("lang", "de", Visibility.global, null));
+
+            assertNotNull(id);
+            assertEquals("de", store.getAllEntries("user-1").getFirst().value());
+        }
+
+        @Test
+        @DisplayName("an existing entry at the identity is left exactly as it is, and no id comes back")
+        void neverReplaces() throws Exception {
+            store.upsert(entry("lang", "en", Visibility.global, "agent-a"));
+
+            assertNull(store.insertIfAbsent(entry("lang", "OLD-v5", Visibility.global, null)));
+
+            var all = store.getAllEntries("user-1");
+            assertEquals(1, all.size());
+            assertEquals("en", all.getFirst().value());
+        }
+
+        @Test
+        @DisplayName("identity, not key: a scoped entry does not block the global one, nor another agent's scoped one")
+        void identityNotKey() throws Exception {
+            store.upsert(entry("lang", "fr", Visibility.self, "agent-a"));
+
+            assertNotNull(store.insertIfAbsent(entry("lang", "de", Visibility.global, null)));
+            assertNotNull(store.insertIfAbsent(entry("lang", "it", Visibility.self, "agent-b")));
+            assertNull(store.insertIfAbsent(entry("lang", "es", Visibility.self, "agent-a")));
+            assertEquals(3, store.getAllEntries("user-1").size());
+        }
+
+        @Test
+        @DisplayName("refuses a reserved _gdpr_ key like upsert does")
+        void refusesReservedKeys() {
+            assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class,
+                    () -> store.insertIfAbsent(entry("_gdpr_processing_restricted", "false", Visibility.global, null)));
+        }
+    }
 
     @Nested
     @DisplayName("Flat Properties")
@@ -447,6 +501,126 @@ class PostgresUserMemoryStoreTest extends PostgresTestBase {
                 return rs.getInt(1);
             }
         }
+    }
+
+    // ─── Owner-conditional global write ─────────────────────────
+
+    @Nested
+    @DisplayName("upsertIfOwnedBy")
+    class OwnerConditionalGlobalWrite {
+
+        @Test
+        @DisplayName("a free key is written and stamped with the writer as owner")
+        void freeKeyIsClaimed() throws Exception {
+            assertTrue(store.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "en", "agent-a"), "agent-a"));
+
+            var stored = store.getAllEntries("u-own");
+            assertEquals(1, stored.size());
+            assertEquals("agent-a", stored.getFirst().sourceAgentId());
+            assertEquals("en", stored.getFirst().value());
+        }
+
+        @Test
+        @DisplayName("the owner can update its own key")
+        void ownerUpdates() throws Exception {
+            store.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "en", "agent-a"), "agent-a");
+
+            assertTrue(store.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "de", "agent-a"), "agent-a"));
+
+            var stored = store.getAllEntries("u-own");
+            assertEquals(1, stored.size());
+            assertEquals("de", stored.getFirst().value());
+        }
+
+        @Test
+        @DisplayName("another agent's key is refused and left untouched")
+        void otherAgentsKeyIsRefused() throws Exception {
+            store.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "en", "agent-a"), "agent-a");
+
+            assertFalse(store.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "fr", "agent-b"), "agent-b"));
+
+            var stored = store.getAllEntries("u-own");
+            assertEquals(1, stored.size(), "a refused write must not add a second global entry");
+            assertEquals("en", stored.getFirst().value());
+            assertEquals("agent-a", stored.getFirst().sourceAgentId());
+        }
+
+        @Test
+        @DisplayName("a key with no recorded owner is refused")
+        void ownerlessKeyIsRefused() throws Exception {
+            // mergeProperties writes global entries without an owning agent
+            var props = new Properties();
+            props.put("lang", "en");
+            store.mergeProperties("u-own", props);
+
+            assertFalse(store.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "fr", "agent-a"), "agent-a"));
+            assertEquals("en", store.readProperties("u-own").get("lang"));
+        }
+
+        @Test
+        @DisplayName("a key with a blank owner is refused")
+        void blankOwnerIsRefused() throws Exception {
+            store.upsert(ownedGlobal("u-own", "lang", "en", ""));
+
+            assertFalse(store.upsertIfOwnedBy(ownedGlobal("u-own", "lang", "fr", "agent-a"), "agent-a"));
+            assertEquals("en", store.getAllEntries("u-own").getFirst().value());
+        }
+
+        @Test
+        @DisplayName("agents racing for a fresh key: exactly one wins, and its value and ownership stick")
+        void concurrentClaimsHaveOneWinner() throws Exception {
+            for (int round = 0; round < 10; round++) {
+                String key = "race-" + round;
+                List<String> winners = raceForFreshKey(store::upsertIfOwnedBy, "u-race", key, 8);
+
+                assertEquals(1, winners.size(), "round " + round + ": winners " + winners);
+                List<UserMemoryEntry> stored = store.getAllEntries("u-race").stream().filter(e -> key.equals(e.key())).toList();
+                assertEquals(1, stored.size(), "round " + round + ": one global entry per key");
+                assertEquals(winners.getFirst(), stored.getFirst().sourceAgentId());
+                assertEquals("value-of-" + winners.getFirst(), stored.getFirst().value(),
+                        "the loser's value must not overwrite the winner's");
+            }
+        }
+    }
+
+    /**
+     * Starts {@code agents} writers on the same fresh global key at once and
+     * returns which of them the store reported as applied.
+     */
+    private static List<String> raceForFreshKey(Store target, String userId, String key, int agents) throws Exception {
+        var pool = Executors.newFixedThreadPool(agents);
+        try {
+            var start = new CountDownLatch(1);
+            List<Future<String>> results = new ArrayList<>();
+            for (int i = 0; i < agents; i++) {
+                String agent = "agent-" + i;
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return target.write(ownedGlobal(userId, key, "value-of-" + agent, agent), agent) ? agent : null;
+                }));
+            }
+            start.countDown();
+            List<String> winners = new ArrayList<>();
+            for (Future<String> result : results) {
+                String winner = result.get(30, TimeUnit.SECONDS);
+                if (winner != null) {
+                    winners.add(winner);
+                }
+            }
+            return winners;
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @FunctionalInterface
+    private interface Store {
+        boolean write(UserMemoryEntry entry, String agentId) throws Exception;
+    }
+
+    private static UserMemoryEntry ownedGlobal(String userId, String key, String value, String agentId) {
+        return new UserMemoryEntry(null, userId, key, value, "fact", Visibility.global, agentId, List.of(), "conv-own", false, 0, null,
+                null);
     }
 
     private static UserMemoryEntry createEntry(String userId, String key, Object value,

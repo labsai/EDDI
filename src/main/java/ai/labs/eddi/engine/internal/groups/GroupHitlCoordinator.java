@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupPauseMismatchException;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
@@ -31,6 +32,7 @@ import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
@@ -65,7 +67,7 @@ import java.util.concurrent.ExecutorService;
  * stores it, never invokes a method on it before the facade's own constructor
  * (and therefore full field initialization) completes.
  * <p>
- * {@code activeTokens} and the virtual-thread {@link ExecutorService} are
+ * {@code discussionControls} and the virtual-thread {@link ExecutorService} are
  * shared by reference, not owned — {@code GroupConversationService} and its
  * other collaborators (e.g. {@link TaskForceEngine}) read/write the same map,
  * and the facade keeps the {@code @PreDestroy} shutdown hook for the executor.
@@ -85,7 +87,7 @@ public class GroupHitlCoordinator {
     private final IScheduleStore scheduleStore;
     private final AuditLedgerService auditLedgerService;
     private final GroupSigningGuard signingGuard;
-    private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens;
+    private final ConcurrentHashMap<String, DiscussionControlToken> discussionControls;
     private final ExecutorService executorService;
     private final CallerIdentityContext callerIdentityContext;
     private final GroupConversationService groupConversationService;
@@ -95,7 +97,7 @@ public class GroupHitlCoordinator {
 
     public GroupHitlCoordinator(IAgentGroupStore groupStore, IGroupConversationStore conversationStore,
             IScheduleStore scheduleStore, AuditLedgerService auditLedgerService, GroupSigningGuard signingGuard,
-            ConcurrentHashMap<String, DiscussionControlToken> activeTokens, ExecutorService executorService,
+            ConcurrentHashMap<String, DiscussionControlToken> discussionControls, ExecutorService executorService,
             CallerIdentityContext callerIdentityContext, GroupConversationService groupConversationService,
             Counter counterGroupHitlPause, Counter counterGroupHitlResume, Counter counterGroupFailure) {
         this.groupStore = groupStore;
@@ -103,7 +105,7 @@ public class GroupHitlCoordinator {
         this.scheduleStore = scheduleStore;
         this.auditLedgerService = auditLedgerService;
         this.signingGuard = signingGuard;
-        this.activeTokens = activeTokens;
+        this.discussionControls = discussionControls;
         this.executorService = executorService;
         this.callerIdentityContext = callerIdentityContext;
         this.groupConversationService = groupConversationService;
@@ -130,10 +132,10 @@ public class GroupHitlCoordinator {
 
     /**
      * Cross-pod terminal-override check for a phase boundary (#27/#45). Group
-     * control is per-pod (activeTokens is process-local), so a cancel/ABORT landing
-     * on another pod flips only the persisted state — the running leg never sees it
-     * and its next whole-document write would resurrect the running state and
-     * clobber concurrent transcript writes. Re-reads the persisted state at the
+     * control is per-pod (discussionControls is process-local), so a cancel/ABORT
+     * landing on another pod flips only the persisted state — the running leg never
+     * sees it and its next whole-document write would resurrect the running state
+     * and clobber concurrent transcript writes. Re-reads the persisted state at the
      * boundary: if another writer moved it to a terminal state, the leg stops and
      * honors it (notifying the listener on a cancel). Best-effort: a store read
      * failure keeps the leg running (the local token path still applies).
@@ -145,6 +147,7 @@ public class GroupHitlCoordinator {
             var persistedState = conversationStore.read(gc.getId()).getState();
             if (persistedState == GroupConversationState.CANCELLED
                     || persistedState == GroupConversationState.FAILED
+                    || persistedState == GroupConversationState.REJECTED
                     || persistedState == GroupConversationState.COMPLETED
                     // CLOSED is terminal too: without it, a leg that keeps running past a
                     // concurrent close would fall through to the unconditional whole-document
@@ -200,7 +203,8 @@ public class GroupHitlCoordinator {
         } else {
             gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
         }
-        conversationStore.update(gc);
+        // H14a: only while still running — a cancel committed elsewhere must win.
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
 
         // MAJOR-2: Schedule group timeout if configured
         scheduleGroupHitlTimeout(gc);
@@ -208,7 +212,7 @@ public class GroupHitlCoordinator {
 
         if (listener != null) {
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
-                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity));
+                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity, gc.getPausedAt()));
         }
     }
 
@@ -256,7 +260,8 @@ public class GroupHitlCoordinator {
         gc.setPausedAt(null);
         gc.setHitlLastPauseFingerprint(null);
         gc.setLastModified(Instant.now());
-        conversationStore.update(gc);
+        // H14a: only while still running — a cancel committed elsewhere must win.
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
         counterGroupFailure.increment();
         deleteGroupHitlTimeoutSchedule(gc.getId());
         cleanupAfterTerminalState(gc);
@@ -274,7 +279,7 @@ public class GroupHitlCoordinator {
      * block.
      */
     public void convertPauseToCancelIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
-        convertPauseToCancelIfSignalled(gc, listener, activeTokens.get(gc.getId()));
+        convertPauseToCancelIfSignalled(gc, listener, discussionControls.get(gc.getId()));
     }
 
     /**
@@ -288,7 +293,7 @@ public class GroupHitlCoordinator {
      * the remove take cancelDiscussion's DB-CAS path instead.
      */
     public void removeTokenAndConvertIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
-        var removed = activeTokens.remove(gc.getId());
+        var removed = discussionControls.remove(gc.getId());
         if (removed != null && removed.isCancelled()
                 && (gc.getState() == GroupConversationState.AWAITING_APPROVAL
                         || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT)) {
@@ -422,7 +427,7 @@ public class GroupHitlCoordinator {
         // fresh pause (token present, pause just committed) reported success yet
         // left the pause intact — stripped of its finite timeout, silently
         // degrading a bounded policy to WAIT_INDEFINITELY.
-        var token = activeTokens.get(conversationId);
+        var token = discussionControls.get(conversationId);
         if (token != null) {
             if (mode == ControlSignal.CANCEL_IMMEDIATE) {
                 token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
@@ -449,8 +454,9 @@ public class GroupHitlCoordinator {
         if (state == GroupConversationState.COMPLETED
                 || state == GroupConversationState.CANCELLED
                 || state == GroupConversationState.FAILED
+                || state == GroupConversationState.REJECTED
                 || state == GroupConversationState.CLOSED) {
-            LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", conversationId, state);
+            LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", LogSanitizer.sanitize(conversationId), state);
             return false;
         }
         boolean wasPaused = state == GroupConversationState.AWAITING_APPROVAL
@@ -464,7 +470,8 @@ public class GroupHitlCoordinator {
         } catch (IResourceStore.ResourceModifiedException e) {
             // CAS lost — leave the schedule alone: whoever won the race (a fresh
             // pause / approve / timeout) owns the schedule now. Report 409.
-            LOGGER.infof("Cancel of group conversation %s lost a concurrent state race — not overwriting", conversationId);
+            LOGGER.infof("Cancel of group conversation %s lost a concurrent state race — not overwriting",
+                    LogSanitizer.sanitize(conversationId));
             return false;
         }
         // Cancel won: delete the timeout schedule only now (MAJOR-3).
@@ -476,6 +483,14 @@ public class GroupHitlCoordinator {
             cleanupAfterTerminalState(gc);
         }
         return true;
+    }
+
+    /**
+     * The caller a resumed discussion runs as: the approver when they started the
+     * discussion, otherwise nobody (H5).
+     */
+    static CallerIdentity resumeCallerFor(CallerIdentity approver, GroupConversation gc) {
+        return CallerIdentityContext.isSameUser(approver, gc.getUserId()) ? approver : null;
     }
 
     public GroupConversation resumeDiscussion(String groupConversationId, GroupApprovalRequest request,
@@ -492,6 +507,13 @@ public class GroupHitlCoordinator {
         var gc = GroupConversationSchemaMigrations.prepareForResume(conversationStore.read(groupConversationId));
         if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
             throw new GroupDiscussionException("Group conversation is not awaiting approval");
+        }
+        // A decision made for an earlier pause (HitlDecision.pauseId) must not
+        // approve this one — the discussion was resumed and has paused again on
+        // something the reviewer never saw.
+        if (request.getDecision() != null && !request.getDecision().appliesToPause(gc.getPausedAt())) {
+            throw new GroupPauseMismatchException("The pending approval changed since this decision was made — "
+                    + "review the current pause and decide again");
         }
 
         // Apply task-level approvals if present
@@ -605,7 +627,11 @@ public class GroupHitlCoordinator {
 
         // Apply phase-level decision
         if (decision != null && decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
-            gc.setState(GroupConversationState.FAILED);
+            // REJECTED, not FAILED: the run did not break, a human declined its
+            // recommendation. Both are terminal and closeable; only the label differs,
+            // and rendering a recorded decision as "Failed" is wrong in a product whose
+            // point is the human in the loop.
+            gc.setState(GroupConversationState.REJECTED);
             gc.setPausedAt(null);
             // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
             conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
@@ -662,7 +688,7 @@ public class GroupHitlCoordinator {
         // cancelled. With the token present here, that cancel takes the SIGNAL path
         // (setSignal) and executeDiscussion's top-of-phase isCancelled() check stops
         // before any member-agent work runs.
-        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        discussionControls.put(gc.getId(), new DiscussionControlToken());
         // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
         // fails, the schedule is preserved so the timeout can still fire.
         deleteGroupHitlTimeoutSchedule(groupConversationId);
@@ -849,7 +875,14 @@ public class GroupHitlCoordinator {
             }
         };
         try {
-            executorService.submit(callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(), resumeWork));
+            // The approver's identity carries the rest of the discussion only when the
+            // approver started it. An admin or eddi-approver deciding someone else's
+            // discussion saw the pause and nothing after it, so the member turns that
+            // follow run with no caller — a ${caller:token} call fails closed rather
+            // than going out with the approver's token (same rule as a conversation
+            // resume, ConversationHitlService).
+            executorService.submit(callerIdentityContext.withIdentity(
+                    resumeCallerFor(callerIdentityContext.captureOrCurrent(), gc), resumeWork));
         } catch (RuntimeException e) {
             // Executor saturated/shut down — no thread will run the resume. The CAS
             // above already consumed the pause; restore it so the approval remains
@@ -987,7 +1020,8 @@ public class GroupHitlCoordinator {
         // record — it is not a HitlTimeoutPolicy and must not pretend to be one.
         gc.setHitlApprovalTimeout(humanConfig.turnTimeout());
         gc.setHitlTimeoutPolicy(null);
-        conversationStore.update(gc);
+        // H14a: only while still running — a cancel committed elsewhere must win.
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
 
         scheduleHumanTurnTimeout(gc);
         counterGroupHitlPause.increment();
@@ -1046,7 +1080,8 @@ public class GroupHitlCoordinator {
         gc.setHitlPauseReason("Facilitator escalation — waiting for input from " + escalation.principalId());
         gc.setHitlApprovalTimeout(humanConfig.turnTimeout());
         gc.setHitlTimeoutPolicy(null);
-        conversationStore.update(gc);
+        // H14a: only while still running — a cancel committed elsewhere must win.
+        RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
 
         scheduleHumanTurnTimeout(gc);
         counterGroupHitlPause.increment();
@@ -1240,7 +1275,7 @@ public class GroupHitlCoordinator {
         // actually ENQUEUED below — a submit failure rolls the pause back, and a
         // rolled-back attempt must not pollute the resume metric or the EU-AI-Act
         // audit trail (the same rule resumeDiscussion follows).
-        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        discussionControls.put(gc.getId(), new DiscussionControlToken());
         deleteGroupHitlTimeoutSchedule(groupConversationId);
 
         final int startFromPhase = pending.phaseIdx();

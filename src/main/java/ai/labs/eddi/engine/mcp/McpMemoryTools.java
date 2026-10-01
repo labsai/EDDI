@@ -5,22 +5,25 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
-import ai.labs.eddi.engine.security.OwnershipValidator;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
@@ -44,12 +47,14 @@ public class McpMemoryTools {
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final boolean authEnabled;
 
     @Inject
     public McpMemoryTools(IUserMemoryStore userMemoryStore, IJsonSerialization jsonSerialization, SecurityIdentity identity,
-            OwnershipValidator ownershipValidator,
+            OwnershipValidator ownershipValidator, ResourceAccessGuard resourceAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+        this.resourceAccessGuard = resourceAccessGuard;
         this.userMemoryStore = userMemoryStore;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
@@ -60,7 +65,7 @@ public class McpMemoryTools {
     @Tool(name = "list_user_memories", description = "List all persistent memory entries for a user. "
             + "Returns structured facts, preferences, and context that agents have remembered about the user.")
     public String listUserMemories(@ToolArg(description = "User ID (required)") String userId,
-                                   @ToolArg(description = "Maximum number of entries to return (default: 50)") Integer limit) {
+                                   @ToolArg(description = "Maximum number of entries to return (default: 50)", required = false) Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -88,9 +93,10 @@ public class McpMemoryTools {
             + "Returns the memories that would be injected into a conversation with this agent.")
     public String getVisibleMemories(@ToolArg(description = "User ID (required)") String userId,
                                      @ToolArg(description = "Agent ID to check visibility for (required)") String agentId,
-                                     @ToolArg(description = "Comma-separated group IDs (optional)") String groupIds,
-                                     @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)") String order,
-                                     @ToolArg(description = "Maximum number of entries (default: 50)") Integer limit) {
+                                     @ToolArg(description = "Comma-separated group IDs (optional)", required = false) String groupIds,
+                                     @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)",
+                                              required = false) String order,
+                                     @ToolArg(description = "Maximum number of entries (default: 50)", required = false) Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -98,7 +104,15 @@ public class McpMemoryTools {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
-            List<String> groups = groupIds != null && !groupIds.isBlank() ? List.of(groupIds.split(",")) : List.of();
+            List<String> groups = groupIds != null && !groupIds.isBlank()
+                    ? Arrays.stream(groupIds.split(",")).map(String::trim).filter(id -> !id.isEmpty()).toList()
+                    : List.of();
+            try {
+                // Same rule as REST: naming a group must not unlock its team memories.
+                resourceAccessGuard.requireUseAccessToEach(groups, "group");
+            } catch (ForbiddenException e) {
+                return errorJson("Access denied: you do not have access to one of the named groups");
+            }
             String recallOrder = order != null && !order.isBlank() ? order : "most_recent";
             int maxEntries = limit != null && limit > 0 ? limit : 50;
 
@@ -168,8 +182,12 @@ public class McpMemoryTools {
                                    @ToolArg(description = "Memory key/name (required)") String key,
                                    @ToolArg(description = "Memory value (required)") String value,
                                    @ToolArg(description = "Source agent ID (required)") String agentId,
-                                   @ToolArg(description = "Category: 'preference', 'fact', or 'context' (default: fact)") String category,
-                                   @ToolArg(description = "Visibility: 'self', 'group', or 'global' (default: self)") String visibility) {
+                                   @ToolArg(description = "Category: 'preference', 'fact', or 'context' (default: fact)",
+                                            required = false) String category,
+                                   @ToolArg(description = "Visibility: 'self', 'group', or 'global' (default: self)",
+                                            required = false) String visibility,
+                                   @ToolArg(description = "Comma-separated group IDs — required for 'group' visibility, which no one can read "
+                                           + "without one", required = false) String groupIds) {
         requireRole(identity, authEnabled, "eddi-admin");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -179,10 +197,21 @@ public class McpMemoryTools {
             return errorJson("value is required");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
+        if (IUserMemoryStore.isReservedKey(key))
+            return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(key).getMessage());
         try {
-            var vis = visibility != null && !visibility.isBlank() ? Visibility.valueOf(visibility.toLowerCase()) : Visibility.self;
+            var vis = visibility != null && !visibility.isBlank() ? Visibility.valueOf(visibility.trim().toLowerCase()) : Visibility.self;
+            List<String> groups = groupIds == null || groupIds.isBlank()
+                    ? List.of()
+                    : Arrays.stream(groupIds.split(",")).map(String::trim).filter(g -> !g.isEmpty()).toList();
 
-            var entry = UserMemoryEntry.fromToolCall(userId, agentId, null, List.of(), key, value, category, vis);
+            var entry = UserMemoryEntry.fromToolCall(userId, agentId, null, groups, key, value, category, vis);
+            // The same floor the REST API enforces — MCP used to accept a key REST
+            // rejected, any value size, and a group entry with no group.
+            String violation = UserMemoryWriteRules.validate(entry);
+            if (violation != null) {
+                return errorJson(violation);
+            }
 
             String id = userMemoryStore.upsert(entry);
 
@@ -201,6 +230,12 @@ public class McpMemoryTools {
         if (entryId == null || entryId.isBlank())
             return errorJson("entryId is required");
         try {
+            var existing = userMemoryStore.findEntryById(entryId);
+            if (existing.isPresent() && IUserMemoryStore.isReservedKey(existing.get().key())) {
+                // The Art. 18 flag is lifted through the GDPR admin unrestrict endpoint, which
+                // audits it.
+                return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(existing.get().key()).getMessage());
+            }
             userMemoryStore.deleteEntry(entryId);
             return jsonSerialization.serialize(Map.of("entryId", entryId, "status", "deleted"));
         } catch (Exception e) {
@@ -209,8 +244,9 @@ public class McpMemoryTools {
         }
     }
 
-    @Tool(name = "delete_all_user_memories", description = "Delete ALL memories for a user (GDPR right-to-erasure). "
-            + "This action is irreversible!")
+    @Tool(name = "delete_all_user_memories", description = "Delete ALL memories for a user. "
+            + "This action is irreversible! GDPR bookkeeping entries (keys starting with '_gdpr_') are kept; "
+            + "use delete_user_data for a full GDPR Art. 17 erasure.")
     public String deleteAllUserMemories(@ToolArg(description = "User ID (required)") String userId,
                                         @ToolArg(description = "Confirmation: must be 'CONFIRM' to proceed") String confirmation) {
         requireRole(identity, authEnabled, "eddi-admin");
@@ -220,8 +256,10 @@ public class McpMemoryTools {
             return errorJson("You must pass confirmation='CONFIRM' to delete all memories. This action is irreversible.");
         }
         try {
-            long count = userMemoryStore.countEntries(userId);
-            userMemoryStore.deleteAllForUser(userId);
+            // Keeps the GDPR bookkeeping rows: this is memory housekeeping, and an Art. 18
+            // restriction must not disappear as a side effect of it (delete_user_data is
+            // the full Art. 17 erasure, and it does remove them).
+            long count = userMemoryStore.deleteAllExceptReserved(userId);
             return jsonSerialization.serialize(Map.of("userId", userId, "entriesDeleted", count, "status", "deleted"));
         } catch (Exception e) {
             LOGGER.error("MCP delete_all_user_memories failed", e);

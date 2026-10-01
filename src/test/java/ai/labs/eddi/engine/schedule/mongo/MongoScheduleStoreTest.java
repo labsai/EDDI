@@ -7,9 +7,11 @@ package ai.labs.eddi.engine.schedule.mongo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.utils.LogCaptureSupport;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.ReadPreference;
 import com.mongodb.client.FindIterable;
@@ -19,6 +21,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
+import org.bson.BsonArray;
 import org.bson.BsonDocument;
 import org.bson.BsonValue;
 import org.bson.Document;
@@ -34,6 +37,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -289,6 +294,30 @@ class MongoScheduleStoreTest {
                 "persistentConversationId")) {
             assertFalse(rendered.contains(forbidden), forbidden + " must not be written by an ordinary update");
         }
+    }
+
+    /**
+     * {@code enabled} is a runtime switch owned by {@code setScheduleEnabled}.
+     * Writing it from the caller's object let an editor whose copy predated another
+     * operator's disable re-enable the schedule just by saving; left out of the
+     * {@code $set}, the stored value survives inside the same atomic update.
+     */
+    @Test
+    @DisplayName("updateSchedule — never writes enabled")
+    void updateScheduleDoesNotWriteEnabled() throws Exception {
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(updateResult);
+
+        ScheduleConfiguration config = new ScheduleConfiguration();
+        config.setName("edited");
+        config.setEnabled(true);
+        store.updateSchedule("sched-1", config);
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        String rendered = update.getValue().toString();
+        assertFalse(rendered.contains("enabled"), "only /enable and /disable may change enabled: " + rendered);
     }
 
     /**
@@ -742,6 +771,92 @@ class MongoScheduleStoreTest {
                 "an admin listing must not be filtered: " + filter.getValue());
     }
 
+    /**
+     * The owner scope, like the HITL redaction, is part of the filter: a
+     * post-filter counted limit/offset over other users' rows and handed a
+     * non-admin a short page the paging contract reads as the end.
+     */
+    @Test
+    @DisplayName("readAllSchedules — owner scope is an $or of own + shared owners in the filter")
+    void readAllSchedulesOwnerScopedFiltersInTheQuery() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, true, ScheduleOwnerScope.visibleTo("editor-1"));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        BsonDocument rendered = encodedFilter(filter.getValue());
+        assertRedactsHitlTimeouts(filter.getValue());
+        BsonArray owners = null;
+        for (BsonValue clause : rendered.getArray("$and")) {
+            if (clause.asDocument().containsKey("$or")) {
+                owners = clause.asDocument().getArray("$or");
+            }
+        }
+        assertNotNull(owners, "the owner scope must be ANDed into the filter: " + rendered.toJson());
+        List<BsonValue> userIds = owners.stream().map(o -> o.asDocument().get("userId")).toList();
+        assertEquals(4, userIds.size(), rendered.toJson());
+        assertTrue(userIds.get(0).isNull(), "no owner is shared (also matches a missing field)");
+        assertEquals("^\\s*$", userIds.get(1).asRegularExpression().getPattern(), "a blank owner is shared");
+        assertEquals(ScheduleOwnerScope.SHARED_OWNER, userIds.get(2).asString().getValue());
+        assertEquals("editor-1", userIds.get(3).asString().getValue());
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — shared rows restricted to their creator, in the filter")
+    void readAllSchedulesSharedOnlyIfCreatedByCallerFiltersOnCreatedBy() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo("alice").sharedOnlyIfCreatedByCaller());
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        String rendered = encodedFilter(filter.getValue()).toJson();
+        assertTrue(rendered.contains("\"userId\": \"alice\""), rendered);
+        assertTrue(rendered.contains("\"createdBy\": \"alice\""), rendered);
+        assertFalse(rendered.contains("teamCadenceType"), rendered);
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — team cadences on request, shared rows unrestricted")
+    void readAllSchedulesWithTeamCadencesAdmitsCadencesByMetadata() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo("alice").withTeamCadences());
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        String rendered = encodedFilter(filter.getValue()).toJson();
+        assertTrue(rendered.contains("\"metadata.teamCadenceType\": \"team_cadence\""), rendered);
+        assertFalse(rendered.contains("createdBy"), rendered);
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — a scope that admits nothing matches no document")
+    void readAllSchedulesScopeAdmittingNothingMatchesNothing() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, ScheduleOwnerScope.visibleTo(null).sharedOnlyIfCreatedByCaller());
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        String rendered = encodedFilter(filter.getValue()).toJson();
+        assertTrue(rendered.contains("\"_id\": null"), rendered);
+        assertFalse(rendered.contains("$or"), "an empty $or is rejected by the server: " + rendered);
+    }
+
+    @Test
+    @DisplayName("readAllSchedules — an unrestricted scope adds no owner filter")
+    void readAllSchedulesUnrestrictedScopeHasNoOwnerFilter() throws Exception {
+        setupSchedulePageIteration();
+
+        store.readAllSchedules(50, 0, false, ScheduleOwnerScope.ALL);
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        assertFalse(filter.getValue().toString().contains("userId"), "unrestricted must not filter owners: " + filter.getValue());
+    }
+
     // ==================== readSchedulesByAgentId ====================
 
     @Test
@@ -831,12 +946,19 @@ class MongoScheduleStoreTest {
     // ==================== findDueSchedules ====================
 
     @Test
-    @DisplayName("findDueSchedules — returns due schedules")
+    @DisplayName("findDueSchedules — returns due schedules, most overdue first")
     void findDueSchedules() throws Exception {
-        setupScheduleIteration();
+        setupSchedulePageIteration();
 
         List<ScheduleConfiguration> result = store.findDueSchedules(Instant.now(), Instant.now().minusSeconds(60), 3);
         assertEquals(1, result.size());
+
+        // An unsorted limit returns the same arbitrary subset every poll once more
+        // rows are due than one batch holds; the oldest due fire must come first.
+        FindIterable<Document> iterable = scheduleCollection.find(new Document());
+        ArgumentCaptor<Document> sort = ArgumentCaptor.forClass(Document.class);
+        verify(iterable).sort(sort.capture());
+        assertEquals(new Document("nextFire", 1).append("_id", 1), sort.getValue());
     }
 
     // ==================== tryClaim ====================
@@ -926,6 +1048,88 @@ class MongoScheduleStoreTest {
                 "an unfenced write must not filter on a fireId it was not given: " + filter.getValue());
     }
 
+    // ==================== dismissDeadLetter ====================
+
+    @Test
+    @DisplayName("dismissDeadLetter — conditional on DEAD_LETTERED, so it can never reset a live claim")
+    void dismissDeadLetterIsStateConditional() throws Exception {
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched);
+
+        store.dismissDeadLetter("sched-1", Instant.parse("2099-01-01T00:00:00Z"));
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(filter.capture(), update.capture());
+        String renderedFilter = filter.getValue().toBsonDocument().toJson();
+        assertTrue(renderedFilter.contains("\"fireStatus\": \"DEAD_LETTERED\""), renderedFilter);
+        String renderedUpdate = update.getValue().toBsonDocument().toJson();
+        assertTrue(renderedUpdate.contains("\"fireStatus\": \"PENDING\""), renderedUpdate);
+        assertFalse(renderedUpdate.contains("lastFired"), "nothing fired, so lastFired must not move: " + renderedUpdate);
+    }
+
+    @Test
+    @DisplayName("dismissDeadLetter — a forged schedule id cannot forge a log record (CWE-117)")
+    void dismissDeadLetterSanitizesTheLoggedId() throws Exception {
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched);
+        String forgedId = "sched-1" + LogCaptureSupport.FORGED_RECORD;
+
+        List<String> logged = captureLogsOf(MongoScheduleStore.class, () -> {
+            try {
+                store.dismissDeadLetter(forgedId, null);
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        });
+
+        assertNoForgedRecordBoundary(logged, "MongoScheduleStore's dismissed-dead-letter line");
+        assertTrue(logged.stream().anyMatch(value -> value.contains("sched-1")), "the id is sanitized, not dropped: " + logged);
+    }
+
+    @Test
+    @DisplayName("dismissDeadLetter — a row that is not dead-lettered is reported, not silently skipped")
+    void dismissDeadLetterNotDeadLettered() throws Exception {
+        UpdateResult none = mock(UpdateResult.class);
+        when(none.getMatchedCount()).thenReturn(0L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(none);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.dismissDeadLetter("sched-1", Instant.now()));
+    }
+
+    @Test
+    @DisplayName("dismissDeadLetter — a recurring schedule's enabled flag is left as the operator set it")
+    void dismissDeadLetterLeavesEnabledUntouched() throws Exception {
+        // Dead-lettering never clears enabled, so a disabled dead-lettered row was
+        // disabled on purpose (operator or undeploy); dismissal must not re-enable it.
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched);
+
+        store.dismissDeadLetter("sched-1", Instant.parse("2099-01-01T00:00:00Z"));
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        String renderedUpdate = update.getValue().toBsonDocument().toJson();
+        assertFalse(renderedUpdate.contains("\"enabled\""), "dismissal must not override an operator's enable/disable: " + renderedUpdate);
+    }
+
+    @Test
+    @DisplayName("dismissDeadLetter — a one-shot with nothing left to fire is disabled")
+    void dismissDeadLetterOneShotDisables() throws Exception {
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched);
+
+        store.dismissDeadLetter("sched-1", null);
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        assertTrue(update.getValue().toBsonDocument().toJson().contains("\"enabled\": false"));
+    }
+
     // ==================== markFailed ====================
 
     @Test
@@ -987,6 +1191,14 @@ class MongoScheduleStoreTest {
     void markDeadLettered() throws Exception {
         when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
         assertDoesNotThrow(() -> store.markDeadLettered("sched-1"));
+
+        // dismissDeadLetter leaves enabled untouched on the premise that running out
+        // of retries never disables a schedule; this pins that premise.
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).updateOne(any(Bson.class), update.capture());
+        String renderedUpdate = update.getValue().toBsonDocument().toJson();
+        assertTrue(renderedUpdate.contains("\"fireStatus\": \"DEAD_LETTERED\""), renderedUpdate);
+        assertFalse(renderedUpdate.contains("\"enabled\""), "dead-lettering must not disable the schedule: " + renderedUpdate);
     }
 
     // ==================== requeueDeadLetter ====================

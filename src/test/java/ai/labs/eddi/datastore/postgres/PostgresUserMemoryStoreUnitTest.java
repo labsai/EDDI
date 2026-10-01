@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -109,6 +110,108 @@ class PostgresUserMemoryStoreUnitTest {
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> sut.findEntryById("entry-1"));
+    }
+
+    // ─── upsertIfOwnedBy ────────────────────────────────────────
+
+    private static UserMemoryEntry globalEntry(String key, String owner) {
+        return new UserMemoryEntry(null, "user-1", key, "v", "fact", Visibility.global, owner, List.of(), "conv-1", false, 0, null,
+                null);
+    }
+
+    @Test
+    void upsertIfOwnedBy_updateArmIsConditionalOnTheExistingOwner() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("id")).thenReturn("row-1");
+
+        assertTrue(sut.upsertIfOwnedBy(globalEntry("lang", "agent-1"), "agent-1"));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String upsert = sql.getAllValues().stream().filter(q -> q.contains("ON CONFLICT")).findFirst().orElseThrow();
+        String normalized = upsert.replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("ON CONFLICT (user_id, key) WHERE visibility = 'global'"), normalized);
+        assertTrue(normalized.contains("WHERE usermemories.source_agent_id = EXCLUDED.source_agent_id RETURNING id"), normalized);
+        // the owner is never part of the update list: a write must not take a key over
+        assertFalse(normalized.substring(normalized.indexOf("DO UPDATE")).contains("source_agent_id = EXCLUDED.source_agent_id,"),
+                normalized);
+        verify(preparedStatement).setString(5, "agent-1");
+    }
+
+    @Test
+    void upsertIfOwnedBy_noReturnedRowMeansRefused() throws Exception {
+        // ON CONFLICT ... DO UPDATE ... WHERE false returns no row: another agent owns
+        // it
+        when(resultSet.next()).thenReturn(false);
+
+        assertFalse(sut.upsertIfOwnedBy(globalEntry("lang", "agent-1"), "agent-1"));
+    }
+
+    @Test
+    void upsertIfOwnedBy_rejectsNonGlobalMismatchedOwnerAndReservedKeysBeforeConnecting() throws Exception {
+        var self = new UserMemoryEntry(null, "user-1", "k", "v", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> sut.upsertIfOwnedBy(self, "agent-1"));
+        assertThrows(IllegalArgumentException.class, () -> sut.upsertIfOwnedBy(globalEntry("k", "agent-2"), "agent-1"));
+        assertThrows(IllegalArgumentException.class, () -> sut.upsertIfOwnedBy(globalEntry("k", " "), " "));
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class,
+                () -> sut.upsertIfOwnedBy(globalEntry("_gdpr_processing_restricted", "agent-1"), "agent-1"));
+        verify(dataSource, never()).getConnection();
+    }
+
+    @Test
+    void upsertIfOwnedBy_sqlFailureIsAStoreException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("boom"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> sut.upsertIfOwnedBy(globalEntry("lang", "agent-1"), "agent-1"));
+    }
+
+    // ─── reserved keys (H9c) ────────────────────────────────────
+
+    @Test
+    void upsert_refusesReservedKeyWithoutOpeningAConnection() throws Exception {
+        var forged = new UserMemoryEntry(null, "user-1", "_gdpr_processing_restricted", "true", "fact",
+                Visibility.self, "agent-1", List.of(), null, false, 0, null, null);
+
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> sut.upsert(forged));
+        verify(dataSource, never()).getConnection();
+    }
+
+    @Test
+    void mergeProperties_refusesReservedKeyWithoutOpeningAConnection() throws Exception {
+        var properties = new Properties();
+        properties.put("_gdpr_processing_restricted", "false");
+
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class, () -> sut.mergeProperties("user-1", properties));
+        verify(dataSource, never()).getConnection();
+    }
+
+    @Test
+    void upsertReserved_refusesAnOrdinaryKey() {
+        var ordinary = new UserMemoryEntry(null, "user-1", "favorite_color", "blue", "preference",
+                Visibility.self, "agent-1", List.of(), null, false, 0, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> sut.upsertReserved(ordinary));
+    }
+
+    /**
+     * {@code _} is LIKE's single-character wildcard, so the old unescaped
+     * {@code '_gdpr_%'} also spared keys such as {@code agdpr1} from retention.
+     */
+    @Test
+    void retentionAndDeleteProperties_escapeTheReservedPrefix() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        var sql = ArgumentCaptor.forClass(String.class);
+
+        sut.deleteOlderThan(30);
+        sut.deleteProperties("user-1");
+
+        verify(connection, atLeast(2)).prepareStatement(sql.capture());
+        var statements = sql.getAllValues().stream().filter(q -> q.startsWith("DELETE")).toList();
+        assertEquals(2, statements.size(), statements.toString());
+        for (String q : statements) {
+            assertTrue(q.contains("key NOT LIKE '!_gdpr!_%' ESCAPE '!'"), q);
+        }
     }
 
     // ─── deleteOlderThan ────────────────────────────────────────

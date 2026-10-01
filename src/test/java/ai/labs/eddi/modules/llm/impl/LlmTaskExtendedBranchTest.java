@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
-import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -24,6 +23,7 @@ import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -83,7 +83,7 @@ class LlmTaskExtendedBranchTest {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
         builders.put("openai", () -> parameters -> new ChatModel() {
             @Override
-            public ChatResponse chat(List<ChatMessage> messages) {
+            public ChatResponse doChat(ChatRequest chatRequest) {
                 return ChatResponse.builder().aiMessage(aiMessage(LLM_RESPONSE)).build();
             }
         });
@@ -95,10 +95,10 @@ class LlmTaskExtendedBranchTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
-        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         mockSnippetService = mock(PromptSnippetService.class);
-        when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
                 new SimpleMeterRegistry());
@@ -258,7 +258,7 @@ class LlmTaskExtendedBranchTest {
             when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
             // Return non-empty snippets
-            when(mockSnippetService.getAll()).thenReturn(Map.of("snippet1", "value1"));
+            when(mockSnippetService.getForAgent(any())).thenReturn(Map.of("snippet1", "value1"));
 
             var task = createTask(Map.of("apiKey", "key"));
             llmTask.execute(memory, new LlmConfiguration(List.of(task)));
@@ -440,17 +440,17 @@ class LlmTaskExtendedBranchTest {
     // ====================
 
     @Nested
-    @DisplayName("IOException wrapping in LifecycleException")
+    @DisplayName("IOException from convertToObject")
     class IoExceptionWrappingTests {
 
         @Test
-        @DisplayName("IOException from convertToObject wraps in LifecycleException")
+        @DisplayName("IOException from convertToObject keeps the raw response instead of failing the turn (M-L4)")
         void ioExceptionWrapping() throws Exception {
             // Create builder that returns JSON-like response
             Map<String, Provider<ILanguageModelBuilder>> jsonBuilders = new HashMap<>();
             jsonBuilders.put("openai", () -> parameters -> new ChatModel() {
                 @Override
-                public ChatResponse chat(List<ChatMessage> messages) {
+                public ChatResponse doChat(ChatRequest chatRequest) {
                     return ChatResponse.builder().aiMessage(aiMessage("{\"key\":\"value\"}")).build();
                 }
             });
@@ -461,7 +461,7 @@ class LlmTaskExtendedBranchTest {
             when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.getTemplateData()).thenReturn(Map.of());
-            var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver);
+            var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver, null);
             var cws = new CounterweightService(mock(PromptSnippetService.class),
                     new SimpleMeterRegistry());
             cws.initMetrics();
@@ -470,7 +470,7 @@ class LlmTaskExtendedBranchTest {
             ims.initMetrics();
 
             var snippetService = mock(PromptSnippetService.class);
-            when(snippetService.getAll()).thenReturn(Collections.emptyMap());
+            when(snippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
             var ioTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
                     templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
@@ -487,8 +487,10 @@ class LlmTaskExtendedBranchTest {
                     .thenThrow(new IOException("parse failure"));
 
             var task = createTask(Map.of("apiKey", "key", "convertToObject", "true"));
-            assertThrows(LifecycleException.class,
-                    () -> ioTask.execute(memory, new LlmConfiguration(List.of(task))));
+            // Used to throw a LifecycleException: a malformed or truncated JSON answer
+            // failed the whole (already paid-for) turn. It now falls back to the string.
+            assertDoesNotThrow(() -> ioTask.execute(memory, new LlmConfiguration(List.of(task))));
+            verify(jsonSerialization).deserialize(anyString(), eq(Map.class));
         }
     }
 }

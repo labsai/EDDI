@@ -1,28 +1,27 @@
 # EDDI Chat UI — AI Agent Guidelines
 
-> **This file is loaded by AI coding assistants. Follow ALL rules below.**
+> **This file is loaded by AI coding assistants. Follow ALL rules below.** The [root `AGENTS.md`](../../AGENTS.md) applies here too — branching, push approval, commit attribution and the changelog rule are defined there.
 
 ## 1. Project Context
 
 > **This directory is part of [labsai/EDDI](https://github.com/labsai/EDDI).** It was the separate `labsai/EDDI-Chat-UI` repository until 2026-09-15; its full history was imported here (`git log -- ui/chat`). Issues and pull requests go to `labsai/EDDI`. The UI is built into the EDDI jar by Maven from the repository root — see the root `AGENTS.md` (Build & Test Commands).
 
-**eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) agents. Built with Vite + TypeScript 5.7, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
+**eddi-chat-ui** is a standalone React 19 chat widget for [EDDI](https://github.com/labsai/EDDI) agents. Built with Vite + TypeScript 5.9, vanilla CSS with CSS custom properties, and `react-markdown` for rich message rendering.
 
 ### Tech Stack
 
 | Technology     | Version | Purpose                        |
 | -------------- | ------- | ------------------------------ |
 | React          | 19      | UI framework                   |
-| TypeScript     | 5.7     | Type safety                    |
-| Vite           | 6       | Build tool + dev server        |
+| TypeScript     | 5.9     | Type safety (7 waits on typescript-eslint support) |
+| Vite           | 8       | Build tool + dev server        |
 | Vitest         | 5.x     | Unit testing (jsdom)           |
 | react-markdown | 10.x    | Markdown rendering in messages |
 
 ### Ecosystem
 
-- **EDDI backend** — Quarkus REST API at `/agents/{env}/{agentId}`, serves chat UI from `META-INF/resources/`
-- **EDDI Manager** — Admin UI with embedded chat panel, shares API patterns
-- All repos at `c:\dev\git\`
+- **EDDI backend** (repository root) — Quarkus REST API at `/agents/{env}/{agentId}`; the Maven build copies this widget into the jar, served at `/chat`
+- **EDDI Manager** (`ui/manager`) — Admin UI with embedded chat panel, shares API patterns
 
 ---
 
@@ -36,15 +35,18 @@ src/
 │   ├── hitl-api.ts         # Approval status, cancel, deadline maths, poll cadence
 │   ├── attachments-api.ts  # Upload/delete + attachment_N context construction
 │   ├── sse-events.ts       # Pure interpretation of SSE payloads
+│   ├── snapshot.ts         # Snapshot steps → messages (masks secret input)
 │   └── demo-api.ts         # Mock API for demo mode
 ├── components/     # UI components
 │   ├── ChatWidget.tsx      # Main orchestrator (lifecycle, SSE, query params)
 │   ├── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
 │   ├── MessageBubble.tsx   # User/agent messages with markdown
+│   ├── markdown-plugins.ts # On-demand KaTeX / highlight.js loading (rich-math.ts, rich-highlight.ts)
+│   ├── SecretInput.tsx     # The input field an agent requested (password masked, text/email plain)
 │   ├── ChatInput.tsx       # Auto-grow textarea, attachment chips, secret mode
 │   ├── PausedCard.tsx      # Awaiting-approval state (read-only, no approve/reject)
 │   ├── QuickReplies.tsx    # Pill buttons for suggested replies
-│   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade)
+│   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade), Using {tool}
 │   └── ScrollToBottom.tsx  # Floating scroll button
 ├── hooks/
 │   ├── useTheme.ts         # Dark/light/system theme with localStorage
@@ -56,6 +58,7 @@ src/
 │   └── chat.css        # All component styles (BEM naming)
 ├── test-utils/
 │   └── sse.ts          # SSE stream + status-aware fetch harnesses
+├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
 ```
 
@@ -63,10 +66,34 @@ src/
 
 - **`ConversationState` has SIX values**: `READY`, `IN_PROGRESS`, `ENDED`,
   `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`.
-- **Eight SSE events**: `task_start`, `task_complete`, `task_failed`, `token`,
-  `cascade_step_start`, `cascade_escalation`, `done`, `error`. There is **no
-  `thinking` event** — the backend never emits one.
-- **`error` payload is JSON** `{"message":"…"}`, not a bare string.
+- **Nine SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
+  `task_failed`, `token`, `tool_call`, `cascade_step_start`, `cascade_escalation`,
+  `done`, `error`. There is **no `thinking` event** — the backend never emits one.
+- **`tool_call` is `{"tool":"<name>"}`, sent right before each tool runs** —
+  the name only; arguments reach the client later, redacted, in
+  `task_complete`'s `toolTrace`. There is **no "tool finished" event**: the
+  widget shows "Using {tool}…" (the Manager's wording) until the next `token`,
+  a `task_failed`, an escalation, or the end of the turn clears it. It is not token-gated — a
+  model can write a sentence and then call a tool.
+- **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
+  refused BEFORE it ran — every condition the non-streaming endpoint answers with a
+  typed status (409, 410, 404, 413, 429, 403, 503) — also carries a `code`
+  (`awaiting_approval`, `conversation_ended`, …, pinned in
+  `UNCONSUMED_STREAM_ERROR_CODES` against `RestAgentEngineStreaming`): treat it like
+  a 409 — withdraw the bubble and restore the draft. Branch on `code`, show `message`.
+- **Every `data:` line carries one delimiter space** —
+  `RestAgentEngineStreaming.padDataLines` writes it. Strip exactly one; a
+  token's own leading space follows it.
+- **`inputField` arrives on `done` too.** Read it from every transport, not
+  only the non-streaming snapshot.
+- **The route's environment must be sent** as `?environment=` on start; the
+  backend defaults a missing one to production.
+- **The turn output's `input` is the masked display copy** — `<secret input>`
+  for a turn sent with `secretInput`. Use it when rebuilding. The engine scrubs
+  a secret turn when it ends and masks older stored ones on read, so
+  `input:initial` also reads `<secret input>`; the client-side mask is a
+  second line of defence, not the only one.
+- **Math is `$$…$$` only.** Single dollars are prices, not formulas.
 - **`done` is a trimmed snapshot** — only `conversationState` and
   `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read
   the snapshot to refresh them.
@@ -114,8 +141,9 @@ src/
 3. **API** — Pure `fetch` in `chat-api.ts`. SSE streaming uses `AsyncGenerator`.
 4. **Testing** — Wrap components in `<ChatProvider>`. Mock `window.matchMedia` in `test-setup.ts`.
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
-6. **Query params** — `hideUndo`, `hideRedo`, `hideNewConversation`, `hideLogo`, `theme`, `title`, `apiServer`, `token`.
-7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in Manager UI (`/agents/pending-approvals`).
+6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `apiServer`, `token` (read once, then removed from the address bar), `userId`. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
+7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in the Manager's approvals page (`/manage/approvals`), which reads the backend's pending-approvals endpoint.
+8. **Lint** — `npm run lint` (ESLint, zero warnings) runs in CI next to `npm run typecheck` and `npm test`.
 
 ---
 
@@ -129,12 +157,18 @@ Production build goes to `dist/` (`chat.html`, `scripts/js/chat-ui.<hash>.js`,
 npm run build    # Outputs to dist/
 ```
 
+### Quality gates
+
+CI's `UI Chat` job runs `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` on every
+PR into `main` that touches `ui/` (`ci.yml` runs on no other base branch, so a stacked PR gets
+no CI at all). Run all three before pushing, plus `npm run build`.
+
 ---
 
 ## 5. Mandatory Workflow
 
-1. **Before work**: `git status`, read this file + the top of `docs/changelog.md` and anything pending in `docs/changelog.d/`
-2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):`. Each commit must build.
+1. **Before work**: `git status`, read this file + the top of the root `docs/changelog.md` and anything pending in the root `docs/changelog.d/`
+2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):` (`(ui)` for a change that spans both UIs). Each commit must pass the gates below.
 3. **After work**: add your entry as a **new file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` — never edit `docs/changelog.md`, which every open PR would conflict over. See [`docs/changelog.d/README.md`](../../docs/changelog.d/README.md).
 
 ### DO NOT

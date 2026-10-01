@@ -42,7 +42,7 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
             throws ResourceStoreException, ResourceNotFoundException {
 
         var accessRestriction = scope == null ? null : scope.toQueryFilters();
-        var spaceRestriction = scope == null ? null : scope.toSpaceFilter();
+        var spaceRestriction = scope == null ? null : scope.toNarrowingFilter();
         return descriptorStore.readDescriptors(type, filter, index, limit, includeDeleted, accessRestriction, spaceRestriction);
     }
 

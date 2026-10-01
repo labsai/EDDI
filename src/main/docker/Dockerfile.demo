@@ -51,7 +51,20 @@ COPY docs/ docs/
 # top-level *.md is reachable at runtime, and four of those pages are internal.
 RUN rm -f docs/changelog.md docs/code-review-standards.md docs/incident-response.md docs/SUMMARY.md
 
+# The Manager and the Chat UI. `package` builds both (frontend-maven-plugin in
+# prepare-package: it downloads Node into ui/node, then `npm ci` and
+# `npm run build` in each), and the demo's own story runs through the Manager —
+# the Platform Operator, the wizard, HITL approvals. Without this COPY the ui/
+# directory did not exist in the build context, `npm ci` failed on a missing
+# package.json, and the documented `docker compose -f docker-compose.openwebui.yml
+# up --build` never produced an image. Copied after src/ and docs/ so a UI edit
+# does not invalidate the dependency layer above; node_modules, ui/node and dist
+# are kept out by Dockerfile.demo.dockerignore, so this is the committed sources
+# and lockfiles only.
+COPY ui/ ui/
+
 RUN --mount=type=cache,target=/root/.m2 \
+    --mount=type=cache,target=/root/.npm \
     mvn -B package -DskipTests
 
 # ── Runtime ──
@@ -78,6 +91,30 @@ COPY --from=build /src/target/quarkus-app/quarkus/ /deployments/quarkus/
 COPY --from=build /src/licenses/                   /licenses/
 COPY --from=build /src/docs/*.md                   /deployments/docs/
 
+# Run as a non-root user. The eclipse-temurin base defaults to root, so without
+# this the demo — and anything it executes — runs with uid 0, unlike the
+# production image (Dockerfile) which drops to USER 185. uid 185 matches that
+# image; /deployments is chowned so tmp/import stays writable while the jars
+# themselves are owned by root and are not writable by the running process.
+RUN groupadd -r -g 185 eddi \
+    && useradd -r -u 185 -g eddi -d /deployments -s /usr/sbin/nologin eddi \
+    && chown -R root:eddi /deployments \
+    && chown -R eddi:eddi /deployments/tmp \
+    && chmod -R 0775 /deployments/tmp
+# Audit-ledger dead-letter sink (eddi.audit.dead-letter-path defaults under
+# /opt/eddi/data). uid 185 cannot create it at runtime, so a non-root process
+# would hit NoSuchFileException in a swallowed catch and lose abandoned audit
+# entries — the same reason the production Dockerfile pre-creates it.
+RUN mkdir -p /opt/eddi/data \
+    && chown -R 185:0 /opt/eddi \
+    && chmod -R 0775 /opt/eddi
+USER 185
+
 EXPOSE 7070
 
-ENTRYPOINT ["java", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]
+# --add-modules=jdk.incubator.vector keeps the in-process `jlama` provider on its SIMD
+# path. Unlike the production image, this ENTRYPOINT is a bare `java` invocation with no
+# run-java.sh and no JAVA_OPTS_APPEND, so the flag has to be spelled out here or the demo
+# image silently runs Jlama on scalar tensor operations. See src/main/docker/Dockerfile
+# and JlamaRuntimeFlagsTest, which grades both images.
+ENTRYPOINT ["java", "--add-modules=jdk.incubator.vector", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]

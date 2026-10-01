@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal, Pencil, MessagesSquare, GitMerge, UserCheck, Gavel } from "lucide-react";
+import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, Pencil, MessagesSquare, GitMerge, UserCheck, Gavel, Info, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials, formatUsd } from "@/lib/utils";
@@ -12,6 +12,7 @@ import {
   effectiveDelegationTimeout,
   memberPolicyLabel,
   moderatorlessPhaseNames,
+  debateVerdictSynthesisPhaseNames,
   uncoveredRolePhases,
 } from "@/lib/group-config";
 import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/lib/hitl-labels";
@@ -27,6 +28,12 @@ interface GroupConfigPanelProps {
   config: AgentGroupConfiguration;
   groupId?: string;
   groupVersion?: number;
+  /**
+   * Called with the version an inline editor's save created. The host page owns
+   * the version (it is in the URL) and must move onto it: every save makes a new
+   * version, and the next save or delete addressed to the old one is a 409.
+   */
+  onVersionChange?: (version: number) => void;
   className?: string;
 }
 
@@ -53,7 +60,13 @@ const CONTEXT_SCOPE_FALLBACKS: Record<string, string> = {
   TASK_WITH_DEPS: "task + deps",
 };
 
-export function GroupConfigPanel({ config, groupId, groupVersion, className }: GroupConfigPanelProps) {
+export function GroupConfigPanel({
+  config,
+  groupId,
+  groupVersion,
+  onVersionChange,
+  className,
+}: GroupConfigPanelProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const styleInfo = styleDisplay(config.style, t);
@@ -87,6 +100,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
   const approvalPhaseNames = (config.phases ?? []).filter((p) => p.requiresApproval).map((p) => p.name);
   const hasHitl = !!hitl || approvalPhaseNames.length > 0;
   const moderatorlessPhases = useMemo(() => moderatorlessPhaseNames(config), [config]);
+  const verdictPhases = useMemo(() => debateVerdictSynthesisPhaseNames(config), [config]);
   const roleGaps = useMemo(() => uncoveredRolePhases(config), [config]);
   const canEditPhases = !!groupId && groupVersion != null;
 
@@ -295,6 +309,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               config={config}
               groupId={groupId!}
               groupVersion={groupVersion!}
+              onSaved={onVersionChange}
               onDone={() => setEditingPhases(false)}
             />
           ) : (
@@ -368,6 +383,27 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
         </div>
       )}
 
+      {/* Two or more member roles plus argument phases put the synthesis on the
+          debate-judgment prompt: it answers with a winner/scores JSON and the
+          moderator's own synthesis instruction is not used. Informational, not a
+          warning — for a real debate this is what was asked for; the point is
+          that nothing else in the config says so. */}
+      {verdictPhases.length > 0 && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-border bg-secondary/40 p-2.5"
+          data-testid="group-debate-verdict-note"
+        >
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            {t(
+              "groups.debateVerdictNote",
+              "Answers with a scoring verdict (winner and scores), not prose: {{phases}}. The members hold two or more roles and arguments come first, so the moderator's own synthesis prompt is not used. Set an input template on the phase for prose.",
+              { phases: verdictPhases.join(", ") },
+            )}
+          </p>
+        </div>
+      )}
+
       {/* Phases addressed to a ROLE no member carries (a DEBATE with no CON,
           a DEVIL_ADVOCATE group without the advocate) — they would run with
           zero speakers and the backend never says so. */}
@@ -392,7 +428,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
       {(hasHitl || canEditHitl) && (
         <div>
           <h4 className="mb-1.5 flex items-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <HandMetal className="inline h-3 w-3 me-1" />
+            <Hand className="inline h-3 w-3 me-1" />
             {t("groups.hitlSection", "Human Approval")}
             {canEditHitl && !editingHitl && (
               <button
@@ -411,6 +447,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               config={config}
               groupId={groupId}
               groupVersion={groupVersion}
+              onSaved={onVersionChange}
               onDone={() => setEditingHitl(false)}
             />
           ) : hasHitl ? (
@@ -596,6 +633,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               config={config}
               groupId={groupId}
               groupVersion={groupVersion}
+              onSaved={onVersionChange}
               onDone={() => setEditingAdvanced(false)}
             />
           ) : !hasAdvanced ? (

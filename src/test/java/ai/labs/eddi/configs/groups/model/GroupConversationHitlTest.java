@@ -48,11 +48,13 @@ class GroupConversationHitlTest {
         @DisplayName("values() contains both HITL states alongside originals")
         void valuesContainAllExpected() {
             var values = GroupConversationState.values();
-            // CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED, CANCELLED,
-            // AWAITING_APPROVAL, AWAITING_HUMAN_INPUT (I6), CLOSED
-            assertEquals(9, values.length);
+            // CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED, REJECTED,
+            // CANCELLED, AWAITING_APPROVAL, AWAITING_HUMAN_INPUT (I6), CLOSED
+            assertEquals(10, values.length);
             assertEquals(GroupConversationState.CLOSED, GroupConversationState.valueOf("CLOSED"));
             assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, GroupConversationState.valueOf("AWAITING_HUMAN_INPUT"));
+            // A human rejection is its own state, not FAILED — see the enum's Javadoc.
+            assertEquals(GroupConversationState.REJECTED, GroupConversationState.valueOf("REJECTED"));
         }
     }
 

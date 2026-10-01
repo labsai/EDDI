@@ -25,6 +25,7 @@ import {
   useResetOperator,
   useOperatorCanary,
   useVerifyOperatorGate,
+  useOperatorUpgradeAssessment,
   seedConfig,
   runPostActivationProbes,
   operatorKeys,
@@ -37,6 +38,8 @@ import { fetchOpenApiSpec, type OperatorConfig } from "@/lib/api/operator";
 import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { RequestPreview } from "@/components/operator/request-preview";
+import { OperatorUpgradeNotice } from "@/components/operator/operator-upgrade";
+import { buildUpgradeRequest, type InstructionsChoice } from "@/lib/operator/operator-revision";
 import type { PendingToolCallView } from "@/lib/api/hitl";
 
 export function OperatorPage() {
@@ -71,6 +74,12 @@ export function OperatorPage() {
   /** Chat or History. Local, not a route: switching tabs is not a navigation
    *  anyone wants in their back-button history mid-investigation. */
   const [tab, setTab] = useState<"chat" | "history">("chat");
+  /**
+   * A failed one-click upgrade. Its own state for the same reason as
+   * `supersededWarning`: `activationError` renders inside the activation form,
+   * and an upgrade never opens it.
+   */
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
 
   const activate = useActivateOperator();
   const reactivate = useReactivateOperator();
@@ -82,6 +91,7 @@ export function OperatorPage() {
   const status = useOperatorStatus(config);
   const gate = useVerifyOperatorGate(config);
   const chat = useOperatorChat(config);
+  const upgrade = useOperatorUpgradeAssessment(config);
 
   // Structured RULE/TOOL_CALL pause detail — the streamed `done` snapshot only
   // carries the generic bookmark fields, not per-call tool names/arguments.
@@ -200,7 +210,13 @@ export function OperatorPage() {
   );
 
   const handleActivate = useCallback(
-    (next: OperatorConfig, apiKey: string, baseUrl?: string) => {
+    (
+      next: OperatorConfig,
+      apiKey: string,
+      baseUrl?: string,
+      /** Where a failure is reported — the form's error slot unless the caller says otherwise. */
+      onFailure?: (message: string) => void,
+    ) => {
       setActivationError(null);
       activate.mutate(
         {
@@ -291,13 +307,38 @@ export function OperatorPage() {
           },
           onError: (err) => {
             setStage("idle");
-            setActivationError(getErrorMessage(err));
+            const message = getErrorMessage(err);
+            if (onFailure) onFailure(message);
+            else setActivationError(message);
           },
         },
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activate, chat.reset, t],
+  );
+
+  /**
+   * The one-click upgrade: the same activation a Reconfigure runs, with every
+   * setting carried over and only the Manager-derived parts rebuilt. When the
+   * stored config cannot reproduce the settings (a plaintext key, an unrecorded
+   * model-server address), the form opens instead — prefilled, as Reconfigure is.
+   */
+  const handleUpgrade = useCallback(
+    (choice: InstructionsChoice) => {
+      if (!config) return;
+      const request = buildUpgradeRequest(config, choice);
+      if (!request) {
+        setShowActivation(true);
+        return;
+      }
+      setUpgradeError(null);
+      handleActivate(request.config, request.apiKey, request.baseUrl, (message) => {
+        setUpgradeError(message);
+        toast.error(message);
+      });
+    },
+    [config, handleActivate],
   );
 
   const handleReactivate = useCallback(() => {
@@ -469,6 +510,17 @@ export function OperatorPage() {
           <p className="text-sm text-muted-foreground">{t("operator.subtitle", "Ask about this EDDI deployment — it looks things up for you.")}</p>
         </div>
       </header>
+
+      {upgrade?.needed && (
+        <OperatorUpgradeNotice
+          assessment={upgrade}
+          onUpgrade={handleUpgrade}
+          onOpenForm={() => setShowActivation(true)}
+          busy={activate.isPending}
+          stageLabel={activate.isPending ? t(`operator.stage.${stage}`) : undefined}
+          error={upgradeError}
+        />
+      )}
 
       {/* Two live operators is a correctness problem, not a warning: the panel and
           the chat below address the NEW agent, and anything done to the old one

@@ -12,6 +12,8 @@ interface TopDiscussionsProps {
 const BADGE_CLASSES: Record<GroupConversationState, string> = {
   COMPLETED: "bg-primary/10 text-primary",
   FAILED: "bg-destructive/10 text-destructive",
+  // A recorded human decision, not a fault — neutral, never destructive.
+  REJECTED: "bg-secondary text-secondary-foreground",
   IN_PROGRESS: "bg-muted text-muted-foreground",
   SYNTHESIZING: "bg-muted text-muted-foreground",
   CREATED: "bg-muted text-muted-foreground",
@@ -24,6 +26,7 @@ const BADGE_CLASSES: Record<GroupConversationState, string> = {
 const STATE_LABELS: Record<GroupConversationState, string> = {
   COMPLETED: "Completed",
   FAILED: "Failed",
+  REJECTED: "Rejected",
   IN_PROGRESS: "In Progress",
   SYNTHESIZING: "Synthesizing",
   CREATED: "Created",

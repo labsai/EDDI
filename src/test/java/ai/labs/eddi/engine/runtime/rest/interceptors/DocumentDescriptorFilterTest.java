@@ -526,6 +526,43 @@ class DocumentDescriptorFilterTest {
             verify(descriptor).setDeleted(true);
             verify(documentDescriptorStore).setDescriptor(eq("aabbccdd11223344eeff5566"), eq(1), eq(descriptor));
         }
+
+        @Test
+        @DisplayName("a DELETE of a sub-resource leaves the descriptor alone — its last segment is not a configuration id")
+        void subResourceDeleteDoesNotTouchDescriptors() throws Exception {
+            // The upload-file delete: a 32-hex file id that extractResourceId accepts.
+            // Looking it up as a descriptor answered a completed delete with a 400 on
+            // MongoDB ("hexString has 24 characters").
+            var request = mock(ContainerRequestContext.class);
+            var response = mock(ContainerResponseContext.class);
+            when(response.getStatus()).thenReturn(200);
+            when(request.getMethod()).thenReturn("DELETE");
+            when(response.getHeaderString("Location")).thenReturn(null);
+            String path = "/ragstore/rags/aabbccdd11223344eeff5566/sources/9de1cbd7-51a8-494d-944c-373dae4e1285"
+                    + "/files/5ed7a19cf16085bf04ac188c943345ef";
+            when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:7070" + path + "?version=1"));
+            when(uriInfo.getPath()).thenReturn(path);
+            when(documentDescriptorStore.readDescriptor(anyString(), anyInt()))
+                    .thenThrow(new IllegalArgumentException("state should be: hexString has 24 characters"));
+
+            assertDoesNotThrow(() -> filter.filter(request, response));
+
+            verify(documentDescriptorStore, never()).readDescriptor(anyString(), anyInt());
+            verify(documentDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+        }
+
+        @Test
+        @DisplayName("only {store}/{collection}/{id} addresses a configuration resource itself")
+        void addressesResourceItself() {
+            assertTrue(DocumentDescriptorFilter.addressesResourceItself("/agentstore/agents/aabbccdd11223344eeff5566"));
+            assertTrue(DocumentDescriptorFilter.addressesResourceItself("ragstore/rags/aabbccdd11223344eeff5566/"));
+            assertFalse(DocumentDescriptorFilter.addressesResourceItself("/ragstore/rags/aabbccdd11223344eeff5566/sources/s1/documents"));
+            assertFalse(DocumentDescriptorFilter.addressesResourceItself(
+                    "/ragstore/rags/aabbccdd11223344eeff5566/sources/s1/files/5ed7a19cf16085bf04ac188c943345ef"));
+            assertFalse(DocumentDescriptorFilter.addressesResourceItself("/agentstore/agents"));
+            assertFalse(DocumentDescriptorFilter.addressesResourceItself(""));
+            assertFalse(DocumentDescriptorFilter.addressesResourceItself(null));
+        }
     }
 
     @Nested

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -11,6 +12,9 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -22,10 +26,14 @@ import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
+import ai.labs.eddi.modules.ingestion.IngestionPipeline;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -42,6 +50,8 @@ class ScheduleFireExecutorTest {
     private DreamService dreamService;
     private TeamCadenceService teamCadenceService;
     private ToolCostTracker toolCostTracker;
+    private IConversationMemoryStore conversationMemoryStore;
+    private RagSourceIngestionService ragSourceIngestionService;
     private ScheduleFireExecutor executor;
 
     @BeforeEach
@@ -61,6 +71,41 @@ class ScheduleFireExecutorTest {
         setField(executor, "dreamService", dreamService);
         setField(executor, "teamCadenceService", teamCadenceService);
         setField(executor, "toolCostTracker", toolCostTracker);
+        ragSourceIngestionService = mock(RagSourceIngestionService.class);
+        setField(executor, "ragSourceIngestionService", ragSourceIngestionService);
+        conversationMemoryStore = mock(IConversationMemoryStore.class);
+        setField(executor, "conversationMemoryStore", conversationMemoryStore);
+    }
+
+    /**
+     * A stored persistent conversation of agent-1 in {@code state} with
+     * {@code steps} steps.
+     */
+    private void storedConversation(String conversationId, ConversationState state, int steps) throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationId(conversationId);
+        snapshot.setAgentId("agent-1");
+        snapshot.setConversationState(state);
+        for (int i = 0; i < steps; i++) {
+            snapshot.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+        }
+        when(conversationMemoryStore.loadConversationMemorySnapshot(conversationId)).thenReturn(snapshot);
+    }
+
+    private void sayIsSkipped(String conversationId, ConversationState state) throws Exception {
+        doAnswer(inv -> {
+            var skipped = new SimpleConversationMemorySnapshot();
+            skipped.setConversationState(state);
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onSkipped(skipped);
+            return null;
+        }).when(conversationService).say(any(), any(), eq(conversationId), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    private void sayCompletes(String conversationId) throws Exception {
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), eq(conversationId), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     /**
@@ -178,6 +223,7 @@ class ScheduleFireExecutorTest {
     void fire_sayRejectsThePausedConversation_isRecordedSkippedNotFailed() throws Exception {
         var schedule = makeCronSchedule("sched-paused-throw", "persistent");
         schedule.setPersistentConversationId("conv-paused");
+        storedConversation("conv-paused", ConversationState.AWAITING_HUMAN, 1);
 
         doThrow(new IConversationService.ConversationAwaitingApprovalException(
                 "Conversation is awaiting human approval")).when(conversationService)
@@ -388,8 +434,7 @@ class ScheduleFireExecutorTest {
         var schedule = makeCronSchedule("sched-2", "persistent");
         schedule.setPersistentConversationId("existing-conv");
 
-        // Mock readConversation to succeed (conversation exists)
-        when(conversationService.readConversation(any(), any(), eq("existing-conv"), anyBoolean(), anyBoolean(), any())).thenReturn(null);
+        storedConversation("existing-conv", ConversationState.READY, 1);
 
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
@@ -404,12 +449,256 @@ class ScheduleFireExecutorTest {
         verify(conversationService, never()).startConversation(any(), any(), any(), any());
     }
 
+    /**
+     * A persistent heartbeat appends a step on every fire to one document. Without
+     * a bound it reaches MongoDB's 16 MB limit and every fire after that is lost —
+     * so an operator can opt into a rollover, which must keep the conversation's
+     * own state (its conversation-scoped properties).
+     */
+    @Test
+    void fire_persistentStrategy_rollsOverAnIdleConversationAtTheLimitAndCarriesItsProperties() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-roll", "persistent");
+        schedule.setPersistentConversationId("full-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+
+        var full = new ConversationMemorySnapshot();
+        full.setConversationId("full-conv");
+        full.setAgentId("agent-1");
+        full.setUserId("system:scheduler");
+        full.setConversationState(ConversationState.READY);
+        for (int i = 0; i < 3; i++) {
+            full.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+        }
+        full.getConversationProperties().put("counter", new Property("counter", "41", Property.Scope.conversation));
+        full.getConversationProperties().put("scratch", new Property("scratch", "x", Property.Scope.step));
+        full.getConversationProperties().put("started", new Property("started", "old", Property.Scope.conversation));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("full-conv")).thenReturn(full);
+
+        var fresh = new ConversationMemorySnapshot();
+        fresh.setConversationId("fresh-conv");
+        fresh.setAgentId("agent-1");
+        fresh.setConversationState(ConversationState.READY);
+        fresh.getConversationProperties().put("started", new Property("started", "new", Property.Scope.conversation));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("fresh-conv")).thenReturn(fresh);
+
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("fresh-conv", null));
+        sayCompletes("fresh-conv");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("fresh-conv", result.conversationId());
+        verify(conversationService).endConversation("full-conv", "system:scheduler");
+        verify(scheduleStore).setPersistentConversationId("hb-roll", "fresh-conv");
+        ArgumentCaptor<ConversationMemorySnapshot> stored = ArgumentCaptor.forClass(ConversationMemorySnapshot.class);
+        verify(conversationMemoryStore).storeConversationMemorySnapshot(stored.capture());
+        var properties = stored.getValue().getConversationProperties();
+        assertEquals("41", properties.get("counter").getValueString(), "conversation-scoped state must survive the rollover");
+        assertFalse(properties.containsKey("scratch"), "step-scoped properties are not carried");
+        assertEquals("new", properties.get("started").getValueString(), "what the new start turn set wins");
+    }
+
+    @Test
+    void fire_persistentStrategy_doesNotCarryAnotherUsersPropertiesAcrossTheRollover() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-owner", "persistent");
+        schedule.setPersistentConversationId("old-owner-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+        var full = new ConversationMemorySnapshot();
+        full.setConversationId("old-owner-conv");
+        full.setAgentId("agent-1");
+        full.setUserId("someone-else");
+        full.setConversationState(ConversationState.READY);
+        for (int i = 0; i < 3; i++) {
+            full.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+        }
+        full.getConversationProperties().put("counter", new Property("counter", "41", Property.Scope.conversation));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("old-owner-conv")).thenReturn(full);
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("owner-fresh", null));
+        sayCompletes("owner-fresh");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("owner-fresh", result.conversationId());
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+    }
+
+    @Test
+    void fire_persistentStrategy_refusesAConversationOwnedByAnotherUser() throws Exception {
+        // Main's ownership guard (8d24ae335), carried onto the raw-load resolver: the
+        // fire runs with server identity, so the interactive ownership check never
+        // engages — a persistentConversationId naming someone else's conversation must
+        // not be reused, even below the step limit.
+        var schedule = makeHeartbeatSchedule("hb-foreign", "persistent");
+        schedule.setPersistentConversationId("foreign-conv");
+        var foreign = new ConversationMemorySnapshot();
+        foreign.setConversationId("foreign-conv");
+        foreign.setAgentId("agent-1");
+        foreign.setUserId("someone-else");
+        foreign.setConversationState(ConversationState.READY);
+        foreign.getConversationProperties().put("counter", new Property("counter", "41", Property.Scope.conversation));
+        when(conversationMemoryStore.loadConversationMemorySnapshot("foreign-conv")).thenReturn(foreign);
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("own-conv", null));
+        sayCompletes("own-conv");
+        // A regression would say into the unstubbed foreign conversation: fail fast.
+        executor.fireTimeout = Duration.ofSeconds(2);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("own-conv", result.conversationId());
+        verify(conversationService, never()).say(any(), any(), eq("foreign-conv"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                any());
+        verify(conversationService, never()).endConversation(any(), any());
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        verify(scheduleStore).setPersistentConversationId("hb-foreign", "own-conv");
+    }
+
+    @Test
+    void fire_persistentStrategy_reusesAnUnownedConversation() throws Exception {
+        // Only a provable mismatch counts: a legacy conversation without an owner is
+        // still this schedule's.
+        var schedule = makeHeartbeatSchedule("hb-legacy", "persistent");
+        schedule.setPersistentConversationId("legacy-conv");
+        storedConversation("legacy-conv", ConversationState.READY, 1);
+        sayCompletes("legacy-conv");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("legacy-conv", result.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_keepsTheConversationWhenEndingItForRolloverFails() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-endfail", "persistent");
+        schedule.setPersistentConversationId("endfail-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+        storedConversation("endfail-conv", ConversationState.READY, 5);
+        doThrow(new RuntimeException("store down")).when(conversationService).endConversation("endfail-conv", "system:scheduler");
+        sayCompletes("endfail-conv");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("endfail-conv", result.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(scheduleStore, never()).setPersistentConversationId(any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_failsTheFireInsteadOfReplacingTheConversationOnAStoreError() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-outage", "persistent");
+        schedule.setPersistentConversationId("outage-conv");
+        when(conversationMemoryStore.loadConversationMemorySnapshot("outage-conv"))
+                .thenThrow(new RuntimeException("connection refused"));
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(scheduleStore, never()).setPersistentConversationId(any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_replacesAConversationTheStoreReportsMissing() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-gone", "persistent");
+        schedule.setPersistentConversationId("gone-conv");
+        when(conversationMemoryStore.loadConversationMemorySnapshot("gone-conv"))
+                .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("gone-fresh", null));
+        sayCompletes("gone-fresh");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("gone-fresh", result.conversationId());
+        verify(scheduleStore).setPersistentConversationId("hb-gone", "gone-fresh");
+    }
+
+    @Test
+    void fire_persistentStrategy_neverRollsOverAPausedConversation() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-paused", "persistent");
+        schedule.setPersistentConversationId("paused-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+        storedConversation("paused-conv", ConversationState.AWAITING_HUMAN, 5);
+        sayIsSkipped("paused-conv", ConversationState.AWAITING_HUMAN);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        // Ending it would terminate the pending approval — audited as a scheduler
+        // decision and announced to Slack. The fire keeps the conversation instead.
+        assertEquals("paused-conv", result.conversationId());
+        verify(conversationService, never()).endConversation(any(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_neverRollsOverABusyConversation() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-busy", "persistent");
+        schedule.setPersistentConversationId("busy-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+        storedConversation("busy-conv", ConversationState.IN_PROGRESS, 5);
+        sayIsSkipped("busy-conv", ConversationState.IN_PROGRESS);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        // A resume or a human's turn is running: ending it would abort the resume or
+        // have that turn's persist refused against ENDED.
+        assertEquals("busy-conv", result.conversationId());
+        verify(conversationService, never()).endConversation(any(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_doesNotRollOverByDefault() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-default", "persistent");
+        schedule.setPersistentConversationId("big-conv");
+        storedConversation("big-conv", ConversationState.READY, ScheduleFireExecutor.PERSISTENT_CONVERSATION_WARN_STEPS + 5);
+        sayCompletes("big-conv");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("big-conv", result.conversationId(), "the rollover is opt-in");
+        verify(conversationService, never()).endConversation(any(), any());
+    }
+
+    @Test
+    void fire_persistentStrategy_replacesAnEndedConversation() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-ended", "persistent");
+        schedule.setPersistentConversationId("ended-conv");
+        storedConversation("ended-conv", ConversationState.ENDED, 2);
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("fresh-conv", null));
+        sayCompletes("fresh-conv");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("fresh-conv", result.conversationId(), "every fire into an ended conversation was refused, forever");
+        verify(conversationService, never()).endConversation(any(), any());
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+    }
+
+    @Test
+    void fire_persistentStrategy_keepsAConversationBelowTheStepLimit() throws Exception {
+        var schedule = makeHeartbeatSchedule("hb-keep", "persistent");
+        schedule.setPersistentConversationId("live-conv");
+        setField(executor, "persistentConversationMaxSteps", 3);
+        storedConversation("live-conv", ConversationState.READY, 1);
+        sayCompletes("live-conv");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals("live-conv", result.conversationId());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(conversationService, never()).endConversation(any(), any());
+    }
+
     @Test
     void fire_heartbeat_defaultsPersistentStrategy() throws Exception {
         var schedule = makeHeartbeatSchedule("hb-1", null); // null strategy → defaults to persistent
         schedule.setPersistentConversationId("hb-conv");
 
-        when(conversationService.readConversation(any(), any(), eq("hb-conv"), anyBoolean(), anyBoolean(), any())).thenReturn(null);
+        storedConversation("hb-conv", ConversationState.READY, 1);
         doAnswer(inv -> {
             ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
             return null;
@@ -426,7 +715,7 @@ class ScheduleFireExecutorTest {
         schedule.setMessage(null); // no message set
         schedule.setPersistentConversationId("hb-conv");
 
-        when(conversationService.readConversation(any(), any(), any(), anyBoolean(), anyBoolean(), any())).thenReturn(null);
+        storedConversation("hb-conv", ConversationState.READY, 1);
 
         var inputCaptor = ArgumentCaptor.forClass(InputData.class);
         doAnswer(inv -> {
@@ -861,14 +1150,14 @@ class ScheduleFireExecutorTest {
     @Timeout(10)
     void fire_teamCadenceSchedule_dispatchesToTheCadenceService() throws Exception {
         var schedule = makeTeamCadenceSchedule("sched-cadence-1");
-        when(teamCadenceService.processScheduledFire(any()))
+        when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", "gc-1", 3, null, null));
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
 
         assertEquals(FireStatus.COMPLETED.name(), result.status());
         assertEquals("gc-1", result.conversationId(), "the fire log records WHICH discussion the cadence started");
-        verify(teamCadenceService).processScheduledFire(schedule.getMetadata());
+        verify(teamCadenceService).processScheduledFire(schedule.getId(), schedule.getMetadata());
         // A cadence pull is orchestration, not a conversation turn.
         verifyNoInteractions(conversationService);
     }
@@ -877,14 +1166,14 @@ class ScheduleFireExecutorTest {
     @Timeout(10)
     void fire_teamCadenceSchedule_skipIsCompleted_failureRetries() throws Exception {
         var skipped = makeTeamCadenceSchedule("sched-cadence-2");
-        when(teamCadenceService.processScheduledFire(any()))
+        when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", null, 0,
                         "No executable backlog tasks", null));
         assertEquals(FireStatus.COMPLETED.name(), executor.fire(skipped, "instance-1", 1).status(),
                 "a deliberate skip is a successful fire, not a retryable failure");
 
         var failing = makeTeamCadenceSchedule("sched-cadence-3");
-        when(teamCadenceService.processScheduledFire(any()))
+        when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", null, 0, null,
                         "No workspace exists for group group-1"));
         ScheduleFireLog failed = executor.fire(failing, "instance-1", 2);
@@ -903,7 +1192,7 @@ class ScheduleFireExecutorTest {
     @Timeout(10)
     void fire_teamCadence_fireLogFailure_doesNotChangeTheOutcome() throws Exception {
         var schedule = makeTeamCadenceSchedule("sched-cadence-4");
-        when(teamCadenceService.processScheduledFire(any()))
+        when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", "gc-9", 2, null, null));
         doThrow(new RuntimeException("db down")).when(scheduleStore).logFire(any());
 
@@ -946,6 +1235,111 @@ class ScheduleFireExecutorTest {
                 "policy", policy,
                 "surface", "regular",
                 "conversationId", conversationId));
+        return s;
+    }
+
+    // ==================== RAG ingestion fires ====================
+
+    @Test
+    void fire_ragIngestion_runsTheSourceAndRecordsTheRun() throws Exception {
+        var schedule = makeIngestionSchedule("rag-1", "kb-1", 2, "src-1");
+        when(ragSourceIngestionService.processScheduledFire(eq("kb-1"), eq(2), eq("src-1"), any()))
+                .thenReturn(new IngestionPipeline.IngestionReport(null, "src-1",
+                        IngestionPipeline.IngestionReport.Outcome.COMPLETED, 3, 2, 1, 0, 0, 5, 5, 0.0,
+                        false, false, null, Duration.ZERO, null));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), log.status());
+        verify(ragSourceIngestionService).processScheduledFire(eq("kb-1"), eq(2), eq("src-1"), any());
+    }
+
+    @Test
+    void fire_ragIngestion_aStartedRunIsACompletedFire() throws Exception {
+        // The fire starts the run on its own worker and returns, so the lease can
+        // never cancel a crawl. What the run then does is in the source's run history.
+        var schedule = makeIngestionSchedule("rag-4", "kb-1", 1, "src-1");
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any(), any()))
+                .thenReturn(new IngestionPipeline.IngestionReport("run-7", "src-1",
+                        IngestionPipeline.IngestionReport.Outcome.STARTED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                        false, false, null, Duration.ZERO, "Run run-7 started"));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), log.status());
+        assertNull(log.errorMessage());
+        verify(scheduleStore).logFire(any());
+    }
+
+    @Test
+    void fire_ragIngestion_aRunThatFailsLaterIsLoggedAsAFailedFire() throws Exception {
+        // The fire returns once the run has started, so a crawl that failed every
+        // night read as a COMPLETED fire with nothing in the fire log to say so.
+        var schedule = makeIngestionSchedule("rag-5", "kb-1", 1, "src-1");
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any(), any())).thenAnswer(invocation -> {
+            Consumer<IngestionPipeline.IngestionReport> onFinished = invocation.getArgument(3);
+            onFinished.accept(new IngestionPipeline.IngestionReport("run-8", "src-1",
+                    IngestionPipeline.IngestionReport.Outcome.FAILED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO, "site unreachable"));
+            return new IngestionPipeline.IngestionReport("run-8", "src-1",
+                    IngestionPipeline.IngestionReport.Outcome.STARTED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO, "Run run-8 started");
+        });
+
+        executor.fire(schedule, "instance-1", 1);
+
+        var logged = ArgumentCaptor.forClass(ScheduleFireLog.class);
+        verify(scheduleStore, times(2)).logFire(logged.capture());
+        var failed = logged.getAllValues().stream()
+                .filter(log -> FireStatus.FAILED.name().equals(log.status())).findFirst().orElseThrow();
+        assertTrue(failed.errorMessage().contains("site unreachable"), failed.errorMessage());
+    }
+
+    @Test
+    void fire_ragIngestion_alreadyRunningIsNotAFailure() throws Exception {
+        // A run can outlast the interval between fires, so the next fire legitimately
+        // finds it still going. Calling that FAILED increments failCount on every fire
+        // and dead-letters the schedule in days.
+        var schedule = makeIngestionSchedule("rag-2", "kb-1", 1, "src-1");
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any(), any()))
+                .thenReturn(new IngestionPipeline.IngestionReport(null, "src-1",
+                        IngestionPipeline.IngestionReport.Outcome.ALREADY_RUNNING, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                        false, false, null, Duration.ZERO, "A run is already in flight for this source"));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), log.status());
+    }
+
+    @Test
+    void fire_ragIngestion_refusesAScheduleWhoseNameDoesNotMatchItsMetadata() throws Exception {
+        // A schedule naming one knowledge base under a name minted for another was
+        // never written by syncSchedules. The fire runs with no caller and no access
+        // check of its own, so crawling on the strength of client-supplied metadata
+        // is how the EDIT gate on the REST route gets bypassed.
+        var schedule = makeIngestionSchedule("rag-3", "victim-kb", 1, "src-1");
+        schedule.setName(RagIngestionSchedules.scheduleName("my-own-kb", "src-1"));
+
+        var log = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), log.status());
+        assertNotNull(log.errorMessage());
+        verify(ragSourceIngestionService, never()).processScheduledFire(any(), any(), any(), any());
+    }
+
+    private static ScheduleConfiguration makeIngestionSchedule(String id, String ragConfigId, int version,
+                                                               String sourceId) {
+        var s = new ScheduleConfiguration();
+        s.setId(id);
+        s.setName(RagIngestionSchedules.scheduleName(ragConfigId, sourceId));
+        s.setTriggerType(TriggerType.CRON);
+        s.setCronExpression("0 2 * * *");
+        s.setEnvironment("production");
+        s.setTimeZone("UTC");
+        s.setUserId("system:scheduler");
+        s.setFireStatus(FireStatus.CLAIMED);
+        s.setNextFire(Instant.now().minusSeconds(60));
+        s.setMetadata(RagIngestionSchedules.metadata(ragConfigId, version, sourceId));
         return s;
     }
 

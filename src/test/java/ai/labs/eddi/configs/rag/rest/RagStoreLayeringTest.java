@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -84,7 +85,8 @@ class RagStoreLayeringTest {
 
         ragStore = new RagStore(storageFactory, mock(IDocumentBuilder.class));
         restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                mock(ResourceAccessGuard.class));
+                mock(ResourceAccessGuard.class),
+                mock(RagSourceIngestionService.class));
     }
 
     private static RagConfiguration knowledgeBase(String chunkStrategy) {

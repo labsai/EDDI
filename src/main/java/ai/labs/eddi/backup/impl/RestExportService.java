@@ -28,10 +28,12 @@ import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -56,6 +58,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.SecureRandom;
 import java.text.MessageFormat;
 import java.text.Normalizer;
 import java.time.Duration;
@@ -76,6 +79,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
+    private final IParserStore parserStore;
     private final IDictionaryStore regularDictionaryStore;
     private final IRuleSetStore behaviorStore;
     private final IApiCallsStore httpCallsStore;
@@ -130,16 +134,27 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private static final String EXPORT_SCRATCH_ROOT = "export";
 
     /**
-     * Matches snippet references in template strings: {{snippets.name}} or
-     * {snippets.name}. Captures the snippet name (group 1).
-     */
-    private static final Pattern SNIPPET_REF_PATTERN = Pattern.compile("snippets\\.([a-zA-Z0-9_\\-]+)");
-
-    /**
      * {@code ${connection:name}} or {@code ${connection:tenant/name}}, wherever it
      * sits.
      */
     private static final Pattern CONNECTION_REFERENCE_PATTERN = Pattern.compile(ConnectionReference.CONNECTION_PATTERN);
+
+    /**
+     * Separates the display slug from the machine part of an archive key. The slug
+     * never contains it ({@link #slugifyForFilename} collapses runs of hyphens and
+     * trims them from both ends) and neither does an agent id (hex, or a UUID's
+     * single hyphens), so the part after the last occurrence is unambiguous.
+     */
+    private static final String ARCHIVE_KEY_SEPARATOR = "--";
+
+    /**
+     * The machine part of an archive key: {@code <agentId>-<version>-<token>}. The
+     * agent id is recovered from the key rather than trusted from anywhere else, so
+     * the download can be checked against the agent it exports.
+     */
+    private static final Pattern ARCHIVE_KEY_PATTERN = Pattern.compile("^(.+)-(\\d+)-([0-9a-f]{32})$");
+
+    private static final SecureRandom ARCHIVE_TOKEN_RANDOM = new SecureRandom();
 
     private final ResourceAccessGuard resourceAccessGuard;
     private final BackupMetrics metrics;
@@ -147,7 +162,8 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore, IAgentStore agentStore, IWorkflowStore workflowStore,
-            IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, ILlmStore llmStore,
+            IParserStore parserStore, IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore,
+            IApiCallsStore httpCallsStore, ILlmStore llmStore,
             IPropertySetterStore propertySetterStore, IOutputStore outputStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore,
             IPromptSnippetStore snippetStore, IJsonSerialization jsonSerialization, IZipArchive zipArchive,
             SecretScrubber secretScrubber, IScheduleStore scheduleStore, ResourceAccessGuard resourceAccessGuard,
@@ -158,6 +174,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
+        this.parserStore = parserStore;
         this.regularDictionaryStore = regularDictionaryStore;
         this.behaviorStore = behaviorStore;
         this.httpCallsStore = httpCallsStore;
@@ -173,10 +190,29 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.scheduleStore = scheduleStore;
     }
 
+    /**
+     * Downloads a finished archive.
+     * <p>
+     * <b>Checked against the agent it exports.</b> This used to serve any file in
+     * {@code tmp/archives/} to any authenticated caller who named it, and the name
+     * was {@code <slug>-<agentId>-<version>.zip} — every part of it readable from a
+     * listing — so a complete dump of an agent somebody else had just exported sat
+     * one guessable GET away for the whole retention window, with no VIEW check at
+     * all. The key now carries a 128-bit random token (so it cannot be guessed) and
+     * the agent id is parsed back out of it and checked for VIEW, exactly as the
+     * export itself is. A name that does not have that shape is simply not an
+     * archive this endpoint produced, and answers like a missing one.
+     */
     @Override
     public Response getAgentZipArchive(String agentFilename) {
         try {
             agentFilename = sanitizeFileName(agentFilename);
+
+            String exportedAgentId = agentIdOfArchive(agentFilename);
+            if (exportedAgentId == null) {
+                throw new FileNotFoundException(agentFilename);
+            }
+            resourceAccessGuard.requireAccess(exportedAgentId, AccessLevel.VIEW, "agent");
 
             Path archiveDir = archiveDirectory();
             Path zipFilePath = archiveDir.resolve(agentFilename).normalize();
@@ -186,7 +222,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             }
 
             return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile())))
-                    .header("Content-Disposition", "attachment; filename=\"" + agentFilename + "\"")
+                    .header("Content-Disposition", "attachment; filename=\"" + downloadNameOf(agentFilename) + "\"")
                     .build();
         } catch (FileNotFoundException e) {
             // An archive that is not there is a 404, not a 500. sneakyThrow'ing the
@@ -317,8 +353,24 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                         WORKFLOW_EXT);
                 writeDocumentDescriptor(workflowPath, resourceId.getId(), resourceId.getVersion());
 
-                Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(
-                        readConfigs(regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN)));
+                // Parsers first: a parser document carries its own dictionary
+                // references, and those dictionaries have to be found before the
+                // dictionary pass runs — a parser whose dictionaries stayed behind
+                // reaches the target pointing at ids that only exist on this instance.
+                Map<IResourceId, String> parserConfigs = convertConfigsToString(
+                        readExistingConfigs(parserStore, extractResourcesUris(workflowConfigString, PARSER_URI_PATTERN)));
+                writeSelectedConfigs(workflowPath, parserConfigs, PARSER_EXT, selectedIds);
+
+                // The workflow's dictionaries must exist, as every extension it names
+                // must. One only a parser document names is carried when it exists:
+                // the pipeline never loads that document, so a dictionary it names
+                // having been deleted must not block the backup.
+                List<URI> workflowDictionaryUris = extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN);
+                Map<IResourceId, Object> dictionaries = new LinkedHashMap<>(
+                        readConfigs(regularDictionaryStore, workflowDictionaryUris));
+                dictionaries.putAll(readExistingConfigs(regularDictionaryStore,
+                        parserOnlyUris(parserConfigs, workflowDictionaryUris, DICTIONARY_URI_PATTERN)));
+                Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(dictionaries);
                 writeSelectedConfigs(workflowPath, dictionaryConfigs, DICTIONARY_EXT, selectedIds);
 
                 Map<IResourceId, String> behaviorConfigs = convertConfigsToString(
@@ -530,7 +582,12 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
     private void addExtensionResources(List<ExportableResource> resources, String wfJson,
                                        String parentWorkflowId) {
-        addExtensionResourcesForType(resources, wfJson, DICTIONARY_URI_PATTERN, "regulardictionary", parentWorkflowId);
+        addExtensionResourcesForType(resources, wfJson, PARSER_URI_PATTERN, PARSER_EXT, parentWorkflowId);
+        // A row for every dictionary the export writes — the ones a parser document
+        // names included. Without them a selective export, which posts back exactly
+        // the rows it was shown, left those dictionaries out of the archive.
+        addExtensionResourcesForType(resources, wfJson + parserDocumentsText(wfJson), DICTIONARY_URI_PATTERN,
+                "regulardictionary", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, BEHAVIOR_URI_PATTERN, "behavior", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, HTTPCALLS_URI_PATTERN, "httpcalls", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, LANGCHAIN_URI_PATTERN, "langchain", parentWorkflowId);
@@ -586,6 +643,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     /**
      * Resolves the resource id of each referenced snippet by name, using the same
      * access-scoped descriptor sweep the export itself performs.
+     * <p>
+     * When several snippets share a name, the one kept is the one a template
+     * renders: {@code PromptSnippetService} walks the same listing and lets a later
+     * entry replace an earlier one, so this does too. Keeping the first instead
+     * exported a different snippet from the one the agent actually runs with.
      */
     private Map<String, IResourceId> resolveSnippetIdsByName(Set<String> referencedNames) {
         Map<String, IResourceId> byName = new LinkedHashMap<>();
@@ -606,7 +668,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                     }
                     PromptSnippet snippet = snippetStore.read(resourceId.getId(), resourceId.getVersion());
                     if (snippet != null && referencedNames.contains(snippet.getName())) {
-                        byName.putIfAbsent(snippet.getName(), resourceId);
+                        byName.put(snippet.getName(), resourceId);
                     }
                 } catch (Exception e) {
                     LOGGER.debugf("Could not resolve snippet id for preview: %s", e.getMessage());
@@ -633,11 +695,45 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         if (agentDocumentDescriptor != null && !isNullOrEmpty(agentDocumentDescriptor.getName())) {
             String slug = slugifyForFilename(agentDocumentDescriptor.getName());
             if (!slug.isEmpty()) {
-                zipFilename = slug + "-";
+                zipFilename = slug + ARCHIVE_KEY_SEPARATOR;
             }
         }
-        zipFilename += agentId + "-" + agentVersion + ".zip";
+        zipFilename += agentId + "-" + agentVersion + "-" + newArchiveToken() + ".zip";
         return zipFilename;
+    }
+
+    /** 128 random bits, hex — what makes an archive key unguessable. */
+    private static String newArchiveToken() {
+        byte[] bytes = new byte[16];
+        ARCHIVE_TOKEN_RANDOM.nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
+    }
+
+    /**
+     * The agent id an archive key names, or {@code null} when the name is not a key
+     * {@link #prepareZipFilename} produces (including keys written before the token
+     * was added, which are no longer downloadable).
+     */
+    static String agentIdOfArchive(String filename) {
+        if (filename == null || !filename.endsWith(".zip")) {
+            return null;
+        }
+        String stem = filename.substring(0, filename.length() - ".zip".length());
+        int separator = stem.lastIndexOf(ARCHIVE_KEY_SEPARATOR);
+        String key = separator >= 0 ? stem.substring(separator + ARCHIVE_KEY_SEPARATOR.length()) : stem;
+        Matcher matcher = ARCHIVE_KEY_PATTERN.matcher(key);
+        return matcher.matches() ? matcher.group(1) : null;
+    }
+
+    /**
+     * The name a browser should save an archive under: the key without its token,
+     * and with the slug separator folded back to a single hyphen —
+     * {@code My-Agent-<agentId>-<version>.zip}, the name archives always had.
+     */
+    static String downloadNameOf(String filename) {
+        String stem = filename.substring(0, filename.length() - ".zip".length());
+        int tokenStart = stem.lastIndexOf('-');
+        return stem.substring(0, tokenStart).replace(ARCHIVE_KEY_SEPARATOR, "-") + ".zip";
     }
 
     /**
@@ -839,6 +935,33 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         return ret;
     }
 
+    /**
+     * Like {@link #readConfigs}, but a reference to a document that no longer
+     * exists is skipped instead of failing the export.
+     * <p>
+     * Used for parser documents only. The pipeline builds its parser from the
+     * workflow step itself and never loads the document, so an agent can run for
+     * years with its parser step naming one that is gone — and every agent imported
+     * from an archive written before parser documents travelled does exactly that,
+     * because the step kept the source instance's id. Refusing to export such an
+     * agent would turn a harmless dangling reference into one that blocks every
+     * backup and every promotion of it.
+     */
+    private static <T> Map<IResourceId, T> readExistingConfigs(IResourceStore<T> store, List<URI> configUris)
+            throws IResourceStore.ResourceStoreException {
+        Map<IResourceId, T> ret = new LinkedHashMap<>();
+        for (URI uri : configUris) {
+            IResourceId resourceId = RestUtilities.extractResourceId(uri);
+            try {
+                ret.put(resourceId, store.read(resourceId.getId(), resourceId.getVersion()));
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                LOGGER.infof("Not exporting %s: it no longer exists, and the workflow's reference to it is kept as it is",
+                        LogSanitizer.sanitize(uri.toString()));
+            }
+        }
+        return ret;
+    }
+
     private void deleteFileIfExists(Path path) throws IOException {
         if (Files.exists(path)) {
             Files.delete(path);
@@ -877,16 +1000,40 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      * @return set of snippet names referenced by any config
      */
     private Set<String> extractReferencedSnippetNames(List<String> configStrings) {
-        Set<String> names = new LinkedHashSet<>();
-        for (String config : configStrings) {
-            if (config == null || config.isEmpty())
-                continue;
-            Matcher matcher = SNIPPET_REF_PATTERN.matcher(config);
-            while (matcher.find()) {
-                names.add(matcher.group(1));
-            }
+        return SnippetReferences.namesIn(configStrings);
+    }
+
+    /**
+     * The URIs the given parser documents name that the workflow does not.
+     * <p>
+     * A dictionary can be referenced either inline from a parser <em>step</em> — in
+     * which case it is already in the workflow JSON — or from a parser
+     * <em>document</em> the step points at. Scanning only the workflow found the
+     * first kind and missed the second.
+     */
+    private List<URI> parserOnlyUris(Map<IResourceId, String> parserConfigs, List<URI> workflowUris, Pattern uriPattern)
+            throws CallbackMatcher.CallbackMatcherException {
+        if (parserConfigs == null || parserConfigs.isEmpty()) {
+            return List.of();
         }
-        return names;
+        List<URI> uris = new ArrayList<>(
+                extractResourcesUris(String.join(System.lineSeparator(), parserConfigs.values()), uriPattern));
+        uris.removeAll(workflowUris);
+        return uris;
+    }
+
+    /**
+     * The parser documents a workflow names, as text to scan for references; one
+     * that cannot be read contributes nothing.
+     */
+    private String parserDocumentsText(String wfJson) {
+        try {
+            return String.join(System.lineSeparator(), convertConfigsToString(
+                    readExistingConfigs(parserStore, extractResourcesUris(wfJson, PARSER_URI_PATTERN))).values());
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the parser documents of a workflow for the preview: %s", e.getMessage());
+            return "";
+        }
     }
 
     /**
@@ -902,6 +1049,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             return;
         }
 
+        // One per name — the one the agent's templates render. Writing every snippet
+        // that shared a name put several in the archive, and the importer kept
+        // whichever it happened to read first.
+        Map<String, IResourceId> rendered = resolveSnippetIdsByName(referencedNames);
         try {
             // Scoped: this sweeps every snippet in the deployment and the export only
             // filters by referenced NAME afterwards, so an unscoped listing would let an
@@ -927,6 +1078,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
                     // Only export snippets actually referenced by this agent...
                     if (!referencedNames.contains(snippet.getName())) {
+                        continue;
+                    }
+                    // ...the one of each name that is rendered...
+                    IResourceId renderedId = rendered.get(snippet.getName());
+                    if (renderedId != null && !renderedId.getId().equals(resourceId.getId())) {
                         continue;
                     }
                     // ...and, when the caller expressed a snippet selection, only
@@ -1056,6 +1212,23 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
+    /**
+     * Whether the caller may carry this schedule out in an archive or see it in the
+     * preview: the schedule listing's owner rule. A schedule that runs as a real
+     * user is that user's — another user's dream schedule would otherwise leave
+     * with its {@code userId}, message and cron in the ZIP, although the listing
+     * hides it. Unowned (system) schedules go with the agent, as before, and an
+     * administrator exports everything. The importer re-stamps {@code userId}
+     * anyway, so nothing an import needs is lost.
+     */
+    private boolean mayExportSchedule(ScheduleConfiguration schedule) {
+        String userId = schedule.getUserId();
+        if (ScheduleOwnerScope.isShared(userId) || resourceAccessGuard.isAdmin()) {
+            return true;
+        }
+        return userId.equals(resourceAccessGuard.currentPrincipal());
+    }
+
     /** A HITL approval-timeout schedule, which never belongs in an archive. */
     private static boolean isHitlTimeout(ScheduleConfiguration schedule) {
         return schedule != null && HitlSchedules.isHitlTimeout(schedule.getMetadata());
@@ -1068,7 +1241,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private void addScheduleResources(List<ExportableResource> resources, String agentId) {
         try {
             for (ScheduleConfiguration schedule : scheduleStore.readSchedulesByAgentId(agentId)) {
-                if (schedule == null || schedule.getId() == null || isHitlTimeout(schedule)) {
+                if (schedule == null || schedule.getId() == null || isHitlTimeout(schedule) || !mayExportSchedule(schedule)) {
                     continue;
                 }
                 resources.add(new ExportableResource(schedule.getId(), null, SCHEDULE_EXT,
@@ -1102,6 +1275,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 // so writing it into the archive only produced a backup that could
                 // not be restored.
                 if (isHitlTimeout(schedule)) {
+                    continue;
+                }
+                if (!mayExportSchedule(schedule)) {
                     continue;
                 }
                 // When the caller expressed a schedule selection, only the ones it

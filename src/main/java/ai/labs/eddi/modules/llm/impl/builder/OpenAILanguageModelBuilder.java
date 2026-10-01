@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -18,6 +19,7 @@ import java.util.Set;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.booleanValue;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -31,18 +33,31 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_RESPONSE_FORMAT = "responseFormat";
     private static final String KEY_BASE_URL = "baseUrl";
     private static final String KEY_MAX_TOKENS = "maxTokens";
+    private static final String KEY_RETURN_THINKING = "returnThinking";
+    private static final String KEY_SEND_THINKING = "sendThinking";
     private static final String TYPE_JSON = "json";
 
     @Override
     public Set<String> recognisedParameters() {
         return Set.of(KEY_API_KEY, KEY_TEMPERATURE, KEY_MODEL_NAME, KEY_TIMEOUT, KEY_LOG_REQUESTS, KEY_LOG_RESPONSES,
-                KEY_RESPONSE_FORMAT, KEY_BASE_URL, KEY_MAX_TOKENS);
+                KEY_RESPONSE_FORMAT, KEY_BASE_URL, KEY_MAX_TOKENS, KEY_RETURN_THINKING, KEY_SEND_THINKING);
     }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
+        return build(parameters, Map.of());
+    }
+
+    /**
+     * Build with extra JSON body fields sent on every request. Public because the
+     * named OpenAI-compatible providers call it through a CDI client proxy.
+     */
+    public ChatModel build(Map<String, String> parameters, Map<String, Object> customParameters) {
         var builder = OpenAiChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+            // Never let a model base URL point at the cloud instance-metadata service
+            // (always-on, independent of eddi.security.ssrf-protection.enabled).
+            UrlValidationUtils.rejectCloudMetadataTarget(parameters.get(KEY_BASE_URL));
             builder.baseUrl(parameters.get(KEY_BASE_URL));
         }
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
@@ -62,14 +77,25 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
             builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
+        }
+        builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, false));
+        builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, false));
+        if (customParameters != null && !customParameters.isEmpty()) {
+            builder.customParameters(customParameters);
         }
         return builder.build();
     }
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+        return buildStreaming(parameters, Map.of());
+    }
+
+    /** Streaming counterpart of {@link #build(Map, Map)}. */
+    public StreamingChatModel buildStreaming(Map<String, String> parameters, Map<String, Object> customParameters) {
         var builder = OpenAiStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+            UrlValidationUtils.rejectCloudMetadataTarget(parameters.get(KEY_BASE_URL));
             builder.baseUrl(parameters.get(KEY_BASE_URL));
         }
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
@@ -89,6 +115,11 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         }
         if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
             builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
+        }
+        builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, false));
+        builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, false));
+        if (customParameters != null && !customParameters.isEmpty()) {
+            builder.customParameters(customParameters);
         }
         return builder.build();
     }

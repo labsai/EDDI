@@ -5,13 +5,19 @@
  * the agent wizard offer the same suggestions from one source.
  */
 
+import { COMPATIBLE_PROVIDERS } from "@/lib/llm-provider-catalog";
+
 /** Popular model suggestions per provider — users can still type any custom model */
 export const MODEL_SUGGESTIONS: Record<string, string[]> = {
+  // Named OpenAI-compatible providers, from the mirror of the backend catalog.
+  ...Object.fromEntries(COMPATIBLE_PROVIDERS.map((p) => [p.id, [...p.suggestions]])),
   anthropic: [
     // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6).
-    // claude-sonnet-5 leads because it is the app-wide default model — a
+    // claude-sonnet-5-5 leads because it is the app-wide default model — a
     // datalist's first entry is what an admin sees before typing, so it should
     // match the placeholder they were already shown.
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
     "claude-sonnet-5",
     "claude-fable-5-1",
     "claude-fable-5",
@@ -24,6 +30,10 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   openai: [
     "gpt-6-astra",
+    // gpt-6.1-sol supersedes gpt-6-sol (still served) since 2026-09-29.
+    "gpt-6.1-sol",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -45,7 +55,7 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.1-pro",
+    // Gemini 3.1 Pro is preview-only: the API documents no bare "gemini-3.1-pro".
     "gemini-3.1-pro-preview",
     "gemini-3.1-pro-preview-customtools",
     "gemini-3.1-flash-lite",
@@ -60,7 +70,6 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.1-pro",
     "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite",
     "gemini-2.5-pro",
@@ -70,6 +79,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "google/gemma3@gemma-3-12b-it",
     "google/gemma2@gemma-2-2b-it",
     // Vertex serves current-generation Claude under the bare first-party id.
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
     "claude-sonnet-5",
     "claude-opus-5",
     "claude-opus-4-8",
@@ -81,33 +92,43 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "llama3.3:70b",
     "qwen3:8b",
     "gemma3:4b",
-    "phi4:mini",
+    // Not "phi4:mini": the phi4 library only has 14b tags. Needs Ollama 0.5.13+.
+    "phi4-mini",
     "deepseek-r1:8b",
   ],
+  // Jlama resolves a model through its own registry, which downloads it from
+  // Hugging Face — so a model name here is a HF *repository id* in `owner/name`
+  // form, not a friendly label. A bare name (`tinyllama`, `llama-3.2-1b`) has no
+  // owner to resolve and fails on the agent's first turn, long after the wizard
+  // reported success. Only ids this repository already treats as real are listed:
+  // any `owner/name` repo Jlama can load can still be typed by hand.
   jlama: [
-    "llama-3.2-1b",
-    "tinyllama",
+    "tjake/Llama-3.2-1B-Instruct-JQ4",
+    "tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4",
   ],
   huggingface: [
     "deepseek-ai/DeepSeek-V4",
     "google/gemma-4-assistant",
-    "THUDM/GLM-5.1",
+    "zai-org/GLM-5.1",
     "Qwen/Qwen3.5-7B",
     "meta-llama/Llama-3.2-1B",
   ],
   mistral: [
+    // The dated ids are the ones Mistral's model pages document; the -latest
+    // aliases still resolve. Devstral was retired and Magistral deprecated by
+    // 2026-07-31: reasoning now comes from reasoning_effort on Small and Medium.
     "mistral-large-latest",
+    "mistral-large-2512",
+    "mistral-medium-3-5",
     "mistral-medium-latest",
     "mistral-small-latest",
-    "mistral-small-4",
+    "mistral-small-2603",
+    "ministral-14b-2512",
     "ministral-14b-latest",
     "ministral-8b-latest",
     "ministral-3b-latest",
-    "devstral-latest",
-    "devstral-small-latest",
+    "codestral-2508",
     "codestral-latest",
-    "magistral-medium-latest",
-    "magistral-small-latest",
   ],
   // Azure uses your own deployment names — these are standard Microsoft-managed
   // deployment identifiers for Azure OpenAI Service
@@ -125,6 +146,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // AWS Bedrock model IDs follow the pattern: provider.model-name-v1:0
     // Anthropic — current-generation ids carry the `anthropic.` prefix with no
     // version suffix.
+    "global.anthropic.claude-sonnet-5-5",
+    "anthropic.claude-opus-5-5",
     "anthropic.claude-sonnet-5",
     "anthropic.claude-opus-5",
     "anthropic.claude-opus-4-8",
@@ -132,8 +155,10 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "anthropic.claude-haiku-4-5-20251001-v1:0",
     "anthropic.claude-sonnet-4-6-v1:0",
     // Meta Llama
-    "meta.llama4-maverick-17b-instruct-v1:0",
-    "meta.llama4-scout-17b-instruct-v1:0",
+    // Llama 4 is served only through cross-region inference profiles; the bare
+    // model id fails with "on-demand throughput isn't supported".
+    "us.meta.llama4-maverick-17b-instruct-v1:0",
+    "us.meta.llama4-scout-17b-instruct-v1:0",
     "meta.llama3-3-70b-instruct-v1:0",
     "meta.llama3-1-405b-instruct-v1:0",
     // Amazon
@@ -144,13 +169,14 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
   "oracle-genai": [
     // Cohere
-    "cohere.command-latest",
-    "cohere.command-plus-latest",
-    "cohere.command-r-plus-v2",
-    "cohere.command-r-plus",
+    // Command R and R+ are retired on OCI (the last on 2026-07-30); Command A
+    // replaced them. OCI has never had "cohere.command-latest".
+    "cohere.command-a-03-2025",
+    "cohere.command-a-reasoning",
+    "cohere.command-a-vision",
     // Meta Llama
-    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-    "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+    // OCI's API name, not the Hugging Face repository name.
+    "meta.llama-4-maverick-17b-128e-instruct-fp8",
     "meta.llama-3.3-70b-instruct",
     "meta.llama-3.1-70b-instruct",
     // OpenAI
@@ -159,7 +185,76 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   ],
 };
 
-/** Whether a provider requires a base URL (local providers) or it's just optional */
+/**
+ * Providers that run the model inside the EDDI JVM rather than talking to a
+ * model server, so there is no endpoint to address and a base URL is not merely
+ * optional — it is meaningless.
+ *
+ * Jlama is the only one. `JlamaLanguageModelBuilder.recognisedParameters()` does
+ * not include `baseUrl`, and `AgentSetupService` drops it before the builder is
+ * even reached, so anything entered vanishes without a trace the user can see.
+ */
+const IN_PROCESS_PROVIDERS = new Set(["jlama"]);
+
+/**
+ * Whether a base URL field should be offered at all.
+ *
+ * False only for in-process providers. Everything else can legitimately be
+ * pointed at a proxy or a private deployment, even when it does not need to be.
+ */
+export function supportsBaseUrl(providerId: string): boolean {
+  return !IN_PROCESS_PROVIDERS.has(providerId);
+}
+
+/**
+ * Whether a provider requires a base URL — true for a local provider that talks
+ * to a model *server* the deployment has to name.
+ *
+ * Jlama used to be on this list and must not come back: it has no server, so
+ * requiring a URL blocked operator activation behind a field whose value was
+ * then thrown away.
+ */
 export function isBaseUrlRequired(providerId: string): boolean {
-  return providerId === "ollama" || providerId === "jlama";
+  return providerId === "ollama";
+}
+
+/**
+ * Providers the setup endpoints (`/administration/agents/setup` and
+ * `setup-api`) cannot turn into a working agent, and so must not offer.
+ *
+ * `gemini-vertex` needs a GCP `projectId` and `location` (langchain4j refuses to
+ * build the model without either), and neither setup request has a field for
+ * them. Offered anyway, it produced an agent that deployed and then failed on its
+ * first message. A Vertex agent is created with another provider and switched to
+ * `gemini-vertex` in the LLM editor, where both parameters can be set.
+ */
+const NOT_PROVISIONABLE_BY_SETUP = new Set(["gemini-vertex"]);
+
+/** Whether the setup endpoints can provision a working agent on this provider. */
+export function isProvisionableBySetup(providerId: string): boolean {
+  return !NOT_PROVISIONABLE_BY_SETUP.has(providerId);
+}
+
+/**
+ * `providerId` when the setup flows offer it, otherwise `fallback`. A stored
+ * value such as an operator configured on `gemini-vertex` before it was hidden
+ * would otherwise render a provider select with no matching option, showing
+ * one provider while the form holds another.
+ */
+export function provisionableProviderOr(providerId: string, fallback: string): string {
+  return isProvisionableBySetup(providerId) ? providerId : fallback;
+}
+
+/**
+ * Providers that take an OPTIONAL credential in the key slot. Jlama downloads
+ * its weights from Hugging Face, and a gated or private repository needs a
+ * token; `AgentSetupService` writes the setup request's `apiKey` to the Jlama
+ * builder's `authToken`. The provider needs no key otherwise, so the field is
+ * offered but never required.
+ */
+const OPTIONAL_TOKEN_PROVIDERS = new Set(["jlama"]);
+
+/** Whether a provider accepts an optional token in place of the API key. */
+export function acceptsOptionalToken(providerId: string): boolean {
+  return OPTIONAL_TOKEN_PROVIDERS.has(providerId);
 }

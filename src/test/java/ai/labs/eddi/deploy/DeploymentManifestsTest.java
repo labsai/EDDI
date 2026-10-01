@@ -26,6 +26,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
@@ -37,6 +38,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -1589,6 +1591,31 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * docker-compose publishes EDDI on {@code ${EDDI_PORT:-7070}}, but the realm
+         * listed fixed origins. Run on any other port, the Manager's token request was
+         * refused by CORS and the login failed with a bare 401 and nothing saying why.
+         * Keycloak substitutes {@code ${VAR:default}} on realm import, so the realm
+         * names the port variable and the compose file hands it over.
+         */
+        @Test
+        @DisplayName("the compose realm allows the origin EDDI is actually published on")
+        void composeRealmFollowsThePublishedPort() throws IOException {
+            List<String> origins = stringList(client(JSON.readTree(COMPOSE_REALM.toFile()), "eddi-frontend").get("webOrigins"));
+            assertTrue(origins.contains("http://localhost:${EDDI_PORT:7070}"),
+                    COMPOSE_REALM + " must list http://localhost:${EDDI_PORT:7070} as a web origin, or EDDI on a "
+                            + "non-default port cannot log in from the browser. Origins: " + origins);
+            assertTrue(origins.contains("https://localhost:${EDDI_HTTPS_PORT:7443}"),
+                    COMPOSE_REALM + " must list https://localhost:${EDDI_HTTPS_PORT:7443} as a web origin. Origins: " + origins);
+
+            JsonNode env = YAML.readTree(Path.of("docker-compose.auth.yml").toFile()).path("services").path("keycloak").path("environment");
+            assertEquals("${EDDI_PORT:-7070}", env.path("EDDI_PORT").asText(),
+                    "docker-compose.auth.yml must pass EDDI_PORT to Keycloak, or the realm's placeholder falls back "
+                            + "to 7070 whatever port EDDI is published on");
+            assertEquals("${EDDI_HTTPS_PORT:-7443}", env.path("EDDI_HTTPS_PORT").asText(),
+                    "docker-compose.auth.yml must pass EDDI_HTTPS_PORT to Keycloak");
+        }
+
+        /**
          * The realm-level switch that decides whether Keycloak will speak cleartext. It
          * shipped as {@code none}, which is "never require TLS, from anywhere" — every
          * login form, every authorization code and every token exchange served over
@@ -1799,7 +1826,7 @@ class DeploymentManifestsTest {
          * Asserted as a relationship — privileged implies no shipped credential —
          * rather than against a remembered username, so a second admin fixture added
          * later is covered by construction. The unprivileged fixtures (viewer, user)
-         * are deliberately untouched.
+         * are covered by {@link #noRealmUserShipsACredential()}.
          * <p>
          * The last assertion is what stops this passing vacuously: deleting every
          * privileged user, rather than its password, would otherwise satisfy the loop
@@ -1831,6 +1858,328 @@ class DeploymentManifestsTest {
                                 + "tell the operator to set a password on; removing it instead of its "
                                 + "password leaves those instructions pointing at nothing — and makes the "
                                 + "assertion above pass by having nothing to check");
+            }
+        }
+
+        /**
+         * The unprivileged fixtures are not harmless either. {@code user}/{@code user}
+         * carries {@code eddi-user}, which is enough to start conversations and run LLM
+         * turns at the deployment's expense, and {@code viewer}/{@code viewer} reads
+         * agent configurations. Both shipped with passwords equal to their usernames,
+         * and {@code "temporary": true} never became an UPDATE_PASSWORD required action
+         * on import — so on every cluster the realm was imported into they logged
+         * straight in, through a Keycloak Service any pod can reach.
+         * <p>
+         * So no seeded account ships a credential at all; the fixtures ship their
+         * roles, and an operator who wants them sets a password in the admin console.
+         * The auth E2E tier supplies its own passwords to a generated copy of the realm
+         * ({@code ui/manager/scripts/make-test-realm.mjs}), which asserts the same
+         * thing from its side.
+         */
+        @Test
+        @DisplayName("no realm copy ships a password for any account")
+        void noRealmUserShipsACredential() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode users = JSON.readTree(realm.toFile()).path("users");
+                assertTrue(users.size() > 0, realm + " seeds no users; the operator docs tell the reader "
+                        + "to set passwords on `eddi`, `viewer` and `user`");
+                for (JsonNode user : users) {
+                    assertFalse(user.path("credentials").elements().hasNext(),
+                            realm + " seeds `" + user.path("username").asText() + "` with a credential. Every "
+                                    + "cluster this realm is imported into then has that login, reachable from "
+                                    + "any pod through the Keycloak ClusterIP. Ship the account's roles and let "
+                                    + "the operator set a password");
+                }
+            }
+        }
+
+        /**
+         * {@code eddi-frontend} is public — a browser SPA cannot keep a secret — so the
+         * direct access (password) grant on it needs nothing but a username and a
+         * password: one {@code curl} to the token endpoint, no browser, no redirect
+         * URI, no PKCE. With the fixture passwords above that was a token good for LLM
+         * turns for anyone who could reach Keycloak. The Manager signs in through the
+         * authorization-code flow and never used the grant; the auth E2E tier turns it
+         * back on in its generated realm only.
+         */
+        @Test
+        @DisplayName("the public SPA client refuses the password grant")
+        void spaClientRefusesThePasswordGrant() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode spa = client(JSON.readTree(realm.toFile()), "eddi-frontend");
+                assertTrue(spa.path("publicClient").asBoolean(),
+                        realm + ": eddi-frontend is the Manager SPA and must stay a public client");
+                assertTrue(spa.path("standardFlowEnabled").asBoolean(),
+                        realm + ": eddi-frontend needs the authorization code flow — it is how the Manager "
+                                + "signs in");
+                assertFalse(spa.path("directAccessGrantsEnabled").asBoolean(true),
+                        realm + ": eddi-frontend is a PUBLIC client with the password grant enabled (or left "
+                                + "to Keycloak's default, which is enabled). Anyone who can reach Keycloak and "
+                                + "knows one password gets a token with a single curl");
+            }
+        }
+
+        /**
+         * The client an MCP client logs in through, once EDDI advertises {@code /mcp}
+         * as an OAuth protected resource.
+         * <p>
+         * Its protocol mappers are the load-bearing part, and the reason this realm
+         * cannot simply let clients register themselves: the realm supplies its own
+         * {@code clientScopes} and defines no {@code roles} scope among them, so a
+         * client without an explicit {@code realm-roles} mapper issues tokens that pass
+         * authentication — valid signature, userinfo succeeds — and then fail every
+         * single MCP tool, because {@code McpToolUtils.requireRole} reads
+         * {@code realm_access/roles} and finds nothing. "Logged in, and everything is
+         * forbidden" is the worst failure shape available, and a dynamically registered
+         * client (RFC 7591 carries no mappers) can only produce that one.
+         * <p>
+         * The flow settings are the other half: a public client with the direct access
+         * grant enabled would let anyone holding a username and password mint an MCP
+         * token without a browser, which is the flow this whole feature exists to stop
+         * relying on.
+         */
+        @Test
+        @DisplayName("the MCP client issues tokens that carry roles, through code+PKCE only")
+        void mcpClientIsUsableAndCodeFlowOnly() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode mcp = client(JSON.readTree(realm.toFile()), "eddi-mcp");
+
+                assertTrue(mcp.path("publicClient").asBoolean(),
+                        realm + ": eddi-mcp must be public — a desktop or CLI MCP client cannot keep a secret");
+                assertTrue(mcp.path("standardFlowEnabled").asBoolean(),
+                        realm + ": eddi-mcp needs the authorization code flow, which is the whole point of it");
+                assertEquals("S256", mcp.path("attributes").path("pkce.code.challenge.method").asText(),
+                        realm + ": eddi-mcp must REQUIRE PKCE S256; a public client without it can have its "
+                                + "authorization code intercepted by any local process that wins the race to "
+                                + "the loopback redirect");
+                for (String forbidden : List.of("directAccessGrantsEnabled", "implicitFlowEnabled",
+                        "serviceAccountsEnabled")) {
+                    assertFalse(mcp.path(forbidden).asBoolean(),
+                            realm + ": eddi-mcp must not enable " + forbidden + " — it exists so that clients "
+                                    + "stop handling passwords and long-lived credentials");
+                }
+
+                List<String> mapperNames = new ArrayList<>();
+                mcp.path("protocolMappers").forEach(mapper -> mapperNames.add(mapper.path("name").asText()));
+                assertTrue(mapperNames.contains("realm-roles"),
+                        realm + ": eddi-mcp has no realm-roles mapper, so its tokens authenticate and then "
+                                + "fail every MCP tool. This realm defines no `roles` client scope, so the "
+                                + "mapper is the only source of realm_access.roles. Mappers: " + mapperNames);
+                assertTrue(mapperNames.contains("eddi-backend-audience"),
+                        realm + ": eddi-mcp has no audience mapper, so its tokens carry no `aud` for the "
+                                + "backend and would be refused the moment quarkus.oidc.token.audience is set. "
+                                + "Mappers: " + mapperNames);
+
+                JsonNode rolesMapper = null;
+                for (JsonNode mapper : mcp.path("protocolMappers")) {
+                    if ("realm-roles".equals(mapper.path("name").asText())) {
+                        rolesMapper = mapper;
+                    }
+                }
+                // The assertion above already refuses a client without this mapper, so
+                // this cannot be null in practice — it is here so that a future edit
+                // which loosens that check fails with a sentence instead of an NPE.
+                assertNotNull(rolesMapper, realm + ": eddi-mcp has no realm-roles mapper to inspect");
+                assertEquals("realm_access.roles", rolesMapper.path("config").path("claim.name").asText(),
+                        realm + ": eddi-mcp's roles mapper must write the claim quarkus.oidc.roles"
+                                + ".role-claim-path names (realm_access/roles)");
+                assertEquals("true", rolesMapper.path("config").path("access.token.claim").asText(),
+                        realm + ": eddi-mcp's roles must be in the ACCESS token — the bearer EDDI validates — "
+                                + "not only in the id token");
+
+                // Keycloak's CLIENT.DESCRIPTION and CLIENT.NAME columns are
+                // VARCHAR(255), and an over-long value does not truncate: the import
+                // fails with "Value too long for column", Keycloak exits 1, and every
+                // stack that imports this realm — compose, helm, kustomize, the auth
+                // E2E tier — comes up with no identity provider at all. Found by
+                // running the import, not by reading the file.
+                for (String field : List.of("description", "name")) {
+                    int length = mcp.path(field).asText().length();
+                    assertTrue(length <= 255,
+                            realm + ": eddi-mcp's " + field + " is " + length + " characters. Keycloak stores it "
+                                    + "in a VARCHAR(255) and refuses to start the realm import above that");
+                }
+
+                List<String> redirects = stringList(mcp.get("redirectUris"));
+                assertFalse(redirects.isEmpty(), realm + ": eddi-mcp has no redirect URI, so no client can use it");
+                for (String uri : redirects) {
+                    assertNotEquals("*", uri,
+                            realm + ": eddi-mcp allows redirects to `*`, which hands an authorization code to "
+                                    + "any host that asks");
+                    assertTrue(isLoopbackOrHttps(uri),
+                            realm + ": eddi-mcp redirect `" + uri + "` is neither loopback nor https. A remote "
+                                    + "http callback would carry the code in cleartext");
+                }
+                assertEquals(List.of(), stringList(mcp.get("webOrigins")),
+                        realm + ": eddi-mcp needs no browser origin — its clients are native processes, and "
+                                + "`+` here would extend CORS to a client that never makes a browser request");
+            }
+        }
+
+        /**
+         * EDDI has no role hierarchy: {@code McpToolUtils.requireRole} is a literal
+         * {@code hasRole}, so {@code eddi-admin} does not satisfy a tool that names
+         * {@code eddi-viewer} — and 27 of the MCP tools name exactly that, including
+         * every read tool in {@code McpConversationTools}.
+         * <p>
+         * The seeded administrator is the account an operator points their first MCP
+         * client at. Holding only {@code eddi-admin} and {@code eddi-editor}, it
+         * completed the OAuth flow and was then refused {@code list_agents} — "logged
+         * in, and every read tool says requires role", which reads as a broken feature
+         * rather than as a missing role assignment.
+         */
+        @Test
+        @DisplayName("the seeded administrator holds the role the MCP read tools name")
+        void seededAdministratorCanUseTheReadTools() throws IOException {
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                for (JsonNode user : JSON.readTree(realm.toFile()).path("users")) {
+                    List<String> roles = stringList(user.get("realmRoles"));
+                    if (!roles.contains("eddi-admin")) {
+                        continue;
+                    }
+                    assertTrue(roles.contains("eddi-viewer"),
+                            realm + ": `" + user.path("username").asText() + "` holds " + roles + " but not "
+                                    + "eddi-viewer. There is no role hierarchy — requireRole is a literal "
+                                    + "hasRole — so this account is refused every MCP read tool");
+                }
+            }
+        }
+
+        /**
+         * {@code quarkus.oidc.token.audience} and the realm's audience mappers are one
+         * mechanism written in two files, and the failure mode is total: every token
+         * the realm issues is refused, every caller gets 401, and nothing in either
+         * file looks wrong on its own.
+         * <p>
+         * Quarkus verifies {@code aud} on an access token only when that property is
+         * set, so before it was, EDDI accepted any token from the realm — for any
+         * client in it — and roles come from {@code realm_access/roles}, which is
+         * client-independent. Setting it closes that, but only for clients whose tokens
+         * actually carry the audience, and a Keycloak client emits it only through an
+         * explicit {@code oidc-audience-mapper}.
+         * <p>
+         * So: every client a human can log in through must mint the audience EDDI
+         * requires, checked against the property rather than a spelling repeated here.
+         */
+        @Test
+        @DisplayName("every login client mints the audience EDDI requires")
+        void everyLoginClientMintsTheRequiredAudience() throws IOException {
+            String audience = applicationProperty("quarkus.oidc.token.audience");
+            assertFalse(audience.isBlank(),
+                    "quarkus.oidc.token.audience is unset, so EDDI accepts any token the realm issued for any "
+                            + "client in it. If that is deliberate, this test is what has to change with it");
+
+            for (Path realm : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                assertEquals(List.of(), clientsMissingAudience(JSON.readTree(realm.toFile()), audience),
+                        realm + ": these clients can log a user in, but their access tokens do not carry `" + audience
+                                + "` as audience. Every token they issue would be refused with 401");
+            }
+        }
+
+        /**
+         * The audience check above, fed realms that must fail it — without these it
+         * could pass by skipping every client. Keycloak creates a client with the
+         * standard flow ON when the field is absent, so an omitted
+         * {@code standardFlowEnabled} is a login client, not an exempt one.
+         */
+        @Test
+        @DisplayName("the audience check flags a login client without the mapper, even one that omits the flow flag")
+        void audienceCheckFlagsClientsThatWouldBeRefused() throws IOException {
+            JsonNode realm = JSON.readTree("""
+                    {"clients": [
+                      {"clientId": "omits-standard-flow"},
+                      {"clientId": "explicit-login", "standardFlowEnabled": true},
+                      {"clientId": "id-token-only", "standardFlowEnabled": true, "protocolMappers": [
+                        {"protocolMapper": "oidc-audience-mapper",
+                         "config": {"included.client.audience": "eddi-backend", "access.token.claim": "false"}}]},
+                      {"clientId": "wrong-audience", "implicitFlowEnabled": true, "standardFlowEnabled": false,
+                       "protocolMappers": [{"protocolMapper": "oidc-audience-mapper",
+                         "config": {"included.client.audience": "other", "access.token.claim": "true"}}]},
+                      {"clientId": "bearer-only", "bearerOnly": true},
+                      {"clientId": "no-flows", "standardFlowEnabled": false},
+                      {"clientId": "device-only", "standardFlowEnabled": false,
+                       "attributes": {"oauth2.device.authorization.grant.enabled": "true"}},
+                      {"clientId": "device-only-field", "standardFlowEnabled": false,
+                       "oauth2DeviceAuthorizationGrantEnabled": true},
+                      {"clientId": "ciba-only", "standardFlowEnabled": false,
+                       "attributes": {"oidc.ciba.grant.enabled": "true"}},
+                      {"clientId": "ciba-off", "standardFlowEnabled": false,
+                       "attributes": {"oidc.ciba.grant.enabled": "false"}},
+                      {"clientId": "good", "protocolMappers": [{"protocolMapper": "oidc-audience-mapper",
+                         "config": {"included.client.audience": "eddi-backend", "access.token.claim": "true"}}]}
+                    ]}""");
+
+            assertEquals(List.of("omits-standard-flow", "explicit-login", "id-token-only", "wrong-audience",
+                    "device-only", "device-only-field", "ciba-only"),
+                    clientsMissingAudience(realm, "eddi-backend"));
+        }
+
+        /**
+         * Client ids in {@code realm} that can obtain an access token but whose tokens
+         * would not carry {@code audience}.
+         */
+        private static List<String> clientsMissingAudience(JsonNode realm, String audience) {
+            List<String> missing = new ArrayList<>();
+            for (JsonNode candidate : realm.path("clients")) {
+                // Any client that can obtain a token, by any flow: a service
+                // account mints one without a human, and Keycloak's implicit
+                // flow returns an access token straight from the authorization
+                // endpoint. An implicit-only client left out of this check could
+                // ship without the audience mapper and be refused at runtime.
+                // A bearer-only client (eddi-backend) validates tokens and mints
+                // none, whatever its flow flags say. standardFlowEnabled defaults to
+                // TRUE in Keycloak when absent, so a missing field is not a pass.
+                // The device authorization grant and CIBA mint access tokens as
+                // well; a realm export carries both as string client attributes
+                // (the device grant also as a top-level boolean in some exports).
+                JsonNode attributes = candidate.path("attributes");
+                boolean mintsTokens = !candidate.path("bearerOnly").asBoolean()
+                        && (candidate.path("standardFlowEnabled").asBoolean(true)
+                                || candidate.path("directAccessGrantsEnabled").asBoolean()
+                                || candidate.path("implicitFlowEnabled").asBoolean()
+                                || candidate.path("serviceAccountsEnabled").asBoolean()
+                                || candidate.path("oauth2DeviceAuthorizationGrantEnabled").asBoolean()
+                                || "true".equals(attributes.path("oauth2.device.authorization.grant.enabled").asText())
+                                || "true".equals(attributes.path("oidc.ciba.grant.enabled").asText()));
+                if (!mintsTokens) {
+                    continue;
+                }
+                List<String> audiences = new ArrayList<>();
+                for (JsonNode mapper : candidate.path("protocolMappers")) {
+                    if ("oidc-audience-mapper".equals(mapper.path("protocolMapper").asText())
+                            && "true".equals(mapper.path("config").path("access.token.claim").asText())) {
+                        audiences.add(mapper.path("config").path("included.client.audience").asText());
+                    }
+                }
+                if (!audiences.contains(audience)) {
+                    missing.add(candidate.path("clientId").asText());
+                }
+            }
+            return missing;
+        }
+
+        /**
+         * A redirect URI that keeps the authorization code off the network: an https
+         * URI, or plain http to a loopback HOST. A prefix test accepted
+         * {@code http://localhost.attacker.com/cb}, which is neither. Keycloak's
+         * {@code :*} port wildcard is allowed on loopback, where RFC 8252 native
+         * clients pick a free port.
+         */
+        private static boolean isLoopbackOrHttps(String uri) {
+            return uri.startsWith("https://")
+                    || uri.matches("http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:(\\d+|\\*))?(/.*)?");
+        }
+
+        @Test
+        @DisplayName("the redirect check accepts loopback hosts only, not names that merely start like one")
+        void redirectCheckRequiresALoopbackHost() {
+            for (String ok : List.of("http://localhost:*", "http://127.0.0.1:*", "http://localhost:8080/callback",
+                    "http://[::1]:*/cb", "http://localhost", "https://eddi.example.com/*")) {
+                assertTrue(isLoopbackOrHttps(ok), ok + " should be accepted");
+            }
+            for (String bad : List.of("http://localhost.attacker.com/cb", "http://127.0.0.1.nip.io/cb",
+                    "http://localhostevil:*", "http://eddi.example.com/*", "*")) {
+                assertFalse(isLoopbackOrHttps(bad), bad + " should be refused");
             }
         }
 
@@ -2510,10 +2859,43 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * The startup probe must not wait for readiness. Readiness is false for as long
+         * as the startup migrations run, and on the first boot of a database migrated
+         * from EDDI 5 that can be many minutes; a startup probe on readiness killed the
+         * pod after 60 s, mid-migration, and every restart began the migration again.
+         * The chart makes it configurable and defaults it to liveness; the plain
+         * manifests use liveness.
+         */
+        @Test
+        @DisplayName("the startup probe checks liveness and is configurable in the chart")
+        void startupProbeChecksLiveness() throws IOException {
+            String template = stripGoComments(read(HELM_TEMPLATES.resolve("deployment.yaml")));
+            int startup = template.indexOf("startupProbe:");
+            assertTrue(startup >= 0, "the chart must keep a startup probe");
+            String startupBlock = template.substring(startup, template.indexOf("livenessProbe:", startup));
+            assertTrue(startupBlock.contains("$startupProbe.path | default \"/q/health/live\""),
+                    "the chart's startup probe must default to /q/health/live: " + startupBlock);
+            assertTrue(startupBlock.contains("$startupProbe.failureThreshold") && startupBlock.contains("$startupProbe.periodSeconds"),
+                    "failureThreshold and periodSeconds must come from eddi.startupProbe");
+            assertTrue(template.contains(".Values.eddi.startupProbe"), "the probe must read eddi.startupProbe");
+
+            JsonNode values = YAML.readTree(HELM.resolve("values.yaml").toFile());
+            assertEquals("/q/health/live", values.path("eddi").path("startupProbe").path("path").asText());
+
+            for (Path manifest : List.of(K8S.resolve("base/eddi-deployment.yaml"), K8S.resolve("quickstart.yaml"))) {
+                String text = stripComments(read(manifest));
+                int at = text.indexOf("startupProbe:");
+                assertTrue(at >= 0, manifest + " must keep a startup probe");
+                String block = text.substring(at, text.indexOf("livenessProbe:", at));
+                assertTrue(block.contains("path: /q/health/live"), manifest + "'s startup probe must check liveness: " + block);
+            }
+        }
+
+        /**
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.0.0";
+        private static final String EXPECTED_CHART_VERSION = "2.3.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
@@ -2686,6 +3068,52 @@ class DeploymentManifestsTest {
     @DisplayName("monitoring stack")
     class Monitoring {
 
+        private static final Path STACK = K8S.resolve("overlays/monitoring/monitoring-stack.yaml");
+
+        /**
+         * The scrape config discovers pods in its own namespace only, so a cluster-wide
+         * ClusterRole granted list/watch on every pod, service and endpoint in the
+         * cluster for nothing.
+         */
+        @Test
+        @DisplayName("prometheus RBAC is namespaced")
+        void prometheusRbacIsNamespaced() throws IOException {
+            List<String> kinds = new ArrayList<>();
+            for (JsonNode document : yamlDocuments(STACK)) {
+                kinds.add(document.path("kind").asText());
+            }
+            assertFalse(kinds.contains("ClusterRole") || kinds.contains("ClusterRoleBinding"),
+                    STACK + " grants Prometheus cluster-wide read; it discovers pods in its own namespace only. Kinds: " + kinds);
+            assertTrue(kinds.contains("Role") && kinds.contains("RoleBinding"), STACK + " kinds: " + kinds);
+            assertEquals("Role", documentOfKind(STACK, "RoleBinding").path("roleRef").path("kind").asText());
+        }
+
+        @Test
+        @DisplayName("grafana's admin password comes from a Secret with no default")
+        void grafanaAdminPasswordHasNoDefault() throws IOException {
+            JsonNode password = null;
+            for (JsonNode document : yamlDocuments(STACK)) {
+                if (!"grafana".equals(document.path("metadata").path("name").asText())
+                        || !"Deployment".equals(document.path("kind").asText())) {
+                    continue;
+                }
+                for (JsonNode variable : document.path("spec").path("template").path("spec").path("containers").get(0)
+                        .path("env")) {
+                    if ("GF_SECURITY_ADMIN_PASSWORD".equals(variable.path("name").asText())) {
+                        password = variable;
+                    }
+                }
+            }
+            assertNotNull(password, "the Grafana Deployment sets no GF_SECURITY_ADMIN_PASSWORD");
+            assertFalse(password.has("value"), "GF_SECURITY_ADMIN_PASSWORD is a literal (it used to be \"admin\")");
+            assertEquals("grafana-admin", password.path("valueFrom").path("secretKeyRef").path("name").asText());
+            assertFalse(password.path("valueFrom").path("secretKeyRef").path("optional").asBoolean(false));
+            for (Path instruction : List.of(K8S.resolve("overlays/monitoring/kustomization.yaml"), K8S_DOC)) {
+                assertTrue(read(instruction).contains("kubectl create secret generic grafana-admin"),
+                        instruction + " must say how to create grafana-admin");
+            }
+        }
+
         /**
          * In a relabel_config {@code separator} is the string placed BETWEEN
          * concatenated source label values (default ";"). Overriding it to ":" made the
@@ -2717,6 +3145,148 @@ class DeploymentManifestsTest {
                             + "what it advertises and the manual fix dies with the pod");
             assertTrue(stack.contains("url: http://prometheus:9090"),
                     "the provisioned datasource must point at the Prometheus Service this file declares");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Datastore credentials, isolation and service-account tokens
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("datastores")
+    class Datastores {
+
+        private static final Path KUSTOMIZE_MONGO = K8S.resolve("overlays/mongodb");
+
+        @Test
+        @DisplayName("kustomize: the MongoDB overlay authenticates from a Secret the operator creates")
+        void kustomizeMongoAuthenticates() throws IOException {
+            JsonNode statefulSet = documentOfKind(KUSTOMIZE_MONGO.resolve("mongodb-statefulset.yaml"), "StatefulSet");
+            JsonNode password = null;
+            for (JsonNode variable : statefulSet.path("spec").path("template").path("spec").path("containers").get(0)
+                    .path("env")) {
+                if ("MONGO_INITDB_ROOT_PASSWORD".equals(variable.path("name").asText())) {
+                    password = variable;
+                }
+            }
+            assertNotNull(password, "the MongoDB StatefulSet sets no MONGO_INITDB_ROOT_PASSWORD — mongod runs without auth");
+            assertFalse(password.has("value"), "MONGO_INITDB_ROOT_PASSWORD must come from a Secret, not a literal");
+            JsonNode reference = password.path("valueFrom").path("secretKeyRef");
+            assertEquals("mongodb-secrets", reference.path("name").asText());
+            assertFalse(reference.path("optional").asBoolean(false),
+                    "an optional reference starts mongod WITHOUT auth when the Secret is missing — fail closed instead");
+
+            Path kustomization = KUSTOMIZE_MONGO.resolve("kustomization.yaml");
+            String patches = read(kustomization);
+            assertTrue(patches.contains("path: /data/MONGODB_CONNECTIONSTRING") && patches.contains("op: remove"),
+                    kustomization + " must remove the base's credential-less MONGODB_CONNECTIONSTRING");
+            assertTrue(patches.contains("/etc/eddi/secrets/mongodb-secrets.properties"),
+                    kustomization + " must mount the connection string into EDDI as a file");
+            for (Path instruction : List.of(kustomization, K8S_DOC)) {
+                assertTrue(read(instruction).contains("kubectl create secret generic mongodb-secrets"),
+                        instruction + " must say how to create mongodb-secrets — the pods do not start without it");
+            }
+        }
+
+        /**
+         * {@code k8s/overlays/postgres/postgres-secret.yaml} committed
+         * {@code eddi}/{@code eddi}, and {@code k8s/examples/postgres-ha} applied it
+         * under {@code production}. A Secret that is a kustomize resource ships its
+         * value to every install; the vault key has been created out-of-band for that
+         * reason, and every other credential now follows it.
+         */
+        @Test
+        @DisplayName("no applied k8s manifest carries a Secret value")
+        void noShippedSecretCarriesAValue() throws IOException {
+            List<String> offenders = new ArrayList<>();
+            List<Path> manifests = new ArrayList<>(manifestsUnder(K8S));
+            for (Path manifest : manifests) {
+                for (JsonNode document : yamlDocuments(manifest)) {
+                    if ("Secret".equals(document.path("kind").asText())
+                            && (document.path("stringData").size() > 0 || document.path("data").size() > 0)) {
+                        offenders.add(manifest + " (" + document.path("metadata").path("name").asText() + ")");
+                    }
+                }
+            }
+            assertEquals(List.of(), offenders,
+                    "these manifests ship a Secret WITH its value, so every install that applies them shares it. Ship "
+                            + "a *.yaml.example with the creation command instead");
+            assertTrue(Files.isRegularFile(K8S.resolve("overlays/postgres/postgres-secret.yaml.example")),
+                    "the PostgreSQL overlay must still document the Secret it needs");
+            assertFalse(read(K8S.resolve("overlays/postgres/kustomization.yaml")).contains("postgres-secret.yaml\n"),
+                    "the PostgreSQL overlay must not list a Secret manifest as a resource");
+        }
+
+        /**
+         * The Kustomize network policies selected only the EDDI pod, so nothing
+         * restricted who could connect TO the databases. Each Kustomize datastore
+         * overlay and the quickstart now ship an ingress policy that admits the EDDI
+         * server pod and nothing else. (The Helm chart's datastore policies live in
+         * templates/networkpolicy.yaml, behind networkPolicy.enabled.)
+         */
+        @Test
+        @DisplayName("every shipped datastore admits only the EDDI pod")
+        void datastoresAdmitOnlyEddi() throws IOException {
+            List<Path> policies = List.of(
+                    KUSTOMIZE_MONGO.resolve("mongodb-networkpolicy.yaml"),
+                    K8S.resolve("overlays/postgres/postgres-networkpolicy.yaml"),
+                    K8S.resolve("quickstart.yaml"));
+            for (Path manifest : policies) {
+                JsonNode policy = documentOfKind(manifest, "NetworkPolicy");
+                String store = policy.path("spec").path("podSelector").path("matchLabels")
+                        .path("app.kubernetes.io/name").asText();
+                assertTrue(List.of("mongodb", "postgres").contains(store), manifest + " selects `" + store + "`");
+                JsonNode from = policy.path("spec").path("ingress").get(0).path("from");
+                assertEquals(1, from.size(), manifest + ": exactly one peer may reach " + store);
+                JsonNode peer = from.get(0);
+                assertTrue(peer.path("namespaceSelector").isMissingNode(),
+                        manifest + ": the peer must be a same-namespace podSelector, not a namespaceSelector");
+                assertEquals("eddi", peer.path("podSelector").path("matchLabels").path("app.kubernetes.io/name").asText());
+                assertEquals("server", peer.path("podSelector").path("matchLabels").path("app.kubernetes.io/component").asText());
+            }
+            for (String overlay : List.of("mongodb", "postgres")) {
+                assertTrue(read(K8S.resolve("overlays/" + overlay + "/kustomization.yaml"))
+                        .contains(overlay + "-networkpolicy.yaml"),
+                        "overlays/" + overlay + " must apply its NetworkPolicy");
+            }
+        }
+
+        /**
+         * No shipped workload calls the Kubernetes API except Prometheus, whose pod
+         * discovery needs it — so every other pod mounted a service-account token it
+         * never used, a free API credential for anything that got into the container.
+         */
+        @Test
+        @DisplayName("only Prometheus mounts a service-account token")
+        void onlyPrometheusMountsAServiceAccountToken() throws IOException {
+            List<String> offenders = new ArrayList<>();
+            int workloads = 0;
+            for (Path manifest : manifestsUnder(K8S)) {
+                for (JsonNode document : yamlDocuments(manifest)) {
+                    String kind = document.path("kind").asText();
+                    if (!List.of("Deployment", "StatefulSet").contains(kind)) {
+                        continue;
+                    }
+                    workloads++;
+                    JsonNode pod = document.path("spec").path("template").path("spec");
+                    if ("prometheus".equals(pod.path("serviceAccountName").asText())) {
+                        continue;
+                    }
+                    if (pod.path("automountServiceAccountToken").asBoolean(true)) {
+                        offenders.add(manifest + " " + kind + "/" + document.path("metadata").path("name").asText());
+                    }
+                }
+            }
+            assertTrue(workloads > 5, "found only " + workloads + " workloads under k8s/ — the sweep is not reading them");
+            assertEquals(List.of(), offenders, "these pods mount a service-account token they never use");
+
+            for (String template : List.of("deployment.yaml", "mongodb.yaml", "postgres.yaml", "nats.yaml", "keycloak.yaml")) {
+                assertTrue(stripGoComments(read(HELM_TEMPLATES.resolve(template))).contains("automountServiceAccountToken:"),
+                        "helm/" + template + " must say automountServiceAccountToken");
+            }
+            assertFalse(YAML.readTree(HELM.resolve("values.yaml").toFile())
+                    .path("serviceAccount").path("automountToken").asBoolean(true),
+                    "serviceAccount.automountToken must default to false");
         }
     }
 
@@ -2756,7 +3326,7 @@ class DeploymentManifestsTest {
     @DisplayName("the postgres credential warning says WHEN it can be changed")
     void postgresPasswordWarningNamesInitdb() throws IOException {
         for (Path source : List.of(
-                K8S.resolve("overlays/postgres/postgres-secret.yaml"),
+                K8S.resolve("overlays/postgres/postgres-secret.yaml.example"),
                 HELM.resolve("values.yaml"))) {
             String text = read(source);
             assertTrue(text.contains("initdb"),
@@ -2781,7 +3351,7 @@ class DeploymentManifestsTest {
     void docsDoNotAdvertiseMutableTag() throws IOException {
         for (Path doc : OPERATOR_DOCS) {
             assertFalse(read(doc).contains("labsai/eddi:latest"),
-                    doc + " advertises labsai/eddi:latest while k8s/base/eddi-deployment.yaml pins an "
+                    doc + " advertises labsai/eddi:latest while k8s/base/kustomization.yaml pins an "
                             + "immutable patch version under a comment forbidding exactly that");
         }
     }
@@ -3223,11 +3793,446 @@ class DeploymentManifestsTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // Installers — the monitoring admin credential
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("installers — Grafana admin credential")
+    class InstallerGrafanaCredential {
+
+        private static final Path INSTALL_SH = Path.of("install.sh");
+        private static final Path INSTALL_PS1 = Path.of("install.ps1");
+
+        /**
+         * docker-compose.monitoring.yml falls back to admin/admin without
+         * GRAFANA_ADMIN_PASSWORD, so the value an install generates has to be in .env
+         * before Compose reads it. Both installers write .env in the step that
+         * downloads the compose files, and that step has to come after the one that
+         * resolves the passwords — or a fresh {@code --with-monitoring} install hands
+         * Compose a .env with no password in it, Grafana initialises its volume as
+         * admin/admin, and the installer advertises a password nothing answers to.
+         * Pinned by position, since nothing else would notice a reordering until an
+         * install failed on a user's machine.
+         */
+        @Test
+        @DisplayName("both installers resolve the admin passwords before writing .env and starting Compose")
+        void passwordsAreResolvedBeforeEnvIsWritten() throws IOException {
+            String sh = read(INSTALL_SH);
+            String shMain = functionBody(sh, "main() {");
+            assertInOrder(INSTALL_SH, shMain, "resolve_stack_passwords", "resolve_compose_files", "start_eddi");
+            assertTrue(functionBody(sh, "resolve_compose_files() {").contains("cat > \"$EDDI_DIR/.env\""),
+                    INSTALL_SH + ": .env is no longer written in resolve_compose_files, so the ordering above "
+                            + "no longer proves the generated passwords reach it before start_eddi");
+
+            String ps1 = read(INSTALL_PS1).replace("\r\n", "\n");
+            String psMain = ps1.substring(ps1.indexOf("    Step-Database\n"));
+            assertInOrder(INSTALL_PS1, psMain, "Resolve-StackCredential", "Get-ComposeFiles", "Start-Eddi");
+            assertTrue(functionBody(ps1, "function Get-ComposeFiles {").contains("Set-Content -Path $envPath"),
+                    INSTALL_PS1 + ": .env is no longer written in Get-ComposeFiles, so the ordering above no "
+                            + "longer proves the generated passwords reach it before Start-Eddi");
+        }
+
+        /**
+         * Grafana reads GF_SECURITY_ADMIN_PASSWORD only when it creates its database,
+         * so a grafana-data volume that predates the generated password keeps its own.
+         * The installer used to probe admin/admin, return quietly when that was
+         * refused, and print a success banner pointing at a password nothing answers
+         * to. It now confirms the credential before the banner, and stops when the
+         * value it just generated is refused.
+         */
+        @Test
+        @DisplayName("install.ps1 confirms Grafana accepts the generated password before reporting success")
+        void powerShellConfirmsTheGrafanaLoginBeforeSuccess() throws IOException {
+            String ps1 = read(INSTALL_PS1).replace("\r\n", "\n");
+            String psMain = ps1.substring(ps1.indexOf("    Step-Database\n"));
+            assertInOrder(INSTALL_PS1, psMain, "Wait-ForReady", "Confirm-GrafanaLogin", "Write-Success");
+
+            String confirm = functionBody(ps1, "function Confirm-GrafanaLogin {");
+            assertTrue(confirm.contains("/api/health"),
+                    INSTALL_PS1 + ": Confirm-GrafanaLogin no longer waits for Grafana. EDDI's readiness says "
+                            + "nothing about Grafana's, and a Grafana still starting refuses every login");
+            assertTrue(confirm.contains("Test-GrafanaLogin $gBase $GrafanaAdminSecret"),
+                    INSTALL_PS1 + ": Confirm-GrafanaLogin no longer checks that Grafana accepts "
+                            + "GRAFANA_ADMIN_PASSWORD");
+            int generated = confirm.indexOf("if ($GrafanaPasswordGenerated) {");
+            assertTrue(generated >= 0 && confirm.indexOf("Write-Fail", generated) > generated,
+                    INSTALL_PS1 + ": a generated GRAFANA_ADMIN_PASSWORD that Grafana refuses must stop the "
+                            + "install (Write-Fail) before Write-Success advertises it");
+            assertFalse(confirm.contains("-or (Test-GrafanaLogin $gBase \"admin\")"),
+                    INSTALL_PS1 + ": Confirm-GrafanaLogin treats a still-valid admin/admin login as confirmation. "
+                            + "When the change to GRAFANA_ADMIN_PASSWORD failed, admin/admin works and the "
+                            + "value in .env does not");
+            int updated = confirm.indexOf("Update-LegacyGrafanaLogin");
+            int configured = confirm.indexOf("Test-GrafanaLogin $gBase $GrafanaAdminSecret");
+            assertTrue(updated >= 0 && configured > updated
+                    && confirm.substring(updated, configured).replaceAll("#[^\n]*", "").contains("if ($script:GrafanaRotated) { return }")
+                    && countOccurrences(confirm.substring(updated, configured).replaceAll("#[^\n]*", ""), "return") == 1,
+                    INSTALL_PS1 + ": between the admin/admin change and the GRAFANA_ADMIN_PASSWORD check, "
+                            + "Confirm-GrafanaLogin may return only when the change succeeded");
+            assertEquals(2, countOccurrences(confirm, "if ($GrafanaPasswordGenerated) {"),
+                    INSTALL_PS1 + ": both refusals — a failed admin/admin change and a foreign password — must "
+                            + "stop the install when this run generated GRAFANA_ADMIN_PASSWORD");
+            assertTrue(functionBody(ps1, "function Repair-RunningStack {").contains("Confirm-GrafanaLogin"),
+                    INSTALL_PS1 + ": the already-running path no longer checks a stored GRAFANA_ADMIN_PASSWORD, "
+                            + "so the re-run that a failed admin/admin change tells the operator to do "
+                            + "retries nothing");
+            assertTrue(functionBody(ps1, "function Resolve-StackCredential {").contains("$script:GrafanaPasswordGenerated = $true"),
+                    INSTALL_PS1 + ": Resolve-StackCredential no longer records that it generated the Grafana "
+                            + "password, so Confirm-GrafanaLogin cannot tell a fresh value from the operator's");
+        }
+
+        /**
+         * The same decision in install.sh, run for real: its two Grafana functions are
+         * lifted out of the installer and driven against a stand-in {@code curl} that
+         * plays a Grafana accepting exactly one admin password.
+         */
+        @Test
+        @DisplayName("install.sh fails on a generated Grafana password nothing accepts, and only then")
+        void shellConfirmsTheGrafanaLogin() throws Exception {
+            String generated = "Gen3ratedPassw0rdGen3ratedPassw0";
+
+            String main = functionBody(read(INSTALL_SH), "main() {");
+            int runningBranch = main.indexOf("if [[ \"$EDDI_ALREADY_RUNNING\" == \"true\" ]]; then");
+            assertTrue(runningBranch >= 0 && main.substring(runningBranch, main.indexOf("exit 0", runningBranch)).contains("confirm_grafana_login"),
+                    INSTALL_SH + ": the already-running path no longer checks a stored GRAFANA_ADMIN_PASSWORD, so the "
+                            + "re-run that a failed admin/admin change tells the operator to do retries nothing");
+
+            GrafanaRun fresh = runGrafanaConfirm(generated, generated, true);
+            assertEquals(0, fresh.exitCode(), INSTALL_SH + " refused a Grafana that accepts GRAFANA_ADMIN_PASSWORD. " + fresh);
+
+            GrafanaRun legacy = runGrafanaConfirm("admin", generated, true);
+            assertEquals(0, legacy.exitCode(), INSTALL_SH + " failed on a legacy admin/admin Grafana instead of rotating it. " + legacy);
+            assertEquals(generated, legacy.acceptedAfter(),
+                    INSTALL_SH + " left a legacy admin/admin Grafana on admin/admin; .env points at the generated "
+                            + "password. " + legacy);
+
+            GrafanaRun foreign = runGrafanaConfirm("OperatorChosenPassword", generated, true);
+            assertNotEquals(0, foreign.exitCode(),
+                    INSTALL_SH + " carried on to the success banner although Grafana accepts neither admin/admin "
+                            + "nor the password it just generated and wrote to .env. " + foreign);
+            assertTrue(foreign.output().contains("GRAFANA_ADMIN_PASSWORD='<your Grafana admin password>'"),
+                    INSTALL_SH + " stopped without telling the operator which line to put in .env. " + foreign);
+
+            GrafanaRun stored = runGrafanaConfirm("OperatorChosenPassword", "StoredInEnvPassword", false);
+            assertEquals(0, stored.exitCode(),
+                    INSTALL_SH + " failed a re-run because Grafana refuses the password .env already held. The "
+                            + "operator chose that one and may have changed it in Grafana since; that is a "
+                            + "warning, not a reason to stop. " + stored);
+            assertTrue(stored.output().contains("does not accept GRAFANA_ADMIN_PASSWORD"),
+                    INSTALL_SH + " said nothing about a GRAFANA_ADMIN_PASSWORD Grafana refuses. " + stored);
+
+            // The legacy login is still valid but the change to the generated value
+            // failed: Grafana now rejects what .env says, so the install stops — and
+            // says how to recover, since .env keeps the value a re-run retries with.
+            GrafanaRun refused = runGrafanaConfirm("admin", generated, true, true, true);
+            assertNotEquals(0, refused.exitCode(),
+                    INSTALL_SH + " reached the success banner after Grafana refused the admin/admin change: "
+                            + "admin/admin still works and the generated GRAFANA_ADMIN_PASSWORD in .env does "
+                            + "not. " + refused);
+            assertTrue(refused.output().contains("re-run the installer to retry"),
+                    INSTALL_SH + " stopped on a refused admin/admin change without saying how to recover. " + refused);
+
+            GrafanaRun refusedStored = runGrafanaConfirm("admin", "StoredInEnvPassword", false, true, true);
+            assertEquals(0, refusedStored.exitCode(),
+                    INSTALL_SH + " failed on a refused admin/admin change for a password the operator supplied; "
+                            + "that is theirs to set, so it warns. " + refusedStored);
+            assertTrue(refusedStored.output().contains("could not change it to GRAFANA_ADMIN_PASSWORD"),
+                    INSTALL_SH + " said nothing when the admin/admin change failed. " + refusedStored);
+
+            // A generated password is alphanumeric, so a host without jq or python3
+            // can still send the change — rather than being stopped by the rule above.
+            GrafanaRun noTool = runGrafanaConfirm("admin", generated, true, false, false);
+            assertEquals(0, noTool.exitCode(), INSTALL_SH + " could not rotate admin/admin without jq or python3. " + noTool);
+            assertEquals(generated, noTool.acceptedAfter(),
+                    INSTALL_SH + " left admin/admin in place on a host without jq or python3. " + noTool);
+
+            for (GrafanaRun run : List.of(fresh, legacy, foreign, stored, refused, refusedStored, noTool)) {
+                assertFalse(run.curlArguments().contains(generated) || run.curlArguments().contains("StoredInEnvPassword"),
+                        INSTALL_SH + " put the Grafana admin password on curl's command line, where the process "
+                                + "table shows it. " + run);
+            }
+        }
+
+        private record GrafanaRun(int exitCode, String output, String acceptedAfter, String curlArguments) {
+            @Override
+            public String toString() {
+                return "Exit status " + exitCode + "; Grafana accepts afterwards: " + acceptedAfter
+                        + "; curl argv:\n" + curlArguments + "\noutput:\n" + output;
+            }
+        }
+
+        private GrafanaRun runGrafanaConfirm(String grafanaAccepts, String envPassword, boolean generated)
+                throws IOException, InterruptedException {
+            return runGrafanaConfirm(grafanaAccepts, envPassword, generated, false, true);
+        }
+
+        /**
+         * @param refuseChange
+         *            the stand-in Grafana answers the password change with a 500 and
+         *            keeps its password
+         * @param withJsonTool
+         *            pass jq/python3 to the function, or nothing — a host with neither
+         */
+        private GrafanaRun runGrafanaConfirm(String grafanaAccepts, String envPassword, boolean generated,
+                                             boolean refuseChange, boolean withJsonTool)
+                throws IOException, InterruptedException {
+            Path bash = locateBash();
+            assumeTrue(bash != null, "no non-WSL bash available to run " + INSTALL_SH + "; CI's ubuntu-latest runner has one");
+            String jsonTool = "";
+            if (withJsonTool) {
+                jsonTool = locateOnPath("jq") != null ? "jq" : locateOnPath("python3") != null ? "python3" : null;
+                assumeTrue(jsonTool != null, "neither jq nor python3 is available; CI's ubuntu-latest runner has both");
+            }
+
+            String installer = read(INSTALL_SH);
+            Path directory = Files.createDirectories(Path.of("target", "grafana-stub"));
+            Path state = directory.resolve("accepted");
+            Path argv = directory.resolve("curl-argv.log");
+            Files.writeString(state, grafanaAccepts, StandardCharsets.UTF_8);
+            Files.deleteIfExists(argv);
+
+            Path curl = directory.resolve("curl");
+            Files.writeString(curl, """
+                    #!/usr/bin/env bash
+                    # A Grafana that accepts admin:<contents of $GRAFANA_STUB_STATE>.
+                    echo "$*" >> "$GRAFANA_STUB_ARGV"
+                    args=("$@"); url="${args[${#args[@]}-1]}"; auth=""
+                    for ((i = 0; i < ${#args[@]}; i++)); do
+                      case "${args[i]}" in
+                        -H) case "${args[i+1]}" in "Authorization: Basic "*) auth="${args[i+1]#Authorization: Basic }" ;; esac ;;
+                        -K) auth=$(sed -n 's/.*Basic \\([^"]*\\)".*/\\1/p') ;;
+                      esac
+                    done
+                    accepted=$(printf 'admin:%s' "$(cat "$GRAFANA_STUB_STATE")" | base64 | tr -d '\\n')
+                    case "$url" in
+                      */api/health) exit 0 ;;
+                      */api/user) if [[ "$auth" == "$accepted" ]]; then printf 200; else printf 401; fi ;;
+                      */api/user/password)
+                        body=$(cat)
+                        if [[ "$GRAFANA_STUB_REFUSE_CHANGE" == "true" ]]; then
+                          printf 500
+                        elif [[ "$auth" == "$accepted" ]]; then
+                          printf '%s' "$body" | sed -n 's/.*"newPassword": *"\\([^"]*\\)".*/\\1/p' > "$GRAFANA_STUB_STATE"
+                          printf 200
+                        else
+                          printf 401
+                        fi ;;
+                      *) exit 7 ;;
+                    esac
+                    """, StandardCharsets.US_ASCII);
+            curl.toFile().setExecutable(true, false);
+
+            Path harness = directory.resolve("harness.sh");
+            Files.writeString(harness, "set -euo pipefail\n"
+                    + "info() { echo \"INFO $1\"; }\nwarn() { echo \"WARN $1\"; }\nfail() { echo -e \"FAIL $1\"; exit 1; }\n"
+                    + functionBody(installer, "grafana_login_status() {") + "\n"
+                    + functionBody(installer, "confirm_grafana_login() {") + "\n"
+                    + "EDDI_DIR=/eddi-stub GRAFANA_PORT=3000\n"
+                    + "GRAFANA_ADMIN_PASSWORD='" + envPassword + "'\n"
+                    + "GRAFANA_PASSWORD_GENERATED=" + generated + "\n"
+                    + "confirm_grafana_login \"" + jsonTool + "\"\n", StandardCharsets.UTF_8);
+
+            String command = "cd \"" + slashed(directory) + "\" && PATH=\"$PWD:$PATH\" bash harness.sh";
+            ProcessBuilder builder = new ProcessBuilder(bash.toString(), "-c", command);
+            builder.redirectErrorStream(true);
+            builder.environment().put("GRAFANA_STUB_STATE", slashed(state));
+            builder.environment().put("GRAFANA_STUB_ARGV", slashed(argv));
+            builder.environment().put("GRAFANA_STUB_REFUSE_CHANGE", String.valueOf(refuseChange));
+            Process process = builder.start();
+            String output;
+            try (var stream = process.getInputStream()) {
+                output = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!process.waitFor(2, TimeUnit.MINUTES)) {
+                process.destroyForcibly();
+                throw new AssertionError("the install.sh Grafana harness did not finish; it printed:\n" + output);
+            }
+            return new GrafanaRun(process.exitValue(), output, Files.readString(state, StandardCharsets.UTF_8).strip(),
+                    Files.exists(argv) ? Files.readString(argv, StandardCharsets.UTF_8) : "");
+        }
+
+        /**
+         * The text of the function whose declaration line is {@code header}, through
+         * its closing brace at column 0 — both installers close top-level functions
+         * that way.
+         */
+        private static String functionBody(String script, String header) {
+            int start = script.indexOf("\n" + header);
+            assertTrue(start >= 0, "no function declared as `" + header + "`");
+            int end = script.indexOf("\n}\n", start + 1);
+            assertTrue(end > start, "function `" + header + "` has no closing brace at column 0");
+            return script.substring(start + 1, end + 3);
+        }
+
+        private static void assertInOrder(Path script, String text, String... steps) {
+            int previous = -1;
+            for (String step : steps) {
+                int index = text.indexOf("\n  " + step);
+                if (index < 0) {
+                    index = text.indexOf("\n    " + step);
+                }
+                if (index < 0 && text.startsWith("    " + step)) {
+                    index = 0;
+                }
+                assertTrue(index >= 0, script + ": the main flow no longer calls " + step);
+                assertTrue(index > previous, script + ": the main flow calls " + step + " out of order; expected "
+                        + String.join(" -> ", steps));
+                previous = index;
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Installers — the realm-account lines of the success banner
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("installers — realm accounts in the success banner")
+    class InstallerRealmAccountBanner {
+
+        private static final Path INSTALL_SH = Path.of("install.sh");
+        private static final Path INSTALL_PS1 = Path.of("install.ps1");
+        private static final String UNREAD = "Could not read the eddi realm accounts";
+
+        /**
+         * After a failed admin login (a stale password in .env, say) the installer
+         * never read the realm, so its account lists are empty for that reason alone.
+         * The banner used to report them anyway: "No account in the eddi realm has a
+         * password yet" and "viewer and user have no password", both unverified. Run
+         * for real against a stand-in {@code curl} that must not be reached.
+         */
+        @Test
+        @DisplayName("install.sh reports the realm accounts only when it read them")
+        void shellReportsRealmAccountsOnlyWhenRead() throws Exception {
+            BannerRun unread = runBanner("KC_ADMIN_TOKEN=''\nREALM_ACCOUNTS_CHECKED=true\n"
+                    + "set_first_login_passwords http://keycloak-stub jq >/dev/null\n");
+            assertEquals(0, unread.exitCode(), INSTALL_SH + ": the banner failed. " + unread);
+            assertTrue(unread.output().contains(UNREAD),
+                    INSTALL_SH + ": after a failed admin login the banner must say the realm could not be read. " + unread);
+            assertFalse(unread.output().contains("No account in the eddi realm has a password yet"),
+                    INSTALL_SH + ": the banner claims no account has a password, but nothing was read. " + unread);
+            assertFalse(unread.output().contains("have no password"),
+                    INSTALL_SH + ": the banner reports viewer/user status, but nothing was read. " + unread);
+            assertEquals("", unread.curlArguments(),
+                    INSTALL_SH + ": set_first_login_passwords called the admin API without a token. " + unread);
+
+            BannerRun read = runBanner("REALM_ACCOUNTS_CHECKED=true\n");
+            assertEquals(0, read.exitCode(), INSTALL_SH + ": the banner failed. " + read);
+            assertFalse(read.output().contains(UNREAD), INSTALL_SH + ": a read realm was reported as unread. " + read);
+            assertTrue(read.output().contains("No account in the eddi realm has a password yet")
+                    && read.output().contains("have no password"),
+                    INSTALL_SH + ": a realm that was read and has no passwords must say so. " + read);
+        }
+
+        @Test
+        @DisplayName("install.ps1 gates the realm-account lines on having read the realm")
+        void powerShellReportsRealmAccountsOnlyWhenRead() throws IOException {
+            String ps1 = read(INSTALL_PS1).replace("\r\n", "\n");
+            String setter = InstallerGrafanaCredential.functionBody(ps1, "function Set-FirstLoginPassword {");
+            int grant = setter.indexOf("Close-SpaPasswordGrant $kcBase $headers");
+            int flag = setter.indexOf("$script:RealmAccountsChecked = $true");
+            assertTrue(grant >= 0 && flag > grant,
+                    INSTALL_PS1 + ": Set-FirstLoginPassword must set $script:RealmAccountsChecked only after it has a "
+                            + "token and has closed the password grant");
+            String success = InstallerGrafanaCredential.functionBody(ps1, "function Write-Success {");
+            int unread = success.indexOf("if (-not $RealmAccountsChecked)");
+            assertTrue(unread >= 0 && success.contains(UNREAD),
+                    INSTALL_PS1 + ": Write-Success must print a neutral line when the realm was not read");
+            assertTrue(success.indexOf("No account in the eddi realm has a password yet") > unread,
+                    INSTALL_PS1 + ": the 'no account has a password' line must sit behind the read check");
+            assertTrue(success.contains("if ($RealmAccountsChecked -and -not $DemoUsers)"),
+                    INSTALL_PS1 + ": the viewer/user status must sit behind the read check");
+        }
+
+        /**
+         * {@code SetAccessRuleProtection} only changes the in-memory ACL; the copied
+         * inherited ACEs stay inherited in that object, so {@code RemoveAccessRule}
+         * cannot match them and Users / Authenticated Users survived on
+         * first-login.txt. The ACL has to be written and read back first.
+         */
+        @Test
+        @DisplayName("install.ps1 persists the broken inheritance before removing broad ACEs")
+        void powerShellPersistsAclBeforeRemovingInheritedRules() throws IOException {
+            String ps1 = read(INSTALL_PS1).replace("\r\n", "\n");
+            String protect = InstallerGrafanaCredential.functionBody(ps1, "function Protect-SensitiveFile([string]$SecurePath) {")
+                    .replaceAll("#[^\n]*", "");
+            int protection = protect.indexOf("$acl.SetAccessRuleProtection($true, $true)");
+            int persist = protect.indexOf("Set-Acl", protection);
+            int reload = protect.indexOf("$acl = Get-Acl $SecurePath", protection);
+            int removal = protect.indexOf("foreach ($rule in $acl.Access)");
+            assertTrue(protection >= 0 && persist > protection && reload > persist && removal > reload,
+                    INSTALL_PS1 + ": Protect-SensitiveFile must Set-Acl and re-read the ACL between "
+                            + "SetAccessRuleProtection and the removal loop, or inherited broad ACEs survive");
+        }
+
+        private record BannerRun(int exitCode, String output, String curlArguments) {
+            @Override
+            public String toString() {
+                return "Exit status " + exitCode + "; curl argv:\n" + curlArguments + "\noutput:\n" + output;
+            }
+        }
+
+        private BannerRun runBanner(String setup) throws IOException, InterruptedException {
+            Path bash = locateBash();
+            assumeTrue(bash != null, "no non-WSL bash available to run " + INSTALL_SH + "; CI's ubuntu-latest runner has one");
+            String installer = read(INSTALL_SH);
+            Path directory = Files.createDirectories(Path.of("target", "realm-banner-stub"));
+            Path argv = directory.resolve("curl-argv.log");
+            Files.deleteIfExists(argv);
+            Path curl = directory.resolve("curl");
+            Files.writeString(curl, "#!/usr/bin/env bash\necho \"$*\" >> \"$REALM_STUB_ARGV\"\nexit 7\n",
+                    StandardCharsets.US_ASCII);
+            curl.toFile().setExecutable(true, false);
+
+            Path harness = directory.resolve("harness.sh");
+            Files.writeString(harness, "set -eo pipefail\n"
+                    + "info() { echo \"INFO $1\"; }\nwarn() { echo \"WARN $1\"; }\nfail() { echo -e \"FAIL $1\"; exit 1; }\n"
+                    + InstallerGrafanaCredential.functionBody(installer, "set_first_login_passwords() {") + "\n"
+                    + InstallerGrafanaCredential.functionBody(installer, "print_success() {") + "\n"
+                    + "EDDI_DIR=\"$PWD/eddi\" EDDI_PORT=7070 EDDI_HTTPS_PORT=7443 KEYCLOAK_PORT=8180\n"
+                    + "WITH_AUTH=true WITH_MONITORING=false DEMO_USERS=false PLATFORM=none\n"
+                    + "FIRST_LOGIN_PASSWORDS=() LEGACY_FIXTURE_LOGINS=()\n"
+                    + setup
+                    + "print_success\n", StandardCharsets.UTF_8);
+
+            String command = "cd \"" + slashed(directory) + "\" && PATH=\"$PWD:$PATH\" bash harness.sh";
+            ProcessBuilder builder = new ProcessBuilder(bash.toString(), "-c", command);
+            builder.redirectErrorStream(true);
+            builder.environment().put("REALM_STUB_ARGV", slashed(argv));
+            Process process = builder.start();
+            String output;
+            try (var stream = process.getInputStream()) {
+                output = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!process.waitFor(2, TimeUnit.MINUTES)) {
+                process.destroyForcibly();
+                throw new AssertionError("the install.sh banner harness did not finish; it printed:\n" + output);
+            }
+            return new BannerRun(process.exitValue(), output,
+                    Files.exists(argv) ? Files.readString(argv, StandardCharsets.UTF_8) : "");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
 
     private static String read(Path path) throws IOException {
         return Files.readString(path, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * One value out of {@code src/main/resources/application.properties}, so an
+     * assertion can be written against what EDDI is configured to do rather than
+     * against a spelling repeated in a test. Read from the source tree: the test
+     * classpath's own application.properties shadows it.
+     */
+    private static String applicationProperty(String key) throws IOException {
+        Properties properties = new Properties();
+        try (var in = Files.newBufferedReader(Path.of("src", "main", "resources", "application.properties"))) {
+            properties.load(in);
+        }
+        return properties.getProperty(key, "").trim();
     }
 
     // ── Reading structure out of a Go template ───────────────────

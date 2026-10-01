@@ -53,7 +53,7 @@ export type EditorRenderFn = (
   parsed: unknown,
   onChange: (val: unknown) => void,
   readOnly: boolean,
-  meta: { resourceId: string; version: number },
+  meta: { resourceId: string; version: number; isDirty: boolean },
 ) => ReactNode;
 
 /**
@@ -83,7 +83,14 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
     <McpCallsEditor data={p as McpCallsConfig} onChange={o} readOnly={r} />
   ),
   rag: (p, o, r, meta) => (
-    <RagEditor data={p as RagConfig} onChange={o} readOnly={r} resourceId={meta.resourceId} version={meta.version} />
+    <RagEditor
+      data={p as RagConfig}
+      onChange={o}
+      readOnly={r}
+      resourceId={meta.resourceId}
+      version={meta.version}
+      isDirty={meta.isDirty}
+    />
   ),
   snippets: (p, o, r) => (
     <SnippetEditor data={p as PromptSnippetConfig} onChange={o} readOnly={r} />

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.AgentSourceData;
 import ai.labs.eddi.backup.IResourceSource.ExtensionSourceData;
@@ -89,6 +91,14 @@ class StructuralMatcherRealWorkflowTest {
         matcher = new StructuralMatcher(agentStore, documentDescriptorStore, snippetStore,
                 workflowStore, restInterfaceFactory, new JacksonJsonSerialization());
 
+        // The matcher resolves the target's current version from its descriptor and
+        // refuses to guess when it cannot — previewing version 1 of a target that
+        // may be at any version is what showed operators pre-sync content labelled
+        // "target". These fixtures are about matching, not versioning, so every
+        // resource simply reports version 1.
+        lenient().when(documentDescriptorStore.readCurrentDescriptor(anyString()))
+                .thenAnswer(invocation -> descriptorAtVersionOne(invocation.getArgument(0)));
+
         doReturn(Collections.emptyList()).when(snippetStore).readSnippetDescriptors(anyString(), anyInt(), anyInt());
         doReturn(llmStore).when(restInterfaceFactory).get(IRestLlmStore.class);
 
@@ -116,6 +126,37 @@ class StructuralMatcherRealWorkflowTest {
         assertEquals(DiffAction.SKIP, llmDiff.action());
         assertEquals(TARGET_LLM_ID, llmDiff.targetId());
         assertEquals("type", llmDiff.matchStrategy());
+    }
+
+    /**
+     * Each instance numbers its own compatibility generations, and the import
+     * writes neither side's value. Compared as content it made an unchanged agent
+     * UPDATE on every sync — a new agent version each time, and an undeclared one
+     * is a breaking change, which cut the agent's running conversations off from
+     * every later compatible version.
+     */
+    @Test
+    @DisplayName("an agent that differs only in its compatibility generation SKIPs")
+    void compatibilityGenerationIsNotContent() throws Exception {
+        doReturn(llm("answer questions")).when(llmStore).readLlm(TARGET_LLM_ID, 1);
+        doReturn(agentWith("support agent", 4)).when(agentStore).readAgent(TARGET_AGENT_ID, 1);
+
+        ImportPreview preview = matcher.buildPreview(sourceWith(agentWith("support agent", 1), llmJson("answer questions")),
+                TARGET_AGENT_ID, true);
+
+        assertEquals(DiffAction.SKIP, diffOfType(preview, "agent").action());
+    }
+
+    @Test
+    @DisplayName("an agent that differs in content as well still UPDATEs")
+    void realAgentChangeStillUpdates() throws Exception {
+        doReturn(llm("answer questions")).when(llmStore).readLlm(TARGET_LLM_ID, 1);
+        doReturn(agentWith("support agent", 4)).when(agentStore).readAgent(TARGET_AGENT_ID, 1);
+
+        ImportPreview preview = matcher.buildPreview(sourceWith(agentWith("sales agent", 4), llmJson("answer questions")),
+                TARGET_AGENT_ID, true);
+
+        assertEquals(DiffAction.UPDATE, diffOfType(preview, "agent").action());
     }
 
     @Test
@@ -262,6 +303,18 @@ class StructuralMatcherRealWorkflowTest {
     }
 
     private IResourceSource sourceWith(String llmContentJson) {
+        return sourceWith(new AgentConfiguration(), llmContentJson);
+    }
+
+    private static AgentConfiguration agentWith(String description, Integer compatibilityGeneration) {
+        var agent = new AgentConfiguration();
+        agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + TARGET_WF_ID + "?version=1")));
+        agent.setDescription(description);
+        agent.setCompatibilityGeneration(compatibilityGeneration);
+        return agent;
+    }
+
+    private IResourceSource sourceWith(AgentConfiguration sourceAgent, String llmContentJson) {
         var sourceWfConfig = realShapedWorkflow();
         String extensionKey = WorkflowExtensions.scan(sourceWfConfig).getFirst().key();
 
@@ -273,7 +326,7 @@ class StructuralMatcherRealWorkflowTest {
         return new IResourceSource() {
             @Override
             public AgentSourceData readAgent() {
-                return new AgentSourceData("src-agent", "Source Agent", new AgentConfiguration());
+                return new AgentSourceData("src-agent", "Source Agent", sourceAgent);
             }
 
             @Override
@@ -322,5 +375,12 @@ class StructuralMatcherRealWorkflowTest {
         public <T> T deserialize(String json, Class<T> type) throws IOException {
             return mapper.readValue(json, type);
         }
+    }
+
+    /** A descriptor naming version 1 of {@code resourceId}. */
+    private static DocumentDescriptor descriptorAtVersionOne(String resourceId) {
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + resourceId + "?version=1"));
+        return descriptor;
     }
 }

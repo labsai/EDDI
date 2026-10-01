@@ -12,7 +12,6 @@ import type {
 } from "@/types";
 import {
   ApiError,
-  buildUrl,
   encodeSegment,
   request,
   requestJson,
@@ -26,13 +25,21 @@ export { setBaseUrl, ApiError };
 /**
  * Start a new conversation.
  * Returns the conversation ID extracted from the Location header.
+ *
+ * `environment` is the route's `/chat/{environment}/…` segment and is sent as
+ * `?environment=`. The backend defaults a missing one to production, so
+ * dropping it made "/chat/test/{id}" 404 for a test-only agent — and silently
+ * talk to production for an agent deployed in both.
  */
 export async function startConversation(
-  _environment: string,
+  environment: string,
   agentId: string,
   userId?: string,
 ): Promise<string> {
-  const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+  const query = new URLSearchParams();
+  if (environment) query.set("environment", environment);
+  if (userId) query.set("userId", userId);
+  const params = query.toString() ? `?${query}` : "";
   const res = await request(
     `/agents/${encodeSegment(agentId)}/start${params}`,
     { method: "POST" },
@@ -177,16 +184,16 @@ export async function* sendMessageStreaming(
           if (line.startsWith("event:")) {
             eventType = line.slice(6).trim() as SSEEventType;
           } else if (line.startsWith("data:")) {
-            // Everything after the colon is payload, taken verbatim.
+            // Strip exactly ONE leading space — the SSE spec's delimiter — and
+            // keep everything after it verbatim.
             //
-            // The SSE spec lets a client strip ONE leading space because
-            // servers conventionally write "data: value". EDDI's writer does
-            // not: resteasy-reactive's SseUtil.serialiseField is
-            // `sb.append(field).append(":")` followed by the raw value
-            // (SseUtil.java:84), with no delimiter. Stripping here therefore
-            // deleted a space that belongs to the token — and LLM streams emit
-            // " word" constantly, so words ran together.
-            dataLines.push(line.slice(5));
+            // EDDI writes that delimiter explicitly: RESTEasy's SseUtil emits
+            // "data:" with no space of its own, so RestAgentEngineStreaming
+            // .padDataLines prefixes every data line with one. A token " word"
+            // therefore arrives as "data:  word". Keeping the delimiter put an
+            // extra space in front of every token ("quota tion"); stripping
+            // more than one would run words together again.
+            dataLines.push(line[5] === " " ? line.slice(6) : line.slice(5));
           }
         }
 
@@ -264,6 +271,22 @@ export async function sendManagedAgentMessage(
 }
 
 /**
+ * End the managed conversation for this intent and user. The next load then
+ * starts a fresh one — a load alone always returns the existing conversation,
+ * so "New conversation" on the managed route kept the agent's whole context.
+ */
+export async function endManagedConversation(
+  intent: string,
+  userId: string,
+): Promise<void> {
+  await request(
+    `/agents/managed/${encodeSegment(intent)}/${encodeSegment(userId)}/endConversation`,
+    { method: "POST" },
+    "Failed to end conversation",
+  );
+}
+
+/**
  * End a conversation.
  */
 export async function endConversation(
@@ -285,14 +308,18 @@ export async function endConversation(
  */
 export async function rerunLastStep(
   conversationId: string,
-  language = "en",
+  language?: string,
 ): Promise<ConversationSnapshot | null> {
-  // `language` is REQUIRED: the backend declares it without @DefaultValue and
-  // calls checkNotEmpty(language) before any other work, so omitting it is an
-  // unconditional 400 — the retry could never have worked.
-  const params = new URLSearchParams({ language });
+  // `language` is optional, as on an ordinary message. Omitted, the rerun
+  // carries no language context. It used to default to "en", which the
+  // backend stores as the conversation's `lang` property: language-specific
+  // outputs were filtered for that user from then on, and a managed
+  // conversation compared every later load against it.
+  const params = new URLSearchParams();
+  if (language) params.set("language", language);
+  const query = params.toString() ? `?${params}` : "";
   return requestJson<ConversationSnapshot>(
-    `/agents/${encodeSegment(conversationId)}/rerun?${params}`,
+    `/agents/${encodeSegment(conversationId)}/rerun${query}`,
     { method: "POST" },
     "Failed to retry",
   );
@@ -332,26 +359,24 @@ export async function redoConversation(
   );
 }
 
-/* ─── Agent descriptor ─────────────────────────── */
+/* ─── Agent profile ─────────────────────────── */
 
 /**
- * Fetch the agent document descriptor to get the agent's display name.
- * Uses the GET /agentstore/agents/:agentId endpoint.
+ * What a chat window shows about an agent: its name, and whether the people
+ * who maintain it may read this conversation.
+ *
+ * Readable by anybody who may chat with the agent — unlike the configuration
+ * store, which someone the agent was shared with "for chatting" cannot read. An
+ * older EDDI without the endpoint answers 404. The name itself arrives with the
+ * conversation read (`agentName` on the snapshot), which needs no editor role.
  */
-export async function fetchAgentDescriptor(
+export async function fetchAgentProfile(
   agentId: string,
-): Promise<{ name?: string; description?: string }> {
-  const res = await fetch(
-    buildUrl(`/agentstore/agents/${encodeSegment(agentId)}`),
+  environment = "production",
+): Promise<{ name?: string | null; reviewNotice?: string | null } | null> {
+  return requestJson<{ name?: string | null; reviewNotice?: string | null }>(
+    `/agents/${encodeSegment(agentId)}/profile?environment=${encodeURIComponent(environment)}`,
+    undefined,
+    "Failed to read the agent profile",
   );
-  if (!res.ok) return {};
-  try {
-    const data = await res.json();
-    return {
-      name: data?.resource?.name ?? data?.name,
-      description: data?.resource?.description ?? data?.description,
-    };
-  } catch {
-    return {};
-  }
 }

@@ -5,6 +5,7 @@
    ────────────────────────────────────────────── */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { useChatState, useChatDispatch } from "@/store/chat-store";
@@ -12,7 +13,7 @@ import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
 import { QuickReplies } from "./QuickReplies";
-import { TypingIndicator, ThinkingIndicator } from "./Indicators";
+import { TypingIndicator, ThinkingIndicator, indicatorStatusText } from "./Indicators";
 import { ScrollToBottom } from "./ScrollToBottom";
 import { ChatHeader } from "./ChatHeader";
 
@@ -25,8 +26,9 @@ import {
   loadManagedConversation,
   undoConversation,
   redoConversation,
-  fetchAgentDescriptor,
+  fetchAgentProfile,
   rerunLastStep,
+  endManagedConversation,
   setBaseUrl,
 } from "@/api/chat-api";
 import { setAuthToken } from "@/api/http";
@@ -44,20 +46,26 @@ import { PausedCard } from "./PausedCard";
 import { ApiError } from "@/api/http";
 import {
   parseDoneSnapshot,
-  parseErrorMessage,
+  parseErrorEvent,
   isSkippedTurn,
   skippedTurnMessage,
   isPausedState,
   extractOutputTexts,
+  extractOutputImages,
+  findInputField,
   isTurnPaused,
+  parseToolCallName,
+  UNCONSUMED_STREAM_ERROR_CODES,
+  type OutputImage,
 } from "@/api/sse-events";
 import type {
   ChatMessage,
   SSEEvent,
   ChatConfig,
-  OutputItem,
   ConversationState,
+  ConversationSnapshot,
 } from "@/types";
+import { END_REASON_AGENT_VERSION_RETIRED } from "@/types";
 
 /**
  * Per-turn mutable bookkeeping for the SSE loop. `tokenCount` is what
@@ -83,13 +91,30 @@ function newTurn(
   return { tokenCount: 0, stateBeforeSend, userMessageId };
 }
 
-function makeAgentMessage(content: string): ChatMessage {
+function makeAgentMessage(content: string, images?: OutputImage[]): ChatMessage {
   return {
     id: `agent-${Date.now()}-${Math.random()}`,
     role: "agent",
     content,
     timestamp: Date.now(),
+    ...(images?.length ? { images } : {}),
   };
+}
+
+/** Transcript copy for a conversation that could not be started. */
+function startFailureMessage(err: unknown, environment?: string): string {
+  if (err instanceof ApiError && err.status === 404) {
+    return environment
+      ? `⚠️ This agent is not available in the "${environment}" environment. It may not be deployed there.`
+      : "⚠️ This agent is not available. It may not be deployed.";
+  }
+  if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+    return "⚠️ You are not allowed to start a conversation with this agent.";
+  }
+  if (err instanceof ApiError && err.status === 400) {
+    return "⚠️ The conversation could not be started. Check the address — the environment must be \"production\" or \"test\".";
+  }
+  return "⚠️ The conversation could not be started. Please try again.";
 }
 
 /**
@@ -138,6 +163,56 @@ function applyColorOverrides(params: URLSearchParams): void {
   }
 }
 
+/**
+ * Sanitize the `?apiServer=` param so it can never redirect API traffic
+ * off-origin. This is an ALLOW-list, not a deny-list: the value must be a clean
+ * same-origin absolute path (a single leading `/`, as the dev proxy and sub-path
+ * deployments use). A deny-list was bypassable — `?apiServer=%09https://attacker`
+ * decodes to a leading TAB, which no scheme/`//`/`\` test matches, but the WHATWG
+ * URL parser strips before resolving, turning `${base}${path}` into the attacker
+ * origin and leaking the bearer token. So anything carrying a control character
+ * or whitespace (the smuggling vector), a backslash, or not starting with a
+ * single `/` is rejected.
+ */
+export function sanitizeApiServer(raw: string | null): string | null {
+  if (!raw) return null;
+  const rejected =
+    // Matching control characters is the point: they are the smuggling vector.
+    // eslint-disable-next-line no-control-regex
+    /[\u0000- \u007f\\]/.test(raw) || // control chars, whitespace, DEL, backslash
+    !raw.startsWith("/") || // must be an absolute path...
+    raw.startsWith("//"); // ...but not a protocol-relative //host
+  if (rejected) {
+    console.warn(
+      "[eddi-chat] ignoring apiServer query param: only a clean same-origin path (single leading '/') is allowed",
+    );
+    return null;
+  }
+  return raw;
+}
+
+/**
+ * Origins allowed to hand the widget a bearer token via postMessage, read from
+ * `?tokenOrigin=` (comma-separated, exact `scheme://host[:port]` each). This is
+ * an explicit operator opt-in: with no value, no postMessage token is accepted.
+ * A malformed entry is dropped rather than widening the allow-list.
+ */
+export function parseAllowedTokenOrigins(params: URLSearchParams): string[] {
+  const raw = params.get("tokenOrigin");
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((o) => o.trim())
+    .filter((o) => {
+      if (!o) return false;
+      try {
+        return new URL(o).origin === o;
+      } catch {
+        return false;
+      }
+    });
+}
+
 /** Read feature toggles from query parameters */
 function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
   const cfg: Partial<ChatConfig> = {};
@@ -159,7 +234,24 @@ export function ChatWidget() {
   const dispatch = useChatDispatch();
 
   const { environment, agentId, userId: userIdParam, intent } = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  /**
+   * `?token=` is read ONCE and then removed from the address bar. Left there,
+   * a bearer token sat in the visible URL, the history entry, and anything the
+   * user copied or bookmarked.
+   */
+  const [urlToken] = useState(() => searchParams.get("token"));
+  useEffect(() => {
+    if (!searchParams.has("token")) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("token");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
 
   const userId =
     userIdParam ?? searchParams.get("userId") ?? undefined;
@@ -204,13 +296,11 @@ export function ChatWidget() {
    */
   const generationRef = useRef(0);
   /**
-   * Raw texts sent this session with secret mode on. The backend stores
-   * `input:initial` unmasked, so a transcript rebuild would print them in
-   * clear; this is the only thing that can mask them client-side.
-   *
-   * Session-scoped by nature: after a reload the widget no longer knows which
-   * past turns were secret, so a rebuild of an older conversation can still
-   * surface them. Masking them properly needs a backend change.
+   * Raw texts sent this session with secret mode on. The backend scrubs a
+   * secret turn when it ends and masks older stored turns on read, so after a
+   * reload the turn output's `input` — "<secret input>" for a secret turn — and
+   * `input:initial` are what mask it (stepsToMessages). This session set
+   * remains a fallback for a backend that sends neither.
    */
   const secretTextsRef = useRef<Set<string>>(new Set());
   /**
@@ -234,13 +324,44 @@ export function ChatWidget() {
 
   /* ─── Set base URL + auth on mount ──────────── */
   useEffect(() => {
-    setBaseUrl(apiServer ?? state.config.apiBaseUrl ?? "");
+    setBaseUrl(sanitizeApiServer(apiServer) ?? state.config.apiBaseUrl ?? "");
   }, [apiServer, state.config.apiBaseUrl]);
 
   useEffect(() => {
     // Query param is a convenience for embedding; config is the real channel.
-    setAuthToken(searchParams.get("token") ?? state.config.authToken ?? null);
-  }, [searchParams, state.config.authToken]);
+    // `urlToken` was read once and stripped from the address above, so it does
+    // not linger in the address bar, history, a Referer header or access logs.
+    //
+    // NOTE (residual risk): accepting a token straight from the URL is still a
+    // login-CSRF vector — a crafted link can silently authenticate the widget as
+    // someone else's session. Fully closing this needs a PKCE/OIDC login flow
+    // (out of scope here). Prefer the postMessage handshake below, or config.
+    setAuthToken(urlToken ?? state.config.authToken ?? null);
+  }, [urlToken, state.config.authToken]);
+
+  /* ─── Accept a token via postMessage from an allow-listed parent ──
+     Safer than the URL: the token never touches the address bar, history or
+     Referer. Only origins named in ?tokenOrigin= are honoured, and only when
+     the message comes from our own parent frame. */
+  useEffect(() => {
+    const allowed = parseAllowedTokenOrigins(searchParams);
+    if (allowed.length === 0) return;
+    const onMessage = (event: MessageEvent) => {
+      if (!allowed.includes(event.origin)) return;
+      if (event.source !== window.parent) return;
+      const data = event.data as unknown;
+      if (
+        data &&
+        typeof data === "object" &&
+        (data as { type?: unknown }).type === "eddi-chat-token" &&
+        typeof (data as { token?: unknown }).token === "string"
+      ) {
+        setAuthToken((data as { token: string }).token);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [searchParams]);
 
   /* ─── SSE event handler (declared early to avoid reference issues) ──
      Returns `true` when the stream is logically complete (done / error),
@@ -253,6 +374,8 @@ export function ChatWidget() {
           dispatch({ type: "SET_THINKING", value: false });
           // Text is flowing, so whichever model won the cascade is answering.
           dispatch({ type: "SET_ESCALATING", value: false });
+          // No event says a tool finished; resumed output is that signal.
+          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
           dispatch({ type: "APPEND_TO_LAST_AGENT", token: event.data });
           return false;
 
@@ -272,7 +395,19 @@ export function ChatWidget() {
           // (cascade escalation, retry), so `done`/`error` decides the final
           // outcome — but stop implying the agent is still composing.
           dispatch({ type: "SET_THINKING", value: false });
+          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
           return false;
+
+        // Emitted right before each tool runs — the name only; arguments come
+        // later, redacted, in task_complete's toolTrace. Deliberately NOT
+        // guarded on tokenCount: a model may write a sentence and then call a
+        // tool, and the silence while that tool runs is exactly the wait worth
+        // explaining. The next token clears it again.
+        case "tool_call": {
+          const tool = parseToolCallName(event.data);
+          if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
+          return false;
+        }
 
         // Step starts are pure observability — task_start already raised the
         // thinking indicator, and it is guarded on tokenCount so it cannot come
@@ -295,8 +430,20 @@ export function ChatWidget() {
             ? snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1]
             : undefined;
           const outputText = extractOutputTexts(lastOutput?.output).join("\n\n");
+          const outputImages = extractOutputImages(lastOutput?.output);
+          const skipped = isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend);
 
-          if (isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend)) {
+          // A requested input field (a password prompt) arrives here on the
+          // streaming path, which is the default. Reading it only from the
+          // non-streaming snapshot meant the key went into the plain textarea,
+          // was shown in clear and was sent without `secretInput`. A skipped
+          // turn carries the PREVIOUS step's outputs, so it must not re-apply.
+          const inputField = skipped ? null : findInputField(lastOutput?.output);
+          if (inputField) {
+            dispatch({ type: "SET_INPUT_FIELD", field: inputField });
+          }
+
+          if (skipped) {
             // The server dropped this turn without consuming it. The payload
             // carries the PREVIOUS step's outputs, so its quick replies must
             // not be applied — doing so re-offered stale buttons as if new.
@@ -331,10 +478,10 @@ export function ChatWidget() {
             // which arrives as a bare string. Dropping it left a paused turn
             // rendering as "No response".
             dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-            if (outputText) {
+            if (outputText || outputImages.length) {
               dispatch({
                 type: "ADD_MESSAGE",
-                message: makeAgentMessage(outputText),
+                message: makeAgentMessage(outputText, outputImages),
               });
             }
             if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
@@ -349,6 +496,13 @@ export function ChatWidget() {
             // authoritative.
             if (outputText) {
               dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
+            }
+            // Images never stream as tokens; the snapshot is their only source.
+            if (outputImages.length) {
+              dispatch({
+                type: "ADD_MESSAGE",
+                message: makeAgentMessage("", outputImages),
+              });
             }
             dispatch({
               type: "SET_QUICK_REPLIES",
@@ -369,8 +523,45 @@ export function ChatWidget() {
         }
 
         case "error": {
-          // Payload is {"message":"…"}, not a bare string.
-          const message = parseErrorMessage(event.data);
+          // Payload is {"message":"…","code":"…"}, not a bare string.
+          const { message, code } = parseErrorEvent(event.data);
+          if (
+            turn.tokenCount === 0 &&
+            code !== null &&
+            UNCONSUMED_STREAM_ERROR_CODES.has(code)
+          ) {
+            // The server refused this turn before running it — the streaming
+            // twin of a 409. Withdraw the optimistic bubble and hand the draft
+            // (a secret included, masked) back, instead of leaving a message
+            // in the transcript that never reached the agent. The refresh after
+            // the stream then picks up the paused state for awaiting_approval.
+            const pending = turn.userMessageId
+              ? pendingTurnsRef.current.get(turn.userMessageId)
+              : undefined;
+            if (turn.userMessageId) {
+              pendingTurnsRef.current.delete(turn.userMessageId);
+              dispatch({
+                type: "WITHDRAW_LAST_USER_MESSAGE",
+                messageId: turn.userMessageId,
+                draft: pending?.text,
+                attachments: pending?.attachments,
+                wasSecret: pending?.isSecret,
+              });
+            } else {
+              dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+            }
+            dispatch({
+              type: "ADD_MESSAGE",
+              message: makeAgentMessage(
+                code === "awaiting_approval"
+                  ? "⚠️ Your message was not sent — this conversation is waiting on a decision."
+                  : `⚠️ Your message was not sent — ${message}`,
+              ),
+            });
+            dispatch({ type: "FINISH_STREAMING" });
+            dispatch({ type: "SET_PROCESSING", value: false });
+            return true;
+          }
           if (turn.tokenCount === 0) {
             dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
             dispatch({
@@ -407,8 +598,7 @@ export function ChatWidget() {
      *   at index 0, so the key degenerates to the reply text and a repeated
      *   utterance (a fallback, a re-prompt) would be silently swallowed.
      */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (snapshot: any, { dedupe = false }: { dedupe?: boolean } = {}) => {
+    (snapshot: Partial<ConversationSnapshot>, { dedupe = false }: { dedupe?: boolean } = {}) => {
       // Managed-agent mode never calls startConversation, so without this the
       // widget has no conversationId — disabling HITL polling, cancel, retry
       // and attachments for the entire managed route.
@@ -419,6 +609,7 @@ export function ChatWidget() {
         dispatch({
           type: "SET_CONVERSATION_STATE",
           state: snapshot.conversationState,
+          endReason: snapshot.endReason ?? null,
         });
       }
 
@@ -431,28 +622,17 @@ export function ChatWidget() {
 
       // Handle the "conversationOutputs" format (from POST /agents responses)
       if (snapshot.conversationOutputs?.length) {
-        snapshot.conversationOutputs.forEach((output: any) => {
+        snapshot.conversationOutputs.forEach((output, index, outputs) => {
           // Extract agent replies and detect input field requests
           const agentReplies: unknown[] = output.output ?? [];
 
-          // inputField items configure the composer rather than the transcript.
-          for (const reply of agentReplies) {
-            if (
-              reply &&
-              typeof reply === "object" &&
-              (reply as OutputItem).type === "inputField"
-            ) {
-              const field = reply as OutputItem;
-              dispatch({
-                type: "SET_INPUT_FIELD",
-                field: {
-                  subType: field.subType || "password",
-                  placeholder: field.placeholder,
-                  label: field.label,
-                  defaultValue: field.defaultValue,
-                },
-              });
-            }
+          // inputField items configure the composer rather than the transcript,
+          // and only the LATEST turn's request is still open: a full-snapshot
+          // refresh (HITL resume) would otherwise re-raise a password prompt
+          // from an earlier turn that was already answered.
+          if (index === outputs.length - 1) {
+            const field = findInputField(agentReplies);
+            if (field) dispatch({ type: "SET_INPUT_FIELD", field });
           }
 
           // Handles bare-string entries too — HITL's pending-approval
@@ -464,6 +644,10 @@ export function ChatWidget() {
               message,
             });
           });
+          const images = extractOutputImages(agentReplies);
+          if (images.length && !dedupe) {
+            dispatch({ type: "ADD_MESSAGE", message: makeAgentMessage("", images) });
+          }
         });
 
         // Quick replies from the last output (most recent step)
@@ -488,6 +672,7 @@ export function ChatWidget() {
         for (const message of stepsToMessages(
           snapshot.conversationSteps,
           secretTextsRef.current,
+          snapshot.conversationOutputs,
         )) {
           dispatch({
             type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
@@ -499,60 +684,153 @@ export function ChatWidget() {
     [dispatch],
   );
 
-  /* ─── Auto-start conversation ───────────────── */
-  useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
+  /**
+   * Show the agent's name, once per open, from the conversation read itself.
+   *
+   * It used to be fetched from `/descriptorstore/descriptors/{id}/simple`, an
+   * authoring endpoint that refuses a user holding only `eddi-user` — so the
+   * very people the chat is for never saw it. The backend now puts the name on
+   * the conversation snapshot for anyone allowed to use the agent. With no name
+   * the header simply shows the logo, titled with the configured `title`.
+   */
+  const loadAgentName = useCallback(
+    (snapshot: { agentName?: unknown }, gen: number) => {
+      if (isDemo || state.config.showAgentName === false) return;
+      const name = snapshot.agentName;
+      if (typeof name !== "string" || !name.trim()) return;
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_AGENT_NAME", name });
+      }
+    },
+    [dispatch, isDemo, state.config.showAgentName],
+  );
 
-    const init = async () => {
+  /**
+   * Open a conversation: the one the route names on first load, a fresh one on
+   * restart. Every await re-checks the generation: the first load used to have
+   * no such check, so "New conversation" clicked while its welcome read was
+   * still in flight got the OLD conversation's greeting grafted onto the new
+   * one, and its id could overwrite the new id.
+   */
+  const openConversation = useCallback(
+    async (fresh: boolean) => {
+      const gen = generationRef.current;
       try {
         if (isDemo) {
           // Demo mode: use mock data
           const result = await demoStartConversation();
+          if (gen !== generationRef.current) return;
           dispatch({ type: "SET_CONVERSATION_ID", id: result.conversationId });
           dispatch({ type: "ADD_MESSAGE", message: result.welcomeMessage });
           dispatch({ type: "SET_QUICK_REPLIES", replies: result.quickReplies });
           dispatch({ type: "SET_CONVERSATION_STATE", state: "READY" });
         } else if (isManagedAgent && intent && userId) {
-          // Managed agent: GET to load existing or start new
+          // A managed load always returns the CURRENT conversation, so a
+          // restart must end it first — otherwise "New conversation" re-showed
+          // the same one and the agent kept its whole context.
+          if (fresh) await endManagedConversation(intent, userId);
           const snapshot = await loadManagedConversation(intent, userId);
+          if (gen !== generationRef.current) return;
+          // The route names an intent; the snapshot names the agent, whose review
+          // notice must be shown like any other's.
+          setManagedAgentId(snapshot.agentId || null);
           processSnapshot(snapshot);
+          loadAgentName(snapshot, gen);
         } else if (environment && agentId) {
           // Direct agent: POST to create conversation
-          const convId = await startConversation(
-            environment,
-            agentId,
-            userId,
-          );
+          const convId = await startConversation(environment, agentId, userId);
+          if (gen !== generationRef.current) return;
           dispatch({ type: "SET_CONVERSATION_ID", id: convId });
 
           // GET to pick up welcome message
-          const snapshot = await readConversation(
-            environment,
-            agentId,
-            convId,
-          );
+          const snapshot = await readConversation(environment, agentId, convId);
+          if (gen !== generationRef.current) return;
           processSnapshot(snapshot);
+          loadAgentName(snapshot, gen);
         }
       } catch (err) {
+        if (gen !== generationRef.current) return;
+        // A managed conversation that did not load names no agent; waiting on its
+        // notice would keep the input closed for good.
+        if (isManagedAgent) setManagedAgentId((current) => current ?? null);
         console.error("Failed to start conversation:", err);
+        // A failed start used to reach the console only, leaving the widget
+        // on "Starting conversation…" for good.
+        dispatch({
+          type: "ADD_MESSAGE",
+          message: makeAgentMessage(startFailureMessage(err, environment)),
+        });
       }
-    };
+    },
+    [
+      dispatch,
+      isDemo,
+      isManagedAgent,
+      intent,
+      userId,
+      environment,
+      agentId,
+      processSnapshot,
+      loadAgentName,
+    ],
+  );
 
-    init();
+  /* ─── Auto-start conversation ───────────────── */
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    openConversation(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ─── Fetch agent name ────────────────────────── */
+  /* ─── Review notice ─────────────────────────── */
+  // The agent's name comes from loadAgentName, per conversation. This only asks
+  // whether the maintainers may read the conversation, which is shown whatever
+  // the name setting: it is about the person's data, not decoration. An EDDI
+  // older than the profile endpoint answers 404, and there is nothing to announce.
+  // Whether the lookup below has answered. The input stays closed until it has:
+  // otherwise a slow profile let somebody type before they were told the
+  // conversation may be read. A failure (an EDDI without the endpoint) settles
+  // it too, so it only ever waits for the request, never blocks on it.
+  const [profileSettled, setProfileSettled] = useState(false);
+  // Read at click time by handleSend, which quick replies and the secret input
+  // call directly: gating only the composer let a quick reply through before the
+  // notice appeared. Synced after commit, like the refs above.
+  const profileSettledRef = useRef(false);
   useEffect(() => {
-    if (isDemo || !agentId || state.config.showAgentName === false) return;
-    fetchAgentDescriptor(agentId).then((desc) => {
-      if (desc.name) {
-        dispatch({ type: "SET_AGENT_NAME", name: desc.name });
-      }
-    }).catch(() => { /* swallow */ });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, isDemo]);
+    profileSettledRef.current = profileSettled;
+  }, [profileSettled]);
+  // The agent behind a managed route, which names an intent rather than an agent.
+  // Undefined until the managed conversation has loaded; null when it named none.
+  const [managedAgentId, setManagedAgentId] = useState<string | null | undefined>(undefined);
+  const profileAgentId = agentId ?? (isManagedAgent ? managedAgentId : null);
+  useEffect(() => {
+    // A new target starts without the previous one's notice, and a slower answer
+    // for the previous target cannot overwrite the new one's.
+    dispatch({ type: "SET_REVIEW_NOTICE", notice: null });
+    if (profileAgentId === undefined && !isDemo) {
+      // A managed conversation still loading: its agent is not known yet.
+      setProfileSettled(false);
+      return;
+    }
+    if (isDemo || !profileAgentId) {
+      setProfileSettled(true);
+      return;
+    }
+    setProfileSettled(false);
+    let cancelled = false;
+    fetchAgentProfile(profileAgentId, environment ?? "production")
+      .then((profile) => {
+        if (!cancelled) dispatch({ type: "SET_REVIEW_NOTICE", notice: profile?.reviewNotice ?? null });
+      })
+      .catch(() => { /* no profile endpoint: no notice */ })
+      .finally(() => {
+        if (!cancelled) setProfileSettled(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profileAgentId, environment, isDemo, dispatch]);
 
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(
@@ -561,6 +839,8 @@ export function ChatWidget() {
       // disabled state, so a click during an in-flight turn used to start a
       // second one — two streams writing into the same transcript.
       if (isProcessingRef.current) return;
+      // Nothing is sent before the review notice has had its chance to appear.
+      if (!profileSettledRef.current) return;
 
       // Conversation identity for THIS turn. Every async continuation below
       // must re-check it: New Conversation can land while a request is in
@@ -631,11 +911,16 @@ export function ChatWidget() {
 
       dispatch({ type: "ADD_MESSAGE", message: userMsg });
       dispatch({ type: "CLEAR_ATTACHMENTS" });
+      // A requested input field lasts for ONE reply. A quick reply answers it
+      // too, and must not leave a stale password prompt over the next turn.
+      dispatch({ type: "CLEAR_INPUT_FIELD" });
       dispatch({ type: "SET_QUICK_REPLIES", replies: [] });
       dispatch({ type: "SET_PROCESSING", value: true });
       dispatch({ type: "SET_THINKING", value: true });
-      // Start every turn un-escalated, however the previous one ended.
+      // Start every turn un-escalated and tool-less, however the previous one
+      // ended.
       dispatch({ type: "SET_ESCALATING", value: false });
+      dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
 
       try {
         if (isDemo) {
@@ -774,6 +1059,9 @@ export function ChatWidget() {
               dispatch({
                 type: "SET_CONVERSATION_STATE",
                 state: after.conversationState,
+                // A turn refused with `conversation_ended` lands here: the
+                // reason decides what the ended footer tells the user.
+                endReason: after.endReason ?? null,
               });
             }
           } catch {
@@ -831,6 +1119,7 @@ export function ChatWidget() {
                 dispatch({
                   type: "SET_CONVERSATION_STATE",
                   state: snap.conversationState,
+                  endReason: snap.endReason ?? null,
                 });
               }
             } catch {
@@ -838,6 +1127,34 @@ export function ChatWidget() {
             }
           }
           return;
+        }
+
+        if (err instanceof ApiError && err.status === 410 && state.conversationId) {
+          // The conversation has ended (RestAgentEngine answers 410 GONE) and
+          // the turn was never consumed. Only an agent update that retired
+          // the conversation's version gets its own handling: say so, and
+          // point at a new conversation. Every other ended case keeps the
+          // generic handling below.
+          let endReason: string | null = null;
+          try {
+            const snap = await readConversation(
+              environment ?? "",
+              agentId ?? "",
+              state.conversationId,
+              true,
+            );
+            endReason = snap.endReason ?? null;
+          } catch {
+            // best effort — falls through to the generic handling
+          }
+          // The user may have started a new conversation while the reread was in
+          // flight; this send's outcome must not land in that one.
+          if (sendGen !== generationRef.current) return;
+          if (endReason === END_REASON_AGENT_VERSION_RETIRED) {
+            withdrawTurn();
+            dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason });
+            return;
+          }
         }
 
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
@@ -908,7 +1225,11 @@ export function ChatWidget() {
       // A New Conversation while this was in flight must not have its
       // transcript replaced by the old conversation's history.
       if (gen !== generationRef.current) return;
-      const msgs = stepsToMessages(snapshot.conversationSteps, secretTextsRef.current);
+      const msgs = stepsToMessages(
+        snapshot.conversationSteps,
+        secretTextsRef.current,
+        snapshot.conversationOutputs,
+      );
       if (msgs.length) {
         dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
       }
@@ -932,7 +1253,7 @@ export function ChatWidget() {
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, environment, agentId, state.conversationId, isDemo]);
+  }, [dispatch, state.conversationId, isDemo]);
 
   /* ─── Redo ──────────────────────────────────── */
   const handleRedo = useCallback(async () => {
@@ -952,7 +1273,11 @@ export function ChatWidget() {
       // A New Conversation while this was in flight must not have its
       // transcript replaced by the old conversation's history.
       if (gen !== generationRef.current) return;
-      const msgs = stepsToMessages(snapshot.conversationSteps, secretTextsRef.current);
+      const msgs = stepsToMessages(
+        snapshot.conversationSteps,
+        secretTextsRef.current,
+        snapshot.conversationOutputs,
+      );
       if (msgs.length) {
         dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
       }
@@ -973,7 +1298,7 @@ export function ChatWidget() {
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, environment, agentId, state.conversationId, isDemo]);
+  }, [dispatch, state.conversationId, isDemo]);
 
   /* ─── Quick reply handler ───────────────────── */
   const handleQuickReply = useCallback(
@@ -993,28 +1318,8 @@ export function ChatWidget() {
     generationRef.current += 1;
     pendingTurnsRef.current.clear();
     dispatch({ type: "CLEAR_MESSAGES" });
-    // Re-init conversation
-    try {
-      if (isDemo) {
-        const result = await demoStartConversation();
-        dispatch({ type: "SET_CONVERSATION_ID", id: result.conversationId });
-        dispatch({ type: "ADD_MESSAGE", message: result.welcomeMessage });
-        dispatch({ type: "SET_QUICK_REPLIES", replies: result.quickReplies });
-        dispatch({ type: "SET_CONVERSATION_STATE", state: "READY" });
-      } else if (isManagedAgent && intent && userId) {
-        // Managed agent: GET to load or re-initialize conversation
-        const snapshot = await loadManagedConversation(intent, userId);
-        processSnapshot(snapshot);
-      } else if (environment && agentId) {
-        const convId = await startConversation(environment, agentId, userId);
-        dispatch({ type: "SET_CONVERSATION_ID", id: convId });
-        const snapshot = await readConversation(environment, agentId, convId);
-        processSnapshot(snapshot);
-      }
-    } catch (err) {
-      console.error("Failed to restart conversation:", err);
-    }
-  }, [dispatch, isDemo, isManagedAgent, intent, environment, agentId, userId, processSnapshot]);
+    await openConversation(true);
+  }, [dispatch, openConversation]);
 
   /* ─── HITL: watch a paused conversation ─────── */
   const isPaused = isPausedState(state.conversationState);
@@ -1098,7 +1403,11 @@ export function ChatWidget() {
       const snapshot = await readConversation("", "", state.conversationId, true);
       if (gen !== generationRef.current) return;
       if (snapshot.conversationState) {
-        dispatch({ type: "SET_CONVERSATION_STATE", state: snapshot.conversationState });
+        dispatch({
+          type: "SET_CONVERSATION_STATE",
+          state: snapshot.conversationState,
+          endReason: snapshot.endReason ?? null,
+        });
       }
       // Retry re-reads the same step that failed; its output is already shown.
       processSnapshot(snapshot, { dedupe: true });
@@ -1114,7 +1423,7 @@ export function ChatWidget() {
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, environment, agentId, state.conversationId, processSnapshot]);
+  }, [dispatch, state.conversationId, processSnapshot]);
 
   /* ─── Stop generating ───────────────────────── */
   const handleStop = useCallback(async () => {
@@ -1166,15 +1475,28 @@ export function ChatWidget() {
   return (
     <div className="chat-root">
       <ChatHeader />
+      {state.reviewNotice && (
+        <div className="chat-review-notice" role="note" data-testid="chat-review-notice">
+          {state.reviewNotice}
+        </div>
+      )}
 
       <div
         className="chat-messages"
         ref={messagesContainerRef}
         onScroll={handleScroll}
+        // Without a live region no reply was ever announced to a screen
+        // reader. aria-busy holds the announcement until a streamed reply is
+        // complete, instead of reading it out token by token.
+        role="log"
+        aria-live="polite"
+        aria-label="Conversation"
+        aria-busy={state.isProcessing}
+        data-testid="chat-transcript"
       >
         {state.messages.length === 0 && !state.isProcessing && !isPaused ? (
           <div className="chat-empty">
-            <div className="chat-empty__icon">💬</div>
+            <MessagesSquare className="chat-empty__icon" size="1em" />
             <p className="chat-empty__text">
               Starting conversation…
             </p>
@@ -1182,7 +1504,13 @@ export function ChatWidget() {
         ) : (
           <>
             {state.messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                enableMarkdown={state.config.enableMarkdown !== false}
+                enableMath={state.config.enableMath !== false}
+                enableCodeHighlight={state.config.enableCodeHighlight !== false}
+              />
             ))}
 
             {isPaused && state.approvalStatus ? (
@@ -1193,18 +1521,38 @@ export function ChatWidget() {
               />
             ) : (
               <>
-                {(state.isThinking || state.isEscalating) && (
-                  <ThinkingIndicator escalating={state.isEscalating} />
+                {(state.isThinking || state.isEscalating || state.activeTool) && (
+                  <ThinkingIndicator
+                    escalating={state.isEscalating}
+                    tool={state.activeTool}
+                  />
                 )}
-                {state.isProcessing && !state.isThinking && !state.isEscalating && (
-                  <TypingIndicator />
-                )}
+                {state.isProcessing &&
+                  !state.isThinking &&
+                  !state.isEscalating &&
+                  !state.activeTool && <TypingIndicator />}
               </>
             )}
 
             <div ref={messagesEndRef} />
           </>
         )}
+      </div>
+
+      {/* The indicator's announcement. It sits OUTSIDE the transcript because
+          the transcript is aria-busy for the whole turn, and a status inside a
+          busy region may never be announced — which would silence "Using
+          calculator…", a state that only exists mid-turn. Always mounted: a
+          live region added together with its text is often not read. */}
+      <div
+        className="chat-sr-only"
+        role="status"
+        aria-live="polite"
+        data-testid="chat-activity-status"
+      >
+        {!isPaused && (state.isThinking || state.isEscalating || state.activeTool)
+          ? indicatorStatusText(state.isEscalating, state.activeTool)
+          : ""}
       </div>
 
       <div style={{ position: "relative" }}>
@@ -1248,8 +1596,20 @@ export function ChatWidget() {
       )}
 
       {isEnded ? (
-        <div className="chat-ended">
-          <span className="chat-ended__label">Conversation Ended</span>
+        <div className="chat-ended" data-testid="chat-ended">
+          {state.endReason === END_REASON_AGENT_VERSION_RETIRED ? (
+            // Ended because the agent was updated in a way this conversation
+            // could not follow — say so, rather than a bare "ended".
+            <span
+              className="chat-ended__label"
+              role="status"
+              data-testid="chat-ended-retired"
+            >
+              This assistant was updated. Start a new conversation to continue.
+            </span>
+          ) : (
+            <span className="chat-ended__label">Conversation Ended</span>
+          )}
           <button className="chat-ended__restart" onClick={handleRestart}>
             Start New Conversation
           </button>
@@ -1270,7 +1630,7 @@ export function ChatWidget() {
                       data-testid="undo-btn"
                       style={{ opacity: state.undoAvailable && !state.isProcessing ? 1 : 0.35 }}
                     >
-                      ↩
+                      <Undo2 size="1em" />
                     </button>
                   )}
                   {state.config.enableRedo !== false && (
@@ -1282,7 +1642,7 @@ export function ChatWidget() {
                       data-testid="redo-btn"
                       style={{ opacity: state.redoAvailable && !state.isProcessing ? 1 : 0.35 }}
                     >
-                      ↪
+                      <Redo2 size="1em" />
                     </button>
                   )}
                 </div>
@@ -1295,7 +1655,7 @@ export function ChatWidget() {
                       aria-label="Stop generating"
                       data-testid="chat-stop"
                     >
-                      ■
+                      <Square size="1em" fill="currentColor" />
                     </button>
                   )}
                   {state.config.enableNewConversation !== false && (
@@ -1305,7 +1665,9 @@ export function ChatWidget() {
                       title="New conversation"
                       data-testid="restart-btn"
                     >
-                      ↻
+                      {/* Not a circular arrow: that reads as retry, and this discards the
+                          conversation. The Manager uses the same icon for it. */}
+                      <MessageSquarePlus size="1em" />
                     </button>
                   )}
                 </div>
@@ -1324,7 +1686,7 @@ export function ChatWidget() {
             ) : (
               <ChatInput
                 onSend={handleSend}
-                disabled={(!state.conversationId && !isManagedAgent) || isPaused}
+                disabled={(!state.conversationId && !isManagedAgent) || isPaused || !profileSettled}
                 conversationId={state.conversationId}
               />
             )}

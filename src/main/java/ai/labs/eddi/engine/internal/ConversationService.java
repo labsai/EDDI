@@ -4,6 +4,12 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.engine.memory.ConversationGroups;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -17,6 +23,7 @@ import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -33,6 +40,8 @@ import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
+import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -66,6 +75,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
+import java.time.Duration;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.*;
@@ -90,10 +101,24 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
  * @author ginccc
  */
 @ApplicationScoped
-public class ConversationService implements IConversationService {
+public class ConversationService implements IConversationService, UserErasureParticipant {
 
     private static final String RESOURCE_URI = "eddi://ai.labs.conversation/conversationstore/conversations/";
+
+    /**
+     * Actor for ending a legacy soft-deleted conversation on its next turn attempt.
+     */
+    static final String SOFT_DELETED_ACTOR = "system:delete";
     private static final String CACHE_NAME_CONVERSATION_STATE = "conversationState";
+    /**
+     * How long a cached conversation state is served before the store is asked
+     * again. The cache used to keep entries until size eviction, and several
+     * writers never touch it — another instance, the HITL timeout and crash
+     * recovery paths, a narrow state write — so a stale entry could be served for
+     * the lifetime of the process. Short enough to bound that staleness, long
+     * enough to absorb a client polling the state of a running turn.
+     */
+    public static final Duration CONVERSATION_STATE_CACHE_TTL = Duration.ofSeconds(30);
     private static final String USER_ID = "userId";
 
     private final IAgentFactory agentFactory;
@@ -151,6 +176,14 @@ public class ConversationService implements IConversationService {
     ConversationAccessGuard conversationAccessGuard;
 
     /**
+     * Verifies a {@code groupId} found only on an earlier step before group memory
+     * is scoped to it (see {@code ConversationGroups}). Field-injected, so directly
+     * constructed tests see {@code null} and only the current step's value counts.
+     */
+    @Inject
+    LiveDiscussionRegistry liveDiscussionRegistry;
+
+    /**
      * Graceful-shutdown gate (B3). New turns are refused once a
      * {@code ShutdownEvent} has been observed, so a rolling deploy drains what is
      * already in flight instead of racing fresh work against the JVM exit.
@@ -197,8 +230,17 @@ public class ConversationService implements IConversationService {
     private final Counter counterConversationProcessing;
     private final Counter counterConversationUndo;
     private final Counter counterConversationRedo;
+    private final Counter counterAgentVersionSwitch;
     final Counter counterHitlPause;
     private final Counter counterHitlResume;
+    /**
+     * Turns whose persist was refused because another writer had already committed
+     * to the same conversation document (an optimistic-concurrency conflict). Every
+     * increment here used to be an invisible data loss: the stale write replaced
+     * the winner and the turn disappeared with no error, no 409 and nothing in the
+     * log.
+     */
+    final Counter counterConversationStoreConflict;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
     private final MeterRegistry meterRegistry;
@@ -247,7 +289,7 @@ public class ConversationService implements IConversationService {
         this.scheduleStore = scheduleStore;
         this.agentStore = agentStore;
         this.jsonSerialization = jsonSerialization;
-        this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
+        this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE, CONVERSATION_STATE_CACHE_TTL);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
         this.callerIdentityContext = callerIdentityContext;
@@ -270,6 +312,8 @@ public class ConversationService implements IConversationService {
         this.counterConversationProcessing = meterRegistry.counter("eddi_conversation_processing_count");
         this.counterConversationUndo = meterRegistry.counter("eddi_conversation_undo_count");
         this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
+        this.counterAgentVersionSwitch = meterRegistry.counter("eddi_conversation_agent_version_switch_count");
+        this.counterConversationStoreConflict = meterRegistry.counter("eddi_conversation_store_conflict_count");
         this.counterHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular");
         this.counterHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "regular");
         // (timeout fires are counted in HitlTimeoutHandler, tagged by surface)
@@ -409,7 +453,7 @@ public class ConversationService implements IConversationService {
             bindCallerIdentity(startCaller);
             try {
                 conversation = latestAgent.startConversation(userId, context,
-                        createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
+                        createPropertiesHandler(userId, latestAgent.getUserMemoryConfig(), latestAgent.isMemoryToolsEnabled()), null);
             } finally {
                 // Restore rather than clear — this can be a sub-agent conversation
                 // started from inside a parent's pipeline turn, whose bindings must
@@ -435,7 +479,7 @@ public class ConversationService implements IConversationService {
             }
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
+            createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri);
 
             return new ConversationResult(conversationId, conversationUri);
         } catch (AgentNotReadyException e) {
@@ -449,6 +493,68 @@ public class ConversationService implements IConversationService {
         }
     }
 
+    /**
+     * Writes the new conversation's descriptor, and removes the just-stored memory
+     * again if that fails.
+     * <p>
+     * The descriptor is where the conversation's owner is recorded, and it can only
+     * be written after the memory is stored (the store assigns the id). If it
+     * failed, the caller got an error but the snapshot stayed behind with no owner
+     * on record: a conversation nobody could be checked against. Discarding it
+     * keeps "every conversation has a descriptor" true, which is what
+     * {@code ConversationAccessGuard} relies on to deny everyone but admins access
+     * to a conversation without one.
+     */
+    private void createDescriptorOrDiscard(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri)
+            throws ResourceStoreException, ResourceNotFoundException {
+        try {
+            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
+        } catch (ResourceStoreException | ResourceNotFoundException | RuntimeException e) {
+            LOGGER.errorf("Could not write the descriptor of new conversation %s — discarding its memory: %s",
+                    sanitize(conversationId), e.getMessage());
+            try {
+                // A pause on the CONVERSATION_START turn armed a timeout already.
+                conversationHitlService.deleteHitlTimeoutSchedule(conversationId);
+                conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
+                conversationStateCache.remove(conversationId);
+            } catch (Exception cleanupFailure) {
+                LOGGER.errorf(cleanupFailure, "Could not discard the memory of conversation %s after its descriptor failed",
+                        sanitize(conversationId));
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public String erasureStepName() {
+        return "inFlightConversations";
+    }
+
+    /**
+     * GDPR erasure: signals every turn running on this node for {@code userId} to
+     * stop, through the same cooperative flag {@link #cancelConversation} sets. A
+     * cancelled turn skips its longTerm write-back to user memory
+     * ({@code Conversation.isTurnDiscarded}) and its snapshot is discarded. The
+     * audit entries it still flushes while unwinding are pseudonymised by the
+     * ledger ({@code AuditLedgerService.markUserErased}). Matched on the live
+     * memory's user, not on a stored lookup, so a turn whose conversation the
+     * cascade has not reached yet — or one started a moment ago — is caught too.
+     */
+    @Override
+    public int stopInFlightWork(String userId) {
+        if (userId == null) {
+            return 0;
+        }
+        int signalled = 0;
+        for (IConversationMemory memory : inFlightConversations.values()) {
+            if (userId.equals(memory.getUserId())) {
+                memory.setCancelled(true);
+                signalled++;
+            }
+        }
+        return signalled;
+    }
+
     @Override
     public void endConversation(String conversationId) {
         // Default actor for callers that cannot attribute (background/scheduled
@@ -460,6 +566,11 @@ public class ConversationService implements IConversationService {
 
     @Override
     public void endConversation(String conversationId, String endedBy) {
+        endConversation(conversationId, endedBy, null);
+    }
+
+    @Override
+    public void endConversation(String conversationId, String endedBy, String endReason) {
         long startTime = System.nanoTime();
         // Signal any in-flight resume on this pod (mirrors cancelConversation): a
         // resume that already passed the AWAITING_HUMAN->IN_PROGRESS CAS would
@@ -476,6 +587,14 @@ public class ConversationService implements IConversationService {
         // leave a dead schedule row forever) and clear the persisted bookmark.
         ConversationState previousState = conversationMemoryStore.getConversationState(conversationId);
         setConversationState(conversationId, ConversationState.ENDED);
+        if (endReason != null) {
+            try {
+                conversationMemoryStore.setConversationEndReason(conversationId, endReason);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Conversation %s ended, but its end reason '%s' could not be recorded: %s",
+                        sanitize(conversationId), sanitize(endReason), e.getMessage());
+            }
+        }
         // Disarm the timeout UNCONDITIONALLY (idempotent, no-ops when absent): a resume
         // in flight may have already flipped AWAITING_HUMAN->IN_PROGRESS and deferred
         // its
@@ -596,6 +715,8 @@ public class ConversationService implements IConversationService {
                 throw new AgentMismatchException(message);
             }
 
+            rejectIfEnded(conversationMemory);
+
             // HITL fast-fail: a paused conversation cannot consume input — reject
             // promptly (REST: 409) instead of dropping the turn into the 60s
             // watchdog. Checked BEFORE quota/reference bookkeeping so nothing
@@ -606,7 +727,12 @@ public class ConversationService implements IConversationService {
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = getAgent(environment, agentId, agentVersion);
+            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
+                // The turn runs on another, compatible version: log it as that one.
+                loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
+                contextLogger.setLoggingContext(loggingContext);
+            }
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
@@ -630,24 +756,6 @@ public class ConversationService implements IConversationService {
             admittedTurn = new ProcessingTurn(processingConversationCount);
             final ProcessingTurn processingTurn = admittedTurn;
 
-            // Set the audit collector on memory (if auditing is enabled)
-            if (auditLedgerService.isEnabled()) {
-                String envName = environment.toString();
-                conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
-            }
-
-            final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
-                                returnDetailed, returnCurrentStepOnly, returningFields);
-                        memorySnapshot.setEnvironment(environment);
-                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
-                        conversationDescriptorStore.updateTimeStamp(conversationId);
-                        recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingTurn.release();
-                        responseHandler.onComplete(memorySnapshot);
-                    });
-
             // Handler contract: a skipped turn (pause/busy committed by the time the
             // queued turn executed) must still complete the response — with the
             // persisted state and WITHOUT the metrics reference leaking.
@@ -660,35 +768,62 @@ public class ConversationService implements IConversationService {
                 responseHandler.onSkipped(memorySnapshot);
             };
 
-            if (conversation.isEnded()) {
-                throw new ConversationEndedException("Conversation has ended!");
-            }
+            // Everything bound to one memory instance lives in the builder, so a queued
+            // turn can be rebuilt over the current document when it finally runs (H13a).
+            ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
+                adoptResolvedAgentVersion(memory, agent);
+                // Set the audit collector on memory (if auditing is enabled)
+                if (auditLedgerService.isEnabled()) {
+                    String envName = environment.toString();
+                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+                }
 
-            Callable<Void> executeConversation;
-            if (rerunOnly) {
-                executeConversation = () -> {
-                    try {
-                        contextLogger.setLoggingContext(loggingContext);
-                        conversation.rerun(inputData.getContext());
-                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        LOGGER.error(e.getLocalizedMessage(), e);
-                    }
-                    return null;
-                };
-            } else {
-                executeConversation = () -> {
-                    try {
-                        contextLogger.setLoggingContext(loggingContext);
-                        conversation.say(inputData.getInput(), inputData.getContext());
-                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        LOGGER.error(e.getLocalizedMessage(), e);
-                    }
-                    return null;
-                };
-            }
+                final IConversation conversation = agent.continueConversation(memory,
+                        createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
+                        returnConversationMemory -> {
+                            SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
+                                    returnDetailed, returnCurrentStepOnly, returningFields);
+                            memorySnapshot.setEnvironment(environment);
+                            cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                            conversationDescriptorStore.updateTimeStamp(conversationId);
+                            recordAgentVersionMove(returnConversationMemory, storedVersion);
+                            recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                            processingTurn.release();
+                            responseHandler.onComplete(memorySnapshot);
+                        });
+
+                if (conversation.isEnded()) {
+                    throw new ConversationEndedException("Conversation has ended!");
+                }
+
+                Callable<Void> executeConversation;
+                if (rerunOnly) {
+                    executeConversation = () -> {
+                        try {
+                            contextLogger.setLoggingContext(loggingContext);
+                            conversation.rerun(inputData.getContext());
+                        } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                            LOGGER.error(e.getLocalizedMessage(), e);
+                        }
+                        return null;
+                    };
+                } else {
+                    executeConversation = () -> {
+                        try {
+                            contextLogger.setLoggingContext(loggingContext);
+                            conversation.say(inputData.getInput(), inputData.getContext());
+                        } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                            LOGGER.error(e.getLocalizedMessage(), e);
+                        }
+                        return null;
+                    };
+                }
+                return withResolutionPrincipal(memory, executeConversation);
+            };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
+                    turnBuilder, !rerunOnly, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -715,6 +850,24 @@ public class ConversationService implements IConversationService {
             LOGGER.error(e.getLocalizedMessage(), e);
             releaseTurn(admittedTurn);
             throw e;
+        }
+    }
+
+    /**
+     * An ended conversation is refused before its agent is looked up.
+     * <p>
+     * The check further down ({@code conversation.isEnded()}) comes after the agent
+     * lookup, so an ended conversation whose agent version had since been
+     * undeployed — the normal state after
+     * {@code undeploy?endAllActiveConversations=true} — answered "agent not ready"
+     * instead of "ended". Clients that recover from an ended conversation by
+     * starting a new one (Slack threads, managed conversations, {@code /v1}) never
+     * saw the signal they recover on, and retried a conversation that could never
+     * answer again.
+     */
+    static void rejectIfEnded(IConversationMemory conversationMemory) throws ConversationEndedException {
+        if (conversationMemory.getConversationState() == ConversationState.ENDED) {
+            throw new ConversationEndedException("Conversation has ended!");
         }
     }
 
@@ -755,6 +908,8 @@ public class ConversationService implements IConversationService {
                 throw new AgentMismatchException(message);
             }
 
+            rejectIfEnded(conversationMemory);
+
             // HITL fast-fail (mirrors say()): reject input into a paused
             // conversation promptly instead of leaving the SSE stream dangling.
             if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
@@ -763,7 +918,12 @@ public class ConversationService implements IConversationService {
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = getAgent(environment, agentId, agentVersion);
+            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
+                // The turn runs on another, compatible version: log it as that one.
+                loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
+                contextLogger.setLoggingContext(loggingContext);
+            }
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
@@ -836,40 +996,49 @@ public class ConversationService implements IConversationService {
                 }
             };
 
-            // Set the event sink on memory so LifecycleManager and tasks can use it
-            conversationMemory.setEventSink(eventSink);
+            // Everything bound to one memory instance lives in the builder, so a queued
+            // turn can be rebuilt over the current document when it finally runs (H13a).
+            ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
+                adoptResolvedAgentVersion(memory, agent);
+                // Set the event sink on memory so LifecycleManager and tasks can use it
+                memory.setEventSink(eventSink);
 
-            // Set the audit collector on memory (if auditing is enabled)
-            if (auditLedgerService.isEnabled()) {
-                String envName = environment.toString();
-                conversationMemory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
-            }
-
-            final IConversation conversation = agent.continueConversation(conversationMemory,
-                    createPropertiesHandler(conversationMemory.getUserId(), agent.getUserMemoryConfig()), returnConversationMemory -> {
-                        SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
-                                returnDetailed, returnCurrentStepOnly, returningFields);
-                        memorySnapshot.setEnvironment(environment);
-                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
-                        conversationDescriptorStore.updateTimeStamp(conversationId);
-                        recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                        processingTurn.release();
-                        streamingHandler.onComplete(memorySnapshot);
-                    });
-
-            if (conversation.isEnded()) {
-                throw new ConversationEndedException("Conversation has ended!");
-            }
-
-            Callable<Void> executeConversation = () -> {
-                try {
-                    contextLogger.setLoggingContext(loggingContext);
-                    conversation.say(inputData.getInput(), inputData.getContext());
-                } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                    LOGGER.error(e.getLocalizedMessage(), e);
-                    streamingHandler.onError(e);
+                // Set the audit collector on memory (if auditing is enabled)
+                if (auditLedgerService.isEnabled()) {
+                    String envName = environment.toString();
+                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
                 }
-                return null;
+
+                final IConversation conversation = agent.continueConversation(memory,
+                        createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
+                        returnConversationMemory -> {
+                            SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
+                                    returnDetailed, returnCurrentStepOnly, returningFields);
+                            memorySnapshot.setEnvironment(environment);
+                            cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                            conversationDescriptorStore.updateTimeStamp(conversationId);
+                            recordAgentVersionMove(returnConversationMemory, storedVersion);
+                            recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                            processingTurn.release();
+                            streamingHandler.onComplete(memorySnapshot);
+                        });
+
+                if (conversation.isEnded()) {
+                    throw new ConversationEndedException("Conversation has ended!");
+                }
+
+                Callable<Void> executeConversation = () -> {
+                    try {
+                        contextLogger.setLoggingContext(loggingContext);
+                        conversation.say(inputData.getInput(), inputData.getContext());
+                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
+                        LOGGER.error(e.getLocalizedMessage(), e);
+                        streamingHandler.onError(e);
+                    }
+                    return null;
+                };
+                return withResolutionPrincipal(memory, executeConversation);
             };
 
             // Handler contract (mirrors say()): a skipped turn must terminate the
@@ -884,7 +1053,7 @@ public class ConversationService implements IConversationService {
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    withResolutionPrincipal(conversationMemory, executeConversation), notifySkipped, processingTurn);
+                    turnBuilder, true, notifySkipped, processingTurn);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -955,10 +1124,14 @@ public class ConversationService implements IConversationService {
                 // the store lands only if nothing moved the DB state meanwhile; on a
                 // miss the concurrent writer wins and undo reports no-op.
                 if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForUndo)) {
-                    LOGGER.warnf("Undo of conversation %s aborted: state changed concurrently (was %s)",
+                    LOGGER.warnf("Undo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
                             conversationId, loadedStateForUndo);
                     return false;
                 }
+                // The undone step is now on top of the redo cache.
+                var undone = conversationMemory.getRedoCache().peek();
+                applyAgentMemoryConfig(environment, conversationMemory, undone);
+                syncLongTermChanges(conversationMemory, undone, true);
                 return true;
             } else {
                 return false;
@@ -1001,10 +1174,12 @@ public class ConversationService implements IConversationService {
                 // Same second-writer race as undo (see above): CAS from the loaded
                 // state so a concurrent say-turn pause commit is not clobbered.
                 if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForRedo)) {
-                    LOGGER.warnf("Redo of conversation %s aborted: state changed concurrently (was %s)",
+                    LOGGER.warnf("Redo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
                             conversationId, loadedStateForRedo);
                     return false;
                 }
+                applyAgentMemoryConfig(environment, conversationMemory, conversationMemory.getCurrentStep());
+                syncLongTermChanges(conversationMemory, conversationMemory.getCurrentStep(), false);
                 return true;
             } else {
                 return false;
@@ -1094,6 +1269,7 @@ public class ConversationService implements IConversationService {
         requireConversationAccess(conversationId);
         requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
+        refuseIfSoftDeleted(conversationId, snapshot);
         say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                 rerunOnly, responseHandler);
     }
@@ -1117,8 +1293,51 @@ public class ConversationService implements IConversationService {
         requireConversationAccess(conversationId);
         requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
+        refuseIfSoftDeleted(conversationId, snapshot);
         sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
                 inputData, streamingHandler);
+    }
+
+    /**
+     * Refuses a turn on a conversation that was soft-deleted but is not ENDED, and
+     * ends it on the way.
+     * <p>
+     * Soft delete ends the conversation since this was fixed, but conversations
+     * soft-deleted by earlier releases were left READY: their owner (the
+     * conversation guard resolves the owner from the archived descriptor) could
+     * still drive them, and the retention sweep — which only looks at ENDED
+     * conversations — never removed them. This is the lazy migration for those: the
+     * first attempt to continue one ends it (HITL-aware, like the delete itself)
+     * and answers as for any ended conversation. It costs one descriptor read on
+     * the conversation-id entry points (REST, SSE, MCP, Slack, {@code /v1}); the
+     * internal agent-driven overloads are not affected.
+     */
+    private void refuseIfSoftDeleted(String conversationId, ConversationMemorySnapshot snapshot)
+            throws ConversationEndedException, ResourceStoreException {
+        if (snapshot.getConversationState() == ConversationState.ENDED || !isSoftDeleted(conversationId)) {
+            return;
+        }
+        LOGGER.infof("Conversation %s was deleted before soft delete ended conversations — ending it now", sanitize(conversationId));
+        endConversation(conversationId, SOFT_DELETED_ACTOR);
+        throw new ConversationEndedException("Conversation has ended!");
+    }
+
+    /**
+     * No live descriptor, but an archived one: the conversation was soft-deleted.
+     */
+    private boolean isSoftDeleted(String conversationId) throws ResourceStoreException {
+        try {
+            if (conversationDescriptorStore.readDescriptor(conversationId, 0) != null) {
+                return false;
+            }
+        } catch (ResourceNotFoundException e) {
+            // no live descriptor — check the archive
+        }
+        try {
+            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, 0) != null;
+        } catch (ResourceNotFoundException e) {
+            return false;
+        }
     }
 
     /**
@@ -1151,13 +1370,15 @@ public class ConversationService implements IConversationService {
 
     @Override
     public Boolean isUndoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        // requireSnapshot, not the raw load: a missing conversation was a null
+        // dereference here, i.e. a 500 where every sibling endpoint answers 404.
+        var snapshot = requireSnapshot(conversationId);
         return isUndoAvailable(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
     }
 
     @Override
     public boolean undo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var snapshot = requireSnapshot(conversationId);
         try {
             return undo(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
         } catch (AgentMismatchException e) {
@@ -1168,13 +1389,13 @@ public class ConversationService implements IConversationService {
 
     @Override
     public Boolean isRedoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var snapshot = requireSnapshot(conversationId);
         return isRedoAvailable(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
     }
 
     @Override
     public boolean redo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        var snapshot = requireSnapshot(conversationId);
         try {
             return redo(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
         } catch (AgentMismatchException e) {
@@ -1185,7 +1406,164 @@ public class ConversationService implements IConversationService {
 
     // --- Internal helpers ---
 
+    /**
+     * Carries an undo ({@code revert}) or redo of {@code step}'s {@code longTerm}
+     * property changes into the user memory store, which the conversation-memory
+     * undo cannot reach: a slot the undone turn filled stayed filled in every later
+     * conversation.
+     * <p>
+     * Deliberately conservative. The store is shared with the user's other
+     * conversations and agents, so only the entry this step wrote is rewritten: the
+     * one at the identity the turn persisted it under (the shared {@code global}
+     * row, or this agent's own row — the two can coexist for one key), still
+     * holding this step's value, and last written by this conversation. Anything
+     * else is left alone, including when that cannot be told apart. The replacement
+     * is persisted the way a turn persists it
+     * ({@link ConversationGroups#persistedVisibility}), so an undo that reverts a
+     * visibility change reverts it in the store too. An entry is only recreated
+     * when none exists for the key. Best effort: a store failure is logged, the
+     * undo itself stands.
+     */
+    void syncLongTermChanges(IConversationMemory memory, IConversationMemory.IConversationStep step, boolean revert) {
+        if (userMemoryStore == null || step == null) {
+            return;
+        }
+        var changes = ConversationMemory.propertyChanges(step);
+        if (changes.isEmpty()) {
+            return;
+        }
+        String userId = memory.getUserId();
+        String agentId = memory.getAgentId();
+        String conversationId = memory.getConversationId();
+        AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
+        List<String> groupIds = ConversationGroups.resolveGroupIds(memory, groupMembershipCheck());
+        changes.forEach((key, beforeAfter) -> {
+            Property stored = revert ? beforeAfter[1] : beforeAfter[0];
+            Property target = revert ? beforeAfter[0] : beforeAfter[1];
+            boolean storedIsLongTerm = stored != null && stored.getScope() == Property.Scope.longTerm;
+            boolean targetIsLongTerm = target != null && target.getScope() == Property.Scope.longTerm;
+            if (!storedIsLongTerm && !targetIsLongTerm) {
+                return;
+            }
+            // GDPR bookkeeping is never written from a conversation — the store refuses
+            // it, as the turn boundary does (Conversation.storePropertiesPermanently).
+            if (IUserMemoryStore.isReservedKey(key)) {
+                return;
+            }
+            try {
+                List<UserMemoryEntry> sameKey = userMemoryStore.getAllEntries(userId).stream()
+                        .filter(e -> key.equals(e.key()))
+                        .filter(e -> e.visibility() == Visibility.global || Objects.equals(agentId, e.sourceAgentId()))
+                        .toList();
+                if (storedIsLongTerm) {
+                    UserMemoryEntry current = entryWrittenByStep(sameKey, stored, userId, agentId, conversationId, config, groupIds);
+                    if (current == null) {
+                        return; // changed since this step, or not distinguishable — not ours to rewrite
+                    }
+                    if (!targetIsLongTerm) {
+                        userMemoryStore.deleteEntry(current.id());
+                        return;
+                    }
+                    Visibility visibility = restoredVisibility(target, config, groupIds, current.visibility());
+                    List<String> groups = visibility == Visibility.group ? groupIds : List.of();
+                    boolean sameIdentity = (visibility == Visibility.global) == (current.visibility() == Visibility.global);
+                    if (sameIdentity) {
+                        Object value = UserMemoryEntry.fromProperty(target, userId, agentId, null, Visibility.self).value();
+                        userMemoryStore.upsert(new UserMemoryEntry(current.id(), userId, key, value, current.category(), visibility,
+                                current.sourceAgentId(), groups, conversationId, false, current.accessCount(), current.createdAt(),
+                                current.updatedAt()));
+                    } else if (sameKey.stream().noneMatch(e -> (e.visibility() == Visibility.global) == (visibility == Visibility.global))) {
+                        // The entry moves between the shared global row and this agent's
+                        // row, which are different documents.
+                        userMemoryStore.deleteEntry(current.id());
+                        userMemoryStore.upsert(UserMemoryEntry.fromProperty(target, userId, agentId, conversationId, visibility, groups));
+                    }
+                    // else: an entry this step did not write already sits where the value
+                    // would go — leave both rather than overwrite it.
+                } else if (sameKey.isEmpty()) {
+                    // The step removed (or never stored) the key; recreate it only when
+                    // nothing has taken its place.
+                    Visibility visibility = restoredVisibility(target, config, groupIds, Visibility.self);
+                    userMemoryStore.upsert(UserMemoryEntry.fromProperty(target, userId, agentId, conversationId, visibility,
+                            visibility == Visibility.group ? groupIds : List.of()));
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Could not %s long-term property '%s' for conversation %s: %s", revert ? "revert" : "re-apply",
+                        sanitize(key), sanitize(conversationId), e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * The entry {@code step} left for {@code stored}: its value, last written by
+     * this conversation, at the identity the turn persisted it under. {@code null}
+     * when there is none — or when the identity is unknown (no visibility on the
+     * property, no agent config to read the default from) and both rows qualify.
+     */
+    private static UserMemoryEntry entryWrittenByStep(List<UserMemoryEntry> sameKey, Property stored, String userId, String agentId,
+                                                      String conversationId, AgentConfiguration.UserMemoryConfig config,
+                                                      List<String> groupIds) {
+        Object expected = UserMemoryEntry.fromProperty(stored, userId, agentId, null, Visibility.self).value();
+        List<UserMemoryEntry> candidates = sameKey.stream()
+                .filter(e -> Objects.equals(e.value(), expected))
+                .filter(e -> Objects.equals(conversationId, e.sourceConversationId()))
+                .toList();
+        if (stored.getVisibility() != null || config != null) {
+            boolean global = ConversationGroups.persistedVisibility(stored, config, groupIds) == Visibility.global;
+            return candidates.stream().filter(e -> (e.visibility() == Visibility.global) == global).findFirst().orElse(null);
+        }
+        return candidates.size() == 1 ? candidates.get(0) : null;
+    }
+
+    /**
+     * Where {@code target} is persisted: as a turn would, when its visibility is
+     * known. A property without one follows the agent's default — and when that
+     * config is unavailable, {@code fallback} is used rather than a guess: the
+     * scope the entry already has, or {@code self} for a new one, which never
+     * widens who can read it.
+     */
+    private static Visibility restoredVisibility(Property target, AgentConfiguration.UserMemoryConfig config, List<String> groupIds,
+                                                 Visibility fallback) {
+        if (target.getVisibility() == null && config == null) {
+            return fallback == Visibility.group && groupIds.isEmpty() ? Visibility.self : fallback;
+        }
+        return ConversationGroups.persistedVisibility(target, config, groupIds);
+    }
+
+    /**
+     * Undo and redo run outside a turn, so the loaded memory has no
+     * {@code userMemoryConfig} (it is applied per turn and never persisted). Reads
+     * it from the agent version that ran {@code step} — recorded on the step, since
+     * a conversation can move between compatible versions whose defaults differ —
+     * so {@link #syncLongTermChanges} persists the way that turn did. A step from
+     * before versions were recorded uses the conversation's version. When that
+     * version is not deployed it stays unset and the sync falls back to never
+     * widening a scope: another version's policy is not the one that governed the
+     * step.
+     */
+    void applyAgentMemoryConfig(Environment environment, IConversationMemory memory, IConversationMemory.IConversationStep step) {
+        Integer version = memory.getAgentVersion();
+        IData<Integer> ranOn = step == null ? null : step.getLatestData(MemoryKeys.AGENT_VERSION);
+        if (ranOn != null && ranOn.getResult() != null) {
+            version = ranOn.getResult();
+        }
+        try {
+            IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), version);
+            if (agent != null) {
+                memory.setUserMemoryConfig(agent.getUserMemoryConfig());
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Agent config for conversation %s unavailable for the long-term undo sync: %s",
+                    sanitize(memory.getConversationId()), e.getMessage());
+        }
+    }
+
     IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig) {
+        return createPropertiesHandler(userId, memoryConfig, memoryConfig != null);
+    }
+
+    IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig,
+                                               final boolean memoryToolsEnabled) {
         return new IPropertiesHandler() {
             @Override
             public IUserMemoryStore getUserMemoryStore() {
@@ -1195,6 +1573,11 @@ public class ConversationService implements IConversationService {
             @Override
             public AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
                 return memoryConfig;
+            }
+
+            @Override
+            public boolean isMemoryToolsEnabled() {
+                return memoryToolsEnabled;
             }
 
             @Override
@@ -1211,7 +1594,22 @@ public class ConversationService implements IConversationService {
             public int getMaxAttachmentsPerTurn() {
                 return maxAttachmentsPerTurn;
             }
+
+            @Override
+            public ConversationGroups.MembershipCheck getGroupMembershipCheck() {
+                return groupMembershipCheck();
+            }
         };
+    }
+
+    /**
+     * Confirms an earlier step's {@code groupId} against the running discussion, or
+     * {@code null} when no registry is wired (direct construction in tests), in
+     * which case only the current step's {@code groupId} counts.
+     */
+    private ConversationGroups.MembershipCheck groupMembershipCheck() {
+        LiveDiscussionRegistry registry = liveDiscussionRegistry;
+        return registry != null ? registry::isLiveMember : null;
     }
 
     /**
@@ -1293,6 +1691,99 @@ public class ConversationService implements IConversationService {
         return resolutionPrincipalContext.withPrincipal(principal, executeConversation);
     }
 
+    /**
+     * The agent version the next turn of this conversation runs on.
+     * <p>
+     * A conversation with a compatibility generation runs on the highest version of
+     * that generation that is {@code READY} on this node, moving to it if that is
+     * not where it is — a newer compatible version as soon as it is deployed, or an
+     * older one when the newer one was undeployed (a rollback) or has not reached
+     * this node yet. "Compatible" is declared in both directions for exactly that
+     * reason.
+     * <p>
+     * Everything else takes today's path, {@link #getAgent}: a conversation without
+     * a generation (pinned), a paused one (a resume must finish on the version that
+     * paused it; {@code say} refuses those anyway), and one whose generation has no
+     * version ready here — which deploys its own version on demand, as it always
+     * did.
+     */
+    IAgent resolveConversationAgent(Environment environment, IConversationMemory memory) throws ServiceException, IllegalAccessException {
+        Integer generation = memory.getCompatibilityGeneration();
+        if (generation != null && memory.getConversationState() != ConversationState.AWAITING_HUMAN) {
+            IAgent candidate = agentFactory.getLatestReadyAgentOfGeneration(environment, memory.getAgentId(), generation);
+            if (candidate != null) {
+                if (!Objects.equals(candidate.getAgentVersion(), memory.getAgentVersion())) {
+                    moveToAgentVersion(memory, candidate.getAgentVersion(), generation);
+                }
+                return candidate;
+            }
+        }
+        return getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
+    }
+
+    private void moveToAgentVersion(IConversationMemory memory, Integer toVersion, Integer generation) {
+        Integer fromVersion = memory.getAgentVersion();
+        memory.switchAgentVersion(toVersion);
+        LOGGER.infof("Conversation %s moves from version %s to version %s of agent %s (compatibility generation %s)",
+                sanitize(memory.getConversationId()), fromVersion, toVersion, sanitize(memory.getAgentId()), generation);
+    }
+
+    /**
+     * A queued turn is rebuilt over the reloaded document when another turn
+     * committed while it waited (see {@code ConversationStepRunner.TurnBuilder}).
+     * That document holds the version it was stored on, not the one resolved for
+     * this turn, so it moves there too — the agent that runs the turn is the one
+     * resolved for it. Only within the conversation's own generation: a
+     * conversation that does not follow versions was resolved to its own.
+     */
+    static void adoptResolvedAgentVersion(IConversationMemory memory, IAgent agent) {
+        Integer resolved = agent.getAgentVersion();
+        Integer generation = memory.getCompatibilityGeneration();
+        if (resolved != null && !Objects.equals(resolved, memory.getAgentVersion()) && generation != null
+                && generation.equals(agent.getCompatibilityGeneration())) {
+            memory.switchAgentVersion(resolved);
+        }
+    }
+
+    /**
+     * Once a turn has run on another version than the conversation was stored on:
+     * count the move, and point the descriptor — which names the agent version too,
+     * and which conversation listings filter on — at the version it ran on.
+     * <p>
+     * After the turn rather than when the version is resolved: a turn refused
+     * between the two (quota, a queued turn skipped) must not leave the descriptor
+     * naming a version the conversation never ran on.
+     * <p>
+     * A failed descriptor update is remembered on the memory, which this turn
+     * persists after this runs, and retried by later turns until it succeeds —
+     * otherwise every later turn, already on the new version, would see nothing to
+     * do and the listings would name the old version for good. The conversation
+     * runs on the right version either way.
+     */
+    void recordAgentVersionMove(IConversationMemory memory, Integer storedVersion) {
+        Integer ranOn = memory.getAgentVersion();
+        if (ranOn == null) {
+            return;
+        }
+        if (!Objects.equals(ranOn, storedVersion)) {
+            counterAgentVersionSwitch.increment();
+        }
+        Integer stale = memory.getStaleDescriptorAgentVersion();
+        Integer named = stale != null ? stale : storedVersion;
+        if (Objects.equals(ranOn, named)) {
+            memory.setStaleDescriptorAgentVersion(null);
+            return;
+        }
+        try {
+            conversationSetup.updateConversationAgentVersion(memory.getConversationId(), memory.getAgentId(), ranOn);
+            memory.setStaleDescriptorAgentVersion(null);
+        } catch (Exception e) {
+            memory.setStaleDescriptorAgentVersion(named);
+            LOGGER.warnf("Conversation %s runs on version %s of agent %s, but its descriptor still names version %s; the next turn retries: %s",
+                    sanitize(memory.getConversationId()), ranOn, sanitize(memory.getAgentId()), named, e.getMessage());
+        }
+    }
+
     IAgent getAgent(Environment environment, String agentId, Integer agentVersion) throws ServiceException, IllegalAccessException {
 
         IAgent agent = agentFactory.getAgent(environment, agentId, agentVersion);
@@ -1311,10 +1802,12 @@ public class ConversationService implements IConversationService {
     // on this class, and ConversationHitlService calls the rest by name.
 
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                                                     Map<String, String> loggingContext, Callable<Void> executeConversation,
-                                                     Consumer<IConversationMemory> skipNotifier, ProcessingTurn processingTurn) {
+                                                     Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
+                                                     boolean rebuildWhenSuperseded, Consumer<IConversationMemory> skipNotifier,
+                                                     ProcessingTurn processingTurn)
+            throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
-                loggingContext, executeConversation, skipNotifier, processingTurn);
+                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn);
     }
 
     void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {

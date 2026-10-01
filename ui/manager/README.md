@@ -42,7 +42,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 If you want to develop the Manager UI itself:
 
 ```bash
-# Prerequisites: Node.js ≥ 22.18 (Stryker 10's Babel 8 floor; the build pins 22.23.2), EDDI backend on localhost:7070
+# Prerequisites: Node.js ≥ 22.18 (Stryker 10's Babel 8 floor; the build pins 24.21.0), EDDI backend on localhost:7070
 npm install
 npm run dev          # Vite dev server on http://localhost:3000
 ```
@@ -58,7 +58,7 @@ npm run build        # Production build
 
 | Layer      | Technology                                      |
 | ---------- | ----------------------------------------------- |
-| Build      | Vite 6                                          |
+| Build      | Vite 8                                          |
 | UI         | React 19 + TypeScript 5 (strict)                |
 | Styling    | Tailwind CSS v4                                 |
 | State      | TanStack Query v5 + Zustand                     |

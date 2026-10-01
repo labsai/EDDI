@@ -22,7 +22,9 @@ import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -32,15 +34,19 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -115,6 +121,151 @@ class VaultGrantCheckerTest {
         oauth.setClientSecret(clientSecret);
         connection.setOauth(oauth);
         return connection;
+    }
+
+    /**
+     * {@code references()} feeds the "these deployed agents lose access" warning. A
+     * false negative there is the dangerous direction — the operator narrows a
+     * grant believing nothing uses it — so every way an agent can reach a secret is
+     * pinned here rather than assumed to follow from sharing the traversal.
+     */
+    @Nested
+    @DisplayName("references() — does an agent use this secret at all")
+    class References {
+
+        private static final String AGENT_ID = "7c1d2e3f4a5b6c7d8e9f0a1b";
+        private static final SecretReference KEY = new SecretReference("default", "llm-api-key");
+
+        /** A deployed agent whose one httpcall target carries {@code text}. */
+        private void deployedAgentWhoseCallCarries(String text) throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/?key=" + text);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+        }
+
+        @Test
+        @DisplayName("a short-form reference counts as the default tenant's key")
+        void shortForm() throws Exception {
+            deployedAgentWhoseCallCarries("${vault:llm-api-key}");
+            assertTrue(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("a full-form reference matches its own tenant and not the default one")
+        void fullFormOtherTenant() throws Exception {
+            deployedAgentWhoseCallCarries("${vault:acme/llm-api-key}");
+            assertTrue(checker.references(AGENT_ID, 1, new SecretReference("acme", "llm-api-key")));
+            assertFalse(checker.references(AGENT_ID, 1, KEY), "same key name in another tenant is another secret");
+        }
+
+        @Test
+        @DisplayName("the legacy ${eddivault:…} prefix counts")
+        void legacyPrefix() throws Exception {
+            deployedAgentWhoseCallCarries("${eddivault:llm-api-key}");
+            assertTrue(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("a secret reached through a ${connection:…} counts")
+        void throughAConnection() throws Exception {
+            var agent = agentReferencingTheConnection();
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(connectionStore.readByName("default", "jira")).thenReturn(oauthConnection("${vault:llm-api-key}"));
+
+            assertTrue(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("a secret reached through a ${vars:…} counts")
+        void throughAVariable() throws Exception {
+            deployedAgentWhoseCallCarries("${vars:model-key}");
+            when(globalVariableResolver.resolveValue("${vars:model-key}", "default")).thenReturn("${vault:llm-api-key}");
+
+            assertTrue(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("an agent that names a different key does not count")
+        void differentKey() throws Exception {
+            deployedAgentWhoseCallCarries("${vault:some-other-key}");
+            assertFalse(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("an agent that cannot be read is reported as not referencing, never as an exception")
+        void unreadableAgent() throws Exception {
+            when(agentStore.read(AGENT_ID, 1)).thenThrow(new ResourceStoreException("store down"));
+            assertFalse(checker.references(AGENT_ID, 1, KEY));
+        }
+
+        /**
+         * S7: "could not read it" is not "does not use it". The impact analysis marks
+         * its answer incomplete on UNKNOWN; answering DOES_NOT_REFERENCE here is what
+         * made it report complete=true for agents it never inspected.
+         */
+        @Test
+        @DisplayName("checkReferences — an unreadable agent is UNKNOWN, not DOES_NOT_REFERENCE")
+        void unreadableAgentIsUnknown() throws Exception {
+            when(agentStore.read(AGENT_ID, 1)).thenThrow(new ResourceStoreException("store down"));
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — an unreadable workflow or extension config is UNKNOWN")
+        void unreadablePartIsUnknown() throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenThrow(new ResourceStoreException("store down"));
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+
+            when(workflowStore.read(anyString(), anyInt())).thenThrow(new RuntimeException("store down"));
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        /**
+         * A store reports absence with ResourceNotFoundException, so a null read is not
+         * a confirmed absence — the part was never inspected.
+         */
+        @Test
+        @DisplayName("checkReferences — a workflow or extension config read as null is UNKNOWN")
+        void nullReadIsUnknown() throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(null);
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+
+            when(workflowStore.read(anyString(), anyInt())).thenReturn(null);
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — a ${vars:…} that cannot be expanded is UNKNOWN, since its value was never scanned")
+        void unexpandableVariableIsUnknown() throws Exception {
+            deployedAgentWhoseCallCarries("${vars:model-key}");
+            when(globalVariableResolver.resolveValue("${vars:model-key}", "default")).thenThrow(new RuntimeException("store down"));
+
+            assertEquals(VaultGrantChecker.ReferenceCheck.UNKNOWN, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — a fully read config that names another key is DOES_NOT_REFERENCE")
+        void readableConfigWithoutTheKey() throws Exception {
+            deployedAgentWhoseCallCarries("${vault:some-other-key}");
+            assertEquals(VaultGrantChecker.ReferenceCheck.DOES_NOT_REFERENCE, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
+
+        @Test
+        @DisplayName("checkReferences — a reference found in the readable part wins over an unreadable part")
+        void foundReferenceWinsOverUnreadablePart() throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            // The agent document itself carries the reference (a Dream credential, say).
+            agent.setDescription("${vault:llm-api-key}");
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenThrow(new ResourceStoreException("store down"));
+            assertEquals(VaultGrantChecker.ReferenceCheck.REFERENCES, checker.checkReferences(AGENT_ID, 1, KEY));
+        }
     }
 
     @Nested
@@ -512,6 +663,88 @@ class VaultGrantCheckerTest {
             when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
 
             assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+    }
+
+    @Nested
+    @DisplayName("referenced tenants — the workspace deploy check")
+    class ReferencedTenants {
+
+        private static final String AGENT_ID = "7c1d2e3f4a5b6c7d8e9f0a1c";
+
+        private void agentWhoseCallCarries(String text) throws Exception {
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            var apiCalls = new ApiCallsConfiguration();
+            apiCalls.setTargetServerUrl("https://api.example.com/?key=" + text);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(apiCalls);
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+        }
+
+        @Test
+        @DisplayName("names every explicit tenant, vault and variables alike, and not the short forms")
+        void explicitTenants() throws Exception {
+            agentWhoseCallCarries("${vault:t.eng.1a2b3c4d/openai}&m=${vars:u.alice.5e6f7a8b/model}&x=${vault:plain}");
+
+            assertEquals(Set.of("t.eng.1a2b3c4d", "u.alice.5e6f7a8b"), checker.referencedTenants(AGENT_ID, 1));
+        }
+
+        @Test
+        @DisplayName("sees a secret hidden behind a variable, as the runtime does")
+        void seesThroughVariables() throws Exception {
+            agentWhoseCallCarries("${vars:u.carol.0a0b0c0d/token}");
+            when(globalVariableResolver.resolveValue("${vars:u.carol.0a0b0c0d/token}", "default")).thenReturn("${vault:t.finance.9e8d7c6b/key}");
+
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).contains("t.finance.9e8d7c6b"),
+                    "a variable in carol's own space holding finance's secret must not smuggle it past the membership check");
+        }
+
+        @Test
+        @DisplayName("follows a connection into its document, so a team secret cannot hide behind one")
+        void followsConnections() throws Exception {
+            agentWhoseCallCarries("${connection:finance-api}");
+            when(connectionStore.readByName("default", "finance-api")).thenReturn(oauthConnection("${vault:t.finance.9e8d7c6b/key}"));
+
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).contains("t.finance.9e8d7c6b"),
+                    "an agent that names only the connection must still count as using finance's secret");
+        }
+
+        @Test
+        @DisplayName("an unreadable workflow or scanned config fails closed; an unscanned step type does not")
+        void unreadableResourcesFailClosed() throws Exception {
+            // "Could not read it" is not "it names no tenant" — a workflow cached from an
+            // earlier build can still resolve whatever it names.
+            agentWhoseCallCarries("unused");
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            when(workflowStore.read(eq(WORKFLOW_ID), anyInt())).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            // An output step is not read by design, so it is not "unreadable".
+            var agent = agentWithStep("ai.labs.output", LLM_ID);
+            when(agentStore.read("output-agent-0000000000", 1)).thenReturn(agent);
+            assertTrue(checker.referencedTenants("output-agent-0000000000", 1).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a missing agent names nothing — the deploy answers 404 — but a store failure fails closed")
+        void missingVersusUnreadableAgent() throws Exception {
+            when(agentStore.read(AGENT_ID, 1)).thenThrow(new ResourceNotFoundException("gone"));
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).isEmpty());
+
+            when(agentStore.read(AGENT_ID, 2)).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 2));
+        }
+
+        @Test
+        @DisplayName("an unreadable connection fails closed; an absent one names nothing")
+        void unreadableConnectionFailsClosed() throws Exception {
+            agentWhoseCallCarries("${connection:finance-api}");
+            when(connectionStore.readByName("default", "finance-api")).thenThrow(new RuntimeException("store down"));
+            assertThrows(VaultGrantChecker.UnverifiableReferencesException.class, () -> checker.referencedTenants(AGENT_ID, 1));
+
+            doReturn(null).when(connectionStore).readByName("default", "finance-api");
+            assertTrue(checker.referencedTenants(AGENT_ID, 1).isEmpty());
         }
     }
 }

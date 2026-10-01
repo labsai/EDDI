@@ -23,15 +23,18 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.secrets.model.SecretReference;
+import io.quarkiverse.mcp.server.ToolArg;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 
 import io.quarkus.security.identity.SecurityIdentity;
@@ -39,6 +42,21 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class McpSetupToolsTest {
+
+    @Test
+    void providerToolArgsNameEveryOpenAiCompatibleProvider() {
+        for (String methodName : List.of("setupAgent", "createApIAgent")) {
+            var method = Arrays.stream(McpSetupTools.class.getDeclaredMethods()).filter(m -> m.getName().equals(methodName))
+                    .findFirst().orElseThrow();
+            String description = Arrays.stream(method.getParameters())
+                    .filter(p -> p.getName().equals("provider") || p.isAnnotationPresent(ToolArg.class)
+                            && p.getAnnotation(ToolArg.class).description().contains("'anthropic' (default)"))
+                    .map(p -> p.getAnnotation(ToolArg.class).description()).findFirst().orElseThrow();
+            for (var provider : OpenAiCompatibleProviders.all()) {
+                assertTrue(description.contains("'" + provider.id() + "'"), methodName + " does not name " + provider.id());
+            }
+        }
+    }
 
     private IRestRuleSetStore behaviorStore;
     private IRestLlmStore langchainStore;

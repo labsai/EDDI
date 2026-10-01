@@ -466,3 +466,101 @@ describe("PropertySetterEditor", () => {
     expect(screen.getByTestId("visibility-select")).toBeInTheDocument();
   });
 });
+
+describe("PropertySetterEditor edge cases", () => {
+  it("renders a setter with no setProperties or actions instead of crashing the page", () => {
+    const data = { setOnActions: [{}] } as unknown as PropertySetterConfig;
+    renderWithProviders(<PropertySetterEditor data={data} onChange={vi.fn()} />);
+    expect(screen.getByText("(no actions)")).toBeInTheDocument();
+  });
+
+  it("warns that a secret read through fromObjectPath is not vaulted", () => {
+    // PropertySetterTask.autoVaultSecret runs only on the valueString path.
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{
+          setOnActions: [
+            {
+              actions: ["a"],
+              setProperties: [
+                { name: "token", valueString: "", scope: "secret", fromObjectPath: "response.token" },
+              ],
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("property-secret-from-path-warning")).toBeInTheDocument();
+  });
+
+  it("does not warn for a secret taken from the value field", () => {
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{
+          setOnActions: [
+            {
+              actions: ["a"],
+              setProperties: [{ name: "token", valueString: "{memory.current.input}", scope: "secret" }],
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("property-secret-from-path-warning")).not.toBeInTheDocument();
+  });
+});
+
+describe("PropertySetterEditor secret warning for non-string values", () => {
+  it("warns for a secret given as valueObject or valueList", () => {
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{
+          setOnActions: [
+            {
+              actions: ["a"],
+              setProperties: [
+                { name: "creds", scope: "secret", valueObject: { key: "v" } },
+                { name: "keys", scope: "secret", valueList: ["k"] },
+              ],
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByTestId("property-secret-from-path-warning")).toHaveLength(2);
+  });
+
+  it("warns for a secret row that also carries a typed value", () => {
+    // PropertySetterTask vaults valueString, then writes valueObject over it
+    // under the same scope — the typed value is what is stored, in plain text.
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{
+          setOnActions: [
+            {
+              actions: ["a"],
+              setProperties: [
+                { name: "creds", scope: "secret", valueString: "{memory.current.input}", valueObject: { key: "v" } },
+              ],
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("property-secret-from-path-warning")).toBeInTheDocument();
+  });
+
+  it("does not warn for a secret row that has no value yet", () => {
+    renderWithProviders(
+      <PropertySetterEditor
+        data={{ setOnActions: [{ actions: ["a"], setProperties: [{ name: "t", valueString: "", scope: "secret" }] }] }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("property-secret-from-path-warning")).not.toBeInTheDocument();
+  });
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Database,
@@ -8,6 +8,7 @@ import {
   Search,
   Upload,
   FileText,
+  Globe,
   Plus,
   X,
   Loader2,
@@ -20,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
+import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
+import type { IngestionSource } from "@/lib/api/ingestion-sources";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +37,8 @@ export interface RagConfig {
   chunkOverlap?: number;
   maxResults?: number;
   minScore?: number;
+  /** Where this knowledge base pulls its own documents from. */
+  sources?: IngestionSource[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -141,11 +146,23 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
   ],
 };
 
+/**
+ * Only `recursive` is implemented. `paragraph` and `sentence` were offered here
+ * but always split recursively, and the backend now rewrites them to
+ * `recursive` on save (`RagConfiguration.LEGACY_CHUNK_STRATEGIES`).
+ */
 const CHUNK_STRATEGIES = [
   { value: "recursive", label: "Recursive (recommended)" },
-  { value: "paragraph", label: "Paragraph" },
-  { value: "sentence", label: "Sentence" },
 ] as const;
+
+/**
+ * Only these two are rewritten to `recursive` on save; any other unknown
+ * strategy (from an import, a hand edit) is refused by
+ * `RagConfiguration.validate()` with a 400.
+ */
+const LEGACY_CHUNK_STRATEGIES = new Set(["paragraph", "sentence"]);
+const isLegacyChunkStrategy = (value: string | undefined) =>
+  LEGACY_CHUNK_STRATEGIES.has((value ?? "").trim().toLowerCase());
 
 // ─── Section Component ──────────────────────────────────────────────────────
 
@@ -356,25 +373,42 @@ interface IngestionStatus {
   ingestionId: string;
   status: string;
   documentName: string;
+  /** A caveat on a completed ingestion — e.g. a replacement the vector store could not carry out. */
+  warning?: string;
 }
 
 function IngestionPanel({
   kbId,
   version,
   readOnly,
+  hasUnsavedChanges,
 }: {
   kbId: string;
   version: number;
   readOnly?: boolean;
+  /**
+   * The ingest endpoint resolves the *saved* knowledge base: its store, its
+   * embedding model, its chunking. Ingesting with unsaved edits on screen put
+   * the documents into the old store with the old model — and nothing told
+   * the user.
+   */
+  hasUnsavedChanges?: boolean;
 }) {
   const { t } = useTranslation();
   const [ingestions, setIngestions] = useState<IngestionStatus[]>([]);
   const [textContent, setTextContent] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  // Off by default: without it, ingesting a file name twice keeps both copies,
+  // which is the long-standing behaviour of this endpoint.
+  const [replaceSameName, setReplaceSameName] = useState(false);
   const mountedRef = useRef(true);
 
-  // Cleanup: mark unmounted so polling stops updating state
+  // Cleanup: mark unmounted so polling stops updating state. Set on mount as well,
+  // not only initialised: StrictMode mounts, unmounts and mounts again, and a ref
+  // that only the cleanup writes stays false from then on — every poll returned
+  // at once and an ingestion sat at "processing" for ever in development.
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -388,13 +422,13 @@ function IngestionPanel({
         if (!mountedRef.current) return;
         attempts++;
         try {
-          const result = await api.get<{ status: string }>(
+          const result = await api.get<{ status: string; warning?: string }>(
             `/ragstore/rags/${kbId}/ingestion/${ingestionId}/status`,
           );
           if (!mountedRef.current) return;
           setIngestions((prev) =>
             prev.map((ing) =>
-              ing.ingestionId === ingestionId ? { ...ing, status: result.status } : ing,
+              ing.ingestionId === ingestionId ? { ...ing, status: result.status, warning: result.warning } : ing,
             ),
           );
           if ((result.status === "processing" || result.status === "pending") && attempts < MAX_POLL_ATTEMPTS) {
@@ -421,7 +455,7 @@ function IngestionPanel({
   );
 
   const startIngestion = useCallback(
-    async (content: string, name: string) => {
+    async (content: string, name: string, replace = false) => {
       const tempId = `local-${Date.now()}`;
       setIngestions((prev) => [...prev, { ingestionId: tempId, status: "uploading", documentName: name }]);
 
@@ -432,6 +466,7 @@ function IngestionPanel({
           version: String(version),
           documentName: name,
         });
+        if (replace) params.set("replace", "true");
         const response = await fetch(
           `${api.getBaseUrl()}/ragstore/rags/${kbId}/ingest?${params.toString()}`,
           {
@@ -468,13 +503,38 @@ function IngestionPanel({
     [kbId, version, pollStatus],
   );
 
+  // What the editor looks like *now*, for a file read that finished after the
+  // render that started it: the check at drop time is not enough on its own.
+  // Updated in a layout effect, i.e. during the commit that shows the new props:
+  // a passive effect can run after the browser has already handled other tasks,
+  // and a FileReader.onload among them would read the previous guard.
+  const readGuard = useRef({ dirty: Boolean(hasUnsavedChanges), version });
+  useLayoutEffect(() => {
+    readGuard.current = { dirty: Boolean(hasUnsavedChanges), version };
+  }, [hasUnsavedChanges, version]);
+
   const handleFiles = useCallback(
     (files: FileList) => {
+      if (hasUnsavedChanges) return;
       Array.from(files).forEach((file) => {
         const reader = new FileReader();
         reader.onload = () => {
+          if (!mountedRef.current) return;
+          // Edited (or saved as a new version) while the file was being read:
+          // the ingest would go to a knowledge base other than the one on screen.
+          if (readGuard.current.dirty || readGuard.current.version !== version) {
+            setIngestions((prev) => [
+              ...prev,
+              {
+                ingestionId: `err-${Date.now()}`,
+                status: `failed: ${file.name} was not ingested — the knowledge base changed while it was read`,
+                documentName: file.name,
+              },
+            ]);
+            return;
+          }
           const content = reader.result as string;
-          startIngestion(content, file.name);
+          startIngestion(content, file.name, replaceSameName);
         };
         reader.onerror = () => {
           setIngestions((prev) => [
@@ -485,19 +545,31 @@ function IngestionPanel({
         reader.readAsText(file);
       });
     },
-    [startIngestion],
+    [startIngestion, hasUnsavedChanges, version, replaceSameName],
   );
 
   const handleTextIngest = useCallback(() => {
-    if (!textContent.trim()) return;
+    if (!textContent.trim() || hasUnsavedChanges) return;
     startIngestion(textContent, `text-${Date.now()}.txt`);
     setTextContent("");
-  }, [textContent, startIngestion]);
+  }, [textContent, startIngestion, hasUnsavedChanges]);
 
   if (readOnly) return null;
 
   return (
     <div className="space-y-3" data-testid="ingestion-panel">
+      {hasUnsavedChanges && (
+        <p
+          className="text-xs text-amber-700 dark:text-amber-400"
+          role="alert"
+          data-testid="ingestion-save-first"
+        >
+          {t(
+            "ragEditor.saveBeforeIngest",
+            "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen.",
+          )}
+        </p>
+      )}
       {/* Drop zone */}
       <div
         onDragOver={(e) => {
@@ -512,10 +584,12 @@ function IngestionPanel({
         }}
         className={cn(
           "rounded-lg border-2 border-dashed p-4 text-center transition-colors",
-          dragOver
+          dragOver && !hasUnsavedChanges
             ? "border-primary bg-primary/5"
             : "border-muted-foreground/20 hover:border-muted-foreground/40",
+          hasUnsavedChanges && "opacity-60",
         )}
+        data-testid="ingestion-dropzone"
       >
         <Upload className="mx-auto h-6 w-6 text-muted-foreground/50 mb-1.5" />
         <p className="text-xs text-muted-foreground">
@@ -524,7 +598,12 @@ function IngestionPanel({
         <p className="text-[10px] text-muted-foreground/60 mt-0.5">
           {t("ragEditor.dropHint", "Text, Markdown, or any text-based file")}
         </p>
-        <label className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/50 transition-colors">
+        <label
+          className={cn(
+            "mt-2 inline-flex items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground transition-colors",
+            hasUnsavedChanges ? "cursor-not-allowed" : "cursor-pointer hover:bg-muted/50",
+          )}
+        >
           <FileText className="h-3 w-3" />
           {t("ragEditor.browse", "Browse")}
           <input
@@ -532,8 +611,19 @@ function IngestionPanel({
             multiple
             accept=".txt,.md,.csv,.json,.xml,.html"
             className="hidden"
+            disabled={hasUnsavedChanges}
             onChange={(e) => e.target.files && handleFiles(e.target.files)}
+            data-testid="ingestion-file-input"
           />
+        </label>
+        <label className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={replaceSameName}
+            onChange={(e) => setReplaceSameName(e.target.checked)}
+            data-testid="ingest-replace-same-name"
+          />
+          {t("ragEditor.replaceSameName", "Replace a previously ingested document with the same file name")}
         </label>
       </div>
 
@@ -553,7 +643,9 @@ function IngestionPanel({
           <button
             type="button"
             onClick={handleTextIngest}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            disabled={hasUnsavedChanges}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="ingest-text-btn"
           >
             <Upload className="h-3 w-3" />
             {t("ragEditor.ingestText", "Ingest Text")}
@@ -573,7 +665,7 @@ function IngestionPanel({
           {ingestions.map((ing) => (
             <div
               key={ing.ingestionId}
-              className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2"
+              className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2"
             >
               {ing.status === "completed" ? (
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
@@ -597,6 +689,11 @@ function IngestionPanel({
               >
                 {ing.status}
               </span>
+              {ing.warning && (
+                <span className="basis-full text-[10px] text-warning" role="status">
+                  {ing.warning}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -613,9 +710,18 @@ export interface RagEditorProps {
   readOnly?: boolean;
   resourceId?: string;
   version?: number;
+  /** Unsaved edits in the editor. Running a source would use the saved config. */
+  isDirty?: boolean;
 }
 
-export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }: RagEditorProps) {
+export function RagEditor({
+  data,
+  onChange,
+  readOnly,
+  resourceId,
+  version = 1,
+  isDirty,
+}: RagEditorProps) {
   const { t } = useTranslation();
 
   // Cache per-store-type params so switching back preserves values
@@ -627,6 +733,10 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
   const selectedStore = STORE_TYPES.find((s) => s.value === data.storeType);
   const storeHints = STORE_PARAM_HINTS[data.storeType ?? "in-memory"] ?? [];
   const embeddingHints = EMBEDDING_PARAM_HINTS[data.embeddingProvider ?? "openai"] ?? [];
+
+  const unknownChunkStrategy =
+    !!data.chunkStrategy?.trim() &&
+    !CHUNK_STRATEGIES.some((s) => s.value === data.chunkStrategy!.trim().toLowerCase());
 
   // Deterministic chunk preview bar heights (stable across re-renders)
   const chunkCount = Math.min(6, Math.ceil(2048 / (data.chunkSize ?? 512)));
@@ -829,7 +939,26 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
                   {s.label}
                 </option>
               ))}
+              {unknownChunkStrategy && (
+                <option value={data.chunkStrategy} disabled>
+                  {isLegacyChunkStrategy(data.chunkStrategy)
+                    ? t("ragEditor.chunkStrategyLegacy", "{{value}} (saved as Recursive)", {
+                        value: data.chunkStrategy,
+                      })
+                    : t("ragEditor.chunkStrategyUnsupported", "{{value}} (not supported)", {
+                        value: data.chunkStrategy,
+                      })}
+                </option>
+              )}
             </select>
+            {unknownChunkStrategy && !isLegacyChunkStrategy(data.chunkStrategy) && (
+              <p className="mt-1 text-[10px] text-destructive" role="alert" data-testid="chunk-strategy-unsupported">
+                {t(
+                  "ragEditor.chunkStrategyUnsupportedHint",
+                  "The server refuses this strategy when you save. Choose Recursive.",
+                )}
+              </p>
+            )}
           </div>
 
           {/* Chunk size slider */}
@@ -1002,6 +1131,24 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
         </div>
       </Section>
 
+      {/* ══════ Ingestion Sources ══════ */}
+      <Section
+        label={t("ragEditor.sources.title", "Ingestion Sources")}
+        icon={Globe}
+        accent="text-sky-500"
+        defaultOpen={false}
+        badge={data.sources?.length ? String(data.sources.length) : undefined}
+      >
+        <IngestionSourcesPanel
+          sources={data.sources ?? []}
+          onChange={(sources) => onChange({ ...data, sources })}
+          kbId={resourceId}
+          version={version}
+          readOnly={readOnly}
+          hasUnsavedChanges={isDirty}
+        />
+      </Section>
+
       {/* ══════ Document Ingestion ══════ */}
       <Section
         label={t("ragEditor.ingestion", "Document Ingestion")}
@@ -1010,7 +1157,12 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
         defaultOpen={false}
       >
         {resourceId ? (
-          <IngestionPanel kbId={resourceId} version={version} readOnly={readOnly} />
+          <IngestionPanel
+            kbId={resourceId}
+            version={version}
+            readOnly={readOnly}
+            hasUnsavedChanges={isDirty}
+          />
         ) : (
           <p className="text-xs text-muted-foreground italic">
             {t("ragEditor.saveFirstIngestion", "Save this knowledge base first to enable document ingestion.")}

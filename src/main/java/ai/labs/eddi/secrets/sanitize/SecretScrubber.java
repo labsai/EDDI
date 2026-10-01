@@ -80,6 +80,32 @@ public class SecretScrubber {
     private static final Pattern SOLE_CONNECTION_REFERENCE = Pattern.compile("\\s*" + ConnectionReference.CONNECTION_PATTERN + "\\s*");
 
     /**
+     * A single {@code ${vault:…}} or {@code ${eddivault:…}} reference. Used to
+     * strip the pointers out of a value so what remains can be judged on its own —
+     * see {@link #scrubTextValue}.
+     */
+    private static final Pattern VAULT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault):[^}]*\\}");
+
+    /**
+     * Splits a vault-reference remainder into candidate credential segments: any
+     * run of characters {@link #KEY_LIKE_PATTERN} does not admit ends a segment.
+     * Splitting on whitespace alone left punctuation glued to a credential —
+     * {@code "sk-live-…,"} — and the whole-token key pattern then rejected it.
+     */
+    private static final Pattern NON_KEY_CHARACTERS = Pattern.compile("[^a-zA-Z0-9_.+/~$\\-]+");
+
+    /**
+     * Words that may legitimately sit beside a vault reference in a
+     * credential-named field: HTTP authorization schemes and their common vendor
+     * variants, as in {@code "Authorization": "Bearer ${vault:k}"}. Compared
+     * case-insensitively. Anything else next to a reference in such a field is
+     * treated as a possible plaintext credential — see
+     * {@link #isReferenceScaffolding(String)}.
+     */
+    private static final Set<String> AUTH_SCHEME_WORDS = Set.of("bearer", "basic", "digest", "token", "bot", "apikey", "api-key", "key",
+            "ssws", "oauth", "negotiate", "hmac");
+
+    /**
      * Fields whose value is a schema-fixed identifier — a discriminator, a name, or
      * a memory path — and therefore never a credential. Exempt from the entropy
      * heuristic; see {@link #isStructuralFieldName(String)} for why.
@@ -160,6 +186,43 @@ public class SecretScrubber {
         }
     }
 
+    /**
+     * Whether scrubbing {@code json} would redact anything — that is, whether it
+     * holds a value this class treats as a credential, judged by exactly the rules
+     * {@link #scrubJson(String)} applies. Nothing is changed.
+     *
+     * <p>
+     * For callers that must keep a credential out of somewhere rather than mask it
+     * in place, such as the migration that copies legacy properties into long-term
+     * memory. JSON that cannot be parsed answers {@code true}: a value that could
+     * not be inspected has not been shown to be safe.
+     * </p>
+     */
+    public boolean containsCredential(String json) {
+        if (json == null || json.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode original = objectMapper.readTree(json);
+            JsonNode scrubbed = original.deepCopy();
+            scrubNode(scrubbed, null);
+            return !scrubbed.equals(original);
+        } catch (Exception e) {
+            LOGGER.warnv("Could not parse JSON to check it for credentials, treating it as holding one: {0}", e.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * Whether a field of this name holds a credential, whatever its value — the
+     * name rules of {@link #scrubJson(String)} on their own. A caller that walks a
+     * structure itself needs them for a credential-named field whose value is an
+     * object: the scrubber judges the strings inside by their own names.
+     */
+    public static boolean isCredentialFieldName(String fieldName) {
+        return isSecretFieldName(fieldName, null);
+    }
+
     private void scrubNode(JsonNode node, String parentFieldName) {
         if (node.isObject()) {
             ObjectNode objectNode = (ObjectNode) node;
@@ -236,9 +299,34 @@ public class SecretScrubber {
         // `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. A URL
         // is therefore always handed to the part-by-part pass below, which judges
         // each parameter on its own.
-        if (!looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:")
-                || SOLE_CONNECTION_REFERENCE.matcher(textValue).matches())) {
-            return null;
+        if (!looksLikeUrl(textValue)) {
+            if (SOLE_CONNECTION_REFERENCE.matcher(textValue).matches()) {
+                return null;
+            }
+            if (textValue.contains("${vault:") || textValue.contains("${eddivault:")) {
+                // "Contains a reference" is not "is a reference". A value built from
+                // references, optionally with fixed scaffolding like "Bearer ", is a
+                // legitimate shape and is left legible so an operator can still read
+                // WHICH key the config used. But a value that pairs a reference with a
+                // real credential — "Bearer sk-live-… ${vault:x}" — must NOT ride the
+                // exemption: the plaintext half would then be exported verbatim. Strip
+                // the references and judge only what is left.
+                String remainder = VAULT_REFERENCE.matcher(textValue).replaceAll("");
+                // The non-reference remainder itself looks like a secret, so redact the
+                // whole value rather than leak the plaintext half. Losing the pointer
+                // costs nothing — this value could never be a valid single credential.
+                if (containsSecretMaterial(remainder)) {
+                    return REDACTED;
+                }
+                // In a credential-named field the entropy test is not enough: a short or
+                // low-entropy password ("hunter2 ${vault:k}") passes it and would be
+                // exported verbatim. There, only a scheme word and separators may sit
+                // beside the reference; anything else redacts the value.
+                if (isSecretFieldName(fieldName, parentFieldName) && !isReferenceScaffolding(remainder)) {
+                    return REDACTED;
+                }
+                return null;
+            }
         }
 
         // Check 1: Known secret field names
@@ -413,6 +501,46 @@ public class SecretScrubber {
      */
     private static boolean isStructuralFieldName(String fieldName) {
         return fieldName != null && STRUCTURAL_FIELD_NAMES.contains(normalizeFieldName(fieldName));
+    }
+
+    /**
+     * Whether any segment of {@code remainder} looks like a secret — the same
+     * length/key-shape/entropy heuristic {@code scrubTextValue} check 3 applies to
+     * a whole value, run per segment here because the remainder of a
+     * vault-reference value ("Bearer sk-live-…") is not a single token. Segments
+     * are split on every character the key pattern does not admit (see
+     * {@link #NON_KEY_CHARACTERS}), not just whitespace, so a credential followed
+     * by a comma or wrapped in quotes is still judged on its own.
+     * <p>
+     * Field names are judged separately, by the caller — see
+     * {@link #isReferenceScaffolding(String)}.
+     */
+    private static boolean containsSecretMaterial(String remainder) {
+        if (remainder == null || remainder.isBlank()) {
+            return false;
+        }
+        for (String token : NON_KEY_CHARACTERS.split(remainder.trim())) {
+            if (token.length() >= MIN_ENTROPY_LENGTH && KEY_LIKE_PATTERN.matcher(token).matches() && shannonEntropy(token) > ENTROPY_THRESHOLD) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether the non-reference remainder of a value is only scaffolding: nothing,
+     * separators, or an authorization-scheme word ({@link #AUTH_SCHEME_WORDS}).
+     * {@code "Bearer "} and the {@code ":"} of {@code "${vault:u}:${vault:p}"} are;
+     * {@code "hunter2 "} is not. An allow-list, because in a credential-named field
+     * a word that is not a known scheme cannot be told apart from a short password.
+     */
+    private static boolean isReferenceScaffolding(String remainder) {
+        for (String word : remainder.split("[^a-zA-Z0-9\\-]+")) {
+            if (!word.isEmpty() && !AUTH_SCHEME_WORDS.contains(word.toLowerCase(Locale.ROOT))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

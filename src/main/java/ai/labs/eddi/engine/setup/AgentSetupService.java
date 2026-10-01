@@ -40,13 +40,15 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
-import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -221,14 +223,32 @@ public class AgentSetupService {
      *             if the setup fails
      */
     public SetupResult setupAgent(SetupAgentRequest request) throws AgentSetupException {
+        return setupAgent(request, null);
+    }
+
+    /**
+     * {@link #setupAgent(SetupAgentRequest)} for {@code create_sub_agent}: stamps
+     * {@code dynamicOrigin} on the agent's first version, which is what
+     * {@code teardown_agent} later requires before it will delete anything.
+     * <p>
+     * A separate overload rather than a field on {@link SetupAgentRequest}, which
+     * is a REST and MCP body: the marker must be something only the engine can
+     * write.
+     *
+     * @param dynamicOrigin
+     *            provenance to record, or {@code null} for an agent a person
+     *            created
+     */
+    public SetupResult setupAgent(SetupAgentRequest request, AgentConfiguration.DynamicOrigin dynamicOrigin) throws AgentSetupException {
         // Validate required params
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
+        rejectUnprovisionableProvider(request.provider());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // vaultKeyName alone is enough: it names a key the vault already holds, which
         // is the whole point of provisioning a second agent against an existing one.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
             throw new AgentSetupException(
-                    "API key is required for cloud LLM providers (anthropic, openai, gemini) — pass apiKey, or vaultKeyName to reuse a key "
+                    "API key is required for cloud LLM providers (anthropic, openai, gemini, xai, deepseek, ...) — pass apiKey, or vaultKeyName to reuse a key "
                             + "already in the vault");
         }
         // Validate the HITL config HERE, before a single resource exists — same
@@ -321,6 +341,8 @@ public class AgentSetupService {
             // leaves the ungated v1 reachable by a redeploy, so a two-step provision would
             // ship an agent that can be returned to an ungated state.
             agentConfig.setHitlConfig(request.hitlConfig());
+            // On v1 for the same reason as the gate: teardown reads the current version.
+            agentConfig.setDynamicOrigin(dynamicOrigin);
             Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
             String agentLocation = agentResponse.getHeaderString("Location");
             String agentId = extractIdFromLocation(agentLocation);
@@ -409,13 +431,14 @@ public class AgentSetupService {
         // failure would leave a unique setup.<name>.<timestamp>.apiKey behind and a
         // retry loop would grow the vault without bound. Only ever set for an entry
         // no other setup can be referencing — see vaultApiKey for when that holds.
-        Object vaultedKey = createdResources.get(VAULTED_SECRET_KEY);
-        if (vaultedKey instanceof String keyName) {
-            try {
-                secretProvider.delete(new SecretReference(SecretReference.DEFAULT_TENANT, keyName));
-            } catch (Exception e) {
-                LOGGER.warnf("Rollback could not remove the auto-vaulted secret '%s': %s",
-                        LogSanitizer.sanitize(keyName), LogSanitizer.sanitize(e.getMessage()));
+        for (String registryKey : List.of(VAULTED_SECRET_KEY, VAULTED_API_AUTH_KEY)) {
+            if (createdResources.get(registryKey) instanceof String keyName) {
+                try {
+                    secretProvider.delete(new SecretReference(SecretReference.DEFAULT_TENANT, keyName));
+                } catch (Exception e) {
+                    LOGGER.warnf("Rollback could not remove the auto-vaulted secret '%s': %s",
+                            LogSanitizer.sanitize(keyName), LogSanitizer.sanitize(e.getMessage()));
+                }
             }
         }
     }
@@ -426,6 +449,13 @@ public class AgentSetupService {
      * {@link #deleteCreatedResource} skips it — it is handled explicitly.
      */
     static final String VAULTED_SECRET_KEY = "vaultedSecretKeyName";
+
+    /**
+     * {@code createdResources} key for the {@code apiAuth} entry a
+     * {@code createApiAgent} call vaulted, rolled back like
+     * {@link #VAULTED_SECRET_KEY}.
+     */
+    static final String VAULTED_API_AUTH_KEY = "vaultedApiAuthKeyName";
 
     /**
      * Deletes one resource created during setup, dispatched by its Location URI.
@@ -475,6 +505,7 @@ public class AgentSetupService {
         if (request.openApiSpec() == null || request.openApiSpec().isBlank()) {
             throw new AgentSetupException("OpenAPI spec is required");
         }
+        rejectUnprovisionableProvider(request.provider());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // See setupAgent: vaultKeyName alone names a key the vault already holds.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
@@ -484,8 +515,17 @@ public class AgentSetupService {
         // Scheme-level check only. Full SSRF validation would reject loopback and
         // private addresses, which is precisely where a local LLM provider lives —
         // the reason this field exists.
-        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank() && !UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
-            throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
+        if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank()) {
+            if (!UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
+                throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
+            }
+            // A local LLM base URL may point at loopback/private hosts on purpose, but
+            // never at the cloud instance-metadata service (always-on guard).
+            try {
+                UrlValidationUtils.rejectCloudMetadataTarget(request.llmBaseUrl());
+            } catch (IllegalArgumentException e) {
+                throw new AgentSetupException(e.getMessage(), e);
+            }
         }
         // Validate the HITL config HERE, before a single resource exists.
         // AgentStore.create validates it too, but only at step 7 — so an unusable
@@ -526,6 +566,18 @@ public class AgentSetupService {
         String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
 
         try {
+
+            // --- Step 1: Vault a plaintext apiAuth ---
+            // Inside the try, so a failure here rolls back the apiKey entry vaulted just
+            // above. The spec was parsed with the value as given (to fail an unparseable
+            // spec before anything is written); when the value is vaulted it is parsed
+            // again, so the generated headers carry the reference and never the
+            // plaintext.
+            String effectiveApiAuth = vaultApiAuth(request.apiAuth(), request.agentName(), createdResources);
+            if (!Objects.equals(effectiveApiAuth, request.apiAuth())) {
+                buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), effectiveApiAuth,
+                        request.apiAuthHeader());
+            }
 
             // --- Step 2: Create ApiCalls resources (one per group) ---
             var httpCallsLocations = new ArrayList<String>();
@@ -868,6 +920,24 @@ public class AgentSetupService {
                 params.put("modelName", modelId);
                 // Auth via OCI config file (~/.oci/config)
             }
+            case "huggingface" -> {
+                // HuggingFaceLanguageModelBuilder reads modelId and accessToken. The
+                // default branch below wrote modelName and apiKey, which it ignores:
+                // the agent deployed, then failed on its first turn with no model.
+                params.put("modelId", modelId);
+                if (apiKey != null && !apiKey.isBlank()) {
+                    params.put("accessToken", apiKey);
+                }
+            }
+            case "gemini-vertex" -> {
+                // VertexGeminiLanguageModelBuilder reads modelId (modelName is not
+                // one of its parameters). Authentication is Google's Application
+                // Default Credentials, so no key is written. projectId and location
+                // are required as well and neither setup request carries them;
+                // the Manager's wizards therefore do not offer this provider, and
+                // an agent created here needs both added in the LLM configuration.
+                params.put("modelId", modelId);
+            }
             default -> {
                 params.put("modelName", modelId);
                 if (apiKey != null && !apiKey.isBlank()) {
@@ -998,7 +1068,7 @@ public class AgentSetupService {
                     continue;
                 }
                 Map<String, String> parameters = task.getParameters() != null ? task.getParameters() : Map.of();
-                String credential = firstNonBlank(parameters.get("apiKey"), parameters.get("authToken"));
+                String credential = firstNonBlank(parameters.get("apiKey"), parameters.get("authToken"), parameters.get("accessToken"));
                 // A reference, not a secret — see the method Javadoc.
                 // Full-pattern match, not isVaultReference: that only asks whether the
                 // value CONTAINS "${vault:", so "plaintext${vault:key}" would be
@@ -1259,11 +1329,75 @@ public class AgentSetupService {
             // value and reuses it. So under `checksum` the entry is left in place, and
             // is either reused by the retry or is one harmless orphan.
             Map<String, Object> rollbackRegistry = VAULT_KEY_REUSE_NEVER.equalsIgnoreCase(vaultKeyReuse) ? createdResources : null;
-            return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), key, agentName, rollbackRegistry);
+            return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), key, agentName, rollbackRegistry, VAULTED_SECRET_KEY);
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + e.getMessage()
-                    + " — falling back to plaintext storage.");
-            return key;
+            // Fail closed. The vault is configured (checked above) but the write failed —
+            // a transient database error, a locked DEK. Falling back to plaintext here
+            // wrote the key into the LLM document of an instance whose operator had
+            // explicitly asked for encrypted storage. A disabled vault is the one case
+            // that still passes the key through, and it says so above.
+            // The provider's detail stays in the server log: it can name internal
+            // infrastructure, and the caller needs only what to do next.
+            LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
+            throw new AgentSetupException("The API key could not be stored in the secrets vault. Refusing to store it in plaintext on an "
+                    + "instance with the vault enabled — retry, or pass vaultKeyName.", e);
+        }
+    }
+
+    /**
+     * Vault a plaintext {@code apiAuth} before it is written into every generated
+     * httpcall header.
+     * <p>
+     * It used to be copied into the ApiCalls documents verbatim, while the LLM
+     * {@code apiKey} of the same request was vaulted. A value that IS a supported
+     * reference ({@code ${vault:…}}, {@code ${eddivault:…}},
+     * {@code ${connection:…}}, {@code ${vars:…}}, {@code ${caller:…}}), optionally
+     * after a scheme such as {@code Bearer }, is used as-is
+     * ({@link #API_AUTH_REFERENCE}). A value that mixes a reference with other text
+     * is refused, because that text would be written into the httpcalls in
+     * plaintext. Anything else is a literal credential and is vaulted, even when it
+     * happens to contain {@code ${} — it used to be taken for a reference on that
+     * alone and stored in plaintext. With the vault disabled the value passes
+     * through with a warning, exactly like {@code apiKey}; with the vault enabled a
+     * failed write fails the setup.
+     *
+     * @return the value to put in the headers — a vault reference when vaulted
+     *
+     * @throws AgentSetupException
+     *             when the value mixes a reference with other text, or the vault
+     *             write fails
+     */
+    private String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources) throws AgentSetupException {
+        String value = apiAuth == null ? null : apiAuth.trim();
+        if (value == null || value.isEmpty() || API_AUTH_REFERENCE.matcher(value).matches()) {
+            return apiAuth;
+        }
+        if (SUPPORTED_REFERENCE.matcher(value).find()) {
+            throw new AgentSetupException("apiAuth mixes a ${…} reference with other text, which would be stored in plaintext. Pass either "
+                    + "the credential itself (it is vaulted) or a reference alone, optionally after a scheme such as 'Bearer '.");
+        }
+        if (!secretProvider.isAvailable()) {
+            LOGGER.warn("Secrets Vault is not configured — apiAuth will be stored in plaintext in the generated httpcalls. "
+                    + "Set EDDI_VAULT_MASTER_KEY to enable encrypted storage, or pass a ${connection:name} reference.");
+            return apiAuth;
+        }
+        String reusable = findReusableSecret(value);
+        if (reusable != null) {
+            return reusable;
+        }
+        try {
+            String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
+            String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8)
+                    + ".apiAuth";
+            // Same rollback rule as the apiKey entry — see vaultApiKey.
+            Map<String, Object> rollbackRegistry = VAULT_KEY_REUSE_NEVER.equalsIgnoreCase(vaultKeyReuse) ? createdResources : null;
+            return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), value, agentName, rollbackRegistry,
+                    VAULTED_API_AUTH_KEY);
+        } catch (ISecretProvider.SecretProviderException e) {
+            // As for the API key: the provider's detail stays in the server log.
+            LOGGER.error("Failed to vault apiAuth for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
+            throw new AgentSetupException("apiAuth could not be stored in the secrets vault. Refusing to write it into the generated "
+                    + "httpcalls in plaintext — retry, or pass a ${vault:…} or ${connection:…} reference.", e);
         }
     }
 
@@ -1299,6 +1433,11 @@ public class AgentSetupService {
                     + "' but vaultKeyName says '" + ref.keyName() + "'. Pass one or the other.");
         }
 
+        if (AutoVaultedSecrets.isReservedName(ref.keyName())) {
+            throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' has the reserved shape of an auto-vaulted conversation "
+                    + "secret, which belongs to one user's conversation. Choose another name.");
+        }
+
         if (!secretProvider.isAvailable()) {
             throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' cannot be used: the secrets vault is unavailable or "
                     + "disabled. Set EDDI_VAULT_MASTER_KEY, or omit vaultKeyName to pass the key through as plaintext.");
@@ -1316,7 +1455,17 @@ public class AgentSetupService {
         boolean haveNewPlaintext = key != null && !key.isEmpty() && !isVaultReference(key);
 
         if (existing != null) {
-            if (haveNewPlaintext && !EnvelopeCrypto.sha256Hex(key).equals(existing.checksum())) {
+            boolean matches;
+            try {
+                matches = !haveNewPlaintext || secretProvider.matchesChecksum(ref.tenantId(), existing.checksum(), key);
+            } catch (RuntimeException e) {
+                // A keyed checksum needs the checksum key, which may have to be read and
+                // unwrapped first. A failure there means "could not compare", not "does
+                // not match" — so it must not fall through to the mismatch message.
+                throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': "
+                        + e.getClass().getSimpleName(), e);
+            }
+            if (!matches) {
                 throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a value that does not match the "
                         + "apiKey supplied. Setup will not overwrite it, because other agents may reference it. Use a different "
                         + "vaultKeyName, omit apiKey to reuse the stored value, or rotate the key through the secrets API first.");
@@ -1340,48 +1489,62 @@ public class AgentSetupService {
             // triggers rollback, a concurrent setup may already have reused the entry,
             // and rollback would pull the key out from under an agent that is not ours.
             // Leaving it also means the retry finds the key already in place.
-            String reference = storeSecret(ref, key, agentName, null);
-            verifyStoredValue(ref, key);
-            return reference;
+            if (storeSecretIfAbsent(ref, key, agentName)) {
+                return ref.toReferenceString();
+            }
+            // Lost the race for the name: another setup created it between the metadata
+            // read above and the insert. The insert left it untouched, so the outcome
+            // depends only on what it holds.
+            return reuseConcurrentlyCreatedKey(ref, key, agentName, createdResources);
         } catch (ISecretProvider.SecretProviderException e) {
             throw new AgentSetupException("Could not store the API key under vault key '" + ref.keyName() + "': " + e.getMessage(), e);
         }
     }
 
     /**
-     * Read the entry back and fail if it does not hold what was just written.
+     * A create-if-absent insert found the named key already there. Reuse it when it
+     * holds the value this setup meant to store — two setups naming one key with
+     * one value converge — and refuse when it holds a different one.
      * <p>
-     * The absent-then-create sequence above is not atomic: {@code store} is an
-     * UPSERT (every {@link ISecretProvider} caller uses it that way — there is no
-     * create-if-absent in the SPI), so two setups naming the same key with
-     * different values can both find it missing and both write. Without this check
-     * the loser proceeds and provisions an agent pointing at the winner's
-     * credential.
-     * <p>
-     * This narrows the window rather than closing it: a write that lands after this
-     * read is still missed. Closing it properly needs a conditional insert in the
-     * persistence layer (Mongo and Postgres both), which is an SPI change shared
-     * with three other callers and does not belong in this one — tracked in issue
-     * #700. What it does buy is that the common interleaving fails loudly, here,
-     * before a single document is created — instead of silently.
+     * The insert is atomic (see {@link ISecretProvider#storeIfAbsent}), so nothing
+     * was overwritten and no window remains: whichever setup created the entry owns
+     * it, and every other one sees exactly that value here.
      */
-    private void verifyStoredValue(SecretReference ref, String expectedPlaintext) throws AgentSetupException {
+    private String reuseConcurrentlyCreatedKey(SecretReference ref, String expectedPlaintext, String agentName,
+                                               Map<String, Object> createdResources)
+            throws AgentSetupException {
+        SecretMetadata winner;
         try {
-            SecretMetadata written = secretProvider.getMetadata(ref);
-            if (written.checksum() != null && !EnvelopeCrypto.sha256Hex(expectedPlaintext).equals(written.checksum())) {
-                throw new AgentSetupException("Vault key '" + ref.keyName() + "' was written concurrently by another setup and now holds "
-                        + "a different value. Nothing was created; retry, or choose a vaultKeyName that is not in contention.");
-            }
-        } catch (ISecretProvider.SecretNotFoundException | ISecretProvider.SecretProviderException e) {
-            LOGGER.debugf("Could not read back vault key '%s' after storing it: %s", LogSanitizer.sanitize(ref.keyName()), e.getMessage());
+            winner = secretProvider.getMetadata(ref);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            // Created and deleted again inside one setup call. Not something to paper
+            // over by writing: report it and let the caller retry.
+            throw new AgentSetupException("Vault key '" + ref.keyName() + "' was created and removed concurrently. Retry the setup.", e);
+        } catch (ISecretProvider.SecretProviderException e) {
+            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
         }
+        boolean sameValue;
+        try {
+            sameValue = winner.checksum() != null && secretProvider.matchesChecksum(ref.tenantId(), winner.checksum(), expectedPlaintext);
+        } catch (RuntimeException e) {
+            throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': " + e.getClass().getSimpleName(), e);
+        }
+        if (!sameValue) {
+            throw new AgentSetupException("Vault key '" + ref.keyName() + "' was created concurrently by another setup and holds a "
+                    + "different value. Nothing was created; retry, or choose a vaultKeyName that is not in contention.");
+        }
+        LOGGER.infof("Agent '%s' reuses vault key '%s', created concurrently with the same value.", LogSanitizer.sanitize(agentName),
+                LogSanitizer.sanitize(ref.keyName()));
+        warnIfRestricted(winner, agentName, createdResources);
+        return ref.toReferenceString();
     }
 
     /**
      * Write one secret and record it for rollback. Split out so the named and the
      * generated path cannot drift on the grant list or the rollback bookkeeping.
      */
-    private String storeSecret(SecretReference ref, String plaintext, String agentName, Map<String, Object> createdResources)
+    private String storeSecret(SecretReference ref, String plaintext, String agentName, Map<String, Object> createdResources,
+                               String registryKey)
             throws ISecretProvider.SecretProviderException {
         // "*" is deliberate. allowedAgents IS enforced now (VaultGrantGate, at
         // deploy time), so this list is a real access-control decision — but the
@@ -1399,10 +1562,30 @@ public class AgentSetupService {
         // Recorded only once the write succeeded: a name whose store threw does not
         // exist, and rollback would log a spurious "could not remove" warning for it.
         if (createdResources != null) {
-            createdResources.put(VAULTED_SECRET_KEY, ref.keyName());
+            createdResources.put(registryKey, ref.keyName());
         }
-        LOGGER.infof("API key vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
+        LOGGER.infof("Credential vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
         return ref.toReferenceString();
+    }
+
+    /**
+     * The create-if-absent counterpart of {@link #storeSecret}, for a caller-chosen
+     * name that must never replace what is there. Not registered for rollback: the
+     * caller decides that.
+     *
+     * @return {@code true} if this call created the entry
+     */
+    private boolean storeSecretIfAbsent(SecretReference ref, String plaintext, String agentName) throws ISecretProvider.SecretProviderException {
+        // "*" for the same reason as in storeSecret: the agent has no id yet.
+        boolean created = secretProvider.storeIfAbsent(ref, plaintext, "Auto-vaulted by AgentSetupService for agent: " + agentName,
+                List.of("*"));
+        if (created) {
+            if (secretResolver != null) {
+                secretResolver.invalidateCache(ref);
+            }
+            LOGGER.infof("Credential vaulted for agent '%s' (key: %s)", LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(ref.keyName()));
+        }
+        return created;
     }
 
     /**
@@ -1435,9 +1618,12 @@ public class AgentSetupService {
             return null;
         }
         try {
-            String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+            // The stored checksum may be keyed (only the provider can verify it) or a
+            // legacy bare SHA-256, so match through the provider rather than computing a
+            // digest here — a caller no longer holds the checksum key.
             return secretProvider.listKeys(SecretReference.DEFAULT_TENANT).stream()
-                    .filter(metadata -> checksum.equals(metadata.checksum()))
+                    .filter(metadata -> secretProvider.matchesChecksum(
+                            metadata.tenantId() == null ? SecretReference.DEFAULT_TENANT : metadata.tenantId(), metadata.checksum(), plaintext))
                     .filter(AgentSetupService::isUnrestricted)
                     // Oldest first, key name as tie-break: repeated setups with the same key
                     // must converge on ONE entry, so the choice cannot depend on listing order.
@@ -1508,8 +1694,11 @@ public class AgentSetupService {
         }
         warn(resources, agentName, "Vault key '" + metadata.keyName() + "' is granted only to " + metadata.allowedAgents()
                 + ". The agent being created cannot be on that list yet, so with eddi.vault.grant-enforcement=enforce its "
-                + "deployment will be blocked until the grant is widened to '*' or to the new agent's ID (secrets REST API, "
-                + "PATCH allowedAgents).");
+                + "deployment will be blocked until the grant is widened to the new agent's ID — PUT /secretstore/secrets/"
+                // The concrete path, not the template: an operator copies this line
+                // straight into curl, and {tenantId}/{keyName} would 404 there.
+                + metadata.tenantId() + "/" + metadata.keyName()
+                + "/grant, which does not need the secret's value (add ?dryRun=true to preview it first).");
     }
 
     /** Log a non-fatal vault problem and return it to the caller. */
@@ -1525,6 +1714,19 @@ public class AgentSetupService {
      * addressable there.
      */
     private static final Pattern VALID_SECRET_NAME = Pattern.compile("[a-zA-Z0-9._-]{1,128}");
+
+    /**
+     * A reference the generated httpcalls resolve in a header: vault (and its
+     * legacy spelling), connection, global variable or caller identity.
+     */
+    private static final Pattern SUPPORTED_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|connection|vars|caller):[^}\\s]+}");
+
+    /**
+     * An {@code apiAuth} that is only a reference, optionally after an
+     * authorization scheme ({@code Bearer ${vault:crm-token}}).
+     */
+    private static final Pattern API_AUTH_REFERENCE = Pattern
+            .compile("(?:[A-Za-z][A-Za-z0-9-]*\\s+)?\\$\\{(?:vault|eddivault|connection|vars|caller):[^}\\s]+}");
 
     private static void validateSecretName(String value, String label) throws AgentSetupException {
         if (value == null || !VALID_SECRET_NAME.matcher(value).matches()) {
@@ -1546,8 +1748,9 @@ public class AgentSetupService {
      * {@code allowedAgents} unset, empty or {@code ["*"]} — usable by any agent.
      */
     private static boolean isUnrestricted(SecretMetadata metadata) {
-        List<String> allowed = metadata.allowedAgents();
-        return allowed == null || allowed.isEmpty() || allowed.contains("*");
+        // Delegates rather than repeating the three shapes, so this cannot drift from
+        // the deploy-time check's idea of "everyone".
+        return SecretMetadata.grantsAllAgents(metadata.allowedAgents());
     }
 
     /**
@@ -1672,6 +1875,25 @@ public class AgentSetupService {
     // ==================== Static Utility Methods ====================
 
     /**
+     * Refuse a provider setup cannot turn into a working agent, before anything is
+     * created or vaulted.
+     * <p>
+     * {@code gemini-vertex} needs a GCP {@code projectId} and {@code location}
+     * (langchain4j refuses to build the model without either), and neither setup
+     * request carries them. Setup used to accept it anyway: it demanded an API key
+     * the provider never reads, vaulted that key under a new name, and produced an
+     * agent that deployed and then failed on its first turn. The caller is told how
+     * to get there instead.
+     */
+    static void rejectUnprovisionableProvider(String provider) throws AgentSetupException {
+        if (provider != null && "gemini-vertex".equals(provider.trim().toLowerCase())) {
+            throw new AgentSetupException("Provider 'gemini-vertex' cannot be set up here: it requires a GCP projectId and location, "
+                    + "which the setup request does not carry. Create the agent with another provider, then switch its LLM "
+                    + "configuration to gemini-vertex and set projectId and location there.");
+        }
+    }
+
+    /**
      * Check if the given provider is a local LLM (no API key needed).
      */
     public static boolean isLocalLlmProvider(String provider) {
@@ -1747,6 +1969,16 @@ public class AgentSetupService {
     }
 
     /**
+     * The model to use for {@code provider} when none was named: a named
+     * OpenAI-compatible provider's own preset default (falling back to
+     * {@link #DEFAULT_MODEL} would hand e.g. xAI a Claude model name), otherwise
+     * {@link #DEFAULT_MODEL}.
+     */
+    public static String defaultModelFor(String provider) {
+        return OpenAiCompatibleProviders.find(provider).map(OpenAiCompatibleProvider::defaultModel).orElse(DEFAULT_MODEL);
+    }
+
+    /**
      * Resolve the caller-supplied setup parameters, applying defaults.
      * <p>
      * The environment is parsed with {@link Deployment.Environment#parseStrict} —
@@ -1760,9 +1992,9 @@ public class AgentSetupService {
      *             if {@code environment} is neither blank nor a known environment
      */
     ResolvedParams resolveParams(String provider, String model, Boolean deploy, String environment) {
-        return new ResolvedParams(provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER,
-                model != null && !model.isBlank() ? model.trim() : DEFAULT_MODEL, deploy == null || deploy,
-                Deployment.Environment.parseStrict(environment));
+        String resolvedProvider = provider != null && !provider.isBlank() ? provider.trim().toLowerCase() : DEFAULT_PROVIDER;
+        String resolvedModel = model != null && !model.isBlank() ? model.trim() : defaultModelFor(resolvedProvider);
+        return new ResolvedParams(resolvedProvider, resolvedModel, deploy == null || deploy, Deployment.Environment.parseStrict(environment));
     }
 
     /**

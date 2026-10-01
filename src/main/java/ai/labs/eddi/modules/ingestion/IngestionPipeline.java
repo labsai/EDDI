@@ -11,6 +11,11 @@ import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
 import ai.labs.eddi.modules.ingestion.crawl.CrawlRequest;
 import ai.labs.eddi.modules.ingestion.crawl.CrawlSink;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
+import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
+import ai.labs.eddi.modules.ingestion.extract.ExtractionLimits;
+import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -20,6 +25,7 @@ import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.exception.UnsupportedFeatureException;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -30,8 +36,10 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
@@ -69,8 +77,25 @@ public class IngestionPipeline {
     /** Cap on third-party text copied into vector metadata. */
     private static final int MAX_TITLE_LENGTH = 300;
 
+    /**
+     * The state row that marks a source whose state was cleared, until the orphan
+     * sweep has run. Not a URL and not a file id, so no document can collide with
+     * it.
+     */
+    static final String SWEEP_MARKER = "eddi:orphan-sweep";
+
+    /** Runs since a purge beyond which the sweep declines to guess. */
+    private static final int SWEEP_RUN_LIMIT = 1000;
+
     /** Added to a run's time budget before it counts as abandoned. */
     private static final Duration STALE_RUN_MARGIN = Duration.ofMinutes(15);
+
+    /**
+     * How often a crawl asks whether it still owns its source. Between pages only —
+     * before embedding a document it always asks, because that is the write that
+     * outlives the run.
+     */
+    private static final Duration OWNERSHIP_CHECK_INTERVAL = Duration.ofSeconds(5);
 
     public static final String METADATA_DOCUMENT_ID = "documentId";
     public static final String METADATA_URL = "url";
@@ -94,6 +119,8 @@ public class IngestionPipeline {
     private final WebCrawler crawler;
     private final HtmlToMarkdownConverter converter;
     private final IIngestionStateStore stateStore;
+    private final IIngestedFileStore fileStore;
+    private final DocumentExtractors extractors;
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final MeterRegistry meterRegistry;
@@ -102,12 +129,16 @@ public class IngestionPipeline {
     public IngestionPipeline(WebCrawler crawler,
             HtmlToMarkdownConverter converter,
             IIngestionStateStore stateStore,
+            IIngestedFileStore fileStore,
+            DocumentExtractors extractors,
             EmbeddingModelFactory embeddingModelFactory,
             EmbeddingStoreFactory embeddingStoreFactory,
             MeterRegistry meterRegistry) {
         this.crawler = crawler;
         this.converter = converter;
         this.stateStore = stateStore;
+        this.fileStore = fileStore;
+        this.extractors = extractors;
         this.embeddingModelFactory = embeddingModelFactory;
         this.embeddingStoreFactory = embeddingStoreFactory;
         this.meterRegistry = meterRegistry;
@@ -152,8 +183,8 @@ public class IngestionPipeline {
         // A run whose process died is still marked RUNNING and would block this
         // source indefinitely; nothing else calls this.
         String sourceKey = stateKey(ragConfigId, source);
-        stateStore.reapStaleRuns(sourceKey, Instant.now().minus(staleRunThreshold(source)));
-        return stateStore.startRun(sourceKey);
+        stateStore.reapStaleRuns(sourceKey, staleBefore(source));
+        return stateStore.startRun(sourceKey, staleAfterClaim(source));
     }
 
     /**
@@ -162,7 +193,7 @@ public class IngestionPipeline {
      */
     public void abandonReservation(String ragConfigId, IngestionSource source, String runId, String reason) {
         finish(Mode.INGEST, runId, stateKey(ragConfigId, source),
-                IngestionReport.failed(runId, source.getId(), reason), IngestionRun.Status.FAILED);
+                IngestionReport.failed(runId, source.effectiveId(), reason), IngestionRun.Status.FAILED);
     }
 
     /**
@@ -180,10 +211,10 @@ public class IngestionPipeline {
             source.validate();
             String name = knowledgeBase.getName();
             if (name == null || name.isBlank()) {
-                early = IngestionReport.failed(reservedRunId, source.getId(),
+                early = IngestionReport.failed(reservedRunId, source.effectiveId(),
                         "The knowledge base has no name, and its name is what the vector store is keyed by");
             } else if (!source.isEnabled() && mode == Mode.INGEST) {
-                early = IngestionReport.skipped(source.getId(), "Source is disabled");
+                early = IngestionReport.skipped(source.effectiveId(), "Source is disabled");
             } else {
                 early = null;
             }
@@ -204,13 +235,13 @@ public class IngestionPipeline {
             if (reservedRunId != null) {
                 runId = reservedRunId;
             } else {
-                stateStore.reapStaleRuns(sourceKey, Instant.now().minus(staleRunThreshold(source)));
-                var claimed = stateStore.startRun(sourceKey);
+                stateStore.reapStaleRuns(sourceKey, staleBefore(source));
+                var claimed = stateStore.startRun(sourceKey, staleAfterClaim(source));
                 if (claimed.isEmpty()) {
                     // Not an error: an operator clicking "run now" while a scheduled run
                     // is in flight should be told, not start a second crawl into one
                     // store.
-                    return IngestionReport.alreadyRunning(source.getId());
+                    return IngestionReport.alreadyRunning(source.effectiveId());
                 }
                 runId = claimed.get();
             }
@@ -228,9 +259,17 @@ public class IngestionPipeline {
         // failure, an OutOfMemoryError, or a StackOverflowError from a pathological
         // page are each enough.
         try {
-            WebCrawler.CrawlSummary summary = crawler.crawl(toCrawlRequest(source), collector);
+            if (mode == Mode.INGEST) {
+                markForSweepIfFresh(source, sourceKey, runId);
+            }
+            SourceRun sourceRun = source.isUpload()
+                    ? readUploadedFiles(sourceKey, source, collector)
+                    : crawl(source, collector);
+            WebCrawler.CrawlSummary summary = sourceRun.summary();
 
-            collector.tombstoned = reconcileDeletions(source, sourceKey, runId, mode, summary, collector);
+            // Added to, not assigned: a file retired as unreadable during the run is
+            // already counted.
+            collector.tombstoned += reconcileDeletions(source, sourceKey, runId, mode, sourceRun, collector);
 
             IngestionReport report = collector.toReport(summary, null, startedAt);
             finish(mode, runId, sourceKey, report, statusFor(collector));
@@ -274,35 +313,18 @@ public class IngestionPipeline {
      * base empties itself because a site was slow.
      */
     private int reconcileDeletions(IngestionSource source, String sourceKey, String runId, Mode mode,
-                                   WebCrawler.CrawlSummary summary, Collector collector) {
+                                   SourceRun sourceRun, Collector collector) {
 
         if (mode != Mode.INGEST) {
             return 0;
         }
-        if (!summary.coveredWholeSource()) {
+        if (!sourceRun.coveredWholeSource()) {
             collector.tombstoningSkipped = true;
-            LOGGER.infof("Not reconciling deletions for source '%s': the crawl stopped at %s rather than covering "
-                    + "the source", LogSanitizer.sanitize(source.getName()), summary.stopReason());
+            LOGGER.infof("Not reconciling deletions for source '%s': the run stopped at %s rather than covering "
+                    + "the source", LogSanitizer.sanitize(source.getName()),
+                    sourceRun.summary().discoveryIncomplete() ? "incomplete sitemap discovery" : sourceRun.summary().stopReason());
             return 0;
         }
-        boolean nothingUsable = collector.ingested + collector.unchanged == 0;
-        boolean nothingDefinitive = collector.failed == collector.unreachable;
-        if (nothingUsable && nothingDefinitive) {
-            // The crawler counts a page it handed over as fetched even when the sink
-            // discarded it as blank, so a site behind a JavaScript challenge or a
-            // maintenance page answers 200 for everything, "covers the source", and
-            // yields nothing. Two such runs would delete the whole corpus.
-            //
-            // Not simply "no usable document": a site whose pages have genuinely been
-            // deleted also yields none, and that is exactly when reconciliation should
-            // run. The distinction is whether anything definitive was learned — a 404
-            // or a 410 — rather than only failures that hide the content.
-            collector.tombstoningSkipped = true;
-            LOGGER.infof("Not reconciling deletions for source '%s': the crawl produced no usable document and "
-                    + "learned nothing definitive about what is gone", LogSanitizer.sanitize(source.getName()));
-            return 0;
-        }
-
         List<DocumentState> gone = stateStore.bumpAndFindMissing(
                 sourceKey, runId, source.settings().tombstoneAfterMissedRunsOrDefault());
         if (gone.isEmpty()) {
@@ -316,7 +338,12 @@ public class IngestionPipeline {
         // again — so nothing would ever come back for them.
         EmbeddingStore<TextSegment> store = collector.store();
         List<String> removedIds = new ArrayList<>();
+        boolean sweptOrphans = false;
         for (DocumentState document : gone) {
+            if (SWEEP_MARKER.equals(document.documentId())) {
+                sweptOrphans = sweepOrphans(source, sourceKey, runId, collector);
+                continue;
+            }
             try {
                 store.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(document.documentId())
                         .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
@@ -331,8 +358,97 @@ public class IngestionPipeline {
                         + "and the next run tries again", LogSanitizer.sanitize(source.getName()));
             }
         }
-        stateStore.markTombstoned(sourceKey, removedIds);
+        stateStore.markTombstoned(sourceKey, sweptOrphans ? withMarker(removedIds) : removedIds);
         return removedIds.size();
+    }
+
+    private static List<String> withMarker(List<String> removedIds) {
+        List<String> ids = new ArrayList<>(removedIds);
+        ids.add(SWEEP_MARKER);
+        return ids;
+    }
+
+    /**
+     * When this run starts from no state at all — the first run, or the first after
+     * a purge or a rename — records the marker the orphan sweep waits on.
+     *
+     * <p>
+     * A read or write failure here only means no sweep: it is housekeeping, and
+     * failing the run over it would stop the run that rebuilds the knowledge base.
+     */
+    private void markForSweepIfFresh(IngestionSource source, String sourceKey, String runId) {
+        try {
+            if (stateStore.listDocuments(sourceKey, 1).isEmpty()) {
+                stateStore.recordIngested(sourceKey, SWEEP_MARKER, SWEEP_MARKER, null, null, runId);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not check whether source '%s' starts from no state; chunks it no longer has "
+                    + "from before a purge will not be swept this time", LogSanitizer.sanitize(source.getName()));
+        }
+    }
+
+    /**
+     * Removes the chunks of this source that no run since its state was cleared
+     * wrote — once the sweep marker has been missed as often as any document must
+     * be before it is tombstoned.
+     *
+     * <p>
+     * A purge forgets which documents a source has ingested but leaves their
+     * vectors answering, so retrieval has no gap while the next run rebuilds. Every
+     * document a run finds is re-embedded, and replacing a document removes its
+     * older chunks — but a document that had disappeared from the source before the
+     * purge is never found again, and with its state row gone nothing would ever
+     * reconcile it: its chunks stayed retrievable for good, attributed to a source
+     * that no longer claims them.
+     *
+     * <p>
+     * The marker is a state row no crawl ever sees, so it is "missed" by every
+     * complete run and reaches {@code tombstoneAfterMissedRuns} exactly as a
+     * vanished page would. Waiting for it gives a page that was only briefly absent
+     * after the purge the same grace any other page gets: once it comes back it is
+     * re-embedded by a run since the purge and survives the sweep. The sweep then
+     * keeps every chunk written by a run since the state was cleared — the purge
+     * took the older run history with it, so the source's run history is exactly
+     * those runs — and removes the rest.
+     *
+     * <p>
+     * Only on a run that read every document it found: a document that failed to
+     * embed, or that the server would not serve, still has only its old chunks, and
+     * they are the ones to keep. Otherwise the marker stays live and the next such
+     * run sweeps. A failure that answered the question does not hold the sweep
+     * back: a 404 or 410 says the page is gone, and a file that yields no text has
+     * had its old version retired already — so one dead link, or one unreadable
+     * upload, no longer keeps every orphan retrievable for good.
+     *
+     * @return whether the sweep ran, so the marker can be retired
+     */
+    private boolean sweepOrphans(IngestionSource source, String sourceKey, String runId, Collector collector) {
+        if (collector.inconclusive > 0 || collector.superseded) {
+            return false;
+        }
+        Set<String> runsSinceClear = new HashSet<>();
+        runsSinceClear.add(runId);
+        try {
+            List<IngestionRun> history = stateStore.listRuns(sourceKey, SWEEP_RUN_LIMIT);
+            if (history.size() >= SWEEP_RUN_LIMIT) {
+                LOGGER.warnf("Not sweeping source '%s': more than %d runs since its state was cleared, so the list "
+                        + "of runs whose chunks to keep might be incomplete", LogSanitizer.sanitize(source.getName()),
+                        SWEEP_RUN_LIMIT);
+                return false;
+            }
+            history.forEach(run -> runsSinceClear.add(run.runId()));
+            collector.store().removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)
+                    .and(metadataKey(METADATA_RUN_ID).isNotIn(runsSinceClear)));
+            return true;
+        } catch (UnsupportedFeatureException e) {
+            collector.replaceUnsupported = true;
+            return true;
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not remove chunks that source '%s' no longer has from before its state was "
+                    + "cleared; they stay retrievable and the next complete run tries again",
+                    LogSanitizer.sanitize(source.getName()));
+            return false;
+        }
     }
 
     private void releaseIfReserved(Mode mode, String reservedRunId, String sourceKey, IngestionSource source,
@@ -340,7 +456,7 @@ public class IngestionPipeline {
         if (mode != Mode.INGEST || reservedRunId == null) {
             return;
         }
-        finish(mode, reservedRunId, sourceKey, IngestionReport.failed(reservedRunId, source.getId(), reason),
+        finish(mode, reservedRunId, sourceKey, IngestionReport.failed(reservedRunId, source.effectiveId(), reason),
                 IngestionRun.Status.FAILED);
     }
 
@@ -355,9 +471,322 @@ public class IngestionPipeline {
                 report.costUsd(), report.message()));
     }
 
-    /** State is scoped to a source of a knowledge base, not to a source name. */
-    static String stateKey(String ragConfigId, IngestionSource source) {
-        return ragConfigId + ":" + source.effectiveId();
+    /**
+     * Removes one document's vectors now, rather than at the next run.
+     *
+     * <p>
+     * Deleting an uploaded file has to take its content out of retrieval
+     * immediately. Leaving that to the next run would mean an operator who removes
+     * a document because it should not have been there is told it is gone while
+     * agents keep answering from it until the cron fires — which, for a source with
+     * no cron, is never.
+     *
+     * @return whether the chunks are gone, still there because the store cannot
+     *         delete by metadata, or still there because the delete failed — the
+     *         last of which the caller must not treat as done
+     */
+    public ForgetOutcome forgetDocument(String ragConfigId, RagConfiguration knowledgeBase,
+                                        IngestionSource source, String documentId) {
+
+        String sourceKey = stateKey(ragConfigId, source);
+        // The state row goes first. If the removal below fails, a tombstoned row
+        // means the next run re-ingests the document rather than reporting it
+        // unchanged over vectors that were never deleted.
+        stateStore.markTombstoned(sourceKey, List.of(documentId));
+        try {
+            embeddingStoreFactory.getOrCreate(knowledgeBase, knowledgeBase.getName())
+                    .removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
+                            .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
+            return ForgetOutcome.REMOVED;
+        } catch (UnsupportedFeatureException e) {
+            LOGGER.warnf("The vector store of knowledge base '%s' cannot delete by metadata, so the chunks of "
+                    + "document '%s' remain retrievable", LogSanitizer.sanitize(knowledgeBase.getName()),
+                    LogSanitizer.sanitize(documentId));
+            return ForgetOutcome.UNSUPPORTED;
+        } catch (RuntimeException e) {
+            // A store that is merely unwell. Returned, not thrown, and distinct from
+            // UNSUPPORTED: the caller must keep the file. Deleting it anyway left the
+            // chunks retrievable for good — the row is tombstoned, reconciliation
+            // skips tombstoned rows, and no file is left to delete again. Kept, the
+            // file can be deleted again once the store recovers; if a run gets to it
+            // first, the tombstone makes it re-embed and so replace the chunks.
+            LOGGER.errorf(e, "Could not remove the chunks of document '%s' from knowledge base '%s'",
+                    LogSanitizer.sanitize(documentId), LogSanitizer.sanitize(knowledgeBase.getName()));
+            return ForgetOutcome.FAILED;
+        }
+    }
+
+    /** What became of a document's chunks. */
+    public enum ForgetOutcome {
+        REMOVED,
+        /** The store cannot delete by metadata; the chunks are still retrievable. */
+        UNSUPPORTED,
+        /**
+         * The store failed; the chunks are still retrievable and it is worth trying
+         * again.
+         */
+        FAILED
+    }
+
+    /**
+     * Removes everything one source ever put into the knowledge base.
+     *
+     * <p>
+     * For a source that is being deleted, or that is changing into a kind of source
+     * that cannot own the documents it already has. Without it, removing an upload
+     * source deletes the only copy of its files while every vector they produced
+     * stays retrievable and unreachable: no endpoint lists them, because the source
+     * they belong to is gone.
+     *
+     * @return false when the vector store cannot delete by metadata, so the chunks
+     *         are still there
+     */
+    public boolean forgetSource(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+        String sourceKey = stateKey(ragConfigId, source);
+        try {
+            embeddingStoreFactory.getOrCreate(knowledgeBase, knowledgeBase.getName())
+                    .removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey));
+            stateStore.purgeSource(sourceKey);
+            return true;
+        } catch (UnsupportedFeatureException e) {
+            LOGGER.warnf("The vector store of knowledge base '%s' cannot delete by metadata, so the chunks of "
+                    + "removed source '%s' remain retrievable", LogSanitizer.sanitize(knowledgeBase.getName()),
+                    LogSanitizer.sanitize(source.getName()));
+            stateStore.purgeSource(sourceKey);
+            return false;
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not remove the chunks of source '%s' from knowledge base '%s'; they stay "
+                    + "retrievable and nothing lists them any more",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(knowledgeBase.getName()));
+            return false;
+        }
+    }
+
+    /**
+     * Claims the source's run slot for something other than a run.
+     *
+     * <p>
+     * Deleting a file has to exclude a run, not merely notice one: a run that
+     * starts between the check and the delete lists the file, loads bytes that are
+     * about to go, embeds them, and records the document as ingested — which clears
+     * the tombstone the delete just wrote. The file is gone and its content is
+     * still retrievable, for a cron-less source indefinitely. Taking the same claim
+     * a run takes is what makes that impossible rather than unlikely.
+     *
+     * @return the claim to pass to {@link #releaseClaim}, or empty when a run holds
+     *         it
+     */
+    public Optional<String> claimForMaintenance(String ragConfigId, IngestionSource source) {
+        return reserveRun(ragConfigId, source);
+    }
+
+    /**
+     * Releases a claim from {@link #claimForMaintenance}.
+     *
+     * <p>
+     * Closed as {@link IngestionRun.Status#MAINTENANCE}, which the run history does
+     * not list. It used to be closed as a {@code COMPLETED} run, so deleting a file
+     * made the source's "last run" an empty success and pushed the real one — with
+     * its errors — out of sight.
+     */
+    public void releaseClaim(String ragConfigId, IngestionSource source, String claimId) {
+        stateStore.finishRun(new IngestionRun(claimId, stateKey(ragConfigId, source),
+                IngestionRun.Status.MAINTENANCE, null, Instant.now(),
+                0, 0, 0, 0, 0, 0, 0.0, null));
+    }
+
+    /**
+     * State is scoped to a source of a knowledge base, not to a source name.
+     *
+     * <p>
+     * Public because the uploaded files of a source are keyed by it too: a file,
+     * the document state derived from it and the vectors it produced all have to
+     * answer to one key, or a purge leaves two of the three behind.
+     */
+    public static String stateKey(String ragConfigId, IngestionSource source) {
+        return stateKeyForSourceId(ragConfigId, source.effectiveId());
+    }
+
+    /**
+     * The same key, for a caller that has only the source's id left. Named apart
+     * from {@link #stateKey} so that a null argument still picks one of them.
+     */
+    public static String stateKeyForSourceId(String ragConfigId, String sourceId) {
+        return ragConfigId + ":" + sourceId;
+    }
+
+    /**
+     * What a run covered, and how.
+     *
+     * <p>
+     * Coverage is carried separately from the summary because the two kinds of
+     * source know it differently. A crawl can only infer it — it stopped at a page
+     * cap, or it reached nothing at all, and {@code CrawlSummary} works that out
+     * from what happened. An upload source knows it outright: it listed the store.
+     * Reusing the crawl's inference for uploads would mean an operator who deletes
+     * the last file of a source is told nothing was concluded, and its vectors
+     * would stay in the knowledge base for good.
+     */
+    private record SourceRun(WebCrawler.CrawlSummary summary, boolean coveredWholeSource) {
+    }
+
+    private SourceRun crawl(IngestionSource source, Collector collector) {
+        WebCrawler.CrawlSummary summary = crawler.crawl(toCrawlRequest(source), collector);
+        return new SourceRun(summary, summary.coveredWholeSource() && learnedSomething(collector));
+    }
+
+    /**
+     * Whether a crawl that reported coverage actually learned anything.
+     *
+     * <p>
+     * The crawler counts a page it handed over as fetched even when the sink
+     * discarded it as blank, so a site behind a JavaScript challenge or a
+     * maintenance page answers 200 for everything, "covers the source", and yields
+     * nothing. Two such runs would delete the whole corpus.
+     *
+     * <p>
+     * Not simply "no usable document": a site whose pages have genuinely been
+     * deleted also yields none, and that is exactly when reconciliation should run.
+     * The distinction is whether anything definitive was learned — a 404 or a 410 —
+     * rather than only failures that hide the content.
+     *
+     * <p>
+     * This is a statement about crawling, which is why it lives here rather than in
+     * the reconciliation it feeds. An upload source that lists an empty store has
+     * learned something definitive: the operator deleted the files. Applying a
+     * crawler's caution to it would leave a deleted document answering questions
+     * for ever, because an upload source has no next crawl to correct it.
+     */
+    private static boolean learnedSomething(Collector collector) {
+        boolean nothingUsable = collector.ingested + collector.unchanged == 0;
+        boolean nothingDefinitive = collector.failed == collector.unreachable;
+        return !(nothingUsable && nothingDefinitive);
+    }
+
+    /**
+     * Reads every file an upload source holds, extracting text from each.
+     *
+     * <p>
+     * The file's own hash decides whether it changed, and it is known without
+     * reading the bytes — so an unchanged 20 MB manual costs one metadata query per
+     * run rather than a download and a full PDF parse.
+     */
+    private SourceRun readUploadedFiles(String sourceKey, IngestionSource source, Collector collector) {
+        Instant start = Instant.now();
+        Instant deadline = uploadDeadline(start, source);
+        List<StoredFile> files;
+        try {
+            files = fileStore.list(sourceKey);
+        } catch (RuntimeException e) {
+            // The store is unavailable, so this run learned nothing about which files
+            // exist. Reported as an uncovered run: concluding "no files" here would
+            // delete the whole knowledge base over a database blip.
+            collector.onError(new CrawlSink.CrawlError(null, null,
+                    "The uploaded files of this source could not be listed: " + describe(e), 0, true));
+            return new SourceRun(uploadSummary(collector, start, WebCrawler.StopReason.CANCELLED), false);
+        }
+
+        ExtractionLimits limits = ExtractionLimits.defaults()
+                .withMaxCharacters(source.settings().maxContentLengthOrDefault());
+        WebCrawler.StopReason stopReason = WebCrawler.StopReason.COMPLETED;
+        int read = 0;
+
+        for (StoredFile file : files) {
+            if (collector.isCancelled()) {
+                stopReason = WebCrawler.StopReason.CANCELLED;
+                break;
+            }
+            if (Instant.now().isAfter(deadline)) {
+                stopReason = WebCrawler.StopReason.TIME_LIMIT;
+                break;
+            }
+            if (read >= source.upload().maxFilesOrDefault()) {
+                // The limit was lowered after the files were uploaded. Stopping short
+                // is not coverage, so nothing is concluded to be deleted.
+                stopReason = WebCrawler.StopReason.PAGE_LIMIT;
+                break;
+            }
+            read++;
+            readOneFile(sourceKey, source, file, limits, collector);
+        }
+
+        boolean covered = stopReason == WebCrawler.StopReason.COMPLETED;
+        return new SourceRun(uploadSummary(collector, start, stopReason), covered);
+    }
+
+    /**
+     * When a run over uploaded files has to stop.
+     *
+     * <p>
+     * The same budget a crawl gets. Without it a run over a large source can
+     * outlive the point at which it is treated as abandoned, and the next fire
+     * starts a second worker embedding into the same store — each one deleting the
+     * other's fresh chunks, because replacement filters on the run id.
+     *
+     * <p>
+     * Its own method so a test can shorten it. The alternative is a test that
+     * blocks for the shortest budget the configuration allows, which is a minute,
+     * and a minute of wall clock in a unit suite is a minute nobody spends twice.
+     */
+    Instant uploadDeadline(Instant start, IngestionSource source) {
+        return start.plus(Duration.ofMinutes(source.settings().timeBudgetMinutesOrDefault()));
+    }
+
+    private void readOneFile(String sourceKey, IngestionSource source, StoredFile file,
+                             ExtractionLimits limits, Collector collector) {
+        // Asked before the bytes are fetched: an unchanged file needs neither.
+        var known = stateStore.lookup(sourceKey, file.fileId());
+        if (known.isPresent() && !known.get().tombstoned() && !known.get().hasChanged(file.contentHash())) {
+            collector.onUnchanged(file.fileId());
+            return;
+        }
+        try {
+            byte[] content = fileStore.load(sourceKey, file.fileId()).orElse(null);
+            if (content == null) {
+                // Deleted between the listing and the read. Not an error and not a
+                // miss: the next run will see it gone and reconcile it properly.
+                return;
+            }
+            String markdown = extractors.extract(content, file.mimeType(), limits);
+            if (markdown.isBlank()) {
+                // A scan with no text layer, or a document with nothing in it. The file
+                // is the whole of this source's evidence, so this is a definitive
+                // answer, not a page that failed to load.
+                collector.onUnreadableFile(file, DocumentExtractors.emptyDocumentReason(file.mimeType()));
+                return;
+            }
+            if (markdown.length() >= limits.maxCharacters()) {
+                // Said once per file rather than silently embedding the first third
+                // of a manual as if it were the whole thing.
+                LOGGER.infof("File '%s' of source '%s' was truncated at %d characters (maxContentLength)",
+                        LogSanitizer.sanitize(file.fileName()), LogSanitizer.sanitize(source.getName()),
+                        limits.maxCharacters());
+            }
+            collector.onExtractedDocument(file.fileId(), "file:" + file.fileName(),
+                    titleOf(file.fileName()), markdown, file.contentHash());
+        } catch (UnreadableDocumentException e) {
+            collector.onUnreadableFile(file, describe(e));
+        } catch (IIngestedFileStore.IngestedFileStoreException e) {
+            // The bytes could not be fetched this time. Recorded as unreachable rather
+            // than missing: the file is there, and a store blip is not evidence that
+            // the source is empty.
+            collector.onError(new CrawlSink.CrawlError(file.fileId(), file.fileName(),
+                    describe(e), 0, true));
+        }
+    }
+
+    private static WebCrawler.CrawlSummary uploadSummary(Collector collector, Instant start,
+                                                         WebCrawler.StopReason stopReason) {
+        return new WebCrawler.CrawlSummary(collector.ingested, collector.unchanged, collector.skipped,
+                collector.failed, collector.unreachable, collector.seen, 0L,
+                Duration.between(start, Instant.now()), stopReason);
+    }
+
+    /** A file name without its extension reads better as a document title. */
+    static String titleOf(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        String stem = dot > 0 ? fileName.substring(0, dot) : fileName;
+        return stem.isBlank() ? fileName : stem;
     }
 
     private static CrawlRequest toCrawlRequest(IngestionSource source) {
@@ -385,7 +814,7 @@ public class IngestionPipeline {
                 web.getUserAgent(),
                 web.isRespectRobots());
 
-        return new CrawlRequest(web.getStartUrl(), scope, limits, politeness);
+        return new CrawlRequest(web.getStartUrl(), scope, limits, politeness, web.getSitemapUrls());
     }
 
     private static String describe(Throwable t) {
@@ -405,6 +834,24 @@ public class IngestionPipeline {
      * How long a run may be in flight before it is treated as abandoned: its own
      * time budget plus a margin, so a slow but healthy run is never reaped.
      */
+    /**
+     * The start time before which a still-RUNNING run of this source counts as
+     * abandoned — for {@link IIngestionStateStore#reapStaleRuns}. Every caller
+     * reaps against this one cut-off, so a read that reaps cannot disagree with a
+     * claim about which runs are dead.
+     */
+    public static Instant staleBefore(IngestionSource source) {
+        return Instant.now().minus(staleRunThreshold(source));
+    }
+
+    /**
+     * The deadline recorded on a run claimed now: from the budget it runs under, so
+     * a later change to the source's settings cannot move it.
+     */
+    private static Instant staleAfterClaim(IngestionSource source) {
+        return Instant.now().plus(staleRunThreshold(source));
+    }
+
     private static Duration staleRunThreshold(IngestionSource source) {
         return Duration.ofMinutes(source.settings().timeBudgetMinutesOrDefault()).plus(STALE_RUN_MARGIN);
     }
@@ -435,11 +882,25 @@ public class IngestionPipeline {
          * Of those failures, the ones that said nothing about whether the page exists.
          */
         private int unreachable;
+        /**
+         * Failures after which a document's old chunks may still be its only copy: the
+         * content could not be looked at, did not embed, or its superseded chunks could
+         * not be removed. The orphan sweep waits for a run with none. Not
+         * {@link #failed}, which also counts the definitive answers — a 404, a file
+         * with no text.
+         */
+        private int inconclusive;
         private int segments;
         private int tombstoned;
         private boolean replaceUnsupported;
         private boolean tombstoningSkipped;
         private boolean budgetExhausted;
+        /**
+         * The run no longer owns its source: it was reaped, or the source was purged or
+         * removed under it. Everything it would still write belongs to nobody.
+         */
+        private boolean superseded;
+        private Instant nextOwnershipCheck = Instant.MIN;
 
         private Collector(RagConfiguration knowledgeBase, String knowledgeBaseId,
                 IngestionSource source, String sourceKey, String runId, Mode mode) {
@@ -463,7 +924,9 @@ public class IngestionPipeline {
 
         private EmbeddingModel model() {
             if (model == null) {
-                model = embeddingModelFactory.getOrCreate(knowledgeBase);
+                // DOCUMENT: the crawler is storing these vectors. An asymmetric model
+                // embeds a document differently from a query, and gets to know which.
+                model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT);
             }
             return model;
         }
@@ -481,7 +944,50 @@ public class IngestionPipeline {
 
         @Override
         public boolean isCancelled() {
-            return budgetExhausted;
+            return budgetExhausted || !stillOwnsRun(false);
+        }
+
+        /**
+         * Whether this run is still the one in flight for its source.
+         *
+         * <p>
+         * A run whose row was purged — the source was removed, its knowledge base
+         * renamed, or its state purged — or that was reaped, used to carry on to the
+         * end of its crawl, embedding into the store and inserting state rows for a
+         * source that had just been cleared. Those inserts are the one write the fence
+         * cannot stop, and the vectors outlived everything: a removed source's chunks
+         * stayed retrievable, and a renamed knowledge base's next run found its
+         * documents "unchanged" in a store that did not have them.
+         *
+         * @param now
+         *            ask the store now rather than at most every
+         *            {@link #OWNERSHIP_CHECK_INTERVAL} — before an embedding, which is
+         *            the write worth the round trip
+         */
+        boolean stillOwnsRun(boolean now) {
+            if (mode != Mode.INGEST || superseded) {
+                return !superseded;
+            }
+            Instant clock = Instant.now();
+            if (!now && clock.isBefore(nextOwnershipCheck)) {
+                return true;
+            }
+            nextOwnershipCheck = clock.plus(OWNERSHIP_CHECK_INTERVAL);
+            try {
+                superseded = stateStore.activeRun(sourceKey)
+                        .map(active -> !runId.equals(active.runId()))
+                        .orElse(true);
+            } catch (RuntimeException e) {
+                // A store that cannot answer has not taken the run away. The writes
+                // themselves are fenced; this only decides whether to keep working.
+                return true;
+            }
+            if (superseded) {
+                LOGGER.warnf("Ingestion run %s of source '%s' no longer owns its source — it was purged, removed "
+                        + "or reaped — and stops here", LogSanitizer.sanitize(runId),
+                        LogSanitizer.sanitize(source.getName()));
+            }
+            return !superseded;
         }
 
         @Override
@@ -497,6 +1003,9 @@ public class IngestionPipeline {
         public void onError(CrawlError error) {
             failed++;
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+            if (error.contentUnknown()) {
+                inconclusive++;
+            }
 
             if (mode != Mode.INGEST || error.documentId() == null || !error.contentUnknown()) {
                 return;
@@ -523,49 +1032,137 @@ public class IngestionPipeline {
                     LOGGER.infof("Document '%s' of source '%s' was truncated at the page size cap",
                             LogSanitizer.sanitize(page.documentId()), LogSanitizer.sanitize(source.getName()));
                 }
-                if (markdown.isBlank()) {
-                    // A page of pure navigation converts to nothing; storing an empty
-                    // document would only pollute retrieval.
-                    skipped++;
-                    return;
-                }
-
-                String hash = ContentHashes.sha256(markdown);
-                var existing = stateStore.lookup(sourceKey, page.documentId());
-                if (existing.isPresent() && !existing.get().hasChanged(hash)) {
-                    unchanged++;
-                    if (mode == Mode.INGEST) {
-                        stateStore.recordSeen(sourceKey, page.documentId(), runId);
-                    }
-                    return;
-                }
-
-                if (mode == Mode.PREVIEW) {
-                    ingested++;
-                    return;
-                }
-
-                int stored = embed(page, markdown);
-                segments += stored;
-                ingested++;
-                meterRegistry.counter("eddi.ingestion.segments.stored", metricTags).increment(stored);
-
-                // Only now, with the vectors safely stored. Recording before this — or
-                // while deciding whether to ingest, as the draft did — means one
-                // provider timeout marks a page done forever.
-                stateStore.recordIngested(sourceKey, page.documentId(), hash,
-                        page.etag(), page.lastModified(), runId);
-
-                if (segments >= source.settings().maxSegmentsPerRunOrDefault()) {
-                    budgetExhausted = true;
-                    LOGGER.warnf("Ingestion of source '%s' stopped at its segment budget (%d)",
-                            LogSanitizer.sanitize(source.getName()), segments);
-                }
+                acceptDocument(page.documentId(), page.finalUrl(), page.title(), markdown,
+                        ContentHashes.sha256(markdown), page.etag(), page.lastModified(), true);
             } catch (RuntimeException e) {
-                failed++;
-                meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
-                LOGGER.warnf(e, "Failed to ingest a document of source '%s'",
-                        LogSanitizer.sanitize(source.getName()));
+                recordDocumentFailure(e);
+            }
+        }
+
+        /**
+         * A document whose text something other than the crawler produced — an uploaded
+         * file.
+         *
+         * @param changeKey
+         *            what decides whether this document changed. For a file it is the
+         *            hash of the bytes, not of the extracted text: the text is
+         *            re-derived on every run, and an extractor improving its output
+         *            would otherwise re-embed every file in the knowledge base.
+         */
+        void onExtractedDocument(String documentId, String url, String title, String markdown, String changeKey) {
+            seen++;
+            try {
+                acceptDocument(documentId, url, title, markdown, changeKey, null, null, false);
+            } catch (RuntimeException e) {
+                recordDocumentFailure(e);
+            }
+        }
+
+        /**
+         * An uploaded file that yields no text — it cannot be read, or it has none.
+         *
+         * <p>
+         * Unlike a crawl error, this is definitive: the stored file is all there is,
+         * and it has just been read. If it replaced a file that had been indexed, the
+         * old version's chunks are removed now. They used to be kept — the error was
+         * recorded as "could not look" — so re-uploading a document as a broken or
+         * scanned copy left the previous text answering questions indefinitely while
+         * the file list showed only the new one.
+         */
+        void onUnreadableFile(StoredFile file, String reason) {
+            seen++;
+            failed++;
+            meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+            LOGGER.warnf("File '%s' of source '%s' was not ingested: %s", LogSanitizer.sanitize(file.fileName()),
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(reason));
+            if (mode != Mode.INGEST) {
+                return;
+            }
+            var known = stateStore.lookup(sourceKey, file.fileId());
+            if (known.isEmpty() || known.get().tombstoned() || !stillOwnsRun(true)) {
+                return;
+            }
+            try {
+                store().removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(file.fileId())
+                        .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
+            } catch (UnsupportedFeatureException e) {
+                replaceUnsupported = true;
+            } catch (RuntimeException e) {
+                // Left as it was — still live, and counted as looked-at rather than
+                // missing — so the next run tries again.
+                LOGGER.warnf(e, "Could not remove the superseded chunks of file '%s' of source '%s'",
+                        LogSanitizer.sanitize(file.fileName()), LogSanitizer.sanitize(source.getName()));
+                unreachable++;
+                inconclusive++;
+                stateStore.recordUnreachable(sourceKey, file.fileId(), runId);
+                return;
+            }
+            stateStore.markTombstoned(sourceKey, List.of(file.fileId()));
+            tombstoned++;
+        }
+
+        private void recordDocumentFailure(RuntimeException e) {
+            failed++;
+            inconclusive++;
+            meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+            LOGGER.warnf(e, "Failed to ingest a document of source '%s'",
+                    LogSanitizer.sanitize(source.getName()));
+        }
+
+        /**
+         * Everything that is the same whatever produced the text.
+         *
+         * @param fromResponse
+         *            the text came from an HTTP response, whose validators replace the
+         *            stored ones even when the content has not changed
+         */
+        private void acceptDocument(String documentId, String url, String title, String markdown,
+                                    String changeKey, String etag, String lastModified, boolean fromResponse) {
+
+            if (markdown.isBlank()) {
+                // A page of pure navigation converts to nothing; storing an empty
+                // document would only pollute retrieval.
+                skipped++;
+                return;
+            }
+
+            var existing = stateStore.lookup(sourceKey, documentId);
+            if (existing.isPresent() && !existing.get().hasChanged(changeKey)) {
+                unchanged++;
+                if (mode == Mode.INGEST && fromResponse) {
+                    // The page was downloaded again, so the validators the server sent
+                    // this time are the ones worth sending back next time.
+                    stateStore.recordSeen(sourceKey, documentId, runId, etag, lastModified);
+                } else if (mode == Mode.INGEST) {
+                    stateStore.recordSeen(sourceKey, documentId, runId);
+                }
+                return;
+            }
+
+            if (mode == Mode.PREVIEW) {
+                ingested++;
+                return;
+            }
+            if (!stillOwnsRun(true)) {
+                // Nothing written for a source that is no longer this run's: the
+                // chunks would belong to nobody.
+                return;
+            }
+
+            int stored = embed(documentId, url, title, markdown);
+            segments += stored;
+            ingested++;
+            meterRegistry.counter("eddi.ingestion.segments.stored", metricTags).increment(stored);
+
+            // Only now, with the vectors safely stored. Recording before this — or
+            // while deciding whether to ingest, as the draft did — means one
+            // provider timeout marks a page done forever.
+            stateStore.recordIngested(sourceKey, documentId, changeKey, etag, lastModified, runId);
+
+            if (segments >= source.settings().maxSegmentsPerRunOrDefault()) {
+                budgetExhausted = true;
+                LOGGER.warnf("Ingestion of source '%s' stopped at its segment budget (%d)",
+                        LogSanitizer.sanitize(source.getName()), segments);
             }
         }
 
@@ -574,14 +1171,14 @@ public class IngestionPipeline {
          * not an estimate. The draft reported {@code markdown.length() / chunkSize},
          * which its own integration test then asserted on.
          */
-        private int embed(CrawledPage page, String markdown) {
+        private int embed(String documentId, String url, String title, String markdown) {
             EmbeddingStore<TextSegment> embeddingStore = store();
 
-            Metadata metadata = Metadata.from(METADATA_DOCUMENT_ID, page.documentId())
-                    .put(METADATA_URL, page.finalUrl())
+            Metadata metadata = Metadata.from(METADATA_DOCUMENT_ID, documentId)
+                    .put(METADATA_URL, url)
                     // Capped: the title comes from a third-party page and is copied onto
                     // every segment of the document.
-                    .put(METADATA_TITLE, cap(page.title(), MAX_TITLE_LENGTH))
+                    .put(METADATA_TITLE, cap(title, MAX_TITLE_LENGTH))
                     .put(METADATA_SOURCE, String.valueOf(source.getName()))
                     .put(METADATA_SOURCE_KEY, sourceKey)
                     .put(METADATA_RUN_ID, runId)
@@ -608,7 +1205,7 @@ public class IngestionPipeline {
             embeddingStore.addAll(embeddings, textSegments);
 
             try {
-                embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(page.documentId())
+                embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
                         .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey))
                         .and(metadataKey(METADATA_RUN_ID).isNotEqualTo(runId)));
             } catch (UnsupportedFeatureException e) {
@@ -625,9 +1222,12 @@ public class IngestionPipeline {
             if (rate != null && rate > 0) {
                 cost = (segments / 1000.0) * rate;
             }
+            if (error == null && superseded) {
+                error = "The run stopped: its source was purged, removed or reaped while it was running";
+            }
             return new IngestionReport(
                     runId,
-                    source.getId(),
+                    source.effectiveId(),
                     error != null
                             ? IngestionReport.Outcome.FAILED
                             : mode == Mode.PREVIEW
@@ -644,6 +1244,12 @@ public class IngestionPipeline {
     /**
      * What one ingestion run did.
      *
+     * @param sourceId
+     *            always {@link IngestionSource#effectiveId()}, never
+     *            {@code getId()}: a source that arrived without an id is addressed,
+     *            keyed and scheduled by its name everywhere else, so reporting null
+     *            here left the run history, the REST answer and the fire log unable
+     *            to say which source they were about
      * @param replaceUnsupported
      *            the configured vector store cannot delete by metadata, so
      *            re-ingested documents accumulate stale chunks. Reported rather
@@ -671,7 +1277,12 @@ public class IngestionPipeline {
             String message) {
 
         public enum Outcome {
-            COMPLETED, PREVIEW, FAILED, SKIPPED, ALREADY_RUNNING
+            COMPLETED, PREVIEW, FAILED, SKIPPED, ALREADY_RUNNING,
+            /**
+             * A run was claimed and handed to its own worker; its outcome goes to the
+             * source's run history, not to whoever started it.
+             */
+            STARTED
         }
 
         static IngestionReport failed(String runId, String sourceId, String message) {
@@ -684,6 +1295,12 @@ public class IngestionPipeline {
                     false, false, null, Duration.ZERO, message);
         }
 
+        static IngestionReport started(String runId, String sourceId) {
+            return new IngestionReport(runId, sourceId, Outcome.STARTED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO,
+                    "Run " + runId + " started; its outcome is recorded in the source's run history");
+        }
+
         static IngestionReport alreadyRunning(String sourceId) {
             return new IngestionReport(null, sourceId, Outcome.ALREADY_RUNNING, 0, 0, 0, 0, 0, 0, 0, 0.0,
                     false, false, null, Duration.ZERO,
@@ -691,7 +1308,7 @@ public class IngestionPipeline {
         }
 
         public boolean isSuccess() {
-            return outcome == Outcome.COMPLETED || outcome == Outcome.PREVIEW;
+            return outcome == Outcome.COMPLETED || outcome == Outcome.PREVIEW || outcome == Outcome.STARTED;
         }
     }
 }

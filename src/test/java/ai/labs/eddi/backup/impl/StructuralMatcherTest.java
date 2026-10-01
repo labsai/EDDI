@@ -143,7 +143,7 @@ class StructuralMatcherTest {
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
             descriptor.setName("Target Agent");
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("target1")).thenReturn(descriptor);
             when(agentStore.readAgent("target1", 1)).thenReturn(targetAgentConfig);
 
             // Same serialization for both
@@ -170,7 +170,7 @@ class StructuralMatcherTest {
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
             descriptor.setName("Target Agent");
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("target1")).thenReturn(descriptor);
             when(agentStore.readAgent("target1", 1)).thenReturn(targetAgentConfig);
 
             // Different serialization
@@ -314,12 +314,25 @@ class StructuralMatcherTest {
     class ReadLatestVersionTests {
 
         @Test
-        @DisplayName("descriptor with null resource returns null version")
+        @DisplayName("a descriptor naming no resource costs nothing — the store answers")
         void nullResource() throws Exception {
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(null);
             descriptor.setName("Test");
-            when(documentDescriptorStore.readDescriptor("id1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("id1")).thenReturn(descriptor);
+            // The store is the authority for the current version; the descriptor is
+            // only consulted when it cannot answer.
+            when(agentStore.getCurrentResourceId("id1")).thenReturn(new IResourceId() {
+                @Override
+                public String getId() {
+                    return "id1";
+                }
+
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
             when(agentStore.readAgent(anyString(), anyInt())).thenReturn(new AgentConfiguration());
 
             var source = mock(IResourceSource.class);

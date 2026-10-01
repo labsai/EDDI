@@ -8,12 +8,15 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 
 import java.util.List;
@@ -39,6 +42,46 @@ class AgentSetupServiceBranchCoverageTest {
     void setUp() {
         openMocks(this);
         service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
+    }
+
+    // ─── default model per provider ──────────────────────────────────────
+
+    @Nested
+    @DisplayName("default model")
+    class DefaultModel {
+
+        @ParameterizedTest
+        @ValueSource(strings = {"xai", "deepseek", "moonshot", "qwen", "zhipu", "minimax", "openrouter", "groq"})
+        @DisplayName("a named OpenAI-compatible provider gets its own default model, not the Claude one")
+        void compatibleProviderDefaultModel(String provider) {
+            var resolved = service.resolveParams(provider, null, null, null);
+            assertEquals(provider, resolved.providerType());
+            assertNotEquals(AgentSetupService.DEFAULT_MODEL, resolved.modelId());
+            assertEquals(OpenAiCompatibleProviders.find(provider).orElseThrow().defaultModel(),
+                    resolved.modelId());
+        }
+
+        @Test
+        @DisplayName("defaultModelFor is the shared rule: preset default, else the historic default")
+        void defaultModelFor() {
+            assertEquals("grok-4.7", AgentSetupService.defaultModelFor("xai"));
+            assertEquals("grok-4.7", AgentSetupService.defaultModelFor(" XAI "));
+            assertEquals(AgentSetupService.DEFAULT_MODEL, AgentSetupService.defaultModelFor("openai"));
+            assertEquals(AgentSetupService.DEFAULT_MODEL, AgentSetupService.defaultModelFor(null));
+        }
+
+        @Test
+        @DisplayName("an explicit model always wins")
+        void explicitModelWins() {
+            assertEquals("grok-4.5", service.resolveParams("xai", " grok-4.5 ", null, null).modelId());
+        }
+
+        @Test
+        @DisplayName("other providers keep the historic default")
+        void otherProvidersKeepDefault() {
+            assertEquals(AgentSetupService.DEFAULT_MODEL, service.resolveParams("openai", null, null, null).modelId());
+            assertEquals(AgentSetupService.DEFAULT_MODEL, service.resolveParams(null, null, null, null).modelId());
+        }
     }
 
     // ─── environment resolution ──────────────────────────────────────────
@@ -339,6 +382,33 @@ class AgentSetupServiceBranchCoverageTest {
             assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
         }
 
+        /**
+         * gemini-vertex needs projectId and location, which the request cannot carry.
+         * Setup used to demand an API key it never writes, vault that key, and create
+         * an agent that fails on its first turn.
+         */
+        @Test
+        @DisplayName("gemini-vertex is refused before anything is vaulted or created")
+        void geminiVertexRefused() {
+            var req = new SetupAgentRequest("Agent", "prompt", " Gemini-Vertex ", "gemini-2.5-flash",
+                    "unused-key", null, null, null, null, null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(req));
+            assertTrue(ex.getMessage().contains("projectId and location"), ex.getMessage());
+            verifyNoInteractions(secretProvider);
+            verifyNoInteractions(restInterfaceFactory);
+        }
+
+        @Test
+        @DisplayName("gemini-vertex is refused for an API agent too")
+        void geminiVertexRefusedForApiAgent() {
+            var req = new CreateApiAgentRequest("Agent", "prompt", "openapi: 3.0", "gemini-vertex", "gemini-2.5-flash",
+                    "unused-key", null, null, null, null, null, null, null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.createApiAgent(req));
+            assertTrue(ex.getMessage().contains("projectId and location"), ex.getMessage());
+            verifyNoInteractions(secretProvider);
+            verifyNoInteractions(restInterfaceFactory);
+        }
+
         @Test
         @DisplayName("null system prompt throws")
         void nullSystemPrompt() {
@@ -564,6 +634,48 @@ class AgentSetupServiceBranchCoverageTest {
                     false, null, null, null, false, false, null);
             var params = config.tasks().get(0).getParameters();
             assertEquals("cohere.command", params.get("modelName"));
+        }
+
+        /**
+         * HuggingFaceLanguageModelBuilder reads {@code modelId} and
+         * {@code accessToken}. The default branch wrote {@code modelName} and
+         * {@code apiKey}, so a wizard-created Hugging Face agent deployed and then
+         * failed on its first turn with no model.
+         */
+        @Test
+        @DisplayName("huggingface sets modelId and accessToken, not modelName/apiKey")
+        void huggingface() {
+            var config = service.createLlmConfig("huggingface", "Qwen/Qwen3.5-7B", "hf_token", "prompt",
+                    false, null, null, null, false, false, null);
+            var params = config.tasks().get(0).getParameters();
+            assertEquals("Qwen/Qwen3.5-7B", params.get("modelId"));
+            assertEquals("hf_token", params.get("accessToken"));
+            assertNull(params.get("modelName"));
+            assertNull(params.get("apiKey"));
+        }
+
+        @Test
+        @DisplayName("huggingface without a key writes no accessToken")
+        void huggingfaceNoKey() {
+            var config = service.createLlmConfig("huggingface", "Qwen/Qwen3.5-7B", null, "prompt",
+                    false, null, null, null, false, false, null);
+            assertNull(config.tasks().get(0).getParameters().get("accessToken"));
+        }
+
+        /**
+         * VertexGeminiLanguageModelBuilder reads {@code modelId}; {@code modelName} is
+         * not one of its parameters, and it authenticates through Application Default
+         * Credentials, so a key is never written.
+         */
+        @Test
+        @DisplayName("gemini-vertex sets modelId and no key")
+        void geminiVertex() {
+            var config = service.createLlmConfig("gemini-vertex", "gemini-2.5-flash", "unused", "prompt",
+                    false, null, null, null, false, false, null);
+            var params = config.tasks().get(0).getParameters();
+            assertEquals("gemini-2.5-flash", params.get("modelId"));
+            assertNull(params.get("modelName"));
+            assertNull(params.get("apiKey"));
         }
 
         @Test

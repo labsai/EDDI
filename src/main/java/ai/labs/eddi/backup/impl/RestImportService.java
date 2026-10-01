@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IRestImportService;
+import ai.labs.eddi.backup.impl.SourceUrlValidator.SyncSourcePolicy;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
@@ -23,8 +25,13 @@ import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
+import ai.labs.eddi.configs.parser.IParserStore;
+import ai.labs.eddi.configs.parser.IRestParserStore;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
+import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -41,6 +48,7 @@ import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
+import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -69,25 +77,32 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.BadRequestException;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.bson.Document;
 import org.jboss.logging.Logger;
 
 import java.io.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -101,6 +116,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class RestImportService extends AbstractBackupService implements IRestImportService {
+    private final RagSourceIngestionService ragSourceIngestionService;
+
     private static final Pattern EDDI_URI_PATTERN = Pattern.compile("\"eddi://ai.labs..*?\"");
     private static final String AGENT_FILE_ENDING = ".agent.json";
     /** EDDI 5.x named the agent file {@code <id>.bot.json}. */
@@ -138,14 +155,52 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final ResourceAccessGuard resourceAccessGuard;
     private final SpaceContext spaceContext;
 
+    /**
+     * What this deployment accepts as a live-sync source — see
+     * {@link SourceUrlValidator.SyncSourcePolicy}. Resolved once at construction
+     * because it is deployment configuration, never per-request input.
+     */
+    private final SyncSourcePolicy syncSourcePolicy;
+
+    /**
+     * Applied to every document a live sync reads from the source — see
+     * {@link RemoteApiResourceSource}. Injected through {@link #useSecretScrubber}
+     * rather than the constructor, and never null: an instance built without CDI
+     * still scrubs, so a missed wiring can not quietly turn a sync back into one
+     * that copies the source's credentials into the preview and the target.
+     */
+    private UnaryOperator<String> remoteSecretScrubber = new SecretScrubber(new ObjectMapper())::scrubJson;
+
     private static final Logger LOGGER = Logger.getLogger(RestImportService.class);
+    private static final String QUERY_SELECTED_RESOURCES = "selectedResources";
+
+    /** The container's configured scrubber, replacing the fail-safe default. */
+    @Inject
+    void useSecretScrubber(SecretScrubber secretScrubber) {
+        this.remoteSecretScrubber = secretScrubber::scrubJson;
+    }
+
+    /**
+     * The request being served — read only to tell {@code ?selectedResources=} from
+     * an absent parameter, which the framework hands over as the same null. Null
+     * when built outside the container (unit tests).
+     */
+    @Inject
+    UriInfo requestUri;
 
     @Inject
     public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization,
             IMigrationManager migrationManager,
             IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
             StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor, IScheduleStore scheduleStore,
-            BackupMetrics metrics, ResourceAccessGuard resourceAccessGuard, SpaceContext spaceContext) {
+            BackupMetrics metrics, ResourceAccessGuard resourceAccessGuard, SpaceContext spaceContext,
+            RagSourceIngestionService ragSourceIngestionService,
+            @ConfigProperty(name = SourceUrlValidator.REQUIRE_HTTPS_PROPERTY, defaultValue = "true") boolean requireHttpsSource,
+            @ConfigProperty(name = SourceUrlValidator.ALLOW_PRIVATE_PROPERTY, defaultValue = "false") boolean allowPrivateSources,
+            @ConfigProperty(name = SourceUrlValidator.ALLOWED_SOURCES_PROPERTY) Optional<String> allowedSources) {
+        this.syncSourcePolicy = new SyncSourcePolicy(requireHttpsSource, allowPrivateSources,
+                SourceUrlValidator.parseAllowedSources(allowedSources.orElse(null)));
+        this.ragSourceIngestionService = ragSourceIngestionService;
         this.metrics = metrics;
         this.resourceAccessGuard = resourceAccessGuard;
         this.spaceContext = spaceContext;
@@ -170,7 +225,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Legacy merge preview path
         File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
         try {
-            this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+            unzipArchive(zippedAgentConfigFiles, targetDir);
             var targetDirPath = targetDir.getPath();
 
             for (Path agentFilePath : singleAgentFileIn(Paths.get(targetDirPath))) {
@@ -229,10 +284,31 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
+    /**
+     * Unpacks an uploaded or fetched archive, answering an over-sized one with 413
+     * and the limit it crossed rather than a 500.
+     */
+    private void unzipArchive(InputStream archive, File targetDir) throws IOException {
+        try {
+            this.zipArchive.unzip(archive, targetDir);
+        } catch (ZipArchive.ZipLimitExceededException e) {
+            throw new WebApplicationException(e.getMessage(), Response.status(Response.Status.REQUEST_ENTITY_TOO_LARGE)
+                    .entity(Map.of("error", e.getMessage()))
+                    .type(MediaType.APPLICATION_JSON)
+                    .build());
+        }
+    }
+
     private void addExtensionDiffs(List<ResourceDiff> diffs, String workflowFileString, Path workflowDir)
             throws CallbackMatcher.CallbackMatcherException {
 
-        addDiffsForType(diffs, workflowFileString, DICTIONARY_URI_PATTERN, DICTIONARY_EXT, workflowDir);
+        List<URI> parserUris = carriedParserUris(workflowFileString, workflowDir);
+        addDiffsForUris(diffs, parserUris, PARSER_EXT, workflowDir);
+        // The dictionaries the import creates include those only a parser document
+        // names, so the preview has to find them in the same place.
+        addDiffsForUris(diffs, withCarried(extractResourcesUris(workflowFileString, DICTIONARY_URI_PATTERN),
+                extractResourcesUris(archivedText(parserUris, PARSER_EXT, workflowDir), DICTIONARY_URI_PATTERN),
+                DICTIONARY_EXT, workflowDir), DICTIONARY_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, BEHAVIOR_URI_PATTERN, BEHAVIOR_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, HTTPCALLS_URI_PATTERN, HTTPCALLS_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, LANGCHAIN_URI_PATTERN, LLM_EXT, workflowDir);
@@ -245,7 +321,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private void addDiffsForType(List<ResourceDiff> diffs, String workflowFileString, Pattern uriPattern, String ext, Path workflowDir)
             throws CallbackMatcher.CallbackMatcherException {
 
-        List<URI> uris = extractResourcesUris(workflowFileString, uriPattern);
+        addDiffsForUris(diffs, extractResourcesUris(workflowFileString, uriPattern), ext, workflowDir);
+    }
+
+    private void addDiffsForUris(List<ResourceDiff> diffs, List<URI> uris, String ext, Path workflowDir) {
         for (URI uri : uris) {
             IResourceId resourceId = RestUtilities.extractResourceId(uri);
             if (resourceId == null)
@@ -298,13 +377,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             continue;
 
                         String snippetName = snippet.getName();
+                        // The archive id, like every other row: it is what a merge matches
+                        // selectedResources against. The local id used to stand here, and
+                        // a new snippet had none at all, so it could not be selected.
+                        String archiveId = snippetArchiveId(snippetFilePath);
                         IResourceId existing = existingByName.get(snippetName);
                         if (existing != null) {
-                            diffs.add(new ResourceDiff(existing.getId(), SNIPPET_EXT, snippetName,
+                            diffs.add(new ResourceDiff(archiveId, SNIPPET_EXT, snippetName,
                                     DiffAction.UPDATE, existing.getId(), existing.getVersion(),
                                     "name", null, null, -1));
                         } else {
-                            diffs.add(new ResourceDiff(null, SNIPPET_EXT, snippetName,
+                            diffs.add(new ResourceDiff(archiveId, SNIPPET_EXT, snippetName,
                                     DiffAction.CREATE, null, null,
                                     null, null, null, -1));
                         }
@@ -543,10 +626,52 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
+    /**
+     * {@code selectedResources} as a set: null when the parameter is absent, which
+     * means everything.
+     * <p>
+     * A parameter that is present but names nothing is refused. It used to read as
+     * "absent", so a caller that deselected every row — a Manager dialog with
+     * everything unticked sends exactly that — got <em>everything</em> written,
+     * including a local hotfix the operator had deliberately left out.
+     *
+     * @throws BadRequestException
+     *             when the parameter is present and names no resource
+     */
     private Set<String> parseSelectedResources(String selectedOriginIds) {
-        if (isNullOrEmpty(selectedOriginIds))
+        if (selectedOriginIds == null) {
+            // `?selectedResources=` arrives here as null, exactly like an absent
+            // parameter — and the Manager sends it for a selection with nothing in
+            // it. Only the raw query can tell the two apart.
+            if (selectionParameterSent()) {
+                throw emptySelection();
+            }
             return null;
-        return Arrays.stream(selectedOriginIds.split(",")).map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toSet());
+        }
+        Set<String> selected = Arrays.stream(selectedOriginIds.split(",")).map(String::trim).filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
+        if (selected.isEmpty()) {
+            throw emptySelection();
+        }
+        return selected;
+    }
+
+    private boolean selectionParameterSent() {
+        if (requestUri == null) {
+            return false;
+        }
+        try {
+            return requestUri.getQueryParameters().containsKey(QUERY_SELECTED_RESOURCES);
+        } catch (RuntimeException outsideARequest) {
+            return false;
+        }
+    }
+
+    private static BadRequestException emptySelection() {
+        String message = "selectedResources names no resource. Leave it out to include everything, or name at least one.";
+        return new BadRequestException(message,
+                Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", message))
+                        .type(MediaType.APPLICATION_JSON).build());
     }
 
     private boolean isSelected(Set<String> selectedSet, String originId) {
@@ -581,14 +706,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                           Set<String> selectedSet, ImportTransaction transaction)
             throws IOException {
 
-        this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+        unzipArchive(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
 
         // Import snippets (global resources, not workflow-embedded). They are
         // recorded on the transaction like everything else — a snippet this import
         // created is just as much an orphan as a workflow when a later resource
         // blows up.
-        importSnippets(Paths.get(targetDirPath), isMerge, transaction);
+        importSnippets(Paths.get(targetDirPath), isMerge, selectedSet, transaction);
 
         // Connections are global too, and the configs about to be imported reference
         // them by name — so they land first, and never over a live one.
@@ -710,8 +835,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // loading old resources, creating/updating them,
                         // updating document descriptor and replacing references in workflow config
 
-                        // ... for dictionaries
-                        List<URI> dictionaryUris = extractResourcesUris(workflowFileString, DICTIONARY_URI_PATTERN);
+                        // ... for parsers, read first and written last. A parser
+                        // document carries its own dictionary references, so those
+                        // dictionaries have to be discovered before the dictionary pass
+                        // and repointed before the parser that names them is written.
+                        List<URI> parserUris = carriedParserUris(workflowFileString, workflowPath);
+                        List<ParserConfiguration> parserConfigs = readResources(parserUris, workflowPath, PARSER_EXT, ParserConfiguration.class,
+                                isMerge);
+
+                        // ... for dictionaries, named by the workflow's own steps or by
+                        // one of those parser documents. One only a parser document names
+                        // is imported when the archive carries it: a selective export may
+                        // have left it out, and the parser then keeps naming it as the
+                        // archive wrote it rather than failing the whole import.
+                        List<URI> dictionaryUris = withCarried(extractResourcesUris(workflowFileString, DICTIONARY_URI_PATTERN),
+                                extractResourcesUris(serializeForScan(parserConfigs), DICTIONARY_URI_PATTERN),
+                                DICTIONARY_EXT, workflowPath);
                         List<URI> newDictionaryUris = createOrUpdateResources(
                                 readResources(dictionaryUris, workflowPath, DICTIONARY_EXT, DictionaryConfiguration.class, isMerge),
                                 dictionaryUris, isMerge,
@@ -719,6 +858,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                         updateDocumentDescriptor(workflowPath, dictionaryUris, newDictionaryUris);
                         workflowFileString = replaceURIs(workflowFileString, dictionaryUris, newDictionaryUris);
+                        parserConfigs = repointReferences(parserConfigs, dictionaryUris, newDictionaryUris);
+
+                        List<URI> newParserUris = createOrUpdateResources(parserConfigs, parserUris, isMerge,
+                                selectedSet, this::createNewParsers, this::updateParser, transaction);
+
+                        updateDocumentDescriptor(workflowPath, parserUris, newParserUris);
+                        workflowFileString = replaceURIs(workflowFileString, parserUris, newParserUris);
 
                         // ... for behavior
                         List<URI> behaviorUris = extractResourcesUris(workflowFileString, BEHAVIOR_URI_PATTERN);
@@ -936,11 +1082,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
-                Response updateResponse = restAgentStore.updateAgent(localResId.getId(), localResId.getVersion(), agentConfiguration);
-                if (updateResponse.getStatus() == 200) {
-                    // updated — new version = old version + 1
-                    int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestAgentStore.resourceURI + localResId.getId() + IRestAgentStore.versionQueryParam + newVersion);
+                // Never compatible: an imported configuration comes from elsewhere, and
+                // nobody has judged it against the conversations running here. A failed
+                // merge's rollback writes through this too, so the restored version is a
+                // new generation as well: conversations on the original stay pinned to it,
+                // as after any breaking save. Reusing the original generation would give the
+                // latest version a lower generation than the aborted import's, and the next
+                // breaking save would then share a generation with that aborted version.
+                URI updated = updateTracked(IAgentStore.class, IRestAgentStore.resourceURI, localResId.getId(),
+                        localResId.getVersion(), agentConfiguration,
+                        (id, version, config) -> restAgentStore.updateAgent(id, version, config, false), transaction);
+                if (updated != null) {
+                    return updated;
                 }
             }
         }
@@ -955,14 +1108,152 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             if (localResId != null) {
                 WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
                 IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
-                Response updateResponse = restWorkflowStore.updateWorkflow(localResId.getId(), localResId.getVersion(), workflowConfig);
-                if (updateResponse.getStatus() == 200) {
-                    int newVersion = localResId.getVersion() + 1;
-                    return URI.create(IRestWorkflowStore.resourceURI + localResId.getId() + IRestWorkflowStore.versionQueryParam + newVersion);
+                URI updated = updateTracked(IWorkflowStore.class, IRestWorkflowStore.resourceURI, localResId.getId(),
+                        localResId.getVersion(), workflowConfig, restWorkflowStore::updateWorkflow, transaction);
+                if (updated != null) {
+                    return updated;
                 }
             }
         }
         return createNewWorkflow(workflowFileString, transaction);
+    }
+
+    /** An {@code IRest*Store} update, e.g. {@code IRestAgentStore::updateAgent}. */
+    @FunctionalInterface
+    private interface RestUpdate<T> {
+        Response update(String id, Integer version, T document);
+    }
+
+    /**
+     * Updates a resource that already exists here during a merge, and records on
+     * the transaction how to put it back.
+     * <p>
+     * A merge writes into live resources. When a later write failed, the rollback
+     * used to delete what the import had created and leave every update in place,
+     * so a failed merge left the target agent half-promoted: its workflows and
+     * extensions already carried the archive's content while the agent itself - the
+     * last write - still pointed at the old versions. The compensation writes the
+     * pre-import content back as a new version through the same REST bean, so
+     * validation, capability registration and cache invalidation run exactly as on
+     * the way in, and history is only ever appended to.
+     *
+     * <p>
+     * One resource can be updated more than once by a single merge — two workflows
+     * sharing a dictionary or an LLM config each carry it, and each merges it. Only
+     * the <em>first</em> update snapshots: the second one's "previous" is the
+     * archive's own content, and restoring that would leave the import in place.
+     * Later updates only move the version the single compensation restores over,
+     * which is read when the compensation runs.
+     * <p>
+     * A first update whose pre-import content cannot be read is not attempted: it
+     * would land with nothing to restore, so a later failure would leave exactly
+     * this resource half-promoted. The merge fails instead, and the transaction's
+     * rollback undoes what it had already written. An unreadable descriptor does
+     * not stop it - the content still restores, only the descriptor's name and
+     * origin id stay as the merge left them, which is logged.
+     *
+     * @return the URI of the version the update produced, or {@code null} when the
+     *         store did not answer 200 - the caller then creates a resource instead
+     * @throws IllegalStateException
+     *             when the resource's current content cannot be read before its
+     *             first update in this merge
+     */
+    private <T> URI updateTracked(Class<?> storeClass, String resourceUri, String localId, Integer localVersion, T document,
+                                  RestUpdate<T> restUpdate, ImportTransaction transaction) {
+        ImportTransaction.TrackedUpdate tracked = transaction.trackedUpdate(storeClass, localId);
+        T previous = null;
+        DocumentDescriptor previousDescriptor = null;
+        if (tracked == null) {
+            previous = readForRollback(storeClass, localId, localVersion);
+            previousDescriptor = readCurrentDescriptorForRollback(localId);
+            if (previousDescriptor == null) {
+                LOGGER.warnf("Merge updates %s '%s' without a readable descriptor; a failed import restores its content but not its name",
+                        storeClass.getSimpleName(), LogSanitizer.sanitize(localId));
+            }
+        }
+
+        Response response = restUpdate.update(localId, localVersion, document);
+        if (response == null || response.getStatus() != 200) {
+            return null;
+        }
+        int newVersion = localVersion + 1;
+        if (tracked != null) {
+            tracked.latestImportedVersion = newVersion;
+        } else {
+            var update = transaction.recordTrackedUpdate(storeClass, localId, newVersion);
+            T original = previous;
+            DocumentDescriptor originalDescriptor = previousDescriptor;
+            transaction.recordCompensation(() -> restorePreviousVersion(storeClass, resourceUri, localId,
+                    update.latestImportedVersion, original, originalDescriptor, restUpdate));
+        }
+        return URI.create(resourceUri + localId + IRestVersionInfo.versionQueryParam + newVersion);
+    }
+
+    /**
+     * The content a first merge update is about to replace - what its compensation
+     * writes back. Never {@code null}: a resource that cannot be read is not
+     * updated at all (see {@link #updateTracked}).
+     */
+    private <T> T readForRollback(Class<?> storeClass, String id, Integer version) {
+        T previous;
+        try {
+            IResourceStore<T> store = resolveStore(storeClass);
+            previous = store.read(id, version);
+        } catch (Exception e) {
+            throw unrestorableUpdate(storeClass, id, version, e);
+        }
+        if (previous == null) {
+            throw unrestorableUpdate(storeClass, id, version, null);
+        }
+        return previous;
+    }
+
+    private static IllegalStateException unrestorableUpdate(Class<?> storeClass, String id, Integer version, Exception cause) {
+        // Sanitized here: the import's catch-all logs this message as it is.
+        return new IllegalStateException("Merge aborted: " + storeClass.getSimpleName() + " '" + LogSanitizer.sanitize(id) + "' v"
+                + version + " could not be read before updating it, so a failed import could not restore it"
+                + (cause == null ? "" : " (" + LogSanitizer.sanitize(cause.getMessage()) + ")"), cause);
+    }
+
+    private DocumentDescriptor readCurrentDescriptorForRollback(String id) {
+        try {
+            IResourceId current = documentDescriptorStore.getCurrentResourceId(id);
+            return current == null ? null : documentDescriptorStore.readDescriptor(current.getId(), current.getVersion());
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the descriptor of '%s' before a merge update: %s", LogSanitizer.sanitize(id),
+                    LogSanitizer.sanitize(e.getMessage()));
+            return null;
+        }
+    }
+
+    /**
+     * Writes {@code previous} back over the version a failed merge produced, then
+     * points the descriptor - name, description and originId included, which the
+     * merge also rewrote - at the restored version. A resource someone else changed
+     * in the meantime is not overwritten: the update is version-checked, the
+     * conflict propagates, and the rollback loop logs it.
+     */
+    private <T> void restorePreviousVersion(Class<?> storeClass, String resourceUri, String id, int importedVersion, T previous,
+                                            DocumentDescriptor previousDescriptor, RestUpdate<T> restUpdate) {
+        Response response = restUpdate.update(id, importedVersion, previous);
+        if (response == null || response.getStatus() != 200) {
+            throw new IllegalStateException("restoring " + storeClass.getSimpleName() + " '" + id + "' answered "
+                    + (response == null ? "nothing" : response.getStatus()));
+        }
+        URI restoredUri = URI.create(resourceUri + id + IRestVersionInfo.versionQueryParam + (importedVersion + 1));
+        LOGGER.warnf("Import failed - restored %s '%s' to its pre-import content as %s", storeClass.getSimpleName(),
+                LogSanitizer.sanitize(id), LogSanitizer.sanitize(restoredUri.toString()));
+        if (previousDescriptor == null) {
+            return;
+        }
+        try {
+            IResourceId currentDescriptorId = documentDescriptorStore.getCurrentResourceId(id);
+            previousDescriptor.setResource(restoredUri);
+            documentDescriptorStore.setDescriptor(currentDescriptorId.getId(), currentDescriptorId.getVersion(), previousDescriptor);
+        } catch (Exception e) {
+            LOGGER.warnf("Restored %s '%s' but could not restore its descriptor: %s", storeClass.getSimpleName(),
+                    LogSanitizer.sanitize(id), LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     private void setOriginIdOnDescriptor(URI resourceUri, String originId) {
@@ -977,8 +1268,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 if (currentDescId != null) {
                     DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(
                             currentDescId.getId(), currentDescId.getVersion());
-                    if (descriptor != null && !originId.equals(descriptor.getOriginId())) {
+                    // The version this import wrote is also the baseline a later sync
+                    // measures local edits against — see DocumentDescriptor#getSyncedVersion.
+                    Integer written = resourceId.getVersion();
+                    if (descriptor != null && (!originId.equals(descriptor.getOriginId())
+                            || !Objects.equals(written, descriptor.getSyncedVersion()))) {
                         descriptor.setOriginId(originId);
+                        descriptor.setSyncedVersion(written);
                         documentDescriptorStore.setDescriptor(
                                 currentDescId.getId(), currentDescId.getVersion(), descriptor);
                     }
@@ -1038,6 +1334,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private URI createNewAgent(AgentConfiguration agentConfiguration, ImportTransaction transaction) {
+        // dynamicOrigin names a conversation on the instance the ZIP came from; the
+        // imported agent gets a fresh id and was provisioned by an import, not by
+        // create_sub_agent here. (A merge that updates an existing agent goes
+        // through RestAgentStore.updateAgent, which keeps the local marker.)
+        agentConfiguration.setDynamicOrigin(null);
         URI createdAgentUri = createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI, transaction);
         registerCapabilities(createdAgentUri, agentConfiguration);
         return createdAgentUri;
@@ -1077,6 +1378,150 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return createResourceDirect(IWorkflowStore.class, workflowConfig, IRestWorkflowStore.resourceURI, transaction);
     }
 
+    /**
+     * The archived files behind these references, concatenated for reference
+     * scanning. A file that cannot be read contributes nothing — the preview then
+     * shows fewer rows, and the import, which reads the same file, reports it.
+     */
+    private String archivedText(List<URI> uris, String extension, Path workflowPath) {
+        StringBuilder text = new StringBuilder();
+        for (URI uri : uris) {
+            IResourceId resourceId = RestUtilities.extractResourceId(uri);
+            if (resourceId == null || resourceId.getId() == null) {
+                continue;
+            }
+            try {
+                text.append(System.lineSeparator())
+                        .append(readFile(createResourcePath(workflowPath, resourceId.getId(), extension)));
+            } catch (IOException e) {
+                LOGGER.debugf("Could not scan %s for references: %s", LogSanitizer.sanitize(uri.toString()),
+                        LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
+        return text.toString();
+    }
+
+    /**
+     * The parser documents this workflow references <em>and the archive
+     * carries</em>.
+     * <p>
+     * Parser documents only travel since the archive started exporting them; every
+     * archive written before that names the document in the parser step's
+     * {@code config.uri} and leaves the file out. Those archives must go on
+     * importing exactly as they did — the step kept and the reference untouched —
+     * rather than failing a merge that has no local copy to answer it with, or
+     * losing the parser step on a create. The runtime builds the parser from the
+     * step's own {@code extensions}, so that reference was never what made the
+     * agent parse.
+     */
+    private List<URI> carriedParserUris(String workflowFileString, Path workflowPath)
+            throws CallbackMatcher.CallbackMatcherException {
+        return withCarried(List.of(), extractResourcesUris(workflowFileString, PARSER_URI_PATTERN), PARSER_EXT,
+                workflowPath);
+    }
+
+    /**
+     * {@code required}, followed by those of {@code optional} the archive carries a
+     * file for and {@code required} does not already name.
+     */
+    private List<URI> withCarried(List<URI> required, List<URI> optional, String extension, Path workflowPath) {
+        List<URI> uris = new ArrayList<>(required);
+        for (URI uri : optional) {
+            if (uris.contains(uri)) {
+                continue;
+            }
+            IResourceId resourceId = RestUtilities.extractResourceId(uri);
+            if (resourceId != null && resourceId.getId() != null
+                    && Files.exists(createResourcePath(workflowPath, resourceId.getId(), extension))) {
+                uris.add(uri);
+            } else {
+                LOGGER.debugf("Archive carries no %s for %s - the reference is kept as it is", extension,
+                        LogSanitizer.sanitize(uri.toString()));
+            }
+        }
+        return uris;
+    }
+
+    /**
+     * Every config in the list as one string, for reference scanning only.
+     * <p>
+     * A parser document's dictionary references live inside its {@code extensions}
+     * map, so the only way to find them with the same URI patterns the rest of this
+     * class uses is to look at the document as text. A config that could not be
+     * read - a merge whose archive left the file out - simply contributes nothing.
+     */
+    private String serializeForScan(List<?> configs) {
+        if (configs == null || configs.isEmpty()) {
+            return "";
+        }
+        StringBuilder scanned = new StringBuilder();
+        for (Object config : configs) {
+            if (config == null) {
+                continue;
+            }
+            try {
+                scanned.append(System.lineSeparator()).append(jsonSerialization.serialize(config));
+            } catch (IOException e) {
+                LOGGER.warnf("Could not scan a %s for references: %s", config.getClass().getSimpleName(),
+                        LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
+        return scanned.toString();
+    }
+
+    /**
+     * The same configs with every {@code oldUris.get(i)} rewritten to
+     * {@code newUris.get(i)}.
+     * <p>
+     * Applied to parser documents once their dictionaries have been created here,
+     * so the parser that lands names <em>this</em> instance's dictionaries. Without
+     * it the parser arrives naming ids that exist only on the instance it came
+     * from: a dangling reference for everything that loads the document, the
+     * {@code /parser/{parserId}} endpoint among them.
+     * <p>
+     * A config that cannot be rewritten fails the import, which rolls back.
+     */
+    private <T> List<T> repointReferences(List<T> configs, List<URI> oldUris, List<URI> newUris) {
+        if (configs == null || configs.isEmpty() || oldUris.isEmpty()) {
+            return configs;
+        }
+        List<T> repointed = new ArrayList<>(configs.size());
+        for (T config : configs) {
+            repointed.add(repointReferences(config, oldUris, newUris));
+        }
+        return repointed;
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T repointReferences(T config, List<URI> oldUris, List<URI> newUris) {
+        if (config == null) {
+            return null;
+        }
+        try {
+            String rewritten = replaceURIs(jsonSerialization.serialize(config), oldUris, newUris);
+            return (T) jsonSerialization.deserialize(rewritten, config.getClass());
+        } catch (Exception e) {
+            // Failing the import, not writing the document with the source's ids: a
+            // 201 for an agent whose parser names dictionaries this instance does not
+            // have would report something the import did not do.
+            throw new IllegalStateException("Could not repoint the references of a "
+                    + config.getClass().getSimpleName() + " at this instance's copies: " + e.getMessage(), e);
+        }
+    }
+
+    private List<URI> createNewParsers(List<ParserConfiguration> configs, ImportTransaction transaction) {
+        return configs.stream().map(c -> createResourceDirect(IParserStore.class, c, IRestParserStore.resourceURI, transaction)).toList();
+    }
+
+    private URI updateParser(ParserConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
+        IRestParserStore store = getRestResourceStore(IRestParserStore.class);
+        Response response = store.updateParser(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestParserStore.resourceURI + localId + IRestParserStore.versionQueryParam + (localVersion + 1));
+        }
+        return createResourceDirect(IParserStore.class, config, IRestParserStore.resourceURI, transaction);
+    }
+
     private List<URI> createNewDictionaries(List<DictionaryConfiguration> configs, ImportTransaction transaction) {
         return configs.stream().map(c -> createResourceDirect(IDictionaryStore.class, c, IRestDictionaryStore.resourceURI, transaction)).toList();
     }
@@ -1106,56 +1551,45 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestDictionaryStore store = getRestResourceStore(IRestDictionaryStore.class);
-        Response response = store.updateRegularDictionary(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestDictionaryStore.resourceURI + localId + IRestDictionaryStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI, transaction);
+        URI updated = updateTracked(IDictionaryStore.class, IRestDictionaryStore.resourceURI, localId, localVersion, config,
+                store::updateRegularDictionary, transaction);
+        return updated != null ? updated : createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI, transaction);
     }
 
     private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
-        Response response = store.updateRuleSet(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestRuleSetStore.resourceURI + localId + IRestRuleSetStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI, transaction);
+        URI updated = updateTracked(IRuleSetStore.class, IRestRuleSetStore.resourceURI, localId, localVersion, config, store::updateRuleSet,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI, transaction);
     }
 
     private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestApiCallsStore store = getRestResourceStore(IRestApiCallsStore.class);
-        Response response = store.updateApiCalls(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestApiCallsStore.resourceURI + localId + IRestApiCallsStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI, transaction);
+        URI updated = updateTracked(IApiCallsStore.class, IRestApiCallsStore.resourceURI, localId, localVersion, config, store::updateApiCalls,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI, transaction);
     }
 
     private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestLlmStore store = getRestResourceStore(IRestLlmStore.class);
-        Response response = store.updateLlm(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestLlmStore.resourceURI + localId + IRestLlmStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI, transaction);
+        URI updated = updateTracked(ILlmStore.class, IRestLlmStore.resourceURI, localId, localVersion, config, store::updateLlm, transaction);
+        return updated != null ? updated : createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI, transaction);
     }
 
     private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestPropertySetterStore store = getRestResourceStore(IRestPropertySetterStore.class);
-        Response response = store.updatePropertySetter(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestPropertySetterStore.resourceURI + localId + IRestPropertySetterStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI, transaction);
+        URI updated = updateTracked(IPropertySetterStore.class, IRestPropertySetterStore.resourceURI, localId, localVersion, config,
+                store::updatePropertySetter, transaction);
+        return updated != null
+                ? updated
+                : createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI, transaction);
     }
 
     private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestOutputStore store = getRestResourceStore(IRestOutputStore.class);
-        Response response = store.updateOutputSet(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestOutputStore.resourceURI + localId + IRestOutputStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IOutputStore.class, config, IRestOutputStore.resourceURI, transaction);
+        URI updated = updateTracked(IOutputStore.class, IRestOutputStore.resourceURI, localId, localVersion, config, store::updateOutputSet,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IOutputStore.class, config, IRestOutputStore.resourceURI, transaction);
     }
 
     private List<URI> createNewMcpCalls(List<McpCallsConfiguration> configs, ImportTransaction transaction) {
@@ -1164,24 +1598,68 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestMcpCallsStore store = getRestResourceStore(IRestMcpCallsStore.class);
-        Response response = store.updateMcpCalls(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestMcpCallsStore.resourceURI + localId + IRestMcpCallsStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IMcpCallsStore.class, config, IRestMcpCallsStore.resourceURI, transaction);
+        URI updated = updateTracked(IMcpCallsStore.class, IRestMcpCallsStore.resourceURI, localId, localVersion, config, store::updateMcpCalls,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IMcpCallsStore.class, config, IRestMcpCallsStore.resourceURI, transaction);
     }
 
     private List<URI> createNewRags(List<RagConfiguration> configs, ImportTransaction transaction) {
-        return configs.stream().map(c -> createResourceDirect(IRagStore.class, c, IRestRagStore.resourceURI, transaction)).toList();
+        return configs.stream().map(config -> {
+            // An archive's knowledge base carries ingestion sources, and this path
+            // writes straight to the store — so none of what the REST layer does on
+            // the way in happened: ids were never assigned (state and schedules then
+            // key on the source NAME, and the first save in the Manager re-keys them,
+            // orphaning the history), nothing was validated, and no schedule was
+            // created, so a source with a cron looked scheduled and never ran.
+            prepareImportedRag(config);
+            URI created = createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+            syncImportedRagSchedules(created, config);
+            return created;
+        }).toList();
+    }
+
+    // Visible for testing
+    /** Assigns source ids and validates, exactly as the REST create does. */
+    void prepareImportedRag(RagConfiguration config) {
+        if (config == null || config.getSources() == null) {
+            return;
+        }
+        for (var source : config.getSources()) {
+            if (source != null && (source.getId() == null || source.getId().isBlank())) {
+                source.setId(UUID.randomUUID().toString());
+            }
+        }
+        // Throws on a source the engine cannot honour. Importing it instead would
+        // produce a knowledge base whose runs fail for ever, and the failure would
+        // only be visible in a run history nobody is watching yet.
+        config.validate();
+        // The same check RestRagStore.prepareForWrite runs, and for the same
+        // reason: validate() does not look at the cron, so an archive could store
+        // an expression POST /ragstore/rags refuses — and the schedule built from
+        // it either cannot be armed at all or is armed and never matches, while
+        // every screen shows the source as scheduled.
+        RagIngestionSchedules.requireValidCrons(config);
+    }
+
+    private void syncImportedRagSchedules(URI created, RagConfiguration config) {
+        if (config.getSources() == null || config.getSources().isEmpty()) {
+            return;
+        }
+        try {
+            IResourceId resourceId = RestUtilities.extractResourceId(created);
+            ragSourceIngestionService.syncSchedules(resourceId.getId(), resourceId.getVersion(), config, Set.of());
+        } catch (RuntimeException e) {
+            // Surfaced, never swallowed: a source with a cron that has no schedule
+            // looks scheduled on every screen and never runs.
+            LOGGER.errorf(e, "Imported knowledge base %s: its ingestion schedules were NOT created. Its sources "
+                    + "will not run until it is saved again.", created);
+        }
     }
 
     private URI updateRag(RagConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRagStore store = getRestResourceStore(IRestRagStore.class);
-        Response response = store.updateRag(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestRagStore.resourceURI + localId + IRestRagStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+        URI updated = updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, store::updateRag, transaction);
+        return updated != null ? updated : createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
     }
 
     // ==================== Connection Import ====================
@@ -1380,7 +1858,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Snippet Import ====================
 
-    private void importSnippets(Path targetDirPath, boolean isMerge, ImportTransaction transaction) {
+    /**
+     * Imports the archive's prompt snippets, matched to this deployment's snippets
+     * by name.
+     *
+     * @param selectedSet
+     *            the caller's resource selection, or null for "everything". A
+     *            snippet row in the preview carries the snippet's archive id (its
+     *            file name) as {@code sourceId}; the local id of the snippet it
+     *            matched by name is accepted too, because that is what earlier
+     *            previews put in the row. Ignoring the selection here overwrote a
+     *            live snippet the operator had explicitly unticked.
+     */
+    private void importSnippets(Path targetDirPath, boolean isMerge, Set<String> selectedSet, ImportTransaction transaction) {
         try {
             // Look for snippets directory — could be inside the agent subdirectory
             Path snippetsDir = findSnippetsDir(targetDirPath);
@@ -1410,6 +1900,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             continue;
 
                         String snippetName = snippet.getName();
+                        IResourceId matched = existingSnippetsByName.get(snippetName);
+                        if (!isSnippetSelected(selectedSet, snippetArchiveId(snippetFilePath), matched)) {
+                            LOGGER.debugf("Snippet '%s' left out of selectedResources, skipping", LogSanitizer.sanitize(snippetName));
+                            skippedCount++;
+                            continue;
+                        }
 
                         // Always check for name collision — snippets are global resources,
                         // duplicates cause unpredictable runtime behavior regardless of strategy
@@ -1417,20 +1913,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             if (isMerge) {
                                 // Merge strategy: update existing snippet with imported content
                                 IResourceId localResId = existingSnippetsByName.get(snippetName);
-                                Response updateResp = restSnippetStore.updateSnippet(
-                                        localResId.getId(), localResId.getVersion(), snippet);
-                                if (updateResp.getStatus() == 200) {
+                                URI updated = updateTracked(IPromptSnippetStore.class, IRestPromptSnippetStore.resourceURI,
+                                        localResId.getId(), localResId.getVersion(), snippet, restSnippetStore::updateSnippet,
+                                        transaction);
+                                if (updated != null) {
                                     LOGGER.debugf("Updated existing snippet '%s' (id=%s, v=%d)",
-                                            snippetName, localResId.getId(), localResId.getVersion());
+                                            LogSanitizer.sanitize(snippetName), localResId.getId(), localResId.getVersion());
                                     importedCount++;
                                     continue;
                                 }
                                 // Update failed (e.g., version conflict) — fall through to create
-                                LOGGER.warnf("Update failed for snippet '%s' (status=%d), creating new",
-                                        snippetName, updateResp.getStatus());
+                                LOGGER.warnf("Update failed for snippet '%s', creating new", LogSanitizer.sanitize(snippetName));
                             } else {
                                 // Create strategy: snippet already exists globally, skip to avoid duplicates
-                                LOGGER.debugf("Snippet '%s' already exists, skipping (create strategy)", snippetName);
+                                LOGGER.debugf("Snippet '%s' already exists, skipping (create strategy)", LogSanitizer.sanitize(snippetName));
                                 skippedCount++;
                                 continue;
                             }
@@ -1439,20 +1935,33 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // Create new snippet
                         Response createResp = restSnippetStore.createSnippet(snippet);
                         checkIfCreatedResponse(createResp);
-                        recordCreatedSnippet(createResp, transaction);
+                        recordCreatedSnippet(createResp, snippetName, transaction);
                         importedCount++;
-                        LOGGER.debugf("Created new snippet '%s'", snippetName);
+                        LOGGER.debugf("Created new snippet '%s'", LogSanitizer.sanitize(snippetName));
                     } catch (Exception e) {
                         LOGGER.warnf("Failed to import snippet from %s: %s", snippetFilePath, e.getMessage());
                     }
                 }
                 if (importedCount > 0 || skippedCount > 0) {
-                    LOGGER.infof("Snippets: imported %d, skipped %d (already exist)", importedCount, skippedCount);
+                    LOGGER.infof("Snippets: imported %d, skipped %d (already exist or not selected)", importedCount, skippedCount);
                 }
             }
         } catch (Exception e) {
             LOGGER.warnf("Failed to import snippets: %s", e.getMessage());
         }
+    }
+
+    /** A snippet's id in the archive: its file name without the extension. */
+    private static String snippetArchiveId(Path snippetFilePath) {
+        String fileName = snippetFilePath.getFileName().toString();
+        String suffix = "." + SNIPPET_EXT + ".json";
+        return fileName.endsWith(suffix) ? fileName.substring(0, fileName.length() - suffix.length()) : fileName;
+    }
+
+    private static boolean isSnippetSelected(Set<String> selectedSet, String archiveId, IResourceId matchedLocal) {
+        return selectedSet == null
+                || selectedSet.contains(archiveId)
+                || (matchedLocal != null && selectedSet.contains(matchedLocal.getId()));
     }
 
     /**
@@ -1469,7 +1978,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * <em>updated</em> during a merge is deliberately not recorded: it already
      * existed and is not an orphan.
      */
-    private void recordCreatedSnippet(Response createResponse, ImportTransaction transaction) {
+    private void recordCreatedSnippet(Response createResponse, String snippetName, ImportTransaction transaction) {
         if (createResponse.getStatus() != 201) {
             return;
         }
@@ -1478,7 +1987,42 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             LOGGER.warn("Created snippet carries no resource URI — it cannot be rolled back if the import fails");
             return;
         }
-        transaction.recordCreated(IPromptSnippetStore.class, RestUtilities.extractResourceId(URI.create(createdUri)));
+        IResourceId resourceId = RestUtilities.extractResourceId(URI.create(createdUri));
+        transaction.recordCreated(IPromptSnippetStore.class, resourceId);
+        writeSnippetDescriptor(resourceId, URI.create(createdUri), snippetName);
+    }
+
+    /**
+     * Writes the descriptor for a snippet an import created.
+     * <p>
+     * An import creates through the store in-process, so
+     * {@code DocumentDescriptorFilter} never runs, and for a snippet that is not
+     * cosmetic: {@code PromptSnippetService} enumerates snippets <em>by
+     * descriptor</em>, so a snippet without one never resolves in a template, and
+     * the matcher lists them the same way, so the next import offers the same
+     * snippet as new and writes another copy.
+     * <p>
+     * A failure here is logged rather than thrown: the snippet itself landed, the
+     * import's other resources are fine, and rolling the whole archive back over
+     * bookkeeping would be a worse outcome than a snippet the operator has to
+     * re-save.
+     */
+    private void writeSnippetDescriptor(IResourceId resourceId, URI resourceUri, String snippetName) {
+        if (resourceId == null || resourceId.getId() == null) {
+            return;
+        }
+        try {
+            // Named after the snippet: the Manager lists snippets by descriptor, and one
+            // an import created showed as a blank row.
+            DocumentDescriptor descriptor = createDocumentDescriptor(resourceUri);
+            descriptor.setName(snippetName);
+            descriptor.setSyncedVersion(resourceId.getVersion());
+            documentDescriptorStore.createDescriptor(resourceId.getId(), resourceId.getVersion(),
+                    resourceAccessGuard.stampNewDescriptor(descriptor));
+        } catch (Exception e) {
+            LOGGER.warnf("Imported snippet %s has no descriptor, so it will not resolve in templates: %s",
+                    LogSanitizer.sanitize(resourceId.getId()), LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     /**
@@ -1780,6 +2324,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * ({@code ScheduleFireExecutor} → {@code DreamService.processScheduledFire},
      * which only falls back to the current version when the field is 0), so every
      * fire would be rejected, retried and eventually dead-lettered.
+     * <p>
+     * Clearing {@code nextFire} is safe here <em>only because</em> every write on
+     * this path goes through {@link IRestScheduleStore}, which arms the schedule
+     * again before it is stored. Nothing in either store computes one: a creator
+     * that writes to {@link IScheduleStore} directly has to arm its own schedule,
+     * and one that did not — the RAG ingestion sync — stored rows that read back
+     * enabled and could never be selected by {@code findDueSchedules}.
      *
      * @param importerPrincipal
      *            the authenticated importer, or {@code null} when there is none —
@@ -1938,6 +2489,33 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         private final List<CreatedResource> created = new ArrayList<>();
 
         /**
+         * A resource this import updated in place: the version its latest update
+         * produced, which is where the one compensation for it restores over.
+         */
+        static final class TrackedUpdate {
+            int latestImportedVersion;
+
+            TrackedUpdate(int latestImportedVersion) {
+                this.latestImportedVersion = latestImportedVersion;
+            }
+        }
+
+        /**
+         * Keyed by store and id, so a resource merged twice keeps its first snapshot.
+         */
+        private final Map<String, TrackedUpdate> updated = new HashMap<>();
+
+        TrackedUpdate trackedUpdate(Class<?> storeClass, String id) {
+            return updated.get(storeClass.getName() + "/" + id);
+        }
+
+        TrackedUpdate recordTrackedUpdate(Class<?> storeClass, String id, int importedVersion) {
+            var update = new TrackedUpdate(importedVersion);
+            updated.put(storeClass.getName() + "/" + id, update);
+            return update;
+        }
+
+        /**
          * Undo actions for things this import created that are not
          * {@code IResourceStore} resources — a schedule, for instance, lives in
          * {@link IScheduleStore} and has no version or descriptor.
@@ -1976,9 +2554,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * Deletes everything the failed import created, newest first, so a ZIP that
      * blows up on its last resource leaves no orphans behind.
      * <p>
-     * Resources that already existed and were merely <em>updated</em> during a
-     * merge are deliberately left alone: they are not orphans, and their previous
-     * versions remain in the store's history.
+     * Resources that already existed and were <em>updated</em> during a merge are
+     * not deleted - they are not orphans - but their pre-import content is written
+     * back by the compensations {@link #updateTracked} recorded, which run first.
      * <p>
      * Every step is guarded — a rollback failure is logged, never thrown, so it can
      * never mask the original error.
@@ -2316,6 +2894,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (type == null || resourceId == null || resourceId.getId() == null) {
             return false;
         }
+        if (PARSER_EXT.equals(type.fileExtension())) {
+            // Archives written before parser documents travelled carry the step and
+            // not the document. Dropping the step would leave the agent unable to
+            // parse any input, so such a reference is left as those archives always
+            // imported it — see carriedParserUris.
+            return false;
+        }
         return !Files.exists(createResourcePath(workflowPath, resourceId.getId(), type.fileExtension()));
     }
 
@@ -2400,8 +2985,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // Normalize legacy ${eddivault:...} → ${vault:...}
             resourceContent = normalizeVaultReferences(resourceContent);
 
-            // Final pass: migrate any remaining Thymeleaf template syntax to Qute
-            resourceContent = templateSyntaxMigrator.migrate(resourceContent);
+            // Final pass: migrate any remaining Thymeleaf template syntax to Qute. A
+            // template the converter cannot convert safely is imported unchanged
+            // rather than rewritten wrongly; say so, since it renders as literal text.
+            // Judged on the decoded values, not the JSON text: escaped quotes hide where
+            // a double-quoted literal ends.
+            String unconvertible = templateSyntaxMigrator.containsThymeleafSyntax(resourceContent)
+                    ? templateSyntaxMigrator.unconvertibleReasonIn(jsonSerialization.deserialize(resourceContent, Map.class))
+                    : null;
+            if (unconvertible != null) {
+                LOGGER.warnf("Importing %s with its Thymeleaf templates unconverted: %s. Convert them to Qute by hand.",
+                        resourcePath.getFileName(), unconvertible);
+            } else {
+                resourceContent = templateSyntaxMigrator.migrate(resourceContent);
+            }
 
             return jsonSerialization.deserialize(resourceContent, clazz);
         } catch (Exception e) {
@@ -2447,7 +3044,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             // try-with-resources: ZipResourceSource.close() removes the unzipped tree
             try (var source = new ZipResourceSource(targetDir.toPath(), jsonSerialization)) {
-                this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+                unzipArchive(zippedAgentConfigFiles, targetDir);
                 return structuralMatcher.buildPreview(source, targetAgentId, true);
             }
         } catch (WebApplicationException e) {
@@ -2468,7 +3065,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             // try-with-resources: ZipResourceSource.close() removes the unzipped tree
             try (var source = new ZipResourceSource(targetDir.toPath(), jsonSerialization)) {
-                this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+                unzipArchive(zippedAgentConfigFiles, targetDir);
                 Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
                 List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
 
@@ -2563,8 +3160,26 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return mode == LaunchMode.DEVELOPMENT || mode == LaunchMode.TEST;
     }
 
+    /**
+     * Applies this deployment's {@link SyncSourcePolicy} to a caller-supplied
+     * source URL.
+     * <p>
+     * Dev and test mode still accept {@code http://} whatever the policy says, so
+     * that a developer running {@code quarkus:dev} does not have to configure
+     * anything. Every other relaxation is the operator's explicit decision.
+     */
     private void validateSourceUrl(String sourceUrl) {
-        SourceUrlValidator.validate(sourceUrl, isDevMode());
+        SyncSourcePolicy effective = isDevMode()
+                ? new SyncSourcePolicy(false, syncSourcePolicy.allowPrivateTargets(), syncSourcePolicy.allowedSources())
+                : syncSourcePolicy;
+        try {
+            SourceUrlValidator.validate(sourceUrl, effective);
+        } catch (IllegalArgumentException e) {
+            // A refused source URL is the caller's input, not a server fault. It used
+            // to reach the client as a 500 with no body, which the Manager rendered as
+            // "Internal Server Error" and left the operator with nothing to act on.
+            throw new BadRequestException(e.getMessage(), e);
+        }
     }
 
     @Override
@@ -2575,23 +3190,24 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         } catch (Exception e) {
             LOGGER.errorf("Failed to list remote agents from %s: %s",
                     LogSanitizer.sanitize(sourceUrl), LogSanitizer.sanitize(e.getMessage()));
-            throw new InternalServerErrorException("Failed to connect to remote instance: " + e.getMessage(), e);
+            throw syncFailure("Could not list agents on " + sourceUrl, e);
         }
     }
 
     @Override
     public ImportPreview previewSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
-                                     String targetAgentId, String sourceAuth) {
+                                     String targetAgentId, String sourceAuth, Boolean createNew) {
         validateSourceUrl(sourceUrl);
-        try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
-            return structuralMatcher.buildPreview(source, targetAgentId, true);
+        try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization,
+                remoteSecretScrubber)) {
+            return previewOnto(source, sourceAgentId, targetAgentId, createNew);
         } catch (WebApplicationException e) {
             // An unreadable target agent is a 404 the operator can act on.
-            throw e;
+            throw withErrorBody(e);
         } catch (Exception e) {
             LOGGER.errorf(e, "Sync preview failed for agent %s from %s",
                     LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
-            throw new InternalServerErrorException("Sync preview failed: " + e.getMessage(), e);
+            throw syncFailure("Sync preview failed", e);
         }
     }
 
@@ -2606,9 +3222,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         for (SyncMapping mapping : mappings) {
             try (var source = new RemoteApiResourceSource(
                     sourceUrl, mapping.sourceAgentId(), mapping.sourceAgentVersion(),
-                    sourceAuth, jsonSerialization)) {
-                ImportPreview preview = structuralMatcher.buildPreview(source, mapping.targetAgentId(), true);
-                previews.add(preview);
+                    sourceAuth, jsonSerialization, remoteSecretScrubber)) {
+                previews.add(previewOnto(source, mapping.sourceAgentId(), mapping.targetAgentId(), mapping.createNew()));
             } catch (Exception e) {
                 LOGGER.warnf(e, "Batch preview failed for agent %s", LogSanitizer.sanitize(mapping.sourceAgentId()));
                 // Report the failure in its own field. Prefixing the agent NAME with
@@ -2625,21 +3240,327 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Override
     public Response executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
                                 String targetAgentId, String selectedResources, String workflowOrder,
-                                String sourceAuth) {
+                                String sourceAuth, Boolean createNew) {
         validateSourceUrl(sourceUrl);
+        Set<String> selectedSet = parseSelectedResources(selectedResources);
+
+        String resolvedTarget;
+        try {
+            resolvedTarget = resolveTarget(targetAgentId, sourceAgentId, createNew);
+        } catch (WebApplicationException e) {
+            throw withErrorBody(e);
+        }
+        if (resolvedTarget == null) {
+            return upgradeResponse(syncNewAgent(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, selectedSet));
+        }
+        targetAgentId = resolvedTarget;
+
         try (var source = new RemoteApiResourceSource(
-                sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
-            Set<String> selectedSet = parseSelectedResources(selectedResources);
+                sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization, remoteSecretScrubber)) {
             List<String> wfOrder = parseWorkflowOrder(workflowOrder);
 
             return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder));
         } catch (WebApplicationException e) {
+            throw withErrorBody(e);
+        } catch (Exception e) {
+            // Without the stack trace: UpgradeExecutor logged it already, and a failed
+            // read of the other instance is not this deployment's fault.
+            LOGGER.warnf("Sync execution failed for agent %s from %s: %s",
+                    LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl),
+                    LogSanitizer.sanitize(e.getMessage()));
+            throw syncFailure("Sync failed", e);
+        }
+    }
+
+    /**
+     * First promotion of an agent this instance does not have yet: fetch the
+     * source's own export archive and import it with {@code strategy=create}.
+     * <p>
+     * Without this, a sync with no {@code targetAgentId} — which the API documents
+     * as "create new", and which is what the Manager sends whenever it cannot match
+     * a local agent by name — went straight into {@link UpgradeExecutor}, whose
+     * every path assumes a target to upgrade. It read the agent {@code null},
+     * answered 500, and left behind the workflow it had already created: one orphan
+     * per attempt, each pointing at resource ids that only exist on the other
+     * instance.
+     * <p>
+     * Routing it through the archive importer rather than writing a second create
+     * path is deliberate — see {@link RemoteApiResourceSource#exportAgentArchive}.
+     * <p>
+     * {@code workflowOrder} has no meaning here and is not taken: it reorders an
+     * existing agent's workflow list, and a created agent's order is the source's
+     * own. {@code selectedResources} is passed on but reaches only the archive's
+     * schedules and prompt snippets: {@code createOrUpdateResources} creates every
+     * config in a create, by design — an agent missing the extensions its workflow
+     * references would not run. A snippet or schedule left out is simply not
+     * created; the preview's rows for them carry the source ids this selection is
+     * matched against. To promote part of an agent, sync onto an existing one.
+     *
+     * @return what landed, in the same shape a sync onto an existing agent answers
+     */
+    private UpgradeResult syncNewAgent(String sourceUrl, String sourceAgentId, Integer sourceVersion,
+                                       String sourceAuth, Set<String> selectedSet) {
+        metrics.upgradeAttempted();
+        byte[] archive;
+        try {
+            archive = RemoteApiResourceSource.exportAgentArchive(sourceUrl, sourceAgentId, sourceVersion, sourceAuth);
+        } catch (Exception e) {
+            metrics.upgradeFailed();
+            LOGGER.errorf(e, "Could not fetch agent %s from %s for a first-time sync",
+                    LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
+            throw syncFailure("The source instance could not supply agent " + sourceAgentId, e);
+        }
+
+        File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
+        try {
+            Response imported = importAgentZipFile(new ByteArrayInputStream(archive), targetDir, false, selectedSet);
+            URI createdAgentUri = locationOf(imported);
+            LOGGER.infof("Sync created agent %s from %s", LogSanitizer.sanitize(String.valueOf(createdAgentUri)),
+                    LogSanitizer.sanitize(sourceUrl));
+            // A create writes every document in the archive, so there is nothing to
+            // report as updated or skipped — and no per-resource failures either: the
+            // importer rolls the whole archive back rather than leaving part of it.
+            UpgradeResult result = new UpgradeResult(createdAgentUri, true, 0, countImportedDocuments(archive), 0, List.of());
+            metrics.upgradeCompleted(result.updated(), result.created(), result.skipped(), 0);
+            return result;
+        } catch (WebApplicationException e) {
+            metrics.upgradeFailed();
             throw e;
         } catch (Exception e) {
-            LOGGER.errorf(e, "Sync execution failed for agent %s from %s",
+            metrics.upgradeFailed();
+            LOGGER.errorf(e, "First-time sync of agent %s from %s failed",
                     LogSanitizer.sanitize(sourceAgentId), LogSanitizer.sanitize(sourceUrl));
-            throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
+            throw syncFailure("Sync failed", e);
         }
+    }
+
+    /**
+     * A sync failure the caller can read.
+     * <p>
+     * Two things had to change here. These used to be an
+     * {@code InternalServerErrorException}, which Quarkus answers with <b>an empty
+     * 500</b> — the message never left the JVM, so the commonest thing that goes
+     * wrong with a sync, a source that is down or addressed wrongly, reached the
+     * operator as "Internal Server Error" and nothing else. And every failure got
+     * the same status, so "the other instance is unreachable" and "this instance
+     * could not write" were indistinguishable.
+     * <p>
+     * A {@link RemoteApiResourceSource.RemoteReadException} anywhere in the cause
+     * chain means the source could not be read: {@code 502 Bad Gateway}, because
+     * this deployment is fine and the one it was told to read is not. Anything else
+     * is this deployment's own failure and stays a {@code 500} — with a body.
+     */
+    private WebApplicationException syncFailure(String what, Exception cause) {
+        String reason = cause.getMessage() == null || cause.getMessage().isBlank()
+                ? cause.getClass().getSimpleName()
+                : cause.getMessage();
+        Response.Status status = causedByRemoteRead(cause)
+                ? Response.Status.BAD_GATEWAY
+                : Response.Status.INTERNAL_SERVER_ERROR;
+        // The message is set explicitly as well as the entity: a batch records
+        // getMessage() per row, and the Response-only constructor derives that from
+        // the status ("HTTP 502 Bad Gateway"), which is exactly the row where the
+        // reason matters most.
+        return new WebApplicationException(what + ": " + reason,
+                Response.status(status)
+                        .entity(Map.of("error", what + ": " + reason))
+                        .type(MediaType.APPLICATION_JSON)
+                        .build());
+    }
+
+    /**
+     * Whether this failure, or anything that caused it, was a failed remote read.
+     */
+    private static boolean causedByRemoteRead(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof RemoteApiResourceSource.RemoteReadException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The {@code Location} of an import answer, as a URI.
+     *
+     * @throws InternalServerErrorException
+     *             when the import reported success but named no agent — answering
+     *             201 with a null {@code agentUri} would tell the caller an agent
+     *             exists that they cannot then address.
+     */
+    private URI locationOf(Response response) {
+        String location = response == null ? null : response.getHeaderString("Location");
+        if (location == null || location.isBlank()) {
+            throw new InternalServerErrorException("The agent was imported but the import named no agent URI.");
+        }
+        return URI.create(location);
+    }
+
+    /**
+     * How many configuration documents the archive carried — what a create sync
+     * reports as {@code created}.
+     * <p>
+     * Descriptors are not counted: they are bookkeeping for the documents beside
+     * them, and counting both would report twice the number of resources the
+     * operator previewed. This counts what the archive <em>carried</em> rather than
+     * what the import wrote, and the two differ for the documents an import may
+     * legitimately skip — a connection whose name already exists here, a snippet
+     * already present under the same name, a schedule the selection left out. The
+     * importer reports those skips in its own headers; the number here is the size
+     * of the promotion, not a per-document receipt.
+     */
+    private int countImportedDocuments(byte[] archive) {
+        int count = 0;
+        try (var zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            for (ZipEntry entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                String name = entry.getName();
+                if (!entry.isDirectory() && name.endsWith(".json") && !name.endsWith(DESCRIPTOR_FILE_ENDING)) {
+                    count++;
+                }
+            }
+        } catch (IOException e) {
+            LOGGER.debugf("Could not count the documents in the imported archive: %s", LogSanitizer.sanitize(e.getMessage()));
+        }
+        return count;
+    }
+
+    /**
+     * One mapping of a batch: an upgrade of the named target, or a first promotion
+     * when the mapping names none.
+     * <p>
+     * The batch has to make the same choice the single-agent endpoint makes.
+     * Sending every mapping into {@link UpgradeExecutor} meant a batch containing
+     * one new agent — the Manager's "Create new", which it selects by default for
+     * anything it cannot match by name — failed that row, and a batch of nothing
+     * but new agents failed wholesale with 500.
+     */
+    private UpgradeResult syncOneAgent(String sourceUrl, SyncRequest request, String sourceAuth) throws Exception {
+        if (request.selectedResources() != null && request.selectedResources().isEmpty()) {
+            throw emptySelection();
+        }
+        String targetAgentId = resolveTarget(request.targetAgentId(), request.sourceAgentId(), request.createNew());
+        if (targetAgentId == null) {
+            return syncNewAgent(sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(), sourceAuth,
+                    request.selectedResources());
+        }
+        try (var source = new RemoteApiResourceSource(
+                sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
+                sourceAuth, jsonSerialization, remoteSecretScrubber)) {
+            return upgradeExecutor.executeUpgrade(source, targetAgentId,
+                    request.selectedResources(), request.workflowOrder());
+        }
+    }
+
+    /**
+     * A preview onto the named target, or onto the agent an earlier sync promoted
+     * from this source. A target found that way is marked on the agent row with
+     * {@code matchStrategy: "originId"}, so the operator can see why an upgrade is
+     * offered where they asked for no target.
+     */
+    private ImportPreview previewOnto(IResourceSource source, String sourceAgentId, String targetAgentId,
+                                      Boolean createNew) {
+        boolean named = !isNullOrEmpty(targetAgentId) && !targetAgentId.isBlank();
+        String resolved = resolveTarget(targetAgentId, sourceAgentId, createNew);
+        ImportPreview preview = structuralMatcher.buildPreview(source, resolved, true);
+        if (named || resolved == null) {
+            return preview;
+        }
+        List<ResourceDiff> resources = preview.resources().stream()
+                .map(diff -> "agent".equals(diff.resourceType())
+                        ? new ResourceDiff(diff.sourceId(), diff.resourceType(), diff.name(), diff.action(),
+                                diff.targetId(), diff.targetVersion(), "originId", diff.sourceContent(),
+                                diff.targetContent(), diff.workflowIndex())
+                        : diff)
+                .toList();
+        return new ImportPreview(preview.sourceAgentId(), preview.sourceAgentName(), preview.targetAgentId(),
+                preview.targetAgentName(), resources, preview.error(), preview.warnings());
+    }
+
+    /**
+     * The local agent a sync writes into: the one named, or — when none is named
+     * and a copy is not explicitly asked for — the one an earlier sync or import
+     * created from this source agent, recognised by the {@code originId} its
+     * descriptor carries. Null means create a new agent.
+     * <p>
+     * "No target means create" made a sync idempotent only for a caller that
+     * remembered the id of the agent its first call created. Every other caller — a
+     * CI job, a script re-run after a timeout — created another full copy on each
+     * call, all of them carrying the same {@code originId}.
+     *
+     * @throws WebApplicationException
+     *             409 when more than one agent was promoted from this source and
+     *             none is named: picking one would be a guess
+     */
+    private String resolveTarget(String targetAgentId, String sourceAgentId, Boolean createNew) {
+        if (!isNullOrEmpty(targetAgentId) && !targetAgentId.isBlank()) {
+            return targetAgentId;
+        }
+        if (Boolean.TRUE.equals(createNew) || isNullOrEmpty(sourceAgentId)) {
+            return null;
+        }
+        List<String> promoted = agentsPromotedFrom(sourceAgentId);
+        if (promoted.isEmpty()) {
+            return null;
+        }
+        if (promoted.size() == 1) {
+            return promoted.getFirst();
+        }
+        String message = promoted.size() + " agents here were promoted from source agent " + sourceAgentId + " ("
+                + String.join(", ", promoted) + "). Name one as targetAgentId, or pass createNew=true for another copy.";
+        throw new WebApplicationException(message, Response.status(Response.Status.CONFLICT)
+                .entity(Map.of("error", message)).type(MediaType.APPLICATION_JSON).build());
+    }
+
+    /**
+     * The live agents whose descriptor records {@code sourceAgentId} as their
+     * origin. Compared exactly and restricted to agents: the store's origin lookup
+     * is a pattern match, and workflows and extensions carry an originId too.
+     */
+    private List<String> agentsPromotedFrom(String sourceAgentId) {
+        try {
+            List<DocumentDescriptor> found = documentDescriptorStore.findByOriginId(sourceAgentId);
+            if (found == null) {
+                return List.of();
+            }
+            return found.stream()
+                    .filter(descriptor -> sourceAgentId.equals(descriptor.getOriginId()) && !descriptor.isDeleted())
+                    .map(DocumentDescriptor::getResource)
+                    .filter(uri -> uri != null && uri.toString().startsWith(IRestAgentStore.resourceURI))
+                    .map(RestUtilities::extractResourceId)
+                    .filter(id -> id != null && id.getId() != null)
+                    .map(IResourceId::getId)
+                    .distinct()
+                    .toList();
+        } catch (Exception e) {
+            LOGGER.debugf("Could not look up agents promoted from %s: %s", LogSanitizer.sanitize(sourceAgentId),
+                    LogSanitizer.sanitize(e.getMessage()));
+            return List.of();
+        }
+    }
+
+    /**
+     * The same exception, with its message as a JSON body when it has none. JAX-RS
+     * answers a bare {@code NotFoundException("...")} with an empty 404, so a
+     * mistyped target agent reached the operator as a status code and nothing else.
+     */
+    private static WebApplicationException withErrorBody(WebApplicationException e) {
+        Response response = e.getResponse();
+        if (response == null || response.hasEntity() || e.getMessage() == null) {
+            return e;
+        }
+        Response withBody = Response.status(response.getStatus()).entity(Map.of("error", e.getMessage()))
+                .type(MediaType.APPLICATION_JSON).build();
+        // The same type as before: callers — and the batch, which reports per row —
+        // distinguish a missing target from a server fault by it.
+        return switch (response.getStatus()) {
+            case 400 -> new BadRequestException(e.getMessage(), withBody, e);
+            case 404 -> new NotFoundException(e.getMessage(), withBody, e);
+            case 500 -> new InternalServerErrorException(e.getMessage(), withBody, e);
+            default -> new WebApplicationException(e.getMessage(), e, withBody);
+        };
     }
 
     @Override
@@ -2660,16 +3581,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 throw new InternalServerErrorException("Batch sync was interrupted after "
                         + results.size() + " of " + requests.size() + " agent(s).");
             }
-            try (var source = new RemoteApiResourceSource(
-                    sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
-                    sourceAuth, jsonSerialization)) {
-                UpgradeResult result = upgradeExecutor.executeUpgrade(
-                        source, request.targetAgentId(),
-                        request.selectedResources(), request.workflowOrder());
+            try {
+                UpgradeResult result = syncOneAgent(sourceUrl, request, sourceAuth);
                 if (result.hasFailures()) {
                     failed++;
                 }
-                results.add(new BatchSyncResult(request.sourceAgentId(), request.targetAgentId(), result, null));
+                results.add(new BatchSyncResult(request.sourceAgentId(), syncedInto(result, request), result, null));
             } catch (Exception e) {
                 LOGGER.warnf(e, "Batch sync failed for agent %s to %s",
                         LogSanitizer.sanitize(request.sourceAgentId()), LogSanitizer.sanitize(request.targetAgentId()));
@@ -2688,6 +3605,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return Response.status(207, "Multi-Status").entity(results).type(MediaType.APPLICATION_JSON).build();
         }
         return Response.ok(results).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * The local agent a batch entry was written into. With no target named it is
+     * the one found by originId, or the one this run created — neither of which the
+     * request carries — so it is read from the result, falling back to the request
+     * only when the result names none.
+     */
+    private static String syncedInto(UpgradeResult result, SyncRequest request) {
+        IResourceId written = result.agentUri() != null ? RestUtilities.extractResourceId(result.agentUri()) : null;
+        return written != null && written.getId() != null ? written.getId() : request.targetAgentId();
     }
 
     /**

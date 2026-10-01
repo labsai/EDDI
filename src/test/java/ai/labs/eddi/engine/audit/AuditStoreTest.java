@@ -19,6 +19,7 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.InsertManyOptions;
 import com.mongodb.client.result.UpdateResult;
+import jakarta.enterprise.inject.Instance;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -315,6 +316,41 @@ class AuditStoreTest {
         when(collection.updateMany(any(Document.class), any(Document.class))).thenReturn(updateResult);
 
         assertEquals(5L, store.pseudonymizeByUserId("real-user", "pseudo-user"));
+    }
+
+    /**
+     * L-S2: v5 rows sign a keyed pseudonym, so each key's rows get the pseudonym
+     * computed under that key first, and only the remaining rows get the caller's
+     * unkeyed one. Writing the unkeyed pseudonym into a v5 row would make an
+     * erasure look like tampering.
+     */
+    @Test
+    @DisplayName("pseudonymizeByUserId — v5 rows get the keyed pseudonym of the key that signed them, then the rest")
+    @SuppressWarnings("unchecked")
+    void pseudonymizeByUserIdKeysV5Rows() {
+        AuditKeyring keyring = AuditKeyring.fromMasterKey("master-key-1234567890");
+        Instance<AuditKeyring> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(keyring);
+        MongoDatabase database = mock(MongoDatabase.class);
+        when(database.getCollection(anyString())).thenReturn(collection);
+        var keyed = new AuditStore(database, instance);
+
+        UpdateResult updateResult = mock(UpdateResult.class);
+        when(updateResult.getModifiedCount()).thenReturn(2L);
+        when(collection.updateMany(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+
+        assertEquals(4L, keyed.pseudonymizeByUserId("real-user", "pseudo-user"));
+
+        var filters = ArgumentCaptor.forClass(Bson.class);
+        var updates = ArgumentCaptor.forClass(Document.class);
+        verify(collection, times(2)).updateMany(filters.capture(), updates.capture());
+        var key = keyring.signingKey();
+        String keyedFilter = filters.getAllValues().get(0).toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(keyedFilter.contains("v5:" + key.id() + ":"), keyedFilter);
+        assertEquals(AuditHmac.keyedPseudonymFor("real-user", key.pseudonymKey()),
+                updates.getAllValues().get(0).get("$set", Document.class).get("userId"));
+        assertEquals("pseudo-user", updates.getAllValues().get(1).get("$set", Document.class).get("userId"));
     }
 
     // ==================== Helpers ====================

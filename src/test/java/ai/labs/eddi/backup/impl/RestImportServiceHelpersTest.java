@@ -4,17 +4,25 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import java.util.Optional;
 import io.quarkus.runtime.LaunchMode;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.MultivaluedHashMap;
+import jakarta.ws.rs.core.UriInfo;
 import org.junit.jupiter.api.*;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.Map;
 import java.util.Set;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link RestImportService} private helper methods via
@@ -46,10 +54,36 @@ class RestImportServiceHelpersTest {
         }
 
         @Test
-        @DisplayName("empty string — returns null")
-        void emptyString() throws Exception {
-            Set<String> result = invokeParseSelectedResources("");
-            assertNull(result);
+        @DisplayName("present but naming nothing — refused, never read as 'everything'")
+        void emptyString() {
+            // "" used to mean "absent", i.e. everything: a dialog with every row
+            // unticked sent exactly that and got every resource written.
+            for (String nothing : List.of("", " ", ",", " , ,")) {
+                var thrown = assertThrows(InvocationTargetException.class,
+                        () -> invokeParseSelectedResources(nothing), "input: '" + nothing + "'");
+                assertInstanceOf(BadRequestException.class, thrown.getCause(), "input: '" + nothing + "'");
+            }
+        }
+
+        /**
+         * The framework hands {@code ?selectedResources=} over as null — the same value
+         * as an absent parameter — so the empty selection the Manager sends was read as
+         * "everything" until the raw query was consulted.
+         */
+        @Test
+        @DisplayName("an empty ?selectedResources= is refused even though it arrives as null")
+        void emptyQueryParameterArrivingAsNull() throws Exception {
+            Method method = RestImportService.class.getDeclaredMethod("parseSelectedResources", String.class);
+            method.setAccessible(true);
+            RestImportService service = createMinimalInstance();
+            service.requestUri = mock(UriInfo.class);
+
+            when(service.requestUri.getQueryParameters()).thenReturn(new MultivaluedHashMap<>(Map.of("selectedResources", "")));
+            var thrown = assertThrows(InvocationTargetException.class, () -> method.invoke(service, (String) null));
+            assertInstanceOf(BadRequestException.class, thrown.getCause());
+
+            when(service.requestUri.getQueryParameters()).thenReturn(new MultivaluedHashMap<>());
+            assertNull(method.invoke(service, (String) null), "an absent parameter still means everything");
         }
 
         @Test
@@ -365,9 +399,50 @@ class RestImportServiceHelpersTest {
                 "RestImportService gained an overload — pick the @Inject one explicitly instead of the only one");
         var constructor = constructors[0];
         constructor.setAccessible(true);
-        // One null per constructor parameter — the helpers we test don't use
-        // them. Derived from the constructor rather than hardcoded so the next
-        // signature change cannot break this at runtime again.
-        return (RestImportService) constructor.newInstance(new Object[constructor.getParameterCount()]);
+        // A default per parameter, derived from the constructor rather than
+        // hardcoded, so a signature change cannot break this at runtime again.
+        // Reference types get null — the helpers under test do not use them —
+        // but a primitive cannot take one, so each gets its own zero value.
+        Class<?>[] parameterTypes = constructor.getParameterTypes();
+        Object[] arguments = new Object[parameterTypes.length];
+        for (int i = 0; i < parameterTypes.length; i++) {
+            arguments[i] = defaultValueFor(parameterTypes[i]);
+        }
+        return (RestImportService) constructor.newInstance(arguments);
+    }
+
+    /**
+     * The zero value for a constructor parameter type: {@code null} for a
+     * reference, and the type's own zero for a primitive — reflection cannot unbox
+     * a null into one.
+     */
+    private static Object defaultValueFor(Class<?> type) {
+        if (type == Optional.class) {
+            // An absent optional, not a null one: the constructor unwraps it, so a
+            // null here is an NPE before the instance exists.
+            return Optional.empty();
+        }
+        if (!type.isPrimitive()) {
+            return null;
+        }
+        if (type == boolean.class) {
+            return false;
+        }
+        if (type == char.class) {
+            // (char) 0 rather than a '\u0000' literal: the formatter decodes the escape
+            // into a real NUL byte, which makes git treat the file as binary and stop
+            // normalising its line endings.
+            return (char) 0;
+        }
+        if (type == long.class) {
+            return 0L;
+        }
+        if (type == float.class) {
+            return 0f;
+        }
+        if (type == double.class) {
+            return 0d;
+        }
+        return 0;
     }
 }

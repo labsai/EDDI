@@ -73,12 +73,12 @@ public class WorkspaceAccessIndexMigration {
      * names used in ZIP archives — {@code ai.labs.rules} not
      * {@code ai.labs.behavior}, {@code ai.labs.apicalls} not
      * {@code ai.labs.httpcalls}, {@code ai.labs.llm} not {@code ai.labs.langchain},
-     * {@code ai.labs.dictionary} not {@code ai.labs.regulardictionary} (AGENTS.md
-     * §5.5). Deriving the list from the constants is what keeps a hand-written
-     * near-miss from silently backfilling nothing for a type and then recording
-     * itself as complete — which would make every rule set, api call, LLM config
-     * and dictionary vanish from every listing the moment enforcement was switched
-     * on.
+     * {@code ai.labs.dictionary} not {@code ai.labs.regulardictionary}
+     * (docs/agent-config-authoring.md). Deriving the list from the constants is
+     * what keeps a hand-written near-miss from silently backfilling nothing for a
+     * type and then recording itself as complete — which would make every rule set,
+     * api call, LLM config and dictionary vanish from every listing the moment
+     * enforcement was switched on.
      * <p>
      * {@code WorkspaceAccessIndexMigrationTest} asserts this against the stores.
      */

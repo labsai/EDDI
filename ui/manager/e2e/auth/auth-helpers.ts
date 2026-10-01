@@ -27,13 +27,20 @@ export const SPA_CLIENT_ID = "eddi-frontend";
  * `realm_access/roles` this user authenticated and was then refused everything.
  * A tier that only tested group-less users would have passed throughout.
  *
- * Its password is supplied by `scripts/make-test-realm.mjs`; the shipped realm
- * deliberately seeds no credential for it.
+ * Every password here is supplied by `scripts/make-test-realm.mjs`; the shipped
+ * realm deliberately seeds no credential for any of the three.
  */
 export const USERS = {
-  admin: { username: "eddi", password: "e2e-admin-password", roles: ["eddi-admin", "eddi-editor"] },
-  user: { username: "user", password: "user", roles: ["eddi-user"] },
-  viewer: { username: "viewer", password: "viewer", roles: ["eddi-viewer"] },
+  admin: {
+    username: "eddi",
+    password: "e2e-admin-password",
+    // eddi-viewer alongside the other two: there is no role hierarchy, so an
+    // administrator without it is refused every MCP read tool. Kept in step with
+    // ROLE_FIXTURES in scripts/make-test-realm.mjs, which fails the run otherwise.
+    roles: ["eddi-admin", "eddi-editor", "eddi-viewer"],
+  },
+  user: { username: "user", password: "e2e-user-password", roles: ["eddi-user"] },
+  viewer: { username: "viewer", password: "e2e-viewer-password", roles: ["eddi-viewer"] },
 } as const;
 
 export type Fixture = keyof typeof USERS;

@@ -396,27 +396,89 @@ class ConversationLogGeneratorTest {
 
     // ─── includeFirstAgentMessage ────────────────────────────────
 
+    /**
+     * The flag exists to strip EDDI's opening greeting, which for an agent with an
+     * {@code ai.labs.output} step firing at {@code CONVERSATION_START} is the first
+     * message. It used to remove the first message <em>whatever its role</em>, and
+     * an agent with no output step opens on the USER's turn — so a one-turn history
+     * went out empty and Anthropic answered
+     * {@code invalid_request_error: messages: Field required}. Ollama accepts an
+     * empty message list, which is why a local smoke test never showed it.
+     */
     @Nested
     @DisplayName("includeFirstAgentMessage")
     class IncludeFirstTests {
 
-        @Test
-        @DisplayName("false — removes first message")
-        void excludeFirst() {
+        /** An output carrying only an agent message — the shape of a greeting turn. */
+        private ConversationOutput greeting(String text) {
+            var output = new ConversationOutput();
+            output.put("output", List.of(text));
+            return output;
+        }
+
+        private ConversationOutput turn(String input, String answer) {
+            var output = new ConversationOutput();
+            output.put("input", input);
+            output.put("output", List.of(answer));
+            return output;
+        }
+
+        private IConversationMemory memoryOf(ConversationOutput... outputs) {
             var memory = mock(IConversationMemory.class);
-            var outputs = new ArrayList<ConversationOutput>();
-            var o1 = new ConversationOutput();
-            o1.put("input", "first");
-            outputs.add(o1);
-            var o2 = new ConversationOutput();
-            o2.put("input", "second");
-            outputs.add(o2);
-            when(memory.getConversationOutputs()).thenReturn(outputs);
+            when(memory.getConversationOutputs()).thenReturn(new ArrayList<>(List.of(outputs)));
+            return memory;
+        }
 
-            var generator = new ConversationLogGenerator(memory);
-            ConversationLog log = generator.generate(-1, false);
+        @Test
+        @DisplayName("false + agent-first history — the greeting is dropped")
+        void agentFirstIsDropped() {
+            var memory = memoryOf(greeting("Hello, I am the probe agent."), turn("Say OK.", "OK"));
 
-            assertEquals(1, log.getMessages().size());
+            ConversationLog log = new ConversationLogGenerator(memory).generate(-1, false);
+
+            assertEquals(2, log.getMessages().size());
+            assertEquals("user", log.getMessages().getFirst().getRole());
+            assertEquals("Say OK.", log.getMessages().getFirst().getContent().getFirst().getValue());
+            assertEquals("assistant", log.getMessages().getLast().getRole());
+        }
+
+        @Test
+        @DisplayName("false + user-first history — the user turn SURVIVES")
+        void userFirstIsKept() {
+            // An agent with no ai.labs.output step: nothing greets, so message 0 is
+            // the user's. Removing it here is what emptied the history.
+            var memory = memoryOf(turn("Say OK.", "OK"));
+
+            ConversationLog log = new ConversationLogGenerator(memory).generate(-1, false);
+
+            assertEquals(2, log.getMessages().size(), "the user's own turn must never be dropped");
+            assertEquals("user", log.getMessages().getFirst().getRole());
+            assertEquals("Say OK.", log.getMessages().getFirst().getContent().getFirst().getValue());
+        }
+
+        @Test
+        @DisplayName("false + a single user turn — the log is never emptied")
+        void singleUserTurnIsNotEmptied() {
+            var output = new ConversationOutput();
+            output.put("input", "Say OK.");
+            var memory = memoryOf(output);
+
+            ConversationLog log = new ConversationLogGenerator(memory).generate(-1, false);
+
+            assertFalse(log.getMessages().isEmpty(),
+                    "an empty message list is what Anthropic rejects with 'messages: Field required'");
+            assertEquals("user", log.getMessages().getFirst().getRole());
+        }
+
+        @Test
+        @DisplayName("true — the greeting is kept")
+        void includeKeepsTheGreeting() {
+            var memory = memoryOf(greeting("Hello."), turn("Say OK.", "OK"));
+
+            ConversationLog log = new ConversationLogGenerator(memory).generate(-1, true);
+
+            assertEquals(3, log.getMessages().size());
+            assertEquals("assistant", log.getMessages().getFirst().getRole());
         }
     }
 

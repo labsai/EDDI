@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
+import ai.labs.eddi.engine.model.DeploymentImpact;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import jakarta.ws.rs.*;
@@ -49,7 +50,10 @@ public interface IRestAgentAdministration {
 
     @POST
     @Path("/{environment}/undeploy/{agentId}")
-    @Operation(summary = "Undeploy an agent", description = "Undeploys an agent from the given environment.")
+    @Operation(summary = "Undeploy an agent", description = "Undeploys an agent from the given environment. "
+            + "Open conversations on the version block it with 409 unless endAllActiveConversations=true ends them — "
+            + "except when another deployed version with the same compatibility generation is there to take them: "
+            + "those conversations move to it on their next turn and neither block the undeploy nor are ended.")
     @APIResponse(responseCode = "200", description = "Agent undeployed.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
     Response undeployAgent(@PathParam("environment") Environment environment, @PathParam("agentId") String agentId,
@@ -59,6 +63,21 @@ public interface IRestAgentAdministration {
                            @DefaultValue("false") Boolean endAllActiveConversations,
                            @QueryParam("undeployThisAndAllPreviousAgentVersions")
                            @DefaultValue("false") Boolean undeployThisAndAllPreviousAgentVersions);
+
+    @GET
+    @NoCache
+    @Path("/{environment}/deploymentimpact/{agentId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Preview what deploying a version does to running conversations",
+               description = "For every other deployed version of the agent in this environment: its open conversations, "
+                       + "and whether they FOLLOW the given version on their next turn (same compatibility generation, "
+                       + "older version) or STAY where they are (a breaking change, a version without a generation, or "
+                       + "a newer version). Read-only; works before or after the version is deployed.")
+    @APIResponse(responseCode = "200", description = "The impact of deploying this version.")
+    @APIResponse(responseCode = "404", description = "Agent version not found.")
+    DeploymentImpact getDeploymentImpact(@PathParam("environment") Environment environment, @PathParam("agentId") String agentId,
+                                         @Parameter(name = "version", required = true, example = "2")
+                                         @QueryParam("version") Integer version);
 
     @GET
     @NoCache

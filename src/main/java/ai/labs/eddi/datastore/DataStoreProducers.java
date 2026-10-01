@@ -46,6 +46,9 @@ import ai.labs.eddi.engine.memory.MongoConversationCheckpointStore;
 import ai.labs.eddi.engine.runtime.DatabaseLogs;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
+import ai.labs.eddi.modules.ingestion.mongo.MongoIngestedFileStore;
+import ai.labs.eddi.datastore.postgres.PostgresIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.mongo.MongoIngestionStateStore;
 import ai.labs.eddi.datastore.postgres.PostgresIngestionStateStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -57,6 +60,9 @@ import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.UserConversationStore;
+import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
+import ai.labs.eddi.integrations.slack.hitl.MongoSlackApprovalRecordStore;
+import ai.labs.eddi.integrations.slack.hitl.PostgresSlackApprovalRecordStore;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.oauth.IOAuthStateStore;
 import ai.labs.eddi.connections.oauth.MongoOAuthStateStore;
@@ -66,6 +72,15 @@ import ai.labs.eddi.connections.grants.PostgresConnectionGrantStore;
 import ai.labs.eddi.connections.settings.IConnectionSettingsStore;
 import ai.labs.eddi.connections.settings.MongoConnectionSettingsStore;
 import ai.labs.eddi.connections.settings.PostgresConnectionSettingsStore;
+import ai.labs.eddi.engine.security.spaces.directory.IUserDirectoryStore;
+import ai.labs.eddi.engine.security.spaces.directory.MongoUserDirectoryStore;
+import ai.labs.eddi.engine.security.spaces.directory.PostgresUserDirectoryStore;
+import ai.labs.eddi.engine.security.spaces.notifications.IWorkspaceNotificationStore;
+import ai.labs.eddi.engine.security.spaces.notifications.MongoWorkspaceNotificationStore;
+import ai.labs.eddi.engine.security.spaces.notifications.PostgresWorkspaceNotificationStore;
+import ai.labs.eddi.engine.security.spaces.settings.IWorkspaceSettingsStore;
+import ai.labs.eddi.engine.security.spaces.settings.MongoWorkspaceSettingsStore;
+import ai.labs.eddi.engine.security.spaces.settings.PostgresWorkspaceSettingsStore;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.MongoSecretPersistence;
 import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
@@ -110,6 +125,13 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IIngestionStateStore ingestionStateStore(Instance<MongoIngestionStateStore> mongo,
                                                     Instance<PostgresIngestionStateStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IIngestedFileStore ingestedFileStore(Instance<MongoIngestedFileStore> mongo,
+                                                Instance<PostgresIngestedFileStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
@@ -169,6 +191,13 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IConnectionNameClaimStore connectionNameClaimStore(Instance<MongoConnectionNameClaimStore> mongo,
                                                               Instance<PostgresConnectionNameClaimStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ISlackApprovalRecordStore slackApprovalRecordStore(Instance<MongoSlackApprovalRecordStore> mongo,
+                                                              Instance<PostgresSlackApprovalRecordStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
@@ -242,6 +271,26 @@ public class DataStoreProducers {
     public ITenantQuotaStore tenantQuotaStore(
                                               Instance<MongoTenantQuotaStore> mongo,
                                               Instance<PostgresTenantQuotaStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IUserDirectoryStore userDirectoryStore(Instance<MongoUserDirectoryStore> mongo, Instance<PostgresUserDirectoryStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IWorkspaceNotificationStore workspaceNotificationStore(Instance<MongoWorkspaceNotificationStore> mongo,
+                                                                  Instance<PostgresWorkspaceNotificationStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IWorkspaceSettingsStore workspaceSettingsStore(Instance<MongoWorkspaceSettingsStore> mongo,
+                                                          Instance<PostgresWorkspaceSettingsStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

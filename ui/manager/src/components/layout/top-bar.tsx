@@ -6,12 +6,12 @@ import {
   Moon,
   Sun,
   Monitor,
-  Globe,
   Menu,
   ChevronRight,
   Link2,
   LogOut,
   UserRound,
+  Languages,
 } from "lucide-react";
 import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { PlatformStatus } from "./platform-status";
 import { OperatorDrawer } from "@/components/operator/operator-drawer";
+import { NotificationBell } from "@/components/workspaces/notification-bell";
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -268,13 +269,14 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
           operator sits outside the tour target — the tour step is about theme
           and language, not about the operator. */}
       <div className="flex min-w-0 items-center gap-2">
+        <NotificationBell />
         <OperatorDrawer />
 
         <div className="flex items-center gap-2" data-tour="topbar-personalize">
           {/* Language selector — hidden on phones (reachable via settings);
               keeping it inflated the bar past the viewport at 375px. */}
           <div className="relative hidden items-center gap-1 sm:flex">
-            <Globe className="h-4 w-4 text-muted-foreground" />
+            <Languages className="h-4 w-4 text-muted-foreground" />
             <select
               value={i18n.language}
               onChange={(e) => void handleLanguageChange(e.target.value)}
