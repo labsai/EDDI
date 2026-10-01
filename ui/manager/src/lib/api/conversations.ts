@@ -370,11 +370,11 @@ export function parseConversationUri(resource: string): string {
 
 // API functions — using low-level /conversationstore/conversations endpoints
 //
-// NOTE on pagination: the backend treats `index` as a PAGE index (0-based),
-// not a row offset — internally it does readDescriptors(type, filter, index,
-// limit), and its owner-scoping loop advances by `index++` one page at a time.
-// So page N ⇒ index = N. `limit` is the page size and is clamped by the backend
-// to [1, 100] (default 20). See RestConversationStore.readConversationDescriptors.
+// NOTE on pagination: `index` is a 0-based page of RESULTS, not a row offset:
+// page N ⇒ index = N, and it holds the (N*limit)th to ((N+1)*limit - 1)th
+// conversation that passes every filter — never more than `limit` rows, and no
+// row is repeated on the next page. `limit` is clamped by the backend to
+// [1, 100] (default 20). See RestConversationStore.readConversationDescriptors.
 export async function getConversationDescriptors(
   limit = 20,
   index = 0,

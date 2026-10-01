@@ -8,9 +8,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -26,9 +28,12 @@ import java.sql.*;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -510,6 +515,53 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         } catch (SQLException e) {
             throw new RuntimeException("Failed to delete conversation memory", e);
         }
+    }
+
+    /**
+     * One query for the whole batch, reading the indexed columns and three JSONB
+     * fields; the steps are counted by the server and never sent.
+     */
+    @Override
+    public Map<String, ConversationListingSummary> loadListingSummaries(Collection<String> conversationIds) {
+        ensureSchema();
+        Map<String, ConversationListingSummary> summaries = new HashMap<>();
+        Map<UUID, String> requested = new HashMap<>();
+        for (String conversationId : conversationIds) {
+            try {
+                if (conversationId != null) {
+                    requested.put(UUID.fromString(conversationId), conversationId);
+                }
+            } catch (IllegalArgumentException e) {
+                // not a UUID, so not a conversation this store can hold: no entry
+            }
+        }
+        if (requested.isEmpty()) {
+            return summaries;
+        }
+
+        String sql = "SELECT id, conversation_state, AGENT_ID, AGENT_VERSION, data->>'userId' AS user_id, "
+                + "data->>'environment' AS environment, "
+                + "COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(data->'conversationSteps') = 'array' "
+                + "THEN data->'conversationSteps' END), 0) AS step_count "
+                + "FROM conversation_memories WHERE id = ANY(?)";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setArray(1, conn.createArrayOf("uuid", requested.keySet().toArray()));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String conversationId = requested.get(rs.getObject("id", UUID.class));
+                    String state = rs.getString("conversation_state");
+                    String environment = rs.getString("environment");
+                    Integer agentVersion = rs.getObject("AGENT_VERSION", Integer.class);
+                    summaries.put(conversationId, new ConversationListingSummary(conversationId, rs.getString("user_id"),
+                            environment == null ? null : Deployment.Environment.fromString(environment),
+                            state == null ? null : ConversationState.valueOf(state), rs.getString("AGENT_ID"),
+                            agentVersion, rs.getInt("step_count")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to load conversation listing summaries", e);
+        }
+        return summaries;
     }
 
     @Override

@@ -132,7 +132,9 @@ store replaces it with the non-unique 6.x one when it starts, and logs that at W
   conversations that agent had on 5.x. A 5.x database often holds descriptors whose conversation
   was deleted long ago; the listing leaves those out, so compare the result with
   `conversationmemories`, not with `descriptors`. The metric
-  `eddi.conversations.listing.orphaned_descriptors` counts how many it skipped.
+  `eddi.conversations.listing.orphaned_descriptors` counts how many it skipped. Page with `index`
+  until a page comes back empty. Before 6.5.0 a filtered listing repeated rows across pages and
+  returned more than `limit`, so a count taken by paging came out too high.
 - **Agents.** `GET /administration/production/deploymentstatus` lists every agent READY.
   Readiness reports failed deployments as data: `agentsInErrorCount` should be `0`. A deployment
   that failed is retried on its own with a growing delay.

@@ -5,11 +5,15 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -88,6 +92,36 @@ public interface IConversationMemoryStore {
 
     ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
+     * The listing fields of several conversations in one read — the conversation
+     * listing asks for a descriptor page's worth at a time instead of loading each
+     * conversation in full.
+     * <p>
+     * The default loads each conversation in full and is only there so a test fake
+     * keeps working; both stores override it with a single projected query.
+     *
+     * @param conversationIds
+     *            the conversations to summarise
+     * @return a summary per conversation that exists, keyed by its id; an id the
+     *         store does not hold — or cannot hold, such as a malformed one — has
+     *         no entry
+     */
+    default Map<String, ConversationListingSummary> loadListingSummaries(Collection<String> conversationIds)
+            throws IResourceStore.ResourceStoreException {
+        Map<String, ConversationListingSummary> summaries = new HashMap<>();
+        for (String conversationId : conversationIds) {
+            try {
+                var snapshot = loadConversationMemorySnapshot(conversationId);
+                if (snapshot != null) {
+                    summaries.put(conversationId, ConversationListingSummary.of(snapshot, conversationId));
+                }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // not stored: no entry
+            }
+        }
+        return summaries;
+    }
 
     List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException;

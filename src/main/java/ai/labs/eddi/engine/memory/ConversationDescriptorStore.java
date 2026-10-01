@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.datastore.DescriptorStore;
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -46,6 +47,14 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         return descriptorStore.readDescriptors(type, filter, index, limit, includeDeleted);
+    }
+
+    @Override
+    public List<ConversationDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                                                        List<IResourceFilter.QueryFilters> restrictions)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        return descriptorStore.readDescriptorsRestricted(type, filter, index, limit, includeDeleted, restrictions);
     }
 
     @Override

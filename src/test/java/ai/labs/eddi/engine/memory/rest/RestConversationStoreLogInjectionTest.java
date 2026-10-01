@@ -78,9 +78,12 @@ class RestConversationStoreLogInjectionTest {
      */
     @SuppressWarnings("unchecked")
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
+        // The listing reads a page of summaries at once; route it through the per-id
+        // stubs.
+        lenient().when(conversationMemoryStore.loadListingSummaries(any())).thenCallRealMethod();
         attachmentStore = mock(IAttachmentStore.class);
         Instance<IAttachmentStore> attachmentStorageInstance = mock(Instance.class);
 
@@ -116,7 +119,7 @@ class RestConversationStoreLogInjectionTest {
     @Test
     @DisplayName("a forged exception message cannot forge a record on the descriptor-skip line")
     void sanitizesTheExceptionMessageOnTheDescriptorSkipLine() throws Exception {
-        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean()))
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean(), any()))
                 .thenReturn(List.of(descriptor()));
         // Fails inside populateDataToDescriptor, i.e. inside the per-descriptor
         // catch that logs the message. Page 1 comes back empty, so the back-fill

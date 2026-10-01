@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
@@ -23,6 +24,7 @@ import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.security.Principal;
@@ -33,6 +35,7 @@ import java.util.List;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -82,6 +85,9 @@ class RestConversationStoreOwnershipTest {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
+        // The listing reads a page of summaries at once; route it through the per-id
+        // stubs.
+        lenient().when(conversationMemoryStore.loadListingSummaries(any())).thenCallRealMethod();
         conversationService = mock(IConversationService.class);
         userMemoryStore = mock(IUserMemoryStore.class);
         runtime = mock(IRuntime.class);
@@ -144,7 +150,7 @@ class RestConversationStoreOwnershipTest {
 
     /** First (and only) descriptor page the store hands back. */
     private void firstPage(ConversationDescriptor... descriptors) throws Exception {
-        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean()))
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean(), any()))
                 .thenReturn(List.of(descriptors));
     }
 
@@ -199,7 +205,7 @@ class RestConversationStoreOwnershipTest {
         // Every page is full and foreign, so the non-admin scan never fills `limit`
         // and stops on the MAX_OWNER_SCAN budget — the truncation the List can't
         // signal.
-        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
                 .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a04", INTRUDER), descriptor("0a0a0a0a0a0a0a0a0a0a0a05", INTRUDER)));
 
         var registry = new SimpleMeterRegistry();
@@ -218,11 +224,11 @@ class RestConversationStoreOwnershipTest {
         // appears only on the next page. A single-page filter would report "none" —
         // the do-while must page forward (index is a page number: skip = index*limit)
         // until the owner's conversation is found.
-        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean()))
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean(), any()))
                 .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a06", INTRUDER), descriptor("0a0a0a0a0a0a0a0a0a0a0a07", INTRUDER)));
-        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(1), anyInt(), anyBoolean()))
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(1), anyInt(), anyBoolean(), any()))
                 .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER)));
-        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(2), anyInt(), anyBoolean()))
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(2), anyInt(), anyBoolean(), any()))
                 .thenReturn(List.of());
 
         List<ConversationDescriptor> result = asOwner().readConversationDescriptors(
@@ -261,7 +267,7 @@ class RestConversationStoreOwnershipTest {
         // The conversationId must be a valid hex id, or extractResourceId yields a null
         // id, the snapshot lookup is skipped, and the owner is never resolved.
         String legacyId = "aaaaaaaaaaaaaaaaaaaaaaaa";
-        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean()))
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean(), any()))
                 .thenAnswer(invocation -> List.of(descriptor(legacyId, null)));
         var ownerSnapshot = new ConversationMemorySnapshot();
         ownerSnapshot.setConversationState(ConversationState.READY);
@@ -378,7 +384,7 @@ class RestConversationStoreOwnershipTest {
         // loaded for the discarded foreign rows. Valid hex ids so the never()-load
         // assertion stays load-bearing (a reordered populate would load a matchable
         // id).
-        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
                 .thenAnswer(invocation -> {
                     int idx = invocation.getArgument(2);
                     int lim = invocation.getArgument(3);
@@ -396,7 +402,120 @@ class RestConversationStoreOwnershipTest {
         // 5 pages of 100 = the 500-descriptor budget, then it stops (not the whole
         // store).
         verify(conversationDescriptorStore, times(5))
-                .readDescriptors(anyString(), any(), anyInt(), eq(100), anyBoolean());
+                .readDescriptors(anyString(), any(), anyInt(), eq(100), anyBoolean(), any());
         verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+    }
+
+    /**
+     * A descriptor store that honours index/limit but ignores the pushed-down
+     * restrictions, so every foreign row reaches the per-row owner check.
+     */
+    private void pagedStore(List<ConversationDescriptor> rows) throws Exception {
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenAnswer(invocation -> {
+                    int index = invocation.getArgument(2);
+                    int limit = invocation.getArgument(3);
+                    int from = (int) Math.min((long) index * limit, rows.size());
+                    return new ArrayList<>(rows.subList(from, Math.min(from + limit, rows.size())));
+                });
+    }
+
+    private static List<String> resources(List<ConversationDescriptor> descriptors) {
+        return descriptors.stream().map(descriptor -> descriptor.getResource().toString()).toList();
+    }
+
+    @Test
+    @DisplayName("an owner's pages are exact and disjoint when other users' rows are interleaved")
+    void ownerPagesAreExactAndDisjoint() throws Exception {
+        // One row in three belongs to someone else. Paging by descriptor page made
+        // page 0 run past `limit` and page 1 repeat rows page 0 had already listed.
+        var rows = new ArrayList<ConversationDescriptor>();
+        var owned = new ArrayList<String>();
+        for (int i = 0; i < 45; i++) {
+            String owner = i % 3 == 1 ? INTRUDER : OWNER;
+            var descriptor = descriptor(String.format("%024x", 0xd000 + i), owner);
+            rows.add(descriptor);
+            if (OWNER.equals(owner)) {
+                owned.add(descriptor.getResource().toString());
+            }
+        }
+        pagedStore(rows);
+
+        var store = asOwner();
+        var listed = new ArrayList<String>();
+        for (int index = 0; index < 10; index++) {
+            List<ConversationDescriptor> page = store.readConversationDescriptors(index, 7, null, null, null, null, null, null);
+            assertTrue(page.size() <= 7, "page " + index + " holds " + page.size() + " rows");
+            if (page.isEmpty()) {
+                break;
+            }
+            listed.addAll(resources(page));
+        }
+
+        assertEquals(owned, listed);
+    }
+
+    @Test
+    @DisplayName("an owner's later pages are reachable: rows counted off for earlier pages do not spend the scan budget")
+    void deepOwnerPageIsNotCutOffByTheScanBudget() throws Exception {
+        // 650 of the owner's own conversations. Page 5 at limit 100 counts off 500
+        // matches first; charged against MAX_OWNER_SCAN (500) they would leave
+        // nothing for the page itself.
+        var rows = new ArrayList<ConversationDescriptor>();
+        for (int i = 0; i < 650; i++) {
+            rows.add(descriptor(String.format("%024x", 0xe000 + i), OWNER));
+        }
+        pagedStore(rows);
+
+        List<ConversationDescriptor> page = asOwner().readConversationDescriptors(5, 100, null, null, null, null, null, null);
+
+        assertEquals(resources(rows.subList(500, 600)), resources(page));
+    }
+
+    @Test
+    @DisplayName("a non-admin listing pushes the owner filter into the descriptor query")
+    @SuppressWarnings("unchecked")
+    void ownerFilterIsPushedDown() throws Exception {
+        firstPage();
+
+        asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        var owner = captor.getValue().getFirst();
+        assertEquals(IResourceFilter.QueryFilters.ConnectingType.OR, owner.getConnectingType());
+        var mine = owner.getQueryFilters().get(0);
+        assertEquals("userId", mine.getField());
+        assertEquals(OWNER, mine.getFilter());
+        assertTrue(mine.isExact());
+        // ...or no recorded owner: a pre-v5.1.6 row, decided from its memory.
+        assertInstanceOf(IResourceFilter.NotMatching.class, owner.getQueryFilters().get(1).getFilter());
+    }
+
+    @Test
+    @DisplayName("the owner filter is not pushed down when an agent is named — its reviewers may list others' conversations")
+    @SuppressWarnings("unchecked")
+    void ownerFilterIsNotPushedDownForAnAgentListing() throws Exception {
+        firstPage();
+
+        asOwner().readConversationDescriptors(0, 20, null, null, "0000000000000000000000a1", null, null, null);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertEquals(1, captor.getValue().size());
+        assertEquals("agentResource", captor.getValue().getFirst().getQueryFilters().getFirst().getField());
+    }
+
+    @Test
+    @DisplayName("an admin listing pushes no owner filter")
+    @SuppressWarnings("unchecked")
+    void adminListingIsNotOwnerFiltered() throws Exception {
+        firstPage();
+
+        asAdmin().readConversationDescriptors(0, 20, null, null, null, null, null, null);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertTrue(captor.getValue().isEmpty());
     }
 }

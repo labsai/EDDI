@@ -114,8 +114,8 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
      * Used to restrict a listing to what the caller may see. The restriction is
      * applied <em>in the query</em>, not to the returned page: filtering afterwards
      * would return short pages and force the kind of scan-budgeted back-fill
-     * {@code RestConversationStore} has to do for conversations, where no such
-     * predicate exists.
+     * {@code RestConversationStore} still has to do for conversations, whose owner,
+     * state and orphan checks depend on the conversation memory.
      * <p>
      * The parameter is a raw {@code QueryFilters} rather than the
      * {@code AccessScope} that produces it, so this package keeps knowing nothing
@@ -140,6 +140,24 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
      */
     public List<T> readDescriptors(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
                                    IResourceFilter.QueryFilters accessRestriction, IResourceFilter.QueryFilters extraRestriction)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        List<IResourceFilter.QueryFilters> restrictions = new LinkedList<>();
+        restrictions.add(accessRestriction);
+        restrictions.add(extraRestriction);
+        return readDescriptorsRestricted(type, filter, index, limit, includeDeleted, restrictions);
+    }
+
+    /**
+     * As above, with any number of further AND-ed groups. The conversation listing
+     * uses it to push its field filters into the query, so that a page of
+     * descriptors is a page of candidates rather than of everything.
+     *
+     * @param restrictions
+     *            additional filter groups; {@code null} entries and empty groups
+     *            are ignored, and so is a {@code null} list
+     */
+    public List<T> readDescriptorsRestricted(String type, String filter, Integer index, Integer limit, boolean includeDeleted,
+                                             List<IResourceFilter.QueryFilters> restrictions)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<IResourceFilter.QueryFilter> queryFiltersRequired = new LinkedList<>();
@@ -181,11 +199,12 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         if (!queryFiltersOptional.isEmpty()) {
             filterGroups.add(new IResourceFilter.QueryFilters(IResourceFilter.QueryFilters.ConnectingType.OR, queryFiltersOptional));
         }
-        if (accessRestriction != null && !accessRestriction.getQueryFilters().isEmpty()) {
-            filterGroups.add(accessRestriction);
-        }
-        if (extraRestriction != null && !extraRestriction.getQueryFilters().isEmpty()) {
-            filterGroups.add(extraRestriction);
+        if (restrictions != null) {
+            for (IResourceFilter.QueryFilters restriction : restrictions) {
+                if (restriction != null && !restriction.getQueryFilters().isEmpty()) {
+                    filterGroups.add(restriction);
+                }
+            }
         }
         IResourceFilter.QueryFilters[] allFilters = filterGroups.toArray(new IResourceFilter.QueryFilters[0]);
 

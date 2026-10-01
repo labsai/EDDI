@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -30,8 +32,11 @@ import org.bson.types.ObjectId;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.mongodb.client.FindIterable;
@@ -60,6 +65,10 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_AGENT_VERSION = "agentVersion";
     private static final String KEY_END_REASON = "endReason";
     private static final String KEY_CONVERSATION_STATE = "conversationState";
+    private static final String KEY_USER_ID = "userId";
+    private static final String KEY_ENVIRONMENT = "environment";
+    /** Computed by the listing projection; never stored. */
+    private static final String KEY_STEP_COUNT = "stepCount";
     /**
      * Optimistic-concurrency revision — see
      * {@link ConversationMemorySnapshot#getRevision()}.
@@ -534,6 +543,53 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
         conversationCollectionDocument.deleteOne(new Document(OBJECT_ID, new ObjectId(conversationId)));
+    }
+
+    /**
+     * One {@code $in} query with a projection: the steps are counted by the server
+     * ({@code $size}) and never sent, so a listing page costs one round trip and a
+     * few fields per conversation instead of a full document load per row.
+     */
+    @Override
+    public Map<String, ConversationListingSummary> loadListingSummaries(Collection<String> conversationIds) {
+        Map<String, ConversationListingSummary> summaries = new HashMap<>();
+        Map<ObjectId, String> requested = new HashMap<>();
+        for (String conversationId : conversationIds) {
+            if (conversationId != null && ObjectId.isValid(conversationId)) {
+                requested.put(new ObjectId(conversationId), conversationId);
+            }
+        }
+        if (requested.isEmpty()) {
+            return summaries;
+        }
+
+        Bson projection = Projections.fields(
+                Projections.include(KEY_USER_ID, KEY_ENVIRONMENT, KEY_CONVERSATION_STATE, KEY_AGENT_ID, KEY_AGENT_VERSION),
+                Projections.computed(KEY_STEP_COUNT,
+                        new Document("$size", new Document("$ifNull", List.of("$" + KEY_CONVERSATION_STEPS, List.of())))));
+        for (Document document : conversationCollectionDocument.find(Filters.in(OBJECT_ID, requested.keySet())).projection(projection)) {
+            String conversationId = requested.get(document.getObjectId(OBJECT_ID));
+            Object environment = document.get(KEY_ENVIRONMENT);
+            Object agentVersion = document.get(KEY_AGENT_VERSION);
+            Object stepCount = document.get(KEY_STEP_COUNT);
+            summaries.put(conversationId, new ConversationListingSummary(conversationId, document.getString(KEY_USER_ID),
+                    environment == null ? null : Deployment.Environment.fromString(environment.toString()),
+                    conversationStateOrNull(document.get(KEY_CONVERSATION_STATE)), document.getString(KEY_AGENT_ID),
+                    agentVersion instanceof Number number ? number.intValue() : null,
+                    stepCount instanceof Number number ? number.intValue() : 0));
+        }
+        return summaries;
+    }
+
+    private static ConversationState conversationStateOrNull(Object storedState) {
+        if (storedState == null) {
+            return null;
+        }
+        try {
+            return ConversationState.valueOf(storedState.toString());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     @Override

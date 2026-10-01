@@ -9,7 +9,9 @@ import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.IResourceFilter.NotMatching;
+import ai.labs.eddi.datastore.IResourceFilter.QueryFilter;
+import ai.labs.eddi.datastore.IResourceFilter.QueryFilters;
 import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -21,6 +23,7 @@ import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 
@@ -46,6 +49,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -57,6 +61,7 @@ import java.util.Set;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
+import static ai.labs.eddi.engine.security.spaces.Subjects.escapeRegex;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
@@ -87,6 +92,22 @@ public class RestConversationStore implements IRestConversationStore {
      * auth-disabled callers are not filtered and never reach this bound.
      */
     private static final int MAX_OWNER_SCAN = 500;
+
+    /** Descriptor batch size of a listing past its first page. */
+    private static final int SCAN_BATCH = 100;
+
+    /** Descriptor fields the listing filters on in the query. */
+    private static final String FIELD_AGENT_RESOURCE = "agentResource";
+    private static final String FIELD_USER_ID = "userId";
+    private static final String FIELD_VIEW_STATE = "viewState";
+
+    /**
+     * Matches a field holding anything but whitespace — so a {@link NotMatching} of
+     * it selects a field that is absent, empty or blank, which is how the listing
+     * treats "no owner" and "no agent" ({@code isNullOrEmpty}, and {@code isBlank}
+     * in the access guard).
+     */
+    private static final String NOT_BLANK = "\\S";
 
     /**
      * Smallest age (in days) the deployment-wide retention sweep accepts. Zero used
@@ -196,132 +217,150 @@ public class RestConversationStore implements IRestConversationStore {
             limit = 100;
         }
 
+        // `index` is a page of RESULTS: page n is the (n*limit)th to the
+        // ((n+1)*limit - 1)th conversation that passes every filter. It used to be a
+        // page of DESCRIPTORS, read from descriptor page `index` onward and filtered
+        // afterwards, so a filtered page could run past `limit` (it added whole
+        // descriptor pages) and page n+1 repeated rows page n had already read from
+        // the descriptor pages after its own.
+        //
+        // The filters that are plain descriptor fields — agent, view state and, for
+        // a non-admin, owner — are pushed into the query (listingRestrictions), so
+        // the descriptors read are mostly results. The rest can only be decided from
+        // the conversation memory: the conversation state, whether the memory still
+        // exists (orphans), and the owner or agent of a legacy descriptor that does
+        // not record them. Those are checked here, and the matches that belong to
+        // earlier pages are counted off.
+        //
+        // The cost per descriptor page is two queries: the descriptor page, and one
+        // projected read of the candidates' listing fields (loadListingSummaries) —
+        // no conversation is loaded in full, and an agent's name is read once per
+        // listing. Page n also reads past the rows of the pages before it, in batches
+        // of SCAN_BATCH, so it costs about 2*ceil((n+1)*limit/100) small queries —
+        // not (n+1)*limit document loads.
+        //
         // Owner-scoping: a non-admin caller may only enumerate their own
-        // conversations. The descriptor store has no owner-scoped query, so we
-        // post-filter each descriptor by its resolved owner. Admins (and any caller
-        // when authorization is disabled) see all — resolved once, up front, so the
-        // per-row check is skipped entirely on that path. The existing do-while
-        // back-fills across pages so a filtered-out row does not starve a personal
-        // list, but that back-fill is bounded by MAX_OWNER_SCAN so a caller who owns
-        // few/none of a large shared store cannot force a full-collection scan
-        // (descriptors come back most-recent-first, so a typical caller's own
-        // conversations fall well within the budget).
+        // conversations. Admins (and any caller when authorization is disabled) see
+        // all — resolved once, up front, so the per-row check is skipped entirely on
+        // that path. The scan is bounded by MAX_OWNER_SCAN so a caller who owns
+        // few/none of a large shared store cannot force a full-collection scan. The
+        // budget counts the descriptors this page examined, not the matches it
+        // counted off for earlier pages: those are the caller's own conversations,
+        // and charging them would put a caller's older conversations out of reach.
         final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
         // Review decisions per agent version, made once per listing rather than once
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();
+        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, agentId, viewState);
+        final long matchesToSkip = (long) index * limit;
+        // Descriptors are read in pages of `limit` for the first result page, the one
+        // almost every request asks for. A later page has earlier pages' rows to count
+        // off first, so it reads in larger batches: fewer round trips, and at most
+        // one batch read past the rows it returns. One listing keeps one size, which
+        // is all the descriptor store's index arithmetic needs.
+        final int scanSize = index == 0 ? limit : Math.max(limit, SCAN_BATCH);
 
         try {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
-            int scannedDescriptors = 0;
+            // Agent display names, read once per agent version rather than once per row.
+            Map<String, String> agentNames = new HashMap<>();
+            String textFilter = filter;
+            int descriptorPage = 0;
+            long skippedMatches = 0;
+            long scannedDescriptors = 0;
             int orphanedDescriptors = 0;
+            boolean pageFull = false;
 
             do {
-                conversationDescriptors = readConversationDescriptors(index, limit, filter);
-                if (conversationDescriptors.isEmpty() && index == 0 && !isNullOrEmpty(filter)) {
-                    conversationDescriptors = readConversationDescriptors(index, limit, null);
+                conversationDescriptors = readConversationDescriptors(descriptorPage, scanSize, textFilter, restrictions);
+                if (conversationDescriptors.isEmpty() && descriptorPage == 0 && !isNullOrEmpty(textFilter)) {
+                    // A search that matches nothing lists everything instead — decided
+                    // once, on the first descriptor page, so every result page of the
+                    // listing agrees on which rows it is paging through.
+                    textFilter = null;
+                    conversationDescriptors = readConversationDescriptors(descriptorPage, scanSize, null, restrictions);
                 }
 
+                // 1. What the descriptor alone decides — no conversation is read for a
+                // row this rejects.
+                List<ConversationDescriptor> candidates = new ArrayList<>();
+                List<String> candidateIds = new ArrayList<>();
                 for (var conversationDescriptor : conversationDescriptors) {
                     // Enforce the scan budget per-descriptor, not just per-page, so a
                     // non-admin scan honours MAX_OWNER_SCAN exactly rather than
                     // overrunning by up to a page (and the exhaustion metric fires at
                     // the documented bound).
-                    if (!seesAllConversations && scannedDescriptors >= MAX_OWNER_SCAN) {
+                    if (!seesAllConversations && scannedDescriptors - skippedMatches >= MAX_OWNER_SCAN) {
                         break;
                     }
                     scannedDescriptors++;
-                    try {
-                        URI resourceUri = conversationDescriptor.getResource();
-                        var conversationResourceId = extractResourceId(resourceUri);
-                        if (conversationResourceId == null) {
-                            log.warn(format("conversationResourceId was null, this should never happen. (%s)", resourceUri));
-                            continue;
-                        }
+                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, agentId, reviewable);
+                    if (candidateId != null) {
+                        candidates.add(conversationDescriptor);
+                        candidateIds.add(candidateId);
+                    }
+                }
 
-                        // Ownership gate — split around the expensive snapshot load so a
-                        // foreign conversation is skipped WITHOUT loading its memory
-                        // document. Every conversation since v5.1.6 records its owner on
-                        // the descriptor, so decide here for the common case; only a
-                        // legacy row with no recorded owner falls through to the
-                        // post-populate re-check below (populate resolves its owner from
-                        // the snapshot). A fully unowned (null both ways) conversation
-                        // stays visible, matching OwnershipValidator.requireOwnerOrAdmin.
-                        String recordedOwner = conversationDescriptor.getUserId();
-                        boolean ownerRecorded = !isNullOrEmpty(recordedOwner);
-                        if (!seesAllConversations && ownerRecorded
-                                && !conversationAccessGuard.canAccessConversation(recordedOwner)
-                                && !mayReview(conversationDescriptor.getAgentResource(), agentId, reviewable)) {
-                            continue;
-                        }
+                // 2. One projected read for the page's candidates, instead of a full
+                // conversation load per row.
+                Set<String> unreadable = new HashSet<>();
+                Map<String, ConversationListingSummary> summaries = readListingSummaries(candidateIds, unreadable);
 
+                // 3. What only the conversation decides, row by row in listing order.
+                for (int i = 0; i < candidates.size(); i++) {
+                    var conversationDescriptor = candidates.get(i);
+                    var summary = summaries.get(candidateIds.get(i));
+                    if (summary == null && unreadable.contains(candidateIds.get(i))) {
+                        continue;
+                    }
+                    if (summary == null) {
                         // A descriptor whose conversation memory is gone is an orphan:
                         // there is no conversation to open, so it is not listed. 5.x left
                         // many of these behind, and once the v6 rename gives them an
                         // agentResource they would otherwise surface in by-agent listings.
-                        if (!populateDataToDescriptor(conversationDescriptor, conversationResourceId)) {
-                            orphanedDescriptors++;
-                            continue;
-                        }
+                        orphanedDescriptors++;
+                        continue;
+                    }
+                    if (!conversationAdmits(conversationDescriptor, summary, seesAllConversations, agentId, agentVersion,
+                            conversationState, viewState)) {
+                        continue;
+                    }
 
-                        // Legacy safety net: the descriptor recorded no owner; populate
-                        // has now resolved it from the snapshot (pre-v5.1.6 fallback), so
-                        // re-check before returning it.
-                        if (!seesAllConversations && !ownerRecorded
-                                && !conversationAccessGuard.canAccessConversation(conversationDescriptor.getUserId())) {
-                            continue;
-                        }
+                    if (skippedMatches < matchesToSkip) {
+                        // A result of an earlier page — counted off, and not charged
+                        // against the scan budget.
+                        skippedMatches++;
+                        continue;
+                    }
 
-                        // Agent filtering uses the agentResource URI (which contains
-                        // the agent's ID), NOT the conversation's resource URI.
-                        if (!isNullOrEmpty(agentId)) {
-                            URI agentResourceUri = conversationDescriptor.getAgentResource();
-                            var agentResourceId = agentResourceUri != null ? extractResourceId(agentResourceUri) : null;
-                            if (agentResourceId == null || !agentId.equals(agentResourceId.getId())) {
-                                continue;
-                            }
-
-                            if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
-                                continue;
-                            }
-                        }
-
-                        if (!isNullOrEmpty(conversationState)) {
-                            if (!conversationState.equals(conversationDescriptor.getConversationState())) {
-                                continue;
-                            }
-                        }
-
-                        if (!isNullOrEmpty(viewState)) {
-                            if (!viewState.equals(conversationDescriptor.getViewState())) {
-                                continue;
-                            }
-                        }
-
-                        retConversationDescriptors.add(conversationDescriptor);
-                    } catch (Exception e) {
-                        // Skip individual corrupted/orphaned descriptors gracefully
-                        log.debug(format("Skipping descriptor due to error: %s", sanitize(e.getMessage())));
+                    fillAgentName(conversationDescriptor, summary, agentNames);
+                    retConversationDescriptors.add(conversationDescriptor);
+                    if (retConversationDescriptors.size() >= limit) {
+                        // Stop at `limit` exactly, mid-page: the rest of this descriptor
+                        // page belongs to the next result page.
+                        pageFull = true;
+                        break;
                     }
                 }
 
-                if (index < Integer.MAX_VALUE) {
-                    index++;
+                if (descriptorPage < Integer.MAX_VALUE) {
+                    descriptorPage++;
                 } else {
                     break; // prevent integer overflow
                 }
                 // Bound the owner-filtered back-fill: stop once the scan budget is spent
                 // (admins/auth-disabled are never filtered, so they page only as far as
                 // filling `limit` requires and never hit this).
-            } while (!conversationDescriptors.isEmpty() && retConversationDescriptors.size() < limit
-                    && (seesAllConversations || scannedDescriptors < MAX_OWNER_SCAN));
+            } while (!pageFull && !conversationDescriptors.isEmpty()
+                    && (seesAllConversations || scannedDescriptors - skippedMatches < MAX_OWNER_SCAN));
 
             // Observability: a non-admin listing that stopped on the scan budget with
             // fewer than `limit` results may have owned conversations beyond what was
             // scanned (the List return type can't signal that truncation to the
             // caller). Count it so a persistently-truncated user is not invisible.
-            if (!seesAllConversations && retConversationDescriptors.size() < limit && scannedDescriptors >= MAX_OWNER_SCAN) {
+            if (!seesAllConversations && retConversationDescriptors.size() < limit
+                    && scannedDescriptors - skippedMatches >= MAX_OWNER_SCAN) {
                 meterRegistry.counter("eddi.conversations.listing.owner_scan_exhausted").increment();
             }
 
@@ -337,60 +376,203 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
-    private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter)
-            throws ResourceStoreException, ResourceNotFoundException {
+    /**
+     * The checks the descriptor alone can make: it names a conversation, and — for
+     * a non-admin — the owner it records is the caller, or the caller reviews its
+     * agent. Every conversation since v5.1.6 records its owner on the descriptor,
+     * so a foreign row is rejected here without its conversation ever being read; a
+     * legacy row with no recorded owner is decided in {@link #conversationAdmits},
+     * once the conversation supplies its owner. A fully unowned (null both ways)
+     * conversation stays visible, matching OwnershipValidator.requireOwnerOrAdmin.
+     *
+     * @return the conversation's id, or {@code null} when the row is not listed
+     */
+    private String recordedOwnerAdmits(ConversationDescriptor conversationDescriptor, boolean seesAllConversations, String agentId,
+                                       Map<URI, Boolean> reviewable) {
+        try {
+            URI resourceUri = conversationDescriptor.getResource();
+            var conversationResourceId = extractResourceId(resourceUri);
+            if (conversationResourceId == null || conversationResourceId.getId() == null) {
+                log.warn(format("conversationResourceId was null, this should never happen. (%s)", resourceUri));
+                return null;
+            }
 
-        return conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
+            String recordedOwner = conversationDescriptor.getUserId();
+            if (!seesAllConversations && !isNullOrEmpty(recordedOwner)
+                    && !conversationAccessGuard.canAccessConversation(recordedOwner)
+                    && !mayReview(conversationDescriptor.getAgentResource(), agentId, reviewable)) {
+                return null;
+            }
+            return conversationResourceId.getId();
+        } catch (Exception e) {
+            // Skip individual corrupted descriptors gracefully
+            log.debug(format("Skipping descriptor due to error: %s", sanitize(e.getMessage())));
+            return null;
+        }
     }
 
     /**
-     * @return {@code false} when the descriptor is orphaned — its conversation
-     *         memory no longer exists — so the caller can leave it out.
+     * The listing fields of a page's candidates, in one read. If that read fails,
+     * the ids are read one at a time, so one conversation the store cannot read
+     * costs only its own row — not the page, and not the listing. Such an id is
+     * added to {@code unreadable}, so it is not mistaken for an orphan.
      */
-    private boolean populateDataToDescriptor(ConversationDescriptor conversationDescriptor, IResourceId resourceId)
-            throws ResourceStoreException, ResourceNotFoundException {
-
+    private Map<String, ConversationListingSummary> readListingSummaries(List<String> conversationIds, Set<String> unreadable) {
+        if (conversationIds.isEmpty()) {
+            return Map.of();
+        }
         try {
-            var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
-
-            if (memorySnapshot == null) {
-                // DEBUG, not WARN: a database carried over from 5.x can hold thousands
-                // of these, and every listing page would log each one again. The
-                // listing reports the count once instead.
-                log.debug(format("Memory snapshot not found for conversation [%s, %s]. Descriptor is orphaned.",
-                        resourceId.getId(), resourceId.getVersion()));
-                return false;
+            return conversationMemoryStore.loadListingSummaries(conversationIds);
+        } catch (Exception batchFailure) {
+            Map<String, ConversationListingSummary> summaries = new HashMap<>();
+            for (String conversationId : conversationIds) {
+                try {
+                    summaries.putAll(conversationMemoryStore.loadListingSummaries(List.of(conversationId)));
+                } catch (Exception e) {
+                    unreadable.add(conversationId);
+                    log.warn(format("Skipping descriptor due to error: %s", sanitize(e.getMessage())));
+                }
             }
+            return summaries;
+        }
+    }
 
-            if (conversationDescriptor.getUserId() == null) {
+    /**
+     * Fills the descriptor from its conversation and makes the checks only the
+     * conversation can answer: the owner of a legacy descriptor that records none,
+     * the agent of one that names none, and the conversation's state — which lives
+     * in the conversation, not on the descriptor, so it cannot be pushed into the
+     * query. The agent and view-state checks repeat what the query already narrowed
+     * to; they stay the authority.
+     */
+    private boolean conversationAdmits(ConversationDescriptor conversationDescriptor, ConversationListingSummary summary,
+                                       boolean seesAllConversations, String agentId, Integer agentVersion,
+                                       ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
+        try {
+            boolean ownerRecorded = !isNullOrEmpty(conversationDescriptor.getUserId());
+            if (!ownerRecorded) {
                 // fallback for older conversations pre v5.1.6
-                conversationDescriptor.setUserId(memorySnapshot.getUserId());
+                conversationDescriptor.setUserId(summary.userId());
             }
-            conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
-            conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
-            conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
-            if (conversationDescriptor.getAgentResource() == null && !isNullOrEmpty(memorySnapshot.getAgentId())) {
+            conversationDescriptor.setEnvironment(summary.environment());
+            conversationDescriptor.setConversationStepSize(summary.conversationStepCount());
+            conversationDescriptor.setConversationState(summary.conversationState());
+            if (conversationDescriptor.getAgentResource() == null && !isNullOrEmpty(summary.agentId())) {
                 // A descriptor an earlier 6.x rewrote without its v5 botResource (see
                 // V6RenameMigration's backfill) names no agent; the conversation does.
                 // Without this it is missing from every per-agent listing.
-                Integer agentVersion = memorySnapshot.getAgentVersion();
-                conversationDescriptor.setAgentResource(agentVersion == null
-                        ? createURI(IRestAgentStore.resourceURI, memorySnapshot.getAgentId())
-                        : createURI(IRestAgentStore.resourceURI, memorySnapshot.getAgentId(), IRestAgentStore.versionQueryParam,
-                                agentVersion));
-            }
-            if (isNullOrEmpty(conversationDescriptor.getAgentName())) {
-                var documentDescriptor = documentDescriptorStore.readDescriptor(memorySnapshot.getAgentId(), memorySnapshot.getAgentVersion());
-
-                conversationDescriptor.setAgentName(documentDescriptor.getName());
+                conversationDescriptor.setAgentResource(summary.agentVersion() == null
+                        ? createURI(IRestAgentStore.resourceURI, summary.agentId())
+                        : createURI(IRestAgentStore.resourceURI, summary.agentId(), IRestAgentStore.versionQueryParam,
+                                summary.agentVersion()));
             }
 
-        } catch (ResourceNotFoundException e) {
-            String message = "Resource referenced in descriptor does not exist (anymore) [%s, %s]. ";
-            message += "Ignoring this resource.";
-            log.warn(format(message, resourceId.getId(), resourceId.getVersion()));
+            // Legacy safety net: the descriptor recorded no owner; the conversation
+            // has now supplied it (pre-v5.1.6 fallback), so check it.
+            if (!seesAllConversations && !ownerRecorded
+                    && !conversationAccessGuard.canAccessConversation(conversationDescriptor.getUserId())) {
+                return false;
+            }
+
+            // Agent filtering uses the agentResource URI (which contains
+            // the agent's ID), NOT the conversation's resource URI.
+            if (!isNullOrEmpty(agentId)) {
+                URI agentResourceUri = conversationDescriptor.getAgentResource();
+                var agentResourceId = agentResourceUri != null ? extractResourceId(agentResourceUri) : null;
+                if (agentResourceId == null || !agentId.equals(agentResourceId.getId())) {
+                    return false;
+                }
+
+                if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
+                    return false;
+                }
+            }
+
+            if (!isNullOrEmpty(conversationState) && !conversationState.equals(conversationDescriptor.getConversationState())) {
+                return false;
+            }
+
+            return isNullOrEmpty(viewState) || viewState.equals(conversationDescriptor.getViewState());
+        } catch (Exception e) {
+            // Skip individual corrupted descriptors gracefully
+            log.debug(format("Skipping descriptor due to error: %s", sanitize(e.getMessage())));
+            return false;
         }
-        return true;
+    }
+
+    /**
+     * Names the agent of a returned row whose descriptor carries no agent name —
+     * only rows that are returned, and each agent version once per listing.
+     */
+    private void fillAgentName(ConversationDescriptor conversationDescriptor, ConversationListingSummary summary,
+                               Map<String, String> agentNames) {
+        if (!isNullOrEmpty(conversationDescriptor.getAgentName()) || isNullOrEmpty(summary.agentId())) {
+            return;
+        }
+        String key = summary.agentId() + "?version=" + summary.agentVersion();
+        String agentName = agentNames.computeIfAbsent(key, ignored -> {
+            try {
+                String name = documentDescriptorStore.readDescriptor(summary.agentId(), summary.agentVersion()).getName();
+                return name == null ? "" : name;
+            } catch (Exception e) {
+                log.warn(format("Resource referenced in descriptor does not exist (anymore) [%s, %s]. Ignoring this resource.",
+                        sanitize(summary.agentId()), summary.agentVersion()));
+                return "";
+            }
+        });
+        if (!agentName.isEmpty()) {
+            conversationDescriptor.setAgentName(agentName);
+        }
+    }
+
+    /**
+     * The listing filters that are plain descriptor fields, as query groups — so
+     * the descriptor store pages through candidates rather than through every
+     * conversation. Each group admits a superset of what
+     * {@link #conversationAdmits} accepts, never less: that check still runs on
+     * every row and stays the authority.
+     * <ul>
+     * <li><b>Agent</b> — the descriptor names this agent, or names no agent at all:
+     * a descriptor an earlier 6.x rewrote without its agent gets it from the
+     * conversation in {@link #conversationAdmits}. The version is left to the
+     * per-row check.</li>
+     * <li><b>Owner</b> (non-admins) — the caller, or no recorded owner (a
+     * pre-v5.1.6 conversation, whose owner comes from its memory). Not pushed when
+     * an agent is named: a reviewer of that agent may list conversations they do
+     * not own (see {@link #mayReview}), and the agent group narrows the query
+     * instead.</li>
+     * <li><b>View state</b> — equality; a descriptor without one never
+     * matched.</li>
+     * </ul>
+     * The conversation state is not here: it is read from the conversation memory,
+     * not from the descriptor.
+     */
+    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String agentId,
+                                                   ConversationDescriptor.ViewState viewState) {
+        List<QueryFilters> restrictions = new LinkedList<>();
+        if (!isNullOrEmpty(agentId)) {
+            restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
+                    new QueryFilter(FIELD_AGENT_RESOURCE, "/" + escapeRegex(agentId) + "(\\?|$)"),
+                    new QueryFilter(FIELD_AGENT_RESOURCE, new NotMatching(NOT_BLANK)))));
+        } else if (!seesAllConversations) {
+            String caller = conversationAccessGuard.callerActor(null);
+            if (caller != null) {
+                restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
+                        QueryFilter.exact(FIELD_USER_ID, caller),
+                        new QueryFilter(FIELD_USER_ID, new NotMatching(NOT_BLANK)))));
+            }
+        }
+        if (viewState != null) {
+            restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_VIEW_STATE, viewState.name()))));
+        }
+        return restrictions;
+    }
+
+    private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
+                                                                     List<QueryFilters> restrictions)
+            throws ResourceStoreException, ResourceNotFoundException {
+
+        return conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false, restrictions);
     }
 
     /**
@@ -503,7 +685,7 @@ public class RestConversationStore implements IRestConversationStore {
         // every listing. Strict variant: a legacy conversation with no recorded
         // owner is refused to a non-admin here, rather than deletable by any token.
         // A pre-v5.1.6 descriptor without a userId resolves its owner from the
-        // snapshot (the same fallback populateDataToDescriptor uses for listings), so
+        // snapshot (the same fallback the listing uses), so
         // the recorded owner can still delete their own legacy conversation.
         conversationAccessGuard.requireConversationOwnerStrict(conversationId, id -> {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(id);

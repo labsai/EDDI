@@ -207,9 +207,9 @@ public class ConversationAccessGuard {
     /**
      * Where the owner of a pre-v5.1.6 conversation is recorded when its descriptor
      * has none: the memory snapshot's {@code userId}. The listing path
-     * ({@code RestConversationStore.populateDataToDescriptor}) already falls back
-     * to it, so the strict check must as well — otherwise the recorded owner of a
-     * legacy conversation could see it listed but never delete it.
+     * ({@code RestConversationStore.conversationAdmits}) already falls back to it,
+     * so the strict check must as well — otherwise the recorded owner of a legacy
+     * conversation could see it listed but never delete it.
      */
     @FunctionalInterface
     public interface LegacyOwnerLookup {

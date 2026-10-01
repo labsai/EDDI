@@ -12,6 +12,7 @@ import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -995,6 +996,47 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
                     .filter(task -> key.equals(task.getKey()))
                     .map(task -> String.valueOf(task.getResult()))
                     .toList();
+        }
+    }
+
+    @Nested
+    @DisplayName("loadListingSummaries")
+    class ListingSummaries {
+
+        @Test
+        @DisplayName("one read returns, per stored conversation, exactly what a full load would show in a listing")
+        void summariesMatchTheFullLoad() throws Exception {
+            var withSteps = createSnapshot(null, "summaryAgent", 3, "summary-user", ConversationState.READY);
+            withSteps.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+            withSteps.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+            String stepsId = store.storeConversationMemorySnapshot(withSteps);
+            String endedId = store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "summaryAgent", 4, "other-user", ConversationState.IN_PROGRESS));
+            // The narrow state write ending a conversation must show in the summary too.
+            store.setConversationState(endedId, ConversationState.ENDED);
+
+            Map<String, ConversationListingSummary> summaries = store.loadListingSummaries(
+                    List.of(stepsId, endedId, "00000000-0000-0000-0000-0000000000aa", "not-an-id"));
+
+            assertEquals(2, summaries.size(), "unknown and malformed ids have no entry: " + summaries.keySet());
+            for (String id : List.of(stepsId, endedId)) {
+                assertEquals(ConversationListingSummary.of(store.loadConversationMemorySnapshot(id), id), summaries.get(id));
+            }
+            var steps = summaries.get(stepsId);
+            assertEquals(2, steps.conversationStepCount());
+            assertEquals("summary-user", steps.userId());
+            assertEquals("summaryAgent", steps.agentId());
+            assertEquals(3, steps.agentVersion());
+            assertEquals(Deployment.Environment.production, steps.environment());
+            assertEquals(ConversationState.READY, steps.conversationState());
+            assertEquals(ConversationState.ENDED, summaries.get(endedId).conversationState());
+            assertEquals(0, summaries.get(endedId).conversationStepCount());
+        }
+
+        @Test
+        @DisplayName("no ids, no query")
+        void emptyRequest() {
+            assertTrue(store.loadListingSummaries(List.of()).isEmpty());
         }
     }
 
