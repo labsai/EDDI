@@ -8,8 +8,13 @@ import { AuthProvider } from "@/components/auth/auth-provider";
 import { App } from "@/app";
 import { i18nReady } from "@/i18n/config";
 import "@/index.css";
-// Start collecting logs from session start (before user navigates to /manage/logs)
-import "@/hooks/session-log-store";
+// NOT importing "@/hooks/session-log-store" here, deliberately. It used to be a
+// bare side-effect import that opened an /administration/logs/stream SSE
+// connection at app boot, on every page, for the lifetime of the tab. EDDI
+// serves HTTP/1.1, where Chrome allows six concurrent connections per origin
+// across the whole profile, so a couple of Manager tabs saturated the cap and
+// pages hung on skeleton loaders while the server was fine. The stream is now
+// opened by the consumers that need a live tail (see that module).
 
 // ── Self-hosted fonts (no external CDN requests) ────────────────────
 import "@fontsource-variable/noto-sans";

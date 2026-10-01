@@ -28,7 +28,7 @@ Result:
 
 The **output templating** is evaluated by the **Quarkus Qute templating engine**, which provides native image compatibility and a clean, expressive syntax.
 
-> **Note:** EDDI v6 migrated from Thymeleaf to Qute. Existing templates are automatically migrated via `V6QuteMigration` (startup) and the import pipeline.
+> **Note:** EDDI v6 migrated from Thymeleaf to Qute. Stored templates are converted by `V6QuteMigration` at startup **only when `eddi.migration.v6-qute.enabled=true`** (default `false`), and imported agent ZIPs are converted by the import pipeline. See [Upgrading from 5.x](upgrading-from-5x.md).
 
 ### Common Use Cases
 
@@ -169,9 +169,15 @@ EDDI provides custom namespace extensions for use in templates (output, httpcall
 | `json` | `{json:serialize(obj)}` | JSON manipulation utilities |
 | `encoder` | `{encoder:base64(data)}` | Text encoding utilities |
 
+### What a template can reach
+
+Templates run in a restricted engine. Beyond the namespaces above, the pass-through references (`${vault:…}`, `${connection:…}`, `${vars:…}`, `${caller:…}`) and Qute's `str:`/`time:` helpers, no namespace is available — in particular `config:`, `inject:` and `cdi:` render as empty. The sections are `{#if}`, `{#for}`/`{#each}`, `{#let}`/`{#set}`, `{#with}` and `{#when}`/`{#switch}`; there is no `{#include}` or `{#eval}`. On objects other than maps, lists and strings, only properties (getters, record components, public fields) can be read — no method with arguments is invoked. A render is capped at `eddi.templating.max-output-chars` characters and `eddi.templating.max-iterations` loop iterations. See [security.md](security.md#runtime-template-engine).
+
+**Values are never re-evaluated.** Whatever an expression resolves to — the user's message, a property, an API response — is written out literally, even if it contains `{…}`. Output that an httpcall/LLM/MCP `postResponse` builds from a response is rendered once and is not templated again by this task.
+
 ## Migration from Thymeleaf (v5 → v6)
 
-If you are upgrading from EDDI v5, template syntax is automatically migrated:
+If you are upgrading from EDDI v5, set `eddi.migration.v6-qute.enabled=true` for the first boot and the stored templates are converted as below. A template that cannot be converted safely (one that generates template syntax) is left unchanged, and so is the rest of its document. The first boot that finds it logs an ERROR naming the collection, id and field; later boots list the documents already reported in a single WARN. The migration is not marked complete while any remain, so it checks them again on every boot and converts one as soon as it has been fixed by hand:
 
 | v5 (Thymeleaf) | v6 (Qute) |
 | --- | --- |

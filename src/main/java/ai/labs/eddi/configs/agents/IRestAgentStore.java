@@ -44,6 +44,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
      *            space". A narrowing only: asking for a space you cannot reach
      *            returns nothing rather than granting it. Blank means every space
      *            you can reach.
+     * @param ownership
+     *            {@code mine} for what the caller owns, {@code shared} for what
+     *            others own and the caller can reach; blank for both. Applied in
+     *            the query for the same paging reason as {@code space}.
      */
     @GET
     @Path("descriptors")
@@ -56,7 +60,17 @@ public interface IRestAgentStore extends IRestVersionInfo {
                                                   @QueryParam("limit")
                                                   @DefaultValue("20") Integer limit,
                                                   @QueryParam("space")
-                                                  @DefaultValue("") String space);
+                                                  @DefaultValue("") String space,
+                                                  @QueryParam("ownership")
+                                                  @DefaultValue("") String ownership);
+
+    /**
+     * As the listing above with no ownership narrowing — the shape every in-process
+     * caller used before "Mine" and "Shared with me" existed.
+     */
+    default List<DocumentDescriptor> readAgentDescriptors(String filter, Integer index, Integer limit, String space) {
+        return readAgentDescriptors(filter, index, limit, space, "");
+    }
 
     @POST
     @Path("descriptors")
@@ -84,6 +98,12 @@ public interface IRestAgentStore extends IRestVersionInfo {
                                  @Parameter(name = "version", required = true, example = "1")
                                  @QueryParam("version") Integer version);
 
+    String COMPATIBLE_DESCRIPTION = "Whether the new version is compatible with the one it replaces. When true, conversations "
+            + "running on the previous version switch to the new one on their next turn once it is deployed; when false "
+            + "(the default) the new version is a breaking change and they stay on the version they started on. The "
+            + "server records the answer as the version's compatibilityGeneration; a value for that field in the body "
+            + "is ignored.";
+
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
@@ -91,7 +111,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
     Response updateAgent(@PathParam("id") String id,
                          @Parameter(name = "version", required = true, example = "1")
                          @QueryParam("version") Integer version,
-                         AgentConfiguration agentConfiguration);
+                         AgentConfiguration agentConfiguration,
+                         @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
+                         @QueryParam("compatible")
+                         @DefaultValue("false") Boolean compatible);
 
     @PUT
     @Path("/{id}/updateResourceUri")
@@ -100,7 +123,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
     Response updateResourceInAgent(@PathParam("id") String id,
                                    @Parameter(name = "version", required = true, example = "1")
                                    @QueryParam("version") Integer version,
-                                   URI resourceURI);
+                                   URI resourceURI,
+                                   @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
+                                   @QueryParam("compatible")
+                                   @DefaultValue("false") Boolean compatible);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)

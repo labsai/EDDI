@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.security.spaces;
 
 import io.quarkus.security.identity.SecurityIdentity;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.jwt.JsonWebToken;
@@ -38,13 +39,34 @@ public class SpaceContext {
 
     private static final Logger LOGGER = Logger.getLogger(SpaceContext.class);
 
+    /**
+     * The request header naming the space a resource created by this request is
+     * filed under — the Manager's "Create in" choice.
+     * <p>
+     * A header rather than a query parameter on every create endpoint, because
+     * resources are created through fifteen stores, duplication, import and the
+     * group wizard, and every one of them already ends in
+     * {@code ResourceAccessGuard.stampNewDescriptor}. One header reaches all of
+     * them without a signature change anywhere.
+     */
+    public static final String SPACE_HEADER = "X-EDDI-Space";
+
     private final SecurityIdentity identity;
     private final WorkspaceSettings settings;
+    private final CurrentVertxRequest currentVertxRequest;
 
     @Inject
-    public SpaceContext(SecurityIdentity identity, WorkspaceSettings settings) {
+    public SpaceContext(SecurityIdentity identity, WorkspaceSettings settings, CurrentVertxRequest currentVertxRequest) {
         this.identity = identity;
         this.settings = settings;
+        this.currentVertxRequest = currentVertxRequest;
+    }
+
+    /**
+     * Without request access: the {@link #SPACE_HEADER} is never read. Test seam.
+     */
+    public SpaceContext(SecurityIdentity identity, WorkspaceSettings settings) {
+        this(identity, settings, null);
     }
 
     /**
@@ -69,9 +91,15 @@ public class SpaceContext {
     }
 
     /**
-     * The space a resource this caller creates is filed under: the configured
-     * default team when the deployment is team-first, otherwise the caller's
-     * personal space.
+     * The space a resource this caller creates is filed under, in order: the space
+     * the request names in {@link #SPACE_HEADER}, when the caller belongs to it;
+     * the deployment's default team, when one is set <em>and the caller is a member
+     * of it</em>; the caller's personal space.
+     * <p>
+     * The default team used to apply to everyone. Someone outside it then had their
+     * work filed where a team they do not belong to could read and edit it — and,
+     * since the setting became changeable at runtime, an administrator turning it
+     * on for one team silently moved everybody else's new work there.
      *
      * @return the space id, or {@code null} when there is no authenticated caller —
      *         in which case nothing should be stamped at all
@@ -81,7 +109,39 @@ public class SpaceContext {
         if (principal == null) {
             return null;
         }
-        return settings.getDefaultSpaceTeam().map(Subjects::teamSpace).orElseGet(() -> Subjects.personalSpace(principal));
+        CallerSpaces caller = current();
+        String requested = requestedSpace();
+        if (requested != null && caller.spaces().contains(requested)) {
+            return requested;
+        }
+        // A space the caller is not in is refused before anything is created — see
+        // SpaceHeaderFilter — so reaching here with one means a path the filter does
+        // not cover. Falling back is the safe answer: the resource lands where it
+        // would have without the header, never in a space the caller cannot see.
+        return settings.getDefaultSpaceTeam().map(Subjects::teamSpace).filter(caller.spaces()::contains)
+                .orElseGet(() -> Subjects.personalSpace(principal));
+    }
+
+    /**
+     * The space this request asked for in {@link #SPACE_HEADER}, trimmed, or
+     * {@code null} when there is none — or no request at all, as on a scheduled
+     * fire.
+     */
+    public String requestedSpace() {
+        if (currentVertxRequest == null) {
+            return null;
+        }
+        try {
+            var current = currentVertxRequest.getCurrent();
+            if (current == null) {
+                return null;
+            }
+            String value = current.request().getHeader(SPACE_HEADER);
+            return value == null || value.isBlank() ? null : value.trim();
+        } catch (RuntimeException e) {
+            // Outside a request (a worker thread, a startup task) there is no header.
+            return null;
+        }
     }
 
     /**

@@ -60,6 +60,13 @@ export const agentKeys = {
    * called. It previously existed twice — see the file header.
    */
   descriptor: (agentId: AgentId) => ["agent-descriptor", agentId] as const,
+  /**
+   * What deploying `version` in `environment` does to the conversations on the
+   * agent's other deployed versions. Under `all`, so a deploy, undeploy or save
+   * — which all invalidate `agentKeys.all` — refreshes it.
+   */
+  deploymentImpact: (environment: string, agentId: AgentId, version: number) =>
+    [...agentKeys.all, "deploymentImpact", environment, agentId, version] as const,
   /** One agent's resolved system prompt. */
   prompt: (agentId: AgentId, version?: number) =>
     version === undefined

@@ -143,10 +143,10 @@ class LlmTaskAuditLedgerTest {
         }).when(currentStep).storeData(any());
         lenient().doAnswer(inv -> stored.get(inv.<String>getArgument(0))).when(currentStep).getLatestData(anyString());
 
-        lenient().when(promptSnippetService.getAll()).thenReturn(Map.of());
+        lenient().when(promptSnippetService.getForAgent(any())).thenReturn(Map.of());
         lenient().when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(counterweightService.apply(anyString(), any(), any())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(0));
         lenient().when(identityMaskingService.apply(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         lenient().when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
         lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
@@ -196,6 +196,9 @@ class LlmTaskAuditLedgerTest {
 
     private void agentReturns(String response, List<Map<String, Object>> trace, Map<String, Object> metadata) throws Exception {
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult(response, trace, metadata));
+        // The cascade calls the overload that records the tool exchange as it runs.
+        lenient().when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult(response, trace, metadata));
     }
 
@@ -477,7 +480,7 @@ class LlmTaskAuditLedgerTest {
         strong.setTimeoutMs(5000L);
         cascade.setSteps(List.of(cheap, strong));
 
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("weak", new ArrayList<>(), Map.of("toolCostUsd", 0.003)))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("strong answer", new ArrayList<>(), Map.of("toolCostUsd", 0.004)));
 

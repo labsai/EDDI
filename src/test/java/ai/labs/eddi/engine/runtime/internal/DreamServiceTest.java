@@ -15,6 +15,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -41,7 +42,7 @@ class DreamServiceTest {
     private AgentConfiguration.DreamConfig dreamConfig;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         store = mock(IUserMemoryStore.class);
         agentStore = mock(IAgentStore.class);
         summarizationService = mock(SummarizationService.class);
@@ -54,6 +55,10 @@ class DreamServiceTest {
         dreamConfig.setPruneStaleAfterDays(30);
         dreamConfig.setDetectContradictions(true);
         dreamConfig.setSummarizeInteractions(false);
+        // A store returns the id of the entry it wrote; a null one is an unconfirmed
+        // write that DreamService rolls back.
+        when(store.upsert(any(UserMemoryEntry.class))).thenAnswer(invocation -> "created-" + UUID.randomUUID());
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenAnswer(invocation -> "created-" + UUID.randomUUID());
     }
 
     // === Existing tests (updated for new constructor) ===
@@ -179,6 +184,12 @@ class DreamServiceTest {
 
     // === Summarization tests ===
 
+    private static UserMemoryEntry entryWith(String key, String value) {
+        Instant now = Instant.now();
+        return new UserMemoryEntry("id-" + key, "user-1", key, value, "preference", Visibility.self, "agent-1", List.of(), "conv-1",
+                false, 0, now, now);
+    }
+
     private List<UserMemoryEntry> makeEntries(int count, String category, String agentId) {
         Instant now = Instant.now();
         var entries = new ArrayList<UserMemoryEntry>();
@@ -244,7 +255,7 @@ class DreamServiceTest {
 
         assertTrue(result.isSuccess());
         assertEquals(4, result.entriesSummarized()); // 6 originals - 2 consolidated = 4 reduced
-        verify(store, times(2)).upsert(any(UserMemoryEntry.class));
+        verify(store, times(2)).insertIfAbsent(any(UserMemoryEntry.class));
         verify(store, times(6)).deleteEntry(anyString());
     }
 
@@ -325,7 +336,7 @@ class DreamServiceTest {
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult(llmResponse));
-        doThrow(new RuntimeException("DB write failed")).when(store).upsert(any(UserMemoryEntry.class));
+        doThrow(new RuntimeException("DB write failed")).when(store).insertIfAbsent(any(UserMemoryEntry.class));
 
         var result = dreamService.process("user-1", "agent-1", dreamConfig);
 
@@ -495,12 +506,14 @@ class DreamServiceTest {
 
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString(), any()))
+        when(summarizationService.summarizeWithUsage(anyString(), startsWith(customPrompt), anyString(), anyString(), any()))
                 .thenReturn(llmResult("[{\"key\": \"s\", \"value\": \"v\"}]"));
 
         dreamService.process("user-1", "agent-1", dreamConfig);
 
-        verify(summarizationService).summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString(), any());
+        // The custom prompt leads; the size bounds (target, "fewer than N") are
+        // appended to it, so a custom prompt cannot lose them.
+        verify(summarizationService).summarizeWithUsage(anyString(), startsWith(customPrompt), anyString(), anyString(), any());
     }
 
     @Test
@@ -528,7 +541,7 @@ class DreamServiceTest {
 
         // Verify the upserted entry has Visibility.self (most restrictive)
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store).upsert(captor.capture());
+        verify(store).insertIfAbsent(captor.capture());
         assertEquals(Visibility.self, captor.getValue().visibility());
     }
 
@@ -620,6 +633,38 @@ class DreamServiceTest {
         verify(store).deleteEntry("2");
     }
 
+    /**
+     * The documentation's own example — agent A stored "English", agent B stored
+     * "German" — was undetectable under the default ownership scope. Detection is
+     * read-only, so it may see B's entry for a key A holds.
+     */
+    @Test
+    void contradictions_acrossAgents_detectedByDefault() throws Exception {
+        Instant now = Instant.now();
+        when(store.getAllEntries("user-1")).thenReturn(List.of(
+                new UserMemoryEntry("1", "user-1", "language", "English", "preference", Visibility.global, "agent-1", List.of(), "c1", false, 0, now,
+                        now),
+                new UserMemoryEntry("2", "user-1", "language", "German", "preference", Visibility.self, "agent-2", List.of(), "c2", false, 0, now,
+                        now)));
+        dreamConfig.setPruneStaleAfterDays(0);
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(1, result.contradictionsFound());
+        verify(store, never()).deleteEntry(anyString()); // detection never changes anything
+    }
+
+    @Test
+    void contradictions_betweenTwoOtherAgents_notThisCyclesToReport() throws Exception {
+        Instant now = Instant.now();
+        when(store.getAllEntries("user-1")).thenReturn(List.of(
+                new UserMemoryEntry("1", "user-1", "city", "Vienna", "fact", Visibility.self, "agent-2", List.of(), "c1", false, 0, now, now),
+                new UserMemoryEntry("2", "user-1", "city", "Paris", "fact", Visibility.self, "agent-3", List.of(), "c2", false, 0, now, now)));
+        dreamConfig.setPruneStaleAfterDays(0);
+
+        assertEquals(0, dreamService.process("user-1", "agent-1", dreamConfig).contradictionsFound());
+    }
+
     @Test
     void contradictions_sameKeyAndValue_noDuplicate() throws Exception {
         Instant now = Instant.now();
@@ -639,13 +684,16 @@ class DreamServiceTest {
     }
 
     @Test
-    void summarize_llmReturnsTooMany_cappedToTarget() throws Exception {
+    void summarize_llmReturnsAboveTarget_keptWholeNeverTruncated() throws Exception {
         enableSummarization();
         dreamConfig.setSummarizeTargetEntries(2);
         var entries = makeEntries(8, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-a", "new-b", "new-c", "new-d");
 
-        // LLM returns 4 (< 8 originals, but > 2 target) → capped to 2
+        // LLM returns 4 (< 8 originals, but > 2 target). Truncating to 2 would
+        // delete all 8 originals while keeping only half of what the model
+        // preserved — so all 4 are written.
         String llmResponse = "[{\"key\":\"a\",\"value\":\"1\"},{\"key\":\"b\",\"value\":\"2\"}," +
                 "{\"key\":\"c\",\"value\":\"3\"},{\"key\":\"d\",\"value\":\"4\"}]";
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
@@ -654,9 +702,216 @@ class DreamServiceTest {
         var result = dreamService.process("user-1", "agent-1", dreamConfig);
 
         assertTrue(result.isSuccess());
-        assertEquals(6, result.entriesSummarized()); // 8 - 2 (capped) = 6
-        verify(store, times(2)).upsert(any(UserMemoryEntry.class)); // only 2 inserted
+        assertEquals(4, result.entriesSummarized()); // 8 deleted - 4 created
+        verify(store, times(4)).insertIfAbsent(any(UserMemoryEntry.class));
         verify(store, times(8)).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_targetIsPartOfThePrompt() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeTargetEntries(2);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult(""));
+
+        dreamService.process("user-1", "agent-1", dreamConfig);
+
+        var instructions = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(summarizationService).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any());
+        assertTrue(instructions.getValue().contains("at most 2 entries"), instructions.getValue());
+        assertTrue(instructions.getValue().contains("fewer than 6"), instructions.getValue());
+    }
+
+    /**
+     * Regression for the live-reproduced data loss: the model reused an original's
+     * key, the upsert overwrote that original IN PLACE (the store returned its id),
+     * and the "delete every original" step then deleted the consolidated entry too
+     * — six memories in, zero out, fire reported COMPLETED.
+     */
+    @Test
+    void summarize_consolidatedKeyReusesOriginal_thatOriginalIsNotDeleted() throws Exception {
+        enableSummarization();
+        var entries = makeEntries(6, "fact", "agent-1"); // ids id-0..id-5, keys key-0..key-5
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        // key-0 lands on original id-0 (same agent, non-global) → store reports id-0
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("id-0", "new-1");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"merged A\"},{\"key\":\"summary\",\"value\":\"merged B\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        verify(store, never()).deleteEntry("id-0");
+        for (int i = 1; i < 6; i++) {
+            verify(store).deleteEntry("id-" + i);
+        }
+        assertEquals(4, result.entriesSummarized()); // 5 deleted - 1 created; id-0 reused in place
+    }
+
+    /**
+     * Live-reproduced on Ollama: four entries in, the model returned three of them
+     * unchanged, and the fourth ("no sugar") was deleted. A verbatim subset merges
+     * nothing — it must not be allowed to delete the rest.
+     */
+    @Test
+    void summarize_answerOnlyRepeatsOriginalsVerbatim_groupSkipped() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeMinEntries(3);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(4, "preference", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"value-0\"},{\"key\":\"key-1\",\"value\":\"value-1\"},"
+                        + "{\"key\":\"key-2\",\"value\":\"value-2\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    /**
+     * An upsert that returns no id is an unconfirmed write: it must roll the group
+     * back rather than be counted as a created entry and let the originals go.
+     */
+    @Test
+    void summarize_upsertReturnsNoId_rollsBackAndKeepsOriginals() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeMinEntries(3);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(4, "preference", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"black, no sugar, oat milk, large\"}]"));
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn(null);
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    /**
+     * The collision check runs before the writes. A memory another writer creates
+     * with the consolidated key in between must not be overwritten: the new entry
+     * goes through the atomic insertIfAbsent, and a refusal rolls the group back.
+     */
+    @Test
+    void summarize_keyCreatedConcurrently_isNotOverwritten_groupRolledBack() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeMinEntries(3);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(4, "preference", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"coffee\",\"value\":\"black, no sugar, oat milk, large\"}]"));
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn(null); // someone else got there first
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).upsert(argThat(e -> e != null && "coffee".equals(e.key())));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void verbatimSubset_droppingOnlyExactDuplicates_isAllowed() {
+        var originals = List.of(entryWith("coffee", "black"), entryWith("coffee_pref", "Black "), entryWith("tea", "green"));
+        var kept = List.of(new DreamService.ConsolidatedEntry("coffee", "black"), new DreamService.ConsolidatedEntry("tea", "green"));
+
+        assertFalse(DreamService.verbatimSubsetDroppingFacts(kept, originals));
+    }
+
+    @Test
+    void verbatimSubset_droppingADistinctFact_isRefused() {
+        var originals = List.of(entryWith("coffee", "black"), entryWith("sugar", "none"), entryWith("tea", "green"));
+        var kept = List.of(new DreamService.ConsolidatedEntry("coffee", "black"), new DreamService.ConsolidatedEntry("tea", "green"));
+
+        assertTrue(DreamService.verbatimSubsetDroppingFacts(kept, originals));
+    }
+
+    @Test
+    void rewrittenAnswer_isNotAVerbatimSubset() {
+        var originals = List.of(entryWith("coffee", "black"), entryWith("sugar", "none"));
+        var merged = List.of(new DreamService.ConsolidatedEntry("coffee", "black, no sugar"));
+
+        assertFalse(DreamService.verbatimSubsetDroppingFacts(merged, originals));
+    }
+
+    @Test
+    void summarize_consolidatedKeyWouldOverwriteMemoryOutsideGroup_groupSkippedUntouched() throws Exception {
+        enableSummarization();
+        var entries = new ArrayList<>(makeEntries(6, "fact", "agent-1"));
+        Instant now = Instant.now();
+        // Same agent, same (non-global) identity, but a DIFFERENT category → a
+        // different group
+        entries.add(new UserMemoryEntry("pref-1", "user-1", "diet", "vegetarian", "preference", Visibility.self, "agent-1", List.of(),
+                "conv-1", false, 0, now, now));
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"diet\",\"value\":\"merged facts\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_globalConsolidationWouldOverwriteAnotherAgentsGlobal_groupSkipped() throws Exception {
+        enableSummarization();
+        Instant now = Instant.now();
+        var entries = new ArrayList<UserMemoryEntry>();
+        for (int i = 0; i < 6; i++) {
+            entries.add(new UserMemoryEntry("id-" + i, "user-1", "key-" + i, "v" + i, "fact", Visibility.global, "agent-1", List.of(), "conv-1",
+                    false, 0, now, now));
+        }
+        // Another agent's shared memory — out of this cycle's scope, must stay
+        // untouched
+        entries.add(new UserMemoryEntry("foreign", "user-1", "language", "German", "preference", Visibility.global, "agent-2", List.of(),
+                "conv-2", false, 0, now, now));
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"language\",\"value\":\"English\"}]"));
+
+        dreamService.process("user-1", "agent-1", dreamConfig);
+
+        verify(store, never()).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_duplicateConsolidatedKeys_mergedNotOverwritten() throws Exception {
+        enableSummarization();
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-1");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"pets\",\"value\":\"has a dog\"},{\"key\":\"pets\",\"value\":\"has a cat\"}]"));
+
+        dreamService.process("user-1", "agent-1", dreamConfig);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, times(1)).insertIfAbsent(captor.capture());
+        assertEquals("has a dog; has a cat", captor.getValue().value());
+    }
+
+    @Test
+    void summarize_insertFailsAfterReusingOriginal_originalRestoredNothingDeleted() throws Exception {
+        enableSummarization();
+        var entries = makeEntries(6, "fact", "agent-1");
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        // key-0 reuses original id-0 (an upsert in place); "other" is new
+        // (insertIfAbsent) and fails
+        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("id-0");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenThrow(new IResourceStore.ResourceStoreException("DB down"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"merged\"},{\"key\":\"other\",\"value\":\"x\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).deleteEntry(anyString());
+        var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store, times(2)).upsert(captor.capture());
+        assertEquals("value-0", captor.getAllValues().get(1).value(), "the overwritten original must be written back");
     }
 
     @Test
@@ -873,8 +1128,10 @@ class DreamServiceTest {
         assertTrue(result.isSuccess());
         assertEquals(1, result.entriesPruned());
         assertEquals(5, result.entriesSummarized()); // 6 fresh - 1 consolidated = 5
-        // 1st call = initial load, 2nd call = reload for summarization (pruned > 0)
-        verify(store, times(2)).getAllEntries("user-1");
+        // 1st call = initial load, 2nd call = reload for summarization (pruned > 0),
+        // 3rd call = the consolidated group's write-target check, which needs the
+        // UNSCOPED set (another agent's global entry is a collision too)
+        verify(store, times(3)).getAllEntries("user-1");
     }
 
     @Test
@@ -982,7 +1239,7 @@ class DreamServiceTest {
                     "fact", Visibility.self, "agent-2", List.of(), "conv-1", false, 0, now, now));
         }
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id-1");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id-1");
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
@@ -992,7 +1249,7 @@ class DreamServiceTest {
 
         // One consolidated entry per contributing agent — never a merged one
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store, times(2)).upsert(captor.capture());
+        verify(store, times(2)).insertIfAbsent(captor.capture());
         var written = captor.getAllValues();
         assertTrue(written.stream().allMatch(e -> e.visibility() == Visibility.self),
                 "self-scoped memories must never be widened, got: "
@@ -1024,7 +1281,7 @@ class DreamServiceTest {
                     "fact", Visibility.global, "agent-2", List.of(), "conv-1", false, 0, now, now));
         }
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult("[{\"key\": \"s\", \"value\": \"v\"}]"));
@@ -1032,7 +1289,7 @@ class DreamServiceTest {
         dreamService.process("user-1", "agent-1", dreamConfig);
 
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store, times(2)).upsert(captor.capture());
+        verify(store, times(2)).insertIfAbsent(captor.capture());
         var byAgent = captor.getAllValues().stream()
                 .collect(Collectors.toMap(UserMemoryEntry::sourceAgentId, UserMemoryEntry::visibility));
         assertEquals(Visibility.self, byAgent.get("agent-1"));
@@ -1051,7 +1308,7 @@ class DreamServiceTest {
                     List.of("group-A", "group-B"), "conv-1", false, 0, now, now));
         }
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn("new-id-1");
+        when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id-1");
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
@@ -1060,7 +1317,7 @@ class DreamServiceTest {
         dreamService.process("user-1", "agent-1", dreamConfig);
 
         var captor = org.mockito.ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(store).upsert(captor.capture());
+        verify(store).insertIfAbsent(captor.capture());
         assertTrue(captor.getValue().groupIds().contains("group-A"));
         assertTrue(captor.getValue().groupIds().contains("group-B"));
     }
@@ -1134,7 +1391,7 @@ class DreamServiceTest {
                 .thenReturn(llmResult(llmResponse));
 
         // First upsert succeeds, second throws
-        when(store.upsert(any(UserMemoryEntry.class)))
+        when(store.insertIfAbsent(any(UserMemoryEntry.class)))
                 .thenReturn("inserted-1")
                 .thenThrow(new RuntimeException("DB write failed"));
 
@@ -1224,6 +1481,28 @@ class DreamServiceTest {
         verify(store).deleteEntry("own");
         verify(store).deleteEntry("foreign");
         verify(store).deleteEntry("unowned");
+    }
+
+    /**
+     * H9c: the Art. 18 flag has no owning agent, so whole-set maintenance put it in
+     * scope and a stale prune deleted it — lifting a legal restriction with no
+     * admin and no audit entry.
+     */
+    @Test
+    void prune_crossAgentMaintenance_neverTouchesTheGdprRestrictionFlag() throws Exception {
+        Instant stale = Instant.now().minus(Duration.ofDays(400));
+        var entries = new ArrayList<>(mixedOwnershipStaleEntries());
+        entries.add(new UserMemoryEntry("gdpr-flag", "user-1", "_gdpr_processing_restricted", "true", "gdpr", Visibility.global, null,
+                List.of(), null, false, 0, stale, stale));
+        when(store.getAllEntries("user-1")).thenReturn(entries).thenReturn(List.of());
+        dreamConfig.setDetectContradictions(false);
+        dreamConfig.setCrossAgentMaintenance(true);
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(3, result.entriesPruned());
+        verify(store, never()).deleteEntry("gdpr-flag");
     }
 
     /**

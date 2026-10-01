@@ -80,3 +80,89 @@ export async function getWorkspaceInfo(): Promise<WorkspaceInfo> {
     throw e;
   }
 }
+
+/** One suggestion for a share box. */
+export interface DirectoryMatch {
+  /** What to send back as the share's `subject`. */
+  subject: string;
+  kind: "user" | "team";
+  /** A person's name or a team's name. */
+  label: string;
+  /** A secondary line — email for a person, when the deployment shows emails. */
+  detail?: string | null;
+}
+
+/**
+ * People and teams whose name, username or email starts with `query`.
+ *
+ * People appear only after signing in to EDDI once — the directory is built
+ * from sign-ins, not from the identity provider.
+ */
+export function searchDirectory(query: string, limit = 8): Promise<DirectoryMatch[]> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return api.get<DirectoryMatch[]>(`/workspaces/directory?${params.toString()}`);
+}
+
+/** Where a workspace setting's value comes from. */
+export type SettingSource = "PINNED" | "STORED" | "DEFAULT";
+
+export interface WorkspaceSetting {
+  value?: string | null;
+  source: SettingSource;
+  /** The property that pins it — what to ask an operator for when it is pinned. */
+  property: string;
+}
+
+/** The workspace settings in effect. Administrators only. */
+export interface WorkspaceSettings {
+  enforcing: boolean;
+  groupsClaim: string;
+  defaultSpace: WorkspaceSetting;
+  legacyVisibility: WorkspaceSetting;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+  warnings: string[];
+}
+
+export function getWorkspaceSettings(): Promise<WorkspaceSettings> {
+  return api.get<WorkspaceSettings>("/workspaces/settings");
+}
+
+/** A null field unsets the stored value; a pinned one cannot be changed. */
+export function updateWorkspaceSettings(update: {
+  defaultSpace: string | null;
+  legacyVisibility: "shared" | "admin-only" | null;
+}): Promise<WorkspaceSettings> {
+  return api.put<WorkspaceSettings>("/workspaces/settings", update);
+}
+
+/** Something about sharing that happened to the signed-in user. */
+export interface WorkspaceNotification {
+  id: string;
+  type: "SHARED_WITH_YOU" | "ACCESS_REQUESTED";
+  resourceId: string;
+  resourceUri?: string | null;
+  resourceName?: string | null;
+  /** The principal who shared, or who asked. */
+  actor: string;
+  actorLabel?: string | null;
+  level: "USE" | "VIEW" | "EDIT" | "OWN";
+  message?: string | null;
+  createdAt: string;
+  readAt?: string | null;
+}
+
+export function getNotifications(unreadOnly = false, limit = 30): Promise<WorkspaceNotification[]> {
+  const params = new URLSearchParams({ unreadOnly: String(unreadOnly), limit: String(limit) });
+  return api.get<WorkspaceNotification[]>(`/workspaces/notifications?${params.toString()}`);
+}
+
+export async function getUnreadNotificationCount(): Promise<number> {
+  const result = await api.get<{ unread: number }>("/workspaces/notifications/count");
+  return result?.unread ?? 0;
+}
+
+/** Marks the given notifications read, or all of the caller's when `ids` is omitted. */
+export function markNotificationsRead(ids?: string[]): Promise<{ marked: number }> {
+  return api.post<{ marked: number }>("/workspaces/notifications/read", ids ? { ids } : {});
+}

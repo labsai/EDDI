@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
+
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
@@ -55,7 +57,7 @@ class PrePostUtilsTest {
         memoryItemConverter = mock(IMemoryItemConverter.class);
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
-        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory);
+        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
     }
 
     // ==================== verifyHttpCode ====================
@@ -182,6 +184,31 @@ class PrePostUtilsTest {
 
             assertSame(refreshedData, result);
             verify(memoryItemConverter).convert(memory);
+        }
+
+        @Test
+        @DisplayName("the instruction's visibility is carried onto the property — a longTerm self property must not persist as global")
+        void preRequestInstruction_keepsVisibility() throws Exception {
+            var memory = mock(IConversationMemory.class);
+            var properties = mock(ConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(properties);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+            when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(i -> i.getArgument(0));
+
+            var instruction = new PropertyInstruction();
+            instruction.setName("apiUser");
+            instruction.setFromObjectPath("");
+            instruction.setValueString("alice");
+            instruction.setScope(Property.Scope.longTerm);
+            instruction.setVisibility(Property.Visibility.self);
+            var preRequest = new PreRequest();
+            preRequest.setPropertyInstructions(List.of(instruction));
+
+            prePostUtils.executePreRequestPropertyInstructions(memory, new HashMap<>(), preRequest);
+
+            var stored = ArgumentCaptor.forClass(Property.class);
+            verify(properties).put(eq("apiUser"), stored.capture());
+            assertEquals(Property.Visibility.self, stored.getValue().getVisibility());
         }
     }
 
@@ -372,6 +399,44 @@ class PrePostUtilsTest {
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
 
             verify(conversationProperties).put(eq("pathProp"), any(Property.class));
+        }
+
+        @Test
+        @DisplayName("fromObjectPath value is data — an upstream \"{vars.x}\" is stored literally, never rendered (C4b)")
+        void fromObjectPathValueIsNotTemplated() throws Exception {
+            String upstream = "{vars.apiKey}";
+            when(templatingEngine.processTemplate(eq(upstream), any())).thenReturn("LEAKED-SECRET");
+
+            var instruction = new PropertyInstruction();
+            instruction.setName("fromApi");
+            instruction.setFromObjectPath("httpResponse.name");
+            instruction.setScope(Property.Scope.conversation);
+            templateData.put("httpResponse", Map.of("name", upstream));
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 200, false, memory, templateData);
+
+            var captor = ArgumentCaptor.forClass(Property.class);
+            verify(conversationProperties).put(eq("fromApi"), captor.capture());
+            assertEquals(upstream, captor.getValue().getValueString());
+            verify(templatingEngine, never()).processTemplate(eq(upstream), any());
+        }
+
+        @Test
+        @DisplayName("control: an authored valueString is still templated")
+        void valueStringIsStillTemplated() throws Exception {
+            when(templatingEngine.processTemplate(eq("{properties.x}"), any())).thenReturn("rendered");
+
+            var instruction = new PropertyInstruction();
+            instruction.setName("authored");
+            instruction.setFromObjectPath("");
+            instruction.setValueString("{properties.x}");
+            instruction.setScope(Property.Scope.conversation);
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+
+            var captor = ArgumentCaptor.forClass(Property.class);
+            verify(conversationProperties).put(eq("authored"), captor.capture());
+            assertEquals("rendered", captor.getValue().getValueString());
         }
 
         @Test

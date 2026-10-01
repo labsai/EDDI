@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/resources";
 import { updateDescriptor } from "@/lib/api/descriptors";
 import {
+  cascadePartialResult,
   cascadeSaveResource,
   type CascadeContext,
 } from "@/lib/api/cascade-save";
@@ -160,21 +161,46 @@ export function useCascadeSave(slug: string) {
       body,
       context,
       skipResourceSave,
+      compatible,
     }: {
       id: string;
       version: number;
       body: unknown;
       context?: CascadeContext;
       skipResourceSave?: boolean;
+      /** The agent version the cascade writes is compatible — see `CascadeOptions`. */
+      compatible?: boolean;
     }) => {
       if (!rt)
         return Promise.reject(new Error(`Unknown resource type: ${slug}`));
-      return cascadeSaveResource(rt, id, version, body, context, { skipResourceSave });
+      return cascadeSaveResource(rt, id, version, body, context, {
+        skipResourceSave,
+        ...(compatible ? { compatible: true } : {}),
+      });
     },
-    onSuccess: () => {
+    onSuccess: (result, { id, body, skipResourceSave }) => {
+      // Seed the version the save created with the body just written, so an
+      // editor that moves onto it keeps rendering instead of dropping to a
+      // loading state (and losing whatever was typed meanwhile).
+      if (!skipResourceSave) {
+        queryClient.setQueryData([...resourceKeys(slug), id, result.newResourceVersion], body);
+      }
       queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+    onError: (err, { id, body }) => {
+      // A cascade that failed partway still wrote new versions, and the page
+      // moves onto them — the version lists must show them too.
+      const partial = cascadePartialResult(err);
+      if (!partial) return;
+      if (partial.newResourceVersion !== undefined) {
+        queryClient.setQueryData([...resourceKeys(slug), id, partial.newResourceVersion], body);
+      }
+      queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
+      if (partial.newWorkflowVersion !== undefined) {
+        queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      }
     },
   });
 }

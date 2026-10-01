@@ -20,6 +20,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -124,14 +125,22 @@ class RemoteApiResourceSourceMissedBranchTest {
     class ReadSnippetsSuccess {
 
         @Test
-        @DisplayName("valid snippet with name — added to list")
+        @DisplayName("valid snippet the agent references — added to list")
         void validSnippetAdded() throws Exception {
             DocumentDescriptor desc = new DocumentDescriptor();
             desc.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/s1?version=1"));
             DocumentDescriptor[] descs = new DocumentDescriptor[]{desc};
 
-            doReturn("[]").doReturn("{}").when(mockResponse).body();
+            // Call order: the agent document, the agent descriptor listing (for its
+            // display name), the snippet descriptors, then the snippet itself.
+            doReturn("agent").doReturn("agent-descriptors").doReturn("[]").doReturn("{}").when(mockResponse).body();
             doReturn(descs).when(jsonSerialization).deserialize(eq("[]"), eq(DocumentDescriptor[].class));
+
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>());
+            doReturn(config).when(jsonSerialization).deserialize(eq("agent"), eq(AgentConfiguration.class));
+            // The agent names the snippet, which is what makes it this agent's.
+            doReturn("{\"systemMessage\":\"{snippets.my-snippet}\"}").when(jsonSerialization).serialize(config);
 
             PromptSnippet snippet = new PromptSnippet();
             snippet.setName("my-snippet");
@@ -143,6 +152,34 @@ class RemoteApiResourceSourceMissedBranchTest {
             var snippets = source.readSnippets();
             assertEquals(1, snippets.size());
             assertEquals("my-snippet", snippets.get(0).name());
+        }
+
+        @Test
+        @DisplayName("a snippet the agent does not reference — not offered")
+        void unreferencedSnippetIsNotOffered() throws Exception {
+            DocumentDescriptor desc = new DocumentDescriptor();
+            desc.setName("someone-elses-snippet");
+            desc.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/s1?version=1"));
+            DocumentDescriptor[] descs = new DocumentDescriptor[]{desc};
+
+            doReturn("agent").doReturn("agent-descriptors").doReturn("[]").doReturn("{}").when(mockResponse).body();
+            doReturn(descs).when(jsonSerialization).deserialize(eq("[]"), eq(DocumentDescriptor[].class));
+
+            AgentConfiguration config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>());
+            doReturn(config).when(jsonSerialization).deserialize(eq("agent"), eq(AgentConfiguration.class));
+            doReturn("{\"systemMessage\":\"{snippets.mine}\"}").when(jsonSerialization).serialize(config);
+
+            PromptSnippet snippet = new PromptSnippet();
+            snippet.setName("someone-elses-snippet");
+            doReturn(snippet).when(jsonSerialization).deserialize(eq("{}"), eq(PromptSnippet.class));
+
+            RemoteApiResourceSource source = new RemoteApiResourceSource(
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+
+            // Syncing one agent must not propose writing the source instance's whole
+            // snippet library onto the target.
+            assertEquals(List.of(), source.readSnippets());
         }
 
         @Test

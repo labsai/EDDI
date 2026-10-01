@@ -20,7 +20,7 @@ import {
   Copy,
   X,
 } from "lucide-react";
-import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
+import { getExtensionIcon, getExtensionColor, extensionTypeForTask } from "@/lib/api/extensions";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
 
 // ==================== Types ====================
@@ -450,8 +450,9 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
 function TaskRow({ task }: { task: TaskSummary }) {
   const { t } = useTranslation();
   const [toolsExpanded, setToolsExpanded] = useState(false);
-  const Icon = getExtensionIcon(task.taskType);
-  const color = getExtensionColor(task.taskType);
+  const extensionType = extensionTypeForTask(task.taskType);
+  const Icon = getExtensionIcon(extensionType);
+  const color = getExtensionColor(extensionType);
   const label = getTaskLabel(task.taskType);
 
   // Paired rows, not raw tool_calls: a pause-cap refusal emits a tool_error

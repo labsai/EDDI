@@ -12,7 +12,7 @@ import {
 } from "@/hooks/use-backup";
 import type { ImportPreview, DocumentDescriptor, SyncExecution } from "@/lib/api/backup";
 import { Button } from "@/components/ui/button";
-import { useInfiniteAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 import { parseResourceUri } from "@/lib/api/backup";
 import { UploadStep, StrategyStep, PreviewStep } from "@/components/agents/import-steps";
@@ -33,6 +33,15 @@ interface ImportAgentDialogProps {
  */
 type Step = "upload" | "strategy" | "target" | "preview" | "importing" | "outcome";
 type Strategy = "create" | "merge" | "upgrade" | "sync";
+
+/**
+ * Every row starts ticked except a CONFLICT: that one was changed on this
+ * instance since the last sync, and overwriting it has to be a choice the
+ * operator makes, never the default.
+ */
+function defaultSelection(preview: ImportPreview): Set<string> {
+  return new Set(preview.resources.filter((r) => r.action !== "CONFLICT").map((r) => r.sourceId));
+}
 
 export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialogProps) {
   const { t } = useTranslation();
@@ -59,6 +68,12 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
   const [sourceAgent, setSourceAgent] = useState<string | null>(null);
   const [sourceVersion, setSourceVersion] = useState<number | null>(null);
   const [syncTargetId, setSyncTargetId] = useState<string | null>(null);
+  /**
+   * The operator picked "Create new agent" themselves. Only then is a copy
+   * forced; otherwise the backend syncs onto the agent promoted from this source
+   * earlier, and the picker pre-selects it so that is visible before the preview.
+   */
+  const [syncCreateNew, setSyncCreateNew] = useState(false);
 
   const importMutation = useImportAgent();
   const previewMutation = usePreviewImport();
@@ -87,11 +102,42 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
     setSourceAgent(null);
     setSourceVersion(null);
     setSyncTargetId(null);
+    setSyncCreateNew(false);
   }, []);
 
   function handleClose() {
     reset();
     onClose();
+  }
+
+  // The remote agent list, the source and target picked from it and any preview
+  // built on them all belong to the instance they were fetched from. Editing the
+  // URL or the token used to keep them, so instance A's agents could be
+  // previewed and synced against instance B. Mirrors the Sync page. Resetting
+  // the preview mutation also detaches a preview still in flight, so its reply
+  // can no longer land on the new source.
+  function handleSyncSourceChange(apply: () => void) {
+    apply();
+    if (
+      remoteAgents.length > 0 ||
+      sourceAgent !== null ||
+      syncTargetId !== null ||
+      preview !== null ||
+      !previewSyncMutation.isIdle ||
+      !executeSyncMutation.isIdle
+    ) {
+      setRemoteAgents([]);
+      setSourceAgent(null);
+      setSourceVersion(null);
+      setSyncTargetId(null);
+      setPreview(null);
+      setSelected(new Set());
+      setExpandedDiff(null);
+      setWorkflowOrder([]);
+      setError(null);
+      previewSyncMutation.reset();
+      executeSyncMutation.reset();
+    }
   }
 
   function handleFileAccepted(f: File) {
@@ -133,8 +179,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
         {
           onSuccess: (data) => {
             setPreview(data);
-            const allIds = new Set(data.resources.map((r) => r.sourceId));
-            setSelected(allIds);
+            setSelected(defaultSelection(data));
             // Initialize workflow order from CREATE workflow resources
             const wfIds = data.resources
               .filter((r) => r.resourceType === "workflow" && r.action === "CREATE")
@@ -154,12 +199,16 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
           sourceVersion,
           targetAgentId: syncTargetId,
           sourceAuth: syncAuth,
+          createNew: syncCreateNew,
         },
         {
           onSuccess: (data) => {
             setPreview(data);
-            const allIds = new Set(data.resources.map((r) => r.sourceId));
-            setSelected(allIds);
+            setSelected(defaultSelection(data));
+            // With no target chosen, the backend syncs onto the agent an earlier
+            // sync promoted from this source, when there is one. Adopting it here
+            // makes the picker say so, and the execute names the same agent.
+            if (!syncTargetId && !syncCreateNew && data.targetAgentId) setSyncTargetId(data.targetAgentId);
             setStep("preview");
           },
           onError: (err) => setError(err.message),
@@ -227,6 +276,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
           selectedResources: selectedIds,
           workflowOrder: workflowOrder.length > 0 ? workflowOrder : null,
           sourceAuth: syncAuth,
+          createNew: syncCreateNew,
         },
         {
           onSuccess: settle,
@@ -245,12 +295,19 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
     });
   }
 
+  /**
+   * The header checkbox manages every row except CONFLICT ones: "select all" must
+   * not overwrite a local change behind the operator's back. A conflict ticked on
+   * its own row stays as the operator left it either way.
+   */
   function toggleAll() {
     if (!preview) return;
-    if (selected.size === preview.resources.length) {
-      setSelected(new Set());
+    const defaults = defaultSelection(preview);
+    const conflictsChosen = [...selected].filter((id) => !defaults.has(id));
+    if ([...defaults].every((id) => selected.has(id))) {
+      setSelected(new Set(conflictsChosen));
     } else {
-      setSelected(new Set(preview.resources.map((r) => r.sourceId)));
+      setSelected(new Set([...defaults, ...conflictsChosen]));
     }
   }
 
@@ -341,11 +398,11 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
               remoteAgents={remoteAgents}
               sourceAgent={sourceAgent}
               syncTargetId={syncTargetId}
-              onSyncUrlChange={setSyncUrl}
-              onSyncAuthChange={setSyncAuth}
+              onSyncUrlChange={(v) => handleSyncSourceChange(() => setSyncUrl(v))}
+              onSyncAuthChange={(v) => handleSyncSourceChange(() => setSyncAuth(v))}
               onRemoteAgents={setRemoteAgents}
               onSourceAgent={(id, version) => { setSourceAgent(id); setSourceVersion(version); }}
-              onSyncTarget={setSyncTargetId}
+              onSyncTarget={(id, createNew) => { setSyncTargetId(id); setSyncCreateNew(createNew); }}
               error={error}
               isLoading={isLoading}
               isPreviewing={previewUpgradeMutation.isPending || previewSyncMutation.isPending}
@@ -497,7 +554,7 @@ function TargetStep({
   onSyncAuthChange: (auth: string) => void;
   onRemoteAgents: (agents: DocumentDescriptor[]) => void;
   onSourceAgent: (id: string, version: number | null) => void;
-  onSyncTarget: (id: string | null) => void;
+  onSyncTarget: (id: string | null, createNew: boolean) => void;
   error: string | null;
   isLoading: boolean;
   isPreviewing: boolean;
@@ -563,7 +620,7 @@ function UpgradeTargetPicker({
   onSelect: (id: string) => void;
 }) {
   const { t } = useTranslation();
-  const { data } = useInfiniteAgentDescriptors();
+  const { data } = useAllAgentDescriptors();
   const agents = groupAgentsByName(data?.pages.flat() ?? []);
 
   return (
@@ -612,10 +669,10 @@ function SyncTargetPicker({
   onAuthChange: (auth: string) => void;
   onRemoteAgents: (agents: DocumentDescriptor[]) => void;
   onSourceAgent: (id: string, version: number | null) => void;
-  onSyncTarget: (id: string | null) => void;
+  onSyncTarget: (id: string | null, createNew: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const { data } = useInfiniteAgentDescriptors();
+  const { data } = useAllAgentDescriptors();
   const localAgents = groupAgentsByName(data?.pages.flat() ?? []);
 
   return (
@@ -644,6 +701,10 @@ function SyncTargetPicker({
                 if (remote) {
                   const { id, version } = parseResourceUri(remote.resource);
                   onSourceAgent(id, version);
+                  // The local copy an earlier sync promoted from this agent, if
+                  // any: syncing onto it is what the operator almost always means.
+                  const promoted = localAgents.find((a) => a.originId === id);
+                  onSyncTarget(promoted?.id ?? null, false);
                 }
               }}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -667,7 +728,7 @@ function SyncTargetPicker({
             </label>
             <select
               value={syncTargetId || ""}
-              onChange={(e) => onSyncTarget(e.target.value || null)}
+              onChange={(e) => onSyncTarget(e.target.value || null, !e.target.value)}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               data-testid="sync-target-select"
             >

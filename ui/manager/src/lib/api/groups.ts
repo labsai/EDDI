@@ -1,6 +1,7 @@
 import { api } from "../api-client";
 import { deleteAgent, type AgentDescriptor } from "./agents";
 import { parseSseFrame } from "./sse-utils";
+import { repairNegotiationArbitration } from "../hitl-config";
 
 // ─── Enums & Types ───────────────────────────────────────────────
 
@@ -99,31 +100,55 @@ export const MAX_GROUP_MEMBERS = 100;
  */
 export const MAX_DISCUSSION_ROUNDS = 50;
 
-export type GroupConversationState =
-  | "CREATED"
-  | "IN_PROGRESS"
-  | "SYNTHESIZING"
-  | "COMPLETED"
-  | "FAILED"
-  | "CANCELLED"
-  | "AWAITING_APPROVAL"
+/**
+ * Every value of the backend's `GroupConversation.GroupConversationState`.
+ *
+ * A runtime array rather than a bare union, and the union is derived from it, so
+ * the two cannot drift. Several render sites key translations off the state name
+ * with a template literal — ``t(`groups.state.${state}`)`` — which `npm run
+ * i18n:check` cannot see, so a state added to a union alone shipped with no
+ * translation in any of the eleven locales and every gate stayed green.
+ * `i18n-quality.test.ts` walks this array.
+ */
+export const GROUP_CONVERSATION_STATES = [
+  "CREATED",
+  "IN_PROGRESS",
+  "SYNTHESIZING",
+  "COMPLETED",
+  "FAILED",
+  /**
+   * A human rejected the discussion's recommendation at a HITL gate.
+   *
+   * Deliberately not FAILED — the run did not break, a person declined its
+   * result. Terminal and closeable exactly as FAILED is; only the meaning
+   * differs, and rendering a recorded decision as a red "Failed" badge told
+   * operators the system had gone wrong when it had done what it was asked.
+   * Documents written before the backend had this state carry FAILED for a
+   * rejection and are left alone.
+   */
+  "REJECTED",
+  "CANCELLED",
+  "AWAITING_APPROVAL",
   /**
    * A HUMAN group member's turn is up (I6): the discussion is parked on
    * `pendingHumanInput` until that member submits via `submitHumanInput`, or the
    * group's `humanMemberConfig` timeout policy resolves the turn. Distinct from
    * AWAITING_APPROVAL — this is "you're up", not "approve/reject".
    */
-  | "AWAITING_HUMAN_INPUT"
+  "AWAITING_HUMAN_INPUT",
   // Terminal — member conversations ended, ephemeral agents cleaned up, no
   // further follow-ups/continuations (backend GroupConversationState.CLOSED).
-  | "CLOSED";
+  "CLOSED",
+] as const;
+
+export type GroupConversationState = (typeof GROUP_CONVERSATION_STATES)[number];
 
 /**
  * Post-COMPLETED lifecycle operations the backend exposes on a group
  * conversation. Mirrors the identifiers returned by the backend's computed
  * `availableActions` field (GroupConversation.getAvailableActions):
- *   - COMPLETED             → ["followup", "continue", "close"]
- *   - FAILED / CANCELLED    → ["close"]
+ *   - COMPLETED                       → ["followup", "continue", "close"]
+ *   - FAILED / REJECTED / CANCELLED   → ["close"]
  *   - AWAITING_HUMAN_INPUT  → ["submitHumanInput"]
  *   - all other states      → []
  */
@@ -522,6 +547,13 @@ export interface AgentGroupConfiguration {
   retroConfig?: RetroConfig | null;
   /** Transcript windowing for long-running discussions (I9). `null` = windowing off entirely. */
   contextWindow?: ContextWindowConfig | null;
+  /**
+   * The overview dashboard's one-line member stances. This is a DEFAULT, not a
+   * switch: `null` still produces stances, by lead-sentence extraction (free,
+   * and the member's own words). What the config adds is the LLM summarizer,
+   * which is better and billable — so opting in is opting into spend.
+   */
+  stanceSummary?: StanceSummaryConfig | null;
   /** Governs shared artifacts / blackboard-lite (I17). Absent = artifact tools not assembled. */
   artifactConfig?: ArtifactConfig | null;
   /**
@@ -577,6 +609,36 @@ export interface ContextWindowConfig {
   outputPricePer1M?: number | null;
 }
 export const CONTEXT_WINDOW_DEFAULT_MAX_RECENT_ENTRIES = 30;
+
+/**
+ * Governs the overview dashboard's member stances.
+ *
+ * Deliberately shaped like {@link ContextWindowConfig} — but with NO `enabled`
+ * flag. Stances always exist (extraction needs no configuration), so a boolean
+ * could only ever have meant "may this spend money?", which is already what
+ * naming a provider and model means.
+ */
+export interface StanceSummaryConfig {
+  /** Hard cap on a rendered stance. Backend default 160 when non-positive. */
+  maxChars: number;
+  /** Both required for the summarizer to run; otherwise every stance is extracted. */
+  llmProvider?: string | null;
+  llmModel?: string | null;
+  /** USD per 1M input/output tokens. `null` = unpriced ($0). */
+  inputPricePer1M?: number | null;
+  outputPricePer1M?: number | null;
+}
+export const STANCE_SUMMARY_DEFAULT_MAX_CHARS = 160;
+
+/** One member's current position in one line, as persisted on the conversation. */
+export interface MemberStance {
+  text: string;
+  /** How many of that member's own contributions this reflects. */
+  coveredContributions: number;
+  /** `true` = LLM paraphrase, `false` = the member's own lead sentence. */
+  llmGenerated: boolean;
+  updated: string;
+}
 
 /** The closed set of declarative artifact validators (I17). Declarative only — never arbitrary code. */
 export type ArtifactValidatorKind = "JSON_SCHEMA" | "REGEX" | "MAX_LENGTH";
@@ -697,6 +759,13 @@ export function normalizeGroupConfig<T extends AgentGroupConfiguration>(config: 
         dynamicAgents: { ...dynamic, lifecyclePolicy: canonical },
       };
     }
+  }
+
+  // A NEGOTIATION group materialized before the Arbitration prompt was carried
+  // stores that phase with no prompt; the next save from any editor heals it.
+  const phases = repairNegotiationArbitration(normalized.style, normalized.phases);
+  if (phases !== normalized.phases) {
+    normalized = { ...normalized, phases: phases ?? null };
   }
 
   return normalized;
@@ -936,6 +1005,8 @@ export interface GroupConversation {
   memberCosts?: Record<string, number>;
   /** Accumulated cost of the whole discussion in USD (F5) — what I1's ceiling bounds. */
   totalCost?: number;
+  /** agentId → that member's one-line stance, for the overview dashboard. */
+  memberStances?: Record<string, MemberStance>;
   currentPhaseIndex: number;
   currentPhaseName: string | null;
   synthesizedAnswer: string | null;
@@ -1067,6 +1138,17 @@ export function getGroup(
     .then(normalizeGroupConfig);
 }
 
+/**
+ * The group's current (newest) version — `GET /groupstore/groups/{id}/currentversion`.
+ *
+ * One small request, for the pages that are reached without a `?version=`: they
+ * used to fall back to version 1, which reads the group's FIRST version — its
+ * original name, members and phases — for any group that had ever been saved.
+ */
+export function getGroupCurrentVersion(id: string): Promise<number> {
+  return api.get<number>(`/groupstore/groups/${encodeURIComponent(id)}/currentversion`);
+}
+
 export function createGroup(
   config: AgentGroupConfiguration
 ): Promise<{ location: string }> {
@@ -1170,6 +1252,22 @@ export const MAX_GROUP_ATTACHMENTS_TOTAL_BYTES = 32 * 1024 * 1024;
 export const MAX_GROUP_QUESTION_CHARS = 50_000;
 
 /**
+ * The `userId` field of a discussion request body — present only when a caller
+ * names a user explicitly.
+ *
+ * Omitted, the backend resolves the owner itself: the signed-in caller when auth
+ * is on (`OwnershipValidator.validateAndResolveUserId`), `anonymous` when it is
+ * off. This used to fall back to the literal `"manager-user"`, and no caller ever
+ * passed a user, so with auth on every NON-admin got a 403 ("you cannot start a
+ * conversation as another user") and could not start, follow up or continue a
+ * discussion at all — while an admin's discussions were recorded as owned by
+ * "manager-user" rather than by the admin.
+ */
+function userIdField(userId?: string): { userId?: string } {
+  return userId ? { userId } : {};
+}
+
+/**
  * Body of a start/continue discussion request. `attachments` is only accepted by
  * the START endpoints — see {@link streamGroupContinue}.
  */
@@ -1180,7 +1278,7 @@ function discussBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     question,
-    userId: userId || "manager-user",
+    ...userIdField(userId),
   };
   // Omit rather than send [] — the backend treats absent and empty the same, and
   // an omitted key keeps the request byte-identical to the pre-attachment one.
@@ -1260,7 +1358,7 @@ export function followupGroupMember(
 ): Promise<GroupConversation> {
   return api.post<GroupConversation>(
     `/groups/${groupId}/conversations/${gcId}/followup`,
-    { question, targetAgentId, userId: userId || "manager-user" },
+    { question, targetAgentId, ...userIdField(userId) },
   );
 }
 
@@ -1348,7 +1446,14 @@ export type GroupSSEEventType =
   | "retro_recorded"
   // A member created or updated a shared artifact (I17). NOT terminal. Carries
   // metadata only, never content.
-  | "artifact_updated";
+  | "artifact_updated"
+  // A cost attribution landed in the discussion ledger. NOT terminal — fires
+  // after every attribution, including system spend (the I9 window summarizer
+  // and the stance summarizer), whose key names no member.
+  | "cost_updated"
+  // A member's one-line stance was recomputed at a phase boundary. NOT
+  // terminal, and fires only when the stance TEXT actually changed.
+  | "stance_updated";
 //
 // `token` and `synthesis_complete` are declared in the backend's
 // GroupConversationEventSink but no producer emits them; they are deliberately
@@ -1375,6 +1480,14 @@ export interface GroupStartPayload {
   memberAgentIds: string[];
 }
 
+/** Opens every continuation round (round 2 onwards) in place of `group_start`. */
+export interface RoundStartPayload {
+  groupConversationId: string;
+  round: number;
+  question: string;
+  phaseCount: number;
+}
+
 export interface PhaseStartPayload {
   phaseIndex: number;
   phaseName: string;
@@ -1389,11 +1502,18 @@ export interface SpeakerStartPayload {
   phaseName: string;
 }
 
+/**
+ * Why a member's turn produced no contribution (`SpeakerCompleteEvent.outcome`).
+ * Absent on an ordinary contribution, and on every event from a backend that
+ * predates the field.
+ */
+export type SpeakerCompleteOutcome = "TIMEOUT" | "SKIPPED" | "ERROR";
+
 export interface SpeakerCompletePayload {
   agentId: string;
   displayName: string;
-  /** Backend field name is 'response' */
-  response: string;
+  /** Backend field name is 'response'. Null when `outcome` is set. */
+  response: string | null;
   /** Fallback alias */
   content?: string;
   phaseIndex: number;
@@ -1401,6 +1521,12 @@ export interface SpeakerCompletePayload {
   /** Peer-targeted phase: the agent this response was aimed at */
   targetAgentId?: string;
   targetDisplayName?: string;
+  /**
+   * Set when the turn produced nothing — then `response` is null, so a failure
+   * is never rendered as something the member said. The raw error text stays in
+   * the server log and the persisted transcript's `errorReason`.
+   */
+  outcome?: SpeakerCompleteOutcome | null;
 }
 
 export interface PhaseCompletePayload {
@@ -1479,6 +1605,49 @@ export interface RetroRecordedPayload {
   lessonsStored: number;
 }
 
+/**
+ * Payload of `cost_updated`.
+ *
+ * `attributedCost` is the key's CUMULATIVE cost, never a delta — the backend
+ * ledger records by replacement, so a frame replayed after a reconnect is
+ * idempotent. Consumers must overwrite their stored value for
+ * `attributionKey` rather than adding to it.
+ *
+ * `totalCost` is a convenience. A PARALLEL phase's simultaneous member turns
+ * can interleave, so two frames' totals may arrive out of order; summing the
+ * per-key map is order-independent and is what `useGroupDiscussionStream`
+ * does.
+ */
+export interface CostUpdatedPayload {
+  /**
+   * The ledger key. NOT uniformly an agent id: a member turn uses its agentId,
+   * the discussion's own machinery uses a synthetic `system:…` key, and a
+   * nested GROUP member uses `agentId:childConversationId`. A consumer that
+   * indexes by member must tolerate a key matching no member.
+   */
+  attributionKey: string;
+  /** The member's display name, or `null` for a system key (which names none). */
+  displayName: string | null;
+  attributedCost: number;
+  totalCost: number;
+}
+
+/** Payload of `stance_updated`. */
+export interface StanceUpdatedPayload {
+  agentId: string;
+  displayName: string | null;
+  stance: string;
+  /**
+   * `true` when a configured summarizer wrote it, `false` when it is the
+   * lead-sentence extraction fallback. Surfaced because an extracted line is
+   * the member's own words and a generated one is a paraphrase — showing a
+   * paraphrase as a quote would misattribute it.
+   */
+  llmGenerated: boolean;
+  /** How many of that member's own contributions the stance reflects. */
+  coveredContributions: number;
+}
+
 /** Payload of `artifact_updated` (I17). `created` is `true` for a fresh artifact (v1), `false` for an accepted update. */
 export interface ArtifactUpdatedPayload {
   artifactId: string;
@@ -1498,7 +1667,7 @@ export interface ArtifactUpdatedPayload {
  * type has nothing to dispatch on and is skipped — passing a sentinel is how we
  * tell the two cases apart without re-parsing.
  */
-const NO_EVENT_TYPE = " no-event-type";
+const NO_EVENT_TYPE = "\u0000no-event-type";
 
 /**
  * Read a Server-Sent Events response body as a stream of parsed group events.
@@ -1522,8 +1691,11 @@ const NO_EVENT_TYPE = " no-event-type";
  */
 async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> {
   if (!response.ok) {
-    // M5 fix: throw a proper Error, not a plain object
-    throw new Error(`Group streaming failed: ${response.status} ${response.statusText}`);
+    // M5 fix: throw a proper Error, not a plain object. The backend's own
+    // sentence goes in it: a refused start ("question is required", a
+    // validation 400, an ownership 403) otherwise reached the user as a bare
+    // "400 Bad Request" with nothing to act on.
+    throw new Error(await streamRefusalMessage(response));
   }
 
   const reader = response.body?.getReader();
@@ -1580,6 +1752,35 @@ async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> 
   }
 }
 
+/**
+ * The message for a stream request the server refused before streaming.
+ *
+ * Plain-text bodies (the exception mappers') are the message; JSON bodies carry
+ * it under the usual keys. Markup (a proxy's error page) and anything
+ * unreadable fall back to the status line.
+ */
+async function streamRefusalMessage(response: Response): Promise<string> {
+  const status = `Group streaming failed: ${response.status} ${response.statusText}`.trim();
+  let body: string;
+  try {
+    body = (await response.text()).trim();
+  } catch {
+    return status;
+  }
+  if (!body || body.startsWith("<")) return status;
+  let message = body;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+    const candidate = record?.message ?? record?.error ?? record?.detail ?? record?.errorMessage;
+    if (typeof candidate !== "string" || !candidate.trim()) return status;
+    message = candidate.trim();
+  } catch {
+    // Not JSON — the body is the message.
+  }
+  return `${message.length > 500 ? `${message.slice(0, 500)}…` : message} (HTTP ${response.status})`;
+}
+
 /** POST a JSON body to an SSE endpoint (shared auth/header scaffolding). */
 function postSSE(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
   return fetch(`${api.getBaseUrl()}${path}`, {
@@ -1632,7 +1833,7 @@ export async function* streamGroupContinue(
 ): AsyncGenerator<GroupSSEEvent> {
   const response = await postSSE(
     `/groups/${groupId}/conversations/${gcId}/continue/stream`,
-    { question, userId: userId || "manager-user" },
+    { question, ...userIdField(userId) },
     signal,
   );
   yield* readGroupSSE(response);
@@ -1938,6 +2139,13 @@ export async function deleteGroupWithMembers(
   }
   if (config.moderatorAgentId) agentIds.add(config.moderatorAgentId);
 
+  // The group goes FIRST. It is the one delete here that can be refused (a 409
+  // when `version` is no longer current, e.g. a page still on the version it
+  // was opened with after a save), and it used to run last: every member agent
+  // was already soft-deleted when it failed, leaving a live group of deleted
+  // agents. Refused now, it throws before any member is touched.
+  await deleteGroup(groupId, version, false);
+
   // Soft-delete each agent at its current version (best-effort)
   const memberDeletes = Array.from(agentIds).map(async (agentId) => {
     try {
@@ -1949,7 +2157,4 @@ export async function deleteGroupWithMembers(
   });
 
   await Promise.allSettled(memberDeletes);
-
-  // Soft-delete the group itself
-  await deleteGroup(groupId, version, false);
 }

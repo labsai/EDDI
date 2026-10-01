@@ -228,12 +228,41 @@ class RestAgentStoreExpandedTest {
         @DisplayName("should update agent and register capabilities")
         void success() throws Exception {
             var config = new AgentConfiguration();
-            when(agentStore.update(eq(AGENT_ID), eq(1), any())).thenReturn(2);
+            when(agentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
 
-            Response response = sut.updateAgent(AGENT_ID, 1, config);
+            Response response = sut.updateAgent(AGENT_ID, 1, config, false);
 
             assertEquals(200, response.getStatus());
             verify(capabilityRegistryService).register(AGENT_ID, config);
+        }
+
+        @Test
+        @DisplayName("compatible=true reaches the store, and the Location names the new version")
+        void compatibleReachesTheStore() throws Exception {
+            var config = new AgentConfiguration();
+            when(agentStore.update(eq(AGENT_ID), eq(1), any(), eq(true))).thenReturn(2);
+
+            Response response = sut.updateAgent(AGENT_ID, 1, config, true);
+
+            assertEquals(200, response.getStatus());
+            assertEquals(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=2"), response.getLocation());
+            verify(agentStore).update(AGENT_ID, 1, config, true);
+            verify(agentStore, never()).update(eq(AGENT_ID), eq(1), any(), eq(false));
+        }
+
+        /**
+         * A caller that sends no flag — an older client, or the internal loopback proxy
+         * passing null — must get the safe answer: a breaking change.
+         */
+        @Test
+        @DisplayName("an absent compatible flag is a breaking change")
+        void absentFlagIsBreaking() throws Exception {
+            var config = new AgentConfiguration();
+            when(agentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
+
+            sut.updateAgent(AGENT_ID, 1, config, null);
+
+            verify(agentStore).update(AGENT_ID, 1, config, false);
         }
     }
 
@@ -250,12 +279,27 @@ class RestAgentStoreExpandedTest {
             config.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1"))));
             when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
-            when(agentStore.update(eq(AGENT_ID), eq(1), any())).thenReturn(2);
+            when(agentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
 
             URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=2");
-            Response response = sut.updateResourceInAgent(AGENT_ID, 1, newUri);
+            Response response = sut.updateResourceInAgent(AGENT_ID, 1, newUri, false);
 
             assertEquals(200, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("a re-point declared compatible writes a compatible agent version")
+        void compatibleRepoint() throws Exception {
+            var config = new AgentConfiguration();
+            config.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1"))));
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
+            when(agentStore.update(eq(AGENT_ID), eq(1), any(), eq(true))).thenReturn(2);
+
+            URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=2");
+            assertEquals(200, sut.updateResourceInAgent(AGENT_ID, 1, newUri, true).getStatus());
+
+            verify(agentStore).update(eq(AGENT_ID), eq(1), any(), eq(true));
         }
 
         @Test
@@ -267,7 +311,7 @@ class RestAgentStoreExpandedTest {
             when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
 
             URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=2");
-            Response response = sut.updateResourceInAgent(AGENT_ID, 1, newUri);
+            Response response = sut.updateResourceInAgent(AGENT_ID, 1, newUri, false);
 
             assertEquals(400, response.getStatus());
         }
@@ -293,13 +337,13 @@ class RestAgentStoreExpandedTest {
             config.setHitlConfig(hitl);
 
             when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
-            when(agentStore.update(eq(AGENT_ID), eq(1), any())).thenReturn(2);
+            when(agentStore.update(eq(AGENT_ID), eq(1), any(), eq(false))).thenReturn(2);
 
             URI newUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=2");
-            assertEquals(200, sut.updateResourceInAgent(AGENT_ID, 1, newUri).getStatus());
+            assertEquals(200, sut.updateResourceInAgent(AGENT_ID, 1, newUri, false).getStatus());
 
             var captor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(agentStore).update(eq(AGENT_ID), eq(1), captor.capture());
+            verify(agentStore).update(eq(AGENT_ID), eq(1), captor.capture(), eq(false));
             var written = captor.getValue();
             assertNotNull(written.getHitlConfig(), "the gate must survive a re-point");
             assertEquals(List.of("http.post:*", "http.put:*", "http.delete:*"),
@@ -324,7 +368,7 @@ class RestAgentStoreExpandedTest {
             lenient().when(agentStore.read(AGENT_ID, 1)).thenReturn(config);
 
             URI noVersion = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID);
-            Response response = sut.updateResourceInAgent(AGENT_ID, 1, noVersion);
+            Response response = sut.updateResourceInAgent(AGENT_ID, 1, noVersion, false);
 
             assertEquals(400, response.getStatus());
             verify(agentStore, never()).update(eq(AGENT_ID), eq(1), any());
@@ -345,7 +389,7 @@ class RestAgentStoreExpandedTest {
 
             for (String query : List.of("?other=2", "?version=", "?version=abc", "?versionx=2", "?")) {
                 URI bad = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + query);
-                assertEquals(400, sut.updateResourceInAgent(AGENT_ID, 1, bad).getStatus(), "must refuse: " + query);
+                assertEquals(400, sut.updateResourceInAgent(AGENT_ID, 1, bad, false).getStatus(), "must refuse: " + query);
             }
             verify(agentStore, never()).update(eq(AGENT_ID), eq(1), any());
         }

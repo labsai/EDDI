@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Central registry of well-known memory keys used across the EDDI lifecycle
@@ -200,10 +201,43 @@ public final class MemoryKeys {
      */
     public static final String QUICK_REPLIES_PREFIX = "quickReplies";
 
+    /**
+     * Output key under which a failed task is reported to the caller —
+     * {@code [{type: "errorDigest", taskId, taskType, text}]}. Written by
+     * {@code LifecycleManager}; one of the keys a non-detailed response keeps.
+     */
+    public static final String TASK_ERRORS = "taskErrors";
+
     // ---- ApiCalls ----
 
     /** ApiCalls prefix key. Used for dynamic keys like "httpCalls:callName". */
     public static final String HTTP_CALLS_PREFIX = "httpCalls";
+
+    // ---- Agent version ----
+
+    /**
+     * The agent version that ran this step. Written by {@code Conversation} at the
+     * end of every step, so a conversation that followed its agent across versions
+     * can say which version produced each answer — with or without the audit
+     * ledger. At the end, not the start: detailed snapshots list a step's data in
+     * insertion order and clients read it by position.
+     *
+     * @since 6.5.0
+     */
+    public static final MemoryKey<Integer> AGENT_VERSION = MemoryKey.of("agent:version");
+
+    /**
+     * {@code {"from": n, "to": m}} on the first step a conversation ran after
+     * moving to another, compatible version of its agent. Absent on every other
+     * step.
+     * <p>
+     * Deliberately not {@code agent:version…}: step lookups match keys by PREFIX
+     * ({@code ConversationStep#getLatestData}), so a key starting with
+     * {@link #AGENT_VERSION}'s would be returned — and removed — in its place.
+     *
+     * @since 6.5.0
+     */
+    public static final MemoryKey<Map<String, Integer>> AGENT_VERSION_CHANGE = MemoryKey.of("agent:switch");
 
     // ---- Properties ----
 

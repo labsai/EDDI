@@ -23,6 +23,9 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -276,6 +279,22 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile ISharedArtifactStore sharedArtifactStore;
 
     /**
+     * M-A1: the USE check {@code recruit_agent} applies on behalf of the
+     * discussion's owner. Field-injected for the same reason as the stores above;
+     * null under direct construction, where recruitment is unchecked as before.
+     */
+    @Inject
+    volatile ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * Read when the dynamic-agent tools are built, on the turn's own thread, to
+     * learn whether the principal the USE check asks about is an administrator
+     * (M-A1 / review #5). Field-injected for the same reason as the fields above.
+     */
+    @Inject
+    volatile CallerIdentityContext callerIdentityContext;
+
+    /**
      * Test seam for supplying the attachment services to a directly-constructed
      * orchestrator (CDI populates the fields above in production). Previously this
      * was the sole wiring path, pushed in by {@code LlmTask}'s
@@ -423,8 +442,22 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * @param responseMetadata
      *            metadata about the execution (aggregate token usage across
      *            tool-loop iterations). Never null; empty when unavailable.
+     * @param toolExchange
+     *            the tool calls the loop executed and their results, in order
+     *            (never the history it started from, never the final answer). Never
+     *            null; empty when no tool ran or the path does not record it.
      */
-    record ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata) {
+    record ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata,
+            List<ChatMessage> toolExchange) {
+        ExecutionResult {
+            toolExchange = toolExchange != null ? List.copyOf(toolExchange) : List.of();
+        }
+
+        /** Convenience constructor — no tool exchange recorded. */
+        ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata) {
+            this(response, trace, responseMetadata, List.of());
+        }
+
         /** Convenience constructor — no response metadata (empty map). */
         ExecutionResult(String response, List<Map<String, Object>> trace) {
             this(response, trace, Map.of());
@@ -509,6 +542,17 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                                  IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
                                                  int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
+        return executeIfToolsEnabled(chatModel, systemMessage, chatMessages, task, memory, effectiveToolApprovals, llmTaskIndex,
+                transcriptMaxBytes, jsonPolicy, null);
+    }
+
+    @Override
+    public ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages,
+                                                 LlmConfiguration.Task task,
+                                                 IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                                 int transcriptMaxBytes, JsonResponseFormatPolicy jsonPolicy,
+                                                 ToolExchangeRecorder exchangeRecorder)
+            throws LifecycleException {
 
         // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
         // prologue the resume path uses.
@@ -520,7 +564,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         }
 
         return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex,
-                transcriptMaxBytes, jsonPolicy);
+                transcriptMaxBytes, jsonPolicy, exchangeRecorder);
     }
 
     /**
@@ -805,14 +849,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
                                              LlmConfiguration.Task task, IConversationMemory memory,
                                              ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
-                                             JsonResponseFormatPolicy jsonPolicy)
+                                             JsonResponseFormatPolicy jsonPolicy, ToolExchangeRecorder exchangeRecorder)
             throws LifecycleException {
         return toolLoopRunner.executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory,
-                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy);
+                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy, exchangeRecorder);
     }
 
     /** @see ToolLoopRunner#conversationToolCost */
-    private double conversationToolCost(String conversationId) {
+    @Override
+    public double conversationToolCost(String conversationId) {
         return toolLoopRunner.conversationToolCost(conversationId);
     }
 
@@ -829,7 +874,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
                                    JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
         return toolLoopRunner.runToolCallLoop(chatModel, initialMessages, activeSpecs, trace, startIteration, setup, isLazy,
-                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy);
+                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy, null, null);
     }
 
     // ─── In-turn tool-context budget (D6b) — extracted to ToolContextBudget (R2
@@ -1158,13 +1203,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * discussion. Read defensively — this runs on every turn, group or not, and a
      * malformed context value must not cost the agent its entire tool set.
      */
-    private static String groupConversationIdOf(IConversationMemory memory) {
+    static String groupConversationIdOf(IConversationMemory memory) {
         try {
             var currentStep = memory.getCurrentStep();
             if (currentStep == null) {
                 return null;
             }
-            var data = currentStep.getLatestData("context:groupConversationId");
+            var data = currentStep.getData("context:groupConversationId");
             if (data != null && data.getResult() instanceof Context ctx && ctx.getValue() != null) {
                 return String.valueOf(ctx.getValue());
             }
@@ -1181,7 +1226,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * field-injected and still null when this class's constructor runs.
      */
     private ContextualToolsProvider contextualToolsProvider() {
-        return new ContextualToolsProvider(userMemoryStore, attachmentStore, attachmentTextExtractor);
+        return new ContextualToolsProvider(userMemoryStore, attachmentStore, attachmentTextExtractor, liveDiscussionRegistry);
     }
 
     // Kept as declared delegators (not inlined) — each has two call sites in
@@ -1208,8 +1253,18 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * constructor runs; see that class's Javadoc.
      */
     private DynamicAgentToolsProvider dynamicAgentToolsProvider() {
+        var guard = resourceAccessGuard;
+        var identityContext = callerIdentityContext;
+        // Captured now, on the turn's thread where the caller is bound: the tools may
+        // run on another executor. Admin-ness is only ever taken from the principal's
+        // own identity — isAdminActingAs compares the user id too.
+        CallerIdentity caller = identityContext != null ? identityContext.current() : null;
         return new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
-                agentFactory, agentStore, deploymentStore, liveDiscussionRegistry, agentGroupStore);
+                agentFactory, agentStore, deploymentStore, liveDiscussionRegistry, agentGroupStore,
+                guard != null
+                        ? (agentId, principal) -> guard.principalMayUse(agentId, principal,
+                                caller != null && caller.isAdminActingAs(principal))
+                        : null);
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by

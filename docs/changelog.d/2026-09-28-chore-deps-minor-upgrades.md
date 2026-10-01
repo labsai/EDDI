@@ -1,0 +1,82 @@
+## ⬆️ chore(deps): every stable patch/minor upgrade, backend and UIs (2026-09-28)
+
+**Repo:** EDDI (`chore/deps-minor-upgrades`)
+
+### What changed
+
+Every dependency and tool moves to its newest stable release within the same major (for `0.x`
+packages, within the same minor). Majors are deliberately left to follow-up branches, one per area.
+
+**Backend (`pom.xml`)**
+
+| Artifact | From → To | Note |
+|---|---|---|
+| Quarkus platform BOM | 3.39.4 → **3.39.5** | `3.40.0` exists only as `CR1` for the platform BOM; the `io.quarkus:*` `3.40.0` the versions report lists are core artifacts the BOM manages, not a platform release |
+| `reactor-netty-http` | 1.2.8 → **1.2.18** | Latest patch on the 1.2 line. An earlier revision of this branch took 1.3.7, whose pom matches Quarkus's `reactor-core` 3.8.7, but 1.3.x is built against Netty 4.2 while Quarkus 3.39.5 manages Netty 4.1.138: its default event loop needs `io.netty.channel.MultiThreadIoEventLoopGroup`, so the Azure OpenAI client's first request threw `NoClassDefFoundError` (reproduced; flagged by CodeRabbit). `ReactorNettyNettyCompatibilityTest` now creates that event loop, so the mismatch fails a unit test instead of a production request |
+| bcprov-lts8on | 2.73.12.1 → **2.73.13** | |
+| classgraph | 4.8.194 → **4.8.196** | |
+| swagger-annotations | 2.2.54 → **2.2.55** | `BuildQualityGatesTest` pins it; its constant and Javadoc moved with it |
+| swagger-parser | 2.1.47 → **2.1.48** | |
+| jnats | 2.26.2 → **2.26.3** | |
+| surefire / failsafe | 3.5.6 → **3.6.0** | GA (3.6.0-M1 was skipped last time) |
+| Maven (wrapper + `mise.toml`) | 3.9.12 → **3.9.16** | New `distributionSha256Sum`, computed from the zip after checking it against Maven Central's published SHA-512 |
+| Node (`node.version`, `mise.toml`, `ci.yml` `NODE_VERSION` + `NODE_SHA256_LINUX_X64`) | 22.23.2 → **22.23.3** | The checksum is the linux-x64 `.tar.gz` line of nodejs.org's `SHASUMS256.txt` for v22.23.3 |
+
+**Rule for anything Quarkus manages or integrates with: take the version Quarkus has, not a newer one.** The versions report offered Jackson 2.22.3, but the Quarkus 3.39.5 BOM manages the Jackson family at 2.22.2, so Jackson stays at 2.22.2. Everything else above is either not in the Quarkus BOM (bcprov-lts8on, classgraph, swagger, jnats, the Maven plugins and wrapper) or matches it. `reactor-netty-http` is the counter-example: matching Quarkus's `reactor-core` is not enough when the library also needs a Netty Quarkus does not ship. Mockito and Caffeine are Quarkus-BOM-managed and move with the platform.
+
+**Held back on purpose:** langchain4j `1.20.0` → `1.20.2`, for two reasons.
+
+- **Quarkus:** the Quarkus 3.39.5 platform ships langchain4j **1.19.3**, through
+  `quarkus-langchain4j-bom`. EDDI is already ahead of it at 1.20.0, and by the rule above it moves
+  no further until Quarkus does.
+- **OCI GenAI:** `langchain4j-community-oci-genai` was never released past `1.20.0-beta30`, and the
+  pom forbids splitting the two langchain4j lines, since a split surfaces as a runtime
+  `NoSuchMethodError`.
+
+**Manager (`ui/manager`)**: React / React DOM 19.3, `@tanstack/react-query` 5.104,
+`react-router-dom` 7.18.4, dompurify 3.4.16, tailwind-merge 3.7, typescript-eslint 8.70,
+`@playwright/test` 1.63, `@testing-library/*`, `eslint-plugin-react-refresh` 0.5.7, and the React
+and Node type packages.
+
+`eslint-plugin-react-refresh` 0.5.7 now catches a re-exported constant it missed before:
+`discussion-transcript.tsx` exported `STYLE_THEME` for `group-detail.tsx`, which disables Fast
+Refresh for that component file. The constant moved to
+[`discussion-style-theme.ts`](../../ui/manager/src/components/groups/discussion-style-theme.ts),
+imported by both.
+
+**Chat (`ui/chat`)**: TypeScript `~5.7` → `~5.9.3` (the Manager's version), katex 0.18.9,
+vitest 5.0.2, and type packages. `npm update` also raised a few floors to the versions already
+installed.
+
+Both lockfiles were written by npm inside a Linux `node:22.23.3` container: npm on Windows prunes
+`@tailwindcss/oxide-wasm32-wasi`'s children and breaks CI's `npm ci`. The four entries are still
+present. The Manager's `npm update` hit an npm bug with its `overrides` block
+(`Cannot read properties of null (reading 'edgesOut')`), so its bumps are explicit `npm install`s.
+
+### Verification
+
+Before main was merged in (2026-09-28):
+
+- **`./mvnw clean test`:** 18,043 tests ran.
+  - 12 failures and 210 errors, all "Unable to establish loopback connection" or Netty "failed to
+    create a child event loop". That is this machine's environmental baseline for tests that bind
+    loopback sockets.
+  - Plus the swagger-annotations constant, since fixed.
+- **Guard tests** (`BuildQualityGatesTest`, `ReleaseVersionSourceTest`, `DeploymentManifestsTest`,
+  `ImportStyleTest`, `ComposeStackTest`): pass, apart from the three `DeploymentManifestsTest`
+  PowerShell tests that fail identically on `origin/main` here.
+- **Manager:** lint, typecheck, `i18n:check`, and `vitest run --coverage` (426 files, 6,858 tests,
+  no unhandled errors) all pass, as does `vite build`.
+- **Chat:** typecheck, vitest (15 files, 278 tests) and build pass.
+
+After merging main (2026-09-30), which brought #831–#853:
+
+- **Guard tests** (`BuildQualityGatesTest`, `ChangelogFragmentTest`, `Documentation*Test`, `ImportStyleTest`, `DeploymentManifestsTest`): 139 of 142 pass; the three failures are the same `DeploymentManifestsTest` PowerShell tests, whose files the merge leaves identical to `origin/main`.
+- **`ReactorNettyNettyCompatibilityTest`** (new): passes on 1.2.18 and fails on 1.3.7 with `NoClassDefFoundError: io/netty/channel/MultiThreadIoEventLoopGroup`, the error a plain-Java request reproduced on 1.3.7.
+- **Manager and Chat suites:** not rerun on this branch after the merge; CI's UI jobs are the check. (The UI-majors branch reran both after the same merge: Chat 338/338; Manager 7,324/7,327, the three failures being the Windows-only CRLF test and two rag-upload tests that need the toolchain branch's Node 24 fix.)
+
+### Next
+
+The majors, as their own branches: MCP server 2 / testcontainers 2 / vert.x 5; the JSON libraries,
+bson4jackson 3 and langchain4j 1.20.2; Node 24 / frontend-maven-plugin 2 / JDK patch; and the UI
+toolchain and runtime majors.

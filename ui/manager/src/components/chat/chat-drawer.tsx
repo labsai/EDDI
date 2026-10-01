@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useChatDrawerStore, type ChatDrawerStep } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation, useSendMessage } from "@/hooks/use-chat";
 import type { SentAttachment } from "@/hooks/use-chat";
+import type { ChatMessage as ChatMessageModel } from "@/lib/api/chat";
 import {
   filesFromClipboard,
   useAttachmentStaging,
@@ -17,6 +18,8 @@ import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer as DebugPanel } from "@/components/debugger/debug-drawer";
 import { useDebugStore } from "@/hooks/use-debug-events";
 import { InputHint } from "@/components/chat/input-hint";
+import { SecretInputField } from "./secret-input-field";
+import type { InputField } from "@/lib/api/conversations";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import {
@@ -67,6 +70,8 @@ function StepProgress({ current, error }: { current: ChatDrawerStep; error: stri
   );
 }
 
+const NO_MESSAGES: ChatMessageModel[] = [];
+
 /* ─── Main ChatDrawer component ─── */
 export function ChatDrawer() {
   const { t } = useTranslation();
@@ -77,10 +82,24 @@ export function ChatDrawer() {
   const errorMessage = useChatDrawerStore((s) => s.errorMessage);
   const close = useChatDrawerStore((s) => s.close);
 
-  const messages = useChatStore((s) => s.messages);
-  const conversationId = useChatStore((s) => s.conversationId);
-  const isProcessing = useChatStore((s) => s.isProcessing);
-  const isThinking = useChatStore((s) => s.isThinking);
+  // The chat store is shared with the main chat panel, so it can hold ANOTHER
+  // agent's conversation when the drawer opens (the agent page's Chat button
+  // on an agent that is not live opens the drawer without starting anything).
+  // Rendering that transcript under this agent's name, and sending into it,
+  // meant talking to the wrong agent. The drawer only ever shows a
+  // conversation that belongs to the agent it was opened for.
+  const chatAgentId = useChatStore((s) => s.selectedAgentId);
+  const ownsConversation = agentId !== null && chatAgentId === agentId;
+  const storeMessages = useChatStore((s) => s.messages);
+  const storeConversationId = useChatStore((s) => s.conversationId);
+  const messages = ownsConversation ? storeMessages : NO_MESSAGES;
+  const conversationId = ownsConversation ? storeConversationId : null;
+  const isProcessing = useChatStore((s) => s.isProcessing) && ownsConversation;
+  const isThinking = useChatStore((s) => s.isThinking) && ownsConversation;
+  const activeInputField = useChatStore((s) => s.activeInputField);
+  // A load in flight still has the conversation being left on screen; sends
+  // wait for it (useSendMessage refuses them as well).
+  const isLoadingConversation = useChatStore((s) => s.loadingConversationId !== null);
   const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
   const liveToolCalls = useDebugStore((s) => s.liveToolCalls);
   const liveToolsSettled = useDebugStore((s) => s.liveToolsSettled);
@@ -117,7 +136,11 @@ export function ChatDrawer() {
 
   const handleNewConversation = useCallback(() => {
     if (!agentId) return;
-    useChatStore.getState().clearMessages();
+    const chat = useChatStore.getState();
+    chat.clearMessages();
+    // Bind the store to THIS agent before starting, in case it still held
+    // another one (see ownsConversation).
+    if (chat.selectedAgentId !== agentId) chat.setSelectedAgent(agentId, agentName);
     useChatDrawerStore.getState().setStep("starting");
     startConversation.mutate(
       // The environment the drawer was OPENED with — a "new conversation" must
@@ -126,7 +149,7 @@ export function ChatDrawer() {
       { agentId, environment: drawerEnvironment },
       { onSuccess: () => useChatDrawerStore.getState().setStep("ready") }
     );
-  }, [agentId, startConversation, drawerEnvironment]);
+  }, [agentId, agentName, startConversation, drawerEnvironment]);
 
   const handleRetry = useCallback(() => {
     // Reset to idle — the user's "Save & Test" hook will need to be re-triggered
@@ -289,7 +312,7 @@ export function ChatDrawer() {
                 </div>
 
                 {/* Quick replies */}
-                <QuickRepliesBar />
+                {ownsConversation && <QuickRepliesBar />}
 
                 {/* Debug drawer — same as main chat */}
                 {conversationId && (
@@ -299,12 +322,20 @@ export function ChatDrawer() {
                   />
                 )}
 
-                {/* Input */}
-                <DrawerChatInput
-                  disabled={!conversationId}
-                  isProcessing={isProcessing}
-                  staging={staging}
-                />
+                {/* Input — the masked field when the agent asked for one */}
+                {activeInputField && conversationId ? (
+                  <DrawerSecretInput
+                    field={activeInputField}
+                    disabled={isProcessing || isLoadingConversation}
+                    staging={staging}
+                  />
+                ) : (
+                  <DrawerChatInput
+                    disabled={!conversationId || isLoadingConversation}
+                    isProcessing={isProcessing}
+                    staging={staging}
+                  />
+                )}
               </>
             )}
           </div>
@@ -318,9 +349,10 @@ export function ChatDrawer() {
 function QuickRepliesBar() {
   const quickReplies = useChatStore((s) => s.quickReplies);
   const isProcessing = useChatStore((s) => s.isProcessing);
+  const isLoadingConversation = useChatStore((s) => s.loadingConversationId !== null);
   const sendMessage = useSendMessage();
 
-  if (quickReplies.length === 0 || isProcessing) return null;
+  if (quickReplies.length === 0 || isProcessing || isLoadingConversation) return null;
 
   return (
     <div className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2 shrink-0">
@@ -328,7 +360,10 @@ function QuickRepliesBar() {
         <button
           type="button"
           key={`${reply}-${i}`}
-          onClick={() => sendMessage.mutate({ message: reply })}
+          onClick={() => {
+            if (useChatStore.getState().loadingConversationId) return;
+            sendMessage.mutate({ message: reply });
+          }}
           className="rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/15"
           data-testid="drawer-quick-reply"
         >
@@ -336,6 +371,40 @@ function QuickRepliesBar() {
         </button>
       ))}
     </div>
+  );
+}
+
+/* ─── Masked input the backend asked for (inputField output item) ─── */
+function DrawerSecretInput({
+  field,
+  disabled,
+  staging,
+}: {
+  field: InputField;
+  disabled: boolean;
+  staging: AttachmentStaging;
+}) {
+  const sendMessage = useSendMessage();
+  return (
+    <SecretInputField
+      compact
+      label={field.label}
+      placeholder={field.placeholder}
+      defaultValue={field.defaultValue}
+      subType={field.subType}
+      disabled={disabled}
+      onSend={(value) => {
+        // Read live, not from the render: a load that began in the render gap
+        // still has the conversation being left on screen. Returning false
+        // keeps the typed value in the field.
+        if (useChatStore.getState().loadingConversationId) return false;
+        // A secret turn never carries a file, so anything staged is dropped
+        // rather than silently held for the next message.
+        staging.discardAll();
+        sendMessage.mutate({ message: value, isSecret: true });
+        return true;
+      }}
+    />
   );
 }
 
@@ -361,6 +430,8 @@ function DrawerChatInput({
     // Attachment-only turns are allowed, matching the main panel; the guard
     // runs BEFORE draining so a no-op send never clears staged chips.
     if ((!trimmed && !hasReadyAttachment) || disabled || isProcessing || isUploading) return;
+    // Live, like the secret field: keep the draft and the staged files.
+    if (useChatStore.getState().loadingConversationId) return;
     const sent: SentAttachment[] = staging.takeForSend().map((a: ReadyAttachment) => ({
       storageRef: a.result.storageRef,
       fileName: a.result.fileName || a.file.name,

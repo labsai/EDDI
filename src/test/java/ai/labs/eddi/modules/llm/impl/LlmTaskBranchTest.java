@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -77,7 +78,7 @@ class LlmTaskBranchTest {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
         builders.put("openai", () -> parameters -> new ChatModel() {
             @Override
-            public ChatResponse chat(List<ChatMessage> messages) {
+            public ChatResponse doChat(ChatRequest chatRequest) {
                 return ChatResponse.builder().aiMessage(aiMessage(LLM_RESPONSE)).build();
             }
         });
@@ -89,10 +90,10 @@ class LlmTaskBranchTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
-        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
+        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
 
         mockSnippetService = mock(PromptSnippetService.class);
-        when(mockSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
 
         var counterweightService = new CounterweightService(mockSnippetService,
                 new SimpleMeterRegistry());
@@ -147,7 +148,7 @@ class LlmTaskBranchTest {
         @Test
         @DisplayName("non-empty snippets are injected into template data")
         void snippetsInjected() throws Exception {
-            when(mockSnippetService.getAll()).thenReturn(Map.of("cautious", "Be careful"));
+            when(mockSnippetService.getForAgent(any())).thenReturn(Map.of("cautious", "Be careful"));
             var memory = setupMemory(List.of("action1"));
             var templateData = new HashMap<String, Object>();
             when(memoryItemConverter.convert(memory)).thenReturn(templateData);
@@ -460,6 +461,20 @@ class LlmTaskBranchTest {
             // deploymentName fallback — no maxContextTokens to avoid tokenizer model lookup
             var task = createTask(Map.of("apiKey", "key", "deploymentName", "my-deployment"));
             assertDoesNotThrow(() -> llmTask.execute(memory, new LlmConfiguration(List.of(task))));
+        }
+
+        @Test
+        @DisplayName("a named OpenAI-compatible provider without a model resolves to its preset default")
+        void compatibleProviderDefaultModel() {
+            assertEquals("grok-4.7", LlmTask.resolveModelName(Map.of("apiKey", "k"), "xai"));
+            assertEquals("grok-4.7", LlmTask.resolveModelName(Map.of("modelName", " "), "xai"));
+        }
+
+        @Test
+        @DisplayName("an explicit model wins over the preset default; other types stay null")
+        void explicitModelAndOtherTypes() {
+            assertEquals("grok-4.5", LlmTask.resolveModelName(Map.of("modelName", "grok-4.5"), "xai"));
+            assertNull(LlmTask.resolveModelName(Map.of("apiKey", "k"), "openai"));
         }
     }
 

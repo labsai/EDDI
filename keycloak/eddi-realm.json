@@ -483,13 +483,15 @@
       "publicClient": true,
       "bearerOnly": false,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "redirectUris": [
         "http://localhost:*",
         "https://localhost:*"
       ],
       "webOrigins": [
         "+",
+        "http://localhost:${EDDI_PORT:7070}",
+        "https://localhost:${EDDI_HTTPS_PORT:7443}",
         "http://localhost:7070",
         "https://localhost:7070",
         "http://localhost:7071",
@@ -499,7 +501,8 @@
         "http://localhost:5173"
       ],
       "attributes": {
-        "post.logout.redirect.uris": "+"
+        "post.logout.redirect.uris": "+",
+        "pkce.code.challenge.method": "S256"
       },
       "defaultClientScopes": [
         "openid",
@@ -637,13 +640,6 @@
       "email": "viewer@localhost",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "viewer",
-          "temporary": true
-        }
-      ],
       "realmRoles": [
         "eddi-viewer"
       ]
@@ -655,13 +651,6 @@
       "email": "user@localhost",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "user",
-          "temporary": true
-        }
-      ],
       "realmRoles": [
         "eddi-user"
       ]

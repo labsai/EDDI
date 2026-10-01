@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.schedule.rest;
 
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -16,6 +17,7 @@ import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.DreamService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -28,6 +30,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -36,6 +39,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -117,16 +122,28 @@ public class RestScheduleStore implements IRestScheduleStore {
             // sort newest-first) while later pages held their own schedules — and the
             // documented "a full page may be truncated, ask for the next one" rule then
             // told a well-behaved client to stop paging.
-            boolean excludeHitlTimeouts = !ownershipValidator.isAdmin(identity);
+            boolean admin = ownershipValidator.isAdmin(identity);
+            boolean excludeHitlTimeouts = !admin;
+            // Owner-scope the listing IN THE QUERY for the same reason: a non-admin
+            // sees only schedules that run as themselves plus unowned/system ones, and
+            // filtering a fetched page counted limit/offset over other users' rows —
+            // a short or empty page while their own schedules sat on later pages,
+            // which the documented paging rule (only a full page may be truncated)
+            // tells a client to treat as the end. Admins, and every caller when
+            // authorization is disabled, get no owner filter.
+            ScheduleOwnerScope ownerScope = admin ? ScheduleOwnerScope.ALL : listingOwnerScope(agentId);
             List<ScheduleConfiguration> schedules;
             if (agentId != null && !agentId.isBlank()) {
-                schedules = scheduleStore.readSchedulesByAgentId(agentId, pageSize, pageOffset, excludeHitlTimeouts);
+                schedules = scheduleStore.readSchedulesByAgentId(agentId, pageSize, pageOffset, excludeHitlTimeouts, ownerScope);
             } else {
-                schedules = scheduleStore.readAllSchedules(pageSize, pageOffset, excludeHitlTimeouts);
+                schedules = scheduleStore.readAllSchedules(pageSize, pageOffset, excludeHitlTimeouts, ownerScope);
             }
+            // Defence in depth only: the query above already returned just the rows
+            // mayRead allows, so this drops nothing.
+            List<ScheduleConfiguration> visible = schedules.stream().filter(this::mayRead).toList();
             // Enrich with cron descriptions
-            schedules.forEach(this::enrichCronDescription);
-            return schedules;
+            visible.forEach(this::enrichCronDescription);
+            return visible;
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Invalid schedule listing request: " + e.getMessage());
             throw new BadRequestException(e.getMessage());
@@ -140,10 +157,23 @@ public class RestScheduleStore implements IRestScheduleStore {
     public ScheduleConfiguration readSchedule(String scheduleId) {
         try {
             ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
+            // A schedule runs as (and, for dream consolidation, prunes the memories of)
+            // its userId. A non-admin may only read a schedule that runs as themselves,
+            // or an unowned/system one — otherwise a plain editor could enumerate
+            // another user's per-user schedules through this endpoint. The rest of the
+            // listing's rule applies too (mayRead): HITL timeouts stay hidden from
+            // non-admins, and under workspace enforcement a system schedule belongs to
+            // its creator and to the team of what it drives.
+            if (!mayRead(schedule)) {
+                throw new ForbiddenException("Access denied: this schedule runs as another user, or belongs to a "
+                        + "resource you may not view.");
+            }
             enrichCronDescription(schedule);
             return schedule;
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Schedule not found: " + scheduleId);
+        } catch (ForbiddenException e) {
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Failed to read schedule " + scheduleId, e);
             throw new InternalServerErrorException("Failed to read schedule");
@@ -167,6 +197,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response ingestionGuard = rejectIngestionBody(schedule, "create");
             if (ingestionGuard != null) {
                 return ingestionGuard;
+            }
+
+            Response cadenceGuard = rejectTeamCadenceBody(schedule, null, "create");
+            if (cadenceGuard != null) {
+                return cadenceGuard;
             }
 
             // A schedule runs AS its userId — refuse to mint one that acts as
@@ -196,6 +231,14 @@ public class RestScheduleStore implements IRestScheduleStore {
             // rogue one keeps starting conversations, and nothing on this path ever
             // set it — every schedule created through the public API had it null.
             schedule.setCreatedBy(callerPrincipal());
+
+            // A caller must not seed a schedule with a persistent conversation it does
+            // not own: the fire path reuses persistentConversationId verbatim and
+            // (running below the USE gate, with no request context) would push turns
+            // into that conversation. It is populated only by the fire path's own
+            // single-field write — never on create. Mirrors the import path, which
+            // nulls it for the same reason.
+            schedule.setPersistentConversationId(null);
 
             // Compute initial nextFire
             computeInitialNextFire(schedule);
@@ -266,6 +309,19 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return guard;
             }
 
+            // Judged on the STORED row, for the same reason as the HITL guard: a PUT
+            // that omits metadata keeps the stored markers (carryOverNonEditableFields),
+            // so the body alone cannot say what the schedule will be after the write.
+            Response managedGuard = guardManagedSchedule(stored);
+            if (managedGuard != null) {
+                return managedGuard;
+            }
+
+            Response cadenceGuard = rejectTeamCadenceBody(schedule, stored, "update");
+            if (cadenceGuard != null) {
+                return cadenceGuard;
+            }
+
             // Same USE gate as create: an update can re-point an existing schedule at a
             // different agent, which is the same act as scheduling that agent afresh.
             if (schedule != null && schedule.getAgentId() != null && !schedule.getAgentId().isBlank()) {
@@ -286,6 +342,16 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response storedOwnerGuard = requireOwnUserId(stored != null ? stored.getUserId() : null, "update");
             if (storedOwnerGuard != null) {
                 return storedOwnerGuard;
+            }
+
+            // Under workspace enforcement a system schedule belongs to its creator and
+            // to the team of what it drives (mayManage) — the owner check above passes
+            // every unowned row.
+            if (stored != null) {
+                Response manageGuard = requireMayManage(stored, "update");
+                if (manageGuard != null) {
+                    return manageGuard;
+                }
             }
 
             Response ownerGuard = requireOwnUserId(schedule != null ? schedule.getUserId() : null, "update");
@@ -342,16 +408,20 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response deleteSchedule(String scheduleId) {
         try {
-            // Deleting a HITL timeout schedule disarms a safety deadline — restrict
-            // to admins so an editor cannot leave a paused conversation with no
-            // ABORT/AUTO_REJECT resolution. The conventional cleanup path is
+            // Deleting a HITL timeout schedule disarms a safety deadline (admin-only),
+            // and deleting another user's schedule is an ownership violation — both are
+            // enforced here. The conventional HITL cleanup path is
             // POST /agents/{conversationId}/resume or .../cancel.
-            Response guard = requireAdminForHitl(scheduleId, "delete");
+            Response guard = requireMutableSchedule(scheduleId, "delete");
             if (guard != null) {
                 return guard;
             }
             scheduleStore.deleteSchedule(scheduleId);
             return Response.noContent().build();
+        } catch (ForbiddenException | WebApplicationException e) {
+            // Keep a downstream 403/404 (or any other mapped status) as-is instead of
+            // flattening it into a 500 — the same rethrow the other mutation paths do.
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Failed to delete schedule " + scheduleId, e);
             throw new InternalServerErrorException("Failed to delete schedule");
@@ -360,7 +430,7 @@ public class RestScheduleStore implements IRestScheduleStore {
 
     @Override
     public Response enableSchedule(String scheduleId) {
-        Response guard = requireAdminForHitl(scheduleId, "enable");
+        Response guard = requireMutableSchedule(scheduleId, "enable");
         if (guard != null) {
             return guard;
         }
@@ -369,8 +439,9 @@ public class RestScheduleStore implements IRestScheduleStore {
 
     @Override
     public Response disableSchedule(String scheduleId) {
-        // Disabling a HITL timeout schedule is equivalent to disarming it.
-        Response guard = requireAdminForHitl(scheduleId, "disable");
+        // Disabling a HITL timeout schedule is equivalent to disarming it, and
+        // disabling another user's schedule is an ownership violation.
+        Response guard = requireMutableSchedule(scheduleId, "disable");
         if (guard != null) {
             return guard;
         }
@@ -399,6 +470,12 @@ public class RestScheduleStore implements IRestScheduleStore {
                 }
                 resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
             }
+            if (TeamCadenceService.isTeamCadenceSchedule(schedule != null ? schedule.getMetadata() : null)) {
+                // A cadence fire pulls the group's backlog and runs a discussion as the
+                // cadence's creator: the same authority as editing the group's cadences,
+                // which RestGroupWorkspace and guardManagedSchedule gate on EDIT of the group.
+                resourceAccessGuard.requireAccess(governingResourceId(schedule), AccessLevel.EDIT, "group");
+            }
 
             if (isHitlSchedule(schedule)) {
                 LOGGER.warnf("Refused manual fire of HITL timeout schedule %s (name=%s) — "
@@ -416,6 +493,10 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response ownerGuard = requireOwnUserId(schedule.getUserId(), "fire");
             if (ownerGuard != null) {
                 return ownerGuard;
+            }
+            Response manageGuard = requireMayManage(schedule, "fire");
+            if (manageGuard != null) {
+                return manageGuard;
             }
             // Claim it first, on the poller's own terms. Without a claim a manual fire
             // ran concurrently with the poller's fire of the same schedule — and with
@@ -464,6 +545,10 @@ public class RestScheduleStore implements IRestScheduleStore {
             return Response.ok(fireLog).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Schedule not found: " + scheduleId);
+        } catch (ForbiddenException e) {
+            // The EDIT gates above (knowledge base, group). The generic catch below used to
+            // turn their clean 403 into a 500.
+            throw e;
         } catch (Exception e) {
             LOGGER.error("Failed to manually fire schedule " + scheduleId, e);
             throw new InternalServerErrorException("Failed to fire schedule");
@@ -473,7 +558,27 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public List<ScheduleFireLog> readFireLogs(String scheduleId, int limit) {
         try {
-            return scheduleStore.readFireLogs(scheduleId, boundedLimit(limit, MAX_FIRE_LOG_LIMIT));
+            int bounded = boundedLimit(limit, MAX_FIRE_LOG_LIMIT);
+            // A fire log carries the conversation ids and errors of every run; it is part
+            // of the schedule and visible exactly when the schedule is (readSchedule's
+            // rule and answer). A schedule that no longer exists leaves its logs to
+            // administrators.
+            ScheduleConfiguration schedule;
+            try {
+                schedule = scheduleStore.readSchedule(scheduleId);
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                schedule = null;
+            }
+            if (schedule == null && !ownershipValidator.isAdmin(identity)) {
+                throw new NotFoundException("Schedule not found: " + scheduleId);
+            }
+            if (schedule != null && !mayRead(schedule)) {
+                throw new ForbiddenException("Access denied: this schedule runs as another user, or belongs to a "
+                        + "resource you may not view.");
+            }
+            return scheduleStore.readFireLogs(scheduleId, bounded);
+        } catch (NotFoundException | ForbiddenException e) {
+            throw e;
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Invalid fire log limit: " + e.getMessage());
             throw new BadRequestException(e.getMessage());
@@ -486,7 +591,23 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public List<ScheduleFireLog> readFailedFires(int limit) {
         try {
-            return scheduleStore.readFailedFireLogs(boundedLimit(limit, MAX_FIRE_LOG_LIMIT));
+            List<ScheduleFireLog> failed = scheduleStore.readFailedFireLogs(boundedLimit(limit, MAX_FIRE_LOG_LIMIT));
+            if (ownershipValidator.isAdmin(identity)) {
+                return failed;
+            }
+            // The dead-letter view carries the conversation ids and error text of every
+            // failed run — the same data /{id}/fires shows only when its schedule is
+            // visible. Non-admins get the entries of schedules mayRead admits, which can
+            // leave the page shorter than the limit: this is an operator view, not a
+            // paged listing, so a short page is honest rather than a truncation signal.
+            Map<String, Boolean> visible = new HashMap<>();
+            List<ScheduleFireLog> scoped = new ArrayList<>();
+            for (ScheduleFireLog log : failed) {
+                if (log != null && visible.computeIfAbsent(log.scheduleId(), this::mayReadById)) {
+                    scoped.add(log);
+                }
+            }
+            return scoped;
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Invalid fire log limit: " + e.getMessage());
             throw new BadRequestException(e.getMessage());
@@ -519,8 +640,9 @@ public class RestScheduleStore implements IRestScheduleStore {
             // A HITL timeout schedule is a safety timer: requeuing it re-arms the
             // AUTO_REJECT/AUTO_APPROVE/ABORT decision on a system actor. Like every
             // other HITL mutation (update/delete/enable/disable), restrict it to
-            // admins so an editor cannot manipulate another user's pending approval.
-            Response guard = requireAdminForHitl(scheduleId, "retry");
+            // admins so an editor cannot manipulate another user's pending approval —
+            // and, like them, refuse a non-owner retrying another user's schedule.
+            Response guard = requireMutableSchedule(scheduleId, "retry");
             if (guard != null) {
                 return guard;
             }
@@ -534,21 +656,41 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
     }
 
-    // Fix #8: dismissDeadLetter uses markCompleted with proper nextFire recompute
+    /**
+     * Clear a dead letter without retrying it, re-armed at its next regular fire.
+     * <p>
+     * Only a DEAD_LETTERED schedule can be dismissed; anything else is a 409. The
+     * state is checked twice, and only the second check is authoritative: the read
+     * gives an honest error for the common case (the Manager offers "Dismiss" on
+     * failed fire LOGS, whose schedule may since have recovered or be running), and
+     * the store's write is itself conditional on DEAD_LETTERED, so a requeue and
+     * claim racing in between cannot be reset to PENDING under a running fire.
+     */
     @Override
     public Response dismissDeadLetter(String scheduleId) {
         try {
             // Dismissing a one-shot HITL timeout schedule disarms it permanently
             // (markCompleted with a null nextFire disables it) — exactly the
             // "editor cannot disarm an ABORT/AUTO_REJECT safety timeout" guarantee the
-            // other mutation paths enforce. Require admin here too.
-            Response guard = requireAdminForHitl(scheduleId, "dismiss");
+            // other mutation paths enforce. Require admin here too, and refuse a
+            // non-owner dismissing another user's schedule.
+            Response guard = requireMutableSchedule(scheduleId, "dismiss");
             if (guard != null) {
                 return guard;
             }
             ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
+            if (schedule.getFireStatus() != FireStatus.DEAD_LETTERED) {
+                return notDeadLettered(schedule.getFireStatus());
+            }
             Instant nextFire = computeNextFireForSchedule(schedule);
-            scheduleStore.markCompleted(scheduleId, nextFire);
+            try {
+                scheduleStore.dismissDeadLetter(scheduleId, nextFire);
+            } catch (IResourceStore.ResourceNotFoundException raced) {
+                // It was DEAD_LETTERED when read and is not any more (requeued, deleted
+                // or re-claimed in between): the write matched nothing, which is the
+                // point of the condition.
+                return notDeadLettered(null);
+            }
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Schedule not found: " + scheduleId);
@@ -559,6 +701,13 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     // --- Helpers ---
+
+    private static Response notDeadLettered(FireStatus current) {
+        return Response.status(Response.Status.CONFLICT)
+                .entity("Only a dead-lettered schedule can be dismissed; this one is "
+                        + (current != null ? current.name() : "no longer dead-lettered") + ".")
+                .build();
+    }
 
     /**
      * Why a manual fire could not claim the schedule, phrased for the operator who
@@ -616,9 +765,29 @@ public class RestScheduleStore implements IRestScheduleStore {
      * {@code markCompleted}, {@code markFailed}, {@code setScheduleEnabled} and
      * {@code requeueDeadLetter}.
      * <p>
+     * {@code enabled} is carried over unconditionally, whatever the body says. It
+     * is a runtime switch owned by {@code /enable} and {@code /disable}, and both
+     * stores' {@code updateSchedule} leave it out of the write, so the stored value
+     * survives even if it changed after this read. Taking it from the body let an
+     * editor whose copy predated another operator's disable re-enable the schedule
+     * by saving — and the model defaults it to {@code true}, so omitting it did the
+     * same. Setting it here only keeps the in-memory body honest about what the row
+     * will hold; the store is what guarantees it.
+     * <p>
      * Recovering a FAILED or DEAD_LETTERED schedule is therefore deliberately NOT a
      * side effect of editing it: {@code POST /schedules/{id}/enable} and
      * {@code POST /schedules/{id}/retry} both clear the failure state explicitly.
+     * <p>
+     * Three EDITABLE fields are carried over too, but only when the body omits
+     * them: {@code metadata}, {@code tenantId} and {@code allowSelfScheduling}.
+     * {@code metadata} is what selects the fire path — dream consolidation, team
+     * cadence, RAG ingestion, HITL timeout — so a client that does not echo it (the
+     * Manager's schedule editor never did) silently turned an edited system
+     * schedule into a plain chat schedule that messaged the agent instead of
+     * crawling or consolidating. A body that names the field still sets it —
+     * {@code "metadata": null} and {@code {}} both clear it — and only absence
+     * means "keep". {@code tenantId} has no such marker: null (or absent) keeps the
+     * stored tenant, because a PUT is not how a schedule changes tenant.
      * <p>
      * {@code stored} is null only when the schedule is genuinely absent, in which
      * case there is nothing to carry over and the store's own update is about to
@@ -638,6 +807,17 @@ public class RestScheduleStore implements IRestScheduleStore {
         schedule.setFireId(stored.getFireId());
         schedule.setNextRetryAt(stored.getNextRetryAt());
         schedule.setPersistentConversationId(stored.getPersistentConversationId());
+        schedule.setEnabled(stored.isEnabled());
+
+        if (!schedule.hasMetadata()) {
+            schedule.setMetadata(stored.getMetadata());
+        }
+        if (schedule.getTenantId() == null) {
+            schedule.setTenantId(stored.getTenantId());
+        }
+        if (!schedule.hasAllowSelfScheduling()) {
+            schedule.setAllowSelfScheduling(stored.isAllowSelfScheduling());
+        }
     }
 
     /**
@@ -653,6 +833,48 @@ public class RestScheduleStore implements IRestScheduleStore {
         } catch (RuntimeException e) {
             return SCHEDULER_USER_ID;
         }
+    }
+
+    /**
+     * Update rules for schedules another resource owns, judged on the stored row.
+     * <ul>
+     * <li><b>RAG ingestion</b> — refused for everyone. The row is minted from a
+     * knowledge base's ingestion source ({@code RagSourceIngestionService}), whose
+     * {@code cron} is the source of truth, and a fire crawls, re-embeds and can
+     * tombstone that knowledge base — which the ingestion endpoints gate on EDIT of
+     * it. Once a metadata-less PUT stopped stripping the marker, an edit here let
+     * anyone with USE on some agent and VIEW on the knowledge base re-cron it to
+     * fire every minute. Change the cadence on the knowledge base instead.</li>
+     * <li><b>Team cadence</b> — requires EDIT on the group, the same gate
+     * {@code RestGroupWorkspace.addCadence} applies. There is no cadence update
+     * endpoint, so this PUT is the only way to change a cadence's cron, and it must
+     * not be open to someone who could not have created the cadence.</li>
+     * </ul>
+     *
+     * @return a response to short-circuit with, or null when the update may
+     *         proceed; a missing EDIT grant surfaces as the guard's
+     *         {@link ForbiddenException}
+     */
+    private Response guardManagedSchedule(ScheduleConfiguration stored) {
+        Map<String, Object> md = stored != null ? stored.getMetadata() : null;
+        if (RagIngestionSchedules.isIngestionSchedule(md)) {
+            LOGGER.warnf("Refused update of ingestion schedule %s — it is managed by knowledge base %s",
+                    sanitize(stored.getId()), sanitize(RagIngestionSchedules.ragConfigId(md)));
+            return Response.status(Response.Status.CONFLICT)
+                    .entity("This schedule is managed by knowledge base '" + RagIngestionSchedules.ragConfigId(md)
+                            + "'. Change the ingestion source's cron on the knowledge base instead; "
+                            + "it re-creates this schedule when saved.")
+                    .build();
+        }
+        if (TeamCadenceService.isTeamCadenceSchedule(md)) {
+            Object groupId = md.get(TeamCadenceService.METADATA_GROUP_ID_KEY);
+            if (groupId == null || groupId.toString().isBlank()) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity("This team cadence schedule names no group and cannot be updated.").build();
+            }
+            resourceAccessGuard.requireAccess(groupId.toString(), AccessLevel.EDIT, "group");
+        }
+        return null;
     }
 
     /** True if the schedule carries the HITL approval-timeout metadata marker. */
@@ -752,6 +974,211 @@ public class RestScheduleStore implements IRestScheduleStore {
                         + "unset to run as the system scheduler. Only an administrator may " + operation
                         + " a schedule that runs as another user.")
                 .build();
+    }
+
+    /**
+     * Refuses a schedule body that claims to be a team cadence it is not already.
+     * <p>
+     * Cadence schedules are minted only by {@code RestGroupWorkspace.addCadence},
+     * which checks EDIT on the group. A fire of one pulls that group's backlog into
+     * a task-force discussion run as the cadence's creator, so a forged body naming
+     * another team's group and cadence id let any editor run a group they cannot
+     * touch, at its owner's cost. A PUT to an existing cadence may echo its own
+     * markers back (a read-modify-write of the cron); {@link #guardManagedSchedule}
+     * has already required EDIT on its group.
+     *
+     * @param stored
+     *            the stored row for an update, {@code null} for a create
+     */
+    private Response rejectTeamCadenceBody(ScheduleConfiguration schedule, ScheduleConfiguration stored, String operation) {
+        Map<String, Object> body = schedule != null ? schedule.getMetadata() : null;
+        if (body == null || !body.containsKey(TeamCadenceService.METADATA_TYPE_KEY)) {
+            return null;
+        }
+        Map<String, Object> current = stored != null ? stored.getMetadata() : null;
+        if (TeamCadenceService.isTeamCadenceSchedule(current)
+                && TeamCadenceService.isTeamCadenceSchedule(body)
+                && String.valueOf(current.get(TeamCadenceService.METADATA_GROUP_ID_KEY))
+                        .equals(String.valueOf(body.get(TeamCadenceService.METADATA_GROUP_ID_KEY)))
+                && String.valueOf(current.get(TeamCadenceService.METADATA_CADENCE_ID_KEY))
+                        .equals(String.valueOf(body.get(TeamCadenceService.METADATA_CADENCE_ID_KEY)))) {
+            return null;
+        }
+        LOGGER.warnf("Refused %s of a schedule whose body declares %s — team cadence schedules are minted internally "
+                + "only", sanitize(operation), TeamCadenceService.METADATA_TYPE_KEY);
+        return Response.status(Response.Status.BAD_REQUEST)
+                .entity("Schedules marked as team cadences (metadata " + TeamCadenceService.METADATA_TYPE_KEY
+                        + ") cannot be created via this API, and a schedule cannot be turned into one. Manage cadences "
+                        + "via POST /groups/{groupId}/workspace/cadences.")
+                .build();
+    }
+
+    /**
+     * The owner scope of a non-admin listing (admins get
+     * {@link ScheduleOwnerScope#ALL}): {@link ScheduleOwnerScope#visibleTo} the
+     * caller, refined for workspaces. With them off every caller may view every
+     * group, so every team cadence is listed. With them enforced a shared schedule
+     * belongs to the team of what it drives, which a schedule query cannot judge:
+     * the caller sees the shared schedules they created, plus — when listing by an
+     * agent they may EDIT — every shared schedule of that agent. Other shared rows
+     * and other members' cadences are still reachable by id ({@link #mayRead}).
+     */
+    private ScheduleOwnerScope listingOwnerScope(String agentId) {
+        ScheduleOwnerScope scope = ScheduleOwnerScope.visibleTo(callerIdForOwnerScope());
+        if (resourceAccessGuard.seesEverything()) {
+            return scope.withTeamCadences();
+        }
+        boolean editsAgent = agentId != null && !agentId.isBlank() && resourceAccessGuard.hasAccess(agentId, AccessLevel.EDIT);
+        return editsAgent ? scope : scope.sharedOnlyIfCreatedByCaller();
+    }
+
+    /**
+     * Whether the caller may see an existing schedule: {@link #mayAccess} at
+     * {@link AccessLevel#VIEW}, and never a HITL timeout unless an admin — the
+     * listing's rule.
+     */
+    private boolean mayRead(ScheduleConfiguration schedule) {
+        if (isHitlSchedule(schedule) && !ownershipValidator.isAdmin(identity)) {
+            return false;
+        }
+        return mayAccess(schedule, AccessLevel.VIEW);
+    }
+
+    /**
+     * The schedule access rule.
+     * <ul>
+     * <li>An administrator may do everything (every caller, with authorization
+     * disabled).</li>
+     * <li>A schedule that runs as a real user belongs to that user, workspaces on
+     * or off, because it acts as them. The one exception is a team cadence: it runs
+     * as its creator but belongs to its group, so whoever holds {@code level} on
+     * the group reaches it too — VIEW to see it, EDIT to toggle or delete it.
+     * (Firing and re-pointing still go through {@link #requireOwnUserId}, because
+     * those act as the creator.)</li>
+     * <li>A shared schedule (see {@link ScheduleOwnerScope#isShared}) is open to
+     * everyone while workspaces are off. With them enforced, to its creator and to
+     * whoever holds {@code level} on the resource it drives
+     * ({@link #governingResourceId}); one created before {@code createdBy} was
+     * stamped is therefore reached through its agent.</li>
+     * </ul>
+     */
+    private boolean mayAccess(ScheduleConfiguration schedule, AccessLevel level) {
+        if (schedule == null || ownershipValidator.isAdmin(identity)) {
+            return true;
+        }
+        String owner = schedule.getUserId();
+        if (!ScheduleOwnerScope.isShared(owner)) {
+            if (ownershipValidator.isOwner(identity, owner)) {
+                return true;
+            }
+            return TeamCadenceService.isTeamCadenceSchedule(schedule.getMetadata())
+                    && resourceAccessGuard.hasAccess(governingResourceId(schedule), level);
+        }
+        if (resourceAccessGuard.seesEverything()) {
+            return true;
+        }
+        String createdBy = schedule.getCreatedBy();
+        if (!ScheduleOwnerScope.isShared(createdBy) && ownershipValidator.isOwner(identity, createdBy)) {
+            return true;
+        }
+        return resourceAccessGuard.hasAccess(governingResourceId(schedule), level);
+    }
+
+    /**
+     * The resource whose access governs a schedule beyond its owner: the knowledge
+     * base of an ingestion schedule, the group of a team cadence, otherwise the
+     * agent.
+     */
+    private static String governingResourceId(ScheduleConfiguration schedule) {
+        Map<String, Object> metadata = schedule.getMetadata();
+        if (RagIngestionSchedules.isIngestionSchedule(metadata)) {
+            return RagIngestionSchedules.ragConfigId(metadata);
+        }
+        if (TeamCadenceService.isTeamCadenceSchedule(metadata)) {
+            Object groupId = metadata.get(TeamCadenceService.METADATA_GROUP_ID_KEY);
+            return groupId != null ? groupId.toString() : null;
+        }
+        return schedule.getAgentId();
+    }
+
+    /**
+     * {@link #mayRead} for a schedule addressed by id; a missing or unreadable
+     * schedule is not visible to a non-admin.
+     */
+    private boolean mayReadById(String scheduleId) {
+        if (scheduleId == null) {
+            return false;
+        }
+        try {
+            return mayRead(scheduleStore.readSchedule(scheduleId));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * A 403 when {@link #mayAccess} at EDIT refuses the stored schedule, else
+     * {@code null}. A schedule that runs as another user is refused with
+     * {@link #requireOwnUserId}'s answer.
+     */
+    private Response requireMayManage(ScheduleConfiguration stored, String operation) {
+        if (mayAccess(stored, AccessLevel.EDIT)) {
+            return null;
+        }
+        Response ownerGuard = requireOwnUserId(stored.getUserId(), operation);
+        if (ownerGuard != null) {
+            return ownerGuard;
+        }
+        LOGGER.warnf("Refused %s of schedule %s: the caller neither created it nor may edit what it drives",
+                sanitize(operation), sanitize(stored.getId()));
+        return Response.status(Response.Status.FORBIDDEN)
+                .entity("You may not " + operation + " this schedule: it belongs to a resource you may not edit.")
+                .build();
+    }
+
+    /**
+     * The single identity form {@link OwnershipValidator#isOwner} compares a
+     * schedule owner against, for a non-admin listing's {@link ScheduleOwnerScope}:
+     * the principal name, or {@code null} for an anonymous or nameless caller (who
+     * owns nothing, so only shared schedules are listed). Only meaningful with
+     * authorization enabled, where isOwner is not short-circuited.
+     */
+    private String callerIdForOwnerScope() {
+        if (identity == null || identity.isAnonymous()) {
+            return null;
+        }
+        return OwnershipValidator.principalName(identity);
+    }
+
+    /**
+     * Combined HITL + ownership guard for a state-changing operation on an existing
+     * schedule, reading the stored row once. Returns a short-circuit
+     * {@link Response} when the operation is blocked (HITL-admin-only, or a
+     * non-owner), or {@code null} when it may proceed — including when the schedule
+     * is genuinely absent, so the downstream operation surfaces its own
+     * 404/idempotent result. Fails CLOSED on a store read error, exactly as
+     * {@link #requireAdminForHitl(String, String)} does.
+     */
+    private Response requireMutableSchedule(String scheduleId, String operation) {
+        ScheduleConfiguration stored;
+        try {
+            stored = scheduleStore.readSchedule(scheduleId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null; // absent — let the downstream operation decide
+        } catch (Exception e) {
+            LOGGER.error("Failed to read schedule " + sanitize(scheduleId) + " while authorizing " + sanitize(operation), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity("Unable to verify schedule authorization; refusing to " + operation + " schedule.")
+                    .build();
+        }
+        if (stored == null) {
+            return null; // absent — let the downstream operation surface its own 404/no-op
+        }
+        Response hitlGuard = requireAdminForHitl(stored, operation);
+        if (hitlGuard != null) {
+            return hitlGuard;
+        }
+        return requireMayManage(stored, operation);
     }
 
     /**
@@ -990,6 +1417,19 @@ public class RestScheduleStore implements IRestScheduleStore {
             }
         }
 
+        boolean dreamSchedule = DreamService.isDreamSchedule(schedule.getMetadata());
+        if (dreamSchedule) {
+            // A Dream cycle consolidates ONE user's memories. Without a real userId it
+            // falls back to the scheduler placeholder, which DreamService refuses —
+            // so the schedule was accepted here and failed on every fire until it
+            // dead-lettered. Say so when it is created instead.
+            String userId = schedule.getUserId();
+            if (userId == null || userId.isBlank() || SCHEDULER_USER_ID.equals(userId)) {
+                throw new IllegalArgumentException("A dream consolidation schedule (metadata dreamType=" + DreamService.METADATA_TYPE_CONSOLIDATION
+                        + ") needs userId: the user whose memories it consolidates.");
+            }
+        }
+
         // Infer trigger type: if heartbeatIntervalSeconds is set, treat as HEARTBEAT
         // regardless of the default value in ScheduleConfiguration
         TriggerType type = schedule.getTriggerType();
@@ -1009,8 +1449,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             }
             // Message is optional for heartbeats (will default to "heartbeat")
         } else {
-            // CRON type: validate message required
-            if (schedule.getMessage() == null || schedule.getMessage().isBlank()) {
+            // CRON type: validate message required — except for a Dream consolidation
+            // schedule, which never sends one: it dispatches to DreamService, not to a
+            // conversation. The documented Dream schedule has no message and was
+            // rejected here.
+            if (!dreamSchedule && (schedule.getMessage() == null || schedule.getMessage().isBlank())) {
                 throw new IllegalArgumentException("message is required for CRON triggers");
             }
 

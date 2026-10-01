@@ -319,6 +319,75 @@ public class GroupConversation {
     public void setAnonymousSummaryUpToIndex(int anonymousSummaryUpToIndex) {
         this.anonymousSummaryUpToIndex = anonymousSummaryUpToIndex;
     }
+
+    /**
+     * agentId &rarr; that member's current one-line stance, for the overview
+     * dashboard's "who thinks what" band. Recomputed at phase boundaries by
+     * {@code StanceSummaryEngine}.
+     * <p>
+     * Derived state, not source of truth: every stance is reproducible from the
+     * transcript, nothing in the discussion reads it back, and a resume that found
+     * it empty would simply refill it at the next boundary. That is why its arrival
+     * does <b>not</b> bump {@link #CURRENT_SCHEMA_VERSION} — the bump rule at the
+     * top of this class is scoped to fields "resume-time logic depends on", and a
+     * display projection is the case that rule excludes. An older pod re-saving one
+     * of these documents drops the stances and loses nothing but a cache.
+     */
+    private Map<String, MemberStance> memberStances = new ConcurrentHashMap<>();
+
+    /**
+     * Read-only view, mirroring {@link #getMemberDisplayNames()} — write through
+     * {@link #putMemberStance}.
+     * <p>
+     * A live unmodifiable <em>view</em> rather than a copy: the backing map is
+     * concurrent, so iterating the view is safe, and a snapshot would let a caller
+     * that held it read stale stances without any hint that it had.
+     */
+    public Map<String, MemberStance> getMemberStances() {
+        return Collections.unmodifiableMap(memberStances);
+    }
+
+    public void setMemberStances(Map<String, MemberStance> memberStances) {
+        this.memberStances = memberStances == null ? new ConcurrentHashMap<>() : new ConcurrentHashMap<>(memberStances);
+    }
+
+    /**
+     * Records one member's stance. The single write path, because
+     * {@link #getMemberStances()} returns an unmodifiable view.
+     */
+    public void putMemberStance(String agentId, MemberStance stance) {
+        if (agentId == null || stance == null) {
+            return;
+        }
+        this.memberStances.put(agentId, stance);
+    }
+
+    /**
+     * One member's current position in one line.
+     *
+     * @param text
+     *            the stance, already trimmed to the configured maximum length
+     * @param coveredContributions
+     *            how many of THIS member's own stance-bearing entries the stance
+     *            reflects. A boundary skips a member whose stored stance already
+     *            covers all of them, which is the difference between one summarizer
+     *            call per member per discussion and one per member per phase.
+     *            <p>
+     *            Deliberately not the transcript length: keyed to that, any member
+     *            speaking invalidated every member's stance, so a six-member
+     *            discussion paid for six calls at every boundary and "a member who
+     *            stayed silent costs nothing" was never true
+     * @param llmGenerated
+     *            {@code true} when a configured summarizer wrote it, {@code false}
+     *            when it is lead-sentence extraction. Surfaced to the UI because an
+     *            extracted line is the member's own words and a generated one is a
+     *            paraphrase — presenting a paraphrase as a quote would be a
+     *            misattribution
+     * @param updated
+     *            when it was computed
+     */
+    public record MemberStance(String text, int coveredContributions, boolean llmGenerated, Instant updated) {
+    }
     private SharedTaskList taskList;
     /** Agents dynamically added during the discussion (recruited or created). */
     private List<AgentGroupConfiguration.GroupMember> dynamicMembers = new CopyOnWriteArrayList<>();
@@ -784,6 +853,15 @@ public class GroupConversation {
         private List<Concession> concessions = new CopyOnWriteArrayList<>();
 
         /**
+         * Concessions parsed after the ledger reached its cap
+         * ({@code negotiationConfig.maxLedgerConcessions}) and therefore not recorded.
+         * Counted so the outcome can say the ledger is incomplete rather than present a
+         * truncated one as the whole record. Additive: a document stored without it
+         * reads as 0.
+         */
+        private int droppedConcessions;
+
+        /**
          * Read-only view — all mutation goes through {@link #addProposal},
          * {@link #replaceProposal} and {@link #addConcession}, so the table cannot be
          * edited behind the state's back.
@@ -819,6 +897,21 @@ public class GroupConversation {
 
         public void addConcession(Concession concession) {
             concessions.add(concession);
+        }
+
+        public int getDroppedConcessions() {
+            return droppedConcessions;
+        }
+
+        public void setDroppedConcessions(int droppedConcessions) {
+            this.droppedConcessions = Math.max(0, droppedConcessions);
+        }
+
+        /** Records {@code count} concessions the full ledger could not take. */
+        public void recordDroppedConcessions(int count) {
+            if (count > 0) {
+                droppedConcessions += count;
+            }
         }
     }
 
@@ -940,6 +1033,20 @@ public class GroupConversation {
 
     public enum GroupConversationState {
         CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
+        /**
+         * A human rejected the discussion's recommendation at a HITL gate.
+         * <p>
+         * Deliberately NOT {@link #FAILED}. A rejection is a recorded human decision
+         * and the product's whole selling point; rendering it as "Failed" told the
+         * operator the system had broken when in fact it had done exactly what it was
+         * asked. Terminal, closeable, and treated as FAILED is everywhere that asks
+         * "may this still run?" — the difference is what it MEANS, not what it permits.
+         * <p>
+         * Documents written before this state existed carry {@link #FAILED} for a
+         * rejection and are left alone: nothing in them distinguishes the two, so a
+         * migration could only guess.
+         */
+        REJECTED,
         /** Discussion was cancelled before completion — HITL foundation (Phase 9b). */
         CANCELLED,
         /** Paused for human approval — HITL foundation (Phase 9b). */
@@ -1330,9 +1437,9 @@ public class GroupConversation {
         }
         return switch (state) {
             case COMPLETED -> List.of("followup", "continue", "close");
-            // FAILED and CANCELLED are terminal but closeable — close ends member
-            // conversations and reclaims ephemeral agents.
-            case FAILED, CANCELLED -> List.of("close");
+            // FAILED, REJECTED and CANCELLED are terminal but closeable — close ends
+            // member conversations and reclaims ephemeral agents.
+            case FAILED, REJECTED, CANCELLED -> List.of("close");
             // I6: the one state a human member acts on — the UI switches to an
             // input prompt instead of approve/reject buttons.
             case AWAITING_HUMAN_INPUT -> List.of("submitHumanInput");

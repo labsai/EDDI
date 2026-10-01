@@ -1,3 +1,5 @@
+import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
+import { isForbidden } from "@/lib/access";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -15,6 +17,8 @@ import {
   X,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -27,6 +31,7 @@ import {
 
 import { parseResourceUri } from "@/lib/api/agents";
 import type { WorkflowExtension } from "@/lib/api/workflows";
+import { addWorkflowStep } from "@/lib/workflow-steps";
 import {
   PipelineBuilder,
   type PipelineItem,
@@ -39,6 +44,7 @@ import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { getAgent, updateAgent } from "@/lib/api/agents";
+import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
 import {
   ParserEditor,
 } from "@/components/editors/parser-editor";
@@ -63,6 +69,9 @@ export function WorkflowDetailPage() {
     agentVer ? parseInt(agentVer, 10) : undefined
   );
   const [showAddDialog, setShowAddDialog] = useState(false);
+  // Save & Test writes a new agent version: breaking unless the user ticks
+  // this. Reset after each such save — every save is its own decision.
+  const [agentCompatible, setAgentCompatible] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [localExtensions, setLocalExtensions] = useState<
     WorkflowExtension[] | null
@@ -77,6 +86,11 @@ export function WorkflowDetailPage() {
   const [parserEditData, setParserEditData] = useState<ParserData | null>(null);
 
   const { data: versionDescriptors } = useWorkflowVersions(id!);
+  // Deleting a workflow needs OWN; an EDIT grantee may still change it.
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
 
   // Version picker data
   const versions = useMemo(() => {
@@ -96,6 +110,7 @@ export function WorkflowDetailPage() {
     data: workflow,
     isLoading,
     isError,
+    error: workflowError,
     refetch,
   } = useWorkflow(id!, resolvedVersion);
   const updateMutation = useUpdateWorkflow();
@@ -139,6 +154,15 @@ export function WorkflowDetailPage() {
     setLocalExtensions(null);
   }, [workflow?.workflowSteps]);
 
+  // The page stays mounted when only the query string changes, so the agent
+  // context can switch underneath it. A compatibility tick is about ONE agent's
+  // next version and must not carry over to another agent's; the version the
+  // next Save & Test replaces comes from the new context too.
+  useEffect(() => {
+    setAgentCompatible(false);
+    setCurrentAgentVer(agentVer ? parseInt(agentVer, 10) : undefined);
+  }, [agentId, agentVer]);
+
   // Clear save message after 3s
   useEffect(() => {
     if (saveMessage) {
@@ -179,7 +203,7 @@ export function WorkflowDetailPage() {
             ? ({ ...defaultParser!.config } as Record<string, unknown>)
             : {},
       };
-      setLocalExtensions([...currentExtensions, newExt]);
+      setLocalExtensions(addWorkflowStep(currentExtensions, newExt));
       setShowAddDialog(false);
     },
     [currentExtensions]
@@ -255,7 +279,10 @@ export function WorkflowDetailPage() {
             u === oldWfUri ? newWfUri : u
           ),
         };
-        const agentResult = await updateAgent(agentId, currentAgentVer, updatedAgent);
+        const agentResult = agentCompatible
+          ? await updateAgent(agentId, currentAgentVer, updatedAgent, { compatible: true })
+          : await updateAgent(agentId, currentAgentVer, updatedAgent);
+        setAgentCompatible(false);
         const agentUrl = new URL(agentResult.location, "http://dummy");
         const newAgentVersion = parseInt(agentUrl.searchParams.get("version") ?? "1", 10);
         setCurrentAgentVer(newAgentVersion);
@@ -263,7 +290,7 @@ export function WorkflowDetailPage() {
         return { newAgentVersion };
       },
     });
-  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, currentAgentVer, saveAndDeploy]);
+  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, currentAgentVer, agentCompatible, saveAndDeploy]);
 
   const handleDiscard = useCallback(() => {
     setLocalExtensions(null);
@@ -329,6 +356,15 @@ export function WorkflowDetailPage() {
     return (
       <div className="flex items-center justify-center py-20" data-testid="workflow-loading">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (isForbidden(workflowError)) {
+    return (
+      <div className="space-y-4">
+        <BackLink />
+        <RequestAccessPanel resourceId={id!} />
       </div>
     );
   }
@@ -458,16 +494,29 @@ export function WorkflowDetailPage() {
             </button>
           )}
 
-          {/* Delete */}
-          <button
-            onClick={() => setShowDeleteDialog(true)}
-            className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-            data-testid="delete-wf-btn"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {/* Delete — OWN only, as on the workflows list */}
+          {access.canOwn && (
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
+              data-testid="delete-wf-btn"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Save & Test also writes a new version of the agent */}
+      {agentId && agentVer && (
+        <CompatibleVersionCheckbox
+          checked={agentCompatible}
+          onChange={setAgentCompatible}
+          disabled={updateMutation.isPending || isSaveAndDeploying}
+          className="max-w-2xl"
+          data-testid="save-test-compatible-checkbox"
+        />
+      )}
 
       {/* Pipeline section */}
       <section className="rounded-xl border bg-card shadow-sm">

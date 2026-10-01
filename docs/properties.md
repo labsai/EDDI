@@ -40,7 +40,7 @@ Properties support four scopes that control their lifetime:
 | `step` | Current conversation turn only | Not persisted | Temporary data needed only for this response |
 | `conversation` | Entire conversation session | Persisted in conversation memory | User preferences within a session, extracted entities |
 | `longTerm` | Across conversations | Persisted in user property store | User profile data, preferences that should survive between sessions |
-| `secret` | Current conversation session (the property holds a `${vault:...}` reference) | Plaintext encrypted into SecretsVault under `<agentId>.<propertyName>`; the property itself is conversation-scoped and is not reloaded in a new conversation | API keys, tokens, sensitive credentials |
+| `secret` | Current conversation session (the property holds a `${vault:...}` reference) | Plaintext encrypted into SecretsVault, one slot per write (`<agentId>.u<userHash>.<nonce>.<propertyName>`); the property itself is conversation-scoped and is not reloaded in a new conversation | API keys, tokens, sensitive credentials |
 
 ### Choosing the Right Scope
 
@@ -71,6 +71,8 @@ Properties also have a **visibility** dimension that controls which agents can s
 | `global` | All agents for this user | Cross-agent user preferences (e.g., language, timezone) |
 
 Visibility is orthogonal to scope — a property can be `longTerm` + `self` (persists across sessions, visible only to the owning agent) or `longTerm` + `global` (persists and visible to all agents).
+
+A property without `visibility` gets the agent's `userMemoryConfig.defaultVisibility` (`self` when the block is declared, `global` when there is none) — with or without `enableMemoryTools`. A `group` property carries the conversation's group id (from the `groupId` context a group conversation injects); in a conversation that belongs to no group it is stored as `self`, since a group entry without a group id could never be read.
 
 ---
 
@@ -151,7 +153,7 @@ See [Persistent User Memory](user-memory.md) for full details on the LLM memory 
 
 Properties are available in **all** templates via the `properties` namespace.
 
-> ⚠️ **`properties` exposes raw values, not `Property` objects.** `MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context, and `toMap()` returns the unwrapped Java value that was stored (`String`, `Integer`, `Float`, `Boolean`, `List`, `Map`) — the `Property` wrapper never reaches the template. Use `{properties.key}` directly. A `.valueString` / `.valueInt` / … suffix resolves against the raw value (a `String` has no `valueString` property) and fails at render time. The `valueString`, `valueInt`, … names are **write-side** field names of the JSON property-setter config only. AGENTS.md §5.1 is the authoritative reference for the template data model.
+> ⚠️ **`properties` exposes raw values, not `Property` objects.** `MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context, and `toMap()` returns the unwrapped Java value that was stored (`String`, `Integer`, `Float`, `Boolean`, `List`, `Map`) — the `Property` wrapper never reaches the template. Use `{properties.key}` directly. A `.valueString` / `.valueInt` / … suffix resolves against the raw value (a `String` has no `valueString` property) and fails at render time. The `valueString`, `valueInt`, … names are **write-side** field names of the JSON property-setter config only. [Agent Config Authoring](agent-config-authoring.md#template-syntax) is the authoritative reference for the template data model.
 
 ### In Output Templates
 
@@ -240,14 +242,18 @@ Conversation.postConversationLifecycleTasks()
 
 ## Secret Properties
 
-Properties with `scope=secret` are automatically handled by the SecretsVault:
+Properties with `scope=secret` are automatically handled by the SecretsVault — in a property setter and in the `preRequest` / `postResponse` property instructions of httpcalls, MCP calls and LLM tasks alike:
 
-1. The moment the property instruction runs, `PropertySetterTask` stores the plaintext in SecretsVault under `<agentId>.<name>`
-2. The raw input is scrubbed from the conversation step
-3. The property value becomes a `${vault:<agentId>.<name>}` reference with `conversation` scope
+1. The moment the property instruction runs, the plaintext is stored in SecretsVault in a slot of its own, `<agentId>.u<userHash>.<nonce>.<name>` — **one slot per write**, so two users or conversations of the same agent never share, or overwrite, each other's secret (see [Secrets Vault](secrets-vault.md#where-vault-references-work))
+2. Every copy of the plaintext is scrubbed from the conversation step (the raw input, a saved API response it was read from)
+3. The property value becomes a `${vault:<agentId>.u<userHash>.<nonce>.<name>}` reference with `conversation` scope
 4. Downstream consumers (`ChatModelRegistry`, `ApiCallExecutor`, `SecretResolver`) resolve the reference at point-of-use
 
-If the vault is unavailable or disabled, the turn fails closed with a `LifecycleException` rather than persisting the plaintext — set `EDDI_VAULT_MASTER_KEY`.
+Only a string can be vaulted. `valueObject`, `valueList`, `valueInt`, `valueFloat` and `valueBoolean` are rejected under `scope: secret` when the configuration is saved, and so is a literal name containing `/`, `{`, `}` or `$`. A value that only turns out not to be a string at run time — a `fromObjectPath` that yields an object or a number, a `convertToObject: true` value that parses as JSON — fails the turn, in the property setter and in the httpcall, MCP and LLM instructions alike. None of them is ever stored in plaintext.
+
+If the vault is unavailable or disabled, the turn fails closed with a `LifecycleException` rather than persisting the plaintext — set `EDDI_VAULT_MASTER_KEY`. **The vault is disabled on a default install**, so there every `scope: secret` instruction fails its turn with an error naming `EDDI_VAULT_MASTER_KEY` — including a post-response instruction of an httpcall, which used to store the value in plaintext.
+
+The slots are deleted when their conversation is permanently deleted and on GDPR erasure — see [Secrets Vault](secrets-vault.md) for the details.
 
 ```json
 {
@@ -284,6 +290,8 @@ Instead of storing entire API responses, extract only what you need:
   "scope": "conversation"
 }
 ```
+
+A value read through `fromObjectPath` is stored **exactly as found** — it is data, not a template, so braces in a user's message or an API response are kept literally and never evaluated. Only `valueString` (and the property `name`) are rendered as templates; to combine a navigated value with text, reference it from a `valueString`, e.g. `"valueString": "Temperature: {memory.current.httpCalls.weatherApi.current.temperature}"`.
 
 ### 3. Use Visibility for Multi-Agent Scenarios
 

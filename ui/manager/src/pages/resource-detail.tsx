@@ -1,20 +1,16 @@
+import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
+import { isForbidden } from "@/lib/access";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
+import { accessForDetail } from "@/lib/access";
+import { useSpaces } from "@/hooks/use-spaces";
 import {
-  FileCode,
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  Brain,
-  Settings,
-  Plug,
   Trash2,
   Copy,
-  Puzzle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,43 +26,46 @@ import {
   useCascadeSave,
 } from "@/hooks/use-resources";
 import { useNavigate } from "react-router-dom";
-import type { LucideIcon } from "lucide-react";
+import { getResourceTypeIcon } from "@/lib/resource-type-icons";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
+import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
+import { useAgent } from "@/hooks/use-agents";
 import {
   findResourceUsage,
   type ResourceUsage,
 } from "@/lib/api/resource-usage";
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import type { CascadeContext } from "@/lib/api/cascade-save";
-import { cascadeVersionUpdate } from "@/lib/api/cascade-save";
+import {
+  CascadeReferenceError,
+  cascadePartialResult,
+  cascadeVersionUpdate,
+  nextCascadeContext,
+} from "@/lib/api/cascade-save";
+import { describeSaveError } from "@/lib/save-error";
 import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
+import { deployAgent } from "@/lib/api/agents";
 
-const ICON_MAP: Record<string, LucideIcon> = {
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  BookOpenCheck: BookOpen, // reuse BookOpen for Knowledge Bases
-  Brain,
-  Settings,
-  Plug,
-  Puzzle,
-};
-
+/**
+ * One id for the "saved — not yet live" toast, so only the most recent save's
+ * Deploy action is ever on screen. See where it is used for why that matters.
+ */
+const SAVE_NOT_LIVE_TOAST_ID = "resource-save-not-live";
 
 export function ResourceDetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
   const [searchParams] = useSearchParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const rt = getResourceType(type ?? "");
-  const Icon = ICON_MAP[rt?.icon ?? ""] ?? FileCode;
+  const Icon = getResourceTypeIcon(rt?.slug);
   const typeName = rt ? t(`${rt.labelKey}.name`) : type ?? "";
 
   // Cascade context from URL search params (set when navigating from agent/workflow)
@@ -89,10 +88,23 @@ export function ResourceDetailPage() {
 
   const [cascadeContext, setCascadeContext] = useState<CascadeContext | undefined>(initialCascade);
 
-  // Sync when URL params change (user navigates to a different resource)
+  // Sync when URL params change (user navigates to a different resource).
+  // The compatibility tick (below) belongs to the cascade it was given for.
   useEffect(() => {
     setCascadeContext(initialCascade);
+    setCascadeCompatible(false);
   }, [initialCascade]);
+
+  /*
+   * Whether the agent version a cascade save writes is compatible with the one
+   * it replaces. Unticked by default, and reset after every save that wrote an
+   * agent version: each save is its own decision, and a stale tick would let
+   * running conversations follow a change nobody judged.
+   */
+  const [cascadeCompatible, setCascadeCompatible] = useState(false);
+  // The agent version the next cascade replaces — only for its generation,
+  // which decides whether the checkbox has to warn about a legacy version.
+  const { data: cascadeAgent } = useAgent(cascadeContext?.agentId ?? "", cascadeContext?.agentVersion);
 
   // Version state — default to latest version once descriptors are loaded
   const [currentVersion, setCurrentVersion] = useState<number | undefined>(undefined);
@@ -109,6 +121,11 @@ export function ResourceDetailPage() {
     isLoading: isVersionsLoading,
     isError: isVersionsError,
   } = useResourceVersions(type ?? "", id ?? "");
+  // Deleting a resource needs OWN; an EDIT grantee may still change it.
+  // Only consulted when no descriptor for this id came back — see accessForDetail.
+  // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
 
   // Resolve latest version from descriptors
   useEffect(() => {
@@ -128,7 +145,7 @@ export function ResourceDetailPage() {
   }, [currentVersion, versionDescriptors]);
 
   // Data hooks
-  const { data, isLoading, isError, refetch } = useResource(
+  const { data, isLoading, isError, error: resourceError, refetch } = useResource(
     type ?? "",
     id ?? "",
     currentVersion ?? 0
@@ -169,6 +186,23 @@ export function ResourceDetailPage() {
       })
     : [{ version: currentVersion ?? 1 }];
 
+  /**
+   * After a cascade that failed partway, move this page onto the versions that
+   * now exist. The resource (and perhaps the workflow) already carries a new
+   * version, so a retry that still addressed the old one 409'd on every attempt
+   * until a reload — which discarded the edit being saved.
+   */
+  const adoptPartialCascade = useCallback((err: unknown) => {
+    const partial = cascadePartialResult(err);
+    if (!partial) return;
+    if (partial.newResourceVersion !== undefined) {
+      setCurrentVersion(partial.newResourceVersion);
+    }
+    if (partial.retryContext) {
+      setCascadeContext(partial.retryContext);
+    }
+  }, []);
+
   // All hooks are above — safe to do early returns below
 
   const handleSave = useCallback(
@@ -186,20 +220,75 @@ export function ResourceDetailPage() {
               version: currentVersion,
               body: parsed,
               context: cascadeContext,
+              compatible: cascadeCompatible,
             },
             {
               onSuccess: (result) => {
-                toast.success(t("editor.saved"));
+                const newAgentVersion = result.newAgentVersion;
+                setCascadeCompatible(false);
+                /*
+                 * "Saved successfully" on its own is misleading here. This path
+                 * cascades resource -> workflow -> agent and stops: the running
+                 * agent keeps serving the version it was deployed with. Measured
+                 * on an eligibility gate with the ceiling lowered from 150,000 to
+                 * 50,000 and a case of 85,000 -- after a plain Save the gate still
+                 * passed, while the resource/workflow/agent versions had advanced
+                 * to v4/v5 with the deployment stuck at v3. Someone who reads
+                 * "Saved successfully" at face value has a config that is saved
+                 * and not live.
+                 *
+                 * The toast says so, and offers the one action that closes the
+                 * gap, so the fix costs a click rather than a support question.
+                 *
+                 * The action is offered ONLY when the cascade actually produced a
+                 * new agent version. Falling back to the version the URL carried
+                 * would deploy a revision that does not contain this edit, while
+                 * the toast beside it promises the change will take effect -- a
+                 * worse failure than the silence this replaced, because it looks
+                 * like it worked.
+                 */
+                toast.success(t("editor.savedNotLive", "Saved — not yet live"), {
+                  /*
+                   * A STABLE id, so a second save replaces the first toast rather
+                   * than stacking beside it. Each toast's action closes over the
+                   * agent version its own save produced, so two live toasts meant
+                   * clicking the older one deployed the older configuration --
+                   * overwriting the newer one in production, from a control that
+                   * looked like it was about the save just made.
+                   */
+                  id: SAVE_NOT_LIVE_TOAST_ID,
+                  description: t(
+                    "editor.savedNotLiveDescription",
+                    "The running agent still serves the deployed version. Deploy to make this change take effect.",
+                  ),
+                  action: newAgentVersion
+                    ? {
+                        label: t("editor.deployNow", "Deploy"),
+                        onClick: () => {
+                          deployAgent("production", cascadeContext.agentId, newAgentVersion)
+                            .then(() => {
+                              // Same caches the Save & Deploy flow refreshes: the
+                              // agent list and the chat's deployed-agent picker
+                              // both render a deployment state that has just
+                              // changed underneath them.
+                              queryClient.invalidateQueries({ queryKey: ["agents"] });
+                              queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+                              toast.success(t("editor.deployStarted", "Deployment started"));
+                            })
+                            .catch((err) => toast.error(getErrorMessage(err)));
+                        },
+                      }
+                    : undefined,
+                });
                 setSaveSuccess(true);
                 setCurrentVersion(result.newResourceVersion);
                 // Update cascade context so next save uses new versions
-                setCascadeContext({
-                  ...cascadeContext,
-                  workflowVersion: result.newWorkflowVersion ?? cascadeContext.workflowVersion,
-                  agentVersion: result.newAgentVersion ?? cascadeContext.agentVersion,
-                });
+                setCascadeContext(nextCascadeContext(cascadeContext, result));
               },
-              onError: (err) => toast.error(getErrorMessage(err)),
+              onError: (err) => {
+                adoptPartialCascade(err);
+                toast.error(describeSaveError(err, t));
+              },
             }
           );
         } else {
@@ -243,7 +332,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, rt, t]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, queryClient, adoptPartialCascade]
   );
 
   const handleSaveAndDeploy = useCallback(
@@ -254,19 +343,24 @@ export function ResourceDetailPage() {
         await saveAndDeploy({
           agentId: agentCtx.agentId,
           save: async () => {
-            const result = await cascadeSave.mutateAsync({
-              id: id ?? "",
-              version: currentVersion,
-              body: parsed,
-              context: cascadeContext,
-            });
+            let result;
+            try {
+              result = await cascadeSave.mutateAsync({
+                id: id ?? "",
+                version: currentVersion,
+                body: parsed,
+                context: cascadeContext,
+                compatible: cascadeCompatible,
+              });
+            } catch (err) {
+              adoptPartialCascade(err);
+              // Save & Deploy shows the error's message as it stands.
+              throw err instanceof CascadeReferenceError ? new Error(describeSaveError(err, t)) : err;
+            }
             setCurrentVersion(result.newResourceVersion);
+            setCascadeCompatible(false);
             // Update cascade context so next Save & Test uses correct versions
-            setCascadeContext(prev => prev ? {
-              ...prev,
-              workflowVersion: result.newWorkflowVersion ?? prev.workflowVersion,
-              agentVersion: result.newAgentVersion ?? prev.agentVersion,
-            } : prev);
+            setCascadeContext(prev => prev ? nextCascadeContext(prev, result) : prev);
             return { newAgentVersion: result.newAgentVersion ?? agentCtx.agentVer };
           },
         });
@@ -274,11 +368,11 @@ export function ResourceDetailPage() {
         // Error handled inside saveAndDeploy
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, agentCtx, saveAndDeploy]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, agentCtx, saveAndDeploy, adoptPartialCascade, t]
   );
 
   const handleCascadeConfirm = useCallback(
-    async (selected: ResourceUsage[]) => {
+    async (selected: ResourceUsage[], { compatible }: { compatible: boolean }) => {
       if (newResourceVersion === null || previousResourceVersion === null || !rt) return;
       setIsCascading(true);
 
@@ -307,7 +401,18 @@ export function ResourceDetailPage() {
                 workflowVersion,
                 agentId: usage.agentId,
                 agentVersion,
+                /*
+                 * A workflow shared by two agents has moved on after the first
+                 * one's cascade, but the second agent still references the
+                 * version the usage scan found. Say so — the cascade checks the
+                 * agent's reference before it writes, and an agent pointing at
+                 * a version other than the one it expects is refused.
+                 */
+                ...(workflowVersion !== usage.workflowVersion
+                  ? { agentWorkflowVersion: usage.workflowVersion }
+                  : {}),
               },
+              { compatible },
             );
 
             if (result.newWorkflowVersion) {
@@ -316,8 +421,15 @@ export function ResourceDetailPage() {
             if (result.newAgentVersion) {
               updatedAgentVersions.set(usage.agentId, result.newAgentVersion);
             }
-          } catch {
+          } catch (err) {
             failCount++;
+            // The workflow may already carry the new reference even though the
+            // agent hop failed; a later usage of the same workflow must build on
+            // that version, not 409 on the one it replaced.
+            const partial = cascadePartialResult(err);
+            if (partial?.newWorkflowVersion !== undefined) {
+              updatedWorkflowVersions.set(usage.workflowId, partial.newWorkflowVersion);
+            }
           }
         }
       } finally {
@@ -447,6 +559,15 @@ export function ResourceDetailPage() {
               )}
             </p>
           )}
+          {cascadeContext && (
+            <CompatibleVersionCheckbox
+              checked={cascadeCompatible}
+              onChange={setCascadeCompatible}
+              disabled={cascadeSave.isPending || isSaveAndDeploying}
+              previousGeneration={cascadeAgent ? (cascadeAgent.compatibilityGeneration ?? null) : undefined}
+              className="mt-2 max-w-xl"
+            />
+          )}
         </div>
         <div className="flex gap-2">
           <Button
@@ -457,14 +578,17 @@ export function ResourceDetailPage() {
             <Copy className="h-4 w-4" />
             {t("common.duplicate")}
           </Button>
-          <Button
-            variant="destructive"
-            onClick={() => setShowDeleteDialog(true)}
-            disabled={deleteMutation.isPending}
-          >
-            <Trash2 className="h-4 w-4" />
-            {t("common.delete")}
-          </Button>
+          {access.canOwn && (
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteDialog(true)}
+              disabled={deleteMutation.isPending}
+              data-testid="delete-resource-btn"
+            >
+              <Trash2 className="h-4 w-4" />
+              {t("common.delete")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -479,7 +603,11 @@ export function ResourceDetailPage() {
         </div>
       )}
 
-      {(isError || isVersionsError) && !isLoading && !isVersionsLoading && (
+      {isForbidden(resourceError) && !isLoading && (
+        <RequestAccessPanel resourceId={id!} />
+      )}
+
+      {(isError || isVersionsError) && !isForbidden(resourceError) && !isLoading && !isVersionsLoading && (
         <ErrorState
           message={t("common.error")}
           onRetry={() => refetch()}

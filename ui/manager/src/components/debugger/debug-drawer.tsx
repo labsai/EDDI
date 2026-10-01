@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebugStore, type DebugTab } from "@/hooks/use-debug-events";
 import { PipelineTrace } from "./pipeline-trace";
@@ -8,13 +8,13 @@ import { LiveLogViewer } from "./live-log-viewer";
 import { PromptViewer } from "./prompt-viewer";
 import { cn } from "@/lib/utils";
 import {
-  GitBranch,
   Coins,
   Database,
   ScrollText,
   MessageSquareCode,
   ChevronUp,
   ChevronDown,
+  Workflow,
 } from "lucide-react";
 
 // ==================== Tab Configuration ====================
@@ -27,7 +27,7 @@ interface TabConfig {
 }
 
 const TABS: TabConfig[] = [
-  { id: "pipeline", labelKey: "debugDrawer.tabPipeline", fallback: "Pipeline", icon: <GitBranch className="h-3.5 w-3.5" /> },
+  { id: "pipeline", labelKey: "debugDrawer.tabPipeline", fallback: "Pipeline", icon: <Workflow className="h-3.5 w-3.5" /> },
   { id: "costs", labelKey: "debugDrawer.tabCosts", fallback: "Costs", icon: <Coins className="h-3.5 w-3.5" /> },
   { id: "memory", labelKey: "debugDrawer.tabMemory", fallback: "Memory", icon: <Database className="h-3.5 w-3.5" /> },
   { id: "logs", labelKey: "debugDrawer.tabLogs", fallback: "Logs", icon: <ScrollText className="h-3.5 w-3.5" /> },
@@ -41,18 +41,29 @@ interface DebugDrawerProps {
   agentId: string | null;
 }
 
+/**
+ * Bottom drawer with the conversation debugger's tabs for the current chat.
+ * Open state and active tab come from the debug store.
+ */
 export function DebugDrawer({ conversationId, agentId }: DebugDrawerProps) {
   const { t } = useTranslation();
   const isOpen = useDebugStore((s) => s.isDebugOpen);
   const activeTab = useDebugStore((s) => s.activeTab);
   const setActiveTab = useDebugStore((s) => s.setActiveTab);
   const toggleDebug = useDebugStore((s) => s.toggleDebug);
+  const bindConversation = useDebugStore((s) => s.bindConversation);
+
+  // The recorded turns belong to one conversation; switching conversation or
+  // agent must not leave the previous one's turns on screen (or append to them).
+  useEffect(() => {
+    bindConversation(conversationId);
+  }, [conversationId, bindConversation]);
 
   /** Full ARIA keyboard navigation: Arrow Left/Right, Home/End */
   const handleTabKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>) => {
       const currentIndex = TABS.findIndex((tab) => tab.id === activeTab);
-      let nextIndex: number | null = null;
+      let nextIndex: number;
 
       switch (e.key) {
         case "ArrowRight":

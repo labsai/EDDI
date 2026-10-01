@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -86,6 +87,9 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
   const [a2aEnabled, setA2aEnabled] = useState(false);
   const [enableMemoryTools, setEnableMemoryTools] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Every save writes a new agent version (two, when the prompt changed too).
+  // Breaking unless ticked; reset after each save.
+  const [compatible, setCompatible] = useState(false);
 
   // Prompt state
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -133,6 +137,9 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
   useEffect(() => {
     setPromptSynced(false);
     setDiscardOpen(false);
+    // A compatibility choice is about ONE agent's next version: ticked for agent A
+    // and closed unsaved, it must not carry over and write B's version as compatible.
+    setCompatible(false);
     // The capability draft is pure UI state — unlike description/capabilities
     // there is no effect syncing it from `agent`, so a half-typed skill stayed
     // on screen for the NEXT agent and Add would have written it there.
@@ -242,6 +249,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
           agentId,
           promptData,
           newSystemMessage: systemPrompt,
+          ...(compatible ? { compatible: true } : {}),
         });
         // Use the new agent version from the cascade for the next save
         if (result.newAgentVersion) {
@@ -260,7 +268,12 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
         a2aEnabled,
         enableMemoryTools,
       };
-      await updateAgent(agentId, agentVersion, updated);
+      if (compatible) {
+        await updateAgent(agentId, agentVersion, updated, { compatible: true });
+      } else {
+        await updateAgent(agentId, agentVersion, updated);
+      }
+      setCompatible(false);
 
       toast.success(
         t("Workforce.agentEditor.saveSuccess", "Agent updated successfully")
@@ -285,6 +298,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
     capabilities,
     a2aEnabled,
     enableMemoryTools,
+    compatible,
     version,
     queryClient,
     t,
@@ -676,7 +690,15 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
 
         {/* ── Footer (sticky) ─────────────────────────────── */}
         {!isLoading && !isError && agent && (
-          <div className="shrink-0 border-t border-border ps-6 pe-6 py-4 flex items-center justify-end gap-3">
+          <div className="shrink-0 border-t border-border ps-6 pe-6 py-4 space-y-3">
+            <CompatibleVersionCheckbox
+              checked={compatible}
+              onChange={setCompatible}
+              disabled={saving}
+              previousGeneration={agent.compatibilityGeneration ?? null}
+              data-testid="agent-editor-compatible-checkbox"
+            />
+            <div className="flex items-center justify-end gap-3">
             <Button
               variant="ghost"
               data-testid="agent-editor-cancel"
@@ -692,6 +714,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               {t("Workforce.agentEditor.save", "Save Changes")}
             </Button>
+            </div>
           </div>
         )}
       </div>

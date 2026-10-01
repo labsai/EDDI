@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets.persistence;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,11 +36,32 @@ public interface ISecretPersistence {
     /**
      * Insert or update an encrypted secret. The composite key is
      * {@code (tenantId, keyName)}.
+     * <p>
+     * A {@code null} {@code allowedAgents} or {@code description} means "not
+     * supplied": an update leaves the stored value alone, and an insert writes the
+     * wildcard grant and no description. A value write that did not mention the
+     * grant used to reset a narrowed grant to {@code ["*"]} and wipe the
+     * description — and, being a whole-row write, to revert any grant edit that
+     * landed between the caller's read and this write.
      *
      * @throws PersistenceException
      *             if the write fails
      */
     void upsertSecret(EncryptedSecret secret);
+
+    /**
+     * Insert an encrypted secret only if no row exists for
+     * {@code (tenantId, keyName)}. Atomic: the check and the insert are one
+     * statement against the store's unique {@code (tenantId, keyName)} constraint,
+     * so of any number of concurrent callers exactly one gets {@code true}, and an
+     * existing row is never touched.
+     *
+     * @return {@code true} if this call inserted the row, {@code false} if one
+     *         already existed
+     * @throws PersistenceException
+     *             if the write fails for any reason other than the row existing
+     */
+    boolean insertSecretIfAbsent(EncryptedSecret secret);
 
     /**
      * Find an encrypted secret by tenant and key name.
@@ -81,6 +103,68 @@ public interface ISecretPersistence {
      */
     boolean updateSecretSealing(EncryptedSecret secret, String expectedDekId);
 
+    /**
+     * Rewrites one secret's {@code allowedAgents} and {@code description}, and
+     * nothing else.
+     * <p>
+     * Deliberately narrow. {@link #upsertSecret} can only express "write the whole
+     * row", so an operator who wants to widen a grant through it has to supply the
+     * ciphertext — which means holding the plaintext, which is precisely what a
+     * vault exists to make unnecessary. This method takes no ciphertext, no IV, no
+     * dekId and no checksum, so a grant edit <em>cannot</em> touch the value even
+     * by mistake: the guarantee is in the signature, not in a caller's discipline.
+     * <p>
+     * {@code createdAt} and {@code lastRotatedAt} are untouched for the same
+     * reason. A grant edit is not a rotation and must not read as one afterwards.
+     *
+     * @param allowedAgents
+     *            the replacement grant list, already canonicalised by the caller
+     * @param description
+     *            the replacement description; a caller that wants the existing one
+     *            kept passes it back in, because "leave unchanged" is a
+     *            request-level notion and not a storage one
+     * @return false if no such {@code (tenantId, keyName)} row exists, in which
+     *         case nothing was written
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description);
+
+    /**
+     * {@link #updateSecretGrant} guarded on the grant the caller last saw.
+     * <p>
+     * Two operators editing the same grant from two browser tabs each send a full
+     * replacement list built from what they loaded, so the second write silently
+     * reverts the first — including a narrowing that was the whole point of the
+     * first. With the list the editor started from as a precondition the second
+     * write matches nothing and the caller can say so.
+     *
+     * @param expectedAllowedAgents
+     *            the grant the caller read, canonicalised — {@code ["*"]} also
+     *            matches a row whose grant is absent or empty, since every layer
+     *            reads those as the wildcard too
+     * @return false if the row does not exist <em>or</em> its grant is no longer
+     *         {@code expectedAllowedAgents}; the caller re-reads to tell which
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateSecretGrantIfUnchanged(String tenantId, String keyName, List<String> expectedAllowedAgents, List<String> allowedAgents,
+                                         String description);
+
+    /**
+     * Records that a secret was just resolved, writing {@code lastAccessedAt} and
+     * nothing else.
+     * <p>
+     * Resolution used to record this by re-upserting the whole row it had read.
+     * That is a read-modify-write of every field, so a resolve that read the row
+     * just before a grant edit — or a rotation — wrote it back a moment later and
+     * silently undid that edit. A single-field write has nothing stale to put back.
+     *
+     * @throws PersistenceException
+     *             if the write fails; callers treat this as best-effort
+     */
+    void touchLastAccessed(String tenantId, String keyName, Instant lastAccessedAt);
+
     // ─── DEKs ───
 
     /**
@@ -103,6 +187,35 @@ public interface ISecretPersistence {
      *             if the write fails for any other reason
      */
     boolean insertDek(EncryptedDek dek);
+
+    /**
+     * Rewrites one DEK generation's wrapping — its encrypted key and IV — but only
+     * while the row still carries {@code expectedIv}.
+     * <p>
+     * Used by KEK rotation. An upsert here could recreate a generation a tenant
+     * reset deleted a moment earlier, or overwrite a wrapping another rotation has
+     * just written; the guard turns both into a clean {@code false} the caller
+     * re-reads.
+     *
+     * @return false if the row is gone or was re-wrapped by somebody else first, in
+     *         which case nothing was written
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateDekWrapping(EncryptedDek dek, String expectedIv);
+
+    /**
+     * Deletes one DEK generation, but only while it still carries
+     * {@code expectedIv} — i.e. only the exact wrapping the caller inserted.
+     * <p>
+     * Used to take back a DEK a node wrapped under a KEK that turned out, a moment
+     * later, to be retired: before anything is sealed with it, so nothing is lost.
+     *
+     * @return false if the row is gone or was re-wrapped meanwhile
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    boolean deleteDekIfWrappedWith(String tenantId, int generation, String expectedIv);
 
     /**
      * Find the tenant's <b>active</b> DEK — the highest generation it holds.
@@ -178,4 +291,59 @@ public interface ISecretPersistence {
     default void setMetaValue(String key, String value) {
         // Default = no-op
     }
+
+    /**
+     * Store {@code value} under {@code key} only if no value is stored there yet,
+     * and return the value that is stored afterwards — the caller's own on a first
+     * write, the existing one otherwise. Unlike
+     * {@link #setMetaValue(String, String)} this never overwrites, so concurrent
+     * creators of a one-time value (the vault's checksum key) converge on a single
+     * winner instead of the last writer silently replacing a value others have
+     * already used.
+     * <p>
+     * The default is a non-atomic read-then-write, adequate only for a store
+     * without concurrent writers; the database-backed implementations override it
+     * with an atomic insert-if-absent.
+     *
+     * @param key
+     *            the metadata key
+     * @param value
+     *            the value to store if none exists
+     * @return the value stored under {@code key} after the call, or null if the
+     *         store keeps no metadata
+     * @throws PersistenceException
+     *             if the read or write fails
+     */
+    default String setMetaValueIfAbsent(String key, String value) {
+        String existing = getMetaValue(key);
+        if (existing != null) {
+            return existing;
+        }
+        setMetaValue(key, value);
+        return getMetaValue(key);
+    }
+
+    /**
+     * Removes a metadata value. Removing an absent key is not an error.
+     *
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    default void deleteMetaValue(String key) {
+        // Default = no-op
+    }
+
+    /**
+     * Removes every metadata value whose key starts with {@code prefix}.
+     * <p>
+     * Used when an operator adopts a new master key after losing the old one: the
+     * sealed system values ({@code system-value:*}) name DEKs that are about to be
+     * deleted, and left in place they would fail authentication forever instead of
+     * being re-created.
+     *
+     * @return how many values were removed
+     * @throws PersistenceException
+     *             if the delete fails
+     */
+    int deleteMetaValuesWithPrefix(String prefix);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { SyncPage } from "@/pages/sync-page";
 import { server } from "@/test/mocks/server";
@@ -307,6 +307,230 @@ describe("SyncPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Sync complete")).toBeInTheDocument();
     });
+    expect(screen.getByTestId("sync-outcome")).toHaveAttribute("data-outcome", "ok");
+  });
+
+  it("reports a partially applied sync instead of reporting success", async () => {
+    // 207 Multi-Status: some resources were not written. The page used to render
+    // a green "Sync complete" for this — and for a 500 in which nothing was
+    // written at all — because it only checked that the mutation resolved.
+    server.use(
+      http.post("*/backup/import/sync/batch", () =>
+        HttpResponse.json(
+          [
+            {
+              sourceAgentId: "agent1",
+              targetAgentId: "agent1-local",
+              result: {
+                agentUri: "eddi://ai.labs.agent/agentstore/agents/agent1-local",
+                agentUpdated: false,
+                updated: 0,
+                created: 0,
+                skipped: 3,
+                failures: [
+                  {
+                    sourceId: "llm1",
+                    resourceType: "langchain",
+                    name: "GPT-4 Task",
+                    reason: "the store did not accept the update",
+                  },
+                ],
+              },
+              error: null,
+            },
+          ],
+          { status: 207 }
+        )
+      )
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled();
+    });
+    await user.click(screen.getByTestId("sync-execute-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-outcome")).toHaveAttribute("data-outcome", "partial");
+    });
+    expect(screen.queryByText("Sync complete")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/the store did not accept the update/)
+    ).toBeInTheDocument();
+  });
+
+  it("reports a batch in which every agent failed", async () => {
+    // EDDI answers 500 when no mapping succeeded, and the body still carries the
+    // reasons — which is why the client resolves rather than throwing here.
+    server.use(
+      http.post("*/backup/import/sync/batch", () =>
+        HttpResponse.json(
+          [
+            {
+              sourceAgentId: "agent1",
+              targetAgentId: null,
+              result: null,
+              error: "the source instance could not supply agent agent1",
+            },
+          ],
+          { status: 500 }
+        )
+      )
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled();
+    });
+    await user.click(screen.getByTestId("sync-execute-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-outcome")).toHaveAttribute("data-outcome", "partial");
+    });
+    expect(
+      screen.getByText(/the source instance could not supply agent/)
+    ).toBeInTheDocument();
+  });
+
+  it("says a preview failed instead of showing it as zero changes", async () => {
+    // A batch preview answers 200 even when a mapping failed — one unreachable
+    // source must not discard the rows that worked — and carries the reason in
+    // the row. Rendering that row's empty resource list as "0 changes" told the
+    // operator there was nothing to promote when the source was simply down.
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", async ({ request }) => {
+        const mappings = (await request.json()) as Array<{ sourceAgentId: string }>;
+        return HttpResponse.json(
+          mappings.map((m) => ({
+            sourceAgentId: m.sourceAgentId,
+            sourceAgentName: null,
+            targetAgentId: null,
+            targetAgentName: null,
+            resources: [],
+            error: "Failed to read agent from remote instance: No route to host",
+          }))
+        );
+      })
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+
+    await waitFor(() => {
+      // One per mapping — every row failed, because the source is unreachable.
+      expect(screen.getAllByText("Preview failed").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/changes/)).not.toBeInTheDocument();
+    // And nothing can be promoted from a preview that did not happen.
+    expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+  });
+
+  it("surfaces the server's own reason when connecting is refused", async () => {
+    // The backend explains exactly which setting to change; the page used to
+    // show "Failed to list remote agents: Bad Request" and nothing else.
+    // text/plain, which is what EDDI's ClientErrorExceptionMapper actually
+    // answers for a 400 — the JSON shape is covered by the next test.
+    server.use(
+      http.get("*/backup/import/sync/agents", () =>
+        HttpResponse.text(
+          "Source URL must not point to a private IP address: http://10.0.0.5:7070."
+            + " Set eddi.backup.sync.allow-private-targets=true",
+          { status: 400 }
+        )
+      )
+    );
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("sync-url-input"), "http://10.0.0.5:7070");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/eddi\.backup\.sync\.allow-private-targets=true/)
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("surfaces a JSON error body too", async () => {
+    // A mapped exception answers {"error": ...}; an unmapped one answers text.
+    // Both have to reach the operator.
+    server.use(
+      http.get("*/backup/import/sync/agents", () =>
+        HttpResponse.json(
+          { error: "Could not list agents on http://staging:7070: connection refused" },
+          { status: 502 }
+        )
+      )
+    );
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("sync-url-input"), "http://staging:7070");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/connection refused/)).toBeInTheDocument();
+    });
+  });
+
+  it("adopts the agent a create sync made, so a second run updates it", async () => {
+    // The mapping starts with no local target ("Create new"). Without adopting
+    // the created agent, the next Preview + Sync sends targetAgentId: null again
+    // and creates a second copy of the same agent.
+    const sentTargets: Array<string | null> = [];
+    server.use(
+      http.post("*/backup/import/sync/batch", async ({ request }) => {
+        const requests = (await request.json()) as Array<{
+          sourceAgentId: string;
+          targetAgentId: string | null;
+        }>;
+        for (const r of requests) sentTargets.push(r.targetAgentId);
+        return HttpResponse.json(
+          requests.map((r) => ({
+            sourceAgentId: r.sourceAgentId,
+            targetAgentId: r.targetAgentId,
+            result: {
+              agentUri: "eddi://ai.labs.agent/agentstore/agents/created-locally-1?version=1",
+              agentUpdated: true,
+              updated: 0,
+              created: 4,
+              skipped: 0,
+              failures: [],
+            },
+            error: null,
+          }))
+        );
+      })
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+
+    // Force "Create new" on every mapping, then preview and sync twice.
+    for (const select of screen.getAllByRole("combobox")) {
+      await user.selectOptions(select, "");
+    }
+    for (let run = 0; run < 2; run++) {
+      const before = sentTargets.length;
+      await user.click(screen.getByTestId("sync-preview-all"));
+      await waitFor(() => {
+        expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled();
+      });
+      await user.click(screen.getByTestId("sync-execute-btn"));
+      await waitFor(() => {
+        expect(sentTargets.length).toBeGreaterThan(before);
+      });
+    }
+
+    // First run creates; the second must upgrade what it created, not create again.
+    expect(sentTargets[0]).toBeNull();
+    expect(sentTargets[sentTargets.length - 1]).toBe("created-locally-1");
   });
 
   // ─── Auto-match badge ──────────────────────────────────────────────────
@@ -410,5 +634,409 @@ describe("SyncPage", () => {
     // Each select has at least "Create new" option
     const firstSelect = selects[0] as HTMLSelectElement;
     expect(firstSelect.options.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ─── Matching needs the WHOLE local list ────────────────────────────────
+  // An unmatched remote agent is CREATED by the sync, so matching against a
+  // partial local list duplicates every agent past the loaded pages.
+
+  /** 60 local agents; "Support Agent" is on page 2, which answers slowly. */
+  function localAgentsWithMatchOnPage2(page2: () => Promise<Response> | Response) {
+    const agents = Array.from({ length: 60 }, (_, i) => ({
+      resource: `eddi://ai.labs.agent/agentstore/agents/local-${i}?version=1`,
+      name: i === 55 ? "Support Agent" : `Local ${i}`,
+      description: "",
+      createdOn: 0,
+      lastModifiedOn: 0,
+    }));
+    server.use(
+      http.get("*/agentstore/agents/descriptors", ({ request }) => {
+        const url = new URL(request.url);
+        const index = Number(url.searchParams.get("index"));
+        const limit = Number(url.searchParams.get("limit"));
+        if (index >= 1) return page2();
+        return HttpResponse.json(agents.slice(0, limit));
+      }),
+    );
+    return agents;
+  }
+
+  it("waits for every local page before auto-matching", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const agents = localAgentsWithMatchOnPage2(async () => {
+      await gate;
+      return HttpResponse.json(agents.slice(50));
+    });
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("sync-url-input"), "https://staging.eddi.example.com");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-local-agents-loading")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Agent Mapping")).not.toBeInTheDocument();
+
+    release();
+    await waitFor(() => {
+      expect(screen.getByText("Agent Mapping")).toBeInTheDocument();
+    });
+    // Matched against the agent that was on page 2.
+    expect(screen.getAllByText("auto-matched").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("says so when the local list fails to load, instead of matching a partial list", async () => {
+    localAgentsWithMatchOnPage2(() => HttpResponse.json({ message: "boom" }, { status: 500 }));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-local-agents-error")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("SyncPage — the promotion loop", () => {
+  const REMOTE = "eddi://ai.labs.agent/agentstore/agents/staging-bot?version=4";
+
+  function oneRemoteAgent(name: string) {
+    server.use(
+      http.get("*/backup/import/sync/agents", () =>
+        HttpResponse.json([{ resource: REMOTE, name, description: "", lastModifiedOn: new Date().toISOString() }])
+      )
+    );
+  }
+
+  function previewAnswering(overrides: Record<string, unknown>) {
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", async ({ request }) => {
+        const mappings = (await request.json()) as Array<{ sourceAgentId: string }>;
+        return HttpResponse.json(
+          mappings.map((m) => ({
+            sourceAgentId: m.sourceAgentId,
+            sourceAgentName: "Staging Bot",
+            targetAgentId: null,
+            targetAgentName: null,
+            resources: [],
+            ...overrides,
+          }))
+        );
+      })
+    );
+  }
+
+  function captureSyncRequests() {
+    const sent: Array<Record<string, unknown>> = [];
+    server.use(
+      http.post("*/backup/import/sync/batch", async ({ request }) => {
+        const requests = (await request.json()) as Array<Record<string, unknown>>;
+        sent.push(...requests);
+        return HttpResponse.json(
+          requests.map((r) => ({
+            sourceAgentId: r.sourceAgentId,
+            targetAgentId: r.targetAgentId,
+            result: {
+              agentUri: "eddi://ai.labs.agent/agentstore/agents/prod-bot?version=3",
+              agentUpdated: true,
+              updated: 2,
+              created: 1,
+              skipped: 4,
+              failures: [],
+            },
+            error: null,
+          }))
+        );
+      })
+    );
+    return sent;
+  }
+
+  async function previewAndSync(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+    await user.click(screen.getByTestId("sync-execute-btn"));
+  }
+
+  it("recognises the local copy by originId, whatever it is called now", async () => {
+    // A name can change on either side; the originId an import records cannot.
+    // Matching by name alone offered "Create new" for a renamed agent, and a
+    // second full copy followed.
+    oneRemoteAgent("Staging Bot (renamed)");
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/prod-bot?version=3",
+            name: "Production Bot",
+            description: "",
+            createdOn: 1,
+            lastModifiedOn: 1,
+            originId: "staging-bot",
+          },
+        ])
+      )
+    );
+
+    renderPage();
+    await connectAndWaitForMapping();
+
+    const target = screen.getAllByRole("combobox").find((s) => (s as HTMLSelectElement).value !== "")!;
+    await waitFor(() => expect((target as HTMLSelectElement).value).toBe("prod-bot"));
+    expect(screen.getByText("auto-matched")).toBeInTheDocument();
+  });
+
+  it("forces a copy only when the operator picks Create new", async () => {
+    oneRemoteAgent("Staging Bot");
+    previewAnswering({});
+    const previewed: Array<Record<string, unknown>> = [];
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", async ({ request }) => {
+        const mappings = (await request.json()) as Array<Record<string, unknown>>;
+        previewed.push(...mappings);
+        return HttpResponse.json(
+          mappings.map((m) => ({ sourceAgentId: m.sourceAgentId, sourceAgentName: "Staging Bot",
+            targetAgentId: null, targetAgentName: null, resources: [] }))
+        );
+      })
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(previewed).toHaveLength(1));
+    expect(previewed[0]!.createNew).toBe(false);
+
+    const targets = screen.getAllByRole("combobox");
+    await user.selectOptions(targets[targets.length - 1]!, "");
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(previewed).toHaveLength(2));
+    expect(previewed[1]!.createNew).toBe(true);
+  });
+
+  it("syncs onto the agent the preview found, not onto a new copy", async () => {
+    // No target named: the backend previews onto the agent an earlier sync
+    // promoted from this source. The sync has to name that same agent.
+    oneRemoteAgent("Staging Bot");
+    previewAnswering({ targetAgentId: "prod-bot", targetAgentName: "Production Bot" });
+    const sent = captureSyncRequests();
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await previewAndSync(user);
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.targetAgentId).toBe("prod-bot");
+    expect(sent[0]!.createNew).toBe(false);
+  });
+
+  it("leaves a conflict alone unless the operator ticks it", async () => {
+    oneRemoteAgent("Staging Bot");
+    previewAnswering({
+      targetAgentId: "prod-bot",
+      resources: [
+        { sourceId: "wf-1", resourceType: "workflow", name: "Main", action: "SKIP", targetId: "wf-t",
+          targetVersion: 2, matchStrategy: "position", sourceContent: null, targetContent: null, workflowIndex: 0 },
+        { sourceId: "llm-1", resourceType: "langchain", name: "LLM", action: "CONFLICT", targetId: "llm-t",
+          targetVersion: 5, matchStrategy: "type", sourceContent: '{"a":1}', targetContent: '{"a":2}', workflowIndex: -1 },
+      ],
+      warnings: ["2 snippets on the source are named 'tone'"],
+    });
+    const sent = captureSyncRequests();
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await previewAndSync(user);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.selectedResources).toBeNull();
+
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await user.click(await screen.findByRole("button", { name: /1 changes/ }));
+    expect(screen.getByTestId("preview-notices")).toHaveTextContent("named 'tone'");
+    await user.click(screen.getByTestId("sync-overwrite-llm-1"));
+    await user.click(screen.getByTestId("sync-execute-btn"));
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]!.selectedResources).toEqual(["wf-1", "llm-1"]);
+  });
+
+  it("says what each agent got, and that it is not live until deployed", async () => {
+    oneRemoteAgent("Staging Bot");
+    previewAnswering({ targetAgentId: "prod-bot" });
+    captureSyncRequests();
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await previewAndSync(user);
+
+    const counts = await screen.findByTestId("sync-outcome-counts");
+    expect(counts).toHaveTextContent("Staging Bot: 2 updated · 1 created · 4 unchanged");
+    expect(screen.getByTestId("sync-redeploy-hint")).toBeInTheDocument();
+  });
+});
+
+describe("SyncPage — after a create", () => {
+  it("adopts the agent the backend names, so the next sync updates it instead of making another copy", async () => {
+    // The backend now fills targetAgentId with the agent it wrote. Adoption used
+    // to key on that field being empty, so an explicit "Create new" stayed armed
+    // and the next sync created a second copy.
+    const sent: Array<Record<string, unknown>> = [];
+    server.use(
+      http.post("*/backup/import/sync/batch", async ({ request }) => {
+        const requests = (await request.json()) as Array<Record<string, unknown>>;
+        sent.push(...requests);
+        return HttpResponse.json(
+          requests.map((r) => ({
+            sourceAgentId: r.sourceAgentId,
+            targetAgentId: r.targetAgentId ?? `made-for-${String(r.sourceAgentId)}`,
+            result: {
+              agentUri: `eddi://ai.labs.agent/agentstore/agents/made-for-${String(r.sourceAgentId)}?version=1`,
+              agentUpdated: true, updated: 0, created: 3, skipped: 0, failures: [],
+            },
+          }))
+        );
+      })
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    const target = screen.getAllByRole("combobox")[1]!;
+    await user.selectOptions(target, "");
+    for (let run = 0; run < 2; run++) {
+      const before = sent.length;
+      await user.click(screen.getByTestId("sync-preview-all"));
+      await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+      await user.click(screen.getByTestId("sync-execute-btn"));
+      await waitFor(() => expect(sent.length).toBeGreaterThan(before));
+    }
+
+    const first = sent.find((r) => r.createNew === true)!;
+    const ofThatAgent = sent.filter((r) => r.sourceAgentId === first.sourceAgentId);
+    const again = ofThatAgent[ofThatAgent.length - 1]!;
+    expect(again.createNew).toBe(false);
+    expect(again.targetAgentId).toBe(`made-for-${String(first.sourceAgentId)}`);
+  });
+});
+
+// ── Regressions: errors and stale previews ─────────────────────────────────
+
+describe("SyncPage — failed and stale previews", () => {
+  it("a failed re-preview says so and leaves nothing to sync from the previous run", async () => {
+    renderPage();
+    const user = await connectAndWaitForMapping();
+
+    // First preview succeeds (default handler) — Sync becomes possible.
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+
+    // The second preview fails outright.
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", () =>
+        HttpResponse.json({ message: "source unreachable" }, { status: 502 })
+      )
+    );
+    await user.click(screen.getByTestId("sync-preview-all"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("sync-preview-all-error")).toBeInTheDocument()
+    );
+    // The old previews must not keep "Sync Selected" armed.
+    expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+  });
+
+  it("marks a mapping the source returned no preview for as failed, not as previewed", async () => {
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", () => HttpResponse.json([]))
+    );
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Preview failed").length).toBeGreaterThan(0)
+    );
+    expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+  });
+
+  it("drops the agent list and previews when the source URL changes", async () => {
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+
+    await user.type(screen.getByTestId("sync-url-input"), "/other");
+
+    expect(screen.queryByText("Agent Mapping")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sync-execute-btn")).not.toBeInTheDocument();
+  });
+
+  // Unchecked mappings kept their preview across a new run. Unchecking one,
+  // then running a preview that failed, then checking it again re-armed
+  // "Sync Selected" on the old diff.
+  it("a failed preview also clears the preview of a mapping that was unchecked", async () => {
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled());
+
+    const first = screen.getAllByRole("checkbox")[0]!;
+    await user.click(first);
+
+    server.use(
+      http.post("*/backup/import/sync/preview/batch", () =>
+        HttpResponse.json({ message: "source unreachable" }, { status: 502 })
+      )
+    );
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() =>
+      expect(screen.getByTestId("sync-preview-all-error")).toBeInTheDocument()
+    );
+
+    // Re-select only the agent that was previewed before the failed run.
+    for (const cb of screen.getAllByRole("checkbox")) {
+      if ((cb as HTMLInputElement).checked) await user.click(cb);
+    }
+    await user.click(first);
+    expect(first).toBeChecked();
+    expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+  });
+
+  // The connect request was not tied to the source it was sent for. Editing the
+  // URL while it was in flight cleared the list, and the late reply then filled
+  // it again with the OLD source's agents, ready to preview and sync.
+  it("ignores a connect reply that arrives after the source URL was edited", async () => {
+    let release: () => void = () => {};
+    let calls = 0;
+    server.use(
+      http.get("*/backup/import/sync/agents", async () => {
+        calls++;
+        await new Promise<void>((r) => (release = r));
+        return HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/stale-agent?version=1",
+            name: "Stale Agent",
+            description: "",
+            lastModifiedOn: new Date().toISOString(),
+          },
+        ]);
+      })
+    );
+
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("sync-url-input"), "https://old.example.com");
+    await user.click(screen.getByTestId("sync-connect-btn"));
+    await waitFor(() => expect(calls).toBe(1));
+
+    await user.type(screen.getByTestId("sync-url-input"), "/new");
+    // Editing frees the Connect button instead of leaving it on the old request.
+    expect(screen.getByTestId("sync-connect-btn")).not.toBeDisabled();
+
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(screen.queryByText("Agent Mapping")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText(/agents found|Connected/)).not.toBeInTheDocument();
   });
 });

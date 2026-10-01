@@ -1,3 +1,6 @@
+import { useEffect, useMemo } from "react";
+import { getWorkspaceInfo } from "@/lib/api/workspaces";
+import { setResourceVisibility } from "@/lib/api/sharing";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   readOperatorConfig,
@@ -26,6 +29,13 @@ import {
 } from "@/lib/api/operator";
 import { undeployAgent, deleteAgent, getAgentCurrentVersion } from "@/lib/api/agents";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
+import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
+import {
+  OPERATOR_REVISION,
+  assessOperatorUpgrade,
+  logOutdatedOnce,
+  type OperatorUpgradeAssessment,
+} from "@/lib/operator/operator-revision";
 import {
   enforceGateDryRun,
   runBackgroundWriteProbe,
@@ -198,7 +208,17 @@ export function useActivateOperator() {
       // persisted on the config, so the operator screen can show it and a later
       // reconfigure reuses the admin's choice instead of re-deriving it.
       const apiBaseUrl = await resolveOperatorApiBaseUrl(config);
-      const effectiveConfig: OperatorConfig = { ...config, apiBaseUrl };
+      const effectiveConfig: OperatorConfig = {
+        ...config,
+        apiBaseUrl,
+        // Stamped on EVERY activation path — the form, Reconfigure, and the
+        // one-click upgrade — so what is recorded is always what was actually
+        // provisioned. These four fields are what a later upgrade reads.
+        provisionedRevision: OPERATOR_REVISION,
+        provisionedEndpoints: [...endpointsForScope(config.scope)],
+        promptBodyIsDefault: config.promptBody === defaultOperatorPromptBody(config.scope),
+        llmBaseUrl: baseUrl?.trim() || null,
+      };
 
       // The stored config this activation replaces, captured BEFORE anything is
       // written, so a replacement that fails verification can hand the deployment
@@ -306,6 +326,16 @@ export function useActivateOperator() {
         await handBackToPredecessor(verificationError, previous, config, result.agentId);
         throw verificationError;
       }
+
+      // Make the operator reachable by everybody signed in. It is provisioned by
+      // whoever activates it, so under workspace enforcement it lands in THAT
+      // person's space and every other user got 403 opening the drawer — the
+      // docs told administrators to publish it by hand with curl. "internal"
+      // lets every signed-in user chat with it without disclosing its prompt
+      // and tools, and without admitting anonymous callers. Best-effort: the
+      // operator works for its activator either way, and an administrator can
+      // still widen it from the share dialog.
+      await shareOperatorWithEveryoneSignedIn(result.agentId);
 
       // Retire the agent this activation replaced, so repeated reconfiguration
       // doesn't accumulate deployed operators.
@@ -437,6 +467,7 @@ async function rollBackUnsafeOperator(config: OperatorConfig, failure: string): 
     throw new Error(
       `${failure} Rolling it back ALSO failed (${detail}). The operator is still deployed with ` +
         "write tools and an unverified gate — remove it manually from the operator screen now.",
+      { cause: rollbackError },
     );
   }
   throw new Error(
@@ -621,9 +652,43 @@ export function useResetOperator() {
   });
 }
 
+/* ─── Upgrade ─── */
+
+/**
+ * Whether the live operator predates this Manager, and what an upgrade changes.
+ *
+ * Derived from the config the caller already holds rather than fetched: every
+ * surface that shows the notice (the operator page, the drawer, the dashboard)
+ * already reads the config, so this costs no request. Logs once per page load
+ * to the browser console as well — see `logOutdatedOnce`.
+ */
+export function useOperatorUpgradeAssessment(
+  config: OperatorConfig | null | undefined,
+): OperatorUpgradeAssessment | null {
+  const assessment = useMemo(() => assessOperatorUpgrade(config), [config]);
+  useEffect(() => {
+    logOutdatedOnce(assessment);
+  }, [assessment]);
+  return assessment;
+}
+
 /* ─── Helpers ─── */
 
 /** The config to seed the activation form with. */
 export function seedConfig(existing: OperatorConfig | null | undefined): OperatorConfig {
   return existing ?? defaultOperatorConfig();
+}
+
+/**
+ * Sets a freshly provisioned operator to `internal` visibility when workspaces
+ * are enforced. Never throws: a failure is logged and the activation carries on.
+ */
+async function shareOperatorWithEveryoneSignedIn(agentId: string): Promise<void> {
+  try {
+    const info = await getWorkspaceInfo();
+    if (!info.enabled) return;
+    await setResourceVisibility(agentId, "internal");
+  } catch (e) {
+    console.warn("[operator] Could not make the operator available to everyone signed in:", e);
+  }
 }

@@ -85,21 +85,30 @@ public class RestManagerResource implements IRestManagerResource {
             // which no classloader resolves: every existing file under /manage fell
             // through to manage.html, and the traversal guard's behaviour differed by
             // operating system.
-            String resourcePath = RESOURCE_BASE + "/" + normalizeSlashPath(path);
+            String normalized = normalizeSlashPath(path);
+
+            // "/manage/" reaches this method through {path:.*} with an EMPTY path, and
+            // normalizeSlashPath drops empty segments — so the lookup below became
+            // getResourceAsStream("META-INF/resources/"), a DIRECTORY entry. A jar
+            // classloader answers that with an open, empty stream rather than null, so
+            // the fallback never ran and the browser got 200 with content-length 0
+            // where it asked for the app. Any path that normalizes to nothing means
+            // "the Manager", so serve it.
+            if (normalized.isEmpty()) {
+                return serveManagerIndex();
+            }
+
+            String resourcePath = RESOURCE_BASE + "/" + normalized;
 
             // Attempt to load the file from the resources folder
             InputStream fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath);
 
             // If the file doesn't exist, fallback to "manage.html"
             if (fileStream == null) {
-                fileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(RESOURCE_BASE + "/manage.html");
-
-                if (fileStream == null) {
-                    throw new FileNotFoundException("manage.html not found in META-INF/resources");
-                }
+                return serveManagerIndex();
             }
 
-            // Return the file (or manage.html) as a response
+            // Return the file as a response
             return Response.ok(fileStream).build();
 
         } catch (SecurityException e) {
@@ -109,6 +118,15 @@ public class RestManagerResource implements IRestManagerResource {
             LOGGER.error("Failed to serve resource: " + path, e);
             throw new InternalServerErrorException("An error occurred while accessing the resource");
         }
+    }
+
+    /** The SPA entry point — every deep link falls back to it. */
+    private static Response serveManagerIndex() throws FileNotFoundException {
+        InputStream index = Thread.currentThread().getContextClassLoader().getResourceAsStream(RESOURCE_BASE + "/manage.html");
+        if (index == null) {
+            throw new FileNotFoundException("manage.html not found in META-INF/resources");
+        }
+        return Response.ok(index).build();
     }
 
     /**

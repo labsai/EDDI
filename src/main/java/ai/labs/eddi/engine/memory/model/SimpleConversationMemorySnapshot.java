@@ -22,9 +22,22 @@ public class SimpleConversationMemorySnapshot {
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
+    /**
+     * The agent's display name, for the people in the conversation. Set only on a
+     * REST conversation read, and only for a caller who may use the agent;
+     * {@code null} everywhere else. See
+     * {@code ai.labs.eddi.engine.internal.AgentDisplayNameResolver}.
+     */
+    private String agentName;
     private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    /**
+     * Why an ENDED conversation ended, when known — see
+     * {@link ConversationMemorySnapshot#getEndReason()}. Lets a client tell "this
+     * assistant was updated" apart from any other end.
+     */
+    private String endReason;
     private Instant hitlPausedAt;
     /**
      * Task 13: HITL pause type ("TOOL_CALL" | "RULE" | null) carried onto the
@@ -140,6 +153,14 @@ public class SimpleConversationMemorySnapshot {
         this.agentId = agentId;
     }
 
+    public String getAgentName() {
+        return agentName;
+    }
+
+    public void setAgentName(String agentName) {
+        this.agentName = agentName;
+    }
+
     public Integer getAgentVersion() {
         return agentVersion;
     }
@@ -170,6 +191,14 @@ public class SimpleConversationMemorySnapshot {
 
     public void setConversationState(ConversationState conversationState) {
         this.conversationState = conversationState;
+    }
+
+    public String getEndReason() {
+        return endReason;
+    }
+
+    public void setEndReason(String endReason) {
+        this.endReason = endReason;
     }
 
     public Instant getHitlPausedAt() {

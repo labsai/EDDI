@@ -83,7 +83,7 @@ class UpgradeExecutorTest {
     private UpgradeExecutor executor;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         agentStore = Mockito.mock(IRestAgentStore.class);
         workflowStore = Mockito.mock(IRestWorkflowStore.class);
         snippetStore = Mockito.mock(IRestPromptSnippetStore.class);
@@ -93,6 +93,23 @@ class UpgradeExecutorTest {
 
         executor = new UpgradeExecutor(agentStore, workflowStore,
                 snippetStore, jsonSerialization, structuralMatcher, descriptorStore, mock(BackupMetrics.class), mock(ResourceAccessGuard.class));
+
+        // Every resource the executor writes gets its DocumentDescriptor moved onto
+        // the new version — that is what makes the written version loadable — so a
+        // descriptor has to answer for any (id, version) a test writes. Without this
+        // the executor correctly reports "written but its descriptor still names vN".
+        lenient().when(descriptorStore.readDescriptor(anyString(), anyInt()))
+                .thenAnswer(invocation -> descriptorAt(invocation.getArgument(0), invocation.getArgument(1)));
+    }
+
+    /**
+     * A descriptor whose resource URI names {@code version} — the shape
+     * {@code bumpDescriptor} reads and rewrites.
+     */
+    private static DocumentDescriptor descriptorAt(String resourceId, Integer version) {
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + resourceId + "?version=" + version));
+        return descriptor;
     }
 
     // ==================== Snippet Processing ====================
@@ -141,6 +158,11 @@ class UpgradeExecutorTest {
                     DiffAction.CREATE, null, null, null, null, null, -1));
 
             setupPreviewAndAgent("target-1", 1, diffs);
+            // The create must be accepted for the "Created snippet" line to fire at all:
+            // a store refusal is now reported as a failure, not logged as a create.
+            String createdUri = IRestPromptSnippetStore.resourceURI + "aabbccddeeff112233445566?version=1";
+            when(snippetStore.createSnippet(any())).thenReturn(Response.created(URI.create(createdUri))
+                    .header("X-Resource-URI", createdUri).build());
 
             List<String> captured = new ArrayList<>();
             Handler handler = new Handler() {
@@ -202,6 +224,33 @@ class UpgradeExecutorTest {
             executor.executeUpgrade(source, "target-1", null, null);
 
             verify(snippetStore).createSnippet(any(PromptSnippet.class));
+        }
+
+        /**
+         * G5: a create the store refused (it answers without throwing) used to be
+         * counted as created, and one whose descriptor could not be written was listed
+         * under "created" and "failures" at once.
+         */
+        @Test
+        @DisplayName("a snippet create counts as created only when accepted and findable")
+        void snippetCreateCountsOnlyWhenItLanded() throws Exception {
+            var sourceSnippet = new SnippetSourceData("src-snp-2", "new_snippet", createSnippet("new_snippet", "Brand new"));
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-snp-2", "snippet", "new_snippet", DiffAction.CREATE, null, null, null, null, null, -1));
+            setupPreviewAndAgent("target-1", 1, diffs);
+
+            when(snippetStore.createSnippet(any())).thenReturn(Response.status(400).build());
+            UpgradeResult refused = executor.executeUpgrade(createSource(List.of(), List.of(sourceSnippet)), "target-1", null, null);
+            assertEquals(0, refused.created(), "a refused create is not a create");
+            assertEquals(1, refused.failures().size(), "got: " + refused.failures());
+
+            String createdUri = IRestPromptSnippetStore.resourceURI + "aabbccddeeff112233445566?version=1";
+            when(snippetStore.createSnippet(any())).thenReturn(Response.created(URI.create(createdUri))
+                    .header("X-Resource-URI", createdUri).build());
+            UpgradeResult accepted = executor.executeUpgrade(createSource(List.of(), List.of(sourceSnippet)), "target-1", null, null);
+            assertEquals(1, accepted.created());
+            assertTrue(accepted.failures().isEmpty(), "got: " + accepted.failures());
         }
 
         @Test
@@ -270,12 +319,12 @@ class UpgradeExecutorTest {
             setupPreviewAndAgent("target-1", 3, diffs);
 
             var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
+            agentConfig.setWorkflows(new ArrayList<>(List.of(workflowUri(WF_FIRST), workflowUri(WF_SECOND))));
             when(agentStore.readAgent("target-1", 3)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(3), any()))
+            when(agentStore.updateAgent(eq("target-1"), eq(3), any(), any()))
                     .thenReturn(Response.ok().build());
 
-            var result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1"));
+            var result = executor.executeUpgrade(source, "target-1", null, List.of(WF_SECOND, WF_FIRST));
 
             assertTrue(result.agentUpdated());
             assertNotNull(result.agentUri());
@@ -298,7 +347,7 @@ class UpgradeExecutorTest {
             // An unconditional updateAgent wrote a byte-identical configuration and
             // bumped the version, so a CI job that synced on every build inflated the
             // version history and "v14" said nothing about whether anything changed.
-            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
             assertFalse(result.agentUpdated());
             assertFalse(result.wroteAnything());
             assertEquals("eddi://ai.labs.agent/agentstore/agents/target-1?version=3",
@@ -332,7 +381,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             // Agent with 3 workflows
             var agentConfig = new AgentConfiguration();
@@ -341,14 +390,14 @@ class UpgradeExecutorTest {
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfIdB + "?version=1"),
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfIdC + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any()))
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any()))
                     .thenReturn(Response.ok().build());
 
             // Reverse order
             executor.executeUpgrade(source, "target-1", null, List.of(wfIdC, wfIdB, wfIdA));
 
             var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture());
+            verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture(), any());
 
             List<URI> workflows = captor.getValue().getWorkflows();
             assertEquals(3, workflows.size());
@@ -398,7 +447,7 @@ class UpgradeExecutorTest {
             // Setup agent descriptor
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             // Mock LLM store via CDI (getStore now uses CDI.current().select())
             var llmStore = Mockito.mock(IRestLlmStore.class);
@@ -415,7 +464,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
@@ -446,7 +495,7 @@ class UpgradeExecutorTest {
                 assertFalse(updatedStep.getExtensions().containsKey("uri"));
 
                 // ... and the agent is versioned because the workflow genuinely changed
-                verify(agentStore).updateAgent(eq("target-1"), eq(1), any());
+                verify(agentStore).updateAgent(eq("target-1"), eq(1), any(), any());
             }
         }
 
@@ -561,7 +610,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var ragDirectStore = Mockito.mock(IRagStore.class);
             var ragRestStore = Mockito.mock(IRestRagStore.class);
@@ -575,7 +624,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
@@ -645,7 +694,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var llmStore = Mockito.mock(IRestLlmStore.class);
             when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
@@ -659,7 +708,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
@@ -724,7 +773,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var llmStore = Mockito.mock(IRestLlmStore.class);
             when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
@@ -739,7 +788,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             @SuppressWarnings("rawtypes")
             MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
@@ -818,7 +867,7 @@ class UpgradeExecutorTest {
                 verify(wfDirectStore).create(any());
                 // Verify agent was updated with new workflow appended
                 var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
-                verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture());
+                verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture(), any());
                 assertTrue(captor.getValue().getWorkflows().stream()
                         .anyMatch(uri -> uri.toString().contains(newWfId)));
             }
@@ -876,7 +925,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             // The target still runs the two steps the other way round.
             when(workflowStore.readWorkflow(WF_ID, 1)).thenReturn(twoStepWorkflow(false));
@@ -886,7 +935,7 @@ class UpgradeExecutorTest {
             agentConfig.setWorkflows(new ArrayList<>(List.of(
                     URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WF_ID + "?version=1"))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any())).thenReturn(Response.ok().build());
 
             UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
 
@@ -905,7 +954,7 @@ class UpgradeExecutorTest {
             assertTrue(result.agentUpdated(), "the agent must point at the new workflow version");
 
             var agentCaptor = ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(agentStore).updateAgent(eq("target-1"), eq(1), agentCaptor.capture());
+            verify(agentStore).updateAgent(eq("target-1"), eq(1), agentCaptor.capture(), any());
             assertEquals("eddi://ai.labs.workflow/workflowstore/workflows/" + WF_ID + "?version=2",
                     agentCaptor.getValue().getWorkflows().getFirst().toString());
         }
@@ -941,7 +990,7 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             // The target has the behavior step but no LLM step at all.
             var targetWfConfig = new WorkflowConfiguration();
@@ -1009,22 +1058,30 @@ class UpgradeExecutorTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
+            agentConfig.setWorkflows(new ArrayList<>(List.of(workflowUri(WF_FIRST), workflowUri(WF_SECOND))));
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any()))
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any(), any()))
                     .thenThrow(new RuntimeException("DB error"));
 
-            // A workflow order is what makes the agent config genuinely need writing;
-            // without one the executor deliberately does not touch the agent at all.
+            // A workflow order that actually changes the order is what makes the agent
+            // config genuinely need writing; without one — or with one that leaves the
+            // list as it is — the executor deliberately does not touch the agent at all.
             assertThrows(RuntimeException.class,
-                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of(WF_SECOND, WF_FIRST)));
         }
     }
 
     // ==================== Test Helpers ====================
+
+    private static final String WF_FIRST = "a1a1a1a1a1a1a1a1a1a1a1a1";
+    private static final String WF_SECOND = "b2b2b2b2b2b2b2b2b2b2b2b2";
+
+    private static URI workflowUri(String id) {
+        return URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + id + "?version=1");
+    }
 
     private ResourceDiff agentDiff(String sourceId, String targetId, DiffAction action) {
         return new ResourceDiff(sourceId, "agent", "Agent", action, targetId, 1, "targetAgent", null, null, -1);
@@ -1036,12 +1093,12 @@ class UpgradeExecutorTest {
 
         var descriptor = new DocumentDescriptor();
         descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + targetAgentId + "?version=" + version));
-        when(descriptorStore.readDescriptor(eq(targetAgentId), isNull())).thenReturn(descriptor);
+        when(descriptorStore.readCurrentDescriptor(targetAgentId)).thenReturn(descriptor);
 
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(new ArrayList<>());
         when(agentStore.readAgent(targetAgentId, version)).thenReturn(agentConfig);
-        when(agentStore.updateAgent(eq(targetAgentId), eq(version), any()))
+        when(agentStore.updateAgent(eq(targetAgentId), eq(version), any(), any()))
                 .thenReturn(Response.ok().build());
     }
 
@@ -1210,7 +1267,7 @@ class UpgradeExecutorTest {
             assertFalse(result.agentUpdated(), "nothing changed, so the agent must not be rewritten");
             assertEquals(IRestAgentStore.resourceURI + "target-1", result.agentUri().toString(),
                     "an unresolvable version must be omitted, never guessed as 1");
-            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
         }
 
         @Test
@@ -1227,7 +1284,7 @@ class UpgradeExecutorTest {
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create(
                     "eddi://ai.labs.agent/agentstore/agents/target-1?version=14"));
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
             UpgradeResult result = executor.executeUpgrade(source, "target-1", null, null);
 
@@ -1331,7 +1388,7 @@ class UpgradeExecutorTest {
                 assertNotNull(result.agentUri());
                 // Nothing landed, so no agent version is burned — and the failure is
                 // reported rather than logged and forgotten behind a 201.
-                verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+                verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
                 assertTrue(result.hasFailures());
                 assertEquals("workflow", result.failures().getFirst().resourceType());
             }
@@ -1399,12 +1456,20 @@ class UpgradeExecutorTest {
 
     // ==================== readLatestVersion edge cases ====================
 
+    /**
+     * What happens when the agent's current version cannot be established.
+     * <p>
+     * These three used to assert that it "defaults to 1" — which is what the defect
+     * did, and what made it invisible: writing against version 1 is correct for an
+     * agent that has never been synced, and a 409 for every agent that has. The
+     * contract now is that a version that cannot be established is not guessed at.
+     */
     @Nested
-    @DisplayName("readLatestVersion edge cases")
-    class ReadLatestVersionEdgeCases {
+    @DisplayName("an agent version that cannot be established")
+    class UnknownAgentVersion {
 
         @Test
-        @DisplayName("should default to 1 when descriptor is null")
+        @DisplayName("a descriptor that is absent is not taken to mean version 1")
         void nullDescriptorDefaultsTo1() throws Exception {
             var source = createSource(List.of(), List.of());
 
@@ -1414,23 +1479,19 @@ class UpgradeExecutorTest {
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
-            // Return null descriptor
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(null);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(null);
 
-            // readLatestVersion should default to 1
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
-            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            var thrown = assertThrows(RuntimeException.class,
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
 
-            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
-
-            assertNotNull(result);
-            assertTrue(result.toString().contains("version=2")); // 1 + 1
+            assertTrue(thrown.getMessage().contains("could not be established"),
+                    "the reason has to say the version is unknown, was: " + thrown.getMessage());
+            // Nothing is written against a guessed version.
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any(), any());
         }
 
         @Test
-        @DisplayName("should default to 1 when descriptor.getResource() is null")
+        @DisplayName("a descriptor naming no resource is not taken to mean version 1")
         void nullResourceDefaultsTo1() throws Exception {
             var source = createSource(List.of(), List.of());
 
@@ -1440,24 +1501,21 @@ class UpgradeExecutorTest {
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
-            // Return descriptor with null resource
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(null);
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+            when(descriptorStore.readCurrentDescriptor("target-1")).thenReturn(descriptor);
 
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
-            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            var thrown = assertThrows(RuntimeException.class,
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
 
-            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
-
-            assertNotNull(result);
-            assertTrue(result.toString().contains("version=2")); // 1 + 1
+            assertTrue(thrown.getMessage().contains("could not be established"),
+                    "the reason has to say the version is unknown, was: " + thrown.getMessage());
+            // Nothing is written against a guessed version.
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any(), any());
         }
 
         @Test
-        @DisplayName("should default to 1 when readDescriptor throws exception")
+        @DisplayName("a descriptor store that fails is not taken to mean version 1")
         void exceptionDefaultsTo1() throws Exception {
             var source = createSource(List.of(), List.of());
 
@@ -1467,18 +1525,16 @@ class UpgradeExecutorTest {
             var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true))).thenReturn(preview);
 
-            when(descriptorStore.readDescriptor(eq("target-1"), isNull()))
-                    .thenThrow(new RuntimeException("descriptor not found"));
+            when(descriptorStore.readCurrentDescriptor("target-1"))
+                    .thenThrow(new RuntimeException("descriptor store unavailable"));
 
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setWorkflows(new ArrayList<>());
-            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
-            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+            var thrown = assertThrows(RuntimeException.class,
+                    () -> executor.executeUpgrade(source, "target-1", null, List.of("wf-1")));
 
-            URI result = executor.executeUpgrade(source, "target-1", null, List.of("wf-1")).agentUri();
-
-            assertNotNull(result);
-            assertTrue(result.toString().contains("version=2"));
+            assertTrue(thrown.getMessage().contains("could not be established"),
+                    "the reason has to say the version is unknown, was: " + thrown.getMessage());
+            // Nothing is written against a guessed version.
+            verify(agentStore, never()).updateAgent(eq("target-1"), anyInt(), any(), any());
         }
     }
 
@@ -1807,7 +1863,7 @@ class UpgradeExecutorTest {
             assertEquals(0, result.created());
             assertFalse(result.hasFailures());
             verify(snippetStore, never()).updateSnippet(anyString(), anyInt(), any());
-            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any());
+            verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
             verify(metrics).upgradeCompleted(0, 0, 3, 0);
         }
 

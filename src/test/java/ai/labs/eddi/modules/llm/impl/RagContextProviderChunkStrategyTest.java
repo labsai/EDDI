@@ -208,7 +208,7 @@ class RagContextProviderChunkStrategyTest {
         }
 
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
-        when(embeddingModelFactory.getOrCreate(any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
 
         var embedding = Embedding.from(new float[]{0.1f, 0.2f, 0.3f});
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(embedding));

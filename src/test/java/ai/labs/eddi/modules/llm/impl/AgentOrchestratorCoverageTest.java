@@ -524,7 +524,9 @@ class AgentOrchestratorCoverageTest {
         var task = calcOnlyTask();
         task.setToolCacheScopes(Map.of("calculate", "global"));
 
-        assertEquals("g", capturedCacheScopeTag(task),
+        // "g" plus the source segment (M-T3); no agent segment, because a built-in on
+        // the global scope is the same tool for every agent.
+        assertEquals("g|src:builtin", capturedCacheScopeTag(task),
                 "an explicit per-tool GLOBAL opt-in is the only way back to a shared partition");
     }
 
@@ -541,7 +543,7 @@ class AgentOrchestratorCoverageTest {
         var task = calcOnlyTask();
         task.setToolCacheScopes(Map.of("calculator", "global"));
 
-        assertEquals("g", capturedCacheScopeTag(task),
+        assertEquals("g|src:builtin", capturedCacheScopeTag(task),
                 "'calculator' is the slug that builtInToolsWhitelist, toolRateLimits and toolPricing all use; "
                         + "the orchestrator must hand the canonical name to resolveScopeTag so it binds here too");
     }

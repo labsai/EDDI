@@ -206,47 +206,45 @@ describe("endConversation", () => {
   });
 });
 
+// RestAgentEngine.undo/redo answer an EMPTY 200 (moved) or a 409 (nothing to
+// move). They never return a snapshot — mocking one here is how the app came
+// to read `.conversationSteps` off `undefined` against the real backend.
 describe("undoConversation", () => {
-  it("undoes the last step", async () => {
+  it("resolves true on the backend's empty 200", async () => {
     server.use(
-      http.post("*/agents/:conversationId/undo", () =>
-        HttpResponse.json({
-          agentId: "agent1",
-          agentVersion: 3,
-          conversationId: "conv-mock",
-          conversationState: "READY",
-          environment: "production",
-          conversationSteps: [],
-          undoAvailable: false,
-          redoAvailable: true,
-        })
-      )
+      http.post("*/agents/:conversationId/undo", () => new HttpResponse(null, { status: 200 })),
     );
-    const result = await undoConversation("production", "agent1", "conv-mock");
-    expect(result).toBeDefined();
-    expect(result.redoAvailable).toBe(true);
+    await expect(undoConversation("production", "agent1", "conv-mock")).resolves.toBe(true);
+  });
+
+  it("resolves false on 409 — nothing to undo is not an error", async () => {
+    server.use(
+      http.post("*/agents/:conversationId/undo", () => new HttpResponse(null, { status: 409 })),
+    );
+    await expect(undoConversation("production", "agent1", "conv-mock")).resolves.toBe(false);
+  });
+
+  it("still throws on a real failure", async () => {
+    server.use(
+      http.post("*/agents/:conversationId/undo", () => new HttpResponse(null, { status: 500 })),
+    );
+    await expect(undoConversation("production", "agent1", "conv-mock")).rejects.toMatchObject({ status: 500 });
   });
 });
 
 describe("redoConversation", () => {
-  it("redoes a previously undone step", async () => {
+  it("resolves true on the backend's empty 200", async () => {
     server.use(
-      http.post("*/agents/:conversationId/redo", () =>
-        HttpResponse.json({
-          agentId: "agent1",
-          agentVersion: 3,
-          conversationId: "conv-mock",
-          conversationState: "READY",
-          environment: "production",
-          conversationSteps: [],
-          undoAvailable: true,
-          redoAvailable: false,
-        })
-      )
+      http.post("*/agents/:conversationId/redo", () => new HttpResponse(null, { status: 200 })),
     );
-    const result = await redoConversation("production", "agent1", "conv-mock");
-    expect(result).toBeDefined();
-    expect(result.undoAvailable).toBe(true);
+    await expect(redoConversation("production", "agent1", "conv-mock")).resolves.toBe(true);
+  });
+
+  it("resolves false on 409", async () => {
+    server.use(
+      http.post("*/agents/:conversationId/redo", () => new HttpResponse(null, { status: 409 })),
+    );
+    await expect(redoConversation("production", "agent1", "conv-mock")).resolves.toBe(false);
   });
 });
 

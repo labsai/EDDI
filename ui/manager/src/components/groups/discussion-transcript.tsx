@@ -3,6 +3,7 @@ import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ChevronDown, 
 import { useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { PhaseHeader } from "./phase-header";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { HumanTurnBanner } from "./human-turn-banner";
@@ -21,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
+import { STYLE_THEME } from "./discussion-style-theme";
 
 interface DiscussionTranscriptProps {
   conversation: GroupConversation | null;
@@ -65,108 +67,6 @@ interface PhaseGroup {
   phaseType: PhaseType;
   entries: TranscriptEntry[];
 }
-
-/** Style-aware accent colors for transcript theming */
-const STYLE_THEME: Record<DiscussionStyle, {
-  accent: string;
-  dotColor: string;
-  phaseAccent: string;
-  questionBg: string;
-  flowBg: string;
-  flowText: string;
-  progressBg: string;
-  progressText: string;
-  progressBorder: string;
-}> = {
-  ROUND_TABLE: {
-    accent: "text-amber-500",
-    dotColor: "bg-amber-500",
-    phaseAccent: "border-amber-500/30 bg-amber-500/5",
-    questionBg: "bg-amber-500/5 border-b-amber-500/20",
-    flowBg: "bg-amber-500/10",
-    flowText: "text-amber-600 dark:text-amber-400",
-    progressBg: "bg-amber-500/5",
-    progressText: "text-amber-600 dark:text-amber-400",
-    progressBorder: "border-amber-500/20",
-  },
-  PEER_REVIEW: {
-    accent: "text-teal-500",
-    dotColor: "bg-teal-500",
-    phaseAccent: "border-teal-500/30 bg-teal-500/5",
-    questionBg: "bg-teal-500/5 border-b-teal-500/20",
-    flowBg: "bg-teal-500/10",
-    flowText: "text-teal-600 dark:text-teal-400",
-    progressBg: "bg-teal-500/5",
-    progressText: "text-teal-600 dark:text-teal-400",
-    progressBorder: "border-teal-500/20",
-  },
-  DEVIL_ADVOCATE: {
-    accent: "text-rose-500",
-    dotColor: "bg-rose-500",
-    phaseAccent: "border-rose-500/30 bg-rose-500/5",
-    questionBg: "bg-rose-500/5 border-b-rose-500/20",
-    flowBg: "bg-rose-500/10",
-    flowText: "text-rose-600 dark:text-rose-400",
-    progressBg: "bg-rose-500/5",
-    progressText: "text-rose-600 dark:text-rose-400",
-    progressBorder: "border-rose-500/20",
-  },
-  DELPHI: {
-    accent: "text-violet-500",
-    dotColor: "bg-violet-500",
-    phaseAccent: "border-violet-500/30 bg-violet-500/5",
-    questionBg: "bg-violet-500/5 border-b-violet-500/20",
-    flowBg: "bg-violet-500/10",
-    flowText: "text-violet-600 dark:text-violet-400",
-    progressBg: "bg-violet-500/5",
-    progressText: "text-violet-600 dark:text-violet-400",
-    progressBorder: "border-violet-500/20",
-  },
-  DEBATE: {
-    accent: "text-indigo-500",
-    dotColor: "bg-indigo-500",
-    phaseAccent: "border-indigo-500/30 bg-indigo-500/5",
-    questionBg: "bg-indigo-500/5 border-b-indigo-500/20",
-    flowBg: "bg-indigo-500/10",
-    flowText: "text-indigo-600 dark:text-indigo-400",
-    progressBg: "bg-indigo-500/5",
-    progressText: "text-indigo-600 dark:text-indigo-400",
-    progressBorder: "border-indigo-500/20",
-  },
-  TASK_FORCE: {
-    accent: "text-orange-500",
-    dotColor: "bg-orange-500",
-    phaseAccent: "border-orange-500/30 bg-orange-500/5",
-    questionBg: "bg-orange-500/5 border-b-orange-500/20",
-    flowBg: "bg-orange-500/10",
-    flowText: "text-orange-600 dark:text-orange-400",
-    progressBg: "bg-orange-500/5",
-    progressText: "text-orange-600 dark:text-orange-400",
-    progressBorder: "border-orange-500/20",
-  },
-  NEGOTIATION: {
-    accent: "text-emerald-500",
-    dotColor: "bg-emerald-500",
-    phaseAccent: "border-emerald-500/30 bg-emerald-500/5",
-    questionBg: "bg-emerald-500/5 border-b-emerald-500/20",
-    flowBg: "bg-emerald-500/10",
-    flowText: "text-emerald-600 dark:text-emerald-400",
-    progressBg: "bg-emerald-500/5",
-    progressText: "text-emerald-600 dark:text-emerald-400",
-    progressBorder: "border-emerald-500/20",
-  },
-  CUSTOM: {
-    accent: "text-primary",
-    dotColor: "bg-primary",
-    phaseAccent: "border-primary/30 bg-primary/5",
-    questionBg: "bg-card/50",
-    flowBg: "bg-primary/10",
-    flowText: "text-primary",
-    progressBg: "bg-primary/5",
-    progressText: "text-primary",
-    progressBorder: "border-primary/20",
-  },
-};
 
 /**
  * Infer PhaseType from TranscriptEntryType — used only to pick the phase
@@ -234,12 +134,15 @@ function groupByPhase(entries: TranscriptEntry[]): PhaseGroup[] {
 }
 
 // State variants — labels resolved via i18n in component
-const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning" | "destructive" }> = {
+const STATE_VARIANTS: Record<string, { variant: "default" | "secondary" | "success" | "warning" | "destructive" }> = {
   CREATED: { variant: "default" },
   IN_PROGRESS: { variant: "warning" },
   SYNTHESIZING: { variant: "warning" },
   COMPLETED: { variant: "success" },
   FAILED: { variant: "destructive" },
+  // A rejection is a decision, not a fault: "secondary" is the neutral chip, so
+  // it does not read as the system having broken.
+  REJECTED: { variant: "secondary" },
   AWAITING_APPROVAL: { variant: "warning" },
   AWAITING_HUMAN_INPUT: { variant: "warning" },
   CANCELLED: { variant: "destructive" },
@@ -389,6 +292,7 @@ export function DiscussionTranscript({
     SYNTHESIZING: t("groups.stateSynthesizing", "Synthesizing…"),
     COMPLETED: t("groups.stateCompleted", "Completed"),
     FAILED: t("groups.stateFailed", "Failed"),
+    REJECTED: t("groups.stateRejected", "Rejected"),
     AWAITING_APPROVAL: t("groups.stateAwaitingApproval", "Awaiting Approval"),
     AWAITING_HUMAN_INPUT: t("groups.stateAwaitingHumanInput", "Awaiting Human Input"),
     CANCELLED: t("groups.stateCancelled", "Cancelled"),
@@ -472,11 +376,20 @@ export function DiscussionTranscript({
             </div>
             {/* Clamped when long: this header is pinned above the transcript, and
                 a teaching case's full brief took 70% of a tablet's height —
-                leaving the discussion itself a sliver to scroll in. */}
+                leaving the discussion itself a sliver to scroll in.
+
+                EXPANDED is bounded and scrolls in place. It used to grow without
+                limit inside a `shrink-0` header in an `h-full` column, so a long
+                brief pushed the transcript, the composer AND its own "Show less"
+                button past the bottom of an `overflow-hidden` pane. Nothing
+                scrolled — the scroll container is the transcript below, not this
+                header — so the expansion could not be undone without reloading
+                the page. */}
             <p
               className={cn(
                 "text-sm sm:text-base font-medium text-foreground whitespace-pre-line",
                 questionIsLong && !questionExpanded && "line-clamp-4",
+                questionIsLong && questionExpanded && "max-h-[30vh] overflow-y-auto",
               )}
               data-testid="discussion-question"
             >
@@ -662,7 +575,7 @@ export function DiscussionTranscript({
                 {isAgentFailurePlaceholder(effectiveSynthesis) ? (
                   <AgentFailedNotice />
                 ) : (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
                     {parsedSynthesis}
                   </ReactMarkdown>
                 )}
@@ -826,5 +739,3 @@ const STYLE_INFO_FLOW: Record<string, string[]> = {
   NEGOTIATION: ["Positions", "Proposals", "Bargaining", "Arbitration", "Synthesis"],
 };
 
-// Re-export for use in group-detail
-export { STYLE_THEME };

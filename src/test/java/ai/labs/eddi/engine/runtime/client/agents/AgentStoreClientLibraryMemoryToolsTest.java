@@ -14,8 +14,10 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -50,6 +52,24 @@ class AgentStoreClientLibraryMemoryToolsTest {
     }
 
     @Test
+    @DisplayName("the deployed agent carries its version's compatibility generation")
+    void carriesCompatibilityGeneration() throws Exception {
+        var config = configuration(false, null);
+        config.setCompatibilityGeneration(3);
+        when(agentStoreService.getAgentConfiguration("agent-1", 4)).thenReturn(config);
+
+        assertEquals(3, library.getAgent("agent-1", 4).getCompatibilityGeneration());
+    }
+
+    @Test
+    @DisplayName("a version without a generation deploys without one")
+    void legacyVersionHasNoGeneration() throws Exception {
+        when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, null));
+
+        assertNull(library.getAgent("agent-1", 1).getCompatibilityGeneration());
+    }
+
+    @Test
     @DisplayName("enabled with no config — falls back to the defaults instead of skipping")
     void defaultsWhenConfigOmitted() throws Exception {
         when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(true, null));
@@ -74,13 +94,36 @@ class AgentStoreClientLibraryMemoryToolsTest {
     }
 
     @Test
-    @DisplayName("not enabled — no config, whatever else is set")
-    void disabledStaysDisabled() throws Exception {
-        when(agentStoreService.getAgentConfiguration("agent-1", 1))
-                .thenReturn(configuration(false, new AgentConfiguration.UserMemoryConfig()));
+    @DisplayName("tools not enabled but a config declared — the config applies, the tool stays off")
+    void configAppliesWithoutTheTools() throws Exception {
+        var memoryConfig = new AgentConfiguration.UserMemoryConfig();
+        memoryConfig.setDefaultVisibility("self");
+        when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, memoryConfig));
 
         var agent = library.getAgent("agent-1", 1);
 
-        assertNull(agent.getUserMemoryConfig(), "enableMemoryTools is the opt-in and it says no");
+        // defaultVisibility and the recall settings govern the longTerm property path
+        // of EVERY agent — dropping them made "self" silently persist as global
+        assertEquals(memoryConfig, agent.getUserMemoryConfig());
+        assertFalse(agent.isMemoryToolsEnabled(), "enableMemoryTools is the opt-in for the tool, and it says no");
+    }
+
+    @Test
+    @DisplayName("enabled — the tool switch is on")
+    void enabledSetsTheToolSwitch() throws Exception {
+        when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(true, null));
+
+        assertTrue(library.getAgent("agent-1", 1).isMemoryToolsEnabled());
+    }
+
+    @Test
+    @DisplayName("neither declared — no config, no tool")
+    void neitherDeclared() throws Exception {
+        when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, null));
+
+        var agent = library.getAgent("agent-1", 1);
+
+        assertNull(agent.getUserMemoryConfig());
+        assertFalse(agent.isMemoryToolsEnabled());
     }
 }

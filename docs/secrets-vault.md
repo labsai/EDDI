@@ -60,7 +60,8 @@ ${vault:tenantId/keyName}
 
 In an HTTP call, a vault reference is resolved **only where the configuration wrote it**: in the
 template of that URL, header, body or query parameter, or as the value of a property the template
-names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding `${vault:<agentId>.apiKey}`).
+names that EDDI itself auto-vaulted (`Bearer {properties.apiKey}` holding
+`${vault:<agentId>.u<userHash>.<nonce>.apiKey}`).
 The same
 applies to `${eddivault:…}`, `${connection:…}` and `${caller:…}`. A reference that arrives through
 conversation data — user input, a model reply, an API response, client context — refuses the call
@@ -72,14 +73,46 @@ reference, so a `${vars:…}` the configuration wrote still resolves through to 
 that arrived through conversation data refuses the call — the check runs again after variable
 expansion, against the configured template expanded the same way.
 
+Because agent-secret grants are checked at **deploy** time, a global variable that resolves to a
+secret can be used to redirect a deployed agent's credentials past that check by editing the
+variable after deployment. To close that, **only an `eddi-admin` may store a global variable whose
+value contains a `${vault:…}`, `${eddivault:…}` or `${connection:…}` reference** — a non-admin
+editor writing such a value is refused with `403`. Plain-literal variables are unaffected, and
+callers on a deployment with authentication disabled are out of scope (there is no editor/admin
+distinction to enforce).
+
 The auto-vaulted-property case rests on **provenance, not on what the value looks like**. A
 `scope: secret` instruction stores its vault reference as an ordinary conversation property, so the
-string `${vault:<agentId>.apiKey}` is one anything that can write a property could produce — a
+string `${vault:<agentId>.u<userHash>.<nonce>.apiKey}` is one anything that can write a property could produce — a
 `valueString` of `{memory.current.input}` and a user who types it, a model reply, an API response
 copied into a property. The property therefore carries an `autoVaulted` marker, written by the
 auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
-present. On top of it the reference must still name this agent and the property the template reads,
-**under this conversation's own tenant**.
+present. On top of it the reference must still name this agent, this user and the property the
+template reads, **under this conversation's own tenant**.
+
+Every auto-vaulted write gets **its own slot**, `<agentId>.u<userHash>.<nonce>.<property>` — the
+user hash is a truncated SHA-256 of the user id (the id itself never enters the vault), the nonce
+makes each write unique. The slot used to be `<agentId>.<property>`, one per agent, so every user and
+conversation of the agent shared it and the last writer's secret was what everyone's reference
+resolved to. Because slots are no longer overwritten they are deleted explicitly: when their
+conversation is permanently deleted, and on GDPR erasure (which reports `autoVaultedSecretsDeleted`).
+Overwriting the property keeps the previous slot, because undo restores the previous reference;
+conversation deletion sweeps every slot the conversation's undo history and redo cache still point
+to. If the vault cannot delete them, the conversation is **not** deleted (the request fails, the
+retention sweep retries on its next run), and a GDPR erasure keeps the user's conversations and
+reports both steps failed — the snapshots are the only record of a custom tenant the slots live
+in, so a retry needs them. A legacy `<agentId>.<property>` reference in an older conversation is
+still accepted, and never deleted by this cleanup — it may back other users' conversations.
+
+The slot shape is **reserved**: the GDPR sweep recognises a user's slots by name, so
+`PUT /secretstore/secrets/{tenant}/{key}` and agent setup's `vaultKeyName` reject a key name in the
+form `<agentId>.u<16 hex>.<12 hex>.<name>` with `400`.
+
+The same rule covers the builder parameters of an LLM task (`modelName`, `baseUrl`, …) and of its
+cascade steps and judge model: they are resolved against the vault after templating, so a reference
+conversation data put into one fails the turn instead of being resolved. A data-supplied
+`${vars:…}` is refused there too, because the registry expands it later. The prompts
+(`systemMessage`, `prompt`) are never resolved and may carry reference-shaped text.
 
 A property with no marker is refused, which includes one stored in a conversation that began before
 this marker existed: an unmarked property and one written from conversation data are the same thing
@@ -91,6 +124,12 @@ A configured reference that **cannot** be resolved — no such secret, the provi
 vault is disabled — also refuses the call, naming the field and the reference. The literal
 `${vault:name}` is never sent as a credential: it would come back as the API's own "invalid key",
 with nothing naming the cause.
+
+The plaintext EDDI substitutes — a vault secret, a connection credential, the caller's token — is
+also removed by value from the response before it reaches conversation memory, template data, the
+LLM tool result or the log. Error bodies are redacted in full. A success body is data, so it is
+handled more carefully: a secret of 8 characters or more is removed from its text, a shorter one only
+where a JSON value is exactly the secret, and a number is never rewritten digit by digit.
 
 The plaintext EDDI substitutes is redacted by value from everything it records about the request:
 the request record in conversation memory, the HITL approval preview and the request log line. The
@@ -108,6 +147,17 @@ Vault references are resolved **at runtime** when the task executes, never store
 5. **Plaintext is NOT stored in memory** — only the vault reference persists
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
+
+## Secrets that belong to a space
+
+With [workspaces](workspaces.md) enforced, writing to the vault stays with
+`eddi-admin` — but every personal and team space also has a tenant of its own,
+which the space's members manage without an administrator
+(`/spacestore/secrets?space=…`, or the Manager's **Workspaces** page). An agent
+references such a secret explicitly, as `${vault:<tenant>/<key>}`, with the
+tenant id every response names. Deploying an agent that references a space's
+tenant requires the deployer to be a member of that space; the grant check below
+applies on top. See [Secrets and variables that belong to a space](workspaces.md#secrets-and-variables-that-belong-to-a-space).
 
 ## Agent Grants (`allowedAgents`)
 
@@ -161,7 +211,50 @@ The deployments that *are* affected have **both** a master key and a grant an op
 references vault secret(s) it is not granted
 ```
 
-Then set `enforce`. To widen a grant instead, add the agent ID to the secret's `allowedAgents` via the [REST API](#rest-api) — or remove the reference from the agent's configuration.
+Then set `enforce`. To widen a grant instead, see below — or remove the reference from the agent's configuration.
+
+### Changing a grant without the secret's value
+
+Use **`PUT /secretstore/secrets/{tenantId}/{keyName}/grant`**. It replaces `allowedAgents` (and optionally the description) and **never touches the encrypted value** — no plaintext is accepted, and none is required:
+
+```bash
+curl -X PUT "$EDDI/secretstore/secrets/default/llm-api-key/grant" \
+  -H 'Content-Type: application/json' \
+  -d '{"allowedAgents": ["0123456789abcdef01234567", "89abcdef0123456789abcdef"]}'
+```
+
+This exists because `PUT /{tenantId}/{keyName}` — the other way to write `allowedAgents` — requires the plaintext value, and **by the time you need to widen a grant the plaintext is gone**, which is the point of having vaulted it. Before this endpoint, adding one agent to a list meant recovering the value from a backup or rotating the key, and the path of least resistance was to grant `["*"]` to everything — throwing away the only control that limits a secret's blast radius. The endpoint is on the same `eddi-admin` role as every other vault endpoint.
+
+Three properties are worth knowing:
+
+- **`allowedAgents` is required and must not be empty.** Unlike the store endpoint, an omitted list is a `400` rather than a silent default to `["*"]`, and so is `[]` — which every other layer reads as "unrestricted": on an edit, a field missing from a JSON body, or a list filtered down to nothing, must not be able to open a narrowed secret to every agent. Send `["*"]` to mean "all agents". A list that mixes the wildcard with agent IDs, such as `["*", "someAgent"]`, is stored as plain `["*"]`, because that is what it already means to the deploy-time check — so a grant never *reads* narrower than it behaves.
+- **Concurrent edits can be refused instead of lost.** Every edit replaces the whole list, so two operators editing from what they each loaded would otherwise overwrite each other without either finding out — the later write quietly reinstating an agent the earlier one removed. Send the list you loaded as `expectedAllowedAgents` and the write is applied only while the grant is still that list (compared as a set; every spelling of the wildcard is equal). Otherwise the answer is **409** with the grant as it now stands, and nothing is written. A dry run checks the precondition too. Omitting the field keeps the old unconditional behaviour.
+- **Absent means null.** Like every EDDI response, fields whose value is null are omitted — a secret that has never been rotated has no `lastRotatedAt` in the response, rather than `"lastRotatedAt": null`.
+- **It is not a rotation.** `createdAt` and `lastRotatedAt` keep their values and the checksum is unchanged; all three are echoed back so you can see that for yourself. The `SecretResolver` cache is deliberately *not* invalidated — the plaintext cannot have changed, and the grant check reads metadata from the store on every call, so the new grant is in force for the very next deployment either way.
+- **Narrowing a grant is reported, not silently applied.** The response lists every *deployed* agent that references the secret and is no longer granted it:
+
+```json
+{
+  "reference": "${vault:llm-api-key}",
+  "tenantId": "default",
+  "keyName": "llm-api-key",
+  "dryRun": false,
+  "allowedAgents": ["0123456789abcdef01234567"],
+  "previousAllowedAgents": ["0123456789abcdef01234567", "89abcdef0123456789abcdef"],
+  "grantsAllAgents": false,
+  "description": "LLM provider key",
+  "createdAt": "2026-03-15T10:30:00Z",
+  "agentsLosingAccessScope": "this-node",
+  "agentsLosingAccess": [
+    { "agentId": "89abcdef0123456789abcdef", "agentVersion": 3, "environment": "production" }
+  ],
+  "warning": "1 deployed agent(s) reference this secret and are not on the new grant list. They keep running — the grant is checked when an agent is deployed, not when a secret is resolved — but under eddi.vault.grant-enforcement=enforce their next deployment will be REFUSED. …"
+}
+```
+
+  Those agents are **not** broken now: the check is a deploy-time gate, so they keep resolving the secret until they are redeployed. What breaks is their *next* deployment, possibly weeks later on a restart nobody connects to the grant edit — which is exactly why it is reported at the moment of the change. Add `?dryRun=true` to get this answer **without writing anything**; that is how the Manager shows the warning before you commit rather than after. Every deployed *version* is considered, not only the latest, since an older version can be the one serving. The list covers the agents deployed on the node you are talking to — the response says so in `agentsLosingAccessScope: "this-node"` — so on a cluster it is indicative rather than exhaustive.
+
+**In the Manager UI:** *Secrets* → the **Allowed Agents** column, or the **Access** action on a row. Agents are picked from a searchable list of the ones that exist (a raw ID can still be typed, for an agent not created yet), and a change that would strip access from a deployed agent shows the warning above and has to be acknowledged before it can be saved.
 
 ## Encryption
 
@@ -184,6 +277,21 @@ database row tells an operator exactly what it means. A tenant holds one DEK row
 generation because [rotation adds one rather than replacing the key](#dek-rotation-is-additive--it-adds-a-generation),
 and ciphertext therefore has to say which key sealed it. A value written before
 generations existed carries no generation and reads as generation 1.
+
+**Ciphertexts are bound to their rows.** A secret is sealed with AES-GCM associated
+data `tenantId|keyName|dekId`, so a ciphertext copied into another row by someone
+with write access to the database fails authentication instead of decrypting as that
+row's value. Rows written before this keep decrypting through a no-AAD fallback, so
+nothing has to be migrated; a DEK rotation re-seals a tenant's secrets in the bound
+form. System values (such as the pinned audit key) are bound to their name and have
+no unbound form. Wrapped DEKs and OAuth connection grants, sealed through `seal()`,
+are not bound.
+
+**The per-deployment salt is created once, by whichever replica gets there first.**
+It is written with an insert-if-absent and every other replica adopts the winner, so
+two replicas booting against an empty database cannot each derive their KEK from a
+different salt. A salt that cannot be read fails the start: falling back to the
+legacy salt on a deployment that has a random one derives the wrong KEK.
 
 ### Configuration
 
@@ -245,7 +353,7 @@ eddi.vault.grant-enforcement=enforce
 eddi.setup.vault-key-reuse=checksum
 ```
 
-> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, `POST /secretstore/secrets/{tenantId}/reset` (see [REST API](#rest-api)) clears the unrecoverable entries so the tenant can start fresh.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset` clears each tenant's unrecoverable entries so it can start fresh.
 
 ## Secret Input (Agent Conversations)
 
@@ -255,17 +363,33 @@ Agents can request secret input from users (e.g., API keys during setup). The fl
 
 When a property has `scope: secret`:
 
-1. **PropertySetterTask** detects `scope == secret` on the property instruction
-2. The raw value is immediately stored in the vault via `ISecretProvider.store()`
+1. **`SecretPropertyVault`** (used by `PropertySetterTask` and by the httpcall / MCP / LLM property instructions) detects `scope == secret`
+2. The raw value is immediately stored in the vault via `ISecretProvider.store()`, in a slot of its own (`<agentId>.u<userHash>.<nonce>.<name>`)
 3. A vault reference (`${vault:...}`) replaces the plaintext in memory
-4. The raw `input:initial` entry is scrubbed from the conversation step
+4. The raw `input:initial` entry, and any other copy in the conversation step, is scrubbed
 
 When the **client flags input as secret** (via the `secretInput` context key):
 
 1. `Conversation.isSecretInputFlagged()` checks for `{"secretInput": {"type": "string", "value": "true"}}` in the context map
 2. `storeUserInputInMemory()` replaces the display value with `<secret input>` in conversation output
-3. The actual plaintext still flows through lifecycle data so `PropertySetterTask` can vault it
-4. The conversation log and API responses show `<secret input>` — **plaintext is never persisted**
+3. The actual plaintext still flows through lifecycle data for the whole turn, so tasks — the parser, `PropertySetterTask` — can use or vault it
+4. When the turn ends (completed, stopped, paused or failed), `Conversation.scrubSecretClientInput()`:
+   - replaces `input:initial` and `input:normalized` with `<secret input>`;
+   - clears the parsed expressions and intents derived from the input;
+   - re-asserts `<secret input>` as the displayed `input` (the parser overwrites it with the normalized text mid-turn);
+   - removes the raw and normalized text from every other datum and output of the step, and from the pending tool-call batch of a tool-call pause — the transcript the model saw, the gated call's arguments and the redacted arguments an approver is shown. A form of 4+ characters is removed wherever it occurs; a shorter one (a 3-digit PIN) only where it stands as a **whole token** — no letter or digit directly before or after it — so "PIN 739 saved" loses the PIN while "order 17391" keeps its digits. The whole-token pass changes values only, **never map keys**: a short secret is often also a field name (`id`, `to`), and renaming it would corrupt the turn's stored API responses and output items.
+
+   This runs in the turn's `finally`, before the audit flush. The audit ledger records the placeholder as the user input and redacts both forms (4+ characters) from every entry of the turn.
+5. So, for turns run on this version, the stored step, the pending approval, API responses, the streamed `done` frame and the audit ledger show `<secret input>`. Clients can rely on the turn output's `input` being the **masked display copy**.
+6. **Turns stored before this version** still hold the raw `input:initial` and the parser's normalized copy in the database. They are masked **on read**: every secret turn carries `context.secretInput == "true"`, and conversation reads (REST, MCP, the `done` frame) replace `input`, `input:initial`, `input:normalized` and `expressions:parsed` for such a turn, clear its other parser results, and remove the raw and normalized text (4+ characters) from every other step result and output value they return for it — an output item that echoed the input included. A `returnDetailed` read additionally drops internal keys (`audit:*`, `*:trace:*`, `*Error`), runs every value through the secret redaction filter and masks everything under a credential-named key (`apiKey`, `token`, `secret`, `password`, `authorization`), for every turn, secret or not. Conversation properties are not masked as part of a secret turn (see **Not scrubbed** below); in a `returnDetailed` read only that credential-name masking applies to them. The stored document itself is not rewritten, and the audit entries of those old turns are unchanged.
+
+**Why four characters.** Where a form *is* the input (`input:initial`, `input:normalized`, the displayed `input`) it is replaced whatever its length. Elsewhere it has to be found by searching. From four characters every occurrence is replaced — inside longer words too, and in map keys as well as values of the turn. A 4-digit PIN or a short password is what a password field carries, so the substring search starts there; below that, replacing every "ok" or "7" inside other words and numbers would shred the turn's reply and rename the fields of its stored API responses and output items. A shorter form is therefore searched for only as a whole token and only in values, which removes a PIN echoed into the reply without touching "17391" or a field named `id`. The audit ledger and the read-time masking of older turns use the 4-character substring search only. Secret *context* values keep their own 8-character floor ([Secret Context Values](passing-context-information.md#secret-context-values)).
+
+**Not scrubbed:** a conversation property the agent designer captured the input into (`{memory.current.input}`, the wizard pattern), and its `properties:*` step mirror — neither at turn end nor on read. Keeping it is the designer's explicit choice; give the property the `secret` scope to have it vaulted instead.
+
+**HITL resume sees the placeholder.** Everything after a pause of a secret turn — a RULE pause (`PAUSE_CONVERSATION`) or a tool-call pause — runs after the scrub. A tool approved on resume executes with `<secret input>` where the secret was, and a property setter that runs after the resume reads `<secret input>` from `{memory.current.input}`. `PropertySetterTask` does not store or vault that placeholder: it logs a warning and leaves the property unset. Capture a secret input **before** any rule that pauses the turn.
+
+**A resume cannot search for the secret.** The resume is a later request, and the plaintext is not kept past the pause — not in the conversation document, not in the resume bookmark, not as a hash (a hash of a PIN or short password stored beside the conversation is reversed offline in seconds, and a hash cannot be searched for inside a longer text anyway). The resumed turn's audit entries record the placeholder as the input, because the step was scrubbed at the pause. What a resumed task *reintroduces* is not redacted — from the ledger or from the stored step: a value copied out of a conversation property that captured the input (the designer's choice above), or a tool or API result that happens to contain it. Give a property that must never reappear the `secret` scope.
 
 When the **client sends a credential as context** — for example the caller's token for a
 downstream API — it marks that context entry `"secret": true`. The value works for that one
@@ -354,7 +478,7 @@ One provider key usually serves many agents, so setup avoids storing it many tim
 | `apiKey: "${vault:openai-prod}"` | Used as-is, never re-vaulted. Surrounding whitespace is trimmed first, so a pasted reference still counts as one. If the key does not exist the setup still succeeds (you may vault it afterwards) but a warning is logged — the agent cannot resolve its credential until it does. |
 | `apiKey: "sk-…"` (plaintext) | Reused if the vault already holds that exact value, otherwise stored under a generated name. |
 
-Plaintext reuse is matched on the SHA-256 checksum the vault already stores per entry — nothing is decrypted to make the decision — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
+Plaintext reuse is matched on the keyed checksum the vault stores per entry — nothing is decrypted to make the decision, and the match is performed by the vault provider (which holds the checksum key) rather than by recomputing a digest in the setup code — and only entries with `allowedAgents` unset or `["*"]` are candidates, since referencing a narrowed grant from a new agent produces a config that [grant enforcement](#agent-grants-allowedagents) rejects at deploy time. When several entries match, the oldest wins, so repeated setups converge on one entry rather than depending on listing order.
 
 Set `eddi.setup.vault-key-reuse=never` to switch plaintext reuse off and give every agent its own entry again — appropriate when two agents hold the same-valued key today but must be able to rotate independently. Neither setting affects the first two rows above: those are explicit caller decisions. Any other value fails startup, as `eddi.vault.grant-enforcement` does — a typo must not silently switch de-duplication off.
 
@@ -388,7 +512,7 @@ A setup that fails part-way rolls back the documents it created. It also removes
 
 A generated vault key is named `setup.<agent>.<timestamp>-<random>.apiKey`. The timestamp alone was not sufficient: two setups for agents with the same name landing in the same millisecond produced the same name, and `store` is an upsert, so one silently overwrote the other's credential. The random suffix is what makes the name unique; the timestamp is kept because it tells you when the entry was made.
 
-A **caller-chosen** `vaultKeyName` has no such suffix, by design — that is the point of naming it. Creating one is read-then-write rather than a conditional insert, so two setups naming the same new key with different values can race; the loser is detected on read-back and fails before anything is created, but a write landing after that read is not caught (an atomic create-if-absent for the vault SPI is tracked in [issue #700](https://github.com/labsai/EDDI/issues/700)). Prefer creating a shared key through the secrets REST API first, then naming it.
+A **caller-chosen** `vaultKeyName` has no such suffix, by design — that is the point of naming it. Creating one uses `ISecretProvider.storeIfAbsent`, an atomic create-if-absent (`INSERT … ON CONFLICT DO NOTHING` on PostgreSQL, an `insertOne` under the unique `(tenantId, keyName)` index on MongoDB), so two setups naming the same new key cannot overwrite each other: exactly one creates it. The other reuses the entry when it holds the same value, and fails — before anything is created — when it holds a different one. `store` stays the explicit upsert for rotation and the secrets REST API.
 
 ### Graceful Degradation
 
@@ -409,6 +533,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | Method   | Path                         | Description                                            |
 | -------- | ---------------------------- | ------------------------------------------------------ |
 | `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …}`) |
+| `PUT`    | `/{tenantId}/{keyName}/grant` | Replace `allowedAgents` (and optionally the description) **without** the value — see [Changing a grant](#changing-a-grant-without-the-secrets-value). `?dryRun=true` previews the impact without writing |
 | `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
 | `GET`    | `/{tenantId}/{keyName}`      | Get secret **metadata only** (never returns plaintext) |
 | `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
@@ -416,12 +541,13 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
 | `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
+| `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
-> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`, `checksum`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API.
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
-**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list (`allowedAgents` defaults to `["*"]` when omitted):
+**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list. On a **create**, an omitted `allowedAgents` defaults to `["*"]`. On an **update** — rotating the value — an omitted `allowedAgents` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
 
 ```json
 {
@@ -449,11 +575,12 @@ It returns the vault reference:
     "tenantId": "default",
     "keyName": "apiKey",
     "createdAt": "2026-03-15T10:30:00Z",
-    "lastAccessedAt": "2026-03-16T14:00:00Z",
-    "checksum": "a1b2c3d4..."
+    "lastAccessedAt": "2026-03-16T14:00:00Z"
   }
 ]
 ```
+
+> The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response.
 
 **`GET /health`** — returns vault provider status:
 
@@ -569,9 +696,101 @@ generation for every future rotation as well.
   leaving one behind on the old KEK is exactly the orphaned-key failure generations
   exist to prevent.
 - Secret ciphertexts are NOT modified — only DEK wrappers change
-- Requires an application restart with the new `EDDI_VAULT_MASTER_KEY` after rotation
-- Verify-then-commit: every DEK is decrypted and re-encrypted in memory before any
-  write occurs, so a wrong old key fails before it can half-rewrite the set
+- Requires restarting **every** replica with the new `EDDI_VAULT_MASTER_KEY` after
+  rotation. Until then, the other replicas cannot open the re-wrapped DEKs and refuse
+  to create new ones (see below) rather than wrap them under the retired key.
+
+A new master key the production startup gate would reject is refused before anything
+is written (`eddi.vault.allow-weak-master-key` lets a deployment *boot* on a weak key
+to rotate off it, never rotate onto one). The rotation cannot be made atomic, so it
+rolls back what it can and is ordered so that whatever it cannot roll back, a
+**re-run with the same two keys** completes:
+
+1. **New salt first.** A deployment still on the legacy salt migrates to a random one
+   during the rotation, and that salt is persisted as *pending* before anything is
+   wrapped under it. It used to exist only in memory until the end, so a failure
+   half-way left DEKs wrapped under a KEK nobody could derive again.
+2. **Verify** — every DEK, and the keyed-checksum key, must open with the old KEK *or
+   the new one*; the second is what an interrupted run leaves behind. Anything that
+   opens with neither stops the rotation before anything is written.
+3. **Announce** — the vault's KEK check value is switched to the new KEK *before* any
+   DEK is re-wrapped. A replica still on the old master key checks it before wrapping
+   a new DEK and refuses, so no new tenant's key is wrapped under a KEK that is on its
+   way out.
+4. **Re-wrap** each DEK, guarded on the wrapping it was read with, then sweep again
+   for a DEK another replica created in the meantime, then re-wrap the checksum key
+   (so every stored keyed checksum keeps verifying).
+5. **Promote** the pending salt.
+
+A failure in step 3 or 4 rolls every DEK this run re-wrapped back to the old KEK and
+restores the check value, so the vault is still readable under the master key it is
+configured with, and the answer says the rotation can simply be retried. Only if that
+rollback cannot finish either (the store is down) does the announcement stay: every
+DEK then opens with one of the two keys, and the answer says re-running completes
+the rotation. A failure in step 5 leaves every DEK on the new key and the pending
+salt persisted; a re-run only promotes it. A replica restarted part-way
+through with the new master key opens DEKs under either KEK and wraps new ones under
+the new one. A DEK it cannot open — one the rotation did not reach, still under the
+previous key — fails with a message saying to re-run the rotation, and does **not**
+offer a tenant reset while a salt migration is pending: one re-run recovers it.
+
+If a legacy-salt migration was interrupted after step 3 and the nodes were restarted
+with the new key, everything keeps working and the unfinished rotation is easy to
+forget. A later rotation from that key to another still succeeds when every DEK was
+reached (DEKs under the pending salt are recognised). If some DEK was not reached, it
+is still under the key before that, and the rotation refuses with a message saying
+to finish the earlier rotation first — from the previous key to the current one.
+
+A node that is about to wrap a new DEK checks the KEK check value both before and
+after inserting it. A node that stalled across a rotation's announcement takes the
+DEK it just inserted back out, before anything is sealed with it, and fails the
+request. Otherwise a stale replica could leave a DEK — and, during a DEK rotation,
+every secret swept onto it — under a KEK nobody runs any more.
+
+#### Lost master key
+
+The KEK check value records which KEK the vault uses, and every node refuses to wrap
+a new DEK under any other. That is what protects a rotation from replicas still on
+the retired key. From a node's point of view, though, a replica that simply has not
+been restarted with a rotated key looks exactly like an operator who lost the old
+key and configured a new one. After a lost key, every new secret for every tenant is
+refused until the operator decides which case applies. That decision cannot be made
+automatically.
+
+When the previous master key is **gone for good**:
+
+1. Start EDDI with the new `EDDI_VAULT_MASTER_KEY`.
+2. `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`. This does the
+   following:
+   - re-announces the check value with the configured key;
+   - if the reserved `__eddi-system` tenant's DEKs no longer open, discards them and
+     every sealed system value (the audit ledger pins a new key — see
+     [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation)), and likewise the
+     keyed-checksum key if it no longer unwraps (`checksumKeyReset`; a new one is
+     created on the next store);
+   - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
+3. `POST /secretstore/secrets/{tenantId}/reset` for each of them, then store the
+   secrets again.
+
+Never call it while a KEK rotation is merely unfinished, or because one replica was
+not restarted: in both cases the previous key still exists and `rotate-kek`
+recovers everything. Adopting the wrong key makes every other replica refuse new
+DEKs instead.
+
+One case needs no call. A vault that holds no DEKs at all — started once with one
+key, restarted with another before anything was stored — adopts the configured key
+at startup, because nothing can be stranded.
+
+#### Resetting a tenant
+
+`POST /{tenantId}/reset` deletes every secret and every DEK generation of the tenant,
+and — before the DEKs go — everything else sealed with them, such as the tenant's
+[OAuth connection grants](connections.md); their users reconnect. Left in place those
+values were not merely unreadable: the tenant's next DEK is generation 1 again, with
+the same `dekId`, so every later read opened them with the wrong key and failed
+authentication on every request. If discarding them fails, the reset stops with the
+DEKs still in place and can be re-run. The reserved tenant `__eddi-system`, which
+seals EDDI's own system values (the audit ledger's pinned key), cannot be reset.
 
 #### Schema
 
@@ -615,6 +834,7 @@ The vault emits metrics under the `eddi.vault.*` namespace for Grafana/Prometheu
 | `eddi.vault.store.count`     | Counter | Total store operations                     |
 | `eddi.vault.delete.count`    | Counter | Total delete operations                    |
 | `eddi.vault.rotate.count`    | Counter | Total rotation operations (DEK + KEK)      |
+| `eddi.vault.grant.update.count` | Counter | Successful grant edits (`PUT …/grant`) — counted apart from stores so a spike in widening is visible |
 | `eddi.vault.errors.count`    | Counter | Total error count (persistence + crypto)   |
 | `eddi.vault.resolve.duration`| Timer   | Duration of resolve operations             |
 | `eddi.vault.store.duration`  | Timer   | Duration of store operations               |
@@ -626,7 +846,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 ### Features
 
 - **Namespace filtering** — select tenant ID to scope the view
-- **Secrets table** — displays `keyName`, `createdAt`, `lastAccessedAt`, and `checksum` (truncated)
+- **Secrets table** — displays `keyName`, `createdAt`, and `lastAccessedAt` (the checksum is internal and not returned over the API)
 - **Add Secret** — dialog with masked password input (eye toggle, `autoComplete="new-password"`)
 - **Delete Secret** — confirmation dialog before permanent deletion
 - **Vault Health** — live status badge showing vault online/offline state

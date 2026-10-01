@@ -7,7 +7,13 @@ export interface CurrentScreenContext {
   screen: string;
   agentId?: string;
   workflowId?: string;
-  groupId?: string;
+  /**
+   * Not `groupId`: that is an engine-reserved context key
+   * (`ClientContextGuard.RESERVED_KEYS`), stripped from every client-started turn
+   * because the orchestrator trusts it to mean "this conversation runs inside
+   * group X". The admin merely LOOKING at a group must not claim that.
+   */
+  viewedGroupId?: string;
   channelId?: string;
   conversationId?: string;
   resourceType?: string;
@@ -46,7 +52,7 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
   { pattern: "/manage/resources", screen: "resources" },
 
   { pattern: "/manage/groups/wizard", screen: "group-wizard" },
-  { pattern: "/manage/groups/:id", screen: "group-detail", params: { id: "groupId" } },
+  { pattern: "/manage/groups/:id", screen: "group-detail", params: { id: "viewedGroupId" } },
   { pattern: "/manage/groups", screen: "groups" },
 
   { pattern: "/manage/agents/wizard", screen: "agent-wizard" },

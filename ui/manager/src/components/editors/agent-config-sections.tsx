@@ -17,9 +17,10 @@ import {
   Trash2,
   AlertTriangle,
   Search,
-  HandMetal,
+  Hand,
+  NotebookPen,
 } from "lucide-react";
-import { useUpdateAgent } from "@/hooks/use-agents";
+import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
 import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
@@ -132,7 +133,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [pendingFlag, setPendingFlag] = useState<typeof INERT_SECURITY_FLAGS[number] | null>(null);
   const [securityError, setSecurityError] = useState<string | null>(null);
 
@@ -614,7 +615,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [newSkill, setNewSkill] = useState("");
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
@@ -764,7 +765,7 @@ export const UserMemorySection = memo(function UserMemorySection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const enabled = agent.enableMemoryTools ?? false;
   const cfg = agent.userMemoryConfig ?? {};
@@ -808,7 +809,7 @@ export const UserMemorySection = memo(function UserMemorySection({
             disabled={updateAgent.isPending}
             className="h-3.5 w-3.5 rounded border-input accent-primary"
           />
-          <Brain className="h-3.5 w-3.5 text-teal-500" />
+          <NotebookPen className="h-3.5 w-3.5 text-teal-500" />
           {t("agentDetail.enableMemoryTools", "Enable Memory Tools")}
         </label>
 
@@ -933,7 +934,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
-                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
@@ -982,7 +983,7 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const policy = agent.memoryPolicy ?? {};
   const swd = policy.strictWriteDiscipline ?? {};
@@ -1067,7 +1068,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const hitl: AgentHitlConfig = agent.hitlConfig ?? {};
   const enabled = !!agent.hitlConfig;
@@ -1110,7 +1111,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   return (
     <EditorSection
       label={t("agentDetail.hitlConfig", "Human-in-the-Loop")}
-      icon={HandMetal}
+      icon={Hand}
       accent="text-amber-500"
       variant="card"
       defaultOpen={enabled}
@@ -1259,7 +1260,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const sm = agent.sessionManagement ?? {};
   const snap = sm.autoSnapshot ?? {};
@@ -1725,7 +1726,7 @@ export const ChannelsSection = memo(function ChannelsSection({
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
+  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const channels: ChannelConnector[] = agent.channels ?? [];
   const slackChannels = channels.filter((c) => c.type === "slack");

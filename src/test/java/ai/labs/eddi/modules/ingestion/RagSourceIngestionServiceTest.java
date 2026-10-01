@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.ingestion;
 
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
+import ai.labs.eddi.modules.ingestion.files.InMemoryIngestedFileStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -18,18 +19,38 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,6 +68,7 @@ class RagSourceIngestionServiceTest {
     private InMemoryIngestionStateStore stateStore;
     private IScheduleStore scheduleStore;
     private IRagStore ragStore;
+    private InMemoryIngestedFileStore fileStore;
     private RagSourceIngestionService service;
 
     @BeforeEach
@@ -55,11 +77,15 @@ class RagSourceIngestionServiceTest {
         stateStore = new InMemoryIngestionStateStore();
         scheduleStore = mock(IScheduleStore.class);
         ragStore = mock(IRagStore.class);
-        service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore);
+        fileStore = new InMemoryIngestedFileStore();
+        service = new RagSourceIngestionService(pipeline, stateStore, scheduleStore, ragStore, fileStore);
         // The reservation is the real one, against the real store: with a bare mock it
         // returns an empty Optional and every runAsync assertion below passes for the
         // wrong reason.
         when(pipeline.reserveRun(anyString(), any())).thenAnswer(invocation -> stateStore
+                .startRun(IngestionPipeline.stateKey(invocation.getArgument(0), invocation.getArgument(1))));
+        // The maintenance claim too: a purge is decided under it.
+        when(pipeline.claimForMaintenance(anyString(), any())).thenAnswer(invocation -> stateStore
                 .startRun(IngestionPipeline.stateKey(invocation.getArgument(0), invocation.getArgument(1))));
     }
 
@@ -73,6 +99,103 @@ class RagSourceIngestionServiceTest {
         source.setWeb(web);
         source.setCron(cron);
         return source;
+    }
+
+    @Nested
+    @DisplayName("a run whose process died")
+    class AbandonedRuns {
+
+        private String runStartedAgo(Duration ago) {
+            String runId = stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source(null))).orElseThrow();
+            stateStore.backdateRun(runId, Instant.now().minus(ago));
+            return runId;
+        }
+
+        /**
+         * Observed live: a crawl killed by a restart stayed RUNNING in the history an
+         * hour after its 25-minute threshold, because only claiming a new run reaped.
+         */
+        @Test
+        @DisplayName("reads as failed in the history once past the stale threshold, without a new run")
+        void historyShowsItFailed() {
+            String runId = runStartedAgo(Duration.ofHours(1));
+
+            var runs = service.listRuns(KB_ID, source(null), 20);
+
+            assertEquals(1, runs.size());
+            assertEquals(runId, runs.getFirst().runId());
+            assertEquals(IIngestionStateStore.IngestionRun.Status.FAILED, runs.getFirst().status());
+            assertTrue(runs.getFirst().error().contains("abandoned"), runs.getFirst().error());
+        }
+
+        /** activeRun is the guard purge and file delete answer 409 on. */
+        @Test
+        @DisplayName("no longer counts as active, so purge and file delete are not refused")
+        void noLongerActive() {
+            runStartedAgo(Duration.ofHours(1));
+
+            assertTrue(service.activeRun(KB_ID, source(null)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a run inside its time budget is left running")
+        void liveRunUntouched() {
+            String runId = runStartedAgo(Duration.ofMinutes(5));
+
+            assertEquals(runId, service.activeRun(KB_ID, source(null)).orElseThrow().runId());
+            assertEquals(IIngestionStateStore.IngestionRun.Status.RUNNING,
+                    service.listRuns(KB_ID, source(null), 20).getFirst().status());
+        }
+
+        @Test
+        @DisplayName("the threshold follows the source's own time budget")
+        void thresholdFollowsTheBudget() {
+            var longRunning = source(null);
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTimeBudgetMinutes(180);
+            longRunning.setSettings(settings);
+            String runId = stateStore.startRun(IngestionPipeline.stateKey(KB_ID, longRunning)).orElseThrow();
+            stateStore.backdateRun(runId, Instant.now().minus(Duration.ofHours(1)));
+
+            assertEquals(runId, service.activeRun(KB_ID, longRunning).orElseThrow().runId(),
+                    "an hour into a three-hour budget is a slow run, not a dead one");
+        }
+
+        /**
+         * The claim records the deadline from the budget the run started under. A read
+         * judged it by the source's current settings instead — lowering the budget
+         * mid-run declared the live run dead, and purge and file delete could then
+         * proceed underneath its worker.
+         */
+        @Test
+        @DisplayName("lowering the budget mid-run does not have the live run reaped")
+        void loweredBudgetDoesNotReapALiveRun() {
+            String runId = stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source(null)),
+                    Instant.now().plus(Duration.ofMinutes(180 + 15))).orElseThrow();
+            stateStore.backdateRun(runId, Instant.now().minus(Duration.ofMinutes(20)));
+            var lowered = source(null);
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTimeBudgetMinutes(1);
+            lowered.setSettings(settings);
+
+            assertEquals(runId, service.activeRun(KB_ID, lowered).orElseThrow().runId());
+        }
+
+        @Test
+        @DisplayName("a reap that fails does not fail the read")
+        void failingReapDoesNotBreakTheRead() {
+            var failing = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized int reapStaleRuns(String sourceId, Instant startedBefore) {
+                    throw new IngestionStateStoreException("store unavailable", new RuntimeException());
+                }
+            };
+            var withFailingStore = new RagSourceIngestionService(pipeline, failing, scheduleStore, ragStore, fileStore);
+            failing.startRun(IngestionPipeline.stateKey(KB_ID, source(null)));
+
+            assertEquals(1, assertDoesNotThrow(() -> withFailingStore.listRuns(KB_ID, source(null), 20)).size());
+            assertTrue(assertDoesNotThrow(() -> withFailingStore.activeRun(KB_ID, source(null))).isPresent());
+        }
     }
 
     private static RagConfiguration knowledgeBase(IngestionSource... sources) {
@@ -101,6 +224,33 @@ class RagSourceIngestionServiceTest {
             assertTrue(RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata()));
             assertEquals(KB_ID, RagIngestionSchedules.ragConfigId(schedule.getMetadata()));
             assertEquals(SOURCE_ID, RagIngestionSchedules.sourceId(schedule.getMetadata()));
+        }
+
+        @Test
+        @DisplayName("a cron more frequent than the deployment allows is refused, naming the source")
+        void refusesACronBelowTheMinimumInterval() {
+            // Ingestion schedules are written to the store directly, not through the
+            // schedule API that enforces eddi.schedule.min-interval-seconds — so the
+            // operator's minimum held for every schedule but these.
+            service.minIntervalSeconds = 3600;
+            var knowledgeBase = knowledgeBase(source("*/5 * * * *"));
+
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> service.requireAllowedIntervals(knowledgeBase));
+
+            assertTrue(failure.getMessage().contains("docs"), failure.getMessage());
+            assertTrue(failure.getMessage().contains("min-interval-seconds"), failure.getMessage());
+            assertDoesNotThrow(() -> service.requireAllowedIntervals(knowledgeBase(source("0 2 * * *"))));
+        }
+
+        @Test
+        @DisplayName("a writer that skipped the check still does not get a too-frequent schedule")
+        void syncSkipsACronBelowTheMinimumInterval() throws Exception {
+            service.minIntervalSeconds = 3600;
+
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source("*/5 * * * *")), Set.of());
+
+            verify(scheduleStore, never()).createSchedule(any());
         }
 
         @Test
@@ -248,21 +398,460 @@ class RagSourceIngestionServiceTest {
         }
     }
 
+    /**
+     * The rows {@code createSchedule} was handed, and what {@code findDueSchedules}
+     * would make of them.
+     *
+     * <p>
+     * The filter below is the one both stores run, transcribed: {@code enabled =
+     * true AND nextFire <= now AND fireStatus = PENDING}. It is spelled out here
+     * rather than mocked away because the whole defect lives in that comparison — a
+     * schedule created without a {@code nextFire} is stored looking enabled and is
+     * never selected, on either backend, for ever.
+     */
+    private static final class StoredSchedules {
+
+        private final List<ScheduleConfiguration> rows = new ArrayList<>();
+
+        String record(ScheduleConfiguration schedule) {
+            schedule.setId(UUID.randomUUID().toString());
+            rows.add(schedule);
+            return schedule.getId();
+        }
+
+        ScheduleConfiguration only() {
+            assertEquals(1, rows.size(), "expected exactly one schedule to have been created");
+            return rows.get(0);
+        }
+
+        List<ScheduleConfiguration> due(Instant now) {
+            return rows.stream()
+                    .filter(row -> row.isEnabled()
+                            && row.getNextFire() != null
+                            && !row.getNextFire().isAfter(now)
+                            && row.getFireStatus() == ScheduleConfiguration.FireStatus.PENDING)
+                    .toList();
+        }
+    }
+
+    private StoredSchedules recordingStore() throws Exception {
+        var stored = new StoredSchedules();
+        when(scheduleStore.createSchedule(any()))
+                .thenAnswer(invocation -> stored.record(invocation.getArgument(0)));
+        return stored;
+    }
+
+    @Nested
+    @DisplayName("arming the schedule")
+    class Arming {
+
+        @Test
+        @DisplayName("a source with a cron is due once its fire time arrives")
+        void scheduledSourceBecomesDue() throws Exception {
+            var stored = recordingStore();
+
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source("0 2 * * *")), Set.of());
+
+            ScheduleConfiguration schedule = stored.only();
+            Instant fireTime = schedule.getNextFire();
+            assertNotNull(fireTime, "a schedule stored without a next fire time can never be selected by a poll");
+            assertTrue(stored.due(fireTime.minusSeconds(60)).isEmpty(), "it must not be due before its time");
+            assertEquals(List.of(schedule), stored.due(fireTime),
+                    "the schedule must come back from findDueSchedules once its time arrives");
+            assertEquals(List.of(schedule), stored.due(fireTime.plusSeconds(3600)),
+                    "a poll that ran late must still find it");
+        }
+
+        @Test
+        @DisplayName("the fire time is the cron read in UTC, and the schedule says so")
+        void armedInUtc() throws Exception {
+            // The poller re-arms in resolveTimeZone(schedule.getTimeZone()), which falls
+            // back to eddi.schedule.default-timezone. Leaving the zone unset would mean
+            // the first fire and every later one were computed in different zones on any
+            // deployment that sets it.
+            var stored = recordingStore();
+
+            service.syncSchedules(KB_ID, 1, knowledgeBase(source("0 2 * * *")), Set.of());
+
+            ScheduleConfiguration schedule = stored.only();
+            assertEquals("UTC", schedule.getTimeZone());
+            var fireTime = schedule.getNextFire().atZone(ZoneId.of("UTC"));
+            assertEquals(2, fireTime.getHour());
+            assertEquals(0, fireTime.getMinute());
+            assertTrue(schedule.getNextFire().isAfter(Instant.now()), "the first fire is in the future");
+        }
+
+        @Test
+        @DisplayName("a cron that can never match is refused rather than stored unfired")
+        void unsatisfiableCronIsRefused() throws Exception {
+            // "0 0 30 2 *" parses — CronParser.validate accepts it — and matches no day
+            // in any year. Stored, it is a source that shows as scheduled for ever.
+            var source = source("0 0 30 2 *");
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.syncSchedules(KB_ID, 1, knowledgeBase(source), Set.of()));
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("startup repair of schedules stored before they were armed")
+    class StartupRepair {
+
+        private ScheduleConfiguration unarmedIngestionSchedule() {
+            var schedule = new ScheduleConfiguration();
+            schedule.setId("sched-1");
+            schedule.setName(RagIngestionSchedules.scheduleName(KB_ID, SOURCE_ID));
+            schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
+            schedule.setCronExpression("0 2 * * *");
+            schedule.setEnabled(true);
+            schedule.setMetadata(RagIngestionSchedules.metadata(KB_ID, 1, SOURCE_ID));
+            return schedule;
+        }
+
+        private void storeHolds(ScheduleConfiguration... schedules) throws Exception {
+            when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+                    .thenAnswer(invocation -> (int) invocation.getArgument(1) == 0
+                            ? List.of(schedules)
+                            : List.of());
+            // The conditional write succeeds by default — Mockito's own default for a
+            // boolean is false, which would model a store where every node always
+            // loses the race and nothing is ever armed. The test that cares about
+            // losing it overrides this.
+            when(scheduleStore.armIfUnarmed(anyString(), any())).thenReturn(true);
+        }
+
+        @Test
+        @DisplayName("an ingestion schedule with no fire time is given one")
+        void armsTheBrokenRow() throws Exception {
+            storeHolds(unarmedIngestionSchedule());
+
+            service.repairUnarmedSchedules();
+
+            ArgumentCaptor<Instant> fireTime = ArgumentCaptor.forClass(Instant.class);
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), fireTime.capture());
+            assertNotNull(fireTime.getValue());
+            assertEquals(2, fireTime.getValue().atZone(ZoneId.of("UTC")).getHour());
+        }
+
+        @Test
+        @DisplayName("the write is conditional, so a second node cannot move a fire time already set")
+        void armsOnlyWhileStillUnarmed() throws Exception {
+            // Each node computes its own occurrence from its own clock, so across a
+            // cron boundary they differ — an unconditional write let the slower node
+            // replace the earlier fire with the later one and skip it. The condition
+            // belongs in the store's predicate, which is the only place both nodes
+            // meet.
+            storeHolds(unarmedIngestionSchedule());
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), any());
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("running it again changes nothing, because nothing is unarmed any more")
+        void isIdempotent() throws Exception {
+            var repaired = unarmedIngestionSchedule();
+            repaired.setNextFire(Instant.now().plusSeconds(3600));
+            storeHolds(repaired);
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("schedules that are not this feature's are left alone")
+        void leavesOtherSchedulesAlone() throws Exception {
+            var foreign = unarmedIngestionSchedule();
+            foreign.setMetadata(Map.of("hitlType", "hitl_timeout"));
+            var disabled = unarmedIngestionSchedule();
+            disabled.setId("sched-2");
+            disabled.setEnabled(false);
+            var cronless = unarmedIngestionSchedule();
+            cronless.setId("sched-3");
+            cronless.setCronExpression(null);
+            storeHolds(foreign, disabled, cronless);
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a store that cannot be read does not stop the application starting")
+        void survivesAStoreFailure() throws Exception {
+            when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+                    .thenThrow(new IResourceStore.ResourceStoreException("nope"));
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).armIfUnarmed(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("the sweep can be turned off")
+        void canBeDisabled() throws Exception {
+            service.scheduleRepairEnabled = false;
+            storeHolds(unarmedIngestionSchedule());
+
+            service.repairUnarmedSchedules();
+
+            verify(scheduleStore, never()).readAllSchedules(anyInt(), anyInt(), anyBoolean());
+            assertFalse(service.scheduleRepairEnabled);
+        }
+
+        /**
+         * Review finding (Copilot, #818): the listing this sweep walks is a snapshot,
+         * and {@code setScheduleEnabled} overwrote {@code nextFire} unconditionally.
+         * Two nodes booting together both see the row as unarmed, and the slower one's
+         * later {@code Instant.now()} replaced the first node's occurrence with the
+         * following one — a skipped fire. The condition now lives in the store's write
+         * predicate, so the second node's write matches nothing and it is told so.
+         */
+        @Test
+        @DisplayName("a row another node armed while the sweep was listing is left alone")
+        void doesNotOverwriteARowAnotherNodeAlreadyArmed() throws Exception {
+            storeHolds(unarmedIngestionSchedule());
+            // What the store reports when its "still unarmed" predicate matched nothing
+            // — the row acquired a fire time between the listing and this write.
+            when(scheduleStore.armIfUnarmed(anyString(), any())).thenReturn(false);
+
+            var result = assertDoesNotThrow(() -> service.repairUnarmedSchedules());
+
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+            assertEquals(0, result.armed(),
+                    "a row somebody else armed is not one this sweep repaired, and counting it would "
+                            + "report work that did not happen");
+            assertTrue(result.complete(), "losing the race is not a reason to call the sweep unfinished");
+        }
+
+        /**
+         * Review finding (Copilot, #818): the page bound is a deliberate safety limit,
+         * but it used to stop the walk without saying so — an operator read "armed 12
+         * schedules" and could not tell a finished repair from one that stopped a page
+         * short of the row they were waiting on.
+         */
+        @Test
+        @DisplayName("stopping at the page bound is reported, not swallowed")
+        void aTruncatedSweepSaysSo() throws Exception {
+            var armed = unarmedIngestionSchedule();
+            armed.setNextFire(Instant.now().plusSeconds(3600));
+            // Every page full, for ever: the walk can only end at its own bound.
+            when(scheduleStore.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(Collections.nCopies(RagSourceIngestionService.REPAIR_PAGE_SIZE, armed));
+
+            var result = service.repairUnarmedSchedules();
+
+            assertFalse(result.complete(),
+                    "the sweep stopped at its own bound rather than at the end of the data, and the "
+                            + "difference is the whole point: rows beyond it were never examined");
+            verify(scheduleStore, times(RagSourceIngestionService.REPAIR_MAX_PAGES))
+                    .readAllSchedules(anyInt(), anyInt(), anyBoolean());
+        }
+
+        /**
+         * Review finding (CodeRabbit, #818): the repair arms through
+         * {@code armIfUnarmed}, which writes {@code nextFire} and nothing else — a
+         * legacy row's null {@code timeZone} stays null. Every fire after the first is
+         * therefore re-armed by the poller through {@code resolveTimeZone(null)}, the
+         * deployment default, so arming the first one in UTC regardless would hand a
+         * non-UTC deployment exactly one interval of the wrong length. That is the same
+         * drift {@code buildSchedule}'s {@code setTimeZone} was fixed for, arriving by
+         * the back door.
+         */
+        @Test
+        @DisplayName("a legacy row with no zone is armed in the zone the poller will use, not in UTC")
+        void armsLegacyRowsInThePollerZone() throws Exception {
+            service.defaultTimeZone = "Asia/Tokyo";
+            var schedule = unarmedIngestionSchedule();
+            schedule.setCronExpression("0 2 * * *");
+            schedule.setTimeZone(null);
+            storeHolds(schedule);
+
+            service.repairUnarmedSchedules();
+
+            var fireTime = ArgumentCaptor.forClass(Instant.class);
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), fireTime.capture());
+            assertEquals(2, fireTime.getValue().atZone(ZoneId.of("Asia/Tokyo")).getHour(),
+                    "02:00 means 02:00 in the zone this row will be re-armed in; computing it in UTC "
+                            + "would make the first interval the odd one out on every deployment that "
+                            + "sets a time zone");
+        }
+
+        @Test
+        @DisplayName("a row that names its own zone is armed in that zone")
+        void armsInTheRowsOwnZoneWhenItHasOne() throws Exception {
+            service.defaultTimeZone = "Asia/Tokyo";
+            var schedule = unarmedIngestionSchedule();
+            schedule.setCronExpression("0 2 * * *");
+            schedule.setTimeZone("UTC");
+            storeHolds(schedule);
+
+            service.repairUnarmedSchedules();
+
+            var fireTime = ArgumentCaptor.forClass(Instant.class);
+            verify(scheduleStore).armIfUnarmed(eq("sched-1"), fireTime.capture());
+            assertEquals(2, fireTime.getValue().atZone(ZoneId.of("UTC")).getHour(),
+                    "the row's own zone is what the poller resolves first, so it is what the repair "
+                            + "must arm in");
+        }
+
+        @Test
+        @DisplayName("reaching the end of the data is reported as a complete sweep")
+        void aFullSweepSaysSo() throws Exception {
+            storeHolds(unarmedIngestionSchedule());
+
+            var result = service.repairUnarmedSchedules();
+
+            assertTrue(result.complete(), "a short page is the end of the data, and that is a finished sweep");
+            assertEquals(1, result.armed());
+        }
+    }
+
     @Nested
     @DisplayName("scheduled fire")
     class ScheduledFire {
 
         @Test
-        @DisplayName("loads the knowledge base and runs the named source")
+        @DisplayName("loads the knowledge base, claims a run and starts it on its own worker")
         void runsTheNamedSource() throws Exception {
             var source = source("0 2 * * *");
             when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
-            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST)))
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
                     .thenReturn(IngestionReport.skipped(SOURCE_ID, "stub"));
 
-            service.processScheduledFire(KB_ID, 1, SOURCE_ID);
+            IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
 
-            verify(pipeline).run(eq(KB_ID), any(RagConfiguration.class), any(IngestionSource.class), eq(Mode.INGEST));
+            assertEquals(IngestionReport.Outcome.STARTED, report.outcome());
+            assertTrue(report.isSuccess(), "a started run is a successful fire");
+            verify(pipeline, timeout(5_000)).run(eq(KB_ID), any(RagConfiguration.class),
+                    any(IngestionSource.class), eq(Mode.INGEST), eq(report.runId()));
+        }
+
+        @Test
+        @DisplayName("the crawl does not run on the scheduler's thread, which cancels a fire after its lease")
+        void theFireReturnsWhileTheRunGoesOn() throws Exception {
+            // The scheduler waits a lease (five minutes) for a fire and then
+            // interrupts it; a crawl's default budget is ten. Run on that thread,
+            // every sizeable scheduled crawl was interrupted mid-run and never
+            // reconciled a deletion.
+            var source = source("0 2 * * *");
+            when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
+            var release = new CountDownLatch(1);
+            var runThread = new AtomicReference<Thread>();
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString())).thenAnswer(invocation -> {
+                runThread.set(Thread.currentThread());
+                release.await(10, TimeUnit.SECONDS);
+                return IngestionReport.skipped(SOURCE_ID, "stub");
+            });
+
+            try {
+                IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
+
+                assertEquals(IngestionReport.Outcome.STARTED, report.outcome());
+                verify(pipeline, timeout(5_000)).run(anyString(), any(), any(), eq(Mode.INGEST), anyString());
+                assertNotEquals(Thread.currentThread(), runThread.get(), "the run needs a thread of its own");
+            } finally {
+                release.countDown();
+            }
+        }
+
+        @Test
+        @DisplayName("the fire's caller hears how the run it started ended")
+        void theFireLearnsTheOutcome() throws Exception {
+            var source = source("0 2 * * *");
+            when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
+                    .thenReturn(IngestionReport.failed("r", SOURCE_ID, "site unreachable"));
+            var outcome = new AtomicReference<IngestionReport>();
+            var done = new CountDownLatch(1);
+
+            service.processScheduledFire(KB_ID, 1, SOURCE_ID, report -> {
+                outcome.set(report);
+                done.countDown();
+            });
+
+            assertTrue(done.await(5, TimeUnit.SECONDS));
+            assertEquals(IngestionReport.Outcome.FAILED, outcome.get().outcome());
+        }
+
+        @Test
+        @DisplayName("the fire's caller hears the outcome even when settling the source afterwards fails")
+        void theOutcomeIsReportedWhenCleanUpThrows() throws Exception {
+            // Settling a source that changed under its run touches the state store. A
+            // failure there used to escape the worker before the report, so a failed
+            // scheduled run left no FAILED entry in the fire log.
+            var source = source("0 2 * * *");
+            var renamed = knowledgeBase(source("0 2 * * *"));
+            renamed.setName("renamed-while-running");
+            var currentVersion = mock(IResourceStore.IResourceId.class);
+            when(currentVersion.getVersion()).thenReturn(3);
+            when(ragStore.read(KB_ID, 1)).thenReturn(knowledgeBase(source));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(currentVersion);
+            when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
+            // doThrow, not when(...): the setUp stub would run on when()'s own call.
+            doThrow(new IngestionStateStoreException("database unwell", null))
+                    .when(pipeline).claimForMaintenance(anyString(), any());
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
+                    .thenReturn(IngestionReport.failed("r", SOURCE_ID, "site unreachable"));
+            var outcome = new AtomicReference<IngestionReport>();
+            var done = new CountDownLatch(1);
+
+            service.processScheduledFire(KB_ID, 1, SOURCE_ID, report -> {
+                outcome.set(report);
+                done.countDown();
+            });
+
+            assertTrue(done.await(5, TimeUnit.SECONDS), "the outcome must be reported");
+            assertEquals(IngestionReport.Outcome.FAILED, outcome.get().outcome());
+            verify(pipeline).claimForMaintenance(eq(KB_ID), any());
+        }
+
+        @Test
+        @DisplayName("a shutdown closes the runs in flight instead of leaving them to be reaped")
+        void shutdownClosesRunsInFlight() throws Exception {
+            // A worker is a virtual thread that just stops with the JVM, leaving its
+            // run RUNNING for its budget plus a quarter of an hour: 25 minutes of 409s
+            // for "Run now" after every rolling restart.
+            var source = source(null);
+            String sourceKey = IngestionPipeline.stateKey(KB_ID, source);
+            var release = new CountDownLatch(1);
+            var running = new CountDownLatch(1);
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString())).thenAnswer(invocation -> {
+                running.countDown();
+                release.await(10, TimeUnit.SECONDS);
+                return IngestionReport.skipped(SOURCE_ID, "stub");
+            });
+
+            try {
+                String runId = service.runAsync(KB_ID, knowledgeBase(source), source).orElseThrow();
+                assertTrue(running.await(5, TimeUnit.SECONDS));
+
+                assertEquals(1, service.cancelInFlightRuns());
+
+                assertTrue(stateStore.activeRun(sourceKey).isEmpty(), "the source is free again at once");
+                assertEquals(IIngestionStateStore.IngestionRun.Status.CANCELLED,
+                        stateStore.listRuns(sourceKey, 5).stream()
+                                .filter(run -> run.runId().equals(runId)).findFirst().orElseThrow().status());
+            } finally {
+                release.countDown();
+            }
+        }
+
+        @Test
+        @DisplayName("a fire while a run holds the source is reported as already running, not started")
+        void aFireWhileRunningIsAlreadyRunning() throws Exception {
+            var source = source("0 2 * * *");
+            when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
+            stateStore.startRun(IngestionPipeline.stateKey(KB_ID, source));
+
+            IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
+
+            assertEquals(IngestionReport.Outcome.ALREADY_RUNNING, report.outcome());
+            verify(pipeline, never()).run(anyString(), any(), any(), any(), anyString());
         }
 
         @Test
@@ -343,10 +932,47 @@ class RagSourceIngestionServiceTest {
             String otherRunId = stateStore.startRun(otherKey).orElseThrow();
             stateStore.recordIngested(otherKey, "doc", "hash", null, null, otherRunId);
 
-            service.purge(KB_ID, source);
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(runId, key,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
+                    0, 0, 0, 0, 0, 0, 0.0, null));
+
+            assertTrue(service.purge(KB_ID, source));
 
             assertTrue(stateStore.lookup(key, "doc").isEmpty());
             assertTrue(stateStore.lookup(otherKey, "doc").isPresent(), "another knowledge base must be untouched");
+            assertTrue(stateStore.activeRun(key).isEmpty(), "the purge's own claim goes with the state");
+        }
+
+        @Test
+        @DisplayName("a purge is refused while a run holds the source, and purges nothing")
+        void purgeIsRefusedWhileARunHoldsTheSource() {
+            // Decided under the run claim. A check made first let a run start in
+            // between; the purge then deleted its RUNNING row — the one thing stopping
+            // a second crawl — and the worker wrote its state back over the purge.
+            var source = source(null);
+            String key = IngestionPipeline.stateKey(KB_ID, source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "doc", "hash", null, null, runId);
+
+            assertFalse(service.purge(KB_ID, source));
+
+            assertTrue(stateStore.lookup(key, "doc").isPresent());
+            assertEquals(runId, stateStore.activeRun(key).orElseThrow().runId(), "the run keeps its claim");
+        }
+
+        @Test
+        @DisplayName("a rename clears the state even while a run is in flight, and stops that run")
+        void renameClearsStateUnderARun() {
+            var source = source(null);
+            String key = IngestionPipeline.stateKey(KB_ID, source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "doc", "hash", null, null, runId);
+
+            service.forgetStateAfterRename(KB_ID, source);
+
+            assertTrue(stateStore.lookup(key, "doc").isEmpty());
+            assertTrue(stateStore.activeRun(key).isEmpty(),
+                    "the running row goes too, which is what tells the run to stop");
         }
 
         @Test
@@ -357,6 +983,276 @@ class RagSourceIngestionServiceTest {
             stateStore.startRun(key);
 
             assertEquals(1, service.listRuns(KB_ID, source, 10).size());
+        }
+    }
+
+    @Nested
+    @DisplayName("a source that stops owning its documents")
+    class RemovedSources {
+
+        private static final String KB_ID = "5a8b1c2d3e4f5a6b7c8d9e0f";
+
+        private IngestionSource uploadSource(String id) {
+            var source = new IngestionSource();
+            source.setId(id);
+            source.setName("handbooks");
+            source.setType(IngestionSource.TYPE_UPLOAD);
+            return source;
+        }
+
+        private RagConfiguration knowledgeBase(IngestionSource... sources) {
+            var config = new RagConfiguration();
+            config.setName("product-docs");
+            config.setSources(List.of(sources));
+            return config;
+        }
+
+        private String keyOf(IngestionSource source) {
+            return IngestionPipeline.stateKey(KB_ID, source);
+        }
+
+        @Test
+        @DisplayName("removing it takes its files AND what the knowledge base learned from them")
+        void removingASourceTakesBoth() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+            var before = knowledgeBase(source);
+
+            service.discardRemovedSources(KB_ID, before, knowledgeBase());
+
+            // Deleting the files and leaving the vectors is the worst of the three
+            // outcomes: agents keep citing a document the operator believes is gone,
+            // and no endpoint can list or delete it, because the source it belonged
+            // to is no longer in the configuration.
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())));
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("turning it into a crawl takes them too")
+        void changingItsTypeTakesBoth() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+
+            var web = new IngestionSource.WebSource();
+            web.setStartUrl("https://example.com/");
+            var nowACrawl = new IngestionSource();
+            nowACrawl.setId("src-files");
+            nowACrawl.setName("handbooks");
+            nowACrawl.setWeb(web);
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(source), knowledgeBase(nowACrawl));
+
+            // The id survives the change, so nothing else notices — and the files
+            // become unreachable, since the file endpoints refuse a source that is
+            // not an upload source.
+            verify(pipeline).forgetSource(eq(KB_ID), any(), any());
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("leaves a source that is still there alone")
+        void keepsWhatIsStillThere() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(source), knowledgeBase(uploadSource("src-files")));
+
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+            assertEquals(1, fileStore.list(keyOf(source)).size());
+        }
+
+        private IngestionSource crawlSource(String id) {
+            var web = new IngestionSource.WebSource();
+            web.setStartUrl("https://example.com/");
+            var crawl = new IngestionSource();
+            crawl.setId(id);
+            crawl.setName("docs");
+            crawl.setWeb(web);
+            return crawl;
+        }
+
+        @Test
+        @DisplayName("removing a crawl takes what it ingested out of the knowledge base")
+        void removingACrawlTakesItsVectors() {
+            // A crawl's documents were left in place on the theory that they "come back
+            // on the next run" — but a removed source has no next run. Its chunks
+            // stayed retrievable for good, and nothing could list or delete them.
+            var crawl = crawlSource("src-web");
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(crawl), knowledgeBase());
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-web".equals(s.getId())));
+        }
+
+        @Test
+        @DisplayName("turning a crawl into a file source takes the crawled pages too")
+        void changingACrawlIntoFilesTakesItsVectors() {
+            service.discardRemovedSources(KB_ID, knowledgeBase(crawlSource("src-x")),
+                    knowledgeBase(uploadSource("src-x")));
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-x".equals(s.getId())));
+        }
+
+        @Test
+        @DisplayName("leaves a crawl that is still there alone")
+        void keepsACrawlThatIsStillThere() {
+            service.discardRemovedSources(KB_ID, knowledgeBase(crawlSource("src-web")),
+                    knowledgeBase(crawlSource("src-web")));
+
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("deleting the knowledge base takes what its crawls ingested")
+        void deletingTheKnowledgeBaseTakesCrawledVectors() {
+            service.removeSchedules(KB_ID, knowledgeBase(crawlSource("src-web")));
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-web".equals(s.getId())));
+        }
+
+        @Test
+        @DisplayName("a run that outlived its source's removal has what it wrote afterwards removed")
+        void aRunThatOutlivedItsSourceIsCleanedUp() throws Exception {
+            // The save removed what the source had ingested, then the run — which
+            // stops only at its next check — embedded a document or two more under a
+            // source nobody lists any more.
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "late.md", "text/markdown", "x".getBytes(UTF_8));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase());
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())));
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a run of a source that is still there is left alone afterwards")
+        void aRunOfALiveSourceIsLeftAlone() throws Exception {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "kept.md", "text/markdown", "x".getBytes(UTF_8));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase(uploadSource("src-files")));
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+            assertEquals(1, fileStore.list(keyOf(source)).size());
+        }
+
+        @Test
+        @DisplayName("a knowledge base that cannot be read after a run is not mistaken for a deleted one")
+        void anUnreadableKnowledgeBaseDeletesNothing() throws Exception {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "kept.md", "text/markdown", "x".getBytes(UTF_8));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+            assertEquals(1, fileStore.list(keyOf(source)).size());
+        }
+
+        @Test
+        @DisplayName("a run that wrote into a renamed knowledge base's old store leaves no state behind")
+        void aRunAcrossARenameIsPurgedAfterwards() throws Exception {
+            // The rename cleared the state so the next run would fill the new store;
+            // the run then recorded documents it had written into the old one, and the
+            // next run found them "unchanged" and never embedded them where retrieval
+            // now looks.
+            var source = uploadSource("src-files");
+            String key = keyOf(source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "late.md", "hash", null, null, runId);
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(runId, key,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
+                    0, 0, 0, 0, 0, 0, 0.0, null));
+            var renamed = knowledgeBase(uploadSource("src-files"));
+            renamed.setName("new-name");
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            assertTrue(stateStore.lookup(key, "late.md").isEmpty());
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a run across a rename leaves nothing another run can call unchanged, even when that run holds the source")
+        void aRunAcrossARenameIsSettledWhenANewerRunHoldsTheSource() throws Exception {
+            // The rename's purge took the running row with it, so the source was free:
+            // a new run claimed it while the old one was between its ownership check
+            // and recording a document it had just embedded into the OLD store. That
+            // insert has no row to be fenced by, so it lands — and the new run reads
+            // its hash as "unchanged" and never embeds the page where retrieval now
+            // looks. The purge that used to settle this is refused, because the new
+            // run holds the source, and its refusal was ignored.
+            var source = uploadSource("src-files");
+            String key = keyOf(source);
+            String oldRun = stateStore.startRun(key).orElseThrow();
+            service.forgetStateAfterRename(KB_ID, source);
+            String newRun = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "late.md", "hash", "\"etag\"", null, oldRun);
+            var renamed = knowledgeBase(uploadSource("src-files"));
+            renamed.setName("new-name");
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            var state = stateStore.lookup(key, "late.md").orElseThrow();
+            assertTrue(state.hasChanged("hash"), "the next look at the page must embed it into the renamed store");
+            assertNull(state.etag(), "nor may a conditional request earn a 304 that skips it");
+            // The newer run noting the page as seen must not restore the old verdict.
+            stateStore.recordSeen(key, "late.md", newRun);
+            assertTrue(stateStore.lookup(key, "late.md").orElseThrow().hasChanged("hash"));
+            assertEquals(newRun, stateStore.activeRun(key).orElseThrow().runId(), "the newer run keeps its claim");
+        }
+
+        private IResourceStore.IResourceId resourceId(int version) {
+            return new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return KB_ID;
+                }
+
+                @Override
+                public Integer getVersion() {
+                    return version;
+                }
+            };
+        }
+
+        @Test
+        @DisplayName("deleting the knowledge base takes its upload sources with it")
+        void deletingTheKnowledgeBaseTakesFilesToo() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+
+            service.removeSchedules(KB_ID, knowledgeBase(source));
+
+            verify(pipeline).forgetSource(eq(KB_ID), any(), any());
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a vector store that refuses still lets the files go, loudly")
+        void survivesAVectorStoreThatRefuses() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+            doThrow(new IllegalStateException("vector store is unwell"))
+                    .when(pipeline).forgetSource(anyString(), any(), any());
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(source), knowledgeBase());
+
+            // Refusing to delete the files because the vectors could not go would
+            // leave the operator with neither the content removed nor a way to try
+            // again — the configuration has already been written.
+            assertTrue(fileStore.list(keyOf(source)).isEmpty());
         }
     }
 }

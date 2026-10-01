@@ -2,8 +2,14 @@
 # EDDI Helm Chart — Default Values
 # ─────────────────────────────────────────────────────────────
 # Override any value with --set or a custom values.yaml file:
-#   helm install eddi ./helm/eddi --set eddi.vaultMasterKey="$(openssl rand -base64 24)"
 #   helm install eddi ./helm/eddi -f my-values.yaml
+#
+# Minimal local (port-forward, no OIDC) install — every value below is required:
+#   helm install eddi ./helm/eddi \
+#     --set eddi.vaultMasterKey="$(openssl rand -base64 24)" \
+#     --set mongodb.rootPassword="$(openssl rand -base64 24)" \
+#     --set eddi.security.allowUnauthenticatedMcp=true \
+#     --set eddi.security.allowUnauthenticatedSecretStore=true
 #
 # ⚠️  The chart intentionally has NO default credentials. eddi.vaultMasterKey is
 # mandatory, and postgres.password / keycloak.adminPassword are mandatory when
@@ -14,9 +20,11 @@
 eddi:
   image:
     repository: labsai/eddi
-    # Immutable patch version — never the mutable major tag "6", which lets the
-    # running bits drift away from the digest CI signed and attested.
-    tag: "6.4.0"
+    # Empty = the chart's appVersion (helm/eddi/Chart.yaml), so a release moves
+    # one line, not two. If you override it, use an immutable patch version —
+    # never the mutable major tag "6", which lets the running bits drift away
+    # from the digest CI signed and attested.
+    tag: ""
     # Strongest form: also pin the digest, so the kubelet verifies exactly what
     # cosign signed. Resolve it once per release with `crane digest`:
     #   digest: "sha256:<64 hex chars>"
@@ -85,10 +93,21 @@ eddi:
 
   # Authentication escape hatches.
   #
-  # Left empty they follow oidc.enabled — OIDC off means the guards would refuse
-  # to boot, so the chart opts out for you and the quickstart works. Set them
-  # explicitly only for a deployment that runs without OIDC on purpose (air-gapped,
-  # or a demo) and wants /mcp or /secretstore closed anyway.
+  # allowUnauthenticated (the whole conversation API): left empty it follows
+  # oidc.enabled, so a no-OIDC quickstart still boots the general API.
+  #
+  # allowUnauthenticatedMcp / allowUnauthenticatedSecretStore: these are NO LONGER
+  # derived from oidc.enabled. The MCP server exposes agent CRUD, conversations,
+  # memories and audit trails; /secretstore writes the vault — turning OIDC off
+  # must not silently open them. Left empty they render "false", so a deployment
+  # running without OIDC must opt each one in EXPLICITLY (set it to true here).
+  # The chart refuses to RENDER an OIDC-off release until both are true — the
+  # same condition under which HighValueSurfaceGuard would refuse to boot, caught
+  # before the pod crash-loops. Enable OIDC instead wherever you can.
+  #
+  # Also note: with ingress.enabled=true and oidc.enabled=false the chart refuses
+  # to render unless allowUnauthenticated is set explicitly — publishing an
+  # unauthenticated EDDI to the network has to be a deliberate choice.
   #
   # Accepts a real boolean (false / true) or its quoted string form; an explicit
   # false always wins over the value derived from oidc.enabled.
@@ -143,6 +162,14 @@ eddi:
       # to authServerUrl, which is the in-cluster address a client cannot reach.
       authorizationServer: ""
 
+      # The ABSOLUTE public URL of the MCP endpoint, e.g.
+      # "https://eddi.example.com/mcp". Unset, EDDI advertises a relative
+      # identifier whose origin comes from each request's Host header — fine
+      # for port-forward, but behind a proxy that does not pin Host a crafted
+      # Host makes EDDI advertise a resource on another origin. Set it for any
+      # deployment reachable by name.
+      resource: ""
+
   resources:
     requests:
       cpu: 250m
@@ -151,9 +178,34 @@ eddi:
       cpu: "2"
       memory: 1Gi
 
+  # Startup probe. It checks LIVENESS, not readiness, on purpose. Readiness is
+  # false for as long as the startup migrations run, and the first boot of a
+  # database migrated from EDDI 5 can take many minutes on a large or throttled
+  # database. A startup probe on readiness killed the pod mid-migration after
+  # 60 s, and every restart began the migration again, so it never finished.
+  # Traffic is still gated by the readiness probe.
+  startupProbe:
+    path: /q/health/live
+    failureThreshold: 30
+    periodSeconds: 2
+
   service:
     type: ClusterIP
     port: 7070
+
+  # Who may read /q/metrics. Empty keeps EDDI's default, "authenticated":
+  # with OIDC on, a Prometheus without a token gets 401. "permit" opens this
+  # one path — only where /q/metrics cannot be reached from outside the
+  # cluster (the chart's ingress routes every path, /q/* included, unless you
+  # change ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
+  metrics:
+    httpPolicy: ""
+
+  # Origins allowed to embed the Chat UI (/chat) in an <iframe>, space-separated,
+  # e.g. "https://www.example.com https://*.example.org". Empty keeps EDDI's
+  # default, 'none': no page may frame it.
+  chat:
+    frameAncestors: ""
 
   # Pod annotations (e.g., Prometheus scrape)
   podAnnotations:
@@ -168,6 +220,27 @@ mongodb:
   image:
     repository: mongo
     tag: "7.0"
+  # Root credentials for the in-chart MongoDB. The database runs WITH
+  # authentication (--auth) and EDDI connects as this user — an unauthenticated
+  # in-cluster MongoDB is reachable by any pod that can resolve its Service.
+  # rootPassword is REQUIRED when mongodb.enabled=true; no default is shipped.
+  # Generate: openssl rand -base64 24
+  #
+  # ⚠️  Set this BEFORE the first install, for the same reason as postgres.password:
+  # the mongo image reads MONGO_INITDB_ROOT_PASSWORD only during first init against
+  # an empty data volume, and that volume survives upgrades. Changing it on a later
+  # `helm upgrade` rotates EDDI's half while the database keeps the old one and every
+  # connection then fails authentication. To rotate afterwards, change the user in
+  # the database first (db.changeUserPassword in the admin db), then upgrade.
+  rootUsername: eddi
+  rootPassword: ""
+  # UPGRADING a release from before MongoDB authentication: its data volume is
+  # already initialised, so the image will NOT create rootUsername, yet it does
+  # turn --auth on. Create the user in the still-unauthenticated database first
+  # (kubectl exec … mongosh admin — the exact command is in the render error and
+  # in docs/kubernetes.md), then set this to true for that upgrade. A live
+  # `helm upgrade` that detects such a release refuses to render until you do.
+  authMigrated: false
   storage:
     size: 10Gi
     # storageClassName: standard
@@ -370,6 +443,12 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
+  # EDDI never calls the Kubernetes API, so its pod does not mount the service
+  # account token: a process that reaches the container (an RCE, a hostile
+  # dependency) gets no API credential to escalate with. Set true only if you
+  # add something that needs one — cloud workload identity (IRSA, GKE Workload
+  # Identity) injects its own projected token and does not need this.
+  automountToken: false
 
 # ── Namespace ──────────────────────────────────────────────
 #

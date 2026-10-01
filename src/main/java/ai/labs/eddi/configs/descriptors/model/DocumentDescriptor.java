@@ -15,6 +15,14 @@ public class DocumentDescriptor extends ResourceDescriptor {
     private String name;
     private String description;
     private String originId; // resource ID from the exporting instance (for merge import)
+    /**
+     * The version a sync or an import last wrote. A current version beyond it means
+     * the resource was edited on this instance since, which is what lets a sync
+     * tell a local hotfix from a copy it may overwrite. Null for a resource no sync
+     * or import has written — such a resource has no baseline and is never reported
+     * as changed locally.
+     */
+    private Integer syncedVersion;
 
     private String ownerId;
     private String spaceId;
@@ -22,6 +30,7 @@ public class DocumentDescriptor extends ResourceDescriptor {
     private List<ResourceGrant> grants;
     private String accessIndex;
     private String callerLevel;
+    private String ownerName;
 
     public String getName() {
         return name;
@@ -41,6 +50,14 @@ public class DocumentDescriptor extends ResourceDescriptor {
 
     public String getOriginId() {
         return originId;
+    }
+
+    public Integer getSyncedVersion() {
+        return syncedVersion;
+    }
+
+    public void setSyncedVersion(Integer syncedVersion) {
+        this.syncedVersion = syncedVersion;
     }
 
     public void setOriginId(String originId) {
@@ -154,6 +171,25 @@ public class DocumentDescriptor extends ResourceDescriptor {
 
     public void setCallerLevel(String callerLevel) {
         this.callerLevel = callerLevel;
+    }
+
+    /**
+     * The owner as a person would recognise them — their name from the user
+     * directory — or {@code null} when the directory does not know them or
+     * workspaces are not enforced.
+     * <p>
+     * Derived per request exactly like {@link #getCallerLevel()}, and for the same
+     * reasons never stored and never accepted: a name is a property of the
+     * directory, not of the resource, and a stale copy on the document would keep
+     * showing somebody's old name after they changed it.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    public String getOwnerName() {
+        return ownerName;
+    }
+
+    public void setOwnerName(String ownerName) {
+        this.ownerName = ownerName;
     }
 
     /** The parsed caller level, or {@code null} when unset or unrecognised. */

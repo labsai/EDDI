@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.triggermanagement;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
@@ -19,6 +20,19 @@ import java.util.List;
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentTriggerStore {
     String resourceURI = "eddi://ai.labs.agentTrigger/AgentTriggerStore/agenttriggers/";
+
+    /**
+     * The trigger exists but routes to an agent the caller may not use. A not-found
+     * to HTTP clients (the status must not confirm another team's intent), but a
+     * distinct type in-process: a caller that treats "not found" as "the trigger
+     * was deleted" and cleans up after it must not do so for a refusal.
+     */
+    class TriggerNotVisibleException extends IResourceStore.ResourceNotFoundException {
+
+        public TriggerNotVisibleException(String message) {
+            super(message);
+        }
+    }
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)

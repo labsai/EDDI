@@ -5,7 +5,9 @@
 package ai.labs.eddi.engine.schedule.mongo;
 
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
@@ -77,6 +79,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String AGENT_ID = "agentId";
     private static final String TENANT_ID = "tenantId";
     private static final String USER_ID = "userId";
+    private static final String CREATED_BY = "createdBy";
     private static final String SCHEDULE_ID = "scheduleId";
     private static final String STARTED_AT = "startedAt";
     private static final String STATUS = "status";
@@ -227,6 +230,15 @@ public class MongoScheduleStore implements IScheduleStore {
      * to a millisecond window and left any non-REST caller un-claiming
      * unconditionally, so the columns are simply not part of a configuration
      * update. {@code nextFire} stays, because an edited cron legitimately re-arms.
+     * <p>
+     * {@code enabled} is out for the same reason. It is a runtime switch owned by
+     * {@link #setScheduleEnabled} (and by {@code markCompleted}, which disables a
+     * finished one-shot), not configuration. Writing it from the caller's object
+     * let an editor that had read the schedule before another operator's
+     * {@code /disable} re-enable it by saving — and because the field defaults to
+     * {@code true} on the model, a body that merely omitted it did the same.
+     * Leaving it out of the {@code $set} keeps the stored value in the same atomic
+     * write, with no read-then-write window.
      */
     @Override
     public void updateSchedule(String scheduleId, ScheduleConfiguration schedule)
@@ -251,7 +263,6 @@ public class MongoScheduleStore implements IScheduleStore {
             updates.add(set("conversationStrategy", schedule.getConversationStrategy()));
             updates.add(set("maxCostPerFire", schedule.getMaxCostPerFire()));
             updates.add(set("allowSelfScheduling", schedule.isAllowSelfScheduling()));
-            updates.add(set(ENABLED, schedule.isEnabled()));
             updates.add(set(NEXT_FIRE, schedule.getNextFire() == null ? null : epochMillis(schedule.getNextFire())));
             updates.add(set(METADATA, schedule.getMetadata()));
             updates.add(set(UPDATED_AT, epochMillis(now)));
@@ -315,6 +326,26 @@ public class MongoScheduleStore implements IScheduleStore {
             throw e;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to set enabled for " + scheduleId, e);
+        }
+    }
+
+    @Override
+    public boolean armIfUnarmed(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+        try {
+            // The nextFire condition lives in the FILTER, not in a read-then-write:
+            // every node's repair sweep touches this row at the same moment, and the
+            // update is what decides which of them wins. eq(NEXT_FIRE, null) matches a
+            // stored null and a missing field alike, which is what "never armed" looks
+            // like across the rows this repair exists for. A row that already has a
+            // fire time keeps it, fireStatus included — re-arming a CLAIMED row would
+            // steal it from the node currently running it.
+            UpdateResult result = scheduleCollection.updateOne(
+                    and(eq(ID, scheduleId), eq(ENABLED, true), eq(NEXT_FIRE, null)),
+                    combine(set(NEXT_FIRE, epochMillis(nextFire)), set(FIRE_STATUS, FireStatus.PENDING.name()),
+                            set(UPDATED_AT, epochMillis(Instant.now()))));
+            return result.getModifiedCount() == 1;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to arm schedule " + scheduleId, e);
         }
     }
 
@@ -406,9 +437,9 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readAllSchedules(int limit, int offset, boolean excludeHitlTimeouts, ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException {
-        return readSchedulePage(redacted(new Document(), excludeHitlTimeouts), limit, offset);
+        return readSchedulePage(ownerScoped(redacted(new Document(), excludeHitlTimeouts), ownerScope), limit, offset);
     }
 
     @Override
@@ -417,9 +448,44 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts)
+    public List<ScheduleConfiguration> readSchedulesByAgentId(String agentId, int limit, int offset, boolean excludeHitlTimeouts,
+                                                              ScheduleOwnerScope ownerScope)
             throws IResourceStore.ResourceStoreException {
-        return readSchedulePage(redacted(new Document(AGENT_ID, agentId), excludeHitlTimeouts), limit, offset);
+        return readSchedulePage(ownerScoped(redacted(new Document(AGENT_ID, agentId), excludeHitlTimeouts), ownerScope), limit, offset);
+    }
+
+    /**
+     * Add the owner restriction of {@code ownerScope} to a listing filter, so
+     * limit/offset count only the rows the caller may see: the caller's own
+     * schedules plus shared ones (no owner, blank owner, or the system placeholder)
+     * — the same set as
+     * {@link ScheduleOwnerScope#admits(String, String, java.util.Map)}, including
+     * its creator and team-cadence refinements. {@code eq(field, null)} also
+     * matches documents with no {@code userId} at all.
+     */
+    static Bson ownerScoped(Bson filter, ScheduleOwnerScope ownerScope) {
+        if (ownerScope == null || ownerScope.unrestricted()) {
+            return filter;
+        }
+        List<Bson> shared = List.of(
+                eq(USER_ID, null),
+                regex(USER_ID, "^\\s*$"),
+                eq(USER_ID, ScheduleOwnerScope.SHARED_OWNER));
+        List<Bson> visible = new ArrayList<>();
+        if (!ownerScope.sharedCreatedByCallerOnly()) {
+            visible.addAll(shared);
+        } else if (ownerScope.callerId() != null) {
+            visible.add(and(or(shared), eq(CREATED_BY, ownerScope.callerId())));
+        }
+        if (ownerScope.callerId() != null) {
+            visible.add(eq(USER_ID, ownerScope.callerId()));
+        }
+        if (ownerScope.includeTeamCadences()) {
+            visible.add(eq(METADATA + "." + TeamCadenceService.METADATA_TYPE_KEY, TeamCadenceService.METADATA_TYPE_CADENCE));
+        }
+        // An empty $or is rejected by the server; a scope that admits nothing (no
+        // caller id, shared rows restricted to their creator) matches no document.
+        return visible.isEmpty() ? and(filter, eq("_id", null)) : and(filter, or(visible));
     }
 
     /**
@@ -456,7 +522,16 @@ public class MongoScheduleStore implements IScheduleStore {
 
             Bson filter = and(eq(ENABLED, true), lte(NEXT_FIRE, nowMs), or(pendingFilter, leaseExpiredFilter, retryDueFilter));
 
-            return readSchedulesWithFilter(filter, pollBatchSize);
+            // Most overdue first, _id breaking ties. With more due rows than one poll
+            // batch, an unsorted limit hands back whichever rows the storage engine
+            // meets first — the same subset every poll — so the rest wait for that
+            // subset to drain regardless of how long they have been due. The
+            // (enabled, nextFire, fireStatus) index serves this sort.
+            List<ScheduleConfiguration> result = new ArrayList<>();
+            for (var doc : scheduleCollection.find(filter).sort(new Document(NEXT_FIRE, 1).append(ID, 1)).limit(pollBatchSize)) {
+                result.add(fromDocument(doc));
+            }
+            return result;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to find due schedules", e);
         }
@@ -599,6 +674,38 @@ public class MongoScheduleStore implements IScheduleStore {
             throw e;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to requeue: " + scheduleId, e);
+        }
+    }
+
+    @Override
+    public void dismissDeadLetter(String scheduleId, Instant nextFire)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        try {
+            long nowMs = epochMillis(Instant.now());
+            Bson filter = and(eq(ID, scheduleId), eq(FIRE_STATUS, FireStatus.DEAD_LETTERED.name()));
+            var updates = new ArrayList<Bson>();
+            updates.add(set(FIRE_STATUS, FireStatus.PENDING.name()));
+            updates.add(set(FAIL_COUNT, 0));
+            updates.add(set(CLAIMED_BY, null));
+            updates.add(set(CLAIMED_AT, null));
+            updates.add(set(FIRE_ID, null));
+            updates.add(set(NEXT_RETRY_AT, null));
+            updates.add(set(UPDATED_AT, nowMs));
+            if (nextFire != null) {
+                updates.add(set(NEXT_FIRE, epochMillis(nextFire)));
+            } else {
+                updates.add(set(ENABLED, false));
+                updates.add(set(NEXT_FIRE, null));
+            }
+            UpdateResult result = scheduleCollection.updateOne(filter, combine(updates));
+            if (result.getMatchedCount() == 0) {
+                throw new IResourceStore.ResourceNotFoundException("Schedule " + scheduleId + " not found or not in DEAD_LETTERED state");
+            }
+            LOGGER.infof("Dismissed dead-lettered schedule %s", sanitize(scheduleId));
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to dismiss dead letter: " + scheduleId, e);
         }
     }
 

@@ -17,6 +17,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonArray;
@@ -35,6 +36,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -375,6 +377,97 @@ class MongoSecretPersistenceTest {
         assertFalse(persistence.updateSecretSealing(createTestSecret(), "dek-0"));
     }
 
+    // ==================== updateSecretGrant ====================
+
+    @Test
+    @DisplayName("updateSecretGrant — writes ONLY allowedAgents and description, never anything the value depends on")
+    void updateSecretGrantTouchesNothingElse() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.updateSecretGrant(TENANT, "my-key", List.of("agent-a", "agent-b"), "new description"));
+
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(any(Bson.class), update.capture());
+        BsonDocument set = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry())
+                .getDocument("$set");
+
+        // The whole point of the endpoint this feeds: a grant edit cannot re-encrypt
+        // or blank the secret. Asserted as an exact key set rather than as four
+        // absences, so a field added to the $set later fails here too.
+        assertEquals(Set.of("allowedAgents", "description"), set.keySet());
+        assertEquals(new BsonArray(List.of(new BsonString("agent-a"), new BsonString("agent-b"))), set.getArray("allowedAgents"));
+        assertEquals(new BsonString("new description"), set.getString("description"));
+    }
+
+    @Test
+    @DisplayName("updateSecretGrant — never upserts: a grant for a key that does not exist reports false")
+    void updateSecretGrantDoesNotCreateRows() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(0L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertFalse(persistence.updateSecretGrant(TENANT, "missing-key", List.of("agent-a"), null));
+
+        // The two-arg updateOne, i.e. without UpdateOptions.upsert(true). A typo in a
+        // key name has to 404, not leave a valueless row behind.
+        verify(secretsCollection).updateOne(any(Bson.class), any(Bson.class));
+        verify(secretsCollection, never()).updateOne(any(Bson.class), any(Bson.class), any());
+    }
+
+    @Test
+    @DisplayName("updateSecretGrant — filters on exactly (tenantId, keyName)")
+    void updateSecretGrantFilter() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        persistence.updateSecretGrant(TENANT, "my-key", List.of("*"), null);
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(filter.capture(), any(Bson.class));
+        String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.contains(TENANT), () -> "expected the tenant in the filter, got " + rendered);
+        assertTrue(rendered.contains("my-key"), () -> "expected the key name in the filter, got " + rendered);
+    }
+
+    @Test
+    @DisplayName("updateSecretGrant — a Mongo failure surfaces as PersistenceException")
+    void updateSecretGrantWrapsFailures() {
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new MongoException("fail"));
+
+        assertThrows(PersistenceException.class, () -> persistence.updateSecretGrant(TENANT, "my-key", List.of("*"), null));
+    }
+
+    // ==================== touchLastAccessed ====================
+
+    @Test
+    @DisplayName("touchLastAccessed — sets lastAccessedAt and nothing else, without upserting")
+    void touchLastAccessedIsOneField() {
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
+
+        persistence.touchLastAccessed(TENANT, "my-key", Instant.parse("2026-01-01T00:00:00Z"));
+
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(any(Bson.class), update.capture());
+        verify(secretsCollection, never()).updateOne(any(Bson.class), any(Bson.class), any());
+        BsonDocument set = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry())
+                .getDocument("$set");
+        // A resolve records its access with this. Any other field in the $set is a
+        // stale value written back over a concurrent grant edit or rotation.
+        assertEquals(Set.of("lastAccessedAt"), set.keySet());
+        assertEquals(new BsonString("2026-01-01T00:00:00Z"), set.getString("lastAccessedAt"));
+    }
+
+    @Test
+    @DisplayName("touchLastAccessed — a Mongo failure surfaces as PersistenceException")
+    void touchLastAccessedWrapsFailures() {
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new MongoException("fail"));
+
+        assertThrows(PersistenceException.class, () -> persistence.touchLastAccessed(TENANT, "my-key", Instant.now()));
+    }
+
     // ==================== deleteDek ====================
 
     @Test
@@ -439,6 +532,160 @@ class MongoSecretPersistenceTest {
         when(metaCollection.updateOne(any(Bson.class), any(Bson.class), any())).thenReturn(mock(UpdateResult.class));
         assertDoesNotThrow(() -> persistence.setMetaValue("salt", "abc123"));
         verify(metaCollection).updateOne(any(Bson.class), any(Bson.class), any());
+    }
+
+    // ==================== setMetaValueIfAbsent ====================
+
+    @Test
+    @DisplayName("setMetaValueIfAbsent — writes with $setOnInsert only, never $set")
+    void setMetaValueIfAbsentNeverOverwrites() {
+        when(metaCollection.updateOne(any(Bson.class), any(Bson.class), any())).thenReturn(mock(UpdateResult.class));
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(metaCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(new Document("key", "k").append("value", "existing"));
+
+        assertEquals("existing", persistence.setMetaValueIfAbsent("k", "mine"));
+
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(metaCollection).updateOne(any(Bson.class), update.capture(), any());
+        BsonDocument rendered = update.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals(Set.of("$setOnInsert"), rendered.keySet(), "an existing value must never be replaced: " + rendered);
+    }
+
+    @Test
+    @DisplayName("setMetaValueIfAbsent — a lost insert race returns the winner's value")
+    void setMetaValueIfAbsentDuplicateKeyReturnsWinner() {
+        doThrow(new MongoWriteException(new WriteError(11000, "E11000 duplicate key error", new BsonDocument()), new ServerAddress(), Set.of()))
+                .when(metaCollection).updateOne(any(Bson.class), any(Bson.class), any());
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(metaCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(new Document("key", "k").append("value", "winner"));
+
+        assertEquals("winner", persistence.setMetaValueIfAbsent("k", "mine"));
+    }
+
+    // ==================== deleteMetaValue (H6a) ====================
+
+    @Test
+    @DisplayName("deleteMetaValue — deletes the one key")
+    void deleteMetaValue() {
+        persistence.deleteMetaValue("vault-kek-salt-pending");
+        verify(metaCollection).deleteOne(any(Bson.class));
+    }
+
+    // ==================== upsertSecret "not supplied" (S1) ====================
+
+    @Test
+    @DisplayName("upsertSecret — a null grant is only defaulted on insert, and a null description is not written")
+    void upsertSecretKeepsAnUnsuppliedGrantAndDescription() {
+        EncryptedSecret secret = createTestSecret();
+        secret.setAllowedAgents(null);
+        secret.setDescription(null);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(mock(UpdateResult.class));
+
+        persistence.upsertSecret(secret);
+
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(any(Bson.class), update.capture(), any(UpdateOptions.class));
+        BsonDocument rendered = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertFalse(rendered.getDocument("$set").containsKey("allowedAgents"), "a value rotation must not reset the grant: " + rendered.toJson());
+        assertFalse(rendered.getDocument("$set").containsKey("description"), rendered.toJson());
+        assertEquals(new BsonArray(List.of(new BsonString("*"))), rendered.getDocument("$setOnInsert").getArray("allowedAgents"));
+    }
+
+    @Test
+    @DisplayName("upsertSecret — a supplied grant and description are written")
+    void upsertSecretWritesASuppliedGrant() {
+        EncryptedSecret secret = createTestSecret();
+        secret.setAllowedAgents(List.of("agent-a"));
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class))).thenReturn(mock(UpdateResult.class));
+
+        persistence.upsertSecret(secret);
+
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(any(Bson.class), update.capture(), any(UpdateOptions.class));
+        BsonDocument set = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).getDocument("$set");
+        assertEquals(new BsonArray(List.of(new BsonString("agent-a"))), set.getArray("allowedAgents"));
+        assertEquals(new BsonString("Test key"), set.getString("description"));
+    }
+
+    // ==================== updateDekWrapping (H6c) / updateSecretGrantIfUnchanged
+    // (S6) ====================
+
+    @Test
+    @DisplayName("updateDekWrapping — guarded on the IV it read, no upsert, and matched-count decides")
+    void updateDekWrappingIsGuarded() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(0L);
+        when(deksCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertFalse(persistence.updateDekWrapping(new EncryptedDek("id", TENANT, 2, "newEnc", "newIv", Instant.now()), "oldIv"));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(deksCollection).updateOne(filter.capture(), any(Bson.class));
+        String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.contains("oldIv"), rendered);
+        verify(deksCollection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("updateSecretGrantIfUnchanged — the precondition is set equality inside the filter")
+    void updateSecretGrantIfUnchangedFilter() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.updateSecretGrantIfUnchanged(TENANT, "my-key", List.of("agent-a", "agent-b"), List.of("agent-a"), null));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(filter.capture(), any(Bson.class));
+        String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        // m5: set equality, which tolerates a stored duplicate; $all+$size did not.
+        assertTrue(rendered.contains("$setEquals") && rendered.contains("$ifNull"), rendered);
+    }
+
+    @Test
+    @DisplayName("updateSecretGrantIfUnchanged — an expected wildcard also matches an absent or empty grant")
+    void updateSecretGrantIfUnchangedWildcard() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        persistence.updateSecretGrantIfUnchanged(TENANT, "my-key", List.of("*"), List.of("agent-a"), null);
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(filter.capture(), any(Bson.class));
+        String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.contains("$or") && rendered.contains("$size"), rendered);
+    }
+
+    @Test
+    @DisplayName("deleteDekIfWrappedWith — guarded on the IV")
+    void deleteDekIfWrappedWithIsGuarded() {
+        DeleteResult result = mock(DeleteResult.class);
+        when(result.getDeletedCount()).thenReturn(1L);
+        when(deksCollection.deleteOne(any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.deleteDekIfWrappedWith(TENANT, 2, "theIv"));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(deksCollection).deleteOne(filter.capture());
+        assertTrue(filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson().contains("theIv"));
+    }
+
+    @Test
+    @DisplayName("deleteMetaValuesWithPrefix — an anchored, quoted prefix regex")
+    void deleteMetaValuesWithPrefix() {
+        DeleteResult result = mock(DeleteResult.class);
+        when(result.getDeletedCount()).thenReturn(2L);
+        when(metaCollection.deleteMany(any(Bson.class))).thenReturn(result);
+
+        assertEquals(2, persistence.deleteMetaValuesWithPrefix("system-value:"));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        verify(metaCollection).deleteMany(filter.capture());
+        String rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.contains("^\\\\Qsystem-value:\\\\E"), rendered);
     }
 
     // ==================== Helpers ====================

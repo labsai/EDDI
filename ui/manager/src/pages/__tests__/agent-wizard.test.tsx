@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { AgentWizardPage } from "@/pages/agent-wizard";
@@ -781,6 +781,116 @@ describe("AgentWizardPage", () => {
     ).toBeInTheDocument();
   });
 
+  // ── Jlama provider (in-process — no endpoint) ─────────────────
+
+  /**
+   * Jlama runs inside the EDDI JVM. The wizard used to offer it a Base URL with
+   * a `http://localhost:8080` placeholder; the backend drops the value, so an
+   * admin who filled it in got no error and no effect. Offering no field at all
+   * is the only honest option.
+   */
+  it("Jlama provider offers no base URL field", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Local Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Local help");
+    await user.click(screen.getByTestId("wizard-next"));
+
+    // Present for the default provider…
+    expect(screen.getByTestId("wizard-baseurl")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "jlama");
+
+    // …and gone once the model runs in-process.
+    expect(screen.queryByTestId("wizard-baseurl")).not.toBeInTheDocument();
+    expect(screen.getByTestId("wizard-jlama-note")).toBeInTheDocument();
+  });
+
+  it("Jlama provider suggests only loadable owner/name model ids", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Local Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Local help");
+    await user.click(screen.getByTestId("wizard-next"));
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "jlama");
+
+    const datalist = document.getElementById("model-suggestions-jlama");
+    expect(datalist).not.toBeNull();
+    const offered = Array.from(datalist!.querySelectorAll("option")).map(
+      (option) => option.getAttribute("value") ?? "",
+    );
+    expect(offered.length).toBeGreaterThan(0);
+    for (const model of offered) {
+      expect(
+        model.split("/"),
+        `"${model}" is not an owner/name repository id — Jlama cannot resolve it`,
+      ).toHaveLength(2);
+    }
+  });
+
+  /**
+   * The Base URL field is not rendered for Jlama, so a URL typed for a previous
+   * provider would be submitted with no way to see it or clear it. What the user
+   * cannot see, the wizard must not send.
+   */
+  it("Jlama drops a base URL carried over from another provider", async () => {
+    let sentBaseUrl: string | undefined = "untouched";
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        const body = (await request.json()) as { baseUrl?: string };
+        sentBaseUrl = body.baseUrl;
+        return HttpResponse.json({
+          agentId: "jlama-agent-1",
+          agentName: "Local Agent",
+          provider: "jlama",
+          model: "tjake/Llama-3.2-1B-Instruct-JQ4",
+          deployed: false,
+          deploymentStatus: null,
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Local Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Local help");
+    await user.click(screen.getByTestId("wizard-next"));
+
+    // A URL for a provider that does have an endpoint…
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "ollama");
+    await user.type(screen.getByTestId("wizard-baseurl"), "http://localhost:11434");
+
+    // …must not survive the switch to one that does not.
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "jlama");
+    await user.type(
+      screen.getByTestId("wizard-model"),
+      "tjake/Llama-3.2-1B-Instruct-JQ4",
+    );
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-only"));
+
+    await waitFor(() => {
+      expect(sentBaseUrl).toBeUndefined();
+    });
+  });
+
   // ── LLM step: base URL input ──────────────────────────────────────
 
   it("shows base URL input on LLM step", async () => {
@@ -856,5 +966,140 @@ describe("AgentWizardPage", () => {
       expect(screen.getByText(/5 API endpoints parsed/)).toBeInTheDocument();
     });
   });
-});
 
+  // ── Named OpenAI-compatible providers ─────────────────────────────
+
+  async function openLlmStep(user: ReturnType<typeof userEvent.setup>) {
+    renderWithProviders(<AgentWizardPage />, {
+      initialRoute: "/manage/agents/wizard",
+    });
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Compat Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Be helpful");
+    await user.click(screen.getByTestId("wizard-next"));
+  }
+
+  it("qwen shows a region select and cn fills the base URL", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    expect(screen.queryByTestId("wizard-region")).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "qwen");
+
+    const region = screen.getByTestId("wizard-region");
+    expect(region).toHaveValue("intl");
+    // The default region needs no URL: the backend applies the preset.
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("");
+
+    await user.selectOptions(region, "cn");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue(
+      "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    );
+
+    await user.selectOptions(region, "intl");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("");
+  });
+
+  it("switching to a single-endpoint provider (deepseek) hides the region control and clears the base URL", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "qwen");
+    await user.selectOptions(screen.getByTestId("wizard-region"), "cn");
+    expect(screen.getByTestId("wizard-baseurl")).not.toHaveValue("");
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "deepseek");
+    expect(screen.queryByTestId("wizard-region")).not.toBeInTheDocument();
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveAttribute(
+      "placeholder",
+      "https://api.deepseek.com",
+    );
+    expect(screen.getByTestId("wizard-compatible-note")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-key-hint")).toBeInTheDocument();
+  });
+
+  it("sends the compatible provider and its regional base URL", async () => {
+    let sent: { provider?: string; baseUrl?: string; model?: string } = {};
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        sent = (await request.json()) as typeof sent;
+        return HttpResponse.json({
+          agentId: "qwen-agent-1",
+          agentName: "Compat Agent",
+          provider: "qwen",
+          model: "qwen3.7-plus",
+          deployed: false,
+          deploymentStatus: null,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "qwen");
+    await user.selectOptions(screen.getByTestId("wizard-region"), "cn");
+    await user.type(screen.getByTestId("wizard-model"), "qwen3.7-plus");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-key");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-only"));
+
+    await waitFor(() => {
+      expect(sent.provider).toBe("qwen");
+    });
+    expect(sent.baseUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
+  });
+  it("clears the API key on any provider change so it never reaches another vendor", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-openai-secret");
+    expect(screen.getByTestId("wizard-apikey-input")).toHaveValue("sk-openai-secret");
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "xai");
+    expect(screen.getByTestId("wizard-apikey-input")).toHaveValue("");
+  });
+
+  it("moving from a regional compatible provider to openai clears the regional base URL", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "qwen");
+    await user.selectOptions(screen.getByTestId("wizard-region"), "cn");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue(
+      "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    );
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("");
+  });
+
+  it("keeps a proxy base URL between two non-compatible providers", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    await user.type(screen.getByTestId("wizard-baseurl"), "https://proxy.example/v1");
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "anthropic");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("https://proxy.example/v1");
+  });
+
+  it("offers a disabled custom region option when the user types their own URL", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "qwen");
+    expect(within(screen.getByTestId("wizard-region")).queryByRole("option", { name: /custom/i })).toBeNull();
+
+    await user.type(screen.getByTestId("wizard-baseurl"), "https://my-workspace.example/compatible-mode/v1");
+
+    const region = screen.getByTestId("wizard-region");
+    expect(region).toHaveValue("custom");
+    const custom = within(region).getByRole("option", { name: "Custom URL (set below)" });
+    expect(custom).toBeDisabled();
+  });
+});

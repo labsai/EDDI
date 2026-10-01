@@ -125,6 +125,68 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * Bounds for the NEGOTIATION concession ledger (M-G1). {@code null} runs with
+     * the defaults — like {@link #retroConfig}, a default, not a switch: the caps
+     * apply either way, because the ledger is an LLM write surface quoted into
+     * every later turn.
+     */
+    private NegotiationConfig negotiationConfig;
+
+    public NegotiationConfig getNegotiationConfig() {
+        return negotiationConfig;
+    }
+
+    public void setNegotiationConfig(NegotiationConfig negotiationConfig) {
+        this.negotiationConfig = negotiationConfig;
+    }
+
+    /**
+     * Bounds for the negotiation concession ledger (M-G1).
+     *
+     * @param maxConcessionsPerMove
+     *            concessions one BARGAIN turn may record (default 5, ceiling
+     *            {@value #CEILING_MAX_PER_MOVE}); further array entries in the same
+     *            reply are ignored
+     * @param maxLedgerConcessions
+     *            concessions the ledger holds in total (default 50, ceiling
+     *            {@value #CEILING_MAX_LEDGER}); past it new ones are dropped with a
+     *            WARN — the earliest are the record the outcome quotes
+     * @param maxRenderedConcessions
+     *            ledger lines quoted into one turn's input — the newest, with a
+     *            count of the older ones omitted (default 20, ceiling
+     *            {@value #CEILING_MAX_RENDERED})
+     */
+    public record NegotiationConfig(int maxConcessionsPerMove, int maxLedgerConcessions, int maxRenderedConcessions) {
+
+        public static final int DEFAULT_MAX_PER_MOVE = 5;
+        public static final int DEFAULT_MAX_LEDGER = 50;
+        public static final int DEFAULT_MAX_RENDERED = 20;
+        public static final int CEILING_MAX_PER_MOVE = 20;
+        public static final int CEILING_MAX_LEDGER = 500;
+        public static final int CEILING_MAX_RENDERED = 100;
+
+        /**
+         * Non-positive falls back to the default; everything is clamped to its ceiling.
+         */
+        public NegotiationConfig {
+            maxConcessionsPerMove = maxConcessionsPerMove <= 0
+                    ? DEFAULT_MAX_PER_MOVE
+                    : Math.min(maxConcessionsPerMove, CEILING_MAX_PER_MOVE);
+            maxLedgerConcessions = maxLedgerConcessions <= 0
+                    ? DEFAULT_MAX_LEDGER
+                    : Math.min(maxLedgerConcessions, CEILING_MAX_LEDGER);
+            maxRenderedConcessions = maxRenderedConcessions <= 0
+                    ? DEFAULT_MAX_RENDERED
+                    : Math.min(maxRenderedConcessions, CEILING_MAX_RENDERED);
+        }
+
+        /** Every cap at its default. */
+        public NegotiationConfig() {
+            this(DEFAULT_MAX_PER_MOVE, DEFAULT_MAX_LEDGER, DEFAULT_MAX_RENDERED);
+        }
+    }
+
+    /**
      * Bounds for the RETRO lesson pipeline (I8).
      *
      * @param maxLessonsPerRun
@@ -135,11 +197,19 @@ public class AgentGroupConfiguration {
      *            FIFO ceiling on the team's stored lessons (default 50): storing
      *            the 51st evicts the oldest. Bounded growth is non-negotiable —
      *            non-positive values fall back to the defaults
+     * @param maxLessonChars
+     *            the most one stored lesson value (lesson plus its "applies:"
+     *            context) may hold (default 1000, the same default as an agent's
+     *            {@code memoryGuardrails.maxValueLength}; ceiling
+     *            {@value #CEILING_MAX_LESSON_CHARS}). Every later discussion of the
+     *            team recalls these lessons, so an unbounded one grows every
+     *            prompt. Longer lessons are truncated, the context first
      */
-    public record RetroConfig(int maxLessonsPerRun, int maxStoredLessons) {
+    public record RetroConfig(int maxLessonsPerRun, int maxStoredLessons, int maxLessonChars) {
 
         public static final int DEFAULT_MAX_PER_RUN = 3;
         public static final int DEFAULT_MAX_STORED = 50;
+        public static final int DEFAULT_MAX_LESSON_CHARS = 1000;
         /**
          * Hard ceilings (review finding): the compact constructor accepted any positive
          * int, so a config carrying {@code Integer.MAX_VALUE} made the per-run write
@@ -149,6 +219,7 @@ public class AgentGroupConfiguration {
          */
         public static final int CEILING_MAX_PER_RUN = 20;
         public static final int CEILING_MAX_STORED = 500;
+        public static final int CEILING_MAX_LESSON_CHARS = 4000;
 
         /** Same normalization choke point as {@link GroupTaskConfig}. */
         public RetroConfig {
@@ -158,13 +229,22 @@ public class AgentGroupConfiguration {
             if (maxStoredLessons <= 0) {
                 maxStoredLessons = DEFAULT_MAX_STORED;
             }
+            if (maxLessonChars <= 0) {
+                maxLessonChars = DEFAULT_MAX_LESSON_CHARS;
+            }
             maxLessonsPerRun = Math.min(maxLessonsPerRun, CEILING_MAX_PER_RUN);
             maxStoredLessons = Math.min(maxStoredLessons, CEILING_MAX_STORED);
+            maxLessonChars = Math.min(maxLessonChars, CEILING_MAX_LESSON_CHARS);
         }
 
-        /** Both caps at their defaults. */
+        /** The two count caps, with the default lesson length. */
+        public RetroConfig(int maxLessonsPerRun, int maxStoredLessons) {
+            this(maxLessonsPerRun, maxStoredLessons, DEFAULT_MAX_LESSON_CHARS);
+        }
+
+        /** Every cap at its default. */
         public RetroConfig() {
-            this(DEFAULT_MAX_PER_RUN, DEFAULT_MAX_STORED);
+            this(DEFAULT_MAX_PER_RUN, DEFAULT_MAX_STORED, DEFAULT_MAX_LESSON_CHARS);
         }
     }
 
@@ -181,6 +261,27 @@ public class AgentGroupConfiguration {
 
     public void setContextWindow(ContextWindowConfig contextWindow) {
         this.contextWindow = contextWindow;
+    }
+
+    /**
+     * One-line "where this member stands" summaries for the overview dashboard.
+     * <p>
+     * This is a <b>default, not a switch</b> (see the collaboration-surface note in
+     * the root {@code AGENTS.md}): a {@code null} config still produces stances —
+     * by lead-sentence extraction from each member's newest contribution, which
+     * costs nothing and quotes the member's own words. What the config adds is the
+     * LLM summarizer, which reads everything a member has said and is therefore
+     * both better and billable. Opting in is opting into spend, not into the
+     * feature.
+     */
+    private StanceSummaryConfig stanceSummary;
+
+    public StanceSummaryConfig getStanceSummary() {
+        return stanceSummary;
+    }
+
+    public void setStanceSummary(StanceSummaryConfig stanceSummary) {
+        this.stanceSummary = stanceSummary;
     }
 
     /**
@@ -242,6 +343,94 @@ public class AgentGroupConfiguration {
             llmModel = llmModel == null || llmModel.isBlank() ? null : llmModel;
             inputPricePer1M = inputPricePer1M == null || inputPricePer1M < 0 ? null : inputPricePer1M;
             outputPricePer1M = outputPricePer1M == null || outputPricePer1M < 0 ? null : outputPricePer1M;
+        }
+    }
+
+    /**
+     * Governs the one-line member stances shown by the overview dashboard's "who
+     * thinks what" band.
+     * <p>
+     * Deliberately shaped like {@link ContextWindowConfig}: same provider/model
+     * pair, same optional price fields feeding the same I1 ledger, same
+     * warn-don't-reject treatment at save time. A stance summarizer is the second
+     * piece of discussion machinery that spends on the group's behalf, and making
+     * the two configs diverge would mean two things to learn instead of one.
+     * <p>
+     * <b>There is no {@code enabled} flag</b>, unlike {@code ContextWindowConfig}.
+     * Stances always exist — the extraction fallback needs no configuration and no
+     * LLM — so a boolean would only ever have meant "may this spend money?", which
+     * is already what naming a provider and model means. A flag that could be
+     * {@code true} with no model (or {@code false} with one) would be two ways to
+     * say the same thing and one way to contradict it.
+     *
+     * @param maxChars
+     *            hard cap on a rendered stance, applied to the extraction fallback
+     *            and to the summarizer's output alike — the band lays out one line
+     *            per member and an essay breaks it. Non-positive falls back to
+     *            {@link #DEFAULT_MAX_CHARS}
+     * @param llmProvider
+     *            provider for the stance calls (e.g. "openai"). Without it (or
+     *            {@code llmModel}) every stance comes from lead-sentence
+     *            extraction, which is a supported outcome rather than a degraded
+     *            one
+     * @param llmModel
+     *            model name for the stance calls
+     * @param inputPricePer1M
+     *            optional USD price per 1M input tokens, so stance spend counts
+     *            toward the discussion's I1 ledger. Null or negative = unpriced
+     *            ($0), same semantics as {@link ContextWindowConfig}
+     * @param outputPricePer1M
+     *            optional USD price per 1M output tokens, same semantics
+     * @param maxInputChars
+     *            the most summarizer input one member's stance call sends (default
+     *            8000, ceiling {@value #CEILING_MAX_INPUT_CHARS}). The member's
+     *            newest contributions are kept and older ones dropped with an
+     *            omission marker — a stance is where the member stands now, and the
+     *            whole history re-sent at every boundary eventually overflows the
+     *            summarizer's context window. Non-positive = default
+     * @param maxEntryChars
+     *            the most one contribution adds to that input (default 2000,
+     *            ceiling {@value #CEILING_MAX_ENTRY_CHARS}). Non-positive = default
+     */
+    public record StanceSummaryConfig(int maxChars, String llmProvider, String llmModel,
+            Double inputPricePer1M, Double outputPricePer1M, int maxInputChars, int maxEntryChars) {
+
+        public static final int DEFAULT_MAX_CHARS = 160;
+        public static final int DEFAULT_MAX_INPUT_CHARS = 8_000;
+        public static final int DEFAULT_MAX_ENTRY_CHARS = 2_000;
+        public static final int CEILING_MAX_INPUT_CHARS = 32_000;
+        public static final int CEILING_MAX_ENTRY_CHARS = 8_000;
+
+        /**
+         * Normalizes at the one choke point every reader passes through, the same shape
+         * {@link ContextWindowConfig} uses. Blank identifiers ARE absent: a
+         * whitespace-only provider reaching the summarization service would bypass the
+         * documented extraction fallback and throw instead.
+         */
+        public StanceSummaryConfig {
+            if (maxChars <= 0) {
+                maxChars = DEFAULT_MAX_CHARS;
+            }
+            llmProvider = llmProvider == null || llmProvider.isBlank() ? null : llmProvider;
+            llmModel = llmModel == null || llmModel.isBlank() ? null : llmModel;
+            inputPricePer1M = inputPricePer1M == null || inputPricePer1M < 0 ? null : inputPricePer1M;
+            outputPricePer1M = outputPricePer1M == null || outputPricePer1M < 0 ? null : outputPricePer1M;
+            maxInputChars = maxInputChars <= 0 ? DEFAULT_MAX_INPUT_CHARS : Math.min(maxInputChars, CEILING_MAX_INPUT_CHARS);
+            maxEntryChars = maxEntryChars <= 0 ? DEFAULT_MAX_ENTRY_CHARS : Math.min(maxEntryChars, CEILING_MAX_ENTRY_CHARS);
+        }
+
+        /** The summarizer settings with the default input bounds. */
+        public StanceSummaryConfig(int maxChars, String llmProvider, String llmModel, Double inputPricePer1M,
+                Double outputPricePer1M) {
+            this(maxChars, llmProvider, llmModel, inputPricePer1M, outputPricePer1M, DEFAULT_MAX_INPUT_CHARS,
+                    DEFAULT_MAX_ENTRY_CHARS);
+        }
+
+        /**
+         * Whether a summarizer is fully configured; otherwise stances are extracted.
+         */
+        public boolean hasSummarizer() {
+            return llmProvider != null && llmModel != null;
         }
     }
 

@@ -4,11 +4,13 @@
  */
 package ai.labs.eddi.engine.setup;
 
+import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -82,6 +85,11 @@ class AgentSetupVaultKeyReuseTest {
         createdResources = new LinkedHashMap<>();
         when(secretProvider.isAvailable()).thenReturn(true);
         when(secretProvider.listKeys(anyString())).thenReturn(List.of());
+        // The mock does not run ISecretProvider's default matchesChecksum, and the
+        // fixtures store legacy bare-SHA-256 checksums, so delegate to the real keyless
+        // (legacy) comparison — which is exactly what the provider default does.
+        when(secretProvider.matchesChecksum(anyString(), any(), anyString())).thenAnswer(
+                inv -> VaultChecksum.matches(null, inv.getArgument(0), inv.getArgument(1), inv.getArgument(2)));
     }
 
     private String vaultApiKey(String apiKey, String vaultKeyName) throws Exception {
@@ -358,7 +366,8 @@ class AgentSetupVaultKeyReuseTest {
             doThrow(new ISecretProvider.SecretProviderException("disk full")).when(secretProvider).store(any(), anyString(), anyString(),
                     any());
 
-            assertEquals(KEY, vaultApiKey(KEY, null), "falls back to plaintext");
+            // Fails closed (M-S1) — it used to fall back to the plaintext key.
+            assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, null));
             assertFalse(createdResources.containsKey(AgentSetupService.VAULTED_SECRET_KEY));
         }
     }
@@ -422,6 +431,20 @@ class AgentSetupVaultKeyReuseTest {
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 
+        @Test
+        @DisplayName("a failure comparing against an existing entry is a setup error, not a mismatch")
+        void checksumComparisonFailureIsASetupError() throws Exception {
+            when(secretProvider.getMetadata(any())).thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
+            when(secretProvider.matchesChecksum(anyString(), any(), anyString())).thenThrow(new IllegalStateException("meta read failed"));
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
+
+            assertTrue(e.getMessage().contains("Could not verify"), e.getMessage());
+            assertFalse(e.getMessage().contains("does not match"), e.getMessage());
+            assertTrue(e.getCause() instanceof IllegalStateException);
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
         /**
          * Rollback deletes what it finds under VAULTED_SECRET_KEY. A caller-chosen name
          * cannot grow the vault on retry (the retry reuses the name), while a
@@ -432,6 +455,7 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a newly created NAMED entry is left alone by rollback")
         void namedEntryIsNotRollbackFodder() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
 
             vaultApiKey(KEY, "openai-prod");
 
@@ -489,46 +513,75 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a tenant-qualified name is created in that tenant")
         void tenantQualifiedNameStaysInItsTenant() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
 
             assertEquals("${vault:acme/openai-prod}", vaultApiKey(KEY, "${vault:acme/openai-prod}"));
 
             var ref = ArgumentCaptor.forClass(SecretReference.class);
-            verify(secretProvider).store(ref.capture(), eq(KEY), anyString(), any());
+            verify(secretProvider).storeIfAbsent(ref.capture(), eq(KEY), anyString(), any());
             assertEquals("acme", ref.getValue().tenantId());
             assertEquals("openai-prod", ref.getValue().keyName());
         }
 
         /**
-         * store is an UPSERT and the absent-then-create sequence is not atomic, so two
-         * setups naming one key with different values can both find it missing and both
-         * write. Reading back turns the common interleaving into a loud failure before
-         * any document exists, instead of an agent provisioned against the other
-         * caller's credential.
+         * Two setups naming one key both find it absent; the atomic insert lets exactly
+         * one create it. The loser must not overwrite it — and must not proceed as if
+         * it had created it either.
          */
         @Test
-        @DisplayName("a value overwritten concurrently is detected, not accepted")
-        void concurrentOverwriteIsDetected() throws Exception {
+        @DisplayName("losing the create race to a DIFFERENT value fails instead of overwriting")
+        void losingTheRaceToADifferentValueFails() throws Exception {
             when(secretProvider.getMetadata(any()))
                     .thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
                     .thenReturn(entry("openai-prod", "the-other-callers-key", Instant.EPOCH, List.of("*")));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(false);
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
-            assertTrue(e.getMessage().contains("written concurrently"), e.getMessage());
+            assertTrue(e.getMessage().contains("created concurrently"), e.getMessage());
+            // The unconditional upsert is what made the old read-back a best effort.
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("losing the create race to the SAME value reuses the winner's entry")
+        void losingTheRaceToTheSameValueReuses() throws Exception {
+            when(secretProvider.getMetadata(any()))
+                    .thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
+                    .thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(false);
+
+            assertEquals("${vault:openai-prod}", vaultApiKey(KEY, "openai-prod"));
+
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            // Not ours: nothing was created, so the resolver cache is left alone.
+            verify(secretResolver, never()).invalidateCache(any(SecretReference.class));
+        }
+
+        @Test
+        @DisplayName("a store failure while creating a named key is reported, not swallowed")
+        void namedCreateFailureIsReported() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("absent"));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any()))
+                    .thenThrow(new ISecretProvider.SecretProviderException("disk full"));
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
+
+            assertTrue(e.getMessage().contains("disk full"), e.getMessage());
         }
 
         @Test
         @DisplayName("a missing entry is created under exactly that name")
         void createsUnderTheGivenName() throws Exception {
-            when(secretProvider.getMetadata(any()))
-                    .thenThrow(new ISecretProvider.SecretNotFoundException("nope"))
-                    .thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
 
             assertEquals("${vault:openai-prod}", vaultApiKey(KEY, "openai-prod"));
 
             var ref = ArgumentCaptor.forClass(SecretReference.class);
-            verify(secretProvider).store(ref.capture(), eq(KEY), anyString(), any());
+            verify(secretProvider).storeIfAbsent(ref.capture(), eq(KEY), anyString(), any());
             assertEquals("openai-prod", ref.getValue().keyName());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
         }
 
         @Test
@@ -649,5 +702,138 @@ class AgentSetupVaultKeyReuseTest {
             assertTrue(e.getMessage().contains("OpenAPI"), e.getMessage());
             verifyNoInteractions(secretProvider);
         }
+    }
+
+    private String vaultApiAuth(String apiAuth) throws Exception {
+        Method method = AgentSetupService.class.getDeclaredMethod("vaultApiAuth", String.class, String.class, Map.class);
+        method.setAccessible(true);
+        try {
+            return (String) method.invoke(service, apiAuth, "My Agent", createdResources);
+        } catch (InvocationTargetException e) {
+            if (e.getCause() instanceof Exception cause) {
+                throw cause;
+            }
+            throw e;
+        }
+    }
+
+    // ─── M-S1: no plaintext fallback, apiAuth vaulted ────────────────────
+
+    @Nested
+    @DisplayName("M-S1 — a vault write failure never degrades to plaintext")
+    class NoPlaintextFallback {
+
+        @Test
+        @DisplayName("apiKey: a failed vault write fails the setup instead of returning the plaintext")
+        void apiKeyStoreFailureFails() throws Exception {
+            doThrow(new ISecretProvider.SecretProviderException("mongo down")).when(secretProvider).store(any(), anyString(), anyString(), any());
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, null));
+
+            assertFalse(e.getMessage().contains(KEY), "the failure must not echo the key: " + e.getMessage());
+            assertTrue(e.getMessage().contains("Refusing to store it in plaintext"), e.getMessage());
+            assertFalse(e.getMessage().contains("mongo down"), "the provider's detail stays in the server log: " + e.getMessage());
+        }
+
+        @Test
+        @DisplayName("apiAuth: a plaintext value is vaulted and replaced by its reference, recorded for rollback")
+        void apiAuthIsVaulted() throws Exception {
+            service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_NEVER;
+
+            String result = vaultApiAuth("Bearer " + KEY);
+
+            var ref = ArgumentCaptor.forClass(SecretReference.class);
+            verify(secretProvider).store(ref.capture(), eq("Bearer " + KEY), anyString(), any());
+            assertTrue(ref.getValue().keyName().startsWith("setup.my-agent."), ref.getValue().keyName());
+            assertTrue(ref.getValue().keyName().endsWith(".apiAuth"), ref.getValue().keyName());
+            assertEquals(ref.getValue().toReferenceString(), result);
+            assertEquals(ref.getValue().keyName(), createdResources.get(AgentSetupService.VAULTED_API_AUTH_KEY));
+            verify(secretResolver).invalidateCache(ref.getValue());
+        }
+
+        @Test
+        @DisplayName("apiAuth: a value already carrying a reference is used as-is")
+        void apiAuthReferencePassesThrough() throws Exception {
+            assertEquals("${connection:crm}", vaultApiAuth("${connection:crm}"));
+            assertEquals("Bearer ${vault:crm-token}", vaultApiAuth("Bearer ${vault:crm-token}"));
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: every supported reference form, alone or after a scheme, is used as-is")
+        void apiAuthSupportedReferencesPassThrough() throws Exception {
+            for (String reference : List.of("${vault:crm-token}", "${eddivault:crm-token}", "${vars:crm-auth}", "Bearer ${caller:token}",
+                    "Basic ${vault:tenant-a/crm-basic}")) {
+                assertEquals(reference, vaultApiAuth(reference));
+            }
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: a literal that merely contains '${' is vaulted, not taken for a reference")
+        void apiAuthLiteralWithDollarBraceIsVaulted() throws Exception {
+            String literal = "Bearer test-token${";
+
+            String result = vaultApiAuth(literal);
+
+            var ref = ArgumentCaptor.forClass(SecretReference.class);
+            verify(secretProvider).store(ref.capture(), eq(literal), anyString(), any());
+            assertEquals(ref.getValue().toReferenceString(), result);
+            assertFalse(result.contains("test-token"), result);
+        }
+
+        @Test
+        @DisplayName("apiAuth: an unsupported namespace is a literal and is vaulted")
+        void apiAuthUnsupportedNamespaceIsVaulted() throws Exception {
+            String literal = "Bearer ${unknown:thing}";
+
+            assertNotEquals(literal, vaultApiAuth(literal));
+            verify(secretProvider).store(any(), eq(literal), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: plaintext mixed with a reference is refused, never written in plaintext")
+        void apiAuthMixedIsRefused() throws Exception {
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiAuth("Bearer plain-" + KEY + "${vault:crm-token}"));
+
+            assertFalse(e.getMessage().contains(KEY), e.getMessage());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: with the vault disabled the value passes through, like apiKey")
+        void apiAuthVaultDisabled() throws Exception {
+            when(secretProvider.isAvailable()).thenReturn(false);
+
+            assertEquals("Bearer " + KEY, vaultApiAuth("Bearer " + KEY));
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("apiAuth: a failed vault write fails the setup")
+        void apiAuthStoreFailureFails() throws Exception {
+            doThrow(new ISecretProvider.SecretProviderException("mongo down")).when(secretProvider).store(any(), anyString(), anyString(), any());
+
+            var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiAuth("Bearer " + KEY));
+
+            assertFalse(e.getMessage().contains(KEY), e.getMessage());
+            assertTrue(e.getMessage().contains("in plaintext"), e.getMessage());
+            assertFalse(e.getMessage().contains("mongo down"), "the provider's detail stays in the server log: " + e.getMessage());
+        }
+    }
+
+    /**
+     * GDPR erasure deletes a user's auto-vaulted slots by name, so setup must not
+     * create — or hand out — a key in that reserved shape.
+     */
+    @Test
+    @DisplayName("a vaultKeyName in the reserved auto-vault shape is rejected")
+    void reservedVaultKeyNameIsRejected() throws Exception {
+        String reserved = AutoVaultedSecrets.newSlotName("agent", "user-1", "apiKey");
+
+        var e = assertThrows(Exception.class, () -> vaultApiKey("sk-live-value", reserved));
+
+        assertTrue(e.getMessage().contains("reserved"), e.getMessage());
+        verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
     }
 }

@@ -75,7 +75,8 @@
     "workforce": "ワークフォース",
     "monitoring": "会話モニタリング",
     "analytics": "分析",
-    "connections": "接続"
+    "connections": "接続",
+    "workspaces": "ワークスペース"
   },
   "theme": {
     "light": "ライト",
@@ -260,11 +261,13 @@
     "deployAndChat": "デプロイしてチャット",
     "openExternalChat": "新しいタブで開く",
     "liveIn": "{{environment}} で稼働中",
+    "liveInVersion": "{{environment}} でバージョン {{version}} が稼働中",
     "chatIn": "{{environment}} でチャット",
     "openExternalChatIn": "{{environment}} のチャットを新しいタブで開く",
     "deployToProduction": "本番にデプロイ",
     "undeployFromProduction": "本番から削除",
-    "deployFailedIn": "{{environment}} へのデプロイに失敗しました"
+    "deployFailedIn": "{{environment}} へのデプロイに失敗しました",
+    "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -444,15 +447,30 @@
     "toolPauseReasonPlaceholder": "例: {toolNames} には承認が必要です",
     "toolPendingMessage": "一時停止中にエンドユーザーへ表示するメッセージ（{toolNames} が使用可能）",
     "toolPendingMessagePlaceholder": "例: {toolNames} の承認を人間が行うのを待っています…",
-    "toolInGroupTurns": "グループターン内では、メンバーのゲートされたツール呼び出しは自動的に拒否されます (REJECT)。"
+    "toolInGroupTurns": "グループターン内では、メンバーのゲートされたツール呼び出しは自動的に拒否されます (REJECT)。",
+    "review": {
+      "title": "利用状況と会話のレビュー",
+      "total": "会話数",
+      "active": "現在アクティブ",
+      "users": "利用者数",
+      "description": "会話は、その会話をした本人だけのものです。これをオンにすると、このエージェントを編集できる全員がその会話を読めるようになります — 利用者が何を尋ねているかを把握し、改善するためです。チャットは入力前に利用者へその旨を伝えます。",
+      "enable": "このエージェントのメンテナーに会話の閲覧を許可する",
+      "notice": "チャットで利用者に伝える内容（空欄にすると標準の文言を使用）",
+      "noticePlaceholder": "このエージェントとの会話は、改善のために管理者が閲覧する場合があります。",
+      "versionNote": "この変更で作成されるバージョン以降の会話が対象です — それ以前の会話は対象外です。Slack、Teams、API クライアントでは通知を表示できません。利用者がそこからこのエージェントを使う場合は、あいさつ文でお知らせください。"
+    }
   },
   "wizard": {
     "title": "Agent ウィザード"
   },
   "setupWizard": {
     "baseUrlHintCloud": "プロキシ、プライベートデプロイ、または Azure OpenAI エンドポイントを使用する場合にのみ必要です",
+    "jlamaNoteTitle": "Jlama は EDDI 内部で動作します",
+    "jlamaNoteBody": "指定すべきモデルサーバーはありません。EDDI が自身のプロセスにモデルを読み込み、初回利用時に Hugging Face から重みをダウンロードするため、最初のメッセージには時間がかかることがあります。",
+    "jlamaNoteTuning": "EDDI をコンテナで実行していますか。作成後にエージェントの LLM 設定を開き、modelCachePath をマウント済みボリュームに設定してください。既定のキャッシュはコンテナの一時レイヤー上にあるため、コンテナが削除または置き換えられるとモデルが再ダウンロードされることがあります。quantizeModelAtRuntime、workingDirectory、workingQuantizedType も同じ場所で調整できます。",
     "baseUrlHintLocal": "必須 — ローカルモデルサーバーが稼働している URL",
     "modelHint": "プロバイダーがサポートする任意のモデル名を入力するか、候補から選択してください",
+    "modelHintJlama": "owner/name 形式の Hugging Face リポジトリ ID を指定してください（例: tjake/Llama-3.2-1B-Instruct-JQ4）。モデル名だけでは解決できず、エージェントは最初のメッセージで失敗します。",
     "modelPlaceholder": "例: {{model}}（またはプロバイダーがサポートする任意のモデル）",
     "title": "Agent 作成ウィザード",
     "subtitle": "数分で完全に設定された Agent を作成",
@@ -546,7 +564,10 @@
     "toolCount": "{{total}}中 {{selected}}を選択",
     "specTooLarge": "この仕様は大きすぎるため、ここでは読み込めません",
     "specUrlInvalid": "有効な URL ではありません",
-    "specUrlScheme": "http:// と https:// の URL のみサポートされています"
+    "specUrlScheme": "http:// と https:// の URL のみサポートされています",
+    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには組み込みツールをオフにしてください。",
+    "hfToken": "Hugging Face トークン",
+    "hfTokenHint": "アクセス制限付きまたはプライベートのリポジトリでのみ必要です。API キーと同様に保管庫に保存されます。"
   },
   "packages": {
     "confirmDeleteDescription": "この操作は元に戻せません。ワークフローとそのすべてのデータが完全に削除されます。",
@@ -652,7 +673,9 @@
     "endSuccess_other": "{{count}} 件の会話を終了しました",
     "endSuccess_one": "{{count}} 件の会話を終了しました",
     "purgeSuccess_other": "終了した会話 {{count}} 件を消去しました",
-    "purgeSuccess_one": "終了した会話 {{count}} 件を消去しました"
+    "purgeSuccess_one": "終了した会話 {{count}} 件を消去しました",
+    "endStateUnavailable": "会話の現在の状態を再確認できなかったため、何も終了していません。もう一度お試しください。",
+    "endStateChanged": "選択した会話の 1 つが承認待ちになりました。選択内容を確認して、もう一度確定してください。"
   },
   "conversationDetail": {
     "backToConversations": "会話一覧に戻る",
@@ -668,7 +691,9 @@
     "exportMd": "Markdownでエクスポート",
     "toolSummary": "ツール使用状況",
     "totalCost": "合計コスト",
-    "cacheHitRate": "キャッシュヒット率"
+    "cacheHitRate": "キャッシュヒット率",
+    "endReasonRetired": "終了：エージェントのバージョンが廃止されました",
+    "stepAgentVersion": "エージェントのバージョン {{version}} が応答"
   },
   "chat": {
     "hide": "非表示",
@@ -743,7 +768,11 @@
     "errorConversationEnded": "この会話は終了しています。",
     "errorAgentNotReady": "このエージェントは選択した環境にまだデプロイされていません。",
     "errorAgentMismatch": "この会話はエージェントの別のバージョンに属しています。",
-    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。"
+    "errorQuotaUnavailable": "現在、利用上限を確認できませんでした。しばらくしてからもう一度お試しください。",
+    "reviewNoticeLabel": "会話のレビュー",
+    "sendRejected": "メッセージは送信されませんでした: {{reason}}",
+    "sendWhileLoading": "メッセージは送信されませんでした: 会話はまだ読み込み中です。しばらくしてからもう一度お試しください。",
+    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -850,7 +879,11 @@
     "cascadePartialFailure_other": "{{count}} 件のカスケード更新が失敗しました",
     "cascadePartialFailure_one": "{{count}} 件のカスケード更新が失敗しました",
     "usedInAgents_other": "{{count}} 個の Agent で使用中",
-    "usedInAgents_one": "{{count}} 個の Agent で使用中"
+    "usedInAgents_one": "{{count}} 個の Agent で使用中",
+    "savedNotLive": "保存しました — まだ反映されていません",
+    "savedNotLiveDescription": "実行中のエージェントはデプロイ済みのバージョンを使用しています。この変更を反映するにはデプロイしてください。",
+    "deployNow": "デプロイ",
+    "deployStarted": "デプロイを開始しました"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -883,7 +916,9 @@
     "removeCondition": "条件を削除",
     "noGroups": "動作グループが定義されていません",
     "noRules": "このグループにルールはありません",
-    "noConditions": "条件なし"
+    "noConditions": "条件なし",
+    "sizeNoBound": "制限なし",
+    "sizeBoundInvalid": "-2147483648 から 2147483647 までの整数を入力するか、制限なしの場合は空欄にしてください。"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "仕様にエンドポイントが見つかりません",
@@ -915,8 +950,6 @@
     "responseObjectName": "レスポンスオブジェクト名",
     "responseHeaderObjectName": "レスポンス Header オブジェクト名",
     "fireAndForget": "ファイア＆フォーゲット",
-    "batchCalls": "バッチコール",
-    "iterationObjectName": "イテレーションオブジェクト名",
     "prePostInstructions": "前後の指示",
     "preRequest": "リクエスト前",
     "postResponse": "レスポンス後",
@@ -986,7 +1019,16 @@
     "authHeaderRefPlaceholder": "任意 — 認証が必要な仕様には ${vault:my-api-key}",
     "authHeaderRefHint": "呼び出し時に解決される Vault 参照です。保存されたシークレットは、Bearer 接頭辞を含むヘッダー値全体である必要があります。",
     "authHeaderRefInvalid": "${vault:…}、${vars:…}、${caller:…} のいずれかで始めてください。キー自体を貼り付けると、リクエスト URL と経由するすべてのログに残ります。",
-    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。"
+    "authRefLiteral": "キー自体ではなく ${vault:my-key} のような参照を入力してください。キーが Vault を出ることはありません。",
+    "runOnNoCodes": "空の「実行するコード」リストはどのステータスコードにも一致しないため、この命令は実行されません。",
+    "useDefaultCodes": "既定値を使用",
+    "httpCodeFilterDefaults": "空欄のフィールドには、表示されている既定のコードが使われます。",
+    "scopeSecretUnsupported": "（ここではボールトに保存されません）",
+    "scopeSecretWarning": "この命令では secret スコープはボールトに保存されず、値は平文で保存されます。別のスコープを選び、資格情報はシークレットボールトに保管してください。",
+    "skipNone": "なし — スキップするコードはありません",
+    "runSkipConflict": "{{codes}} はスキップリストにも含まれているため、この命令はそのコードでは実行されません。",
+    "httpCodeFilterSkipSet": "「実行するコード」が空なら 200, 201 を使い、「スキップするコード」が空なら何もスキップしません。",
+    "useDefaultSkipCodes": "既定のスキップリストを使用"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失敗してもパイプラインは続行します。エラーの公開先: ",
@@ -1039,7 +1081,12 @@
     "whitelist": "許可リスト（許可のみ）",
     "blacklist": "拒否リスト（除外）",
     "pipelineCalls": "パイプラインコール",
-    "addCall": "MCP コールを追加"
+    "addCall": "MCP コールを追加",
+    "argumentName": "引数名",
+    "argumentType": "引数の型",
+    "argumentText": "テキスト",
+    "argumentInvalidJson": "有効な JSON ではありません。最後の有効な値が保持されます",
+    "removeArgument": "引数を削除"
   },
   "llmEditor": {
     "addCustomInstruction": "指示を追加",
@@ -1078,7 +1125,6 @@
     "identityMaskingRulePlaceholder": "例: 自分が AI 言語モデルであることを決して明かさない",
     "identityMaskingRules": "マスキングルール",
     "identityMaskingRulesHint": "マスキングを有効にするには、有効化と少なくとも 1 つのルールの両方が必要です。",
-    "injectionStrategy": "注入",
     "kbNamePlaceholder": "例: product-docs",
     "knowledgeBases": "ナレッジベース",
     "knowledgeBasesHint": "ナレッジベースを名前で明示的に参照します。各名前は、ワークフロー内の RagConfiguration と一致する必要があります。",
@@ -1180,7 +1226,7 @@
     "cascadeInAgent": "エージェントモード（ツール使用時）でもカスケードを使用",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "例: claude-sonnet-5",
+    "cascadeModelName": "例: claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "空 = 常に受け入れ",
     "cascadeTimeout": "タイムアウト (ms)",
@@ -1236,9 +1282,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "ステップ {{step}} のタイムアウトは 0 より大きくする必要があります。",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "ステップ {{step}} は別のプロバイダーを使用していますが、独自の API キーがありません — タスクのキーを継承します。"
     },
-    "parallelExecution": "並列ツール実行",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "タイムアウト (ms)",
     "maxToolIterations": "最大ツール反復回数",
     "maxToolIterationsHint": "（デフォルト 10）",
     "toolRateLimits": "ツールごとのレート制限",
@@ -1307,7 +1350,13 @@
     "streamingTimeoutSeconds": "ストリーミングタイムアウト（秒）",
     "streamingTimeoutSecondsHint": "エンジンのデフォルト値（120秒）を上書きします。ストリーミング中のみ適用されます。空 = デフォルトを使用。",
     "taskPricing": "通常呼び出しの料金設定",
-    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。"
+    "taskPricingDesc": "コスト追跡とグループのコスト上限のために、このタスクの通常（非カスケード）のモデル呼び出しに価格を設定します。価格未設定（空欄）の場合は $0 として扱われます。",
+    "unknownType": "{{type}}（カスタム）",
+    "compatibleEndpoint": "エンドポイント: {{url}} — 上書きするには baseUrl または region パラメーターを追加します",
+    "compatibleEndpointOverridden": "エンドポイント: {{url}}",
+    "modelType": "モデルタイプ",
+    "paramName": "パラメーター名",
+    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -1371,7 +1420,8 @@
     "openEditor": "エディターで編集",
     "visibilityTitle": "この longTerm プロパティを表示できる Agent",
     "editValue": "値を編集",
-    "toggleGroup": "プロパティグループを切り替え"
+    "toggleGroup": "プロパティグループを切り替え",
+    "secretFromPathWarning": "シークレットがボールトに保存されるのは値フィールドから来た場合だけです。「取得元パス」から読み取る場合やその他の方法で指定した場合は平文で保存されます。値フィールドに入力するか、別のスコープを選んでください。"
   },
   "dictionaryEditor": {
     "language": "言語",
@@ -1541,7 +1591,8 @@
     "stateReady": "準備完了",
     "stateActive": "アクティブ",
     "stateError": "エラー",
-    "stateEnded": "終了"
+    "stateEnded": "終了",
+    "loadOlder": "古いエントリを読み込む"
   },
   "secrets": {
     "loadError": "シークレットを読み込めませんでした",
@@ -1639,7 +1690,29 @@
     "resetSecretCount_other": "{{count}} 件の Secret が完全に失われます",
     "resetSecretCount_one": "{{count}} 件の Secret が完全に失われます",
     "resetTenantSuccess_other": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました",
-    "resetTenantSuccess_one": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました"
+    "resetTenantSuccess_one": "「{{tenant}}」の Vault をリセットしました — {{count}} 件の Secret を完全に削除しました",
+    "access": "アクセス",
+    "editGrant": "このシークレットを使用できるエージェントを編集",
+    "editGrantKey": "{{key}} のアクセスを編集",
+    "grantTitle": "「{{key}}」を使用できる対象",
+    "grantValueUntouched": "シークレットの値は変更されず、再入力も不要です。使用できる対象のみが変わります。",
+    "grantOnlyTheseAgents": "これらのエージェントのみ",
+    "grantAllHint": "このテナントのすべてのエージェントがこのシークレットを参照できます。範囲を狭めると、漏洩した設定 1 つが及ぶ範囲を限定できます。",
+    "grantAddAgent": "エージェントを追加",
+    "grantEmptyError": "エージェントを 1 つ以上追加するか、「すべてのエージェント」を選択してください。空のリストは使用できません。",
+    "grantCheckingImpact": "デプロイ済みエージェントを確認中…",
+    "grantLosingAccessTitle": "このシークレットを使用していてアクセスを失うデプロイ済みエージェント（{{count}}）",
+    "grantLosingAccessBody": "今のところ稼働は続きます — 権限はシークレット使用時ではなくエージェントのデプロイ時にチェックされます — が、次回のデプロイは拒否されます。",
+    "grantAcknowledge": "これらのエージェントは、再度追加されるか設定がこのシークレットを使わなくなるまでデプロイできないことを理解しました。",
+    "grantSaved": "「{{key}}」のアクセスを更新しました",
+    "grantImpactFailed": "このシークレットを使用しているデプロイ済みエージェントを確認できなかったため、どのエージェントもアクセスを失う可能性があります。",
+    "grantAcknowledgeUnchecked": "影響を受けるデプロイ済みエージェントが分からないまま保存します。",
+    "rotateNotFound": "このシークレットはもう存在しないため、ローテーションするものがありません。代わりに再度追加してください。",
+    "keyExists": "「{{key}}」という名前のシークレットは既に存在します。再度追加すると値が置き換えられます。値を変更して利用者の設定を維持するには「ローテーション」を使用してください。",
+    "keyExistsRotate": "代わりにこのシークレットをローテーション",
+    "keyExistsPicker": "「{{key}}」という名前のシークレットは既に存在します。ボールトの一覧から選択するか、別の名前にしてください。",
+    "rotateKeepsGrantAll": "すべてのエージェントが現在と同じくアクセスを維持します。",
+    "rotateKeepsGrant": "アクセスは引き続き次に限定されます: {{agents}}"
   },
   "audit": {
     "title": "監査ログ",
@@ -1673,17 +1746,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "ボールトのマスターキーを設定すると、今後のすべての監査エントリに HMAC-SHA256 署名が自動で付与されます。",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "実行者",
-    "automated": "自動"
+    "automated": "自動",
+    "verify": {
+      "entryInvalid": "署名が一致しません",
+      "entryUnproven": "未検証",
+      "signatureCount": "読み込んだ {{total}} 件中 {{count}} 件に署名があります。",
+      "loading": "署名を検証中…",
+      "errorTitle": "整合性は未検証です",
+      "errorDesc": "検証リクエストが失敗したため、ここでは何も確認されていません。",
+      "checked": "最新の {{count}} 件を確認しました。",
+      "verifiedTitle": "署名を検証しました",
+      "chainIntact": "シーケンスに欠けているエントリはありません。",
+      "chainNotApplicable": "会話をまたぐ場合は署名のみを確認し、シーケンスは確認しません。",
+      "verifiedBadge": "検証済み",
+      "tamperedTitle": "整合性チェックに失敗しました",
+      "tamperedInvalid": "{{count}} 件のエントリ署名が内容と一致しません。書き込み後にエントリが変更されています。",
+      "tamperedChain": "シーケンスからエントリが欠落しています（{{sequences}}）。記録が短縮されています。",
+      "disabledTitle": "署名を検証できません",
+      "reasonUnsigned": "署名のないエントリ {{count}} 件",
+      "reasonUnknownKey": "このデプロイメントが保持していないキーで署名されたもの {{count}} 件",
+      "reasonSkipped": "未確認の古いエントリ {{count}} 件",
+      "reasonChain": "シーケンスを完全には確定できませんでした",
+      "reasonDuplicates": "重複したシーケンス番号",
+      "reasonUncovered": "確認範囲より古い読み込み済みエントリ {{count}} 件",
+      "unverifiedTitle": "完全には検証されていません",
+      "unverifiedDesc": "否定された署名はありませんが、すべてを確認できたわけではありません: {{reasons}}。"
+    }
   },
   "schedules": {
     "cronHelp": "5 フィールド形式: 分 時 日 月 曜日",
@@ -1810,7 +1902,11 @@
       "weeklyMonday": "毎週（月 00:00）",
       "monthly": "毎月（1 日 00:00）"
     },
-    "totalCappedHint": "サーバーが 1 ページ分すべてを返したため、ここに表示されている以上のスケジュールが存在する可能性があります。"
+    "totalCappedHint": "サーバーが 1 ページ分すべてを返したため、ここに表示されている以上のスケジュールが存在する可能性があります。",
+    "systemManaged": "システム",
+    "systemManagedHint": "EDDI が管理しています（ナレッジベースの取り込み、メモリ統合、またはチームのケイデンス）。ここではなく、定義されている場所で変更してください。",
+    "persistentConversationIdLocked": "スケジュール作成時に設定されます。サーバーは、実行が追記されてきた会話を保持します。",
+    "failedScheduleGone": "スケジュールはもう存在しません"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",
@@ -1871,7 +1967,8 @@
     "tokenDistribution": "トークン分布",
     "totalCost": "合計コスト",
     "totalTokens": "合計トークン数",
-    "turns": "ターン"
+    "turns": "ターン",
+    "partial": "この会話には、デバッガーが読み込む量を超える監査エントリがあります。合計は最新のものだけを対象としています。"
   },
   "memoryInspector": {
     "error": "メモリデータの読み込みに失敗しました",
@@ -2012,6 +2109,7 @@
     "ingestion": "ドキュメントの取り込み",
     "dropFiles": "ここに取り込むドキュメントをドロップします",
     "dropHint": "テキスト、Markdown、または任意のテキストベースのファイル",
+    "replaceSameName": "同じファイル名で以前に取り込んだドキュメントを置き換える",
     "browse": "参照",
     "pasteText": "またはテキストを貼り付けます",
     "pastePlaceholder": "ここにドキュメントのテキストを貼り付けてください...",
@@ -2028,7 +2126,7 @@
       "enabled": "有効",
       "running": "実行中",
       "emptyTitle": "取り込みソースがありません",
-      "emptyDescription": "ソースを追加すると、このナレッジベースがサイトをクロールして最新の状態を保ちます。",
+      "emptyDescription": "ソースを追加してサイトをクロールするか文書をアップロードし、このナレッジベースを最新に保ちます。",
       "name": "名前",
       "namePlaceholder": "public-docs",
       "startUrl": "開始 URL",
@@ -2043,6 +2141,8 @@
       "includeSubdomains": "サブドメインを含める",
       "excludePatterns": "除外パターン",
       "excludePatternsHint": "URL パスに対するグロブをカンマ区切りで指定 — * は 1 つのセグメント内、** はセグメントをまたぎます",
+      "sitemapUrls": "サイトマップ",
+      "sitemapUrlsHint": "ページ検出に使うサイトマップのURL（カンマ区切り）。robots.txt に記載がない場合のみ必要です。サイトマップインデックスもたどります",
       "saveFirst": "このソースの実行・プレビュー・履歴表示には、ナレッジベースの保存が必要です。",
       "run": "今すぐ実行",
       "runFailed": "実行を開始できませんでした。すでに実行中の可能性があります。",
@@ -2065,8 +2165,49 @@
       "previewFailed": "このソースをプレビューできませんでした。",
       "previewNotCompleted": "プレビューは完了しませんでした。",
       "disabledNoRun": "このソースは無効です。実行またはスケジュールするには有効にして保存してください。",
-      "purgeBlockedWhileRunning": "実行中です。今消去すると、並行して 2 つ目の実行が始まる可能性があります。"
-    }
+      "purgeBlockedWhileRunning": "実行中です。今消去すると、並行して 2 つ目の実行が始まる可能性があります。",
+      "type": "ソース",
+      "typeWeb": "ウェブサイト",
+      "typeUpload": "ファイル",
+      "typeWebHint": "ウェブサイトをクロールする",
+      "typeUploadHint": "ここにアップロードしたファイルを読み込みます",
+      "cronHintUpload": "空のままにします — ソースを実行するとアップロード済みファイルが読まれます",
+      "maxFiles": "最大ファイル数",
+      "maxFilesHint": "このソースが保持できるファイル数",
+      "maxFileMb": "最大ファイルサイズ（MB）",
+      "maxFileMbHint": "1 ファイルあたり",
+      "filesSaveFirst": "ナレッジベースを一度保存すると、このソースにファイルをアップロードできます。",
+      "dropFiles": "ここにファイルをドロップ、または",
+      "browseFiles": "選択します",
+      "acceptedFormats": "PDF、Word、Excel、PowerPoint、テキスト、Markdown、CSV、HTML",
+      "clearUploadList": "リストをクリア",
+      "uploadFailed": "このファイルをアップロードできませんでした。",
+      "noFiles": "まだファイルがありません。アップロード後にソースを実行してインデックスしてください。",
+      "filesSummary": "ファイル: {{count}} ({{size}})",
+      "deleteFile": "{{fileName}} を削除",
+      "deleteFileTitle": "このファイルを削除しますか？",
+      "deleteFileDescription": "{{fileName}} と、ナレッジベースがそこから学んだ内容が削除され、エージェントは直ちにそれを使って回答しなくなります。",
+      "previewFiles": "変更をプレビュー",
+      "saveBeforeUpload": "先にナレッジベースを保存してください — アップロードは画面上の編集ではなく、保存済みのソースに送られます。",
+      "foldersNotSupported": "フォルダーはアップロードできません。中のファイルをドロップしてください。",
+      "filesAwaitingRun": "ファイルは保存済みですが、まだナレッジベースには入っていません。ソースを実行してインデックスしてください。",
+      "retryUpload": "{{fileName}} を再試行",
+      "fileIndexed": "インデックス済み",
+      "fileChanged": "変更あり",
+      "fileNotIndexed": "未インデックス",
+      "maxTotalMb": "合計サイズの上限（MB）",
+      "maxTotalMbHint": "このソースの全ファイル合計",
+      "removeTitle": "このソースを削除しますか？",
+      "removeDescription": "保存すると、アップロードされたファイルとナレッジベースがそこから学んだ内容が削除されます。元には戻せません。",
+      "switchTypeTitle": "ウェブサイトのソースに切り替えますか？",
+      "switchTypeDescription": "保存すると、このソースのアップロード済みファイルと、ナレッジベースがそこから学習したすべての内容が削除されます。元に戻すことはできません。",
+      "switchTypeConfirm": "ウェブサイトに切り替え",
+      "filesLoadFailed": "ファイルを読み込めませんでした: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}}（再帰として保存）",
+    "saveBeforeIngest": "まず変更を保存してください。ドキュメントは画面上の編集内容ではなく、保存済みナレッジベースのストアと埋め込みモデルで取り込まれます。",
+    "chunkStrategyUnsupported": "{{value}}（非対応）",
+    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。"
   },
   "onboarding": {
     "welcome": {
@@ -2388,6 +2529,7 @@
       "SYNTHESIZING": "統合中",
       "COMPLETED": "完了",
       "FAILED": "失敗",
+      "REJECTED": "却下",
       "ERROR": "エラー",
       "AWAITING_APPROVAL": "承認待ち",
       "CANCELLED": "キャンセル済み",
@@ -2634,7 +2776,6 @@
     "contextWindowEntries": "全文のまま残す直近エントリ数",
     "contextWindowSummarize": "ウィンドウから外れた分を要約する",
     "contextWindowTruncateNote": "古いエントリは「N 件の以前のエントリを省略」という簡易な表示に置き換えられます。",
-    "retroConfigHint": "振り返りフェーズが学びをチームメモリに記録し、以降の議論に引き継ぎます。",
     "retroPerRun": "1 回の実行あたり",
     "retroStored": "保存上限",
     "artifactConfigHint": "メンバーが共同で文書を作成し、書かれたターンを越えて残せるようにします。",
@@ -2757,7 +2898,96 @@
       "finalAnswer": "最終回答",
       "phase": "フェーズ"
     },
-    "deleteMembersConfigFailed": "グループのメンバーを読み取れなかったため、何も削除されていません。もう一度お試しください。"
+    "deleteMembersConfigFailed": "グループのメンバーを読み取れなかったため、何も削除されていません。もう一度お試しください。",
+    "overview": {
+      "anonymousMember": "参加者 {{n}}",
+      "cellAbsent": "このフェーズには参加せず",
+      "cellAbstained": "棄権した",
+      "cellDissent": "異議を述べた",
+      "cellFailed": "失敗",
+      "cellPending": "未実行",
+      "cellSilent": "発言予定だったが発言なし",
+      "cellSpoke": "発言した",
+      "cellSummary": "{{member}}、{{phase}}：{{state}}",
+      "convergenceNoScore": "合意度は未評価",
+      "convergenceScore": "合意度 {{pct}}%",
+      "empty": "まだ表示するものがありません。議論が実行されると概要が表示されます。",
+      "emptyLive": "議論を開始しています — メンバーが発言すると概要が埋まっていきます。",
+      "live": "ライブ",
+      "matrix": "すべての発言を一目で",
+      "matrixLabel": "メンバーとフェーズ別の発言",
+      "memberColumn": "メンバー",
+      "noStanceYet": "まだ発言していません",
+      "noStanceOfOwn": "自身の立場は示していません",
+      "phaseActive": "進行中",
+      "phaseDone": "完了",
+      "phaseNeedsApproval": "人による承認が必要",
+      "phaseProgress": "{{total}} 中 {{done}}",
+      "phaseStarting": "開始中…",
+      "phaseUpcoming": "予定",
+      "phases": "フェーズ",
+      "phasesLabel": "議論のフェーズ",
+      "roster": "誰がどう考えているか",
+      "rosterLabel": "メンバーの立場",
+      "round": "ラウンド {{n}}",
+      "spokenCount_one": "これまで {{count}} 件の発言",
+      "spokenCount_other": "これまで {{count}} 件の発言",
+      "stanceQuoted": "本人の言葉",
+      "stanceSummarised": "モデルによる要約",
+      "statCost": "コスト",
+      "synthesis": "結論",
+      "statMembers": "メンバー",
+      "statPhases": "フェーズ",
+      "statTurns": "発言",
+      "statusAwaiting": "あなたの番",
+      "statusDissented": "異議",
+      "statusFailed": "失敗",
+      "statusSpeaking": "発言中",
+      "turnCount_one": "{{count}} 件の発言",
+      "turnCount_other": "{{count}} 件の発言",
+      "viewMode": "議論ビュー",
+      "viewOverview": "概要",
+      "viewSplit": "両方",
+      "viewTranscript": "トランスクリプト",
+      "phaseRepeatsTitle": "このフェーズは {{count}} 回実行されます",
+      "roundScope": "ラウンド {{n}} のみ",
+      "roundScopeTitle": "このビューはラウンド {{n}} のみを対象とします。以前のラウンドはトランスクリプトにあります。",
+      "convergenceStopped_one": "収束 — {{count}} 回の繰り返しを省略",
+      "convergenceStopped_other": "収束 — {{count}} 回の繰り返しを省略",
+      "interactions": "誰が誰に向けたか",
+      "interactionsLabel": "誰が誰に向けたか",
+      "addressedConnector": "の宛先:",
+      "unaddressed": "誰からも向けられず: {{names}}",
+      "unknownMember": "不明",
+      "bids": "誰が何に立候補したか",
+      "bidsLabel": "タスク別の立候補",
+      "rosterShowFewer": "表示を減らす",
+      "roundLabel": "ラウンド",
+      "roundSelect": "別のラウンドを表示",
+      "roundOption": "{{total}} 中 {{n}}",
+      "rosterShowAll_one": "{{count}} 人すべてを表示",
+      "rosterShowAll_other": "{{count}} 人すべてを表示"
+    },
+    "stateRejected": "却下",
+    "inputDisabledRejected": "この提案は却下されました",
+    "debateVerdictNote": "散文ではなく採点による裁定（勝者とスコア）で回答します: {{phases}}。メンバーが2つ以上の役割を持ち、議論が先行するため、モデレーター自身の統合プロンプトは使用されません。散文が必要な場合はフェーズに入力テンプレートを設定してください。",
+    "retroCustomLimits": "レトロの教訓の上限をカスタマイズ",
+    "retroCustomHint": "レトロフェーズは教訓をチームの記憶に書き込み、以降のディスカッションに引き継ぎます。この上限で件数を制限します。",
+    "retroDefaultHint": "レトロフェーズは既定の上限（1回あたり {{perRun}} 件、保存 {{stored}} 件）で引き続き教訓を書き込みます。止めるには RETRO フェーズを削除してください。",
+    "voteOptionsTooFew": "明示的な投票用紙には少なくとも 2 つの選択肢が必要です。",
+    "saveProblem": {
+      "title": "このグループはまだ作成できません:",
+      "debateRoles": "ディベートには、役割 PRO のメンバーと役割 CON のメンバーがそれぞれ少なくとも 1 人必要です。",
+      "devilAdvocateRole": "悪魔の代弁者グループには、役割 DEVIL_ADVOCATE のメンバーが必要です。",
+      "humanInTaskForce": "人間のメンバーはタスクフォースグループ（計画・実行・検証フェーズ）に参加できません。",
+      "humanWithPeerPhases": "ピアレビューのように、フェーズが各メンバーに順番に向けられるグループには人間のメンバーは参加できません。",
+      "memberUnassigned_one": "{{count}} 名のメンバーにエージェントが割り当てられていません。",
+      "memberUnassigned_other": "{{count}} 名のメンバーにエージェントが割り当てられていません。",
+      "humanNeedsName_one": "{{count}} 名の人間メンバーに表示名が必要です。",
+      "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
+      "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
+      "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
+    }
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -2821,7 +3051,7 @@
     "value": "値",
     "deleteAll": "すべて削除",
     "deleteAllTitle": "すべてのプロパティを削除",
-    "deleteAllDesc": "このユーザーのすべてのプロパティが完全に削除されます。",
+    "deleteAllDesc": "このユーザーのすべてのグローバルプロパティが完全に削除されます。ここに表示されている行だけでなく、エージェントが保存したものを含む、すべてのグローバルなユーザーメモリエントリが対象です。",
     "deleted": "プロパティを削除しました",
     "noResults": "プロパティが見つかりません",
     "showingCount": "{{count}}件のプロパティ"
@@ -2901,6 +3131,9 @@
     "new": "新規",
     "updated": "更新済み",
     "unchanged": "変更なし",
+    "removed": "削除",
+    "conflicts": "ここで変更済み",
+    "conflictHint": "「競合」と表示されたリソースは、前回の同期以降にこのインスタンスで変更されています。チェックしない限り変更されません。チェックするとローカルの変更が上書きされます。",
     "selected": "選択済み",
     "mergeNow": "選択した項目をインポート",
     "syncNow": "今すぐ同期",
@@ -2922,6 +3155,8 @@
     "title": "エージェントの同期",
     "subtitle": "EDDIインスタンス間でエージェントを同期する",
     "connection": "ソースインスタンス",
+    "loadingLocalAgents": "照合の前にすべてのローカルエージェントを読み込んでいます…",
+    "localAgentsError": "ローカルのエージェント一覧を完全に読み込めなかったため、名前でエージェントを照合できません。今同期すると重複が作成されます。",
     "sourceUrl": "ソースEDDIインスタンスのURL",
     "authToken": "認証トークン",
     "authHint": "任意。X-Source-Authorization ヘッダに設定。",
@@ -2941,13 +3176,21 @@
     "syncError": "同期エラー",
     "empty": "エージェント同期を開始するには、ソースインスタンスに接続してください。",
     "autoMatched": "自動マッチ",
-    "previewFirst": "同期前に変更をプレビュー"
+    "previewFirst": "同期前に変更をプレビュー",
+    "syncPartial": "同期は未完了です — 一部のリソースが書き込まれませんでした",
+    "syncIdentical": "すでに最新です — 書き込む項目はありません",
+    "outcomeCounts": "更新 {{updated}} · 作成 {{created}} · 変更なし {{skipped}}",
+    "redeployHint": "同期された変更は新しいバージョンとして保存されます。実行中のものはそのまま動き続けます。有効にするには新しいバージョンをデプロイしてください。",
+    "overwrite": "ローカルの変更を上書き",
+    "previewFailed": "プレビューに失敗しました",
+    "noPreviewReturned": "ソースはこのエージェントのプレビューを返しませんでした。"
   },
   "sync": {
     "actionCreate": "新規",
     "actionUpdate": "更新",
     "actionSkip": "最新です",
-    "actionConflict": "競合"
+    "actionConflict": "競合",
+    "actionRemove": "削除"
   },
   "userConversations": {
     "title": "ユーザー会話",
@@ -3151,7 +3394,6 @@
     "agentIdPlaceholder": "メッセージを処理するエージェント ID",
     "botToken": "ボットトークン",
     "botTokenHint": "ボットユーザー OAuth トークン。セキュリティのためにボールト参照を使用してください。",
-    "botTokenPlaceholder": "xoxb-… または ${vault:slack-bot-token}",
     "channel": "チャネル",
     "channelId": "Slack チャネル ID",
     "channelIdCol": "チャネル ID",
@@ -3172,7 +3414,6 @@
     "searchPlaceholder": "チャネルを検索…",
     "signingSecret": "署名シークレット",
     "signingSecretHint": "Slack アプリの基本情報ページから取得します。",
-    "signingSecretPlaceholder": "16進数文字列または ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack セットアップガイド",
     "slackSetupSummary": "Slack アプリを作成し、ボットトークンスコープ（app_mentions:read、chat:write、im:history、channels:history、groups:history）を設定し、資格情報をここに貼り付けてください。",
     "target": "ターゲット",
@@ -3226,7 +3467,9 @@
     "typeAgent": "エージェント",
     "typeGroup": "グループ",
     "selectGroup": "グループを選択…",
-    "unknownGroup": "{{id}}（見つかりません）"
+    "unknownGroup": "{{id}}（見つかりません）",
+    "plaintextSecret": "{{fields}} はシークレットボールトに保存し、${vault:…} で参照してください。平文の認証情報は保存されません。",
+    "plaintextStored": "このチャネルは {{fields}} を平文で保存しています。シークレットボールトに移し、保存して参照に置き換えてください。"
   },
   "hitl": {
     "loadingApprovalDetails": "承認の詳細を読み込んでいます…",
@@ -3316,7 +3559,8 @@
     "decidedProgress": "{{total}} 件中 {{decided}} 件を判断済み",
     "groupLinkUnavailable": "このグループが見つからないため、確実なリンクを表示できません。",
     "confirmApproveGroupDescription": "停止中のフェーズ全体を承認し、ディスカッションを再開します。保留中のタスクもすべて併せて承認されます。個別に判断するにはグループを開いてください。",
-    "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。"
+    "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。",
+    "pauseChanged": "開いた後にこのリクエストが変更されました。何も決定されていません。もう一度確認してください。"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",
@@ -3403,16 +3647,14 @@
     "conversationsTruncated_other": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
     "failedConversations_other": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
     "conversationsTruncated_one": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
-    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。"
+    "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
+    "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。"
   },
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"
   },
   "orphans": {
-    "confirmPurgeAll": "{{count}} 件すべての孤立リソースを完全に削除しますか？サーバーはすべてを削除し、選択は適用されません。この操作は元に戻せません。",
-    "deleteSelected": "選択した {{count}} 件を削除",
     "description": "どのエージェントやパッケージからも参照されていないリソースを検出してクリーンアップします。",
-    "deselectAll": "すべて選択解除",
     "includeDeleted": "ソフト削除済みを含む",
     "lastScanned": "最終スキャン",
     "noOrphans": "孤立項目は見つかりません",
@@ -3423,13 +3665,13 @@
     "scanPromptDesc": "どのワークフローやエージェントからも参照されていない拡張設定（ルール、API 呼び出し、LLM、出力）を検出します。未使用のリソースをクリーンアップして、プラットフォームを整理された状態に保ちます。",
     "scanPromptTitle": "プラットフォームをスキャン",
     "scanning": "リソースをスキャン中…",
-    "selectAll": "すべて選択",
     "softDeleted": "削除済み",
     "title": "孤立検出",
     "found_other": "{{count}} 件の孤立項目が見つかりました",
     "found_one": "{{count}} 件の孤立項目が見つかりました",
     "scanIncomplete": "このスキャンは完了しませんでした",
-    "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。"
+    "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。",
+    "confirmPurge": "孤立したリソース {{count}} 件をすべて完全に削除しますか？この操作は元に戻せません。"
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",
@@ -3497,7 +3739,7 @@
     "tagPlaceholder": "例: safety, production",
     "tags": "タグ",
     "templateEnabled": "テンプレート解決を有効化",
-    "templateEnabledHint": "無効にすると、コンテンツ内の {{}} マーカーはリテラルテキストとして扱われます（コード例に便利）。",
+    "templateEnabledHint": "無効にすると、コンテンツ内の { } マーカーはリテラルテキストとして扱われます（コード例に便利）。",
     "usageHint": "使用方法:"
   },
   "status": {
@@ -3550,7 +3792,8 @@
     "copyVars": "${vars:…} 参照をコピー",
     "refCopied": "コピーしました: {{ref}}",
     "infoLine1": "システムプロンプトでは {{vars.<key>}} を、エージェント設定の任意の場所では ${vars:<key>} を使用します。",
-    "infoLine2": "変更は 2 分以内に反映されます（キャッシュ TTL）。機密値にはシークレット保管庫をご利用ください。"
+    "infoLine2": "変更は 2 分以内に反映されます（キャッシュ TTL）。機密値にはシークレット保管庫をご利用ください。",
+    "keyExists": "「{{key}}」という名前の変数は既に存在します。代わりに一覧から編集してください。"
   },
   "workflowEditor": {
     "endpoints": "エンドポイント",
@@ -3611,7 +3854,19 @@
       "toggleConfig": "詳細パネルの表示切替",
       "unpin": "回答のピン留めを解除",
       "untitled": "無題",
-      "viewSessions": "過去のセッションを表示"
+      "viewSessions": "過去のセッションを表示",
+      "alreadyEnded": "ディスカッションはすでに終了していました。",
+      "stopRaced": "停止しようとした時点でディスカッションの状態が変わり、まだ続いています。もう一度停止してください。",
+      "stopUnconfirmed": "ディスカッションが停止したことを確認できませんでした。状態を確認して、もう一度停止してください。",
+      "stopFailed": "ディスカッションを停止できませんでした: {{error}}",
+      "stopping": "停止しています…",
+      "startOver": "最初からやり直す",
+      "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。",
+      "confirmNewTitle": "実行中のディスカッションを停止しますか？",
+      "confirmNewDescription": "ディスカッションがまだ実行中です。新しく開始すると先に停止され、進行中の作業は破棄されます。",
+      "confirmNewButton": "停止して新規開始",
+      "keepRunning": "実行を続ける",
+      "questionRequired": "タスクフォースへの質問を入力してください。ファイルはディスカッション開始時に共有されます。"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
@@ -3638,7 +3893,10 @@
       "pausedRejected": "この会話は人による判断を待って停止しているため、メッセージは送信されませんでした。",
       "reviewApprovals": "保留中の承認を確認",
       "stop": "生成を停止",
-      "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。"
+      "streamEnded": "返信が完了する前に接続が終了しました。届いた分は上に表示されています。もう一度送信してやり直してください。",
+      "newConversation": "新しい会話",
+      "newConversationFailed": "新しい会話を開始できませんでした",
+      "initFailed": "この会話を開けませんでした。"
     },
     "chat": {
       "agentDetails": "エージェントの詳細",
@@ -3961,7 +4219,8 @@
       "transcript": "会話の書き起こし",
       "tryDifferent": "別の検索語をお試しください",
       "untitled": "無題の会話",
-      "loadListError": "会話の読み込みに失敗しました"
+      "loadListError": "会話の読み込みに失敗しました",
+      "rejected": "却下"
     },
     "insights": "インサイト",
     "memberCount": "{{count}} 名のメンバー",
@@ -4052,7 +4311,7 @@
       "llmDefaultsDesc": "ここで作成する各アドバイザーに適用されます（下で個別に設定した場合を除く）。",
       "llmDefaultsKeyRequired": "ここにキーを追加すると、個別にキーを設定していないすべてのアドバイザーに適用されます。",
       "model": "モデル",
-      "modelPlaceholder": "例: claude-sonnet-5",
+      "modelPlaceholder": "例: claude-sonnet-5-5",
       "nameRequired": "このアドバイザーに名前を付けてください。",
       "new": "新規",
       "next": "次へ",
@@ -4155,7 +4414,10 @@
       "platformBaseUrlAuto": "サーバーから取得",
       "platformBaseUrlDiffers": "このデプロイは現在、自身のアドレスを {{serverUrl}} と報告しています。上の値はこれと異なります。意図して設定した場合のみそのままにしてください。",
       "platformBaseUrlQueryFailed": "サーバーに自身のアドレスを問い合わせられませんでした。ここに入力しない限り有効化は失敗します。再試行するにはページを再読み込みしてください。",
-      "platformBaseUrlUnresolved": "このデプロイはランダムな HTTP ポートで動作しており eddi.self.base-url も未設定のため、自分自身に到達できるアドレスを示せません。ここにアドレスを入力してください。"
+      "platformBaseUrlUnresolved": "このデプロイはランダムな HTTP ポートで動作しており eddi.self.base-url も未設定のため、自分自身に到達できるアドレスを示せません。ここにアドレスを入力してください。",
+      "llmEndpoint": "モデルのエンドポイント",
+      "promptBodyDiffers": "この指示は現在のデフォルトと異なります。編集されたか、以前のバージョンの Manager によって書かれたものです。",
+      "promptBodyReset": "デフォルトに戻す"
     },
     "authMode": {
       "none": {
@@ -4321,6 +4583,28 @@
     },
     "superseded": {
       "title": "以前のオペレーターエージェントがまだデプロイされています。"
+    },
+    "upgrade": {
+      "hint": "Platform Operator のアップデートがあります。",
+      "blockerBaseUrl": "モデルサーバーのアドレスが記録されていません。アップグレードするには再入力してください。",
+      "addedTools_other": "{{count}} 件の新しいツール",
+      "action": "アップグレード",
+      "addedTools_one": "{{count}} 件の新しいツール",
+      "blockerProvider": "このモデルプロバイダーはこの方法では設定できなくなりました。アップグレードするには別のプロバイダーを選んでください。",
+      "useNewDefault": "新しいデフォルトに置き換える",
+      "confirmBody": "現在の指示とツールで新しいオペレーターを作成し、新規有効化と同様に検証してから、古いオペレーターを削除します。モデル、キー、環境、アクセス設定は引き継がれます。開いているオペレーターとのチャットは終了し、古いオペレーターとの会話は履歴に表示されなくなります。",
+      "description": "以前のバージョンの Manager で設定されたため（リビジョン {{from}}、このバージョンは {{to}}）、指示とツールが古くなっています。",
+      "blockerCredential": "モデルキーが平文で入力されており、平文は保存されません。アップグレードするには再入力してください。",
+      "reviewAction": "確認してアップグレード",
+      "instructionsUnknown": "オペレーターの指示が現在のデフォルトと異なります。古いデフォルトか、あなたの編集のどちらかです。",
+      "instructionsCustomized": "オペレーターの指示を編集しています。",
+      "confirmTitle": "Platform Operator をアップグレードしますか？",
+      "removedTools_other": "{{count}} 件のツールを削除",
+      "removedTools_one": "{{count}} 件のツールを削除",
+      "confirm": "今すぐアップグレード",
+      "hintAction": "アップグレード",
+      "keepCurrent": "現在のテキストを維持する（新しいデフォルトで追加された内容は反映されません）",
+      "title": "Platform Operator のアップデートがあります"
     }
   },
   "groupWorkspace": {
@@ -4732,7 +5016,9 @@
       "published": "公開済み",
       "shared": "共有中",
       "sharedTitle": "{{owner}} が所有 · {{space}} 内",
-      "ownedBy": "{{owner}} が所有"
+      "ownedBy": "{{owner}} が所有",
+      "internal": "サインイン済みの全員",
+      "sharedBy": "{{owner}} が共有"
     },
     "level": {
       "use": "会話のみ",
@@ -4750,7 +5036,14 @@
       "space": "ワークスペース",
       "spaceHint": "このリソースのワークスペースの全員。",
       "published": "公開",
-      "publishedHint": "このデプロイにアクセスできる全員。"
+      "publishedHint": "このデプロイにアクセスできる全員が閲覧できます — 匿名のチャット訪問者も含みます。",
+      "internal": "サインイン済みの全員",
+      "internalHint": "サインインした人なら誰でもチャットできます。構成は非公開のままです。匿名ではアクセスできません。",
+      "confirmTitle": "公開範囲を{{visibility}}に変更しますか？",
+      "cascadeLabel": "参照しているワークフローと設定にも適用する",
+      "cascadeWarning": "あなたが所有する参照先リソースすべてにこの公開範囲が設定され、個別の設定は置き換えられます。以前の設定は残りません。",
+      "noCascadeWarning": "このリソースだけが変更されます。新たに閲覧できる人でも、参照先を開けない場合があります。",
+      "apply": "公開範囲を変更"
     },
     "share": {
       "title": "共有",
@@ -4758,7 +5051,7 @@
       "visibility": "公開範囲",
       "peopleAndTeams": "ユーザーとチーム",
       "subjectLabel": "ユーザーまたはチーム",
-      "subjectPlaceholder": "name@example.com または team:engineering",
+      "subjectPlaceholder": "名前、メールアドレス、またはチーム",
       "levelLabel": "アクセスレベル",
       "add": "共有",
       "shared": "共有しました",
@@ -4784,7 +5077,13 @@
       "cascadeRevoked_other": "{{count}} 件のリソースから削除しました",
       "andMore_other": "ほか {{count}} 件",
       "cascadeRevoked_one": "{{count}} 件のリソースから削除しました",
-      "andMore_one": "ほか {{count}} 件"
+      "andMore_one": "ほか {{count}} 件",
+      "unknownGrant": "サインインするユーザーのうち、これに一致する人はいません — 誰にも届きません。削除して共有し直してください。",
+      "copyFailed": "コピーできませんでした — アドレスを選択して手動でコピーしてください。",
+      "chatLink": "チャットリンク",
+      "copied": "コピーしました",
+      "copy": "コピー",
+      "chatLinkHint": "「会話のみ」以上の権限でエージェントを共有されている全員が利用できます。"
     },
     "emptySpace": "このワークスペースにエージェントはありません",
     "emptySpaceDescription": "他のワークスペースに閲覧可能なエージェントがある可能性があります。",
@@ -4802,12 +5101,148 @@
       "warning": "現在の所有者（{{owner}}）が置き換えられ、このリソースの制御を失います。",
       "cascade_other": "{{count}} 件のリソースの所有者を変更しました",
       "cascade_one": "{{count}} 件のリソースの所有者を変更しました"
-    }
+    },
+    "notifications": {
+      "granted": "{{name}} にアクセス権を付与しました",
+      "labelUnread_one": "通知 — 未読 {{count}} 件",
+      "labelUnread_other": "通知 — 未読 {{count}} 件",
+      "label": "通知",
+      "markAll": "すべて既読にする",
+      "empty": "新着はありません。あなたへの共有やアクセスリクエストがここに表示されます。",
+      "unnamed": "名前のないリソース",
+      "requested": "{{who}} が {{what}} への「{{level}}」アクセスをリクエストしています",
+      "shared": "{{who}} が {{what}} をあなたと共有しました — {{level}}",
+      "grant": "付与",
+      "openChat": "チャットを開く",
+      "open": "開く",
+      "dismiss": "閉じる"
+    },
+    "request": {
+      "alreadyHas": "すでにそのアクセス権があります — ページを再読み込みしてください。",
+      "chatOnlyTitle": "このエージェントとチャットできます",
+      "title": "これにアクセスする権限がありません",
+      "chatOnly": "チャット用に共有されているため、構成は非公開のままです。",
+      "subtitle": "非公開か、他のユーザーとのみ共有されている可能性があります。アクセスをリクエストできます。",
+      "sent": "リクエストを送信しました。対象が存在し所有者がいる場合、所有者の通知に表示されます — 付与されると、あなたにも通知されます。",
+      "messagePlaceholder": "必要な理由（任意）",
+      "message": "所有者へのメッセージ",
+      "action": "アクセスをリクエスト"
+    },
+    "move": {
+      "done": "移動しました",
+      "title": "チームに移動",
+      "team": "チーム",
+      "action": "移動",
+      "hint": "チームの全員が検索・編集できるようになります。所有者はあなたのままです — 削除やさらなる共有ができるのはあなただけです。",
+      "cascade_one": "{{count}} 件のリソースを移動しました",
+      "cascade_other": "{{count}} 件のリソースを移動しました"
+    },
+    "preview": {
+      "title_one": "この変更は {{count}} 件のリソースに適用されます",
+      "title_other": "この変更は {{count}} 件のリソースに適用されます",
+      "confirm": "すべてに適用"
+    },
+    "ownership": {
+      "mine": "自分のもの",
+      "shared": "共有されたもの",
+      "any": "表示できるすべて",
+      "label": "表示"
+    },
+    "create": {
+      "default": "デフォルトのワークスペース",
+      "hint": "新しい項目は {{space}} に作成されます。"
+    },
+    "emptyShared": "まだ何も共有されていません",
+    "emptySharedDescription": "同僚があなたやあなたのチームとエージェントを共有すると、ここと通知に表示されます。",
+    "showEverything": "表示できるものをすべて表示"
   },
   "connectionRef": {
     "wrapped": "接続はスキームを含むヘッダー値全体を供給します。${connection:name} を単独で使い、「Bearer 」は接続のヘッダー値側に置いてください。",
     "headerMismatch": "この接続は資格情報を「{{expected}}」として送るため、ヘッダー名もそれにする必要があります。そうでないと設定上の名前と実際のリクエストのヘッダーが食い違います。",
     "refusedInRequest": "${connection:…} はパス、クエリパラメーター、ボディでは拒否されます。URL 内の資格情報はすべてのプロキシログに残り、ボディ内のものは読まれません。代わりにヘッダーから接続を参照してください。",
     "refusedInModel": "言語モデル、埋め込み、ベクターストアは ${connection:…} を受け付けません。接続はヘッダー全体に解決されますが、これらには生の資格情報が必要です。ここでは ${vault:…} を使ってください。"
+  },
+  "workspacesPage": {
+    "title": "ワークスペース",
+    "subtitle": "あなたのワークスペース、そこに保管されるシークレットと変数、新しい作業の共有方法。",
+    "notEnforced": "このデプロイではワークスペースが適用されていないため、全員がすべてを見られます。オペレーターは eddi.workspaces.enabled=true で有効にします。",
+    "yourSpaces": "あなたのワークスペース",
+    "yourSpacesHint": "各ワークスペースには独自のシークレットと変数があります。表示・変更できるのはメンバーだけで、それらを使うエージェントをデプロイできるのもメンバーだけです。",
+    "referenceCopied": "参照をコピーしました",
+    "copyReference": "エージェントで使う参照をコピー",
+    "secretStored": "シークレットを保存しました",
+    "secrets": "シークレット",
+    "noSecrets": "このワークスペースにはまだシークレットがありません",
+    "deleteNamed": "{{name}} を削除",
+    "secretName": "名前（例: openai-key）",
+    "secretValue": "値 — 暗号化して保存され、二度と表示されません",
+    "add": "追加",
+    "deleteSecretTitle": "このシークレットを削除しますか？",
+    "deleteSecretDescription": "これを使うエージェントは、再度保存されるまで動作しなくなります。この操作は元に戻せません。",
+    "variableStored": "変数を保存しました",
+    "variables": "変数",
+    "noVariables": "このワークスペースにはまだ変数がありません",
+    "variableName": "名前（例: model）",
+    "variableValue": "値",
+    "pinned": "{{property}} により固定",
+    "stored": "ここで設定",
+    "default": "デフォルト",
+    "settings": "設定",
+    "settingsHint": "すぐに反映され、5 秒以内にすべてのレプリカに適用されます。ワークスペースを適用するかどうか、どのトークンクレームがチームを含むかは起動時の設定で、参考として表示されます。",
+    "enforcing": "適用中",
+    "enforcedYes": "はい",
+    "enforcedNo": "いいえ",
+    "groupsClaim": "チームの取得元トークンクレーム",
+    "defaultSpace": "新しい作業の既定の作成先",
+    "defaultSpacePlaceholder": "空欄: 各自のワークスペース — またはチーム名",
+    "defaultSpaceHelp": "チーム名を指定すると、デプロイはチーム優先になります。非公開にしない限り、同僚同士で作業が見えます。個人が選択したワークスペースが常に優先されます。",
+    "legacy": "所有権の記録前に作成されたリソース",
+    "legacyShared": "全員に表示 — アップグレード後も何も消えません",
+    "legacyAdminOnly": "管理者のみに表示 — 所有者が割り当てられた後",
+    "lastChanged": "最終変更者: {{who}}",
+    "neverChanged": "まだここで変更されていません",
+    "saved": "設定を保存しました"
+  },
+  "cascadeSave": {
+    "workflowChanged": "ワークフロー {{workflowId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
+    "agentChanged": "エージェント {{agentId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
+    "workflowMissingResource": "ワークフロー {{workflowId}}（バージョン {{version}}）は {{resource}} を参照していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
+    "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を参照しており、バージョン {{expected}} ではありません。このページを開いた後にエージェントが変更されました。再読み込みしてください。何も保存されていません。",
+    "agentMissingWorkflow": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} を参照していません。何も保存されていません。"
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "モデル開発元",
+      "compatible": "OpenAI 互換プロバイダー",
+      "cloud": "クラウドプラットフォーム",
+      "local": "ローカル / セルフホスト"
+    },
+    "region": {
+      "label": "リージョン",
+      "intl": "国際",
+      "cn": "中国本土",
+      "us": "米国",
+      "custom": "カスタム URL(下で設定)"
+    },
+    "compatibleNote": "プロバイダーの OpenAI 互換 API（{{url}}）経由で接続します。プロキシや別のリージョンを使う場合のみ変更してください。",
+    "keyHint": "API キーは {{url}} で取得できます",
+    "select": "プロバイダーを選択"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "前のバージョンと互換 — 進行中の会話がこのバージョンに切り替わる場合があります",
+    "compatibleHint": "進行中の会話を壊さない変更（プロンプトの言い回しや別のモデルなど）の場合のみ。プロパティ、アクション、ワークフローのステップを名前変更または削除した場合はチェックしないでください。",
+    "compatibleLegacyNote": "現在のバージョンはバージョン追従より前のものなので、すでに実行中の会話はそのまま残ります。次の互換保存からチェーンがつながります。",
+    "compatibleUnknownNote": "バージョン追従より前のバージョンの会話はそのバージョンに残ります。",
+    "generationBadge": "互換世代 {{generation}}",
+    "generationTooltip": "互換世代 {{generation}}：同じ世代を持つこのエージェントのバージョンは互換性があるため、進行中の会話は次のターンで最新のデプロイ済みバージョンに移ります。互換性のない保存は新しい世代を開始します。",
+    "impactTitle": "v{{version}} を{{environment}}にデプロイ — 進行中の会話",
+    "impactFollow_other": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
+    "impactStay_other": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります",
+    "impactReasonNewer": "より新しいバージョン",
+    "impactReasonLegacy": "バージョン追従より前",
+    "impactReasonBreaking": "互換性のない変更",
+    "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
+    "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
+    "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
   }
 }

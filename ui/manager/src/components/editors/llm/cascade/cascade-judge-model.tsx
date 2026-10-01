@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Scale } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { MODEL_TYPES, type CascadeJudgeModel } from "../types";
+import { ProviderSelect } from "@/components/shared/provider-select";
+import { type CascadeJudgeModel } from "../types";
 
 /**
  * Editor for the `judge_model` confidence-evaluation strategy — a separate
@@ -40,19 +41,13 @@ export function CascadeJudgeModelEditor({
       </p>
 
       <div className="flex items-center gap-2">
-        <select
+        <ProviderSelect
           value={judge.type ?? "openai"}
-          onChange={(e) => onChange({ ...judge, type: e.target.value })}
+          onChange={(type) => onChange({ ...judge, type })}
           disabled={readOnly}
           className="h-7 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-          data-testid="cascade-judge-type"
-        >
-          {MODEL_TYPES.map((mt) => (
-            <option key={mt} value={mt}>
-              {mt}
-            </option>
-          ))}
-        </select>
+          testId="cascade-judge-type"
+        />
         <input
           type="text"
           value={judge.parameters?.model ?? ""}

@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.persistence;
 
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -137,7 +138,8 @@ public class PostgresSecretPersistence implements ISecretPersistence {
                 ON CONFLICT (tenant_id, key_name)
                 DO UPDATE SET encrypted_value = EXCLUDED.encrypted_value,
                     iv = EXCLUDED.iv, dek_id = EXCLUDED.dek_id, checksum = EXCLUDED.checksum,
-                    description = EXCLUDED.description, allowed_agents = EXCLUDED.allowed_agents,
+                    description = CASE WHEN ? THEN EXCLUDED.description ELSE secret_vault_secrets.description END,
+                    allowed_agents = CASE WHEN ? THEN EXCLUDED.allowed_agents ELSE secret_vault_secrets.allowed_agents END,
                     last_accessed_at = EXCLUDED.last_accessed_at, last_rotated_at = EXCLUDED.last_rotated_at
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -152,9 +154,43 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             ps.setTimestamp(9, instantToTimestamp(secret.getCreatedAt()));
             ps.setTimestamp(10, instantToTimestamp(secret.getLastAccessedAt()));
             ps.setTimestamp(11, instantToTimestamp(secret.getLastRotatedAt()));
+            // Null means "not supplied" — see ISecretPersistence#upsertSecret. The
+            // insert branch still writes the defaults bound above; the update branch
+            // keeps the stored grant and description unless the caller gave new ones.
+            ps.setBoolean(12, secret.getDescription() != null);
+            ps.setBoolean(13, secret.getAllowedAgents() != null);
             ps.executeUpdate();
         } catch (Exception e) {
             throw new PersistenceException("Failed to upsert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        }
+    }
+
+    @Override
+    public boolean insertSecretIfAbsent(EncryptedSecret secret) {
+        ensureSchema();
+        String sql = """
+                INSERT INTO secret_vault_secrets
+                    (tenant_id, key_name, encrypted_value, iv, dek_id, checksum,
+                     description, allowed_agents, created_at, last_accessed_at, last_rotated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                ON CONFLICT (tenant_id, key_name) DO NOTHING
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, secret.getTenantId());
+            ps.setString(2, secret.getKeyName());
+            ps.setString(3, secret.getEncryptedValue());
+            ps.setString(4, secret.getIv());
+            ps.setString(5, secret.getDekId());
+            ps.setString(6, secret.getChecksum());
+            ps.setString(7, secret.getDescription());
+            ps.setString(8, MAPPER.writeValueAsString(secret.getAllowedAgents() != null ? secret.getAllowedAgents() : List.of("*")));
+            ps.setTimestamp(9, instantToTimestamp(secret.getCreatedAt()));
+            ps.setTimestamp(10, instantToTimestamp(secret.getLastAccessedAt()));
+            ps.setTimestamp(11, instantToTimestamp(secret.getLastRotatedAt()));
+            // The affected-row count is the answer: 0 means the conflict arm fired.
+            return ps.executeUpdate() > 0;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to insert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
         }
     }
 
@@ -229,6 +265,72 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         }
     }
 
+    @Override
+    public boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description) {
+        ensureSchema();
+        // Two columns in the SET list, and no INSERT branch. encrypted_value, iv,
+        // dek_id and checksum are not named here, so a grant edit cannot re-encrypt
+        // or blank the secret; and a grant for a key that does not exist updates no
+        // rows, which the caller turns into a 404 rather than creating an empty one.
+        String sql = """
+                UPDATE secret_vault_secrets
+                   SET allowed_agents = ?::jsonb, description = ?
+                 WHERE tenant_id = ? AND key_name = ?
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, MAPPER.writeValueAsString(allowedAgents != null ? allowedAgents : List.of("*")));
+            ps.setString(2, description);
+            ps.setString(3, tenantId);
+            ps.setString(4, keyName);
+            return ps.executeUpdate() == 1;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to update the grant of secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    @Override
+    public boolean updateSecretGrantIfUnchanged(String tenantId, String keyName, List<String> expectedAllowedAgents, List<String> allowedAgents,
+                                                String description) {
+        ensureSchema();
+        // The precondition is in the WHERE clause, so the check and the write are one
+        // statement. Containment both ways is set equality: the order ids were typed
+        // in is not part of what a grant means.
+        String wildcardCondition = "(allowed_agents IS NULL OR allowed_agents = '[]'::jsonb OR allowed_agents @> '[\"*\"]'::jsonb)";
+        String listCondition = "(allowed_agents @> ?::jsonb AND allowed_agents <@ ?::jsonb)";
+        boolean wildcard = SecretMetadata.grantsAllAgents(expectedAllowedAgents);
+        String sql = "UPDATE secret_vault_secrets SET allowed_agents = ?::jsonb, description = ? WHERE tenant_id = ? AND key_name = ? AND "
+                + (wildcard ? wildcardCondition : listCondition);
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, MAPPER.writeValueAsString(allowedAgents != null ? allowedAgents : List.of("*")));
+            ps.setString(2, description);
+            ps.setString(3, tenantId);
+            ps.setString(4, keyName);
+            if (!wildcard) {
+                String expected = MAPPER.writeValueAsString(expectedAllowedAgents);
+                ps.setString(5, expected);
+                ps.setString(6, expected);
+            }
+            return ps.executeUpdate() == 1;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to update the grant of secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    @Override
+    public void touchLastAccessed(String tenantId, String keyName, Instant lastAccessedAt) {
+        ensureSchema();
+        // One column, no INSERT branch — see ISecretPersistence#touchLastAccessed.
+        String sql = "UPDATE secret_vault_secrets SET last_accessed_at = ? WHERE tenant_id = ? AND key_name = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setTimestamp(1, instantToTimestamp(lastAccessedAt));
+            ps.setString(2, tenantId);
+            ps.setString(3, keyName);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to record access to secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
     // ─── DEKs ───
 
     @Override
@@ -271,6 +373,42 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             return ps.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new PersistenceException("Failed to insert DEK generation for tenant " + dek.getTenantId(), e);
+        }
+    }
+
+    @Override
+    public boolean updateDekWrapping(EncryptedDek dek, String expectedIv) {
+        ensureSchema();
+        // No INSERT branch: re-wrapping a generation that no longer exists must not
+        // bring it back.
+        String sql = """
+                UPDATE secret_vault_deks
+                   SET encrypted_dek = ?, iv = ?
+                 WHERE tenant_id = ? AND generation = ? AND iv = ?
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, dek.getEncryptedDek());
+            ps.setString(2, dek.getIv());
+            ps.setString(3, dek.getTenantId());
+            ps.setInt(4, dek.getGeneration());
+            ps.setString(5, expectedIv);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to re-wrap DEK generation " + dek.getGeneration() + " for tenant " + dek.getTenantId(), e);
+        }
+    }
+
+    @Override
+    public boolean deleteDekIfWrappedWith(String tenantId, int generation, String expectedIv) {
+        ensureSchema();
+        String sql = "DELETE FROM secret_vault_deks WHERE tenant_id = ? AND generation = ? AND iv = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            ps.setInt(2, generation);
+            ps.setString(3, expectedIv);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to delete DEK generation " + generation + " for tenant " + tenantId, e);
         }
     }
 
@@ -389,6 +527,52 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new PersistenceException("Failed to write meta value: " + key, e);
+        }
+    }
+
+    @Override
+    public String setMetaValueIfAbsent(String key, String value) {
+        ensureSchema();
+        // DO NOTHING on conflict: an existing value is never replaced, and the primary
+        // key makes the insert atomic, so concurrent creators converge on one winner.
+        String sql = """
+                INSERT INTO secret_vault_meta (key, value) VALUES (?, ?)
+                ON CONFLICT (key) DO NOTHING
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, key);
+            ps.setString(2, value);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to write meta value: " + key, e);
+        }
+        return getMetaValue(key);
+    }
+
+    @Override
+    public int deleteMetaValuesWithPrefix(String prefix) {
+        ensureSchema();
+        // starts_with rather than LIKE: a prefix holding % or _ must not widen the
+        // match.
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM secret_vault_meta WHERE starts_with(key, ?)")) {
+            ps.setString(1, prefix);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to delete meta values with prefix: " + prefix, e);
+        }
+    }
+
+    @Override
+    public void deleteMetaValue(String key) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM secret_vault_meta WHERE key = ?")) {
+            ps.setString(1, key);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to delete meta value: " + key, e);
         }
     }
 

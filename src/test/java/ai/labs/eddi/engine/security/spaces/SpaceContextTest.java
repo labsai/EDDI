@@ -243,25 +243,23 @@ class SpaceContextTest {
             var s = new WorkspaceSettings(true, true, "groups", WorkspaceSettings.LEGACY_SHARED, Optional.of("engineering"));
             s.validate();
 
-            var ctx = new SpaceContext(withJwtClaim("alice", List.of()), s);
+            var ctx = new SpaceContext(withJwtClaim("alice", List.of("/engineering")), s);
 
             assertEquals(Subjects.teamSpace("engineering"), ctx.defaultWriteSpace());
         }
 
         @Test
-        @DisplayName("a configured team applies even to someone who is not in it")
-        void configuredTeamAppliesRegardlessOfMembership() {
-            // Deliberate: this is the deployment saying "everything is filed here",
-            // not a per-user preference. Whether the creator can then SEE it is the
-            // access model's business, and it says no — which is why an operator
-            // setting this must also add people to that group.
+        @DisplayName("a configured team applies only to its members; everyone else keeps their own space")
+        void configuredTeamAppliesOnlyToMembers() {
+            // It used to apply to everyone, filing an outsider's work where a team
+            // they do not belong to could read and edit it. Found on a live
+            // instance once the setting became changeable at runtime.
             var s = new WorkspaceSettings(true, true, "groups", WorkspaceSettings.LEGACY_SHARED, Optional.of("engineering"));
             s.validate();
 
-            var ctx = new SpaceContext(withJwtClaim("outsider", List.of()), s);
+            var ctx = new SpaceContext(withJwtClaim("outsider", List.of("/sales")), s);
 
-            assertEquals(Subjects.teamSpace("engineering"), ctx.defaultWriteSpace());
-            assertFalse(ctx.current().spaces().contains(Subjects.teamSpace("engineering")));
+            assertEquals(Subjects.personalSpace("outsider"), ctx.defaultWriteSpace());
         }
     }
 }

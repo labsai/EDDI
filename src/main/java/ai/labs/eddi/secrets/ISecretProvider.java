@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Service Provider Interface for secrets management. Implementations handle the
@@ -63,6 +65,90 @@ public interface ISecretProvider {
     void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents) throws SecretProviderException;
 
     /**
+     * Store a new secret only if none exists under {@code reference}.
+     * <p>
+     * Unlike {@link #store}, which is an explicit upsert (rotation, the REST
+     * create-or-replace), this never replaces an existing value. The check and the
+     * write are one atomic operation in the persistence layer, so it is the only
+     * safe way to claim a key name: a read of {@link #getMetadata} followed by a
+     * {@link #store} lets two callers both see the key as absent and the later
+     * write silently replace the earlier.
+     *
+     * @return {@code true} if this call created the secret, {@code false} if one
+     *         already existed (left exactly as it was)
+     * @throws SecretProviderException
+     *             if storage fails
+     */
+    boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
+            throws SecretProviderException;
+
+    /**
+     * Change which agents may use an existing secret, without touching its value.
+     * <p>
+     * <b>Why this is separate from {@link #store}.</b> {@code store} was the only
+     * write path there was, and it needs the plaintext. Once a key is in the vault
+     * the operator no longer has the plaintext — that is the point of vaulting it —
+     * so widening a grant through {@code store} meant recovering the value from a
+     * backup or rotating the key. This method takes no plaintext parameter at all,
+     * so it cannot read, re-encrypt or re-write the value even by accident; the
+     * property holds by signature rather than by convention, and implementations
+     * must keep it that way (see
+     * {@link ai.labs.eddi.secrets.persistence.ISecretPersistence#updateSecretGrant},
+     * which names only the two fields it may write).
+     * <p>
+     * A grant edit is <b>not</b> a rotation: {@code lastRotatedAt} and
+     * {@code createdAt} keep their values, so nothing in the metadata afterwards
+     * suggests the secret itself changed.
+     *
+     * @param reference
+     *            the secret whose grant to replace
+     * @param allowedAgents
+     *            the replacement grant list, canonicalised through
+     *            {@link SecretMetadata#canonicalGrant} on the way in so that every
+     *            shape meaning "all agents" is stored as the documented
+     *            {@code ["*"]}
+     * @param description
+     *            the new description, or {@code null} to keep the existing one.
+     *            Clearing it is done by passing an empty string
+     * @return the secret's metadata as it now stands
+     * @throws SecretNotFoundException
+     *             if the secret does not exist. A grant edit never creates one — a
+     *             typo in the key name has to fail rather than produce a valueless
+     *             entry
+     * @throws SecretProviderException
+     *             if the update fails
+     */
+    SecretMetadata updateGrant(SecretReference reference, List<String> allowedAgents, String description)
+            throws SecretNotFoundException, SecretProviderException;
+
+    /**
+     * {@link #updateGrant(SecretReference, List, String)}, applied only while the
+     * secret's grant is still {@code expectedAllowedAgents}.
+     * <p>
+     * A grant edit replaces the whole list, so two operators editing from what they
+     * each loaded otherwise overwrite each other without either finding out — the
+     * later write quietly reinstating an agent the earlier one had just removed.
+     * The list the editor started from, sent back as a precondition, turns that
+     * into a {@link GrantConflictException} carrying the grant as it now stands.
+     *
+     * @param expectedAllowedAgents
+     *            the grant the caller last read, compared as a set with every
+     *            spelling of the wildcard equal; {@code null} applies the update
+     *            unconditionally
+     * @throws GrantConflictException
+     *             if the grant is no longer {@code expectedAllowedAgents}; nothing
+     *             was written
+     */
+    default SecretMetadata updateGrant(SecretReference reference, List<String> allowedAgents, String description,
+                                       List<String> expectedAllowedAgents)
+            throws SecretNotFoundException, SecretProviderException {
+        if (expectedAllowedAgents != null) {
+            throw new SecretProviderException("This secret provider does not support conditional grant updates");
+        }
+        return updateGrant(reference, allowedAgents, description);
+    }
+
+    /**
      * Delete a secret from the backend.
      *
      * @param reference
@@ -98,6 +184,32 @@ public interface ISecretProvider {
      *             if the operation fails
      */
     List<SecretMetadata> listKeys(String tenantId) throws SecretProviderException;
+
+    /**
+     * Whether {@code storedChecksum} — as returned in {@link SecretMetadata} — is
+     * the checksum of {@code plaintext} for the given tenant.
+     * <p>
+     * Callers must not compute this comparison themselves: the current (keyed)
+     * checksum scheme uses an HMAC key that only the provider holds, so a caller
+     * with just the plaintext cannot reproduce a keyed checksum. This method hides
+     * both the keyed scheme and the legacy bare-SHA-256 scheme behind one call, so
+     * dedup and value-match keep working across the upgrade.
+     * <p>
+     * The default implementation understands only the legacy scheme, which is
+     * correct for the in-memory and test doubles that never write keyed checksums;
+     * the vault provider overrides it to also verify keyed checksums.
+     *
+     * @param tenantId
+     *            the owning tenant
+     * @param storedChecksum
+     *            the checksum from {@link SecretMetadata#checksum()}
+     * @param plaintext
+     *            the candidate value
+     * @return true when the checksum matches the plaintext
+     */
+    default boolean matchesChecksum(String tenantId, String storedChecksum, String plaintext) {
+        return storedChecksum != null && VaultChecksum.matches(null, tenantId, storedChecksum, plaintext);
+    }
 
     /**
      * Rotate the Data Encryption Key (DEK) for a specific tenant: adds a new DEK
@@ -187,6 +299,36 @@ public interface ISecretProvider {
     String unseal(String tenantId, SealedValue sealed) throws SecretProviderException;
 
     /**
+     * Stores a deployment-level value, sealed, unless one is already stored under
+     * {@code name}, and returns whichever value is stored afterwards.
+     * <p>
+     * For key material other subsystems must keep stable across a KEK rotation —
+     * the audit ledger's HMAC key is the one that exists. Held outside every
+     * tenant's secrets: it cannot be listed, resolved through a {@code ${vault:…}}
+     * reference or deleted over the secrets API. The insert-if-absent is what makes
+     * every replica adopt the same value.
+     *
+     * @return the value stored under {@code name} once the call returns
+     * @throws SecretProviderException
+     *             if the vault is unavailable or the value cannot be stored or read
+     */
+    default String pinSystemValue(String name, String candidate) throws SecretProviderException {
+        throw new SecretProviderException("This secret provider cannot hold system values");
+    }
+
+    /**
+     * The system value pinned under {@code name}, or empty when none is. The value
+     * is authenticated by its sealing, so a row written straight into the database
+     * without the vault's keys is not returned.
+     *
+     * @throws SecretProviderException
+     *             if the vault is unavailable or the value cannot be read or opened
+     */
+    default Optional<String> readSystemValue(String name) throws SecretProviderException {
+        return Optional.empty();
+    }
+
+    /**
      * Ciphertext, its initialization vector, and the name of the key that sealed
      * it.
      * <p>
@@ -230,6 +372,24 @@ public interface ISecretProvider {
 
         public SecretProviderException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * A conditional grant update found the grant already changed by somebody else.
+     * Carries the grant as it now stands, so the caller can show it rather than
+     * re-read it.
+     */
+    class GrantConflictException extends SecretProviderException {
+        private final List<String> currentAllowedAgents;
+
+        public GrantConflictException(String message, List<String> currentAllowedAgents) {
+            super(message);
+            this.currentAllowedAgents = currentAllowedAgents == null ? List.of() : List.copyOf(currentAllowedAgents);
+        }
+
+        public List<String> getCurrentAllowedAgents() {
+            return currentAllowedAgents;
         }
     }
 }

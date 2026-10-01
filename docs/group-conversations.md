@@ -205,6 +205,68 @@ marker and the next boundary catches up.
   last two rounds.
 
 
+## Member stances (the overview dashboard)
+
+The Manager and the Workforce board can render a discussion as an **overview**
+instead of a transcript — a phase rail, a members x phases matrix, and a roster
+of one-line positions. The roster's lines are *member stances*, and they always
+exist: by default each is the **lead sentence of that member's newest
+contribution**, which costs nothing and is the member's own words.
+
+`stanceSummary` upgrades that to an LLM summary of everything the member has
+said:
+
+```json
+"stanceSummary": {
+  "maxChars": 160,
+  "llmProvider": "openai",
+  "llmModel": "gpt-4o-mini",
+  "inputPricePer1M": 0.15,
+  "outputPricePer1M": 0.60,
+  "maxInputChars": 8000,
+  "maxEntryChars": 2000
+}
+```
+
+- **The summarizer's input is bounded.** It reads the member's **newest**
+  contributions within `maxInputChars` (default 8,000, ceiling 32,000), each cut
+  to `maxEntryChars` (default 2,000, ceiling 8,000), with an
+  `[N earlier contribution(s) omitted]` marker — a stance is where the member
+  stands now, and the whole history re-sent at every boundary eventually
+  overflows the summarizer's context window. Non-positive values take the
+  default.
+
+- **There is no `enabled` flag**, unlike `contextWindow`. Stances exist either
+  way, so the only thing a flag could have meant is "may this spend money?" —
+  which is already what naming a provider and a model means.
+- Stances are recomputed at **phase boundaries**, and only for a member whose
+  stored stance no longer covers **their own** contributions. A member who
+  stayed silent through a phase costs nothing — coverage is counted per member,
+  not against the transcript length, or one member speaking would re-bill
+  everyone.
+- The summarizer is **optional spend and obeys `maxCostPerDiscussion`**, like
+  the window summarizer and the convergence judge. Past the ceiling it
+  downgrades to extraction rather than stopping the phase.
+- A summarizer failure **degrades to lead-sentence extraction**, never to a
+  blank roster, and never fails the discussion.
+- The UI distinguishes the two producers — an extracted line is shown as a
+  quotation, a generated one as a summary — because presenting a paraphrase the
+  way a quotation is presented would misattribute it.
+- Extraction skips the entry types that carry a **JSON contract** (`VOTE`,
+  `BID`, `RETRO`, `PLAN`, `TASK_RESULT`, `VERIFICATION`) and quotes the newest
+  prose entry instead — the lead "sentence" of a ballot is an opening brace, and
+  it would otherwise replace a member's real position after every vote. The LLM
+  summarizer still reads them.
+- The optional prices attribute stance spend to the same cost ledger
+  `maxCostPerDiscussion` bounds, under a `system:stance:*` key.
+- Naming only one of `llmProvider`/`llmModel` (or prices with neither) produces
+  a save-time warning: that config intends to spend and silently will not.
+
+Both surfaces stream two events for this view: `cost_updated` after every cost
+attribution (carrying the key's *cumulative* spend, so a redelivered frame is
+idempotent) and `stance_updated` whenever a stance's text changes.
+
+
 ## Voting
 
 A `VOTE` phase collects **explicit ballots** instead of another round of prose.
@@ -238,6 +300,20 @@ peer-hidden until their phase completes (commit-reveal).
   strict JSON → JSON embedded in prose → a reply naming exactly one option's
   text. Anything else is a non-ballot and **counts against quorum** — as do
   abstentions; a mostly-silent team has not reached quorum, and that is signal.
+  - **Only what was cast counts.** For a JSON ballot, only the `vote`/`votes`
+    values are read, never the free-text `statement`. A cast in a shape the
+    method did not ask for still counts when it names exactly one option (the
+    approval array `{"votes": ["X"]}` under `MAJORITY`, a string `"votes": "X"`
+    under `APPROVAL`).
+  - **An empty ballot is a non-vote.** `"votes": []`, `"vote": null` or a JSON
+    ballot with no vote field at all counts against quorum — even if its
+    statement mentions an option.
+  - **Options are matched as words.** In prose ballots (and the moderator's
+    tiebreak reply) an option must appear as a whole word or phrase,
+    case-insensitively: option `No` is not found inside "not" or "know". The
+    boundary applies only between words of scripts written with spaces — in
+    Chinese, Japanese, Thai and similar scripts a plain substring match is used,
+    so "我支持方案A。" is a vote for `方案A`.
 - **Options:** `EXPLICIT` is the reliable path. `LAST_SYNTHESIS` extracts
   `Option A: …` lines from the newest synthesis — instruct that synthesis to
   emit them (the default synthesis prompt does not). The line may be written the
@@ -380,6 +456,21 @@ single deterministic skip condition) ⑤ *Synthesis*.
   co-signatures; no new crypto.
 - No agreement → the arbitration runs and its conclusion becomes
   `decision: {type: "VERDICT", method: "arbitration"}`.
+- **The ledger is bounded** — it is an LLM write surface quoted into every
+  later turn. One BARGAIN turn records at most `maxConcessionsPerMove`
+  concessions (default 5, ceiling 20; each side of a concession is stored
+  truncated to 600 characters), the ledger stops at `maxLedgerConcessions`
+  (default 50, ceiling 500 — the earliest are kept, they are the record the
+  outcome quotes; further concessions are not recorded but counted, and the
+  agreement outcome says "N further concession(s) not recorded (ledger full)"
+  and carries `tally.concessionsNotRecorded`), and a turn's
+  prompt quotes only the newest `maxRenderedConcessions` (default 20, ceiling
+  100) with an "(N earlier concession(s) omitted)" line. `negotiationConfig` is
+  a default, not a switch: without it the defaults apply.
+
+```json
+"negotiationConfig": { "maxConcessionsPerMove": 5, "maxLedgerConcessions": 50, "maxRenderedConcessions": 20 }
+```
 
 ## Retro → group memory
 
@@ -390,7 +481,7 @@ knowledge that compounds run-over-run.
 
 ```json
 { "name": "Retro", "type": "RETRO", "participants": "MODERATOR" },
-"retroConfig": { "maxLessonsPerRun": 3, "maxStoredLessons": 50 }
+"retroConfig": { "maxLessonsPerRun": 3, "maxStoredLessons": 50, "maxLessonChars": 1000 }
 ```
 
 - The built-in template asks for `{"lessons": [{"lesson": "...", "context":
@@ -409,6 +500,10 @@ knowledge that compounds run-over-run.
   ceiling is only as bounded as the operator's typing.
 - `maxLessonsPerRun` bounds the whole harvest, not each contribution — a RETRO
   phase with several participants or repeats cannot multiply it.
+- `maxLessonChars` (default 1000 — the same default as an agent's
+  `memoryGuardrails.maxValueLength`; ceiling 4000) bounds one stored lesson
+  value, lesson plus its "applies:" context. Longer lessons are truncated, the
+  context first; the idempotency key still hashes the untruncated lesson.
 - Member conversations already load group-visible entries at init, so recall
   needs no new namespace. The `retro_recorded` SSE event reports each harvest.
 
@@ -460,7 +555,7 @@ nothing. It also means a fire's `COMPLETED` status says the discussion was
 writeback has run. VERIFIED outcomes stay VERIFIED on the backlog and credit the
 assignee's `perMemberStats`; anything else returns to PENDING with the
 reviewer's feedback appended to the description — **the cross-run retry
-loop**. A FAILED/CANCELLED discussion returns every pulled task untouched.
+loop**. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
 
 **Stale claims are reclaimed.** The default group HITL timeout policy is
@@ -853,8 +948,16 @@ already computed for the round in flight. The recruitment is recorded as a
 the reason, so the rest of the team can see why the roster changed.
 
 Recruitment is refused, with an actionable message, when the agent is not
-deployed, is already a member, is the recruiter itself, or when
-`maxRecruitedAgentsPerDiscussion` is reached.
+deployed, is already a member, is the recruiter itself, when
+`maxRecruitedAgentsPerDiscussion` is reached, or when the discussion's owner may
+not use the agent. A recruit speaks as that owner and at their cost, so with
+workspaces enforced it has to be an agent the owner could have started a
+conversation with: their own, one shared with them directly, or a published one.
+Team shares do not count here — the member turn runs without the owner's token,
+so their team memberships are unknown. An owner who holds `eddi-admin` on the
+request that drives the turn is admitted, as they are everywhere else. The access
+check runs before the deployment check, so a refusal never reveals whether an
+off-limits agent is deployed.
 
 **Recruits are never torn down.** They are pre-existing deployed agents the
 discussion borrowed, so `TeardownAgentTool` and end-of-discussion cleanup leave
@@ -904,6 +1007,29 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowedModels` | `null` (any) | Per-provider model whitelist |
 
 Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentIds`, and `retainedAgentIds`.
+
+**What the tools may touch.**
+
+- `teardown_agent` undeploys (and optionally deletes) only an agent that is both
+  in the conversation's created list **and** carries a `dynamicOrigin` in its own
+  configuration naming the calling conversation or its discussion.
+  `create_sub_agent` stamps that marker on the agent's first version; an agent a
+  person built has none, so it can never be torn down by a tool. Only the engine
+  writes the marker: an agent update (`PUT`, a merge import, an upgrade) keeps the
+  stored value whatever the body says, and a duplicate or a ZIP import that
+  creates a new agent drops it.
+- End-of-discussion cleanup applies the same marker: it deletes only agents whose
+  `dynamicOrigin` names this discussion, leaves agents marked for another one
+  alone, and only **undeploys** — never deletes — an agent with no marker (one
+  created before markers existed, or never created by `create_sub_agent`).
+- `retain_agent` flags persist across turns; `unretain_agent` removes them for good.
+- `converse_with_agent` continues only a conversation owned by the same user the
+  calling conversation belongs to (a conversation of another user, or one that
+  records no owner, is refused). Every delegation — a new conversation or a
+  continued one — requires that user to be allowed to use the target agent, the
+  same rule as recruitment above; agents this conversation or its discussion
+  created are exempt — "created" meaning tracked **and** carrying a
+  `dynamicOrigin` that names this conversation or its discussion.
 
 #### Model and credential inheritance
 
@@ -1012,8 +1138,8 @@ summarizer's.
 | `GET` | `/groupstore/groups/{id}/workspace` | Read the standing-team workspace (I13) |
 | `GET` | `/groupstore/groups/{id}/workspace/backlog` | Read the team backlog |
 | `POST` | `/groupstore/groups/{id}/workspace/backlog` | File a backlog task |
-| `POST` | `/groupstore/groups/{id}/workspace/cadences` | Add a cron cadence |
-| `DELETE` | `/groupstore/groups/{id}/workspace/cadences/{cadenceId}` | Remove a cadence and its schedule |
+| `POST` | `/groupstore/groups/{id}/workspace/cadences` | Add a cron cadence (409 if the workspace keeps changing under three revision-checked attempts; the schedule it created is deleted again) |
+| `DELETE` | `/groupstore/groups/{id}/workspace/cadences/{cadenceId}` | Remove a cadence, then its schedule (409 as above; cadence and schedule then both stay) |
 
 ## SSE Events
 
@@ -1027,7 +1153,7 @@ speaker and phase pairs.
 | `group_start` | The discussion begins (carries group id and question) |
 | `phase_start` / `phase_complete` | A phase opens / closes |
 | `round_start` | A continuation round (round 2+) of the whole discussion begins — see `POST .../continue`. Phase repeats fire `phase_start` instead |
-| `speaker_start` / `speaker_complete` | A member's turn opens / closes (complete carries the content) |
+| `speaker_start` / `speaker_complete` | A member's turn opens / closes. `complete` carries the content, or — when the turn produced none — no content and an `outcome` of `TIMEOUT`, `SKIPPED` or `ERROR`. Every started turn is closed, including a parallel member released by the batch deadline |
 | `token` | Incremental token from a streaming member turn |
 | `synthesis_start` / `synthesis_complete` | The synthesis phase opens / closes |
 | `convergence_checked` / `convergence_reached` | A convergence judge ran / declared the phase converged (I2) |

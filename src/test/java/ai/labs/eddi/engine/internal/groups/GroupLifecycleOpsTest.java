@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -80,6 +82,21 @@ class GroupLifecycleOpsTest {
         return gc;
     }
 
+    /**
+     * The marker create_sub_agent stamps; cleanup deletes only agents carrying it
+     * for this discussion.
+     */
+    private void stubOrigin(String agentId, String createdInGroupConversationId) throws Exception {
+        IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+        when(current.getVersion()).thenReturn(1);
+        when(agentStore.getCurrentResourceId(agentId)).thenReturn(current);
+        var configuration = new AgentConfiguration();
+        if (createdInGroupConversationId != null) {
+            configuration.setDynamicOrigin(new DynamicOrigin("parent", "member-conv", createdInGroupConversationId, "user"));
+        }
+        when(agentStore.read(agentId, 1)).thenReturn(configuration);
+    }
+
     private AgentGroupConfiguration configWithPolicy(LifecyclePolicy policy) {
         var config = new AgentGroupConfiguration();
         var dynamicAgents = new DynamicAgentConfig();
@@ -103,6 +120,7 @@ class GroupLifecycleOpsTest {
     @Test
     void cleanupEphemeralAgents_ephemeralPolicy_undeploysAndDeletes() throws Exception {
         var ops = ops();
+        stubOrigin(AGENT_A, "gc-1");
         ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
 
         verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
@@ -140,12 +158,48 @@ class GroupLifecycleOpsTest {
     @Test
     void cleanupEphemeralAgents_agentDecidesPolicy_nonRetainedAgentCleaned() throws Exception {
         var ops = ops();
+        stubOrigin(AGENT_A, "gc-1");
         var gc = gc(AGENT_A); // not added to retainedAgentIds
 
         ops.cleanupEphemeralAgents(gc, configWithPolicy(LifecyclePolicy.AGENT_DECIDES));
 
         verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
         verify(agentStore).deleteAllPermanently(AGENT_A);
+    }
+
+    @Test
+    void cleanupEphemeralAgents_unmarkedAgent_undeployedButNeverDeleted() throws Exception {
+        // Review #3: a created-list entry alone must not reach a permanent delete —
+        // an agent without a dynamicOrigin may have been built by a person.
+        var ops = ops();
+        stubOrigin(AGENT_A, null);
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
+
+        verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
+        verify(agentStore, never()).deleteAllPermanently(any());
+    }
+
+    @Test
+    void cleanupEphemeralAgents_agentFromAnotherDiscussion_leftAlone() throws Exception {
+        var ops = ops();
+        stubOrigin(AGENT_A, "some-other-discussion");
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
+
+        verifyNoInteractions(agentFactory);
+        verify(agentStore, never()).deleteAllPermanently(any());
+    }
+
+    @Test
+    void cleanupEphemeralAgents_unreadableOrigin_undeployedButNeverDeleted() throws Exception {
+        var ops = ops();
+        when(agentStore.getCurrentResourceId(AGENT_A)).thenThrow(new RuntimeException("store down"));
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.EPHEMERAL));
+
+        verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
+        verify(agentStore, never()).deleteAllPermanently(any());
     }
 
     @Test
@@ -203,6 +257,69 @@ class GroupLifecycleOpsTest {
         ops.closeGroupConversation("gc-1");
 
         verify(sharedArtifactStore).deleteByGroupConversationId("gc-1");
+    }
+
+    /**
+     * A human rejection is terminal in its own right ({@code REJECTED}, added so
+     * the Manager stops rendering a recorded decision as a red "Failed"), and an
+     * operator has to be able to close it for exactly the reason a {@code FAILED}
+     * one is closeable: close ends the member conversations and reclaims the
+     * ephemeral agents. Leaving it out of the CAS chain would have made every
+     * rejected discussion permanently uncloseable.
+     */
+    @Test
+    void closeGroupConversation_acceptsARejectedDiscussion() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.REJECTED);
+        var closed = gc();
+        closed.setState(GroupConversationState.CLOSED);
+        when(conversationStore.read("gc-1")).thenReturn(gc, closed);
+        // Only the REJECTED -> CLOSED CAS succeeds; the others are tried and miss.
+        when(conversationStore.compareAndSetState(eq("gc-1"), any(), eq(GroupConversationState.CLOSED)))
+                .thenReturn(false);
+        when(conversationStore.compareAndSetState("gc-1", GroupConversationState.REJECTED, GroupConversationState.CLOSED))
+                .thenReturn(true);
+
+        assertDoesNotThrow(() -> ops.closeGroupConversation("gc-1"));
+
+        verify(conversationStore).compareAndSetState("gc-1", GroupConversationState.REJECTED, GroupConversationState.CLOSED);
+        verify(sharedArtifactStore).deleteByGroupConversationId("gc-1");
+    }
+
+    /**
+     * The message has to name the states the chain actually tries. It used to be a
+     * hand-written sentence beside three hand-written {@code if} blocks, which is
+     * how a state gets added to one and left out of the other.
+     * <p>
+     * Asserted against a LITERAL list, not against {@code CLOSEABLE_STATES}.
+     * Iterating the same constant the message is built from passes for any contents
+     * -- it pins the {@code .formatted(...)} wiring and nothing else. Pinning the
+     * contents is the point: dropping a state from the chain has to fail here, and
+     * the literal is what notices.
+     */
+    @Test
+    void closeGroupConversation_refusalNamesEveryCloseableState() {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        try {
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+
+        var thrown = assertThrows(Exception.class, () -> ops.closeGroupConversation("gc-1"));
+
+        assertEquals(
+                List.of(GroupConversationState.COMPLETED, GroupConversationState.FAILED,
+                        GroupConversationState.REJECTED, GroupConversationState.CANCELLED),
+                GroupLifecycleOps.CLOSEABLE_STATES,
+                "a terminal state that can be closed must be in the chain, in this order");
+        for (var state : List.of("COMPLETED", "FAILED", "REJECTED", "CANCELLED")) {
+            assertTrue(thrown.getMessage().contains(state),
+                    "the refusal must name " + state + ", which the CAS chain tries: " + thrown.getMessage());
+        }
     }
 
     // =================================================================

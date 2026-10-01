@@ -5,12 +5,15 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import com.mongodb.ErrorCategory;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -18,9 +21,18 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.*;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.datastore.mongo.MongoResourceStorage.ID_FIELD;
+import static com.mongodb.client.model.Filters.and;
+import static com.mongodb.client.model.Filters.elemMatch;
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.exists;
+import static com.mongodb.client.model.Filters.ne;
+import static com.mongodb.client.model.Filters.nor;
+import static com.mongodb.client.model.Filters.or;
+import static com.mongodb.client.model.Filters.regex;
 
 /**
  * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment
@@ -40,8 +52,37 @@ public class V6RenameMigration {
     private static final Logger LOGGER = Logger.getLogger(V6RenameMigration.class);
     private static final String MIGRATION_KEY = "v6-rename-migration-complete";
 
+    /**
+     * Written once the conversation descriptors hold their v6 field names — by the
+     * full migration, or by {@link #catchUp} on a database an earlier 6.x migrated
+     * without renaming them.
+     */
+    static final String DESCRIPTOR_FIELDS_KEY = "v6-rename-descriptor-fields-complete";
+
+    /**
+     * Written once the stored conversation steps hold the v6 shape — by the full
+     * migration, or by the catch-up on a database an earlier 6.x migrated before
+     * the step rename existed.
+     */
+    static final String STEP_SHAPE_KEY = "v6-rename-step-shape-complete";
+
+    /**
+     * Written when this migration completes, and read by {@link #holdsRetention()}:
+     * the database came from EDDI 5, which never deleted ended conversations.
+     */
+    static final String RETENTION_HOLD_KEY = "v6-rename-retention-hold";
+
+    /** A v5 collection whose documents mean the database has not been migrated. */
+    private static final String V5_MARKER_COLLECTION = "bots";
+
     /** MongoDB {@code NamespaceExists} — renameCollection onto an existing name. */
     private static final int NAMESPACE_EXISTS_ERROR_CODE = 48;
+
+    /**
+     * MongoDB {@code NamespaceNotFound} — the only collection-access failure that
+     * means "nothing to migrate here" rather than "this collection was never read".
+     */
+    private static final int NAMESPACE_NOT_FOUND_ERROR_CODE = 26;
 
     /**
      * URI authority rewrites (old → new). Longest-first to avoid partial matches.
@@ -50,6 +91,44 @@ public class V6RenameMigration {
             {"eddi://ai.labs.httpcalls/", "eddi://ai.labs.apicalls/"}, {"eddi://ai.labs.behavior/", "eddi://ai.labs.rules/"},
             {"eddi://ai.labs.langchain/", "eddi://ai.labs.llm/"}, {"eddi://ai.labs.package/", "eddi://ai.labs.workflow/"},
             {"eddi://ai.labs.bot/", "eddi://ai.labs.agent/"},};
+
+    /**
+     * Workflow step types renamed in v6 (v5 type → v6 type), matched against the
+     * whole value of a step's {@code type} field and nothing else.
+     *
+     * <p>
+     * {@link #URI_AUTHORITY_REWRITES} cannot do this. Its entries carry a trailing
+     * slash so that they match config URIs
+     * ({@code eddi://ai.labs.langchain/langchainstore/...}) and nothing shorter —
+     * and a step type is the bare {@code eddi://ai.labs.langchain}. Dropping the
+     * slash is not the fix either: most v5 step types were <em>not</em> renamed.
+     * {@code eddi://ai.labs.behavior} and {@code eddi://ai.labs.httpcalls} are
+     * still the registered ids of the rules and API-call tasks, while their config
+     * URIs moved to {@code ai.labs.rules} and {@code ai.labs.apicalls}; rewriting
+     * the step types the same way would point every workflow at the aliases, and
+     * any mapping without a registered target at nothing. So this table lists only
+     * the step types that no longer resolve, each against the id 6.x registers for
+     * it — {@code V6RenameMigrationStepTypeTest} checks both sides against the
+     * extension registry itself.
+     * </p>
+     *
+     * <p>
+     * Package-private for testing.
+     * </p>
+     */
+    static final Map<String, String> STEP_TYPE_REWRITES = Map.of("eddi://ai.labs.langchain", "eddi://ai.labs.llm");
+
+    /**
+     * The fields a workflow document keeps its steps under: {@code workflowSteps}
+     * in 6.x, and the older names {@code WorkflowConfiguration} still accepts —
+     * {@code packageExtensions} is what EDDI 5 wrote.
+     */
+    private static final List<String> WORKFLOW_STEP_FIELDS = List.of("workflowSteps", "packageExtensions", "workflowExtensions",
+            "pipelineSteps");
+
+    private static final String FIELD_STEP_TYPE = "type";
+
+    private static final String COLLECTION_WORKFLOWS = "workflows";
 
     /** Store path rewrites (old → new) — applied inside URI strings. */
     private static final String[][] STORE_PATH_REWRITES = {{"regulardictionarystore/regulardictionaries", "dictionarystore/dictionaries"},
@@ -62,7 +141,7 @@ public class V6RenameMigration {
      * corresponding ".history" rename.
      */
     private static final String[][] COLLECTION_RENAMES = {{"bots", "agents"}, {"packages", "workflows"}, {"behaviorrulesets", "rulesets"},
-            {"httpcalls", "apicalls"}, {"langchain", "llms"}, {"regulardictionaries", "dictionaries"},};
+            {"httpcalls", "apicalls"}, {"langchain", "llms"}, {"regulardictionaries", "dictionaries"}, {"bottriggers", "agenttriggers"},};
 
     /**
      * BSON field renames inside agent documents (old field → new field). Applied
@@ -72,6 +151,18 @@ public class V6RenameMigration {
 
     /** Environment value rewrites. */
     private static final String[][] ENVIRONMENT_REWRITES = {{"unrestricted", "production"}, {"restricted", "production"},};
+
+    /** The field {@link #ENVIRONMENT_REWRITES} applies to. */
+    private static final String FIELD_ENVIRONMENT = "environment";
+
+    /**
+     * The v6 deployment key fields, i.e. the targets of
+     * {@link #FIELD_NAME_REWRITES}.
+     */
+    private static final String FIELD_AGENT_ID = "agentId";
+    private static final String FIELD_AGENT_VERSION = "agentVersion";
+
+    private static final String COLLECTION_DEPLOYMENTS = "deployments";
 
     /**
      * Field-name rewrites for deployment/conversation documents (old Java name →
@@ -95,12 +186,87 @@ public class V6RenameMigration {
     private final IMigrationLogStore migrationLogStore;
     private final boolean enabled;
 
+    /**
+     * Latches once the migration is known not to be pending, so that
+     * {@link #isPending()} stops reading the migration log on every call. Only ever
+     * set from false to true, and only after a completed migration has been
+     * observed, so a stale read cannot un-complete it.
+     */
+    private volatile boolean knownNotPending;
+
     @Inject
     public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore,
             @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;
         this.enabled = enabled;
+    }
+
+    /**
+     * Whether this migration has been asked for but has not completed yet — i.e.
+     * whether the collections may still be under their EDDI 5 names.
+     *
+     * <p>
+     * A caller that would read an absent config as "the config is gone" has to wait
+     * for this to be false. The agent configs live in {@code bots} until this
+     * migration renames them, and {@code agents} does not exist at all, so on a
+     * first boot against an EDDI 5 database every deployed agent reads as deleted.
+     * That is what made {@code AgentDeploymentManagement.checkDeployments()} —
+     * which runs on its own ten-second schedule, not after the migrations — retire
+     * the deployment rows of every agent in the database.
+     * </p>
+     *
+     * <p>
+     * Disabled means not pending: nobody asked for a rename, so the collection
+     * names are whatever they already are. That distinction matters because the
+     * property defaults to false, so "no completion entry" is the permanent state
+     * of every installation that never needed the migration. Pending is otherwise
+     * the fail-safe answer — a migration log that cannot be read leaves the
+     * question open, and the caller that waits loses ten seconds where the caller
+     * that proceeds deletes data.
+     * </p>
+     */
+    public boolean isPending() {
+        if (!enabled || knownNotPending) {
+            return false;
+        }
+        try {
+            if (migrationLogStore.readMigrationLog(MIGRATION_KEY) == null) {
+                return true;
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read the V6 rename migration log (%s) — treating the migration as still pending", e.getMessage());
+            return true;
+        }
+        knownNotPending = true;
+        return false;
+    }
+
+    /**
+     * Whether ended conversations must not be deleted yet because this database
+     * comes from EDDI 5 — which kept them for ever — and the operator has not said
+     * that 6.x's retention may apply.
+     *
+     * <p>
+     * True while the migration is pending, once it has completed (a marker in the
+     * migration log, so it holds on every later boot and every replica, not only in
+     * the process that migrated), and while the v5 collections still hold documents
+     * — which covers a 5.x database booted with the migration flag off. It is
+     * lifted by the operator, through
+     * {@code eddi.migration.v6-rename.retention-confirmed}, not by time or by a
+     * restart: a rescheduled pod or a second replica is not a decision anybody
+     * made. A migration log or collection that cannot be read answers true; a sweep
+     * that waits a day loses nothing.
+     * </p>
+     */
+    public boolean holdsRetention() {
+        try {
+            return isPending() || migrationLogStore.readMigrationLog(RETENTION_HOLD_KEY) != null
+                    || database.getCollection(V5_MARKER_COLLECTION).estimatedDocumentCount() > 0;
+        } catch (Exception e) {
+            LOGGER.warnf("Could not tell whether this database came from EDDI 5 (%s) — holding the retention sweep", e.getMessage());
+            return true;
+        }
     }
 
     /**
@@ -114,6 +280,9 @@ public class V6RenameMigration {
 
         if (migrationLogStore.readMigrationLog(MIGRATION_KEY) != null) {
             LOGGER.info("V6 rename migration already applied — skipping");
+            catchUpManagedConversationMappings();
+            catchUp(STEP_SHAPE_KEY, "the v5 step shape of stored conversations", this::migrateConversationStepShape);
+            catchUp(DESCRIPTOR_FIELDS_KEY, "the v5 field names of conversation descriptors", this::migrateConversationDescriptors);
             return;
         }
 
@@ -131,7 +300,7 @@ public class V6RenameMigration {
             return;
         }
 
-        int totalMigrated = 0;
+        MigrationResult total = MigrationResult.NOTHING;
 
         // 0b. Rename MongoDB collections (v5 → v6 names)
         var renameFailures = renameCollections();
@@ -143,24 +312,52 @@ public class V6RenameMigration {
         }
 
         // 1. Rename BSON fields in agent documents (packages → workflows)
-        totalMigrated += migrateAgentFields();
+        total = total.plus(migrateAgentFields());
 
         // 2. Rewrite URIs in all resource + history collections
         for (String collectionName : RESOURCE_COLLECTIONS) {
-            totalMigrated += migrateCollection(collectionName);
-            totalMigrated += migrateCollection(collectionName + ".history");
+            total = total.plus(migrateCollection(collectionName));
+            total = total.plus(migrateCollection(collectionName + ".history"));
         }
 
         // 3. Rewrite resource URIs in descriptors
-        totalMigrated += migrateDescriptors("descriptors");
-        totalMigrated += migrateDescriptors("descriptors.history");
+        total = total.plus(migrateDescriptors("descriptors"));
+        total = total.plus(migrateDescriptors("descriptors.history"));
 
-        // 4. Rewrite environment fields in deployment/conversation documents
-        totalMigrated += migrateEnvironments("conversationmemories");
-        totalMigrated += migrateEnvironments("deployments");
+        // 4. Rename the v5 step shape inside stored conversations (packages →
+        // workflows), server-side.
+        total = total.plus(migrateConversationStepShape());
 
-        LOGGER.infof("V6 rename migration complete: %d documents migrated", totalMigrated);
+        // 5. The managed-conversation mappings: triggers by intent, and each user's
+        // conversation per intent.
+        total = total.plus(migrateAgentTriggers());
+        total = total.plus(migrateUserConversations());
 
+        // 6. Rename the v5 field names and environment values: conversations
+        // server-side, deployments one row at a time (a row can collide with another
+        // on its v6 key, and that needs deciding per row).
+        total = total.plus(migrateConversationFields());
+        total = total.plus(migrateEnvironments(COLLECTION_DEPLOYMENTS));
+
+        // 7. Rename the v5 field names of conversation descriptors. After step 6,
+        // because the backfill it includes reads the conversations' v6 agentId.
+        total = total.plus(migrateConversationDescriptors());
+
+        // Every pass, not only the environment one: a collection that could not be
+        // read and a document that could not be written both land here, and either
+        // means this migration has not done what the completion log would claim.
+        if (total.failed() > 0) {
+            LOGGER.errorf("V6 rename migration migrated %d document(s), but %d could not be migrated (logged above). "
+                    + "The migration was NOT marked complete and will run again on the next start.",
+                    total.migrated(), total.failed());
+            return;
+        }
+
+        LOGGER.infof("V6 rename migration complete: %d documents migrated", total.migrated());
+
+        migrationLogStore.createMigrationLog(new MigrationLog(RETENTION_HOLD_KEY));
+        migrationLogStore.createMigrationLog(new MigrationLog(STEP_SHAPE_KEY));
+        migrationLogStore.createMigrationLog(new MigrationLog(DESCRIPTOR_FIELDS_KEY));
         migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
     }
 
@@ -299,19 +496,17 @@ public class V6RenameMigration {
      * Rename BSON fields in agent documents (e.g., "packages" → "workflows"). Runs
      * after collection renames so we operate on the "agents" collection.
      */
-    private int migrateAgentFields() {
+    private MigrationResult migrateAgentFields() {
         MongoCollection<Document> collection;
         try {
-            collection = database.getCollection("agents");
-            if (collection.estimatedDocumentCount() == 0) {
-                return 0;
-            }
-        } catch (Exception e) {
-            return 0;
+            collection = collectionToScan("agents");
+        } catch (UnreadableCollectionException e) {
+            return unreadable("agents", e);
         }
 
         int migrated = 0;
-        for (Document doc : collection.find()) {
+        int failed = 0;
+        for (Document doc : collection == null ? List.<Document>of() : collection.find()) {
             boolean changed = false;
 
             for (String[] mapping : AGENT_FIELD_RENAMES) {
@@ -330,61 +525,98 @@ public class V6RenameMigration {
         }
 
         // Also migrate history collection
+        MongoCollection<Document> historyCollection;
         try {
-            MongoCollection<Document> historyCollection = database.getCollection("agents.history");
-            for (Document doc : historyCollection.find()) {
-                boolean changed = false;
-                for (String[] mapping : AGENT_FIELD_RENAMES) {
-                    if (doc.containsKey(mapping[0])) {
-                        doc.put(mapping[1], doc.get(mapping[0]));
-                        doc.remove(mapping[0]);
-                        changed = true;
-                    }
-                }
-                if (changed) {
-                    saveDocument(historyCollection, doc, true);
-                    migrated++;
+            historyCollection = collectionToScan("agents.history");
+        } catch (UnreadableCollectionException e) {
+            MigrationResult unread = unreadable("agents.history", e);
+            return new MigrationResult(migrated, failed).plus(unread);
+        }
+        for (Document doc : historyCollection == null ? List.<Document>of() : historyCollection.find()) {
+            boolean changed = false;
+            for (String[] mapping : AGENT_FIELD_RENAMES) {
+                if (doc.containsKey(mapping[0])) {
+                    doc.put(mapping[1], doc.get(mapping[0]));
+                    doc.remove(mapping[0]);
+                    changed = true;
                 }
             }
-        } catch (Exception e) {
-            // History collection may not exist
+            if (changed) {
+                if (saveDocument(historyCollection, doc, true)) {
+                    migrated++;
+                } else {
+                    failed++;
+                }
+            }
         }
 
         if (migrated > 0) {
             LOGGER.infof("  agents: renamed %d document fields (packages → workflows)", migrated);
         }
-        return migrated;
+        return new MigrationResult(migrated, failed);
     }
 
     /**
      * Migrate a single collection: rewrite all URI strings in all documents.
      */
-    private int migrateCollection(String collectionName) {
+    private MigrationResult migrateCollection(String collectionName) {
         MongoCollection<Document> collection;
         try {
-            collection = database.getCollection(collectionName);
-            // Quick check if collection has any documents
-            if (collection.estimatedDocumentCount() == 0) {
-                return 0;
-            }
-        } catch (Exception e) {
-            // Collection may not exist
-            return 0;
+            collection = collectionToScan(collectionName);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(collectionName, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
         }
 
+        boolean isWorkflowCollection = collectionName.equals(COLLECTION_WORKFLOWS)
+                || collectionName.equals(COLLECTION_WORKFLOWS + ".history");
         int migrated = 0;
+        int failed = 0;
         for (Document doc : collection.find()) {
+            boolean stepTypesRewritten = isWorkflowCollection && rewriteStepTypes(doc);
             Document rewritten = rewriteUrisInDocument(doc);
-            if (rewritten != null) {
-                saveDocument(collection, doc, collectionName.endsWith(".history"));
-                migrated++;
+            if (rewritten != null || stepTypesRewritten) {
+                if (saveDocument(collection, doc, collectionName.endsWith(".history"))) {
+                    migrated++;
+                } else {
+                    failed++;
+                }
             }
         }
 
         if (migrated > 0) {
             LOGGER.infof("  %s: migrated %d documents", collectionName, migrated);
         }
-        return migrated;
+        return new MigrationResult(migrated, failed);
+    }
+
+    /**
+     * Rewrites the {@code type} of every step of a workflow document whose type was
+     * renamed in v6 — see {@link #STEP_TYPE_REWRITES}.
+     * <p>
+     * Package-private for testing.
+     *
+     * @return whether any step type was changed
+     */
+    static boolean rewriteStepTypes(Document workflow) {
+        boolean changed = false;
+        for (String field : WORKFLOW_STEP_FIELDS) {
+            if (!(workflow.get(field) instanceof List<?> steps)) {
+                continue;
+            }
+            for (Object step : steps) {
+                if (step instanceof Document stepDocument && stepDocument.get(FIELD_STEP_TYPE) instanceof String type) {
+                    String renamed = STEP_TYPE_REWRITES.get(type);
+                    if (renamed != null) {
+                        stepDocument.put(FIELD_STEP_TYPE, renamed);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        return changed;
     }
 
     /**
@@ -392,47 +624,887 @@ public class V6RenameMigration {
      * descriptors have no separate 'type' field — the resource URI authority (e.g.,
      * "eddi://ai.labs.behavior/...") is what identifies the type.
      */
-    private int migrateDescriptors(String collectionName) {
+    private MigrationResult migrateDescriptors(String collectionName) {
         MongoCollection<Document> collection;
         try {
-            collection = database.getCollection(collectionName);
-            if (collection.estimatedDocumentCount() == 0) {
-                return 0;
-            }
-        } catch (Exception e) {
-            return 0;
+            collection = collectionToScan(collectionName);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(collectionName, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
         }
 
         int migrated = 0;
+        int failed = 0;
         for (Document doc : collection.find()) {
             Document rewritten = rewriteUrisInDocument(doc);
             if (rewritten != null) {
-                saveDocument(collection, doc, collectionName.endsWith(".history"));
-                migrated++;
+                if (saveDocument(collection, doc, collectionName.endsWith(".history"))) {
+                    migrated++;
+                } else {
+                    failed++;
+                }
             }
         }
 
         if (migrated > 0) {
             LOGGER.infof("  %s: migrated %d descriptors", collectionName, migrated);
         }
-        return migrated;
+        return new MigrationResult(migrated, failed);
     }
 
     /**
-     * Migrate environment fields in conversation memory documents.
+     * What one collection pass did.
+     *
+     * <p>
+     * {@code failed} is what keeps the completion log unwritten. Every pass that
+     * could not read its collection, or could not write a document it had
+     * rewritten, has to land here — a pass that reports {@code (0, 0)} for a
+     * collection nobody read is indistinguishable from one that had nothing to do,
+     * and {@link #runIfNeeded()} would record the migration complete over it.
+     * </p>
      */
-    private int migrateEnvironments(String collectionName) {
+    private record MigrationResult(int migrated, int failed) {
+
+        /** Nothing to migrate, and nothing went wrong. */
+        static final MigrationResult NOTHING = new MigrationResult(0, 0);
+
+        /** A collection this pass could not read at all. */
+        static final MigrationResult UNREADABLE = new MigrationResult(0, 1);
+
+        MigrationResult plus(MigrationResult other) {
+            return new MigrationResult(migrated + other.migrated, failed + other.failed);
+        }
+    }
+
+    /** A collection that could not be read. Never leaves this class. */
+    private static final class UnreadableCollectionException extends RuntimeException {
+        UnreadableCollectionException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * The collection to scan, or {@code null} when there is nothing to scan.
+     *
+     * <p>
+     * Every pass used to open with {@code catch (Exception e) { return 0; }}, so an
+     * authorization error, a timeout or a step-down read exactly like "this
+     * collection does not exist": the pass reported nothing migrated and nothing
+     * failed, {@link #runIfNeeded()} saw a clean total, and the completion log was
+     * written over a collection that had never been read. The documents were then
+     * left in their v5 shape for good, because this migration only runs once.
+     * </p>
+     *
+     * <p>
+     * {@code NamespaceNotFound} (26) is the one failure that really does mean
+     * "nothing to migrate here": only some of these names exist on any given
+     * database, and while the current driver answers
+     * {@code estimatedDocumentCount()} on a missing namespace with zero, others
+     * raise that error instead. Treating it as a failure would leave the migration
+     * permanently incomplete on a database with nothing to migrate. The same rule
+     * {@code V6QuteMigration} already applies.
+     * </p>
+     *
+     * @throws UnreadableCollectionException
+     *             for every other failure, which the caller counts so the migration
+     *             runs again on the next start
+     */
+    private MongoCollection<Document> collectionToScan(String collectionName) {
+        try {
+            MongoCollection<Document> collection = database.getCollection(collectionName);
+            return collection.estimatedDocumentCount() == 0 ? null : collection;
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() == NAMESPACE_NOT_FOUND_ERROR_CODE) {
+                LOGGER.debugf("  %s: no such collection — nothing to migrate", collectionName);
+                return null;
+            }
+            throw new UnreadableCollectionException(e.getErrorMessage());
+        } catch (RuntimeException e) {
+            throw new UnreadableCollectionException(e.toString());
+        }
+    }
+
+    /** The result for a collection {@link #collectionToScan} could not read. */
+    private static MigrationResult unreadable(String collectionName, UnreadableCollectionException e) {
+        LOGGER.errorf("  %s could not be read (%s) — counted as a failure, so the migration is NOT recorded as "
+                + "complete and runs again on the next start", collectionName, e.getMessage());
+        return MigrationResult.UNREADABLE;
+    }
+
+    private static final String COLLECTION_CONVERSATIONS = "conversationmemories";
+
+    /**
+     * The arrays of a conversation document whose elements are conversation steps.
+     */
+    private static final List<String> CONVERSATION_STEP_ARRAYS = List.of("conversationSteps", "redoCache");
+
+    /**
+     * What a stored conversation step holds its workflow runs under: v5, then v6.
+     */
+    private static final String FIELD_STEP_RUNS_V5 = "packages";
+    private static final String FIELD_STEP_RUNS_V6 = "workflows";
+
+    /** What a stored step result records its origin under: v5, then v6. */
+    private static final String FIELD_ORIGIN_V5 = "originPackageId";
+    private static final String FIELD_ORIGIN_V6 = "originWorkflowId";
+
+    /**
+     * Renames the v5 shape of a stored conversation step to the v6 one:
+     * {@code conversationSteps[].packages} becomes {@code workflows}, and inside it
+     * each result's {@code originPackageId} becomes {@code originWorkflowId}. The
+     * redo cache holds steps of the same shape and is renamed the same way.
+     *
+     * <p>
+     * Without this every conversation created on EDDI 5 loaded with no data in any
+     * step. {@code ConversationStepSnapshot} serialises its runs as
+     * {@code workflows}, the stored key was {@code packages}, and an unknown key is
+     * ignored on read — so the load answered 200 with the whole history silently
+     * gone, the LLM saw none of it, and the next save wrote the empty steps back
+     * over the stored ones. This pass makes the stored data v6-shaped; the snapshot
+     * also accepts {@code packages} on read, and has to keep doing so. The pass
+     * runs once — on the first migration, or as a catch-up on a database an earlier
+     * 6.x migrated without it (see {@link #catchUp}) — so a v5 step written after
+     * that, by a 5.x instance still running during the upgrade or a restore from a
+     * 5.x backup, loads only through the alias; so does every conversation of such
+     * a database until its catch-up succeeds. Do not remove the alias.
+     * </p>
+     *
+     * <p>
+     * One {@code updateMany} with an aggregation pipeline, so the documents never
+     * leave the server. {@code $rename} cannot reach into array elements, and a
+     * read-modify-write in Java costs the transfer of every conversation in full —
+     * on a throttled database the existing per-document pass over the same
+     * collection took twenty minutes. Only documents that still hold a v5 step are
+     * matched, so a second run changes nothing.
+     * </p>
+     *
+     * <p>
+     * A step that already holds a non-empty {@code workflows} beside its
+     * {@code packages} is left exactly as it is: which of the two is right cannot
+     * be told, and picking one would destroy the other. Steps with neither key are
+     * counted and reported too — there is nothing to rename in them, but a step
+     * with no runs at all is not something either version writes.
+     * </p>
+     */
+    private MigrationResult migrateConversationStepShape() {
         MongoCollection<Document> collection;
         try {
-            collection = database.getCollection(collectionName);
-            if (collection.estimatedDocumentCount() == 0) {
-                return 0;
+            collection = collectionToScan(COLLECTION_CONVERSATIONS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_CONVERSATIONS, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        List<Bson> holdsV5Step = new ArrayList<>();
+        Document set = new Document();
+        for (String array : CONVERSATION_STEP_ARRAYS) {
+            holdsV5Step.add(elemMatch(array, renamableStep()));
+            set.append(array, new Document("$cond", List.of(new Document("$isArray", "$" + array),
+                    new Document("$map", new Document("input", "$" + array).append("as", "step").append("in", v6Step("$$step"))),
+                    "$" + array)));
+        }
+
+        bumpRevision(set);
+        long migrated;
+        try {
+            migrated = collection.updateMany(or(holdsV5Step), List.of(new Document("$set", set))).getModifiedCount();
+        } catch (Exception e) {
+            LOGGER.errorf("  %s: the conversation steps could not be renamed (%s → %s) — counted as a failure, so the "
+                    + "migration is NOT recorded as complete and runs again on the next start: %s", COLLECTION_CONVERSATIONS,
+                    FIELD_STEP_RUNS_V5, FIELD_STEP_RUNS_V6, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: renamed the step shape (%s → %s) in %d documents", COLLECTION_CONVERSATIONS, FIELD_STEP_RUNS_V5,
+                    FIELD_STEP_RUNS_V6, migrated);
+        }
+
+        List<Bson> leftAlone = new ArrayList<>();
+        List<Bson> neither = new ArrayList<>();
+        for (String array : CONVERSATION_STEP_ARRAYS) {
+            leftAlone.add(elemMatch(array, and(exists(FIELD_STEP_RUNS_V5), nor(renamableStep()))));
+            neither.add(elemMatch(array, new Document(FIELD_STEP_RUNS_V5, new Document("$exists", false))
+                    .append(FIELD_STEP_RUNS_V6, new Document("$exists", false))));
+        }
+        try {
+            long ambiguous = collection.countDocuments(or(leftAlone));
+            if (ambiguous > 0) {
+                LOGGER.warnf("  %s: %d document(s) hold steps with both '%s' and a non-empty '%s'; those steps were left "
+                        + "unchanged. Their v5 runs load only if '%s' is emptied by hand.", COLLECTION_CONVERSATIONS, ambiguous,
+                        FIELD_STEP_RUNS_V5, FIELD_STEP_RUNS_V6, FIELD_STEP_RUNS_V6);
+            }
+            long empty = collection.countDocuments(or(neither));
+            if (empty > 0) {
+                LOGGER.warnf("  %s: %d document(s) hold steps with neither '%s' nor '%s' — nothing to rename, but those "
+                        + "steps load with no data", COLLECTION_CONVERSATIONS, empty, FIELD_STEP_RUNS_V5, FIELD_STEP_RUNS_V6);
             }
         } catch (Exception e) {
-            return 0;
+            LOGGER.warnf("  %s: could not count the steps left unrenamed: %s", COLLECTION_CONVERSATIONS, e.toString());
+        }
+        return new MigrationResult((int) migrated, 0);
+    }
+
+    /**
+     * A step this pass renames: it holds {@code packages}, and its
+     * {@code workflows} is absent, null or empty. Matched per array element, so a
+     * document whose only v5-shaped steps are the ambiguous ones is not matched —
+     * and so not rewritten, with its revision bumped, on every run.
+     */
+    private static Bson renamableStep() {
+        return and(exists(FIELD_STEP_RUNS_V5), or(exists(FIELD_STEP_RUNS_V6, false), eq(FIELD_STEP_RUNS_V6, null),
+                new Document(FIELD_STEP_RUNS_V6, new Document("$size", 0))));
+    }
+
+    /**
+     * A conversation's optimistic-concurrency revision; see
+     * {@code ConversationMemoryStore}.
+     */
+    private static final String FIELD_REVISION = "_rev";
+    /** The revision of the last write that rewrote a conversation's history. */
+    private static final String FIELD_HISTORY_REVISION = "_histRev";
+
+    /**
+     * Adds to a pipeline {@code $set} what {@code ConversationMemoryStore} does on
+     * every full-document write: the revision goes up by one, and the history
+     * revision is set to it, since these passes rewrite stored steps.
+     *
+     * <p>
+     * A migration write that left the revision alone could be undone without a
+     * trace: a writer holding the document from before it would replace the
+     * document on a revision that still matched. Bumped, that writer gets the
+     * conflict the store already raises for any concurrent write and reloads.
+     * {@code _rev} is absent on documents EDDI 5 wrote, which the store reads as 0.
+     * </p>
+     */
+    private static void bumpRevision(Document set) {
+        Document next = new Document("$add", List.of(new Document("$ifNull", List.of("$" + FIELD_REVISION, 0L)), 1L));
+        set.append(FIELD_REVISION, next).append(FIELD_HISTORY_REVISION, next);
+    }
+
+    /**
+     * Renames the v5 field names of stored conversations ({@code botId},
+     * {@code botVersion} → {@code agentId}, {@code agentVersion}) and maps the v5
+     * environments to {@code production}, in one server-side {@code updateMany}.
+     *
+     * <p>
+     * This used to be {@link #migrateEnvironments}: every conversation read into
+     * Java, rewritten and replaced whole. Its cost followed the size of the
+     * collection, not the work — on a throttled database it was about 20 of the 24
+     * minutes the first boot took, for 195 documents — and each whole-document
+     * replace could overwrite a concurrent write. Here the documents never leave
+     * the server, and the revision is bumped as by any other write (see
+     * {@link #bumpRevision}).
+     * </p>
+     *
+     * <p>
+     * The old pass also rewrote legacy {@code eddi://} URIs anywhere inside a
+     * conversation. That is not carried over: no field of a stored conversation is
+     * read as a URI in 6.x (the agent is addressed by {@code agentId}, runs by
+     * workflow id), so such a string is historical step data, and finding one means
+     * reading every document in full — the cost this pass exists to remove. A
+     * document holding both {@code botId} and {@code agentId} is not matched —
+     * which is right cannot be told — and is counted and reported.
+     * </p>
+     */
+    private MigrationResult migrateConversationFields() {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(COLLECTION_CONVERSATIONS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_CONVERSATIONS, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        List<String> v5Environments = new ArrayList<>();
+        for (String[] mapping : ENVIRONMENT_REWRITES) {
+            v5Environments.add(mapping[0]);
+        }
+        List<Bson> v5Shaped = new ArrayList<>();
+        List<String> v5Fields = new ArrayList<>();
+        Document set = new Document();
+        for (String[] mapping : FIELD_NAME_REWRITES) {
+            v5Shaped.add(exists(mapping[0]));
+            v5Fields.add(mapping[0]);
+            set.append(mapping[1], new Document("$ifNull", List.of("$" + mapping[1], "$" + mapping[0])));
+        }
+        v5Shaped.add(new Document(FIELD_ENVIRONMENT, new Document("$in", v5Environments)));
+        set.append(FIELD_ENVIRONMENT, cond(
+                new Document("$in", List.of(new Document("$toLower", new Document("$ifNull", List.of("$" + FIELD_ENVIRONMENT, ""))),
+                        v5Environments)),
+                ENVIRONMENT_REWRITES[0][1], "$" + FIELD_ENVIRONMENT));
+        bumpRevision(set);
+        Bson ambiguous = and(exists(FIELD_NAME_REWRITES[0][0]), exists(FIELD_NAME_REWRITES[0][1]));
+
+        long migrated;
+        try {
+            migrated = collection.updateMany(and(or(v5Shaped), nor(ambiguous)),
+                    List.of(new Document("$set", set), new Document("$unset", v5Fields))).getModifiedCount();
+        } catch (Exception e) {
+            LOGGER.errorf("  %s: the v5 field names could not be migrated — counted as a failure, so the migration is NOT "
+                    + "recorded as complete and runs again on the next start: %s", COLLECTION_CONVERSATIONS, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: migrated %d documents", COLLECTION_CONVERSATIONS, migrated);
+        }
+        try {
+            long left = collection.countDocuments(ambiguous);
+            if (left > 0) {
+                LOGGER.warnf("  %s: %d document(s) hold both '%s' and '%s' and were left unchanged; they load as '%s'. "
+                        + "Remove '%s' by hand once checked.", COLLECTION_CONVERSATIONS, left, FIELD_NAME_REWRITES[0][0],
+                        FIELD_NAME_REWRITES[0][1], FIELD_NAME_REWRITES[0][1], FIELD_NAME_REWRITES[0][0]);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("  %s: could not count the documents left unmigrated: %s", COLLECTION_CONVERSATIONS, e.toString());
+        }
+        return new MigrationResult((int) migrated, 0);
+    }
+
+    /**
+     * The aggregation expression that turns one stored step into its v6 shape.
+     * Every branch is a {@code $cond}, which evaluates lazily, so a value of an
+     * unexpected type is passed through unchanged rather than failing the whole
+     * update.
+     */
+    private static Document v6Step(String step) {
+        String v5Runs = step + "." + FIELD_STEP_RUNS_V5;
+        String v6Runs = step + "." + FIELD_STEP_RUNS_V6;
+        Document hasV5Runs = new Document("$ne", List.of(new Document("$type", v5Runs), "missing"));
+        Document v6RunsEmpty = new Document("$or", List.of(new Document("$in", List.of(new Document("$type", v6Runs), List.of("missing", "null"))),
+                new Document("$eq", List.of(v6Runs, List.of()))));
+        Document renamed = new Document("$mergeObjects", List.of(withoutField(step, FIELD_STEP_RUNS_V5),
+                new Document(FIELD_STEP_RUNS_V6, v6Runs(v5Runs))));
+        return cond(isObject(step), cond(new Document("$and", List.of(hasV5Runs, v6RunsEmpty)), renamed, step), step);
+    }
+
+    /** Each run of a v5 step, with its results' origin field renamed. */
+    private static Document v6Runs(String runs) {
+        Document run = cond(new Document("$and", List.of(isObject("$$run"), new Document("$isArray", "$$run.lifecycleTasks"))),
+                new Document("$mergeObjects", List.of("$$run", new Document("lifecycleTasks", new Document("$map",
+                        new Document("input", "$$run.lifecycleTasks").append("as", "result").append("in", v6Result("$$result")))))),
+                "$$run");
+        return cond(new Document("$isArray", runs), new Document("$map", new Document("input", runs).append("as", "run").append("in", run)),
+                runs);
+    }
+
+    private static Document v6Result(String result) {
+        String origin = result + "." + FIELD_ORIGIN_V5;
+        Document renamed = new Document("$mergeObjects", List.of(withoutField(result, FIELD_ORIGIN_V5),
+                new Document(FIELD_ORIGIN_V6, origin)));
+        return cond(isObject(result), cond(new Document("$ne", List.of(new Document("$type", origin), "missing")), renamed, result), result);
+    }
+
+    /**
+     * {@code object} without {@code field} — {@code $unsetField} needs MongoDB 5.0.
+     */
+    private static Document withoutField(String object, String field) {
+        return new Document("$arrayToObject", new Document("$filter", new Document("input", new Document("$objectToArray", object))
+                .append("as", "field").append("cond", new Document("$ne", List.of("$$field.k", field)))));
+    }
+
+    private static Document isObject(String value) {
+        return new Document("$eq", List.of(new Document("$type", value), "object"));
+    }
+
+    private static Document cond(Object condition, Object then, Object otherwise) {
+        return new Document("$cond", Arrays.asList(condition, then, otherwise));
+    }
+
+    /**
+     * Migrates the triggers and user-conversation mappings of a database whose
+     * rename migration an earlier 6.x recorded as complete.
+     *
+     * <p>
+     * Before 6.5 the migration did not touch {@code bottriggers} or
+     * {@code userconversations}. A database migrated then has its triggers under
+     * the v5 name, where the 6.x store never looks, so every managed conversation
+     * by intent still finds none. Both passes are idempotent, and the rename only
+     * happens while {@code bottriggers} holds documents, so on any other database
+     * this costs two counts.
+     * </p>
+     */
+    private void catchUpManagedConversationMappings() {
+        try {
+            long legacyTriggers = exactDocumentCount("bottriggers");
+            if (legacyTriggers < 0) {
+                LOGGER.errorf("  Could not tell whether an earlier 6.x left triggers under 'bottriggers' (logged above); "
+                        + "checked again on the next start");
+                return;
+            }
+            if (legacyTriggers > 0) {
+                if (renameCollectionIfExists("bottriggers", COLLECTION_AGENT_TRIGGERS)) {
+                    LOGGER.info("  Migrating the triggers an earlier 6.x left under 'bottriggers'");
+                } else {
+                    LOGGER.errorf("  The triggers under 'bottriggers' could not be moved to '%s' (logged above); merge them by "
+                            + "hand — managed conversations by intent find no trigger until then", COLLECTION_AGENT_TRIGGERS);
+                }
+            }
+            migrateAgentTriggers();
+            migrateUserConversations();
+        } catch (Exception e) {
+            LOGGER.errorf("  Could not bring triggers and user-conversation mappings to the v6 shape: %s", e.toString());
+        }
+    }
+
+    /**
+     * Runs a pass the rename migration gained after an earlier 6.x recorded it
+     * complete, on a database that migration left behind.
+     *
+     * <p>
+     * Two passes need this. The step rename ({@code packages} → {@code workflows})
+     * came in 6.5, so a database 6.4 migrated still holds every EDDI 5 conversation
+     * in the v5 step shape, loadable only through the alias on
+     * {@code ConversationStepSnapshot}. And before 6.5 the conversation descriptors
+     * kept {@code botResource} and {@code botName}, so every per-agent listing of
+     * conversations was empty for the conversations EDDI 5 created.
+     * </p>
+     *
+     * <p>
+     * Each runs until it succeeds once, then records {@code key}. Unlike the
+     * trigger catch-up, neither can tell from a count whether there is anything to
+     * do, and scanning every conversation or descriptor on every start is a cost
+     * that only buys something once. A pass that fails is logged and tried again on
+     * the next start; it never keeps the rest of the startup from running.
+     * </p>
+     */
+    private void catchUp(String key, String what, Supplier<MigrationResult> pass) {
+        try {
+            if (migrationLogStore.readMigrationLog(key) != null) {
+                return;
+            }
+            LOGGER.infof("  Migrating %s, which an earlier 6.x left in place", what);
+            MigrationResult result = pass.get();
+            if (result.failed() > 0) {
+                LOGGER.errorf("  Migrating %s: %d document(s) migrated, but %d pass(es) failed (logged above); tried again on "
+                        + "the next start", what, result.migrated(), result.failed());
+                return;
+            }
+            migrationLogStore.createMigrationLog(new MigrationLog(key));
+        } catch (Exception e) {
+            LOGGER.errorf("  Could not migrate %s; tried again on the next start: %s", what, e.toString());
+        }
+    }
+
+    private static final String COLLECTION_DESCRIPTORS = "descriptors";
+    private static final String FIELD_DESCRIPTOR_RESOURCE = "resource";
+    private static final String FIELD_AGENT_RESOURCE_V5 = "botResource";
+    private static final String FIELD_AGENT_RESOURCE_V6 = "agentResource";
+    private static final String FIELD_AGENT_NAME_V5 = "botName";
+    private static final String FIELD_AGENT_NAME_V6 = "agentName";
+
+    /** What every conversation descriptor's {@code resource} starts with. */
+    private static final String CONVERSATION_RESOURCE_PREFIX = "eddi://ai.labs.conversation/";
+
+    /** What an agent resource URI starts with; the id and version follow. */
+    private static final String AGENT_RESOURCE_PREFIX = "eddi://ai.labs.agent/agentstore/agents/";
+
+    /** How many descriptors {@link #backfillAgentResources} looks up at once. */
+    private static final int BACKFILL_BATCH_SIZE = 500;
+
+    /**
+     * Both descriptor passes: the renames, current and history, then the backfill.
+     */
+    private MigrationResult migrateConversationDescriptors() {
+        return migrateConversationDescriptorFields(COLLECTION_DESCRIPTORS)
+                .plus(migrateConversationDescriptorFields(COLLECTION_DESCRIPTORS + ".history")).plus(backfillAgentResources());
+    }
+
+    /**
+     * Renames the v5 field names of conversation descriptors — {@code botResource}
+     * to {@code agentResource}, {@code botName} to {@code agentName} — in one
+     * server-side {@code updateMany}. Config descriptors kept their field names in
+     * v6 and hold neither key, so matching on the keys selects exactly the
+     * conversation descriptors EDDI 5 wrote.
+     *
+     * <p>
+     * A document that holds both names of either pair is not matched — which one is
+     * right cannot be told — and is counted and reported, as for conversations.
+     * Only documents holding a v5 key are matched, so a second run changes nothing.
+     * </p>
+     *
+     * <p>
+     * No revision is bumped, unlike the conversation passes. A descriptor has no
+     * {@code _rev}: its only version field is {@code _version}, which is part of
+     * the conversation's resource URI ({@code ?version=}) and must not move. It
+     * would protect nothing either, since descriptors are written by unconditional
+     * whole-document replaces. A replace racing this pass is still safe from 6.5
+     * on: {@code ConversationDescriptor} reads the v5 names, so what it writes back
+     * carries the v6 ones.
+     * </p>
+     */
+    private MigrationResult migrateConversationDescriptorFields(String collectionName) {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(collectionName);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(collectionName, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        Bson v5Shaped = or(exists(FIELD_AGENT_RESOURCE_V5), exists(FIELD_AGENT_NAME_V5));
+        Bson ambiguous = or(and(exists(FIELD_AGENT_RESOURCE_V5), exists(FIELD_AGENT_RESOURCE_V6)),
+                and(exists(FIELD_AGENT_NAME_V5), exists(FIELD_AGENT_NAME_V6)));
+        Document set = new Document(FIELD_AGENT_RESOURCE_V6, firstPresent(FIELD_AGENT_RESOURCE_V6, FIELD_AGENT_RESOURCE_V5))
+                .append(FIELD_AGENT_NAME_V6, firstPresent(FIELD_AGENT_NAME_V6, FIELD_AGENT_NAME_V5));
+
+        long migrated;
+        try {
+            migrated = collection.updateMany(and(v5Shaped, nor(ambiguous)), List.of(new Document("$set", set),
+                    new Document("$unset", List.of(FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_NAME_V5)))).getModifiedCount();
+        } catch (Exception e) {
+            LOGGER.errorf("  %s: the v5 field names of the conversation descriptors could not be renamed — counted as a "
+                    + "failure, so this runs again on the next start: %s", collectionName, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: renamed %s → %s and %s → %s in %d conversation descriptors", collectionName,
+                    FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_RESOURCE_V6, FIELD_AGENT_NAME_V5, FIELD_AGENT_NAME_V6, migrated);
+        }
+        try {
+            long left = collection.countDocuments(ambiguous);
+            if (left > 0) {
+                LOGGER.warnf("  %s: %d conversation descriptor(s) hold both a v5 and a v6 name (%s/%s or %s/%s) and were "
+                        + "left unchanged; they read as the v6 one. Remove the v5 field by hand once checked.", collectionName,
+                        left, FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_RESOURCE_V6, FIELD_AGENT_NAME_V5, FIELD_AGENT_NAME_V6);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("  %s: could not count the descriptors left unrenamed: %s", collectionName, e.toString());
+        }
+        return new MigrationResult((int) migrated, 0);
+    }
+
+    /**
+     * {@code field}'s value if the document has it, else {@code fallback}'s, else
+     * the field is left out — never written as an explicit null.
+     */
+    private static Document firstPresent(String field, String fallback) {
+        return cond(isPresent("$" + field), "$" + field, cond(isPresent("$" + fallback), "$" + fallback, "$$REMOVE"));
+    }
+
+    private static Document isPresent(String value) {
+        return new Document("$ne", List.of(new Document("$type", value), "missing"));
+    }
+
+    /**
+     * Gives back an {@code agentResource} to the conversation descriptors that lost
+     * it, taken from the conversation itself.
+     *
+     * <p>
+     * An earlier 6.x read a v5 descriptor without its {@code botResource} — the
+     * model had no such field — and every write of a descriptor is a whole replace,
+     * so the next write stored it with neither name. A turn does that (it updates
+     * the descriptor's timestamp), and so does ending the conversation, which the
+     * idle sweep does five minutes after the first boot. Those descriptors have
+     * nothing left to rename; the agent is still recorded on the conversation,
+     * under the same id.
+     * </p>
+     *
+     * <p>
+     * Current descriptors only: a history row belongs to a deleted conversation,
+     * and no listing reads it. A descriptor whose conversation is gone, or names no
+     * agent, is counted and reported, not failed — there is nothing to give back,
+     * and failing would retry it on every start for ever. Each write is conditioned
+     * on the field still being absent, so a descriptor rewritten meanwhile is left
+     * alone.
+     * </p>
+     */
+    private MigrationResult backfillAgentResources() {
+        MongoCollection<Document> descriptors;
+        try {
+            descriptors = collectionToScan(COLLECTION_DESCRIPTORS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_DESCRIPTORS, e);
+        }
+        if (descriptors == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        Bson noAgentResource = and(exists(FIELD_AGENT_RESOURCE_V6, false), exists(FIELD_AGENT_RESOURCE_V5, false));
+        List<Object> ids = new ArrayList<>();
+        try {
+            for (Document descriptor : descriptors
+                    .find(and(regex(FIELD_DESCRIPTOR_RESOURCE, "^" + Pattern.quote(CONVERSATION_RESOURCE_PREFIX)), noAgentResource))
+                    .projection(new Document(ID_FIELD, 1))) {
+                ids.add(descriptor.get(ID_FIELD));
+            }
+        } catch (Exception e) {
+            LOGGER.errorf("  %s: could not look for conversation descriptors without an agent — counted as a failure, so "
+                    + "this runs again on the next start: %s", COLLECTION_DESCRIPTORS, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (ids.isEmpty()) {
+            return MigrationResult.NOTHING;
+        }
+
+        MongoCollection<Document> conversations = database.getCollection(COLLECTION_CONVERSATIONS);
+        int migrated = 0;
+        int failed = 0;
+        int noAgent = 0;
+        for (int from = 0; from < ids.size(); from += BACKFILL_BATCH_SIZE) {
+            List<Object> batch = ids.subList(from, Math.min(from + BACKFILL_BATCH_SIZE, ids.size()));
+            try {
+                Map<Object, Document> agents = new HashMap<>();
+                for (Document conversation : conversations.find(new Document(ID_FIELD, new Document("$in", batch)))
+                        .projection(new Document(FIELD_AGENT_ID, 1).append(FIELD_AGENT_VERSION, 1))) {
+                    agents.put(conversation.get(ID_FIELD), conversation);
+                }
+                for (Object id : batch) {
+                    Document conversation = agents.get(id);
+                    if (conversation == null || !(conversation.get(FIELD_AGENT_ID) instanceof String agentId) || agentId.isBlank()) {
+                        noAgent++;
+                        continue;
+                    }
+                    Object agentVersion = conversation.get(FIELD_AGENT_VERSION);
+                    String agentResource = AGENT_RESOURCE_PREFIX + agentId
+                            + (agentVersion instanceof Number version ? "?version=" + version.intValue() : "");
+                    migrated += (int) descriptors.updateOne(and(eq(ID_FIELD, id), noAgentResource),
+                            new Document("$set", new Document(FIELD_AGENT_RESOURCE_V6, agentResource))).getModifiedCount();
+                }
+            } catch (Exception e) {
+                failed++;
+                LOGGER.errorf("  %s: could not give %d conversation descriptor(s) back their agent — counted as a failure, "
+                        + "so this runs again on the next start: %s", COLLECTION_DESCRIPTORS, batch.size(), e.toString());
+            }
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: gave %d conversation descriptor(s) back the agent an earlier 6.x dropped from them",
+                    COLLECTION_DESCRIPTORS, migrated);
+        }
+        if (noAgent > 0) {
+            LOGGER.warnf("  %s: %d conversation descriptor(s) name no agent, and their conversation is gone or names none "
+                    + "either; they are left as they are and are not listed under any agent", COLLECTION_DESCRIPTORS, noAgent);
+        }
+        return new MigrationResult(migrated, failed);
+    }
+
+    private static final String COLLECTION_AGENT_TRIGGERS = "agenttriggers";
+    private static final String COLLECTION_USER_CONVERSATIONS = "userconversations";
+    private static final String FIELD_BOT_ID = "botId";
+    private static final String FIELD_BOT_DEPLOYMENTS = "botDeployments";
+    private static final String FIELD_AGENT_DEPLOYMENTS = "agentDeployments";
+
+    /**
+     * Brings the triggers that EDDI 5 kept in {@code bottriggers} (renamed to
+     * {@code agenttriggers} with the other collections) into the v6 shape:
+     * {@code botDeployments[].botId} becomes {@code agentDeployments[].agentId},
+     * and a v5 environment becomes {@code production}.
+     *
+     * <p>
+     * Without it the collection kept its v5 name, {@code agenttriggers} stayed
+     * empty, and every managed conversation by intent
+     * ({@code /agents/managed/{intent}/…}) found no trigger after the upgrade.
+     * </p>
+     *
+     * <p>
+     * The environment remap can make two entries of one trigger identical — the
+     * same agent listed for both {@code restricted} and {@code unrestricted}. The
+     * managed endpoint picks one entry at random, so a duplicate would double one
+     * agent's share; an identical duplicate is dropped, and logged. Entries that
+     * still differ (another agent, another initial context) are all kept: which one
+     * the operator meant cannot be told, so nothing is guessed. The intent is the
+     * collection's unique key and is not changed, so no two triggers can collide.
+     * </p>
+     *
+     * <p>
+     * Read and written in Java rather than server-side: triggers are a handful of
+     * small documents, and the de-duplication compares whole entries.
+     * </p>
+     */
+    private MigrationResult migrateAgentTriggers() {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(COLLECTION_AGENT_TRIGGERS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_AGENT_TRIGGERS, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
         }
 
         int migrated = 0;
+        int failed = 0;
+        for (Document trigger : collection.find(exists(FIELD_BOT_DEPLOYMENTS))) {
+            Object intent = trigger.get("intent");
+            if (trigger.containsKey(FIELD_AGENT_DEPLOYMENTS)) {
+                LOGGER.warnf("  %s: the trigger for intent '%s' holds both '%s' and '%s' — left unchanged; merge them by hand",
+                        COLLECTION_AGENT_TRIGGERS, intent, FIELD_BOT_DEPLOYMENTS, FIELD_AGENT_DEPLOYMENTS);
+                continue;
+            }
+            List<Document> deployments = new ArrayList<>();
+            int duplicates = 0;
+            Object v5Deployments = trigger.get(FIELD_BOT_DEPLOYMENTS);
+            for (Object entry : v5Deployments instanceof List<?> list ? list : List.of()) {
+                if (!(entry instanceof Document v5)) {
+                    continue;
+                }
+                Document v6 = new Document();
+                for (var field : v5.entrySet()) {
+                    String name = FIELD_BOT_ID.equals(field.getKey()) ? FIELD_AGENT_ID : field.getKey();
+                    v6.put(name, field.getValue());
+                }
+                if (v6.containsKey(FIELD_ENVIRONMENT)) {
+                    v6.put(FIELD_ENVIRONMENT, v6Environment(v6.get(FIELD_ENVIRONMENT)));
+                }
+                if (deployments.contains(v6)) {
+                    duplicates++;
+                } else {
+                    deployments.add(v6);
+                }
+            }
+            if (duplicates > 0) {
+                LOGGER.warnf("  %s: the trigger for intent '%s' listed %d agent deployment(s) twice once both v5 environments "
+                        + "became '%s' — kept one of each", COLLECTION_AGENT_TRIGGERS, intent, duplicates,
+                        ENVIRONMENT_REWRITES[0][1]);
+            }
+            trigger.remove(FIELD_BOT_DEPLOYMENTS);
+            trigger.put(FIELD_AGENT_DEPLOYMENTS, deployments);
+            try {
+                collection.replaceOne(eq(ID_FIELD, trigger.get(ID_FIELD)), trigger);
+                migrated++;
+            } catch (Exception e) {
+                failed++;
+                LOGGER.errorf("  %s: the trigger for intent '%s' could not be migrated — leaving it unchanged and continuing: %s",
+                        COLLECTION_AGENT_TRIGGERS, intent, e.toString());
+            }
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: migrated %d triggers", COLLECTION_AGENT_TRIGGERS, migrated);
+        }
+        return new MigrationResult(migrated, failed);
+    }
+
+    /**
+     * Matches a document whose {@code environment} is a v5 value, ignoring case as
+     * {@link #ENVIRONMENT_REWRITES} does.
+     */
+    private static Bson v5Environment() {
+        List<String> names = new ArrayList<>();
+        for (String[] mapping : ENVIRONMENT_REWRITES) {
+            names.add(Pattern.quote(mapping[0]));
+        }
+        return regex(FIELD_ENVIRONMENT, "^(" + String.join("|", names) + ")$", "i");
+    }
+
+    /**
+     * The v6 value of an environment, i.e. {@link #ENVIRONMENT_REWRITES} applied.
+     */
+    private static Object v6Environment(Object environment) {
+        if (environment instanceof String value) {
+            for (String[] mapping : ENVIRONMENT_REWRITES) {
+                if (value.equalsIgnoreCase(mapping[0])) {
+                    return mapping[1];
+                }
+            }
+        }
+        return environment;
+    }
+
+    /**
+     * Brings each user's conversation-per-intent mapping into the v6 shape:
+     * {@code botId} becomes {@code agentId}, and a v5 environment becomes
+     * {@code production}.
+     *
+     * <p>
+     * Without it an existing user's intent resolved to no agent, so a managed
+     * conversation either failed or started over instead of continuing the user's
+     * old one. The collection's unique key is {@code (intent, userId)}, which this
+     * does not touch, so the remap cannot make two documents collide.
+     * </p>
+     *
+     * <p>
+     * One {@code updateMany} with an aggregation pipeline. A document that already
+     * holds an {@code agentId} beside its {@code botId} is not matched — which of
+     * the two is right cannot be told — and is counted and reported instead.
+     * </p>
+     */
+    private MigrationResult migrateUserConversations() {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(COLLECTION_USER_CONVERSATIONS);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(COLLECTION_USER_CONVERSATIONS, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        List<String> v5Environments = new ArrayList<>();
+        for (String[] mapping : ENVIRONMENT_REWRITES) {
+            v5Environments.add(mapping[0]);
+        }
+        Document environment = cond(
+                new Document("$in", List.of(new Document("$toLower", new Document("$ifNull", List.of("$" + FIELD_ENVIRONMENT, ""))),
+                        v5Environments)),
+                ENVIRONMENT_REWRITES[0][1], "$" + FIELD_ENVIRONMENT);
+        Document agentId = new Document("$ifNull", List.of("$" + FIELD_AGENT_ID, "$" + FIELD_BOT_ID));
+        Bson v5Shaped = and(or(exists(FIELD_BOT_ID), v5Environment()),
+                or(exists(FIELD_BOT_ID, false), exists(FIELD_AGENT_ID, false)));
+
+        long migrated;
+        try {
+            migrated = collection.updateMany(v5Shaped, List.of(
+                    new Document("$set", new Document(FIELD_AGENT_ID, agentId).append(FIELD_ENVIRONMENT, environment)),
+                    new Document("$unset", FIELD_BOT_ID))).getModifiedCount();
+        } catch (Exception e) {
+            LOGGER.errorf("  %s could not be migrated — counted as a failure, so the migration is NOT recorded as complete "
+                    + "and runs again on the next start: %s", COLLECTION_USER_CONVERSATIONS, e.toString());
+            return MigrationResult.UNREADABLE;
+        }
+        if (migrated > 0) {
+            LOGGER.infof("  %s: migrated %d documents", COLLECTION_USER_CONVERSATIONS, migrated);
+        }
+        try {
+            long ambiguous = collection.countDocuments(and(exists(FIELD_BOT_ID), exists(FIELD_AGENT_ID)));
+            if (ambiguous > 0) {
+                LOGGER.warnf("  %s: %d document(s) hold both '%s' and '%s' and were left unchanged; they resolve to '%s'. "
+                        + "Remove '%s' by hand once checked.", COLLECTION_USER_CONVERSATIONS, ambiguous, FIELD_BOT_ID, FIELD_AGENT_ID,
+                        FIELD_AGENT_ID, FIELD_BOT_ID);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("  %s: could not count the documents left unmigrated: %s", COLLECTION_USER_CONVERSATIONS, e.toString());
+        }
+        return new MigrationResult((int) migrated, 0);
+    }
+
+    /**
+     * Migrate environment fields in deployment documents.
+     *
+     * <p>
+     * Conversations used to go through here too, and made this the expensive step
+     * of the migration; they are now migrated server-side by
+     * {@link #migrateConversationFields()}. Deployment rows stay here: they are
+     * few, and one can collide with another on its v6 key.
+     * </p>
+     *
+     * <p>
+     * Documents are written one at a time, and one that cannot be written does not
+     * stop the rest: it is logged, counted, and keeps the migration from being
+     * recorded as complete, so it runs again on the next start. A deployment row
+     * whose v6 key another row already holds is not such a failure — it is
+     * resolved; see {@link #resolveDeploymentKeyCollision}.
+     * </p>
+     */
+    private MigrationResult migrateEnvironments(String collectionName) {
+        MongoCollection<Document> collection;
+        try {
+            collection = collectionToScan(collectionName);
+        } catch (UnreadableCollectionException e) {
+            return unreadable(collectionName, e);
+        }
+        if (collection == null) {
+            return MigrationResult.NOTHING;
+        }
+
+        int migrated = 0;
+        int failed = 0;
         for (Document doc : collection.find()) {
             boolean changed = false;
 
@@ -446,11 +1518,11 @@ public class V6RenameMigration {
             }
 
             // Rewrite environment field
-            Object envObj = doc.get("environment");
+            Object envObj = doc.get(FIELD_ENVIRONMENT);
             if (envObj instanceof String envStr) {
                 for (String[] mapping : ENVIRONMENT_REWRITES) {
                     if (envStr.equalsIgnoreCase(mapping[0])) {
-                        doc.put("environment", mapping[1]);
+                        doc.put(FIELD_ENVIRONMENT, mapping[1]);
                         changed = true;
                         break;
                     }
@@ -461,17 +1533,171 @@ public class V6RenameMigration {
             Document uriRewritten = rewriteUrisInDocument(doc);
             changed = changed || uriRewritten != null;
 
-            if (changed) {
-                var query = eq(ID_FIELD, doc.get(ID_FIELD));
-                collection.replaceOne(query, doc);
+            if (!changed) {
+                continue;
+            }
+            try {
+                writeMigrated(collection, collectionName, doc);
                 migrated++;
+            } catch (Exception e) {
+                failed++;
+                LOGGER.errorf("  %s/%s could not be migrated — leaving it unchanged and continuing: %s", collectionName,
+                        doc.get(ID_FIELD), e.toString());
             }
         }
 
         if (migrated > 0) {
-            LOGGER.infof("  %s: migrated %d conversation documents", collectionName, migrated);
+            LOGGER.infof("  %s: migrated %d documents", collectionName, migrated);
         }
-        return migrated;
+        return new MigrationResult(migrated, failed);
+    }
+
+    /**
+     * Writes a migrated document back, resolving a deployment key collision rather
+     * than failing on it.
+     */
+    private void writeMigrated(MongoCollection<Document> collection, String collectionName, Document doc) {
+        try {
+            collection.replaceOne(eq(ID_FIELD, doc.get(ID_FIELD)), doc);
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY || !COLLECTION_DEPLOYMENTS.equals(collectionName)) {
+                throw e;
+            }
+            resolveDeploymentKeyCollision(collection, doc);
+        }
+    }
+
+    /**
+     * A v5 deployment row that becomes the same v6 key as a row already written.
+     *
+     * <p>
+     * Two v5 shapes do this. {@link #ENVIRONMENT_REWRITES} maps both
+     * {@code unrestricted} and {@code restricted} to {@code production}, so an
+     * agent deployed to both becomes one key; and v5's own check-then-act
+     * {@code setDeploymentInfo} wrote same-environment duplicates outright. The
+     * unique index {@code MongoDeploymentStorage} builds when it is constructed
+     * already exists by the time this migration runs, so the second write fails
+     * with a duplicate-key error — and it used to fail on every boot, because the
+     * first row had already been rewritten and the second never could be. The
+     * migration then never completed, and with the deployment sweep waiting on it,
+     * no agent was ever deployed again.
+     * </p>
+     *
+     * <p>
+     * It is resolved with the rule the store itself applies when it deduplicates:
+     * one row per key, the newest by {@code _id} kept. The rows differ only in
+     * status, and the newest is the operator's last word; any single row is a
+     * consistent answer where two are not.
+     * </p>
+     *
+     * <p>
+     * "Newest" is decided by {@link #strictlyNewer}, not by
+     * {@code ObjectId.compareTo}. An ObjectId is a 4-byte timestamp, a 5-byte
+     * process-unique value and a 3-byte counter, compared in that order — so
+     * {@code compareTo} orders by the <em>random process bytes</em> before the
+     * counter, and for two ids created in the same second by different processes
+     * the larger id can be the older row. Deleting on that basis can delete the
+     * newer deployment status, which is data loss with nothing to recover it from.
+     * Every case where insertion order cannot be established — a different process
+     * inside the same second, or ids that are not ObjectIds at all — is left to
+     * fail, and so to be counted, logged and keep the migration incomplete, rather
+     * than guessed at. A migration that stops and says which two rows to reconcile
+     * is recoverable; a deleted row is not.
+     * </p>
+     */
+    private void resolveDeploymentKeyCollision(MongoCollection<Document> collection, Document doc) {
+        Object id = doc.get(ID_FIELD);
+        Bson sameKey = and(eq(FIELD_ENVIRONMENT, doc.get(FIELD_ENVIRONMENT)), eq(FIELD_AGENT_ID, doc.get(FIELD_AGENT_ID)),
+                eq(FIELD_AGENT_VERSION, doc.get(FIELD_AGENT_VERSION)), ne(ID_FIELD, id));
+        Document holder = collection.find(sameKey).first();
+        if (holder == null) {
+            // The row that held the key has gone since the write failed; nothing is
+            // in the way any more.
+            collection.replaceOne(eq(ID_FIELD, id), doc);
+            return;
+        }
+
+        Object holderId = holder.get(ID_FIELD);
+        if (!(id instanceof ObjectId mine) || !(holderId instanceof ObjectId theirs)) {
+            throw new IllegalStateException(String.format("deployment rows %s and %s both become %s/%s/%s, and their ids are "
+                    + "not ObjectIds, so which is newer cannot be told; keep one by hand", id, holderId,
+                    doc.get(FIELD_ENVIRONMENT), doc.get(FIELD_AGENT_ID), doc.get(FIELD_AGENT_VERSION)));
+        }
+
+        Boolean isNewer = strictlyNewer(mine, theirs);
+        if (isNewer == null) {
+            throw new IllegalStateException(String.format("deployment rows %s and %s both become %s/%s/%s, and their ids were "
+                    + "created in the same second by different processes, so which one the operator wrote last cannot be "
+                    + "told; keep one by hand", id, holderId, doc.get(FIELD_ENVIRONMENT), doc.get(FIELD_AGENT_ID),
+                    doc.get(FIELD_AGENT_VERSION)));
+        }
+
+        Object keptId;
+        Object removedId;
+        if (isNewer) {
+            // This row is the newer one: it takes the key. Delete first — the unique
+            // index will not let both exist, and if this stops in between, the row
+            // being migrated is still there under its v5 names for the next start.
+            collection.deleteOne(eq(ID_FIELD, holderId));
+            collection.replaceOne(eq(ID_FIELD, id), doc);
+            keptId = id;
+            removedId = holderId;
+        } else {
+            collection.deleteOne(eq(ID_FIELD, id));
+            keptId = holderId;
+            removedId = id;
+        }
+        LOGGER.warnf("  deployments: rows %s and %s both become %s/%s/%s under v6 names — kept %s (the newer), removed %s",
+                id, holderId, doc.get(FIELD_ENVIRONMENT), doc.get(FIELD_AGENT_ID), doc.get(FIELD_AGENT_VERSION), keptId, removedId);
+    }
+
+    /**
+     * Whether {@code mine} was inserted after {@code theirs}, or {@code null} when
+     * that cannot be established.
+     *
+     * <p>
+     * An ObjectId is {@code [4 bytes timestamp][5 bytes process-unique][3 bytes
+     * counter]}, and {@code compareTo} compares those twelve bytes in order. When
+     * the timestamps differ that is insertion order at one-second resolution, which
+     * is all this needs. Inside one second it is not: the process-unique bytes are
+     * compared before the counter, so of two ids written in the same second by two
+     * instances, the larger one is as likely to be the older row. The counter is
+     * insertion order only within the process that issued it, which is why the
+     * process bytes must match before it is consulted.
+     * </p>
+     *
+     * <p>
+     * Package-private and returning a boxed {@code Boolean} on purpose: "cannot
+     * tell" is a third answer the caller has to act on by refusing, not a value it
+     * can fold into a comparison.
+     * </p>
+     */
+    static Boolean strictlyNewer(ObjectId mine, ObjectId theirs) {
+        int byTime = Integer.compareUnsigned(mine.getTimestamp(), theirs.getTimestamp());
+        if (byTime != 0) {
+            return byTime > 0;
+        }
+        byte[] a = mine.toByteArray();
+        byte[] b = theirs.toByteArray();
+        for (int i = PROCESS_BYTES_FROM; i < PROCESS_BYTES_TO; i++) {
+            if (a[i] != b[i]) {
+                // Same second, different writers: concurrent by any definition
+                // available here.
+                return null;
+            }
+        }
+        int mineCounter = counterOf(a);
+        int theirsCounter = counterOf(b);
+        return mineCounter == theirsCounter ? null : mineCounter > theirsCounter;
+    }
+
+    /** First byte of an ObjectId's 5-byte process-unique value. */
+    private static final int PROCESS_BYTES_FROM = 4;
+    /** One past the last byte of that value; the 3-byte counter follows. */
+    private static final int PROCESS_BYTES_TO = 9;
+
+    private static int counterOf(byte[] objectId) {
+        return ((objectId[9] & 0xFF) << 16) | ((objectId[10] & 0xFF) << 8) | (objectId[11] & 0xFF);
     }
 
     /**
@@ -556,28 +1782,45 @@ public class V6RenameMigration {
     }
 
     /**
-     * Save a document back to its collection.
+     * Saves a rewritten document back to its collection.
+     *
+     * <p>
+     * Returns whether the write actually happened. It used to return {@code void}
+     * after swallowing every exception, and every caller incremented its migrated
+     * count immediately afterwards — so a write that failed, and an {@code _id}
+     * shape this method silently declines to handle, both counted as a document
+     * migrated. The migration then recorded completion over documents still in
+     * their v5 shape, and since it runs once, they stayed that way.
+     * </p>
+     *
+     * @return {@code true} when the document was written, {@code false} when it was
+     *         not — which the caller counts as a failure so the migration runs
+     *         again on the next start
      */
     @SuppressWarnings("unchecked")
-    private void saveDocument(MongoCollection<Document> collection, Document document, boolean isHistory) {
+    private boolean saveDocument(MongoCollection<Document> collection, Document document, boolean isHistory) {
+        Object idObj = document.get(ID_FIELD);
         try {
             if (isHistory) {
-                Object idObj = document.get(ID_FIELD);
                 if (idObj instanceof Map<?, ?>) {
                     var idMap = (Map<String, Object>) idObj;
                     var query = eq(ID_FIELD, new Document((Map<String, Object>) idMap));
                     collection.replaceOne(query, document);
+                    return true;
                 }
-            } else {
-                Object idObj = document.get(ID_FIELD);
-                if (idObj instanceof ObjectId) {
-                    collection.replaceOne(eq(ID_FIELD, idObj), document);
-                } else if (idObj instanceof String) {
-                    collection.replaceOne(eq(ID_FIELD, new ObjectId((String) idObj)), document);
-                }
+            } else if (idObj instanceof ObjectId) {
+                collection.replaceOne(eq(ID_FIELD, idObj), document);
+                return true;
+            } else if (idObj instanceof String) {
+                collection.replaceOne(eq(ID_FIELD, new ObjectId((String) idObj)), document);
+                return true;
             }
+            LOGGER.warnf("Not saving a migrated document: its _id is a %s, which this migration cannot address",
+                    idObj == null ? "null" : idObj.getClass().getSimpleName());
+            return false;
         } catch (Exception e) {
-            LOGGER.warnf("Failed to save migrated document: %s", e.getMessage());
+            LOGGER.warnf("Failed to save migrated document %s: %s", idObj, e.getMessage());
+            return false;
         }
     }
 }

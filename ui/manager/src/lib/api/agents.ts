@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { getDescriptorVersions } from "./descriptors";
 import { ENVIRONMENTS, type Environment } from "../constants";
 
 // Re-export from shared constants for backward compatibility
@@ -24,7 +25,13 @@ export interface AgentDescriptor {
    */
   ownerId?: string;
   spaceId?: string;
-  visibility?: "private" | "space" | "published";
+  visibility?: "private" | "space" | "internal" | "published";
+  /**
+   * The owner's name from the user directory, for showing a person to a person.
+   * Absent when the directory does not know them or workspaces are not enforced
+   * — fall back to `ownerId`.
+   */
+  ownerName?: string;
   /**
    * What the signed-in user may do with THIS resource — `USE`, `VIEW`, `EDIT`
    * or `OWN`.
@@ -35,6 +42,12 @@ export interface AgentDescriptor {
    * `accessFor()` in `@/lib/access`, which treats absence as unrestricted.
    */
   callerLevel?: string;
+  /**
+   * The agent's id on the instance it was imported or synced from. It is what
+   * recognises the local copy of a remote agent — a name can be changed on
+   * either side, or shared by two agents.
+   */
+  originId?: string;
 }
 
 export interface Agent {
@@ -52,8 +65,27 @@ export interface Agent {
   memoryPolicy?: MemoryPolicy;
   // Wave 6 — Session Management
   sessionManagement?: SessionManagement;
+  /**
+   * Whether the agent's maintainers may read other people's conversations with
+   * it. Off unless set; the chat shows `notice` (or a standard wording) before
+   * anyone types.
+   */
+  conversationReview?: { enabled?: boolean; notice?: string | null };
   // HITL — Human-in-the-Loop approval configuration
   hitlConfig?: import("./hitl").AgentHitlConfig;
+  /**
+   * The version's compatibility generation — SERVER-OWNED. Two versions of an
+   * agent with the same generation are compatible: a running conversation moves
+   * between them on its next turn once the newer one is deployed. `null` or
+   * absent on versions stored before version following existed, which are
+   * compatible only with themselves.
+   *
+   * Read-only: the store assigns it on every save and ignores whatever a PUT
+   * body carries, so sending the value back is harmless but changes nothing.
+   * Whether a save continues the chain is the `compatible` option of
+   * {@link updateAgent}.
+   */
+  compatibilityGeneration?: number | null;
 }
 
 export interface ChannelConnector {
@@ -171,11 +203,18 @@ export function parseResourceUri(resource: string): {
 }
 
 // API functions
+/**
+ * Which agents a listing returns by owner: everything reachable, only the
+ * caller's own, or only what somebody else owns and has let them reach.
+ */
+export type Ownership = "" | "mine" | "shared";
+
 export function getAgentDescriptors(
   limit = 20,
   index = 0,
   filter = "",
-  space = ""
+  space = "",
+  ownership: Ownership = ""
 ): Promise<AgentDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -186,44 +225,59 @@ export function getAgentDescriptors(
   // "everything" is not page 2 of "this workspace", so filtering client-side
   // would quietly break pagination.
   if (space) params.set("space", space);
+  // Also in the query, for the same paging reason.
+  if (ownership) params.set("ownership", ownership);
   return api.get<AgentDescriptor[]>(
     `/agentstore/agents/descriptors?${params.toString()}`
   );
 }
 
+/** What a chat window shows about an agent — readable by anybody who may chat with it. */
+export interface AgentProfile {
+  agentId: string;
+  name?: string | null;
+  description?: string | null;
+  /**
+   * What to tell the person chatting when the deployed version lets its
+   * maintainers read conversations. Absent when it does not.
+   */
+  reviewNotice?: string | null;
+}
+
+export function getAgentProfile(agentId: string, environment = "production"): Promise<AgentProfile> {
+  return api.get<AgentProfile>(
+    `/agents/${encodeURIComponent(agentId)}/profile?environment=${encodeURIComponent(environment)}`
+  );
+}
+
+/** How much an agent is used — counts, never content. Requires view access. */
+export interface AgentUsage {
+  total: number;
+  active: number;
+  distinctUsers: number;
+}
+
+export function getAgentUsage(agentId: string): Promise<AgentUsage> {
+  return api.get<AgentUsage>(`/agents/${encodeURIComponent(agentId)}/usage`);
+}
+
 /**
  * Fetch agent descriptors for all versions of a specific agent.
  *
- * The GET descriptors endpoint does NOT support includePreviousVersions;
- * we use the currentversion endpoint to resolve the latest version.
+ * Resolves the latest version via `currentversion`, then reads each version's
+ * descriptor by id and version — see `getDescriptorVersions` for why the store
+ * listing (`descriptors?filter=…`) cannot answer this.
  */
 export async function getAgentDescriptorsWithVersions(
   agentId: string
 ): Promise<AgentDescriptor[]> {
-  // Resolve the latest version number
   const currentVersion = await api.get<number>(
-    `/agentstore/agents/${agentId}/currentversion`
+    `/agentstore/agents/${encodeURIComponent(agentId)}/currentversion`
   );
-  const latest = currentVersion ?? 1;
-
-  // Fetch descriptor for each version in parallel
-  const descriptors = await Promise.all(
-    Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
-      try {
-        const results = await api.get<AgentDescriptor[]>(
-          `/agentstore/agents/descriptors?filter=${agentId}&version=${v}`
-        );
-        return results;
-      } catch {
-        return [];
-      }
-    })
-  );
-
-  const flat = descriptors.flat();
+  const flat = await getDescriptorVersions(agentId, currentVersion ?? 1);
   if (flat.length === 0) {
     return api.get<AgentDescriptor[]>(
-      `/agentstore/agents/descriptors?filter=${agentId}`
+      `/agentstore/agents/descriptors?filter=${encodeURIComponent(agentId)}`
     );
   }
   return flat;
@@ -250,12 +304,26 @@ export function createAgent(agent: Agent): Promise<{ location: string }> {
   return api.post<{ location: string }>("/agentstore/agents", agent);
 }
 
+export interface UpdateAgentOptions {
+  /**
+   * The new version is compatible with the one it replaces: conversations
+   * running on the previous version switch to it on their next turn once it is
+   * deployed. Absent or `false` is a breaking change — running conversations
+   * stay on the version they are on. The safe default, so only an explicit
+   * `true` is sent.
+   */
+  compatible?: boolean;
+}
+
 export function updateAgent(
   id: string,
   version: number,
-  agent: Agent
+  agent: Agent,
+  options?: UpdateAgentOptions
 ): Promise<{ location: string }> {
-  return api.put(`/agentstore/agents/${id}?version=${version}`, agent);
+  const params = new URLSearchParams({ version: String(version) });
+  if (options?.compatible === true) params.set("compatible", "true");
+  return api.put(`/agentstore/agents/${id}?${params.toString()}`, agent);
 }
 
 export function deleteAgent(
@@ -321,6 +389,44 @@ export function undeployAgent(
   );
 }
 
+/** What deploying a version does to one OTHER deployed version's conversations. */
+export type DeploymentImpactOutcome = "FOLLOW" | "STAY";
+
+export interface DeployedVersionImpact {
+  version: number;
+  compatibilityGeneration: number | null;
+  /** Active conversations currently on this version in the environment. */
+  activeConversations: number;
+  /**
+   * `FOLLOW` — they move to the deployed version on their next turn.
+   * `STAY` — they stay: a breaking change, a legacy version, or a newer version.
+   */
+  outcome: DeploymentImpactOutcome;
+}
+
+/** `GET /administration/{environment}/deploymentimpact/{agentId}?version=N` */
+export interface DeploymentImpact {
+  agentId: string;
+  version: number;
+  compatibilityGeneration: number | null;
+  /** Every OTHER deployed version of the agent in the environment, highest first. */
+  deployedVersions: DeployedVersionImpact[];
+}
+
+/**
+ * Preview of what deploying `version` would do to the conversations running on
+ * the agent's other deployed versions in `environment`. Read-only.
+ */
+export function getDeploymentImpact(
+  environment: string,
+  agentId: string,
+  version: number
+): Promise<DeploymentImpact> {
+  return api.get<DeploymentImpact>(
+    `/administration/${environment}/deploymentimpact/${encodeURIComponent(agentId)}?version=${version}`
+  );
+}
+
 export function getDeploymentStatus(
   environment: string,
   agentId: string,
@@ -334,6 +440,30 @@ export function getDeploymentStatus(
 export interface EnvironmentStatus {
   environment: Environment;
   status: DeploymentStatus["status"];
+  /**
+   * Set when `status` describes a DIFFERENT version than the one asked about —
+   * the agent is live in this environment, but at this (older) version. See
+   * `withAnyDeployedVersion`.
+   */
+  deployedVersion?: number;
+}
+
+/** One row of `GET /administration/{environment}/deploymentstatus` (backend `AgentDeploymentStatus`). */
+export interface AgentDeploymentSummary {
+  environment: Environment;
+  agentId: string;
+  agentVersion: number;
+  status: DeploymentStatus["status"];
+}
+
+/**
+ * Every agent deployed in an environment, each at its HIGHEST deployed version
+ * (`AgentFactory.getAllLatestAgents`). The per-agent status endpoint answers for
+ * one exact version only, so this is how to learn that an agent is still live
+ * at an older version after a save bumped it.
+ */
+export function listDeploymentStatuses(environment: Environment): Promise<AgentDeploymentSummary[]> {
+  return api.get<AgentDeploymentSummary[]>(`/administration/${environment}/deploymentstatus`);
 }
 
 export async function getDeploymentStatuses(

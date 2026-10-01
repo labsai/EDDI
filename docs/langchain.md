@@ -8,7 +8,7 @@ The **LLM Lifecycle Task** (formerly "Langchain") is EDDI's unified integration 
 
 By default, it provides **simple chat** with any LLM provider. Optionally, you can enable **agent mode** to give your LLM access to built-in tools (calculator, web search, weather, etc.).
 
-EDDI supports **12 LLM providers** out of the box — eleven registered model builders: OpenAI, Anthropic, Google Gemini (`gemini`), Google Vertex AI (`gemini-vertex`), Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face, and Jlama — plus any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via the `baseUrl` parameter.
+EDDI supports **19 named LLM providers** out of the box — eleven model builders (OpenAI, Anthropic, Google Gemini (`gemini`), Google Vertex AI (`gemini-vertex`), Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face and Jlama) plus eight first-class OpenAI-compatible providers (xAI Grok, DeepSeek, Moonshot Kimi, Alibaba Qwen, Z.ai GLM, MiniMax, OpenRouter and Groq; see [OpenAI-compatible providers](#openai-compatible-providers)). Any other OpenAI-compatible endpoint works through the `openai` type and a `baseUrl`.
 
 The task automatically detects which mode to use based on your configuration—no manual switching required.
 
@@ -45,13 +45,14 @@ User Input → Parser → Behavior Rules → [LangChain Task] → Output Generat
 
 The Langchain task integrates with multiple LLM providers via the langchain4j library:
 
-- **OpenAI** (ChatGPT, GPT-4, GPT-4o) — also supports **DeepSeek** and **Cohere** via `baseUrl`
+- **OpenAI** (ChatGPT, GPT-4, GPT-4o) — also any other OpenAI-compatible endpoint via `baseUrl`
+- **OpenAI-compatible providers** with their own type: `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `minimax`, `openrouter`, `groq` ([details](#openai-compatible-providers))
 - **Anthropic** (Claude)
 - **Google Gemini** (`gemini` - AI Studio API, `gemini-vertex` - Vertex AI)
 - **Mistral AI** (Mistral Large, Codestral, Pixtral)
 - **Azure OpenAI** (GPT-4o via Azure-hosted endpoints)
 - **Amazon Bedrock** (Claude, Llama, Titan via AWS credential chain)
-- **Oracle GenAI** (Cohere Command R+ via OCI authentication)
+- **Oracle GenAI** (Cohere Command A, Meta Llama and others via OCI authentication)
 - **Ollama** (Local models)
 - **Hugging Face** (Various models)
 - **Jlama** (Local Java-based inference)
@@ -96,7 +97,6 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
         "systemMessage": "You are a helpful assistant",
         "prompt": "",
         "logSizeLimit": "-1",
-        "includeFirstAgentMessage": "true",
         "convertToObject": "false",
         "addToOutput": "true"
       }
@@ -116,7 +116,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
 | **Context Control**        |         |                                                       |                   |
 | `logSizeLimit`             | int     | Conversation history limit (`-1` = unlimited, `0` = none) | falls back to `conversationHistoryLimit` (default 10) |
-| `includeFirstAgentMessage` | boolean | Include first agent message in context                | true              |
+| `includeFirstAgentMessage` | boolean | **Deprecated — do not use in new configs.** Include the opening **agent** message in context. `false` drops it — and only it: a first message from the *user* is always kept. Setting it logs a WARN; see [Deprecated parameters](#deprecated-parameters) | true              |
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
@@ -255,7 +255,13 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 }
 ```
 
-> **Important**: Anthropic doesn't allow the first message to be from the agent, so `includeFirstAgentMessage` should be set to `false`.
+> **`includeFirstAgentMessage` is deprecated and no longer needed for Anthropic.** This example keeps
+> `"false"` only because countless existing configs carry it. The advice it used to
+> illustrate — "Anthropic doesn't allow the first message to be from the agent, so set
+> this to `false`" — described a restriction the
+> [Messages API](https://platform.claude.com/docs/en/api/messages) no longer documents,
+> and a history beginning with an assistant turn is accepted. Leave the parameter off
+> new Anthropic configs unless you genuinely want the opening greeting withheld.
 >
 > **maxTokens**: Anthropic requires `max_tokens` in every request. If omitted, EDDI defaults to **16384**. For models with **extended thinking** (e.g. `claude-sonnet-5`), thinking tokens count toward this budget — set it higher (e.g. `"32768"` or `"65536"`) for complex analysis tasks.
 
@@ -434,6 +440,11 @@ Both are exposed as parameters:
 
 #### Jlama (Local Java Inference)
 
+Jlama is the only provider that runs inference **inside the EDDI JVM**. There is no
+second process, no Ollama, no HTTP hop — which also means the model's memory, CPU and
+weight storage are EDDI's problem rather than a sidecar's. Read the two subsections
+below before deploying it; both describe defaults that fail in a container.
+
 ```json
 {
   "tasks": [
@@ -444,7 +455,9 @@ Both are exposed as parameters:
       "description": "Jlama local model chat",
       "parameters": {
         "modelName": "tjake/Llama-3.2-1B-Instruct-JQ4",
+        "modelCachePath": "/var/lib/eddi/jlama",
         "temperature": "0.7",
+        "maxTokens": "512",
         "timeout": "30000",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
@@ -454,7 +467,101 @@ Both are exposed as parameters:
 }
 ```
 
-**Note**: Jlama runs models locally in Java without requiring external services like Ollama.
+| Parameter | Meaning |
+| --------- | ------- |
+| `modelName` | Hugging Face repo id, e.g. `tjake/Llama-3.2-1B-Instruct-JQ4`. Jlama downloads it on first use |
+| `modelCachePath` | Where weights are cached. **Set this in any container** — see below. Default: `${user.home}/.jlama/models` |
+| `authToken` | Hugging Face token, for gated or private repos. Use `${vault:...}` rather than a literal |
+| `quantizeModelAtRuntime` | `true` quantizes on load: slower startup, smaller memory footprint |
+| `workingDirectory` | Scratch space for the loader. Needs to be writable |
+| `workingQuantizedType` | Jlama `DType` name for working-set quantization, e.g. `F32`, `I8`. Case-insensitive; an unknown name is logged and ignored |
+| `temperature`, `maxTokens` | As for every other provider. Jlama defaults to `0.3` and the model's full context length |
+| `timeout` | Honoured, but applied by EDDI as a wall-clock bound around the call rather than by Jlama itself — Jlama's own builder has no timeout |
+
+##### Required JVM flag
+
+Jlama needs the Java Vector API for SIMD tensor operations:
+
+```
+--add-modules=jdk.incubator.vector
+```
+
+**EDDI sets this for you** in both container images, in the Maven Surefire fork and in
+the `mise` dev tasks. (Deliberately not in the Failsafe fork — declaring an `argLine`
+there would replace the implicit `${argLine}` that carries the JaCoCo integration-test
+agent and Quarkus's module opens, and no integration test builds a Jlama model anyway.) You only need to add it yourself if you launch `quarkus-run.jar` with
+your own command line.
+
+The image carries it on **`JDK_JAVA_OPTIONS`**, deliberately, rather than on
+`JAVA_OPTS_APPEND` where EDDI's other JVM settings live. The `java` launcher reads
+`JDK_JAVA_OPTIONS` itself, so the flag survives an operator overriding either of the
+other two variables — and overriding them is normal: a `docker run -e JAVA_OPTS_APPEND=…`
+*replaces* the image's value rather than adding to it, so a deployment that sets its
+MongoDB connection string that way would otherwise silently drop the flag and fall back
+to scalar inference.
+
+> ⚠️ If you set `JDK_JAVA_OPTIONS` yourself, carry
+> `--add-modules=jdk.incubator.vector` across — that one *does* replace the image's value.
+> You will see `NOTE: Picked up JDK_JAVA_OPTIONS` in the startup log either way.
+
+This matters more than a usual tuning flag, because the failure is silent. Jlama probes
+for the Vector API inside a `catch (Throwable)`; without the module it logs one line,
+falls back to `NaiveTensorOperations` — scalar Java matrix arithmetic — and answers
+normally, just orders of magnitude slower than SIMD. Nothing errors; the agent is simply
+too slow to use. EDDI logs its own warning naming this flag when it builds a Jlama model
+on a JVM that lacks it.
+
+> The JVM prints `WARNING: Using incubator modules: jdk.incubator.vector` at startup.
+> That is expected and is not an error.
+
+##### Deploying Jlama in a container
+
+Three things behave differently inside a container. None of them raises an error — which
+is exactly why each is worth setting explicitly.
+
+- **`modelCachePath` — set it.** Jlama writes weights to `${user.home}/.jlama/models`,
+  which in a container is the pod's ephemeral writable layer. That *works*, which is what
+  makes it a trap rather than an error: the multi-gigabyte weights live exactly as long as
+  the pod does, so every restart, rollout and reschedule re-downloads them from Hugging
+  Face before the first turn can be answered. Point it at a mounted volume. (The download
+  happens on the *first turn*, not at deploy time, so a mistake here surfaces long after
+  the agent was configured and saved.)
+- **Thread count — give the pod a CPU *limit*, not a parameter.** Jlama runs inference on
+  a process-global `PhysicalCoreExecutor` sized at `max(2, availableProcessors() / 2)`.
+  `availableProcessors()` honours a container CPU **limit**, so `limits.cpu: 4` yields two
+  inference threads. It does **not** honour a CPU **request**: cgroup shares have been
+  ignored since JDK 19, so a pod with only `requests.cpu` sees the whole node. EDDI
+  deliberately exposes no `threadCount` parameter — Jlama applies it through a one-shot
+  process-global latch that throws on its second call, so it cannot be a per-model setting.
+  If you must override it, size the pod.
+- **Memory — size for the weights, outside the heap.** Jlama memory-maps the safetensors
+  files, so the weights land in RSS and page cache, not the Java heap. They still count
+  against the container's memory limit. Size the pod for the model *plus* EDDI's heap, and
+  note that `JAVA_MAX_MEM_RATIO` only governs the heap, so raising it does not make room
+  for the model — it takes room away.
+
+For an air-gapped deployment, pre-seed `modelCachePath` from a machine that has network
+access and mount it read-only. Jlama reaches out to Hugging Face whenever the model is
+not already in the cache, so an empty cache with no egress fails rather than degrades.
+
+**Note**: Jlama runs models locally in Java without requiring external services like
+Ollama. It is CPU inference — there is no GPU path — so it suits small quantized models
+(1B–8B) rather than large ones. For a GPU or a larger model, serve it with vLLM or
+`llama-server` and point the `openai` provider at it via `baseUrl`.
+
+**`modelName` must be a Hugging Face repository id in `owner/name` form** — for
+example `tjake/Llama-3.2-1B-Instruct-JQ4` or
+`tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4`. Jlama resolves the model through its
+own registry, which downloads it from Hugging Face on first use; a bare name
+such as `llama-3.2-1b` has no owner to resolve and fails on the agent's first
+turn, long after the configuration was saved. Private repositories additionally
+need `authToken`.
+
+**There is no `baseUrl`.** Jlama runs *inside the EDDI JVM* — there is no model
+server to point at, and a `baseUrl` parameter is dropped with an
+"unrecognised parameter" warning. See the parameter table above for everything
+the builder does read; `threadCount` is deliberately absent from it — see
+"Deploying Jlama in a container" above.
 
 #### Mistral AI
 
@@ -542,7 +649,7 @@ Both are exposed as parameters:
       "type": "oracle-genai",
       "description": "Oracle GenAI chat",
       "parameters": {
-        "modelName": "cohere.command-r-plus",
+        "modelName": "cohere.command-a-03-2025",
         "compartmentId": "ocid1.compartment.oc1..your-compartment-id",
         "configProfile": "DEFAULT",
         "temperature": "0.7",
@@ -557,7 +664,86 @@ Both are exposed as parameters:
 
 **Note**: Oracle GenAI does not require an `apiKey`. Authentication is via OCI SDK (`~/.oci/config`). The `configProfile` parameter selects which OCI profile to use (defaults to `"DEFAULT"`).
 
-#### DeepSeek / Cohere (via OpenAI-Compatible Endpoints)
+#### OpenAI-compatible providers
+
+Eight providers that speak the OpenAI chat-completions protocol have a type of their own, so
+the config needs only a key. The endpoint, the default model and the vendor's reasoning quirks
+come from a preset (`src/main/resources/llm/openai-compatible-providers.json`), which the
+Manager mirrors for its provider picker.
+
+| `type` | Provider | Default endpoint | Regions (`region`) | Default model |
+|---|---|---|---|---|
+| `xai` | xAI Grok | `https://api.x.ai/v1` | `intl`, `us` | `grok-4.7` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` | | `deepseek-flash` |
+| `moonshot` | Moonshot Kimi | `https://api.moonshot.ai/v1` | `intl`, `cn` | `kimi-k3` |
+| `qwen` | Alibaba Qwen | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `intl`, `cn`, `us` | `qwen3.7-plus` |
+| `zhipu` | Z.ai GLM (Zhipu) | `https://api.z.ai/api/paas/v4` | `intl`, `cn` | `glm-5.3` |
+| `minimax` | MiniMax | `https://api.minimax.io/v1` | `intl`, `cn` | `MiniMax-M3` |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | | `openrouter/auto` |
+| `groq` | Groq | `https://api.groq.com/openai/v1` | | `openai/gpt-oss-120b` |
+
+Model ids and endpoints were checked against the vendors' documentation on 2026-09-29. Vendors
+retire models often, so treat the defaults as a starting point and set `modelName` explicitly
+in production. Alibaba is moving the Singapore and Beijing regions to workspace-specific hosts;
+the shared hosts above still work (they enter maintenance mode on 2026-09-30, which means no
+new features rather than shutdown), and a workspace host
+(`https://{WorkspaceId}.<region>.maas.aliyuncs.com/compatible-mode/v1`) goes in `baseUrl`.
+xAI's `us` region is its US data-residency host: it serves `grok-4.7` and `grok-4.6` only, at
+roughly a 10% premium. DeepSeek's V4.1 Flash (released 2026-09-10) is multimodal and is the
+model DeepSeek recommends; whether `deepseek-v4-pro` is still a distinct model is unconfirmed.
+Moonshot fixes `temperature` on `kimi-k2.7-code` and `kimi-k2.6`, so do not set it there.
+
+**Precedence.**
+- Endpoint: an explicit `baseUrl`, then the `region` parameter (a region id from the table), then
+  the default endpoint. An unknown region fails with the list of valid ids. `baseUrl` is still
+  checked against the cloud-metadata block list.
+- Model: `modelName`, then the provider default.
+- Any parameter you set beats the preset's defaults (below).
+- `apiKey` is required. Use a vault reference, for example `${vault:xai-key}`; the error names
+  the provider and suggests one.
+
+**Thinking defaults.** Reasoning models return their reasoning in a separate field, and some
+providers require it back on the next request of a tool loop. The presets set:
+
+| Provider | `returnThinking` | `sendThinking` | Why |
+|---|---|---|---|
+| `deepseek`, `moonshot` | `true` | `true` | The API rejects a tool-loop follow-up that omits the previous turn's reasoning |
+| `zhipu` | `true` | `true` | Z.ai asks that the historical `reasoning_content` be returned during tool use |
+| `minimax` | `true` | `true` | With `reasoning_split: true` (sent by the preset) thinking arrives in `reasoning_content`, and MiniMax's docs say the full assistant message must be appended to the history |
+| `qwen`, `xai`, `openrouter`, `groq` | default | default | Nothing to echo |
+
+`returnThinking` and `sendThinking` are ordinary parameters and also work on `type: openai`
+(both default to `false` there, so existing configs are unchanged). Today `returnThinking` only
+matters together with `sendThinking`: EDDI does not read a response's thinking for any other
+purpose, so returning it without echoing it buys nothing. `minimax` additionally sends the
+request-body field `reasoning_split`; that is fixed by the preset. A parameter left blank
+(`""`) counts as not set, so the preset default still applies.
+
+**Capabilities.** `jsonResponseFormat: auto` sends a JSON response format to `xai`, `deepseek`,
+`moonshot`, `qwen`, `zhipu` and `groq` when the request carries no tools (never with tools), and
+never to `minimax` or `openrouter`. Image input is enabled by model id: `grok-4*`,
+`deepseek-flash`/`deepseek-v4-flash`, `kimi-k3`, `kimi-k2.6`, `kimi-k2.7-code`, the Qwen
+`qwen3.8*`, `qwen3.7-plus`, `qwen3.7-flash`, `qwen3.6-plus`, `qwen3.6-flash` and
+`qwen3-vl`/`qwen-vl`/`qvq` families (not the text-only `qwen3.7-max`), `glm-5.3-flash`,
+`glm-4.6v`/`glm-4.5v` (`glm-5.3` itself is text-only), `minimax-m3`, `openrouter/auto` and
+Groq's `qwen3.8-27b`. Override either per task or per deployment as usual.
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "grokChat",
+      "type": "xai",
+      "parameters": {
+        "apiKey": "${vault:xai-key}",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
 
 ```json
 {
@@ -565,12 +751,10 @@ Both are exposed as parameters:
     {
       "actions": ["send_message"],
       "id": "deepseekChat",
-      "type": "openai",
-      "description": "DeepSeek via OpenAI-compatible endpoint",
+      "type": "deepseek",
       "parameters": {
-        "apiKey": "your-deepseek-api-key",
-        "modelName": "deepseek-chat",
-        "baseUrl": "https://api.deepseek.com",
+        "apiKey": "${vault:deepseek-key}",
+        "modelName": "deepseek-flash",
         "temperature": "0.7",
         "systemMessage": "You are a helpful assistant",
         "addToOutput": "true"
@@ -580,7 +764,33 @@ Both are exposed as parameters:
 }
 ```
 
-**Note**: Any OpenAI-compatible provider (DeepSeek, Cohere, etc.) can be used by setting the `baseUrl` parameter on the `openai` type. No additional dependencies are required.
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "qwenChina",
+      "type": "qwen",
+      "parameters": {
+        "apiKey": "${vault:qwen-key}",
+        "region": "cn",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+**Any other endpoint.** Cohere, Together, a corporate gateway and the like still work through
+`type: openai` with a `baseUrl`; they simply have no preset.
+
+**Known limitation.** A durable tool-approval pause stores the in-flight transcript, including
+each assistant turn's `thinking`, and resumes from it, so DeepSeek and Kimi tool turns survive a
+pause. On the degraded resume (the transcript exceeded `eddi.hitl.tool.transcript-max-bytes`) the
+gating assistant message is replayed with its thinking, unless that single message exceeds its
+64 KB cap: it is then persisted without the thinking, and those two providers can reject the
+resumed request with a 400. Raise the cap or approve such calls quickly if you hit it.
 
 ---
 
@@ -625,15 +835,22 @@ Both are exposed as parameters:
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-in** — a ceiling without it is report-only, and is named in a startup WARN | false (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
-| `enableToolCaching`        | boolean  | Cache tool results to reduce API calls           | true                   |
-| `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global` | (all `user`)   |
+| `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
+| `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
 | `enableRateLimiting`       | boolean  | Limit tool/LLM usage rate                        | true                   |
 | `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
 | `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout` | (none) |
+| **Retrieval (RAG)**        |          | Requires the agent's workflow to bind the knowledge base with an `eddi://ai.labs.rag` step — see [RAG](rag.md#configuration) | |
+| `knowledgeBases`           | object[] | Knowledge bases this task retrieves from, by `name`, each optionally overriding `maxResults` / `minScore`. The name must match a KB the workflow binds; an unmatched name is skipped silently | (none) |
+| `enableWorkflowRag`        | boolean  | Retrieve from **every** knowledge base the workflow binds, instead of listing them. Ignored when `knowledgeBases` contains at least one reference; an empty `knowledgeBases` array does **not** suppress it | false |
+| `ragDefaults`              | object   | `maxResults` / `minScore` applied under `enableWorkflowRag`; falls back to each KB's own defaults | (KB defaults) |
+| `httpCallRag`              | string   | Name of an httpCall to execute as a search, injecting its response as `## Search Results:`. Needs no vector store and no workflow step, but calls an **external** search API — it cannot query an EDDI knowledge base | (none) |
 | `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters. `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
+| `markRagProvenance`        | boolean  | Wrap retrieved context in a `[retrieved context — source '…' …]` … `[end of retrieved context]` envelope that marks it as data, not instructions, before it joins the system prompt. The envelope adds about 200 characters on top of `maxRagContextChars` | true |
+| **Prompt & History Limits** |         |                                                  |                        |
 | `maxSystemPromptChars`     | int      | Hard ceiling on the whole assembled system prompt, applied after RAG context, counterweight, identity masking and response-format blocks are appended. `-1` leaves it untouched | -1 |
 | `conversationSummary`      | object   | Rolling conversation summary — see [Rolling Conversation Summary](#rolling-conversation-summary) | (none) |
 
@@ -1019,6 +1236,20 @@ The engine clamps these so a config cannot pin a pipeline thread: at most 10 att
 30 seconds for one backoff, and at most 60 seconds of backoff in total across the retry sequence.
 A clamped value is reported once in a WARN.
 
+**In a tool loop, the unit of retry is one model request.** A failure on the fifth model call of
+a tool-calling turn resends that one request — with every tool result gathered so far — rather
+than restarting the turn. Tools that already ran are never executed again by a retry. The
+60-second backoff ceiling still applies to the **whole turn**: every model request of one tool
+loop draws from the same budget, so a long tool loop cannot sleep for a minute per request. (A
+HITL resume continues the turn with a fresh budget.)
+
+When `convertToObject` requests the provider's native JSON mode and the call still fails after
+its retries, the engine falls back to a plain request only if the failure could mean "JSON mode
+is not supported". A timeout, rate limit or 5xx is rethrown instead of being paid for twice. A
+self-hosted OpenAI-compatible gateway that answers an unsupported `response_format` with a **5xx**
+rather than a 4xx therefore fails the turn instead of falling back; set `jsonResponseFormat: "off"`
+on that task (see the provider matrix below) so the format is never sent.
+
 ### Rolling Conversation Summary
 
 The third windowing strategy compresses older turns into a running summary that is injected into
@@ -1047,6 +1278,12 @@ back into the full text through the `conversationRecall` built-in tool.
 | `excludePropertiesFromSummary` | boolean | Tell the summarizer to skip facts already captured as persistent properties                      | true    |
 | `recentWindowSteps`            | int     | Conversation steps kept verbatim alongside the summary. Everything older is covered by it        | 5       |
 | `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
+| `maxTurnsPerUpdate`            | int     | Most turns folded into the summary by one update. A backlog (summary enabled late, or a summarizer outage) is caught up over several turns instead of one request that outgrows the summarizer's context | 20      |
+| `maxCharsPerUpdate`            | int     | Character ceiling on everything sent in one update — the previous summary, its headings and the new turns. The summary's share is reserved first; the batch of new turns is shortened turn by turn to fit the rest, and a single larger turn is cut. The summary is never cut: if it leaves the new turns less than a quarter of the budget, the update is skipped with a WARN (turns past the summary keep reaching the model verbatim) until you raise this. Lowering `maxSummaryTokens` does not help that conversation — the stored summary is not rewritten while updates are skipped — it only keeps later summaries small | 60000   |
+
+Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
+the opening (`CONVERSATION_START`) step and turn 1 the user's first message. A requested range such as
+`turns 3-5` is inclusive.
 
 > **Watch the whitelist.** A non-empty `builtInToolsWhitelist` enables only the tools it names, and
 > `conversationRecall` is one of them. Enabling the rolling summary on a task whose whitelist does
@@ -1158,7 +1395,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
-| **Smart Caching** | Deduplicates identical tool calls, partitioned per identity            | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
+| **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an opt-in ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
 
 #### Tool names: dispatch name vs. configuration slug
@@ -1220,10 +1457,24 @@ Negative `toolPricing` values are clamped to 0.0.
 
 #### Tool cache scoping
 
-Cached tool results are partitioned by identity. The cache key is
-`scopeTag|toolName:arguments`, and the scope tag is resolved per tool call as
-`toolCacheScopes[<dispatch name>]` → `toolCacheScopes[<slug>]` →
-`defaultToolCacheScope` → `user`:
+**What is cached.** Built-in tools, except the stateful ones (artifacts, group
+tasks, dynamic agents, memory, recall), which are never cached. **HTTP-call, MCP and
+A2A tools are not cached unless the task names the tool in `toolCacheScopes`.**
+Those tools reach systems EDDI does not control and can have side effects — a POST,
+an MCP write, a request to another agent — and a cache hit does not execute the
+call: before this rule, a second identical order placed within the TTL was answered
+from the cache and never placed. Naming a tool in `toolCacheScopes`
+(`{"lookupCustomer": "user"}`) is the explicit statement that repeating the call is
+safe to skip; do it only for read-only tools.
+
+Cached tool results are partitioned by identity, by the tool's source and by the
+agent. The cache key is `scopeTag|src:<source>|agent:<agentId>|toolName:arguments`
+— the agent segment is left out only for a built-in on the `global` scope, whose
+definition is the same for every agent. Without the source and agent segments, two
+agents serving the same user (or every scheduled run, which share the scheduler's
+identity) shared entries for any tool name they had in common. The scope tag is
+resolved per tool call as `toolCacheScopes[<dispatch name>]` →
+`toolCacheScopes[<slug>]` → `defaultToolCacheScope` → `user`:
 
 | Scope          | Tag                                    | A cached result is reused…                     |
 | -------------- | -------------------------------------- | ---------------------------------------------- |
@@ -1407,7 +1658,7 @@ EDDI uses three complementary mechanisms to ensure reliable JSON output:
 |---|---|---|
 | **1. System Prompt** | Appends `## RESPONSE FORMAT (MANDATORY)` section with schema to every request | All providers |
 | **2. Native API** | Sets `ResponseFormatType.JSON` on the outgoing `ChatRequest` | See the matrix below |
-| **3. Validation** | Pre-parse `startsWith("{")` check before deserialization | All providers |
+| **3. Validation** | A response starting with `{` becomes an object (a map), one starting with `[` a list; plain text, or JSON the model truncated or malformed, is kept as the raw string with a WARN rather than failing the turn | All providers |
 
 If a provider doesn't support native JSON mode (e.g. Anthropic), EDDI gracefully falls back to prompt-only enforcement.
 
@@ -1422,6 +1673,8 @@ Layer 2 is applied **per request**, never baked into the model instance, and it 
 | `mistral` | ✅ | ✅ |
 | `gemini`, `gemini-vertex` | ✅ | ❌ — the Gemini API rejects `responseMimeType: application/json` together with `tools` |
 | `anthropic`, `bedrock` | ❌ — both reject a JSON format without a schema | ❌ |
+| `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `groq` | ✅ | ❌ — no verified tools + JSON support |
+| `minimax`, `openrouter` | ❌ | ❌ |
 | `ollama`, `jlama`, `huggingface`, `oracle-genai` | ❌ (not verified — opt in with `jsonResponseFormat: "on"`) | ❌ |
 
 #### Overriding the matrix per task
@@ -1505,6 +1758,41 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 ---
 
+## Deprecated parameters
+
+### `includeFirstAgentMessage`
+
+**Deprecated. Still honoured; do not use it in new configurations.**
+
+It exists for one reason: Anthropic used to reject a conversation whose first
+message was an assistant turn, so the flag stripped EDDI's opening greeting to
+make the history start with a user message.
+
+**That restriction is gone.** The
+[Messages API reference](https://platform.claude.com/docs/en/api/messages) no
+longer documents a first-message role rule anywhere, and a history beginning with
+an assistant turn is accepted.
+
+What remains is a flag whose only documented reason to exist has expired, and
+which for years was implemented as *remove the first message* regardless of whose
+it was — so an agent with no `ai.labs.output` step, which opens on the **user's**
+turn, sent an empty history and Anthropic answered
+`invalid_request_error: messages: Field required`. The removal is role-aware now,
+so the flag is no longer dangerous; it is merely pointless for the case it was
+written for.
+
+**Why deprecated rather than removed.** Agent behaviour lives in JSON stored in
+MongoDB and imported from ZIPs — the one backward-compatibility boundary this
+codebase has. Silently ignoring a parameter an author set deliberately would be
+worse than honouring it: an agent that genuinely wants its greeting withheld
+would start sending it, with no diagnostic. So the flag keeps working exactly as
+before, and `LlmTask` logs a WARN naming the task the first time each configured
+task uses it.
+
+**What to do:** delete it from the task. Keep it only if that agent must really
+withhold its opening greeting from the model — which is a presentation choice,
+not a provider requirement.
+
 ## Common Issues and Troubleshooting
 
 ### API Key Issues
@@ -1526,8 +1814,21 @@ When `convertToObject=true`, the raw LLM response is **always** persisted in con
 
 ### Anthropic First Message Error
 
-- **Problem**: Anthropic API rejects conversations starting with agent message
-- **Solution**: Set `includeFirstAgentMessage: "false"` for Anthropic tasks
+- **Historical problem**: the Anthropic API rejected conversations starting with an agent message
+- **Solution**: Historical. The Messages API no longer documents a "first message must be
+  the user's" rule, and an assistant-first history is accepted — so `includeFirstAgentMessage`
+  is not the fix for a modern Anthropic failure. Leave it unset.
+
+### `invalid_request_error: messages: Field required` (Anthropic)
+
+- **Problem**: An agent with **no** `ai.labs.output` step — a group member that only answers,
+  say — sends an empty message list.
+- **Cause**: `includeFirstAgentMessage: "false"` drops the opening greeting. An agent that
+  produces no greeting opens on the *user's* turn, so on the first turn there was nothing
+  left to send. The removal is role-aware since 6.4.1 and only ever drops an **agent**
+  message, so this cannot recur; a local Ollama smoke test will not reproduce it either,
+  because Ollama accepts an empty message list.
+- **Solution**: Remove `includeFirstAgentMessage` from the task (or set it to `"true"`).
 
 ### Tool Not Working
 
@@ -1554,8 +1855,8 @@ All LLM tools execute **inside a conversation pipeline**. The full execution pat
 
 ```
 LlmTask.execute(memory)
-  └─→ AgentOrchestrator.buildToolList(memory, config)
-      └─→ Constructs tool instances with conversation context
+  └─→ AgentOrchestrator.buildToolSetup(task, memory)
+      └─→ every ToolSourceProvider.contribute(ToolAssemblyContext) — the context carries the memory
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -1563,7 +1864,7 @@ LlmTask.execute(memory)
 
 ### Implicit Context
 
-`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it via constructor injection from `AgentOrchestrator`, which has the memory object at tool-list build time.
+`IConversationMemory` is **always available** when tools execute. Tools that need conversation state (e.g., `userId`, `agentId`, `groupIds`) receive it from their `ToolSourceProvider`, which gets the memory in the `ToolAssemblyContext` at tool-assembly time.
 
 This means:
 - **No ThreadLocal** or request-scoped beans needed
@@ -1597,7 +1898,7 @@ This means:
 The LLM Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
 
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
-2. ✅ **12 Provider Support** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + OpenAI-compatible (DeepSeek, Cohere)
+2. ✅ **19 Provider Support** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + xAI, DeepSeek, Kimi, Qwen, GLM, MiniMax, OpenRouter, Groq (and any other OpenAI-compatible endpoint via `baseUrl`)
 3. ✅ **Built-in Tools** - 9 tools available when you enable agent mode
 4. ✅ **Tool Execution Pipeline** - Rate limiting, caching, cost tracking for every tool call
 5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation

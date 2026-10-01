@@ -51,13 +51,59 @@ public interface IResourceFilter<T> {
         }
     }
 
+    /**
+     * A filter value that matches when the field does <em>not</em> match
+     * {@code pattern}.
+     * <p>
+     * A plain {@code String} filter is a regular expression on both backends, and
+     * neither regex dialect they share can express a negation — POSIX ERE, which
+     * PostgreSQL uses, has no lookahead. So "everything except X" needs its own
+     * value type, which each backend renders as its native negation.
+     * <p>
+     * A document that does not carry the field at all <em>matches</em>: absent is
+     * "not X". Both backends are written to agree on that, because a descriptor
+     * without an owner is exactly the row a "not mine" listing must include.
+     *
+     * @param pattern
+     *            a regular expression in the dialect both backends accept — see
+     *            {@code Subjects.escapeRegex}
+     */
+    record NotMatching(String pattern) {
+    }
+
+    /**
+     * One condition on one field. A {@code String} filter is a regular expression
+     * on both backends; any other value is compared for equality. Use
+     * {@link #exact(String, String)} to compare a string for equality instead.
+     */
     class QueryFilter {
         private String field;
         private Object filter;
+        private boolean exact;
 
         public QueryFilter(String field, Object filter) {
             this.field = field;
             this.filter = filter;
+        }
+
+        /**
+         * The field equals {@code value}, character for character - not a pattern.
+         * <p>
+         * An escaped, anchored regex is not the same thing: MongoDB's {@code $} also
+         * matches before a final newline, so {@code ^name$} selects {@code "name\n"}
+         * too. Nor is there one strict end anchor for both backends - MongoDB's is
+         * {@code \z}, which PostgreSQL rejects, and PostgreSQL's is {@code \Z}, which
+         * MongoDB treats like {@code $}. Equality is exact on both, and can use an
+         * index.
+         */
+        public static QueryFilter exact(String field, String value) {
+            QueryFilter queryFilter = new QueryFilter(field, value);
+            queryFilter.exact = true;
+            return queryFilter;
+        }
+
+        public boolean isExact() {
+            return exact;
         }
 
         public String getField() {

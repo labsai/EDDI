@@ -5,15 +5,6 @@ import { toast } from "sonner";
 import {
   Search,
   Plus,
-  FileCode,
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  BookOpenCheck,
-  Brain,
-  Settings,
-  Plug,
   ExternalLink,
   Copy,
   Trash2,
@@ -29,7 +20,7 @@ import { accessFor } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { ShareDialog } from "@/components/workspaces/share-dialog";
-import type { LucideIcon } from "lucide-react";
+import { getResourceTypeIcon } from "@/lib/resource-type-icons";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -41,17 +32,6 @@ import {
   type ViewMode,
 } from "@/components/shared/view-toggle";
 import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
-
-const ICON_MAP: Record<string, LucideIcon> = {
-  GitBranch,
-  Globe,
-  MessageSquareText,
-  BookOpen,
-  BookOpenCheck,
-  Brain,
-  Settings,
-  Plug,
-};
 
 export function ResourceListPage() {
   const { type } = useParams<{ type: string }>();
@@ -98,7 +78,7 @@ export function ResourceListPage() {
     );
   }
 
-  const Icon = ICON_MAP[rt.icon] ?? FileCode;
+  const Icon = getResourceTypeIcon(rt.slug);
   const typeName = t(`${rt.labelKey}.name`);
 
   /**
@@ -237,7 +217,6 @@ export function ResourceListPage() {
                   key={item.resource}
                   item={item}
                   typeSlug={type ?? ""}
-                  iconName={rt.icon}
                   onDuplicate={handleDuplicate}
                   onDelete={handleDelete}
                 />
@@ -285,6 +264,7 @@ export function ResourceListPage() {
                         <OwnershipBadge
                           className="ms-2 align-middle"
                           ownerId={item.ownerId}
+                          ownerName={item.ownerName}
                           spaceId={item.spaceId}
                           visibility={item.visibility}
                         />

@@ -51,5 +51,11 @@ public final class PersistenceMixins {
 
         @JsonIgnore
         abstract void setCallerLevel(String callerLevel);
+
+        @JsonIgnore
+        abstract String getOwnerName();
+
+        @JsonIgnore
+        abstract void setOwnerName(String ownerName);
     }
 }

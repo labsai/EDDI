@@ -9,9 +9,13 @@ import {
   type GroupConversationState,
   type GroupSSEEvent,
   type GroupStartPayload,
+  type RoundStartPayload,
+  type GroupConversation,
   type PhaseStartPayload,
   type SpeakerStartPayload,
   type SpeakerCompletePayload,
+  type SpeakerCompleteOutcome,
+  type PhaseCompletePayload,
   type GroupCompletePayload,
   type TaskPlanCreatedPayload,
   type TaskVerifiedPayload,
@@ -23,8 +27,11 @@ import {
   type HumanInputRequestedPayload,
   type RetroRecordedPayload,
   type ArtifactUpdatedPayload,
+  type CostUpdatedPayload,
+  type StanceUpdatedPayload,
 } from "@/lib/api/groups";
-import type { GroupApprovalRequest } from "@/lib/api/hitl";
+import { cancelGroupDiscussion, type GroupApprovalRequest } from "@/lib/api/hitl";
+import { isApiError } from "@/lib/api-client";
 
 // ─── Streaming State ────────────────────────────────────────────
 
@@ -134,7 +141,59 @@ export interface GroupStreamState {
    * terminal; a discussion can write several artifacts across its run.
    */
   artifactUpdates: ArtifactUpdatedPayload[];
+  /**
+   * Ledger key → that key's CUMULATIVE cost in USD, from `cost_updated`.
+   *
+   * Keyed rather than summed-on-arrival on purpose: the backend records by
+   * replacement, and a PARALLEL phase's turns interleave, so adding deltas (or
+   * trusting a frame's own `totalCost` ordering) double-counts on a replay and
+   * races on a fan-out. Summing this map is order-independent — see
+   * `streamTotalCost`.
+   *
+   * Keys are NOT all agent ids: system spend uses `system:…` and a nested
+   * GROUP member uses `agentId:childConversationId`.
+   */
+  memberCosts: Map<string, number>;
+  /**
+   * agentId → the member's current one-line stance, from `stance_updated`.
+   * Live-only; the persisted equivalent is `conversation.memberStances`.
+   */
+  stances: Map<string, StanceUpdatedPayload>;
+  /**
+   * The connection ended without any terminal event — a proxy timeout, a pod
+   * restart, a network drop. The discussion may well still be running on the
+   * server, so this is deliberately NOT a failure: consumers stop treating the
+   * live transcript as authoritative and follow the persisted conversation
+   * (which polls while it is running) instead of freezing on the last frame.
+   */
+  interrupted: boolean;
+  /**
+   * Stop was pressed before the backend had named the conversation, so there
+   * was nothing to cancel yet. The cancel is sent as soon as `group_start`
+   * supplies the id; until then the UI shows the stop as in progress.
+   */
+  cancelRequested: boolean;
+  /**
+   * A deferred Stop (see `cancelRequested`) was sent once `group_start` named
+   * the conversation, and the server refused it. The discussion is still
+   * running and the stream still follows it, so this is deliberately NOT
+   * `error`: the board renders `error` as a discussion failure, which a failed
+   * Stop is not. The board reports it the way it reports an immediate Stop
+   * failure (a toast) and then clears it with `clearCancelError`.
+   */
+  cancelError: string | null;
+  /**
+   * Index in `transcript` where the CURRENT round's entries begin — the live
+   * counterpart of `GroupConversation.roundStartTranscriptIndex`.
+   *
+   * A continuation deliberately KEEPS the previous rounds (`continueStream`
+   * preserves `s.transcript`, and the `group_start` handler appends the new
+   * question), so anything bucketing by `phaseIndex` — which the backend
+   * restarts at 0 each round — needs this to avoid merging rounds.
+   */
+  roundStartIndex: number;
 }
+
 
 /** Shared empty state handed to consumers that have no stream yet. Never mutated. */
 const initialState: GroupStreamState = {
@@ -160,6 +219,12 @@ const initialState: GroupStreamState = {
   humanInputRequest: null,
   retroRecorded: [],
   artifactUpdates: [],
+  memberCosts: new Map(),
+  stances: new Map(),
+  interrupted: false,
+  cancelRequested: false,
+  cancelError: null,
+  roundStartIndex: 0,
 };
 
 /** A clean state with its own collection instances (the shared `initialState`
@@ -174,6 +239,9 @@ function freshState(): GroupStreamState {
     convergence: new Map(),
     retroRecorded: [],
     artifactUpdates: [],
+    memberCosts: new Map(),
+    stances: new Map(),
+    roundStartIndex: 0,
   };
 }
 
@@ -192,15 +260,150 @@ interface GroupStreamStore {
   streams: Record<string, GroupStreamState>;
   update: (groupId: string, updater: (s: GroupStreamState) => GroupStreamState) => void;
   startStream: (groupId: string, question: string, attachments?: GroupAttachmentRef[]) => Promise<void>;
-  continueStream: (groupId: string, gcId: string, question: string) => Promise<void>;
-  approveAndStream: (groupId: string, gcId: string, request: GroupApprovalRequest) => Promise<void>;
+  continueStream: (
+    groupId: string,
+    gcId: string,
+    question: string,
+    seed?: GroupConversation | null,
+  ) => Promise<void>;
+  approveAndStream: (
+    groupId: string,
+    gcId: string,
+    request: GroupApprovalRequest,
+    seed?: GroupConversation | null,
+  ) => Promise<void>;
+  /**
+   * Detach from the stream WITHOUT touching the discussion — it keeps running on
+   * the server. For navigating to another discussion, never for "Stop".
+   */
   abortStream: (groupId: string) => void;
+  /**
+   * Stop the discussion: cancel it on the server, then close the stream.
+   * See {@link CancelOutcome} for the outcome values.
+   *
+   * `gcId` names the discussion to stop when it is not the one this tab is
+   * streaming — one whose connection dropped, one adopted from the stored list
+   * after a reload, or one selected from Sessions while ANOTHER discussion
+   * streams here. That one is cancelled by id and the live stream is left
+   * alone. Omitted, or naming the streamed discussion, it stops the live stream.
+   */
+  cancelStream: (groupId: string, gcId?: string) => Promise<CancelOutcome>;
+  /** Acknowledge a reported {@link GroupStreamState.cancelError}. */
+  clearCancelError: (groupId: string) => void;
   resetStream: (groupId: string) => void;
+}
+
+/**
+ * What a Stop achieved.
+ *
+ * - `cancelled` — the server cancelled the discussion.
+ * - `alreadyEnded` — the server answered 409: the discussion reached a terminal
+ *   state on its own before the cancel landed. Nothing is running any more, so
+ *   this is not an error; the persisted document says how it ended.
+ * - `pending` — the backend has not named the conversation yet; the cancel is
+ *   sent as soon as `group_start` arrives.
+ * - `nothingToCancel` — no stream for this group.
+ */
+export type CancelOutcome = "cancelled" | "alreadyEnded" | "pending" | "nothingToCancel";
+
+/**
+ * Where a resumed or continued stream picks up from.
+ *
+ * Neither the approve nor the continue endpoint replays what came before it, so
+ * the store holds only what THIS page session saw stream: nothing after a
+ * reload, and another discussion's rows, costs and stances if the user watched
+ * one stream and then picked this one. The first dropped every earlier phase
+ * and round from the overview the moment a resumed turn arrived (the digest
+ * prefers a non-empty live transcript); the second showed a different
+ * discussion's turns and spend under this one.
+ *
+ * So a stream that was on another conversation starts from a clean state, and
+ * the persisted document (the complete record up to the pause or the previous
+ * round) supplies the transcript whenever it holds at least as much as the
+ * store does. The store only wins when it is AHEAD, which happens when the
+ * caller's copy was fetched before the last streamed rows.
+ */
+function resumeBase(s: GroupStreamState, gcId: string, seed?: GroupConversation | null): GroupStreamState {
+  const own = s.conversationId === gcId;
+  const base = own ? s : freshState();
+  const persisted = seed?.id === gcId ? (seed.transcript ?? []) : null;
+  if (persisted && persisted.length >= base.transcript.length) {
+    return { ...base, transcript: persisted, roundStartIndex: seed?.roundStartTranscriptIndex ?? 0 };
+  }
+  return base;
 }
 
 /** In-flight abort controllers, one per group. Kept outside the store because
  *  they are not render state. */
 const abortControllers = new Map<string, AbortController>();
+
+/** Mark every still-open speaker placeholder as a turn that produced nothing. */
+function closePlaceholders(
+  transcript: TranscriptEntry[],
+  matches: (entry: TranscriptEntry) => boolean = () => true,
+): TranscriptEntry[] {
+  let changed = false;
+  const next = transcript.map((entry) => {
+    if (!isOpenPlaceholder(entry) || !matches(entry)) return entry;
+    changed = true;
+    return { ...entry, type: "SKIPPED" as TranscriptEntryType };
+  });
+  return changed ? next : transcript;
+}
+
+/**
+ * A `speaker_start` placeholder that no `speaker_complete` has filled yet.
+ *
+ * Every renderer draws a null-content member entry as "still typing", so one
+ * left open after its turn ended types forever. SKIPPED/ERROR rows carry null
+ * content legitimately (`member_pause_skipped`, a no-content outcome) and are
+ * closed already.
+ */
+export function isOpenPlaceholder(entry: TranscriptEntry): boolean {
+  return (
+    entry.content === null &&
+    entry.type !== "SKIPPED" &&
+    entry.type !== "ERROR" &&
+    entry.type !== "QUESTION" &&
+    !!entry.speakerAgentId
+  );
+}
+
+/**
+ * How many transcript rows the stream has actually delivered — everything but
+ * the still-open placeholders, which are not rows the stored document will
+ * hold. Compared against the persisted transcript to tell whether a refetched
+ * document has caught up with what the live view showed.
+ */
+export function deliveredRowCount(transcript: TranscriptEntry[]): number {
+  let count = 0;
+  for (const entry of transcript) if (!isOpenPlaceholder(entry)) count++;
+  return count;
+}
+
+/**
+ * Whether the stored copy of the stream's discussion holds at least what the
+ * stream delivered — the point at which a stopped stream can give way to it
+ * without rows vanishing on screen until the next poll.
+ */
+export function persistedHasCaughtUp(
+  conversation: { id: string; transcript?: TranscriptEntry[] | null } | null | undefined,
+  stream: Pick<GroupStreamState, "conversationId" | "transcript">,
+): boolean {
+  return (
+    !!conversation &&
+    conversation.id === stream.conversationId &&
+    (conversation.transcript?.length ?? 0) >= deliveredRowCount(stream.transcript)
+  );
+}
+
+/**
+ * Terminal settle shared by every event that ends the run: no one is speaking
+ * any more, so any placeholder still open never gets its content.
+ */
+function settleTerminal(s: GroupStreamState): Pick<GroupStreamState, "activeSpeakers" | "transcript"> {
+  return { activeSpeakers: new Set(), transcript: closePlaceholders(s.transcript) };
+}
 
 function swapController(groupId: string): AbortController {
   abortControllers.get(groupId)?.abort();
@@ -236,6 +439,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       streamGroupDiscussion(groupId, question, undefined, abort.signal, attachments),
       abort,
       update,
+      () => get().streams[groupId],
     );
   },
 
@@ -244,20 +448,23 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
    * the resumed progress over the same connection. Preserves the existing
    * transcript so a live pause→resume appends rather than restarts.
    */
-  approveAndStream: async (groupId, gcId, request) => {
+  approveAndStream: async (groupId, gcId, request, seed) => {
     const abort = swapController(groupId);
     const update = get().update;
 
     update(groupId, (s) => ({
-      ...s,
+      ...resumeBase(s, gcId, seed),
       isStreaming: true,
       state: "IN_PROGRESS",
       conversationId: gcId,
+      interrupted: false,
+      cancelRequested: false,
+      cancelError: null,
       hitlPause: null,
       hitlResume: null,
       humanInputRequest: null,
       error: null,
-      startedAt: s.startedAt ?? new Date().toISOString(),
+      startedAt: (s.conversationId === gcId ? s.startedAt : null) ?? new Date().toISOString(),
       activeSpeakers: new Set(),
     }));
 
@@ -266,6 +473,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       streamGroupApproval(groupId, gcId, request, abort.signal),
       abort,
       update,
+      () => get().streams[groupId],
     );
   },
 
@@ -274,19 +482,22 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
    * Preserves the existing transcript so the new round appends rather than
    * replaces — same pattern as approveAndStream.
    */
-  continueStream: async (groupId, gcId, question) => {
+  continueStream: async (groupId, gcId, question, seed) => {
     const abort = swapController(groupId);
     const update = get().update;
 
     update(groupId, (s) => ({
-      ...s,
+      ...resumeBase(s, gcId, seed),
       isStreaming: true,
       state: "IN_PROGRESS",
       conversationId: gcId,
       error: null,
       errorKind: null,
-      startedAt: s.startedAt ?? new Date().toISOString(),
-      // Keep transcript (appended by group_start handler), but reset
+      interrupted: false,
+      cancelRequested: false,
+      cancelError: null,
+      startedAt: (s.conversationId === gcId ? s.startedAt : null) ?? new Date().toISOString(),
+      // Keep transcript (appended by the round_start handler), but reset
       // per-round derived fields so stale data doesn't leak into the UI.
       synthesizedAnswer: null,
       // `continueDiscussion` clears both of these server-side — a round that
@@ -312,6 +523,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       streamGroupContinue(groupId, gcId, question, undefined, abort.signal),
       abort,
       update,
+      () => get().streams[groupId],
     );
   },
 
@@ -319,6 +531,45 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
     abortControllers.get(groupId)?.abort();
     abortControllers.delete(groupId);
     get().update(groupId, (s) => ({ ...s, isStreaming: false }));
+  },
+
+  /**
+   * "Stop" used to be {@link abortStream}: it closed this tab's connection and
+   * nothing else, so the discussion went on running — and spending — on the
+   * server while the board froze on the last frame it had seen.
+   *
+   * The cancel is sent FIRST and the stream closed only once it succeeded: if
+   * the cancel fails, the discussion is still running and the stream is still
+   * the best view of it. The caller reports a thrown error.
+   */
+  cancelStream: async (groupId, knownGcId) => {
+    const current = get().streams[groupId];
+    if (knownGcId && knownGcId !== current?.conversationId) {
+      // A different discussion from the one this tab streams (if it streams
+      // one at all): Stop is about the discussion on screen, and must not
+      // cancel the live stream instead. `cancelAndClose` closes a stream only
+      // when it is this discussion's, so the live one keeps running.
+      return cancelAndClose(groupId, knownGcId, get().update);
+    }
+    if (!current?.isStreaming && !current?.cancelRequested) {
+      // No live stream. A discussion can still be running on the server — the
+      // connection dropped, or the board adopted it after a reload — and it
+      // needs a Stop just as much.
+      return knownGcId ? cancelAndClose(groupId, knownGcId, get().update) : "nothingToCancel";
+    }
+    const gcId = current.conversationId;
+    if (!gcId) {
+      // Nothing to address yet. consumeStream sends the cancel as soon as
+      // group_start names the conversation.
+      get().update(groupId, (s) => ({ ...s, cancelRequested: true, cancelError: null }));
+      return "pending";
+    }
+    return cancelAndClose(groupId, gcId, get().update);
+  },
+
+  clearCancelError: (groupId) => {
+    if (!get().streams[groupId]?.cancelError) return;
+    get().update(groupId, (s) => ({ ...s, cancelError: null }));
   },
 
   /** Abort any in-flight stream AND fully reset to the initial clean state.
@@ -341,6 +592,53 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
 
 type UpdateFn = GroupStreamStore["update"];
 
+/**
+ * Cancel `gcId` on the server, then close this group's stream.
+ *
+ * A 409 is the backend saying the discussion was already terminal — it ended
+ * between the click and the request. The stream is closed all the same (there
+ * is nothing left to follow), but the state is left to the persisted document
+ * rather than claimed as CANCELLED, because that is not how it ended.
+ */
+async function cancelAndClose(groupId: string, gcId: string, update: UpdateFn): Promise<CancelOutcome> {
+  let outcome: CancelOutcome = "cancelled";
+  try {
+    await cancelGroupDiscussion(groupId, gcId);
+  } catch (e) {
+    if (!(isApiError(e) && e.status === 409)) {
+      update(groupId, (s) => (s.conversationId === gcId ? { ...s, cancelRequested: false } : s));
+      throw e;
+    }
+    outcome = "alreadyEnded";
+  }
+  // Only close the stream this cancel was about: a newer one may own the slot.
+  // A discussion followed without a stream has no entry, and gets none.
+  if (!useGroupStreamStore.getState().streams[groupId]) return outcome;
+  const controller = abortControllers.get(groupId);
+  let closed = false;
+  update(groupId, (s) => {
+    if (s.conversationId !== gcId) return s;
+    closed = true;
+    return {
+      ...s,
+      ...settleTerminal(s),
+      isStreaming: false,
+      cancelRequested: false,
+      // Whatever the connection did, the run is over now: "the live connection
+      // was lost, keeps updating while it runs" would be false.
+      interrupted: false,
+      ...(outcome === "cancelled"
+        ? { state: "CANCELLED" as GroupConversationState, cancelInfo: { reason: undefined, cancelledBy: undefined } }
+        : {}),
+    };
+  });
+  if (closed && controller) {
+    controller.abort();
+    if (abortControllers.get(groupId) === controller) abortControllers.delete(groupId);
+  }
+  return outcome;
+}
+
 /** Drain an SSE event source into the group's state, then settle isStreaming.
  *  Shared by the start / continue / approve-resume flows. */
 async function consumeStream(
@@ -348,6 +646,7 @@ async function consumeStream(
   events: AsyncGenerator<GroupSSEEvent>,
   abort: AbortController,
   update: UpdateFn,
+  read: () => GroupStreamState | undefined,
 ) {
   // A superseded loop (new discussion started, or the user hit Stop) may still
   // run for a tick or fail afterwards. Its writes must not land on the stream
@@ -358,31 +657,66 @@ async function consumeStream(
     update(groupId, updater);
   };
 
+  // Whether the server said how the run ended (or paused). Without one, the
+  // connection simply stopped — see `interrupted`.
+  let sawTerminal = false;
+  // Whether anything arrived at all. A failure BEFORE the first frame is the
+  // request being refused (a 400, a 403): the run never started. A failure
+  // AFTER it is the connection dropping under a run that may still be going.
+  let sawEvent = false;
+
   try {
     for await (const event of events) {
+      sawEvent = true;
       const isDone = handleSSEEvent(event, setState);
       if (isDone) {
+        sawTerminal = true;
         abort.abort();
         break;
       }
+      // Stop was pressed before the conversation had an id; now it may have one.
+      const current = read();
+      if (current?.cancelRequested && current.conversationId && abortControllers.get(groupId) === abort) {
+        try {
+          await cancelAndClose(groupId, current.conversationId, update);
+          return;
+        } catch (e) {
+          // The Stop failed, the discussion did not: keep following it, and
+          // report the refusal as a failed Stop rather than as `error`, which
+          // the board renders as the discussion itself failing.
+          // `cancelAndClose` has already dropped `cancelRequested`.
+          setState((s) => ({ ...s, cancelError: e instanceof Error ? e.message : String(e) }));
+        }
+      }
     }
   } catch (e) {
-    // AbortError is expected when we abort after a terminal event
     if (e instanceof DOMException && e.name === "AbortError") {
-      // expected — swallow
-    } else {
+      // Expected when we abort after a terminal event, or on Stop/New.
+    } else if (!sawEvent) {
       const errorMsg = e instanceof Error ? e.message : String(e);
       setState((s) => ({
         ...s,
+        ...settleTerminal(s),
         isStreaming: false,
+        cancelRequested: false,
         state: "FAILED",
         error: errorMsg,
         errorKind: "generic",
       }));
+      sawTerminal = true;
     }
+    // Otherwise the run started and the connection then broke. That says
+    // nothing about the run itself, so it is not declared FAILED: it falls
+    // through to `interrupted` below.
   }
 
-  // Safety-net: if the stream ended without a done event
+  // No terminal event and not stopped by us: the connection ended under a run
+  // that may still be going. Placeholders stay open — those members may well
+  // still be answering — and consumers switch to the persisted conversation.
+  if (!sawTerminal && !abort.signal.aborted) {
+    setState((s) => (s.isStreaming ? { ...s, isStreaming: false, cancelRequested: false, interrupted: true } : s));
+  }
+  // Safety-net for every other exit.
   setState((s) => (s.isStreaming ? { ...s, isStreaming: false } : s));
 
   // Unregister once finished. The map is the supersession source of truth, so
@@ -444,17 +778,17 @@ export function useGroupDiscussionStream(groupId?: string) {
   );
 
   const continueStream = useCallback(
-    async (gid: string, gcId: string, question: string) => {
+    async (gid: string, gcId: string, question: string, seed?: GroupConversation | null) => {
       setStartedGroupId(gid);
-      await useGroupStreamStore.getState().continueStream(gid, gcId, question);
+      await useGroupStreamStore.getState().continueStream(gid, gcId, question, seed);
     },
     [],
   );
 
   const approveAndStream = useCallback(
-    async (gid: string, gcId: string, request: GroupApprovalRequest) => {
+    async (gid: string, gcId: string, request: GroupApprovalRequest, seed?: GroupConversation | null) => {
       setStartedGroupId(gid);
-      await useGroupStreamStore.getState().approveAndStream(gid, gcId, request);
+      await useGroupStreamStore.getState().approveAndStream(gid, gcId, request, seed);
     },
     [],
   );
@@ -463,14 +797,73 @@ export function useGroupDiscussionStream(groupId?: string) {
     if (key) useGroupStreamStore.getState().abortStream(key);
   }, [key]);
 
+  const cancelStream = useCallback(async (gcId?: string): Promise<CancelOutcome> => {
+    if (!key) return "nothingToCancel";
+    return useGroupStreamStore.getState().cancelStream(key, gcId);
+  }, [key]);
+
+  const clearCancelError = useCallback(() => {
+    if (key) useGroupStreamStore.getState().clearCancelError(key);
+  }, [key]);
+
   const resetStream = useCallback(() => {
     if (key) useGroupStreamStore.getState().resetStream(key);
   }, [key]);
 
-  return { streamState, startStream, continueStream, approveAndStream, abortStream, resetStream };
+  return {
+    streamState,
+    startStream,
+    continueStream,
+    approveAndStream,
+    abortStream,
+    cancelStream,
+    clearCancelError,
+    resetStream,
+  };
 }
 
 // ─── Event Handler ──────────────────────────────────────────────
+
+/**
+ * Records the question that opens a round and where that round begins.
+ *
+ * `roundStartIndex` is the question's own index for an appended round and 0 for
+ * a fresh discussion. Without it the digest buckets every round's turns into the
+ * current round's phases, because the backend restarts phaseIndex at 0 each
+ * round.
+ *
+ * A resume that restarts at phase 0 re-announces the round it resumes, and a
+ * transcript seeded from the persisted document already ends with that
+ * question. Appending it again would duplicate the row AND count a round that
+ * never ran, so a question matching the transcript's last row is kept, not
+ * repeated.
+ */
+function openRound(
+  s: GroupStreamState,
+  conversationId: string | null | undefined,
+  question: string,
+  append: boolean,
+): GroupStreamState {
+  const opened = { ...s, conversationId: conversationId ?? s.conversationId, state: "IN_PROGRESS" as const };
+  const last = s.transcript[s.transcript.length - 1];
+  if (append && last?.type === "QUESTION" && last.content === question) return opened;
+  const questionEntry: TranscriptEntry = {
+    speakerAgentId: "user",
+    speakerDisplayName: "User",
+    content: question,
+    phaseIndex: -1,
+    phaseName: null,
+    type: "QUESTION" as TranscriptEntryType,
+    timestamp: new Date().toISOString(),
+    errorReason: null,
+    targetAgentId: null,
+  };
+  return {
+    ...opened,
+    transcript: append ? [...s.transcript, questionEntry] : [questionEntry],
+    roundStartIndex: append ? s.transcript.length : 0,
+  };
+}
 
 /**
  * Process a single SSE event from the group discussion stream.
@@ -484,30 +877,29 @@ function handleSSEEvent(
     case "group_start": {
       try {
         const payload: GroupStartPayload = JSON.parse(event.data);
-        const questionEntry: TranscriptEntry = {
-          speakerAgentId: "user",
-          speakerDisplayName: "User",
-          content: payload.question,
-          phaseIndex: -1,
-          phaseName: null,
-          type: "QUESTION" as TranscriptEntryType,
-          timestamp: new Date().toISOString(),
-          errorReason: null,
-          targetAgentId: null,
-        };
-        setState((s) => ({
-          ...s,
-          conversationId: payload.groupConversationId ?? payload.conversationId,
-          state: "IN_PROGRESS",
-          // Continuation (conversationId already set by continueStream) →
-          // append the new question to the existing transcript.
-          // New discussion → replace with just the question.
-          transcript: s.conversationId
-            ? [...s.transcript, questionEntry]
-            : [questionEntry],
-        }));
+        // A conversation id already set means this stream is appending to a
+        // known conversation (a resume); otherwise it is a brand-new discussion
+        // and replaces whatever the store held.
+        setState((s) =>
+          openRound(s, payload.groupConversationId ?? payload.conversationId, payload.question, !!s.conversationId),
+        );
       } catch (e) {
         console.warn('[SSE] Failed to parse group_start event:', e);
+      }
+      return false;
+    }
+
+    // Continuation rounds (round 2 onwards) open with this, never with
+    // `group_start`. Unhandled, a live continuation recorded no question and
+    // never moved `roundStartIndex`, so the overview bucketed every round's
+    // turns into one round's phases, the exact merge the round boundary exists
+    // to prevent, and the transcript showed no question for the new round.
+    case "round_start": {
+      try {
+        const payload: RoundStartPayload = JSON.parse(event.data);
+        setState((s) => openRound(s, payload.groupConversationId, payload.question, true));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse round_start event:', e);
       }
       return false;
     }
@@ -587,12 +979,22 @@ function handleSSEEvent(
           const newSpeakers = new Set(s.activeSpeakers);
           newSpeakers.delete(payload.agentId);
 
+          // A turn that produced nothing. Newer backends say why in `outcome`
+          // (and send no content, so a failure is never shown as something the
+          // member said); older ones just send no content. Either way the
+          // placeholder must close — left at `content: null` it rendered as a
+          // member typing for ever.
+          const outcome = noContentOutcome(payload.outcome);
+          const content = outcome ? null : (payload.response ?? payload.content ?? null);
+          const closedType: TranscriptEntryType | null =
+            outcome === "ERROR" ? "ERROR" : outcome || content === null ? "SKIPPED" : null;
+
           // Replace the placeholder entry with the real content
           const transcript = [...s.transcript];
           const placeholderIdx = transcript.findIndex(
             (e) =>
               e.speakerAgentId === payload.agentId &&
-              e.content === null &&
+              isOpenPlaceholder(e) &&
               e.phaseIndex === payload.phaseIndex
           );
 
@@ -601,10 +1003,10 @@ function handleSSEEvent(
             transcript[placeholderIdx] = {
               speakerAgentId: prev.speakerAgentId,
               speakerDisplayName: prev.speakerDisplayName,
-              content: payload.response ?? payload.content ?? null,
+              content,
               phaseIndex: prev.phaseIndex,
               phaseName: prev.phaseName,
-              type: prev.type,
+              type: closedType ?? prev.type,
               timestamp: new Date().toISOString(),
               errorReason: prev.errorReason,
               targetAgentId: prev.targetAgentId,
@@ -614,10 +1016,10 @@ function handleSSEEvent(
             transcript.push({
               speakerAgentId: payload.agentId,
               speakerDisplayName: payload.displayName,
-              content: payload.response ?? payload.content ?? null,
+              content,
               phaseIndex: payload.phaseIndex,
               phaseName: payload.phaseName,
-              type: mapPhaseToEntryType(s.currentPhase?.type),
+              type: closedType ?? mapPhaseToEntryType(s.currentPhase?.type),
               timestamp: new Date().toISOString(),
               errorReason: null,
               targetAgentId: null,
@@ -765,10 +1167,18 @@ function handleSSEEvent(
 
     case "phase_complete": {
       try {
-        JSON.parse(event.data); // validate payload
+        const payload: PhaseCompletePayload = JSON.parse(event.data);
+        // A phase that is over has no one left typing in it. A backend that
+        // predates `speaker_complete.outcome` sent no completion at all for a
+        // PARALLEL member released by the batch deadline, so its placeholder
+        // stayed open — a typing indicator for the rest of the discussion.
         setState((s) => ({
           ...s,
           activeSpeakers: new Set(),
+          transcript: closePlaceholders(
+            s.transcript,
+            (e) => typeof payload?.phaseIndex !== "number" || e.phaseIndex === payload.phaseIndex,
+          ),
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse phase_complete event:', e);
@@ -787,20 +1197,28 @@ function handleSSEEvent(
     case "group_complete": {
       try {
         const payload: GroupCompletePayload = JSON.parse(event.data);
+        // Honour the state the backend put on the event rather than assuming
+        // COMPLETED. `group_complete` is the terminal notification for every
+        // outcome that ends a run, and a HITL rejection ends it as REJECTED —
+        // rendering that as "Completed" for the seconds before the persisted
+        // conversation loads says the opposite of what happened. COMPLETED
+        // remains the fallback for a payload that carries no state.
         setState((s) => ({
           ...s,
+          ...settleTerminal(s),
           isStreaming: false,
-          state: "COMPLETED",
+          cancelRequested: false,
+          state: payload.state ?? "COMPLETED",
           synthesizedAnswer: payload.synthesizedAnswer,
-          activeSpeakers: new Set(),
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse group_complete event:', e);
         setState((s) => ({
           ...s,
+          ...settleTerminal(s),
           isStreaming: false,
+          cancelRequested: false,
           state: "COMPLETED",
-          activeSpeakers: new Set(),
         }));
       }
       return true;
@@ -825,11 +1243,12 @@ function handleSSEEvent(
       const configDrift = /config changed while paused|fix the config and retry/i.test(errorMsg);
       setState((s) => ({
         ...s,
+        ...settleTerminal(s),
         isStreaming: false,
+        cancelRequested: false,
         state: "FAILED",
         error: errorMsg,
         errorKind: configDrift ? "config_drift" : "generic",
-        activeSpeakers: new Set(),
       }));
       return true;
     }
@@ -851,7 +1270,9 @@ function handleSSEEvent(
             reason: payload.reason,
             granularity: payload.granularity,
           },
+          ...settleTerminal(s),
           isStreaming: false,
+          cancelRequested: false,
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse awaiting_approval event:', e);
@@ -871,7 +1292,9 @@ function handleSSEEvent(
             phaseIndex: payload.phaseIndex,
             phaseName: payload.phaseName,
           },
+          ...settleTerminal(s),
           isStreaming: false,
+          cancelRequested: false,
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse human_input_requested event:', e);
@@ -910,12 +1333,14 @@ function handleSSEEvent(
         };
         setState((s) => ({
           ...s,
+          ...settleTerminal(s),
           state: "CANCELLED" as GroupConversationState,
           cancelInfo: {
             reason: payload.reason,
             cancelledBy: payload.cancelledBy,
           },
           isStreaming: false,
+          cancelRequested: false,
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse cancelled event:', e);
@@ -943,7 +1368,7 @@ function handleSSEEvent(
           const idx = transcript.findIndex(
             (e) =>
               e.speakerAgentId === payload.agentId &&
-              e.content === null &&
+              isOpenPlaceholder(e) &&
               e.phaseIndex === payload.phaseIndex,
           );
           if (idx >= 0) {
@@ -982,12 +1407,58 @@ function handleSSEEvent(
       return false;
     }
 
+    case "cost_updated": {
+      try {
+        const payload: CostUpdatedPayload = JSON.parse(event.data);
+        if (typeof payload.attributionKey !== "string" || !Number.isFinite(payload.attributedCost)) {
+          return false;
+        }
+        setState((s) => {
+          const next = new Map(s.memberCosts);
+          // set, never add: the value is cumulative for this key, so a frame
+          // redelivered after a reconnect must be idempotent.
+          next.set(payload.attributionKey, payload.attributedCost);
+          return { ...s, memberCosts: next };
+        });
+      } catch (e) {
+        console.warn('[SSE] Failed to parse cost_updated event:', e);
+      }
+      return false;
+    }
+
+    case "stance_updated": {
+      try {
+        const payload: StanceUpdatedPayload = JSON.parse(event.data);
+        if (typeof payload.agentId !== "string" || typeof payload.stance !== "string") {
+          return false;
+        }
+        setState((s) => {
+          const next = new Map(s.stances);
+          next.set(payload.agentId, payload);
+          return { ...s, stances: next };
+        });
+      } catch (e) {
+        console.warn('[SSE] Failed to parse stance_updated event:', e);
+      }
+      return false;
+    }
+
     default:
       return false;
   }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
+
+/**
+ * `speaker_complete.outcome` as one of the three reasons a turn can produce
+ * nothing, or null for an ordinary contribution. Anything else — an absent
+ * field from an older backend, or a value a newer one adds — reads as a
+ * contribution, which then closes as SKIPPED if it carried no content.
+ */
+function noContentOutcome(outcome: unknown): SpeakerCompleteOutcome | null {
+  return outcome === "TIMEOUT" || outcome === "SKIPPED" || outcome === "ERROR" ? outcome : null;
+}
 
 /** Map phase type to the TranscriptEntryType used in entries */
 function mapPhaseToEntryType(phaseType?: string): TranscriptEntryType {

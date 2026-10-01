@@ -75,7 +75,8 @@
     "workforce": "कार्यबल",
     "monitoring": "वार्तालाप निगरानी",
     "analytics": "विश्लेषण",
-    "connections": "कनेक्शन"
+    "connections": "कनेक्शन",
+    "workspaces": "कार्यक्षेत्र"
   },
   "theme": {
     "light": "लाइट",
@@ -260,11 +261,13 @@
     "deployAndChat": "डिप्लॉय करें और चैट करें",
     "openExternalChat": "नए टैब में खोलें",
     "liveIn": "{{environment}} में सक्रिय",
+    "liveInVersion": "{{environment}} में संस्करण {{version}} सक्रिय",
     "chatIn": "{{environment}} में चैट करें",
     "openExternalChatIn": "{{environment}} चैट नए टैब में खोलें",
     "deployToProduction": "प्रोडक्शन में तैनात करें",
     "undeployFromProduction": "प्रोडक्शन से हटाएँ",
-    "deployFailedIn": "{{environment}} में तैनाती विफल"
+    "deployFailedIn": "{{environment}} में तैनाती विफल",
+    "undeployCompatibleHint": "जिन बातचीत को कोई संगत डिप्लॉय किया गया संस्करण जारी रख सकता है, वे समाप्त नहीं होतीं: वे अपनी अगली बारी में उस पर चली जाती हैं।"
   },
   "agentDetail": {
     "a2aDescHint": "Agent Card में दिखाया जाता है — अन्य एजेंट को यह समझने में मदद करता है कि यह एजेंट क्या करता है",
@@ -444,15 +447,30 @@
     "toolPauseReasonPlaceholder": "जैसे {toolNames} के लिए अनुमोदन आवश्यक",
     "toolPendingMessage": "विराम के दौरान अंतिम-उपयोगकर्ता संदेश ({toolNames} अनुमत)",
     "toolPendingMessagePlaceholder": "जैसे {toolNames} को अनुमोदित करने के लिए मानव की प्रतीक्षा…",
-    "toolInGroupTurns": "समूह टर्न के भीतर, किसी सदस्य की गेटेड टूल कॉल स्वतः अस्वीकृत (REJECT) होती है।"
+    "toolInGroupTurns": "समूह टर्न के भीतर, किसी सदस्य की गेटेड टूल कॉल स्वतः अस्वीकृत (REJECT) होती है।",
+    "review": {
+      "title": "उपयोग और बातचीत की समीक्षा",
+      "total": "बातचीत",
+      "active": "अभी सक्रिय",
+      "users": "लोग",
+      "description": "बातचीत केवल उसी व्यक्ति के लिए निजी होती है जिसने उसे किया। इसे चालू करें ताकि इस एजेंट को संपादित कर सकने वाला हर व्यक्ति इसकी बातचीत पढ़ सके — यह देखने के लिए कि लोग क्या पूछते हैं और इसे बेहतर बनाने के लिए। टाइप करने से पहले चैट लोगों को यह बताती है।",
+      "enable": "इस एजेंट के अनुरक्षकों को इसकी बातचीत पढ़ने दें",
+      "notice": "चैट लोगों को क्या बताती है (मानक शब्दों के लिए खाली छोड़ें)",
+      "noticePlaceholder": "इस एजेंट के साथ बातचीत को इसे बेहतर बनाने के लिए इसके अनुरक्षक पढ़ सकते हैं।",
+      "versionNote": "इस बदलाव से बनने वाले संस्करण और उसके बाद के संस्करणों की बातचीत पर लागू होता है — पहले कही गई बातों पर कभी नहीं। Slack, Teams और API क्लाइंट सूचना नहीं दिखा सकते; यदि लोग वहाँ से इस एजेंट तक पहुँचते हैं, तो अभिवादन में इसका उल्लेख करें।"
+    }
   },
   "wizard": {
     "title": "Agent विज़ार्ड"
   },
   "setupWizard": {
     "baseUrlHintCloud": "केवल तभी आवश्यक जब प्रॉक्सी, निजी परिनियोजन, या Azure OpenAI एंडपॉइंट का उपयोग कर रहे हों",
+    "jlamaNoteTitle": "Jlama EDDI के भीतर ही चलता है",
+    "jlamaNoteBody": "इंगित करने के लिए कोई मॉडल सर्वर नहीं है — EDDI मॉडल को अपनी ही प्रक्रिया में लोड करता है और पहली बार उपयोग पर Hugging Face से वेट डाउनलोड करता है, इसलिए पहले संदेश में कुछ समय लग सकता है।",
+    "jlamaNoteTuning": "क्या EDDI किसी कंटेनर में चल रहा है? बाद में एजेंट का LLM कॉन्फ़िगरेशन खोलें और modelCachePath को माउंट किए गए वॉल्यूम पर सेट करें — डिफ़ॉल्ट कैश कंटेनर की अस्थायी लेयर पर रहता है, इसलिए कंटेनर हटाए या बदले जाने के बाद मॉडल फिर से डाउनलोड हो सकता है। quantizeModelAtRuntime, workingDirectory और workingQuantizedType भी वहीं ट्यून किए जा सकते हैं।",
     "baseUrlHintLocal": "आवश्यक — वह URL जहां आपका स्थानीय मॉडल सर्वर चल रहा है",
     "modelHint": "अपने प्रदाता द्वारा समर्थित कोई भी मॉडल नाम टाइप करें, या सुझावों में से एक चुनें",
+    "modelHintJlama": "यह owner/name रूप में Hugging Face रिपॉज़िटरी आईडी होनी चाहिए, जैसे tjake/Llama-3.2-1B-Instruct-JQ4। केवल मॉडल का नाम हल नहीं किया जा सकता और एजेंट अपने पहले ही संदेश पर विफल हो जाएगा।",
     "modelPlaceholder": "उदा. {{model}} (या आपका प्रदाता जो भी मॉडल समर्थन करता है)",
     "title": "Agent निर्माण विज़ार्ड",
     "subtitle": "कुछ ही मिनटों में पूरी तरह कॉन्फ़िगर किया गया Agent बनाएं",
@@ -546,7 +564,10 @@
     "toolCount": "{{total}} में से {{selected}} चयनित",
     "specTooLarge": "यह विनिर्देश यहाँ लोड करने के लिए बहुत बड़ा है",
     "specUrlInvalid": "यह मान्य URL नहीं है",
-    "specUrlScheme": "केवल http:// और https:// URL समर्थित हैं"
+    "specUrlScheme": "केवल http:// और https:// URL समर्थित हैं",
+    "lastToolHint": "कम से कम एक टूल चयनित रहना चाहिए। सभी को अक्षम करने के लिए अंतर्निहित टूल बंद करें।",
+    "hfToken": "Hugging Face टोकन",
+    "hfTokenHint": "केवल प्रतिबंधित या निजी रिपॉज़िटरी के लिए आवश्यक। इसे API कुंजी की तरह वॉल्ट में संग्रहीत किया जाता है।"
   },
   "packages": {
     "confirmDeleteDescription": "इस क्रिया को पूर्ववत नहीं किया जा सकता। Workflow और इसका सारा डेटा स्थायी रूप से हटा दिया जाएगा।",
@@ -652,7 +673,9 @@
     "endSuccess_one": "{{count}} बातचीत समाप्त की गई",
     "endSuccess_other": "{{count}} बातचीत समाप्त की गई",
     "purgeSuccess_one": "{{count}} समाप्त बातचीत साफ़ की गईं",
-    "purgeSuccess_other": "{{count}} समाप्त बातचीत साफ़ की गईं"
+    "purgeSuccess_other": "{{count}} समाप्त बातचीत साफ़ की गईं",
+    "endStateUnavailable": "बातचीत की वर्तमान स्थिति दोबारा जाँची नहीं जा सकी, इसलिए कुछ भी समाप्त नहीं किया गया। फिर से प्रयास करें।",
+    "endStateChanged": "चुनी गई एक बातचीत अब अनुमोदन की प्रतीक्षा कर रही है। चयन की समीक्षा करें और फिर से पुष्टि करें।"
   },
   "conversationDetail": {
     "backToConversations": "बातचीत पर वापस जाएं",
@@ -668,7 +691,9 @@
     "exportMd": "Markdown में निर्यात करें",
     "toolSummary": "उपकरण उपयोग सारांश",
     "totalCost": "कुल लागत",
-    "cacheHitRate": "कैश हिट दर"
+    "cacheHitRate": "कैश हिट दर",
+    "endReasonRetired": "समाप्त: एजेंट संस्करण को सेवानिवृत्त कर दिया गया",
+    "stepAgentVersion": "एजेंट संस्करण {{version}} द्वारा उत्तर दिया गया"
   },
   "chat": {
     "hide": "छुपाएं",
@@ -743,7 +768,11 @@
     "errorConversationEnded": "यह वार्तालाप समाप्त हो चुका है।",
     "errorAgentNotReady": "यह एजेंट चयनित परिवेश में अभी तैनात नहीं है।",
     "errorAgentMismatch": "यह वार्तालाप एजेंट के किसी अन्य संस्करण से संबंधित है।",
-    "errorQuotaUnavailable": "अभी उपयोग सीमाएँ जाँची नहीं जा सकीं। कुछ देर बाद पुनः प्रयास करें।"
+    "errorQuotaUnavailable": "अभी उपयोग सीमाएँ जाँची नहीं जा सकीं। कुछ देर बाद पुनः प्रयास करें।",
+    "reviewNoticeLabel": "बातचीत की समीक्षा",
+    "sendRejected": "आपका संदेश नहीं भेजा गया: {{reason}}",
+    "sendWhileLoading": "आपका संदेश नहीं भेजा गया: वार्तालाप अभी लोड हो रहा है। कुछ देर बाद फिर से प्रयास करें।",
+    "turnFailed": "एजेंट इस संदेश का उत्तर नहीं दे सका। कारण जानने के लिए सर्वर लॉग या बातचीत का ऑडिट ट्रेल देखें।"
   },
   "resources": {
     "backToWorkflow": "Workflow पर वापस जाएं",
@@ -850,7 +879,11 @@
     "cascadePartialFailure_one": "{{count}} कैस्केड अपडेट विफल हुए",
     "cascadePartialFailure_other": "{{count}} कैस्केड अपडेट विफल हुए",
     "usedInAgents_one": "{{count}} Agent में उपयोग किया गया",
-    "usedInAgents_other": "{{count}} Agents में उपयोग किया गया"
+    "usedInAgents_other": "{{count}} Agents में उपयोग किया गया",
+    "savedNotLive": "सहेजा गया — अभी लाइव नहीं",
+    "savedNotLiveDescription": "चल रहा एजेंट अब भी तैनात संस्करण ही दे रहा है। यह बदलाव प्रभावी करने के लिए तैनात करें।",
+    "deployNow": "तैनात करें",
+    "deployStarted": "तैनाती शुरू हुई"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -883,7 +916,9 @@
     "removeCondition": "शर्त हटाएं",
     "noGroups": "कोई व्यवहार समूह परिभाषित नहीं",
     "noRules": "इस समूह में कोई नियम नहीं",
-    "noConditions": "कोई शर्तें नहीं"
+    "noConditions": "कोई शर्तें नहीं",
+    "sizeNoBound": "कोई सीमा नहीं",
+    "sizeBoundInvalid": "-2147483648 से 2147483647 के बीच पूर्ण संख्या होनी चाहिए, या कोई सीमा न हो तो खाली छोड़ें।"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "स्पेक में कोई एंडपॉइंट नहीं मिला",
@@ -915,8 +950,6 @@
     "responseObjectName": "प्रतिक्रिया ऑब्जेक्ट का नाम",
     "responseHeaderObjectName": "प्रतिक्रिया Header ऑब्जेक्ट का नाम",
     "fireAndForget": "भेजें और भूल जाएं",
-    "batchCalls": "बैच कॉल",
-    "iterationObjectName": "इटरेशन ऑब्जेक्ट का नाम",
     "prePostInstructions": "पूर्व/पश्च निर्देश",
     "preRequest": "अनुरोध से पहले",
     "postResponse": "प्रतिक्रिया के बाद",
@@ -986,7 +1019,16 @@
     "authHeaderRefPlaceholder": "ऐच्छिक — प्रमाणीकरण वाले स्पेक के लिए ${vault:my-api-key}",
     "authHeaderRefHint": "वॉल्ट संदर्भ, जो कॉल के समय हल होता है। संग्रहीत गोपनीय मान पूरा हेडर मान होना चाहिए, जिसमें Bearer उपसर्ग भी शामिल हो।",
     "authHeaderRefInvalid": "यह ${vault:…}, ${vars:…} या ${caller:…} से शुरू होना चाहिए। कुंजी को सीधे चिपकाने से वह अनुरोध URL और रास्ते के हर लॉग में पहुँच जाएगी।",
-    "authRefLiteral": "कुंजी के बजाय ${vault:my-key} जैसा संदर्भ दर्ज करें। कुंजी कभी वॉल्ट से बाहर नहीं जाती।"
+    "authRefLiteral": "कुंजी के बजाय ${vault:my-key} जैसा संदर्भ दर्ज करें। कुंजी कभी वॉल्ट से बाहर नहीं जाती।",
+    "runOnNoCodes": "खाली \"इन कोड पर चलाएँ\" सूची किसी भी स्टेटस कोड से मेल नहीं खाती, इसलिए यह निर्देश कभी नहीं चलता।",
+    "useDefaultCodes": "डिफ़ॉल्ट उपयोग करें",
+    "httpCodeFilterDefaults": "खाली फ़ील्ड उनमें दिखाए गए डिफ़ॉल्ट कोड का उपयोग करते हैं।",
+    "scopeSecretUnsupported": "(यहाँ वॉल्ट में नहीं रखा जाता)",
+    "scopeSecretWarning": "इस निर्देश पर secret स्कोप वॉल्ट में नहीं रखा जाता: मान सादे टेक्स्ट में संग्रहीत होता है। कोई अन्य स्कोप चुनें और क्रेडेंशियल को सीक्रेट्स वॉल्ट में रखें।",
+    "skipNone": "कोई नहीं — कोई कोड नहीं छोड़ा जाता",
+    "runSkipConflict": "{{codes}} छोड़ने की सूची में भी है, इसलिए यह निर्देश उस पर कभी नहीं चलता।",
+    "httpCodeFilterSkipSet": "खाली \"इन कोड पर चलाएँ\" 200, 201 का उपयोग करता है; खाली \"इन कोड पर छोड़ें\" कुछ नहीं छोड़ता।",
+    "useDefaultSkipCodes": "डिफ़ॉल्ट छोड़ने की सूची उपयोग करें"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "विफलता पर पाइपलाइन जारी रहती है; त्रुटि यहां उजागर होती है ",
@@ -1039,7 +1081,12 @@
     "whitelist": "व्हाइटलिस्ट (केवल अनुमति)",
     "blacklist": "ब्लैकलिस्ट (बहिष्कृत)",
     "pipelineCalls": "Pipeline कॉल",
-    "addCall": "MCP कॉल जोड़ें"
+    "addCall": "MCP कॉल जोड़ें",
+    "argumentName": "आर्ग्युमेंट का नाम",
+    "argumentType": "आर्ग्युमेंट का प्रकार",
+    "argumentText": "टेक्स्ट",
+    "argumentInvalidJson": "मान्य JSON नहीं है — अंतिम मान्य मान रखा गया है",
+    "removeArgument": "आर्ग्युमेंट हटाएँ"
   },
   "llmEditor": {
     "addCustomInstruction": "निर्देश जोड़ें",
@@ -1078,7 +1125,6 @@
     "identityMaskingRulePlaceholder": "उदा. कभी न बताएं कि आप एक AI भाषा मॉडल हैं",
     "identityMaskingRules": "मास्किंग नियम",
     "identityMaskingRulesHint": "मास्किंग प्रभावी होने के लिए सक्षम होना और कम से कम एक नियम दोनों आवश्यक हैं।",
-    "injectionStrategy": "इंजेक्शन",
     "kbNamePlaceholder": "उदा. product-docs",
     "knowledgeBases": "ज्ञान आधार",
     "knowledgeBasesHint": "ज्ञान आधार को नाम से स्पष्ट रूप से संदर्भित करें। प्रत्येक नाम वर्कफ़्लो में एक RagConfiguration से मेल खाना चाहिए।",
@@ -1180,7 +1226,7 @@
     "cascadeInAgent": "एजेंट मोड (उपकरण सहित) में भी कैस्केड उपयोग करें",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "जैसे claude-sonnet-5",
+    "cascadeModelName": "जैसे claude-sonnet-5-5",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "खाली = हमेशा स्वीकार",
     "cascadeTimeout": "टाइमआउट (मि.से.)",
@@ -1236,9 +1282,6 @@
       "STEP_TIMEOUT_NONPOSITIVE": "चरण {{step}} टाइमआउट 0 से अधिक होना चाहिए।",
       "STEP_CROSS_PROVIDER_NO_APIKEY": "चरण {{step}} एक अलग प्रदाता का उपयोग करता है लेकिन इसकी अपनी कोई API कुंजी नहीं है — यह कार्य कुंजी विरासत में लेगा।"
     },
-    "parallelExecution": "समानांतर उपकरण निष्पादन",
-    "parallelExecutionDesc": "Run independent tool calls concurrently",
-    "parallelTimeout": "टाइमआउट (मि.से.)",
     "maxToolIterations": "अधिकतम उपकरण पुनरावृत्ति",
     "maxToolIterationsHint": "(डिफ़ॉल्ट 10)",
     "toolRateLimits": "प्रति-उपकरण दर सीमा",
@@ -1307,7 +1350,13 @@
     "streamingTimeoutSeconds": "स्ट्रीमिंग टाइमआउट (सेकंड)",
     "streamingTimeoutSecondsHint": "इंजन के डिफ़ॉल्ट (120s) को ओवरराइड करता है। केवल स्ट्रीमिंग के दौरान लागू होता है; खाली = डिफ़ॉल्ट का उपयोग करें।",
     "taskPricing": "सामान्य-कॉल मूल्य निर्धारण",
-    "taskPricingDesc": "लागत ट्रैकिंग और समूह लागत सीमा के लिए इस कार्य की सामान्य (गैर-कैस्केड) मॉडल कॉलों की कीमत तय करता है। बिना मूल्य (खाली) $0 का योगदान देता है।"
+    "taskPricingDesc": "लागत ट्रैकिंग और समूह लागत सीमा के लिए इस कार्य की सामान्य (गैर-कैस्केड) मॉडल कॉलों की कीमत तय करता है। बिना मूल्य (खाली) $0 का योगदान देता है।",
+    "unknownType": "{{type}} (कस्टम)",
+    "compatibleEndpoint": "एंडपॉइंट: {{url}} — बदलने के लिए baseUrl या region पैरामीटर जोड़ें",
+    "compatibleEndpointOverridden": "एंडपॉइंट: {{url}}",
+    "modelType": "मॉडल प्रकार",
+    "paramName": "पैरामीटर का नाम",
+    "lastToolHint": "कम से कम एक टूल चयनित रहना चाहिए। सभी को अक्षम करने के लिए \"अंतर्निहित टूल सक्षम करें\" को अनचेक करें।"
   },
   "outputEditor": {
     "labelPlaceholder": "लिंक लेबल...",
@@ -1371,7 +1420,8 @@
     "openEditor": "एडिटर में संपादित करें",
     "visibilityTitle": "कौन से Agent इस longTerm प्रॉपर्टी को देख सकते हैं",
     "editValue": "मान संपादित करें",
-    "toggleGroup": "प्रॉपर्टी समूह टॉगल करें"
+    "toggleGroup": "प्रॉपर्टी समूह टॉगल करें",
+    "secretFromPathWarning": "सीक्रेट केवल तभी वॉल्ट में रखा जाता है जब वह मान फ़ील्ड से आता है। \"पाथ से\" पढ़े जाने या किसी अन्य तरीके से दिए जाने पर वह सादे टेक्स्ट में संग्रहीत होता है — उसे मान फ़ील्ड में दर्ज करें या कोई अन्य स्कोप चुनें।"
   },
   "dictionaryEditor": {
     "language": "भाषा",
@@ -1541,7 +1591,8 @@
     "stateReady": "तैयार",
     "stateActive": "सक्रिय",
     "stateError": "त्रुटि",
-    "stateEnded": "समाप्त"
+    "stateEnded": "समाप्त",
+    "loadOlder": "पुरानी प्रविष्टियाँ लोड करें"
   },
   "secrets": {
     "loadError": "सीक्रेट लोड नहीं हो सके",
@@ -1639,7 +1690,29 @@
     "resetSecretCount_one": "{{count}} Secret स्थायी रूप से खो जाएंगे",
     "resetSecretCount_other": "{{count}} Secret स्थायी रूप से खो जाएंगे",
     "resetTenantSuccess_one": "\"{{tenant}}\" के लिए Vault रीसेट किया गया — {{count}} Secret स्थायी रूप से हटाए गए",
-    "resetTenantSuccess_other": "\"{{tenant}}\" के लिए Vault रीसेट किया गया — {{count}} Secret स्थायी रूप से हटाए गए"
+    "resetTenantSuccess_other": "\"{{tenant}}\" के लिए Vault रीसेट किया गया — {{count}} Secret स्थायी रूप से हटाए गए",
+    "access": "पहुँच",
+    "editGrant": "संपादित करें कि कौन-से एजेंट इस सीक्रेट का उपयोग कर सकते हैं",
+    "editGrantKey": "{{key}} की पहुँच संपादित करें",
+    "grantTitle": "“{{key}}” का उपयोग कौन कर सकता है",
+    "grantValueUntouched": "सीक्रेट का मान नहीं बदलता और उसे पुनः दर्ज करने की आवश्यकता नहीं है। केवल यह बदलता है कि उसका उपयोग कौन कर सकता है।",
+    "grantOnlyTheseAgents": "केवल ये एजेंट",
+    "grantAllHint": "इस टेनेंट का प्रत्येक एजेंट इस सीक्रेट को संदर्भित कर सकता है। सीमित करने से यह तय होता है कि किसी लीक हुए कॉन्फ़िगरेशन की पहुँच कहाँ तक है।",
+    "grantAddAgent": "एजेंट जोड़ें",
+    "grantEmptyError": "कम से कम एक एजेंट जोड़ें, या “सभी एजेंट” चुनें। खाली सूची की अनुमति नहीं है।",
+    "grantCheckingImpact": "तैनात एजेंटों की जाँच हो रही है…",
+    "grantLosingAccessTitle": "तैनात एजेंट जो इस सीक्रेट का उपयोग करते हैं और पहुँच खो देंगे ({{count}})",
+    "grantLosingAccessBody": "वे अभी चलते रहेंगे — अनुमति की जाँच एजेंट की तैनाती के समय होती है, सीक्रेट के उपयोग के समय नहीं — लेकिन उनकी अगली तैनाती अस्वीकार कर दी जाएगी।",
+    "grantAcknowledge": "मैं समझता हूँ कि ये एजेंट तब तक पुनः तैनात नहीं हो पाएंगे जब तक उन्हें फिर से जोड़ा न जाए या उनका कॉन्फ़िगरेशन इस सीक्रेट का उपयोग बंद न कर दे।",
+    "grantSaved": "“{{key}}” की पहुँच अपडेट कर दी गई",
+    "grantImpactFailed": "यह जाँचा नहीं जा सका कि कौन-से तैनात एजेंट इस सीक्रेट का उपयोग करते हैं, इसलिए इनमें से कोई भी पहुँच खो सकता है।",
+    "grantAcknowledgeUnchecked": "यह जाने बिना सहेजें कि किन तैनात एजेंटों पर असर पड़ेगा।",
+    "rotateNotFound": "यह सीक्रेट अब मौजूद नहीं है, इसलिए रोटेट करने के लिए कुछ नहीं है। इसके बजाय इसे फिर से जोड़ें।",
+    "keyExists": "\"{{key}}\" नाम का सीक्रेट पहले से मौजूद है। इसे फिर से जोड़ने पर इसका मान बदल जाएगा — मान बदलने और इसे कौन उपयोग कर सकता है यह बनाए रखने के लिए रोटेट का उपयोग करें।",
+    "keyExistsRotate": "इसके बजाय इस सीक्रेट को रोटेट करें",
+    "keyExistsPicker": "\"{{key}}\" नाम का सीक्रेट पहले से मौजूद है। इसे वॉल्ट सूची से चुनें, या कोई दूसरा नाम चुनें।",
+    "rotateKeepsGrantAll": "हर एजेंट की पहुँच अभी की तरह बनी रहती है।",
+    "rotateKeepsGrant": "पहुँच इन तक सीमित रहती है: {{agents}}"
   },
   "audit": {
     "title": "ऑडिट लॉग",
@@ -1673,17 +1746,36 @@
     "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
     "autoRefreshOn": "Auto",
     "autoRefreshOff": "Auto",
-    "integrityVerified": "All entries cryptographically signed",
-    "integrityVerifiedDesc": "{{count}} of {{total}} entries have HMAC-SHA256 signatures",
-    "integrityPass": "SIGNED",
-    "integrityPartial": "Partially signed audit trail",
-    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
-    "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "integrityNoneDesc": "भविष्य की सभी ऑडिट प्रविष्टियों पर स्वचालित HMAC-SHA256 हस्ताक्षर सक्षम करने के लिए वॉल्ट मास्टर की कॉन्फ़िगर करें।",
     "signed": "Signed",
     "allSigned": "All signed",
     "decidedBy": "द्वारा",
-    "automated": "स्वचालित"
+    "automated": "स्वचालित",
+    "verify": {
+      "entryInvalid": "हस्ताक्षर मेल नहीं खाता",
+      "entryUnproven": "सत्यापित नहीं",
+      "signatureCount": "लोड की गई {{total}} प्रविष्टियों में से {{count}} पर हस्ताक्षर है।",
+      "loading": "हस्ताक्षर सत्यापित किए जा रहे हैं…",
+      "errorTitle": "अखंडता सत्यापित नहीं हुई",
+      "errorDesc": "सत्यापन अनुरोध विफल रहा, इसलिए यहाँ कुछ भी जाँचा नहीं गया है।",
+      "checked": "सबसे हाल की {{count}} प्रविष्टियाँ जाँची गईं।",
+      "verifiedTitle": "हस्ताक्षर सत्यापित",
+      "chainIntact": "क्रम से कोई प्रविष्टि गायब नहीं है।",
+      "chainNotApplicable": "कई बातचीतों में केवल हस्ताक्षर जाँचे जाते हैं, क्रम नहीं।",
+      "verifiedBadge": "सत्यापित",
+      "tamperedTitle": "अखंडता जाँच विफल",
+      "tamperedInvalid": "{{count}} प्रविष्टि हस्ताक्षर अपनी सामग्री से मेल नहीं खाते — प्रविष्टियाँ लिखे जाने के बाद बदली गईं।",
+      "tamperedChain": "क्रम से प्रविष्टियाँ गायब हैं ({{sequences}}) — रिकॉर्ड छोटा किया गया है।",
+      "disabledTitle": "हस्ताक्षर सत्यापित नहीं किए जा सकते",
+      "reasonUnsigned": "{{count}} बिना हस्ताक्षर वाली प्रविष्टि(याँ)",
+      "reasonUnknownKey": "{{count}} ऐसी की से हस्ताक्षरित जो इस डिप्लॉयमेंट के पास अब नहीं है",
+      "reasonSkipped": "{{count}} पुरानी प्रविष्टि(याँ) जाँची नहीं गईं",
+      "reasonChain": "क्रम पूरी तरह स्थापित नहीं किया जा सका",
+      "reasonDuplicates": "डुप्लिकेट क्रम संख्याएँ",
+      "reasonUncovered": "{{count}} लोड की गई प्रविष्टि(याँ) जाँची गई सीमा से पुरानी हैं",
+      "unverifiedTitle": "पूरी तरह सत्यापित नहीं",
+      "unverifiedDesc": "कोई हस्ताक्षर गलत साबित नहीं हुआ, लेकिन सब कुछ जाँचा नहीं जा सका: {{reasons}}।"
+    }
   },
   "schedules": {
     "cronHelp": "5-फ़ील्ड प्रारूप: मिनट घंटा माह-का-दिन माह सप्ताह-का-दिन",
@@ -1810,7 +1902,11 @@
       "weeklyMonday": "साप्ताहिक (सोम 00:00)",
       "monthly": "मासिक (1 तारीख, 00:00)"
     },
-    "totalCappedHint": "सर्वर ने पूरा एक पृष्ठ लौटाया, इसलिए यहाँ दिखाए गए से अधिक शेड्यूल हो सकते हैं।"
+    "totalCappedHint": "सर्वर ने पूरा एक पृष्ठ लौटाया, इसलिए यहाँ दिखाए गए से अधिक शेड्यूल हो सकते हैं।",
+    "systemManaged": "सिस्टम",
+    "systemManagedHint": "EDDI द्वारा प्रबंधित (नॉलेज-बेस इन्जेशन, मेमोरी समेकन या टीम कैडेंस)। इसे यहाँ नहीं, जहाँ यह परिभाषित है वहाँ बदलें।",
+    "persistentConversationIdLocked": "शेड्यूल बनाते समय सेट होता है। सर्वर वही बातचीत रखता है जिसमें अब तक के फायर जोड़े जाते रहे हैं।",
+    "failedScheduleGone": "शेड्यूल अब मौजूद नहीं है"
   },
   "cascadeTrace": {
     "title": "मॉडल कैस्केड",
@@ -1871,7 +1967,8 @@
     "tokenDistribution": "टोकन वितरण",
     "totalCost": "कुल लागत",
     "totalTokens": "कुल टोकन",
-    "turns": "चरण"
+    "turns": "चरण",
+    "partial": "इस बातचीत में डीबगर द्वारा लोड की जाने वाली संख्या से अधिक ऑडिट प्रविष्टियाँ हैं। कुल योग केवल सबसे हाल की प्रविष्टियों को शामिल करते हैं।"
   },
   "memoryInspector": {
     "error": "मेमोरी डेटा लोड करने में विफल",
@@ -2012,6 +2109,7 @@
     "ingestion": "दस्तावेज़ अंतर्ग्रहण",
     "dropFiles": "फ़ाइलों को यहाँ पर ड्रैग एंड ड्रॉप करें",
     "dropHint": "टेक्स्ट, मार्कडाउन या अन्य कोई टेक्स्ट पर आधारित फ़ाइल",
+    "replaceSameName": "समान फ़ाइल नाम वाले पहले से जोड़े गए दस्तावेज़ को बदलें",
     "browse": "ब्राउज़ करें",
     "pasteText": "या केवल टेक्स्ट पेस्ट करें",
     "pastePlaceholder": "दस्तावेज़ का टेक्स्ट यहाँ पेस्ट करें...",
@@ -2028,7 +2126,7 @@
       "enabled": "सक्रिय",
       "running": "चल रहा है",
       "emptyTitle": "कोई इंजेशन स्रोत नहीं",
-      "emptyDescription": "एक स्रोत जोड़ें ताकि यह नॉलेज बेस किसी साइट को क्रॉल करके स्वयं को अद्यतन रखे।",
+      "emptyDescription": "साइट क्रॉल करने या दस्तावेज़ अपलोड करने के लिए स्रोत जोड़ें, और इस ज्ञान आधार को अद्यतन रखें।",
       "name": "नाम",
       "namePlaceholder": "public-docs",
       "startUrl": "प्रारंभिक URL",
@@ -2043,6 +2141,8 @@
       "includeSubdomains": "सबडोमेन शामिल करें",
       "excludePatterns": "बहिष्करण पैटर्न",
       "excludePatternsHint": "URL पथ पर लागू ग्लोब, अल्पविराम से अलग — * एक खंड तक सीमित, ** खंडों को पार करता है",
+      "sitemapUrls": "साइटमैप",
+      "sitemapUrlsHint": "पेज खोजने के लिए साइटमैप URL, अल्पविराम से अलग। केवल तब ज़रूरी जब robots.txt उन्हें सूचीबद्ध न करे; साइटमैप इंडेक्स का अनुसरण किया जाता है",
       "saveFirst": "इस स्रोत को चलाने, पूर्वावलोकन करने या इतिहास देखने के लिए नॉलेज बेस सहेजें।",
       "run": "अभी चलाएँ",
       "runFailed": "रन प्रारंभ नहीं हो सका। संभव है कि एक रन पहले से चल रहा हो।",
@@ -2065,8 +2165,49 @@
       "previewFailed": "इस स्रोत का पूर्वावलोकन नहीं किया जा सका।",
       "previewNotCompleted": "पूर्वावलोकन पूरा नहीं हुआ।",
       "disabledNoRun": "यह स्रोत निष्क्रिय है। चलाने या शेड्यूल करने के लिए इसे सक्षम करके सहेजें।",
-      "purgeBlockedWhileRunning": "एक रन चल रहा है। अभी साफ़ करने से दूसरा रन साथ में शुरू हो सकता है।"
-    }
+      "purgeBlockedWhileRunning": "एक रन चल रहा है। अभी साफ़ करने से दूसरा रन साथ में शुरू हो सकता है।",
+      "type": "स्रोत",
+      "typeWeb": "वेबसाइट",
+      "typeUpload": "फ़ाइलें",
+      "typeWebHint": "वेबसाइट क्रॉल करें",
+      "typeUploadHint": "यहाँ अपलोड की गई फ़ाइलें पढ़ें",
+      "cronHintUpload": "खाली छोड़ें — स्रोत चलाने पर अपलोड की गई फ़ाइलें पढ़ी जाती हैं",
+      "maxFiles": "अधिकतम फ़ाइलें",
+      "maxFilesHint": "यह स्रोत कितनी फ़ाइलें रख सकता है",
+      "maxFileMb": "अधिकतम फ़ाइल आकार (MB)",
+      "maxFileMbHint": "प्रति फ़ाइल",
+      "filesSaveFirst": "ज्ञान आधार को एक बार सहेजें, फिर आप इस स्रोत में फ़ाइलें अपलोड कर सकते हैं।",
+      "dropFiles": "फ़ाइलें यहाँ ड्रॉप करें, या",
+      "browseFiles": "उन्हें चुनें",
+      "acceptedFormats": "PDF, Word, Excel, PowerPoint, टेक्स्ट, Markdown, CSV और HTML",
+      "clearUploadList": "सूची साफ़ करें",
+      "uploadFailed": "यह फ़ाइल अपलोड नहीं हो सकी।",
+      "noFiles": "अभी कोई फ़ाइल नहीं। अपलोड के बाद स्रोत चलाकर उन्हें इंडेक्स करें।",
+      "filesSummary": "फ़ाइलें: {{count}} ({{size}})",
+      "deleteFile": "{{fileName}} हटाएँ",
+      "deleteFileTitle": "इस फ़ाइल को हटाएँ?",
+      "deleteFileDescription": "{{fileName}} और ज्ञान आधार ने उससे जो कुछ सीखा वह सब हटा दिया जाएगा। एजेंट तुरंत उससे उत्तर देना बंद कर देंगे।",
+      "previewFiles": "बदलावों का पूर्वावलोकन",
+      "saveBeforeUpload": "पहले ज्ञान आधार सहेजें — अपलोड सहेजे गए स्रोत में जाते हैं, स्क्रीन पर दिख रहे बदलावों में नहीं।",
+      "foldersNotSupported": "फ़ोल्डर अपलोड नहीं किए जा सकते। उनके अंदर की फ़ाइलें ड्रॉप करें।",
+      "filesAwaitingRun": "फ़ाइलें सहेजी गई हैं पर अभी ज्ञान आधार में नहीं हैं। उन्हें इंडेक्स करने के लिए स्रोत चलाएँ।",
+      "retryUpload": "{{fileName}} पुनः प्रयास करें",
+      "fileIndexed": "इंडेक्स किया",
+      "fileChanged": "बदला गया",
+      "fileNotIndexed": "इंडेक्स नहीं",
+      "maxTotalMb": "अधिकतम कुल आकार (MB)",
+      "maxTotalMbHint": "इस स्रोत की सभी फ़ाइलों मिलाकर",
+      "removeTitle": "इस स्रोत को हटाएँ?",
+      "removeDescription": "सहेजने पर इसकी अपलोड की गई फ़ाइलें और ज्ञान आधार ने उनसे जो सीखा वह सब हटा दिया जाएगा। यह पूर्ववत नहीं हो सकता।",
+      "switchTypeTitle": "इसे वेबसाइट स्रोत में बदलें?",
+      "switchTypeDescription": "सहेजने पर इस स्रोत की अपलोड की गई फ़ाइलें और नॉलेज बेस ने उनसे जो कुछ सीखा है, सब हटा दिया जाता है। इसे पूर्ववत नहीं किया जा सकता।",
+      "switchTypeConfirm": "वेबसाइट पर स्विच करें",
+      "filesLoadFailed": "फ़ाइलें लोड नहीं हो सकीं: {{error}}"
+    },
+    "chunkStrategyLegacy": "{{value}} (रिकर्सिव के रूप में सहेजा जाता है)",
+    "saveBeforeIngest": "पहले अपने बदलाव सहेजें — दस्तावेज़ सहेजे गए नॉलेज बेस के स्टोर और एम्बेडिंग मॉडल से इनजेस्ट होते हैं, स्क्रीन पर किए गए बदलावों से नहीं।",
+    "chunkStrategyUnsupported": "{{value}} (समर्थित नहीं)",
+    "chunkStrategyUnsupportedHint": "सहेजते समय सर्वर यह रणनीति अस्वीकार करता है। रिकर्सिव चुनें।"
   },
   "onboarding": {
     "welcome": {
@@ -2388,6 +2529,7 @@
       "SYNTHESIZING": "संश्लेषण जारी",
       "COMPLETED": "पूर्ण",
       "FAILED": "विफल",
+      "REJECTED": "अस्वीकृत",
       "ERROR": "त्रुटि",
       "AWAITING_APPROVAL": "अनुमोदन की प्रतीक्षा",
       "CANCELLED": "रद्द",
@@ -2634,7 +2776,6 @@
     "contextWindowEntries": "पूर्ण रूप में रखी गई हालिया प्रविष्टियाँ",
     "contextWindowSummarize": "विंडो से बाहर जाने वाली सामग्री का सारांश बनाएँ",
     "contextWindowTruncateNote": "पुरानी प्रविष्टियाँ इसके बजाय “N पूर्व प्रविष्टियाँ छोड़ी गईं” चिह्न से बदल दी जाती हैं।",
-    "retroConfigHint": "रेट्रो चरण को टीम की स्मृति में सीख लिखने देता है, जो बाद की चर्चाओं में साथ चलती है।",
     "retroPerRun": "प्रति रन",
     "retroStored": "अधिकतम संग्रहीत",
     "artifactConfigHint": "सदस्यों को साझा दस्तावेज़ लिखने देता है जो लिखे जाने वाली बारी के बाद भी बने रहते हैं।",
@@ -2757,7 +2898,96 @@
       "finalAnswer": "अंतिम उत्तर",
       "phase": "चरण"
     },
-    "deleteMembersConfigFailed": "समूह के सदस्य पढ़े नहीं जा सके, इसलिए कुछ भी नहीं हटाया गया। फिर से प्रयास करें।"
+    "deleteMembersConfigFailed": "समूह के सदस्य पढ़े नहीं जा सके, इसलिए कुछ भी नहीं हटाया गया। फिर से प्रयास करें।",
+    "overview": {
+      "anonymousMember": "प्रतिभागी {{n}}",
+      "cellAbsent": "इस चरण में शामिल नहीं",
+      "cellAbstained": "अनुपस्थित रहा",
+      "cellDissent": "असहमति जताई",
+      "cellFailed": "विफल",
+      "cellPending": "लंबित",
+      "cellSilent": "अपेक्षित था, कुछ नहीं कहा",
+      "cellSpoke": "बोला",
+      "cellSummary": "{{member}}, {{phase}} चरण: {{state}}",
+      "convergenceNoScore": "सहमति का आकलन नहीं",
+      "convergenceScore": "सहमति {{pct}}%",
+      "empty": "अभी दिखाने को कुछ नहीं। चर्चा चलने के बाद अवलोकन दिखेगा।",
+      "emptyLive": "चर्चा शुरू हो रही है — जैसे-जैसे सदस्य बोलेंगे, अवलोकन भरता जाएगा।",
+      "live": "लाइव",
+      "matrix": "एक नज़र में हर बारी",
+      "matrixLabel": "सदस्य और चरण के अनुसार योगदान",
+      "memberColumn": "सदस्य",
+      "noStanceYet": "अभी तक नहीं बोला",
+      "noStanceOfOwn": "अपनी कोई स्थिति नहीं",
+      "phaseActive": "अभी",
+      "phaseDone": "पूर्ण",
+      "phaseNeedsApproval": "मानव अनुमोदन आवश्यक",
+      "phaseProgress": "{{total}} में से {{done}}",
+      "phaseStarting": "शुरू हो रहा है…",
+      "phaseUpcoming": "आगामी",
+      "phases": "चरण",
+      "phasesLabel": "चर्चा के चरण",
+      "roster": "कौन क्या सोचता है",
+      "rosterLabel": "सदस्यों की स्थिति",
+      "round": "दौर {{n}}",
+      "spokenCount_one": "अब तक {{count}} योगदान",
+      "spokenCount_other": "अब तक {{count}} योगदान",
+      "stanceQuoted": "उनके अपने शब्द",
+      "stanceSummarised": "मॉडल द्वारा सारांशित",
+      "statCost": "लागत",
+      "synthesis": "निष्कर्ष",
+      "statMembers": "सदस्य",
+      "statPhases": "चरण",
+      "statTurns": "बारी",
+      "statusAwaiting": "आपकी बारी",
+      "statusDissented": "असहमति",
+      "statusFailed": "विफल",
+      "statusSpeaking": "बोल रहा है",
+      "turnCount_one": "{{count}} बारी",
+      "turnCount_other": "{{count}} बारियाँ",
+      "viewMode": "चर्चा दृश्य",
+      "viewOverview": "अवलोकन",
+      "viewSplit": "दोनों",
+      "viewTranscript": "प्रतिलिपि",
+      "phaseRepeatsTitle": "यह चरण {{count}} बार चलता है",
+      "roundScope": "केवल दौर {{n}}",
+      "roundScopeTitle": "यह दृश्य केवल दौर {{n}} को कवर करता है। पिछले दौर प्रतिलिपि में हैं।",
+      "convergenceStopped_one": "अभिसरित — {{count}} पुनरावृत्ति छोड़ी गई",
+      "convergenceStopped_other": "अभिसरित — {{count}} पुनरावृत्तियाँ छोड़ी गईं",
+      "interactions": "किसने किसे संबोधित किया",
+      "interactionsLabel": "किसने किसे संबोधित किया",
+      "addressedConnector": "ने संबोधित किया:",
+      "unaddressed": "किसी ने संबोधित नहीं किया: {{names}}",
+      "unknownMember": "अज्ञात",
+      "bids": "किसने किसके लिए बोली लगाई",
+      "bidsLabel": "कार्य के अनुसार बोलियाँ",
+      "rosterShowFewer": "कम दिखाएँ",
+      "roundLabel": "दौर",
+      "roundSelect": "दूसरा दौर दिखाएँ",
+      "roundOption": "{{total}} में से {{n}}",
+      "rosterShowAll_one": "सभी {{count}} सदस्य दिखाएँ",
+      "rosterShowAll_other": "सभी {{count}} सदस्य दिखाएँ"
+    },
+    "stateRejected": "अस्वीकृत",
+    "inputDisabledRejected": "यह सिफ़ारिश अस्वीकार कर दी गई",
+    "debateVerdictNote": "गद्य के बजाय अंकों वाले फ़ैसले (विजेता और अंक) के रूप में उत्तर देता है: {{phases}}। सदस्यों के पास दो या अधिक भूमिकाएँ हैं और तर्क पहले आते हैं, इसलिए मॉडरेटर का अपना संश्लेषण प्रॉम्प्ट उपयोग नहीं होता। गद्य के लिए चरण पर एक इनपुट टेम्पलेट सेट करें।",
+    "retroCustomLimits": "रेट्रो सबकों की कस्टम सीमाएँ",
+    "retroCustomHint": "रेट्रो चरण टीम की स्मृति में सबक लिखता है, जो बाद की चर्चाओं में काम आते हैं। ये सीमाएँ तय करती हैं कि कितने।",
+    "retroDefaultHint": "रेट्रो चरण फिर भी डिफ़ॉल्ट सीमाओं ({{perRun}} प्रति रन, {{stored}} संग्रहीत) के साथ सबक लिखता है। इसे रोकने के लिए RETRO चरण हटाएँ।",
+    "voteOptionsTooFew": "स्पष्ट मतपत्र में कम से कम दो विकल्प होने चाहिए।",
+    "saveProblem": {
+      "title": "यह समूह अभी नहीं बनाया जा सकता:",
+      "debateRoles": "बहस के लिए कम से कम एक PRO भूमिका वाला और एक CON भूमिका वाला सदस्य चाहिए।",
+      "devilAdvocateRole": "डेविल्स एडवोकेट समूह में DEVIL_ADVOCATE भूमिका वाला एक सदस्य चाहिए।",
+      "humanInTaskForce": "मानव सदस्य टास्क-फ़ोर्स समूह (योजना, निष्पादन और सत्यापन चरण) में शामिल नहीं हो सकते।",
+      "humanWithPeerPhases": "मानव सदस्य ऐसे समूह में शामिल नहीं हो सकते जिसके चरण बारी-बारी से हर साथी को संबोधित करते हैं, जैसे पीयर रिव्यू।",
+      "memberUnassigned_one": "{{count}} सदस्य को कोई एजेंट असाइन नहीं है।",
+      "memberUnassigned_other": "{{count}} सदस्यों को कोई एजेंट असाइन नहीं है।",
+      "humanNeedsName_one": "{{count}} मानव सदस्य को प्रदर्शन नाम चाहिए।",
+      "humanNeedsName_other": "{{count}} मानव सदस्यों को प्रदर्शन नाम चाहिए।",
+      "humanNeedsId_one": "{{count}} मानव सदस्य को उस व्यक्ति की उपयोगकर्ता आईडी चाहिए।",
+      "humanNeedsId_other": "{{count}} मानव सदस्यों को उस व्यक्ति की उपयोगकर्ता आईडी चाहिए।"
+    }
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",
@@ -2821,7 +3051,7 @@
     "value": "मान",
     "deleteAll": "सभी हटाएं",
     "deleteAllTitle": "सभी गुण हटाएं",
-    "deleteAllDesc": "इस उपयोगकर्ता के सभी गुण स्थायी रूप से हटा दिए जाएंगे।",
+    "deleteAllDesc": "इससे इस उपयोगकर्ता के सभी वैश्विक गुण स्थायी रूप से हट जाएंगे: हर वैश्विक उपयोगकर्ता-स्मृति प्रविष्टि, जिसमें एजेंटों द्वारा सहेजी गई प्रविष्टियां भी शामिल हैं, न कि केवल यहां सूचीबद्ध पंक्तियां।",
     "deleted": "गुण हटाए गए",
     "noResults": "कोई गुण नहीं मिले",
     "showingCount": "{{count}} गुण"
@@ -2901,6 +3131,9 @@
     "new": "नया",
     "updated": "अद्यतन",
     "unchanged": "अपरिवर्तित",
+    "removed": "हटाए गए",
+    "conflicts": "यहाँ बदले गए",
+    "conflictHint": "संघर्ष चिह्नित संसाधन पिछले सिंक के बाद इस इंस्टेंस पर बदले गए हैं। जब तक आप इन्हें चुनते नहीं, ये जैसे हैं वैसे ही रहते हैं — किसी को चुनने पर स्थानीय बदलाव अधिलेखित हो जाता है।",
     "selected": "चयनित",
     "mergeNow": "चयनित आयात करें",
     "syncNow": "अभी सिंक करें",
@@ -2922,6 +3155,8 @@
     "title": "सिंक",
     "subtitle": "सिंक करें।",
     "connection": "शुरुआती इंस्टेंस",
+    "loadingLocalAgents": "मिलान से पहले सभी स्थानीय एजेंट लोड किए जा रहे हैं…",
+    "localAgentsError": "स्थानीय एजेंट सूची पूरी तरह लोड नहीं हो सकी, इसलिए एजेंटों का नाम से मिलान नहीं किया जा सकता। अभी सिंक करने से डुप्लिकेट बनेंगे।",
     "sourceUrl": "शुरुआती ईडीआईआई URL",
     "authToken": "टोकन प्रमाणीकरण",
     "authHint": "वैकल्पिक (X-Source-Authorization)।",
@@ -2941,13 +3176,21 @@
     "syncError": "सिंक त्रुटि",
     "empty": "एक शुरुआत करें",
     "autoMatched": "स्वतः मिलान",
-    "previewFirst": "सिंक से पहले बदलावों का पूर्वावलोकन करें"
+    "previewFirst": "सिंक से पहले बदलावों का पूर्वावलोकन करें",
+    "syncPartial": "सिंक अधूरा — कुछ संसाधन नहीं लिखे गए",
+    "syncIdentical": "पहले से अद्यतित — लिखने के लिए कुछ नहीं",
+    "outcomeCounts": "{{updated}} अपडेट · {{created}} बनाए गए · {{skipped}} अपरिवर्तित",
+    "redeployHint": "सिंक किए गए बदलाव नए संस्करण के रूप में सहेजे जाते हैं। जो चल रहा है वह चलता रहता है — इसे लाइव करने के लिए नया संस्करण डिप्लॉय करें।",
+    "overwrite": "स्थानीय बदलाव अधिलेखित करें",
+    "previewFailed": "पूर्वावलोकन विफल",
+    "noPreviewReturned": "स्रोत ने इस एजेंट के लिए कोई पूर्वावलोकन नहीं लौटाया।"
   },
   "sync": {
     "actionCreate": "नया",
     "actionUpdate": "अपडेट",
     "actionSkip": "अद्यतित",
-    "actionConflict": "विवाद"
+    "actionConflict": "विवाद",
+    "actionRemove": "हटाएँ"
   },
   "userConversations": {
     "title": "उपयोगकर्ता वार्तालाप",
@@ -3151,7 +3394,6 @@
     "agentIdPlaceholder": "संदेश संभालने के लिए एजेंट ID",
     "botToken": "बॉट टोकन",
     "botTokenHint": "बॉट उपयोगकर्ता OAuth टोकन। सुरक्षा के लिए वॉल्ट संदर्भ का उपयोग करें।",
-    "botTokenPlaceholder": "xoxb-… या ${vault:slack-bot-token}",
     "channel": "चैनल",
     "channelId": "Slack चैनल ID",
     "channelIdCol": "चैनल ID",
@@ -3172,7 +3414,6 @@
     "searchPlaceholder": "चैनल खोजें…",
     "signingSecret": "साइनिंग सीक्रेट",
     "signingSecretHint": "आपके Slack ऐप के मूलभूत जानकारी पृष्ठ से।",
-    "signingSecretPlaceholder": "हेक्स स्ट्रिंग या ${vault:slack-signing-secret}",
     "slackSetupGuide": "Slack सेटअप गाइड",
     "slackSetupSummary": "एक Slack ऐप बनाएं, बॉट टोकन स्कोप कॉन्फ़िगर करें (app_mentions:read, chat:write, im:history, channels:history, groups:history), फिर क्रेडेंशियल यहाँ पेस्ट करें।",
     "target": "लक्ष्य",
@@ -3226,7 +3467,9 @@
     "typeAgent": "एजेंट",
     "typeGroup": "समूह",
     "selectGroup": "एक समूह चुनें…",
-    "unknownGroup": "{{id}} (नहीं मिला)"
+    "unknownGroup": "{{id}} (नहीं मिला)",
+    "plaintextSecret": "{{fields}} को सीक्रेट वॉल्ट में स्टोर करें और ${vault:…} के रूप में संदर्भित करें — सादे टेक्स्ट वाले क्रेडेंशियल सहेजे नहीं जाते।",
+    "plaintextStored": "यह चैनल {{fields}} को सादे टेक्स्ट में स्टोर करता है। इसे सीक्रेट वॉल्ट में ले जाएँ और संदर्भ से बदलने के लिए सहेजें।"
   },
   "hitl": {
     "loadingApprovalDetails": "अनुमोदन विवरण लोड हो रहा है…",
@@ -3316,7 +3559,8 @@
     "decidedProgress": "{{total}} में से {{decided}} तय",
     "groupLinkUnavailable": "यह समूह नहीं मिला, इसलिए इसका कोई भरोसेमंद लिंक नहीं है।",
     "confirmApproveGroupDescription": "पूरे रुके हुए चरण को स्वीकृत करें और चर्चा जारी रखें। इस विराम पर प्रतीक्षारत हर कार्य भी स्वीकृत हो जाएगा — अलग-अलग निर्णय के लिए समूह खोलें।",
-    "confirmRejectGroupDescription": "पूरे रुके हुए चरण को अस्वीकार करें। इस विराम पर प्रतीक्षा कर रहा हर कार्य इसके साथ अस्वीकार हो जाएगा और चर्चा आगे नहीं बढ़ेगी — अलग-अलग निर्णय लेने के लिए समूह खोलें।"
+    "confirmRejectGroupDescription": "पूरे रुके हुए चरण को अस्वीकार करें। इस विराम पर प्रतीक्षा कर रहा हर कार्य इसके साथ अस्वीकार हो जाएगा और चर्चा आगे नहीं बढ़ेगी — अलग-अलग निर्णय लेने के लिए समूह खोलें।",
+    "pauseChanged": "आपके खोलने के बाद यह अनुरोध बदल गया — कुछ भी तय नहीं किया गया। इसे फिर से समीक्षा करें।"
   },
   "chatDrawer": {
     "deploying": "एजेंट Deploy हो रहा है…",
@@ -3403,16 +3647,14 @@
     "conversationsTruncated_one": "वार्तालापों की सीमा लगी — उपयोगकर्ता के कुल {{count}} हैं।",
     "conversationsTruncated_other": "वार्तालापों की सीमा लगी — उपयोगकर्ता के कुल {{count}} हैं।",
     "failedConversations_one": "{{count}} वार्तालाप पढ़ा नहीं जा सका और बंडल में अनुपस्थित है।",
-    "failedConversations_other": "{{count}} वार्तालाप पढ़े नहीं जा सके और बंडल में अनुपस्थित हैं।"
+    "failedConversations_other": "{{count}} वार्तालाप पढ़े नहीं जा सके और बंडल में अनुपस्थित हैं।",
+    "deleteIncomplete": "मिटाना अधूरा है — इस उपयोगकर्ता का कुछ डेटा अभी भी मौजूद हो सकता है। इसे पूरा हुआ न बताएँ।"
   },
   "mockBanner": {
     "message": "डेमो मोड — नमूना डेटा प्रदर्शित हो रहा है। वास्तविक डेटा के लिए एक EDDI बैकएंड कनेक्ट करें।"
   },
   "orphans": {
-    "confirmPurgeAll": "सभी {{count}} अनाथ संसाधनों को स्थायी रूप से हटाएँ? सर्वर सभी को हटा देता है — आपका चयन लागू नहीं होता। इसे पूर्ववत नहीं किया जा सकता।",
-    "deleteSelected": "{{count}} चयनित हटाएं",
     "description": "किसी भी एजेंट या पैकेज द्वारा संदर्भित न किए गए संसाधनों को खोजें और साफ़ करें।",
-    "deselectAll": "सभी अचयनित करें",
     "includeDeleted": "सॉफ्ट-डिलीट किए गए शामिल करें",
     "lastScanned": "अंतिम स्कैन",
     "noOrphans": "कोई अनाथ नहीं मिला",
@@ -3423,13 +3665,13 @@
     "scanPromptDesc": "एक्सटेंशन कॉन्फ़िग (नियम, API कॉल, LLM, आउटपुट) खोजें जो किसी भी वर्कफ़्लो या एजेंट द्वारा संदर्भित नहीं हैं। अपने प्लेटफ़ॉर्म को व्यवस्थित रखने के लिए अप्रयुक्त संसाधनों को साफ़ करें।",
     "scanPromptTitle": "अपने प्लेटफ़ॉर्म को स्कैन करें",
     "scanning": "संसाधन स्कैन हो रहे हैं…",
-    "selectAll": "सभी चुनें",
     "softDeleted": "हटाया गया",
     "title": "अनाथ पहचान",
     "found_one": "{{count}} अनाथ मिले",
     "found_other": "{{count}} अनाथ मिले",
     "scanIncomplete": "यह स्कैन पूरा नहीं हुआ",
-    "scanIncompleteBody": "अब भी उपयोग में आ रहे संसाधन अनाथ के रूप में सूचीबद्ध हो सकते हैं। स्कैन पूरा होने तक शुद्धिकरण अवरुद्ध है।"
+    "scanIncompleteBody": "अब भी उपयोग में आ रहे संसाधन अनाथ के रूप में सूचीबद्ध हो सकते हैं। स्कैन पूरा होने तक शुद्धिकरण अवरुद्ध है।",
+    "confirmPurge": "सभी {{count}} अनाथ संसाधनों को स्थायी रूप से हटाएँ? इसे पूर्ववत नहीं किया जा सकता।"
   },
   "quotas": {
     "apiCallsMinute": "API कॉल / मिनट",
@@ -3497,7 +3739,7 @@
     "tagPlaceholder": "उदा. safety, production",
     "tags": "टैग",
     "templateEnabled": "टेम्पलेट रिज़ॉल्यूशन सक्षम करें",
-    "templateEnabledHint": "अक्षम होने पर, सामग्री में {{}} मार्कर को शाब्दिक टेक्स्ट के रूप में माना जाता है (कोड उदाहरणों के लिए उपयोगी)।",
+    "templateEnabledHint": "अक्षम होने पर, सामग्री में { } मार्कर को शाब्दिक टेक्स्ट के रूप में माना जाता है (कोड उदाहरणों के लिए उपयोगी)।",
     "usageHint": "उपयोग:"
   },
   "status": {
@@ -3550,7 +3792,8 @@
     "copyVars": "${vars:…} संदर्भ कॉपी करें",
     "refCopied": "कॉपी किया गया: {{ref}}",
     "infoLine1": "सिस्टम प्रॉम्प्ट में {{vars.<key>}} या एजेंट कॉन्फ़िगरेशन में कहीं भी ${vars:<key>} का उपयोग करें।",
-    "infoLine2": "परिवर्तन 2 मिनट के भीतर प्रभावी होते हैं (कैश TTL)। संवेदनशील मानों के लिए सीक्रेट वॉल्ट का उपयोग करें।"
+    "infoLine2": "परिवर्तन 2 मिनट के भीतर प्रभावी होते हैं (कैश TTL)। संवेदनशील मानों के लिए सीक्रेट वॉल्ट का उपयोग करें।",
+    "keyExists": "\"{{key}}\" नाम का वेरिएबल पहले से मौजूद है। इसके बजाय इसे सूची से संपादित करें।"
   },
   "workflowEditor": {
     "endpoints": "एंडपॉइंट",
@@ -3611,7 +3854,19 @@
       "toggleConfig": "विवरण पैनल टॉगल करें",
       "unpin": "उत्तर अनपिन करें",
       "untitled": "शीर्षकहीन",
-      "viewSessions": "पिछले सत्र देखें"
+      "viewSessions": "पिछले सत्र देखें",
+      "alreadyEnded": "चर्चा पहले ही समाप्त हो चुकी थी।",
+      "stopRaced": "रोकते समय चर्चा की स्थिति बदल गई और यह अभी भी जारी है। फिर से रोकने का प्रयास करें।",
+      "stopUnconfirmed": "यह पुष्टि नहीं हो सकी कि चर्चा रुक गई है। इसकी स्थिति जाँचें और फिर से रोकने का प्रयास करें।",
+      "stopFailed": "चर्चा रोकी नहीं जा सकी: {{error}}",
+      "stopping": "रोका जा रहा है…",
+      "startOver": "फिर से शुरू करें",
+      "streamInterrupted": "लाइव कनेक्शन टूट गया। सहेजी गई चर्चा दिखाई जा रही है, जो चलते रहने तक अपडेट होती रहती है।",
+      "confirmNewTitle": "चल रही चर्चा रोकें?",
+      "confirmNewDescription": "एक चर्चा अभी चल रही है। नई शुरू करने से पहले वह रुक जाएगी — प्रगति में कोई भी काम छोड़ दिया जाएगा।",
+      "confirmNewButton": "रोकें और नई शुरू करें",
+      "keepRunning": "चलने दें",
+      "questionRequired": "अपनी टास्क फ़ोर्स के लिए एक प्रश्न जोड़ें — चर्चा शुरू होने पर फ़ाइलें उसके साथ साझा की जाती हैं।"
     },
     "thread": {
       "fileTooLarge": "फ़ाइल 20MB से कम होनी चाहिए",
@@ -3638,7 +3893,10 @@
       "pausedRejected": "यह बातचीत मानवीय निर्णय की प्रतीक्षा में रुकी है, इसलिए संदेश भेजा नहीं गया।",
       "reviewApprovals": "लंबित स्वीकृतियाँ देखें",
       "stop": "उत्तर बनाना रोकें",
-      "streamEnded": "उत्तर पूरा होने से पहले कनेक्शन समाप्त हो गया। जो मिला वह ऊपर है — फिर से प्रयास करने के लिए दोबारा भेजें।"
+      "streamEnded": "उत्तर पूरा होने से पहले कनेक्शन समाप्त हो गया। जो मिला वह ऊपर है — फिर से प्रयास करने के लिए दोबारा भेजें।",
+      "newConversation": "नई बातचीत",
+      "newConversationFailed": "नई बातचीत शुरू नहीं की जा सकी",
+      "initFailed": "यह बातचीत खोली नहीं जा सकी।"
     },
     "chat": {
       "agentDetails": "एजेंट विवरण",
@@ -3961,7 +4219,8 @@
       "transcript": "वार्तालाप प्रतिलेख",
       "tryDifferent": "कोई अन्य खोज शब्द आज़माएँ",
       "untitled": "शीर्षकहीन वार्तालाप",
-      "loadListError": "वार्तालाप लोड करने में विफल"
+      "loadListError": "वार्तालाप लोड करने में विफल",
+      "rejected": "अस्वीकृत"
     },
     "insights": "अंतर्दृष्टि",
     "memberCount": "{{count}} सदस्य",
@@ -4052,7 +4311,7 @@
       "llmDefaultsDesc": "यहाँ बनाए गए हर सलाहकार पर लागू होता है, जब तक सलाहकार नीचे अपना अलग न चुने।",
       "llmDefaultsKeyRequired": "यहाँ एक कुंजी जोड़ें ताकि वह हर उस सलाहकार पर लागू हो जो अपनी कुंजी नहीं देता।",
       "model": "मॉडल",
-      "modelPlaceholder": "उदा. claude-sonnet-5",
+      "modelPlaceholder": "उदा. claude-sonnet-5-5",
       "nameRequired": "इस सलाहकार को एक नाम दें।",
       "new": "नया",
       "next": "आगे",
@@ -4155,7 +4414,10 @@
       "platformBaseUrlAuto": "सर्वर से प्राप्त",
       "platformBaseUrlDiffers": "यह परिनियोजन इस समय अपना पता {{serverUrl}} बता रहा है। ऊपर का मान अलग है — इसे तभी रखें जब आपने जानबूझकर सेट किया हो।",
       "platformBaseUrlQueryFailed": "सर्वर से उसका अपना पता नहीं पूछा जा सका। जब तक आप इसे यहाँ दर्ज नहीं करते, सक्रियण विफल होगा — या फिर से कोशिश करने के लिए पेज रीलोड करें।",
-      "platformBaseUrlUnresolved": "यह परिनियोजन एक यादृच्छिक HTTP पोर्ट पर चलता है और इसमें eddi.self.base-url नहीं है, इसलिए यह नहीं बता सकता कि स्वयं तक कहाँ पहुँचे। पता यहाँ दर्ज करें।"
+      "platformBaseUrlUnresolved": "यह परिनियोजन एक यादृच्छिक HTTP पोर्ट पर चलता है और इसमें eddi.self.base-url नहीं है, इसलिए यह नहीं बता सकता कि स्वयं तक कहाँ पहुँचे। पता यहाँ दर्ज करें।",
+      "llmEndpoint": "मॉडल एंडपॉइंट",
+      "promptBodyDiffers": "ये निर्देश मौजूदा डिफ़ॉल्ट से अलग हैं — इन्हें संपादित किया गया था, या Manager के पुराने संस्करण ने लिखा था।",
+      "promptBodyReset": "डिफ़ॉल्ट पर रीसेट करें"
     },
     "authMode": {
       "none": {
@@ -4321,6 +4583,28 @@
     },
     "superseded": {
       "title": "पिछला ऑपरेटर एजेंट अभी भी परिनियोजित है।"
+    },
+    "upgrade": {
+      "hint": "Platform Operator के लिए एक अपडेट उपलब्ध है।",
+      "blockerBaseUrl": "इसके मॉडल सर्वर का पता दर्ज नहीं किया गया था — अपग्रेड करने के लिए इसे फिर से दर्ज करें।",
+      "addedTools_other": "{{count}} नए टूल",
+      "action": "अपग्रेड करें",
+      "addedTools_one": "{{count}} नया टूल",
+      "blockerProvider": "इसका मॉडल प्रदाता अब इस तरह सेट नहीं किया जा सकता — अपग्रेड करने के लिए कोई दूसरा चुनें।",
+      "useNewDefault": "इन्हें नए डिफ़ॉल्ट से बदलें",
+      "confirmBody": "मौजूदा निर्देशों और टूल के साथ एक नया ऑपरेटर बनाया जाता है और नए सक्रियण की तरह जाँचा जाता है; उसके बाद ही पुराना हटाया जाता है। मॉडल, कुंजी, एनवायरनमेंट और एक्सेस सेटिंग्स बनी रहती हैं। खुली ऑपरेटर चैट समाप्त हो जाती है, और पुराने ऑपरेटर के साथ हुई बातचीत अब इतिहास में नहीं दिखती।",
+      "description": "इसे Manager के पुराने संस्करण ने सेट किया था (संशोधन {{from}}; यह संस्करण {{to}} देता है), इसलिए इसके निर्देश और टूल पुराने हो गए हैं।",
+      "blockerCredential": "इसकी मॉडल कुंजी सादे पाठ के रूप में दर्ज की गई थी, जो कभी सहेजी नहीं जाती — अपग्रेड करने के लिए इसे फिर से दर्ज करें।",
+      "reviewAction": "समीक्षा करें और अपग्रेड करें",
+      "instructionsUnknown": "ऑपरेटर के निर्देश मौजूदा डिफ़ॉल्ट से अलग हैं — या तो पुराना डिफ़ॉल्ट या आपके अपने संपादन।",
+      "instructionsCustomized": "आपने ऑपरेटर के निर्देश संपादित किए हैं।",
+      "confirmTitle": "Platform Operator को अपग्रेड करें?",
+      "removedTools_other": "{{count}} टूल हटाए गए",
+      "removedTools_one": "{{count}} टूल हटाया गया",
+      "confirm": "अभी अपग्रेड करें",
+      "hintAction": "अपग्रेड करें",
+      "keepCurrent": "मौजूदा पाठ रखें (यह नहीं सीखेगा कि नया डिफ़ॉल्ट क्या जोड़ता है)",
+      "title": "Platform Operator के लिए एक अपडेट उपलब्ध है"
     }
   },
   "groupWorkspace": {
@@ -4732,7 +5016,9 @@
       "published": "प्रकाशित",
       "shared": "साझा",
       "sharedTitle": "{{owner}} का · {{space}} में",
-      "ownedBy": "{{owner}} का"
+      "ownedBy": "{{owner}} का",
+      "internal": "साइन इन किए हुए सभी",
+      "sharedBy": "{{owner}} द्वारा साझा"
     },
     "level": {
       "use": "बातचीत कर सकते हैं",
@@ -4750,7 +5036,14 @@
       "space": "कार्यक्षेत्र",
       "spaceHint": "इस संसाधन के कार्यक्षेत्र में सभी।",
       "published": "प्रकाशित",
-      "publishedHint": "इस परिनियोजन तक पहुँच रखने वाले सभी।"
+      "publishedHint": "इस परिनियोजन तक पहुँच रखने वाला हर कोई इसे पढ़ सकता है — गुमनाम चैट आगंतुकों सहित।",
+      "internal": "साइन इन किए हुए सभी",
+      "internalHint": "साइन इन करने वाला कोई भी व्यक्ति इससे बातचीत कर सकता है। इसका कॉन्फ़िगरेशन निजी रहता है। गुमनाम रूप से उपलब्ध नहीं।",
+      "confirmTitle": "दृश्यता को {{visibility}} में बदलें?",
+      "cascadeLabel": "इसे उन वर्कफ़्लो और कॉन्फ़िगरेशन पर भी लागू करें जिनका यह संदर्भ देता है",
+      "cascadeWarning": "आपके स्वामित्व वाले हर संदर्भित संसाधन को यह दृश्यता मिलेगी, जो उसकी अपनी सेटिंग की जगह लेगी। पिछली सेटिंग्स नहीं रखी जातीं।",
+      "noCascadeWarning": "केवल यह संसाधन बदलता है। जो अब इसे देख सकते हैं, वे शायद अब भी इसके संदर्भित संसाधन नहीं खोल पाएँगे।",
+      "apply": "दृश्यता बदलें"
     },
     "share": {
       "title": "साझा करें",
@@ -4758,7 +5051,7 @@
       "visibility": "दृश्यता",
       "peopleAndTeams": "लोग और टीमें",
       "subjectLabel": "व्यक्ति या टीम",
-      "subjectPlaceholder": "name@example.com या team:engineering",
+      "subjectPlaceholder": "नाम, ईमेल या टीम",
       "levelLabel": "पहुँच स्तर",
       "add": "साझा करें",
       "shared": "साझा किया गया",
@@ -4784,7 +5077,13 @@
       "cascadeRevoked_one": "{{count}} संसाधन से हटाया गया",
       "andMore_one": "और {{count}} अन्य",
       "cascadeRevoked_other": "{{count}} संसाधनों से हटाया गया",
-      "andMore_other": "और {{count}} अन्य"
+      "andMore_other": "और {{count}} अन्य",
+      "unknownGrant": "साइन इन करने वाला कोई भी व्यक्ति इससे मेल नहीं खाता — यह किसी तक नहीं पहुँचता। इसे हटाएँ और फिर से साझा करें।",
+      "copyFailed": "कॉपी नहीं हो सका — पता चुनें और स्वयं कॉपी करें।",
+      "chatLink": "चैट लिंक",
+      "copied": "कॉपी किया गया",
+      "copy": "कॉपी करें",
+      "chatLinkHint": "उन सभी के लिए काम करता है जिनके साथ एजेंट “बातचीत कर सकते हैं” या उससे ऊपर के स्तर पर साझा किया गया है।"
     },
     "emptySpace": "इस कार्यक्षेत्र में कोई एजेंट नहीं",
     "emptySpaceDescription": "अन्य कार्यक्षेत्रों में ऐसे एजेंट हो सकते हैं जो आप देख सकते हैं।",
@@ -4802,12 +5101,148 @@
       "warning": "यह वर्तमान स्वामी ({{owner}}) को बदल देता है। वे इस संसाधन पर नियंत्रण खो देते हैं।",
       "cascade_one": "{{count}} संसाधन पर स्वामी बदला गया",
       "cascade_other": "{{count}} संसाधनों पर स्वामी बदला गया"
-    }
+    },
+    "notifications": {
+      "granted": "{{name}} को पहुँच दी गई",
+      "labelUnread_one": "सूचनाएँ — {{count}} अपठित",
+      "labelUnread_other": "सूचनाएँ — {{count}} अपठित",
+      "label": "सूचनाएँ",
+      "markAll": "सभी को पढ़ा हुआ चिह्नित करें",
+      "empty": "कुछ नया नहीं। आपके साथ किए गए साझा और पहुँच अनुरोध यहाँ दिखाई देते हैं।",
+      "unnamed": "एक बिना नाम का संसाधन",
+      "requested": "{{who}} ने {{what}} के लिए “{{level}}” पहुँच माँगी है",
+      "shared": "{{who}} ने {{what}} आपके साथ साझा किया — {{level}}",
+      "grant": "पहुँच दें",
+      "openChat": "चैट खोलें",
+      "open": "खोलें",
+      "dismiss": "खारिज करें"
+    },
+    "request": {
+      "alreadyHas": "आपके पास पहले से यह पहुँच है — पेज फिर से लोड करें।",
+      "chatOnlyTitle": "आप इस एजेंट से बातचीत कर सकते हैं",
+      "title": "आपके पास इसकी पहुँच नहीं है",
+      "chatOnly": "इसे आपके साथ बातचीत के लिए साझा किया गया था, इसलिए इसका कॉन्फ़िगरेशन निजी रहता है।",
+      "subtitle": "यह निजी हो सकता है, या केवल अन्य लोगों के साथ साझा किया गया हो। आप पहुँच का अनुरोध कर सकते हैं।",
+      "sent": "अनुरोध भेजा गया। यदि यह मौजूद है और इसका कोई स्वामी है, तो वे इसे अपनी सूचनाओं में देखेंगे — और जब वे पहुँच देंगे, तो आप भी देखेंगे।",
+      "messagePlaceholder": "आपको इसकी आवश्यकता क्यों है? (वैकल्पिक)",
+      "message": "स्वामी के लिए संदेश",
+      "action": "पहुँच का अनुरोध करें"
+    },
+    "move": {
+      "done": "ले जाया गया",
+      "title": "किसी टीम में ले जाएँ",
+      "team": "टीम",
+      "action": "ले जाएँ",
+      "hint": "फिर टीम में हर कोई इसे ढूँढ और संपादित कर सकेगा। आप स्वामी बने रहेंगे — केवल आप ही इसे हटा या आगे साझा कर सकते हैं।",
+      "cascade_one": "{{count}} संसाधन ले जाया गया",
+      "cascade_other": "{{count}} संसाधन ले जाए गए"
+    },
+    "preview": {
+      "title_one": "यह बदलाव {{count}} संसाधन पर लागू होता है",
+      "title_other": "यह बदलाव {{count}} संसाधनों पर लागू होता है",
+      "confirm": "सभी पर लागू करें"
+    },
+    "ownership": {
+      "mine": "मेरे",
+      "shared": "मेरे साथ साझा",
+      "any": "जो कुछ भी मैं देख सकता हूँ",
+      "label": "दिखाएँ"
+    },
+    "create": {
+      "default": "आपके डिफ़ॉल्ट कार्यक्षेत्र",
+      "hint": "नए आइटम {{space}} में बनाए जाते हैं।"
+    },
+    "emptyShared": "अभी तक आपके साथ कुछ भी साझा नहीं किया गया है",
+    "emptySharedDescription": "जब कोई सहकर्मी आपके या आपकी टीम के साथ कोई एजेंट साझा करता है, तो वह यहाँ दिखाई देता है — और आपकी सूचनाओं में भी।",
+    "showEverything": "वह सब दिखाएँ जो मैं देख सकता हूँ"
   },
   "connectionRef": {
     "wrapped": "कनेक्शन स्कीम सहित पूरा हेडर मान देता है। ${connection:name} को अकेले उपयोग करें और “Bearer ” को कनेक्शन के हेडर मान में रखें।",
     "headerMismatch": "यह कनेक्शन अपना क्रेडेंशियल “{{expected}}” के रूप में भेजता है, इसलिए हेडर का नाम वही होना चाहिए — वरना कॉन्फ़िग एक नाम दिखाएगा और अनुरोध दूसरा ले जाएगा।",
     "refusedInRequest": "${connection:…} पाथ, क्वेरी पैरामीटर या बॉडी में अस्वीकृत है — URL में क्रेडेंशियल हर प्रॉक्सी लॉग में पहुँच जाता है, और बॉडी में इसे पढ़ा नहीं जाता। इसके बजाय हेडर से कनेक्शन को संदर्भित करें।",
     "refusedInModel": "भाषा मॉडल, एम्बेडिंग और वेक्टर स्टोर ${connection:…} स्वीकार नहीं करते: कनेक्शन पूरे हेडर में हल होता है, जबकि इन्हें सादा क्रेडेंशियल चाहिए। यहाँ ${vault:…} उपयोग करें।"
+  },
+  "workspacesPage": {
+    "title": "कार्यक्षेत्र",
+    "subtitle": "आपके कार्यक्षेत्र, उनमें रखे सीक्रेट्स और चर, और नया काम कैसे साझा होता है।",
+    "notEnforced": "इस परिनियोजन पर कार्यक्षेत्र लागू नहीं हैं, इसलिए हर कोई सब कुछ देखता है। ऑपरेटर इन्हें eddi.workspaces.enabled=true से चालू करता है।",
+    "yourSpaces": "आपके कार्यक्षेत्र",
+    "yourSpacesHint": "हर कार्यक्षेत्र के अपने सीक्रेट्स और चर होते हैं। केवल उसके सदस्य उन्हें देख या बदल सकते हैं, और केवल सदस्य ही उनका उपयोग करने वाला एजेंट परिनियोजित कर सकता है।",
+    "referenceCopied": "संदर्भ कॉपी किया गया",
+    "copyReference": "एजेंट में उपयोग के लिए संदर्भ कॉपी करें",
+    "secretStored": "सीक्रेट संग्रहीत किया गया",
+    "secrets": "सीक्रेट्स",
+    "noSecrets": "इस कार्यक्षेत्र में अभी कोई सीक्रेट नहीं है",
+    "deleteNamed": "{{name}} हटाएँ",
+    "secretName": "नाम, जैसे openai-key",
+    "secretValue": "मान — एन्क्रिप्ट करके संग्रहीत, फिर कभी नहीं दिखाया जाएगा",
+    "add": "जोड़ें",
+    "deleteSecretTitle": "यह सीक्रेट हटाएँ?",
+    "deleteSecretDescription": "इसका उपयोग करने वाले एजेंट तब तक काम नहीं करेंगे जब तक इसे फिर से संग्रहीत न किया जाए। इसे पूर्ववत नहीं किया जा सकता।",
+    "variableStored": "चर सहेजा गया",
+    "variables": "चर",
+    "noVariables": "इस कार्यक्षेत्र में अभी कोई चर नहीं है",
+    "variableName": "नाम, जैसे model",
+    "variableValue": "मान",
+    "pinned": "{{property}} द्वारा निर्धारित",
+    "stored": "यहाँ सेट किया गया",
+    "default": "डिफ़ॉल्ट",
+    "settings": "सेटिंग्स",
+    "settingsHint": "तुरंत प्रभावी होती हैं, हर रेप्लिका पर पाँच सेकंड के भीतर। कार्यक्षेत्र लागू हैं या नहीं, और कौन-सा टोकन क्लेम टीमें रखता है — ये स्टार्टअप सेटिंग्स हैं और केवल संदर्भ के लिए दिखाई जाती हैं।",
+    "enforcing": "लागू",
+    "enforcedYes": "हाँ",
+    "enforcedNo": "नहीं",
+    "groupsClaim": "टीमें इस टोकन क्लेम से आती हैं",
+    "defaultSpace": "नया काम डिफ़ॉल्ट रूप से कहाँ बनता है",
+    "defaultSpacePlaceholder": "खाली: हर व्यक्ति का अपना कार्यक्षेत्र — या किसी टीम का नाम",
+    "defaultSpaceHelp": "टीम का नाम देने से परिनियोजन टीम-प्रथम बन जाता है: सहकर्मी एक-दूसरे का काम देखते हैं, जब तक उसे निजी न किया जाए। किसी व्यक्ति द्वारा चुना गया कार्यक्षेत्र हमेशा प्राथमिकता पाता है।",
+    "legacy": "स्वामित्व दर्ज होने से पहले बनाए गए संसाधन",
+    "legacyShared": "सभी को दिखाई देते हैं — अपग्रेड के बाद कुछ भी गायब नहीं होता",
+    "legacyAdminOnly": "केवल व्यवस्थापकों को दिखाई देते हैं — स्वामी निर्धारित होने के बाद",
+    "lastChanged": "अंतिम बार {{who}} द्वारा बदला गया",
+    "neverChanged": "यहाँ अभी तक नहीं बदला गया",
+    "saved": "सेटिंग्स सहेजी गईं"
+  },
+  "cascadeSave": {
+    "workflowChanged": "वर्कफ़्लो {{workflowId}} कहीं और बदला गया है (अब संस्करण {{current}}, इस पृष्ठ पर संस्करण {{version}} है)। पृष्ठ पुनः लोड करें। कुछ भी सहेजा नहीं गया।",
+    "agentChanged": "एजेंट {{agentId}} कहीं और बदला गया है (अब संस्करण {{current}}, इस पृष्ठ पर संस्करण {{version}} है)। पृष्ठ पुनः लोड करें। कुछ भी सहेजा नहीं गया।",
+    "workflowMissingResource": "वर्कफ़्लो {{workflowId}} (संस्करण {{version}}) {{resource}} का संदर्भ नहीं देता, इसलिए यहाँ सहेजने से एजेंट नहीं बदलेगा। कुछ भी सहेजा नहीं गया।",
+    "agentWorkflowMismatch": "एजेंट {{agentId}} (संस्करण {{version}}) वर्कफ़्लो {{workflowId}} के संस्करण {{found}} का संदर्भ देता है, संस्करण {{expected}} का नहीं। यह पृष्ठ खुलने के बाद एजेंट बदल गया। इसे पुनः लोड करें। कुछ भी सहेजा नहीं गया।",
+    "agentMissingWorkflow": "एजेंट {{agentId}} (संस्करण {{version}}) वर्कफ़्लो {{workflowId}} का संदर्भ नहीं देता। कुछ भी सहेजा नहीं गया।"
+  },
+  "llmProviders": {
+    "group": {
+      "frontier": "मॉडल लैब",
+      "compatible": "OpenAI-संगत प्रदाता",
+      "cloud": "क्लाउड प्लेटफ़ॉर्म",
+      "local": "स्थानीय / स्व-होस्टेड"
+    },
+    "region": {
+      "label": "क्षेत्र",
+      "intl": "अंतरराष्ट्रीय",
+      "cn": "मुख्यभूमि चीन",
+      "us": "संयुक्त राज्य अमेरिका",
+      "custom": "कस्टम URL (नीचे सेट है)"
+    },
+    "compatibleNote": "प्रदाता के OpenAI-संगत API ({{url}}) से कनेक्ट होता है। केवल प्रॉक्सी या किसी अन्य क्षेत्र के लिए बदलें।",
+    "keyHint": "{{url}} पर API कुंजी प्राप्त करें",
+    "select": "प्रदाता चुनें"
+  },
+  "agentVersioning": {
+    "compatibleLabel": "पिछले संस्करण के साथ संगत — चल रही बातचीत इस पर स्विच कर सकती है",
+    "compatibleHint": "केवल उन बदलावों के लिए जो चल रही बातचीत को नहीं तोड़ सकते, जैसे प्रॉम्प्ट का शब्दांकन या कोई दूसरा मॉडल। यदि प्रॉपर्टी, एक्शन या वर्कफ़्लो चरणों का नाम बदला गया या उन्हें हटाया गया है, तो इसे न चुनें।",
+    "compatibleLegacyNote": "वर्तमान संस्करण संस्करण-अनुसरण सुविधा से पहले का है, इसलिए उस पर पहले से चल रही बातचीत उसी पर रहती है। अगली संगत सेव से शृंखला जुड़ जाती है।",
+    "compatibleUnknownNote": "संस्करण-अनुसरण सुविधा से पहले के संस्करण पर चल रही बातचीत उसी पर रहती है।",
+    "generationBadge": "संगतता पीढ़ी {{generation}}",
+    "generationTooltip": "संगतता पीढ़ी {{generation}}: इस एजेंट के समान पीढ़ी वाले संस्करण संगत हैं, इसलिए चल रही बातचीत अपनी अगली बारी में सबसे नए डिप्लॉय किए गए संस्करण पर चली जाती है। असंगत सेव एक नई पीढ़ी शुरू करता है।",
+    "impactTitle": "v{{version}} को {{environment}} में डिप्लॉय करना — चल रही बातचीत",
+    "impactFollow_one": "v{{from}} पर {{count}} सक्रिय बातचीत v{{to}} पर जारी रहेगी",
+    "impactFollow_other": "v{{from}} पर {{count}} सक्रिय बातचीत v{{to}} पर जारी रहेंगी",
+    "impactStay_one": "v{{from}} पर {{count}} सक्रिय बातचीत v{{from}} पर ही रहेगी",
+    "impactStay_other": "v{{from}} पर {{count}} सक्रिय बातचीत v{{from}} पर ही रहेंगी",
+    "impactReasonNewer": "नया संस्करण",
+    "impactReasonLegacy": "संस्करण-अनुसरण से पहले का",
+    "impactReasonBreaking": "असंगत बदलाव",
+    "switchNotice": "एजेंट v{{from}} से v{{to}} पर चला गया"
   }
 }

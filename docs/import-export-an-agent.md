@@ -97,11 +97,11 @@ DEVELOPMENT EDDI
     ↓
 1. Export Agent
    POST /backup/export/agent123?agentVersion=1
-   ← Returns: agent123-1.zip
+   ← Returns: Location /backup/export/My-Agent--agent123-1-<token>.zip
     ↓
 2. Download ZIP file
-   GET /backup/export/agent123-1.zip
-   ← Receives: agent123-1.zip file
+   GET /backup/export/My-Agent--agent123-1-<token>.zip
+   ← Receives: My-Agent-agent123-1.zip (needs VIEW on the agent)
     ↓
 3. Store in version control / backup / transfer
     ↓
@@ -213,8 +213,11 @@ curl -X POST -H "Content-Type: application/zip" \
 > carries `X-Schedules-Skipped: <count>` whenever the selection left schedules out, and
 > the same count is logged at `INFO`. List the schedule `sourceId`s alongside the
 > extension ones if you want them, or omit the parameter entirely to take the whole
-> archive. Prompt snippets are the one exception: they are matched by name and imported
-> regardless of the selection.
+> archive. Prompt snippets honour the selection too: a snippet row's `sourceId` is the
+> snippet's id in the archive (its file name), and a merge updates a live snippet of the
+> same name only when that id — or the id of the local snippet it matched — is selected.
+> The same filter applies to a create import and to a first-time live sync: a snippet
+> left out of `selectedResources` is not created.
 
 **Scenario 4: Disaster Recovery**
 
@@ -289,7 +292,10 @@ agent), so read it from the `Location` header rather than constructing it.
 LOCATION=$(curl -s -D - -o /dev/null -X POST \
   "http://localhost:7070/backup/export/agent123?agentVersion=1" \
   | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
-# e.g. /backup/export/My+Agent-agent123-1.zip
+# e.g. /backup/export/My-Agent--agent123-1-3f9c0e1a7b2d4c5e8f60718293a4b5c6.zip
+# The last segment carries a random token, so the URL cannot be guessed, and the
+# download checks VIEW on the exported agent. The file is saved as
+# My-Agent-agent123-1.zip (Content-Disposition).
 
 curl -O "http://localhost:7070${LOCATION}"
 ```
@@ -470,7 +476,10 @@ duplicate cron jobs. Such an update replaces what the schedule *does* — cron, 
 but never **who it runs as**: when the archive brings no identity of its own (the usual case,
 per the paragraph above), the owner already on the target is kept. Otherwise every promotion
 reset that schedule to the system scheduler, which stops Dream consolidation and drops the
-schedule's ownership protection. The target's HITL approval timers are excluded from that name matching —
+schedule's ownership protection. Nor does it change whether the schedule is **enabled**: the
+update goes through `PUT /schedulestore/schedules/{id}`, which keeps the stored `enabled`
+value, so a schedule an operator disabled on the target stays disabled (see
+[Enabling and disabling](scheduling.md#enabling-and-disabling)). The target's HITL approval timers are excluded from that name matching —
 they are per-conversation safety timers, never part of an agent's configuration, and the export
 side leaves them out for the same reason. If the import fails after a schedule was overwritten,
 the target's original is written back as part of the rollback. The merge preview says so:
@@ -482,6 +491,30 @@ Because that parameter is a single flat list across every preview row, a caller 
 only extension ids leaves **all** of them out — the import answers `X-Schedules-Skipped: <count>`
 and logs the same number at `INFO`, rather than a bare `201` for an agent whose nightly job
 did not come back. Name the schedule ids too, or leave `selectedResources` off.
+
+### When a merge fails part-way
+
+A merge writes into resources that already exist here. If a later write fails, the import is
+rolled back as a whole: what it **created** is deleted, and what it **updated** — the agent,
+its workflows and extensions, and prompt snippets — gets its pre-import content written back as
+a new version, with the descriptor (name, description, origin) restored alongside. History only
+ever grows, so the version the failed import wrote stays readable. A resource someone else
+changed while the import ran is not overwritten by the rollback; the conflict is logged at
+`WARN` instead.
+
+A merge reads each existing resource before it first overwrites it, because that snapshot is
+what the rollback writes back. If the read fails, the merge stops there — before overwriting
+that resource — and fails with `500` naming it, and everything it had already written is
+rolled back as above. Retry once the store is readable again.
+
+### Archive limits
+
+An uploaded or synced archive is unpacked under three limits — entry count, bytes per entry,
+and total bytes, all counted from what is actually decompressed — so a small upload that
+inflates to gigabytes is refused with `413` and the limit it crossed, instead of filling the
+disk. The defaults (`10000` entries, 32 MiB per entry, 256 MiB in total) sit far above any real
+agent export; see `eddi.backup.import.*` in the
+[configuration reference](configuration-reference.md).
 
 ## Live Sync (Without ZIP)
 

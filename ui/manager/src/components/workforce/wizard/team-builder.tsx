@@ -8,6 +8,7 @@ import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
+import { ProviderSelect } from "@/components/shared/provider-select";
 import {
   memberIssue,
   effectiveLlm,
@@ -94,33 +95,29 @@ function LlmFields({
         <label htmlFor={`provider-${idPrefix}`} className={labelClass}>
           {t("Workforce.wizard.provider", "LLM Provider")}
         </label>
-        <select
+        <ProviderSelect
           id={`provider-${idPrefix}`}
           value={value.provider}
-          onChange={(e) => {
-            const prov = LLM_PROVIDERS.find((p) => p.id === e.target.value);
+          onChange={(providerId) => {
+            const prov = LLM_PROVIDERS.find((p) => p.id === providerId);
             // Switching provider resets the model to that provider's default;
             // a per-advisor "inherit" pick clears the model too so it inherits.
-            onChange({ provider: e.target.value, model: prov?.defaultModel ?? "" });
+            onChange({ provider: providerId, model: prov?.defaultModel ?? "" });
           }}
           className={cn(inputClass, "border-input")}
-        >
-          {/* Only a per-advisor field can be left blank (to inherit); the
-              defaults block always names a provider, since a blank one would
-              just be anthropic on the server anyway. */}
-          {inherit && (
-            <option value="">
-              {t("Workforce.wizard.useDefault", "Workforce default ({{value}})", {
-                value: providerLabel(inherit.provider),
-              })}
-            </option>
-          )}
-          {LLM_PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+          // Only a per-advisor field can be left blank (to inherit); the
+          // defaults block always names a provider, since a blank one would
+          // just be anthropic on the server anyway.
+          leadingOptions={
+            inherit ? (
+              <option value="">
+                {t("Workforce.wizard.useDefault", "Workforce default ({{value}})", {
+                  value: providerLabel(inherit.provider),
+                })}
+              </option>
+            ) : undefined
+          }
+        />
       </div>
 
       <div>
@@ -137,7 +134,7 @@ function LlmFields({
               ? t("Workforce.wizard.useDefault", "Workforce default ({{value}})", {
                   value: inherit.model,
                 })
-              : t("Workforce.wizard.modelPlaceholder", "e.g. claude-sonnet-5")
+              : t("Workforce.wizard.modelPlaceholder", "e.g. claude-sonnet-5-5")
           }
           className={cn(inputClass, "border-input")}
         />

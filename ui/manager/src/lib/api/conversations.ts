@@ -106,6 +106,13 @@ export interface SimpleConversationMemorySnapshot {
   conversationProperties?: Record<string, unknown>;
   undoAvailable?: boolean;
   redoAvailable?: boolean;
+  /**
+   * Why the conversation ended, when it was ended for a reason the backend
+   * records — today only {@link END_REASON_AGENT_VERSION_RETIRED}. Absent
+   * otherwise. Note `agentVersion` is the version the conversation is on NOW:
+   * with version following it can change between turns.
+   */
+  endReason?: string;
   // HITL bookmark fields (set when conversationState === "AWAITING_HUMAN")
   hitlPausedWorkflowId?: string;
   hitlPausedAbsoluteTaskIndex?: number;
@@ -118,6 +125,27 @@ export interface SimpleConversationMemorySnapshot {
   // GET /agents/{conversationId}/approval-status (useApprovalStatus).
   hitlTimeoutPolicy?: string;
   hitlApprovalTimeout?: string;
+}
+
+/**
+ * Placeholder the backend persists in `input:initial` (and the echoed `input`)
+ * for a secret-flagged turn — see Conversation.scrubSecretUserInput. The raw
+ * text is scrubbed server-side, so a rebuilt transcript never carries it.
+ */
+export const SECRET_INPUT_PLACEHOLDER = "<secret input>";
+
+/** Neutral mask shown in place of the placeholder token (no i18n needed). */
+export const SECRET_INPUT_MASK = "••••••••";
+
+/**
+ * Render a user input for display: map the backend secret placeholder to a mask
+ * so a secret turn shows a masked bubble rather than the raw `<secret input>`
+ * token, and pass anything else through unchanged. Use this at every site that
+ * displays `input:initial`.
+ */
+export function displayUserInput(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return value === SECRET_INPUT_PLACEHOLDER ? SECRET_INPUT_MASK : value;
 }
 
 /** Extract user input from a conversation step's key/value pairs */
@@ -168,6 +196,45 @@ export function extractOutputParts(conversationOutput?: ConversationOutput): str
     }
   }
   return texts;
+}
+
+/**
+ * Why a turn failed, from the `taskErrors` the backend records in the turn's
+ * output — one line per failed task, already redacted server-side. `null` when
+ * nothing failed.
+ */
+export function extractTaskErrors(conversationOutput?: ConversationOutput): string | null {
+  const entries = conversationOutput?.taskErrors;
+  if (!Array.isArray(entries)) return null;
+  const texts = entries
+    .map((entry) =>
+      entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).text === "string"
+        ? ((entry as Record<string, unknown>).text as string).trim()
+        : "",
+    )
+    .filter(Boolean);
+  return texts.length > 0 ? texts.join("\n") : null;
+}
+
+/**
+ * The notice to show for a failed turn, or `null` for one that did not fail.
+ *
+ * A turn whose LLM call was rejected used to come back as `ERROR` with an empty
+ * output and render as nothing at all — the spinner stopped and no bubble
+ * appeared. The backend's reason is preferred; `fallback` covers a turn that
+ * errored without one.
+ */
+export function describeTurnFailure(
+  conversationOutput: ConversationOutput | undefined,
+  conversationState: string | undefined,
+  fallback: string,
+): string | null {
+  const reported = extractTaskErrors(conversationOutput);
+  if (reported) return reported;
+  if (conversationState === "ERROR" && extractOutputParts(conversationOutput).length === 0) {
+    return fallback;
+  }
+  return null;
 }
 
 /** Extract agent output from a conversationOutput map as a single string.
@@ -237,6 +304,44 @@ export function extractActions(step: SimpleConversationStep): string[] {
   if (Array.isArray(entry.value)) return entry.value as string[];
   if (typeof entry.value === "string") return [entry.value];
   return [];
+}
+
+/**
+ * `endReason` of a conversation ended because the agent version it ran on was
+ * undeployed with "end all active conversations" (backend
+ * `IConversationService.END_REASON_AGENT_VERSION_RETIRED`).
+ */
+export const END_REASON_AGENT_VERSION_RETIRED = "agent-version-retired";
+
+/** Anything carrying a step's key/value entries — simple or detailed snapshot. */
+interface StepEntries {
+  conversationStep?: { key: string; value: unknown }[] | null;
+}
+
+/**
+ * The agent version that ran this step — step data `agent:version`
+ * (`MemoryKeys.AGENT_VERSION`). Not a public key: only detailed views carry it,
+ * and steps recorded before version following never do. `null` when absent.
+ */
+export function extractAgentVersion(step: StepEntries | undefined): number | null {
+  const entry = step?.conversationStep?.find((d) => d.key === "agent:version");
+  const value = entry?.value;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The version move recorded on the first step a new version ran — step data
+ * `agent:switch` = `{ from, to }` (`MemoryKeys.AGENT_VERSION_CHANGE`). `null`
+ * when the step carries none, or one that is not shaped like a move.
+ */
+export function extractAgentSwitch(
+  step: StepEntries | undefined
+): { from: number; to: number } | null {
+  const entry = step?.conversationStep?.find((d) => d.key === "agent:switch");
+  const value = entry?.value;
+  if (!value || typeof value !== "object") return null;
+  const { from, to } = value as { from?: unknown; to?: unknown };
+  return typeof from === "number" && typeof to === "number" ? { from, to } : null;
 }
 
 export interface ConversationMemorySnapshot {
@@ -396,11 +501,19 @@ export interface DetailedConversation {
 }
 
 /** Fetch a fully-detailed conversation snapshot including all step data.
- *  Used by the Memory Inspector debug tab. */
+ *  Used by the Memory Inspector debug tab.
+ *
+ *  `returnCurrentStepOnly=false` is explicit because the backend DEFAULTS it to
+ *  `true` on `GET /agents/{conversationId}` — without it the inspector's step
+ *  tabs only ever showed the latest step. */
 export function getDetailedConversation(
   conversationId: string,
 ): Promise<DetailedConversation> {
+  const params = new URLSearchParams({
+    returnDetailed: "true",
+    returnCurrentStepOnly: "false",
+  });
   return api.get<DetailedConversation>(
-    `/agents/${conversationId}?returnDetailed=true`,
+    `/agents/${conversationId}?${params.toString()}`,
   );
 }

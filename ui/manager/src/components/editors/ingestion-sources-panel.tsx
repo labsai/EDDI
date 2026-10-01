@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Clock,
   Eye,
+  FolderUp,
   Globe,
   Loader2,
   Play,
@@ -25,6 +26,7 @@ import {
   usePurgeIngestionSource,
   useRunIngestionSource,
 } from "@/hooks/use-ingestion-sources";
+import { IngestionFilesPanel } from "@/components/editors/ingestion-files-panel";
 import type { IngestionReport, IngestionSource } from "@/lib/api/ingestion-sources";
 
 export interface IngestionSourcesPanelProps {
@@ -89,6 +91,14 @@ export function IngestionSourcesPanel({
     );
   };
 
+  const updateUpload = (index: number, patch: Partial<NonNullable<IngestionSource["upload"]>>) => {
+    onChange(
+      sources.map((source, i) =>
+        i === index ? { ...source, upload: { ...source.upload, ...patch } } : source,
+      ),
+    );
+  };
+
   const addSource = () => {
     onChange([...sources, { ...DEFAULT_SOURCE, web: { ...DEFAULT_SOURCE.web } }]);
     setExpanded(String(sources.length));
@@ -128,6 +138,7 @@ export function IngestionSourcesPanel({
             onToggle={() => setExpanded(isOpen ? null : key)}
             onChange={(patch) => update(index, patch)}
             onChangeWeb={(patch) => updateWeb(index, patch)}
+            onChangeUpload={(patch) => updateUpload(index, patch)}
             onRemove={() => removeSource(index)}
             kbId={kbId}
             version={version}
@@ -154,6 +165,7 @@ function SourceCard({
   onToggle,
   onChange,
   onChangeWeb,
+  onChangeUpload,
   onRemove,
   kbId,
   version,
@@ -166,6 +178,7 @@ function SourceCard({
   onToggle: () => void;
   onChange: (patch: Partial<IngestionSource>) => void;
   onChangeWeb: (patch: Partial<NonNullable<IngestionSource["web"]>>) => void;
+  onChangeUpload: (patch: Partial<NonNullable<IngestionSource["upload"]>>) => void;
   onRemove: () => void;
   kbId?: string;
   version: number;
@@ -175,6 +188,8 @@ function SourceCard({
 }) {
   const { t } = useTranslation();
   const [confirmPurge, setConfirmPurge] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmTypeSwitch, setConfirmTypeSwitch] = useState(false);
   const [preview, setPreview] = useState<IngestionReport | null>(null);
   // A preview describes the configuration it ran against. Once that changes, it is
   // a claim about something that no longer exists.
@@ -184,8 +199,25 @@ function SourceCard({
     }
   }, [hasUnsavedChanges]);
 
+  const isUpload = source.type === "upload";
+
   // Runtime actions need a saved source: the id is what the endpoints address.
   const isSaved = Boolean(kbId && source.id);
+
+  /**
+   * A saved upload source that stops being one loses its files: on save the
+   * backend deletes them and every vector they produced
+   * (`RagSourceIngestionService.discardRemovedSources`). Removing the source
+   * already asked first; switching its type did the same damage silently.
+   */
+  const requestType = (next: IngestionSource["type"]) => {
+    if (next === source.type) return;
+    if (isUpload && source.id) {
+      setConfirmTypeSwitch(true);
+      return;
+    }
+    onChange({ type: next });
+  };
 
   // Not `isSaved && isOpen`: a disabled query keeps its cached data, so collapsing
     // a card froze its "Running" badge for ever and a scheduled run never showed one.
@@ -208,7 +240,11 @@ function SourceCard({
           className="flex flex-1 items-center gap-2.5 text-start"
           data-testid={`${testId}-toggle`}
         >
-          <Globe className="h-4 w-4 shrink-0 text-sky-500" />
+          {isUpload ? (
+            <FolderUp className="h-4 w-4 shrink-0 text-sky-500" />
+          ) : (
+            <Globe className="h-4 w-4 shrink-0 text-sky-500" />
+          )}
           <span className="flex-1 truncate text-sm font-medium text-foreground">
             {source.name || t("ragEditor.sources.unnamed", "Unnamed source")}
           </span>
@@ -238,7 +274,7 @@ function SourceCard({
           <Button
             variant="ghost"
             size="icon"
-            onClick={onRemove}
+            onClick={() => (isUpload ? setConfirmRemove(true) : onRemove())}
             aria-label={t("ragEditor.sources.remove", "Remove source")}
             data-testid={`${testId}-remove`}
           >
@@ -249,6 +285,47 @@ function SourceCard({
 
       {isOpen && (
         <div className="space-y-4 border-t border-border px-4 py-3">
+          <Field
+            label={t("ragEditor.sources.type", "Source")}
+            hint={
+              isUpload
+                ? t("ragEditor.sources.typeUploadHint", "Read files you upload here")
+                : t("ragEditor.sources.typeWebHint", "Crawl a website")
+            }
+          >
+            <div
+              className="flex gap-2"
+              role="radiogroup"
+              aria-label={t("ragEditor.sources.type", "Source")}
+              onKeyDown={(event) => {
+                // A radiogroup moves between its options with the arrow keys.
+                // Without this the only way to change the type is a pointer.
+                if (readOnly) return;
+                if (["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) {
+                  event.preventDefault();
+                  requestType(isUpload ? "web" : "upload");
+                }
+              }}
+            >
+              <TypeChoice
+                label={t("ragEditor.sources.typeWeb", "Website")}
+                icon={Globe}
+                selected={!isUpload}
+                disabled={readOnly}
+                onSelect={() => requestType("web")}
+                testId={`${testId}-type-web`}
+              />
+              <TypeChoice
+                label={t("ragEditor.sources.typeUpload", "Files")}
+                icon={FolderUp}
+                selected={isUpload}
+                disabled={readOnly}
+                onSelect={() => requestType("upload")}
+                testId={`${testId}-type-upload`}
+              />
+            </div>
+          </Field>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t("ragEditor.sources.name", "Name")}>
               <Input
@@ -259,29 +336,16 @@ function SourceCard({
                 data-testid={`${testId}-name`}
               />
             </Field>
-            <Field label={t("ragEditor.sources.startUrl", "Start URL")}>
-              <Input
-                value={source.web?.startUrl ?? ""}
-                onChange={(e) => onChangeWeb({ startUrl: e.target.value })}
-                disabled={readOnly}
-                placeholder="https://example.com/docs/"
-                data-testid={`${testId}-start-url`}
-              />
-            </Field>
-            <Field
-              label={t("ragEditor.sources.pathPrefix", "Path prefix")}
-              hint={t("ragEditor.sources.pathPrefixHint", "Only crawl under this path")}
-            >
-              <Input
-                value={source.web?.pathPrefix ?? "/"}
-                onChange={(e) => onChangeWeb({ pathPrefix: e.target.value })}
-                disabled={readOnly}
-                data-testid={`${testId}-path-prefix`}
-              />
-            </Field>
             <Field
               label={t("ragEditor.sources.cron", "Schedule (cron)")}
-              hint={t("ragEditor.sources.cronHint", "Leave empty to run only by hand")}
+              hint={
+                isUpload
+                  ? t(
+                      "ragEditor.sources.cronHintUpload",
+                      "Leave empty — uploaded files are read when you run the source",
+                    )
+                  : t("ragEditor.sources.cronHint", "Leave empty to run only by hand")
+              }
             >
               <Input
                 value={source.cron ?? ""}
@@ -291,28 +355,105 @@ function SourceCard({
                 data-testid={`${testId}-cron`}
               />
             </Field>
-            <Field label={t("ragEditor.sources.maxDepth", "Max depth")}>
-              <Input
-                type="number"
-                min={1}
-                max={20}
-                value={source.web?.maxDepth ?? 3}
-                onChange={(e) => onChangeWeb({ maxDepth: numberOrUndefined(e.target.value) })}
-                disabled={readOnly}
-                data-testid={`${testId}-max-depth`}
-              />
-            </Field>
-            <Field label={t("ragEditor.sources.maxPages", "Max pages")}>
-              <Input
-                type="number"
-                min={1}
-                max={50000}
-                value={source.web?.maxPages ?? 200}
-                onChange={(e) => onChangeWeb({ maxPages: numberOrUndefined(e.target.value) })}
-                disabled={readOnly}
-                data-testid={`${testId}-max-pages`}
-              />
-            </Field>
+            {!isUpload && (
+              <>
+                <Field label={t("ragEditor.sources.startUrl", "Start URL")}>
+                  <Input
+                    value={source.web?.startUrl ?? ""}
+                    onChange={(e) => onChangeWeb({ startUrl: e.target.value })}
+                    disabled={readOnly}
+                    placeholder="https://example.com/docs/"
+                    data-testid={`${testId}-start-url`}
+                  />
+                </Field>
+                <Field
+                  label={t("ragEditor.sources.pathPrefix", "Path prefix")}
+                  hint={t("ragEditor.sources.pathPrefixHint", "Only crawl under this path")}
+                >
+                  <Input
+                    value={source.web?.pathPrefix ?? "/"}
+                    onChange={(e) => onChangeWeb({ pathPrefix: e.target.value })}
+                    disabled={readOnly}
+                    data-testid={`${testId}-path-prefix`}
+                  />
+                </Field>
+                <Field label={t("ragEditor.sources.maxDepth", "Max depth")}>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={source.web?.maxDepth ?? 3}
+                    onChange={(e) => onChangeWeb({ maxDepth: numberOrUndefined(e.target.value) })}
+                    disabled={readOnly}
+                    data-testid={`${testId}-max-depth`}
+                  />
+                </Field>
+                <Field label={t("ragEditor.sources.maxPages", "Max pages")}>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50000}
+                    value={source.web?.maxPages ?? 200}
+                    onChange={(e) => onChangeWeb({ maxPages: numberOrUndefined(e.target.value) })}
+                    disabled={readOnly}
+                    data-testid={`${testId}-max-pages`}
+                  />
+                </Field>
+              </>
+            )}
+            {isUpload && (
+              <>
+                <Field
+                  label={t("ragEditor.sources.maxFiles", "Max files")}
+                  hint={t("ragEditor.sources.maxFilesHint", "How many files this source may hold")}
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={source.upload?.maxFiles ?? 500}
+                    onChange={(e) => onChangeUpload({ maxFiles: numberOrUndefined(e.target.value) })}
+                    disabled={readOnly}
+                    data-testid={`${testId}-max-files`}
+                  />
+                </Field>
+                <Field
+                  label={t("ragEditor.sources.maxFileMb", "Max file size (MB)")}
+                  hint={t("ragEditor.sources.maxFileMbHint", "Per file")}
+                >
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={megabytesOf(source.upload?.maxFileBytes) ?? 25}
+                    onChange={(e) =>
+                      onChangeUpload({ maxFileBytes: bytesFromMegabytes(e.target.value) })
+                    }
+                    disabled={readOnly}
+                    data-testid={`${testId}-max-file-mb`}
+                  />
+                </Field>
+                <Field
+                  label={t("ragEditor.sources.maxTotalMb", "Max total size (MB)")}
+                  hint={t("ragEditor.sources.maxTotalMbHint", "Across all of this source's files")}
+                >
+                  {/* Editable because the server's refusal tells the operator to
+                      raise it: a limit named in an error and settable nowhere is
+                      worse than no message at all. */}
+                  <Input
+                    type="number"
+                    min={1}
+                    max={20480}
+                    value={megabytesOf(source.upload?.maxTotalBytes) ?? 500}
+                    onChange={(e) =>
+                      onChangeUpload({ maxTotalBytes: bytesFromMegabytes(e.target.value) })
+                    }
+                    disabled={readOnly}
+                    data-testid={`${testId}-max-total-mb`}
+                  />
+                </Field>
+              </>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-4">
@@ -323,40 +464,82 @@ function SourceCard({
               disabled={readOnly}
               testId={`${testId}-enabled`}
             />
-            <Toggle
-              label={t("ragEditor.sources.respectRobots", "Respect robots.txt")}
-              hint={t(
-                "ragEditor.sources.respectRobotsHint",
-                "Turn off only for a site you own",
-              )}
-              checked={source.web?.respectRobots !== false}
-              onChange={(checked) => onChangeWeb({ respectRobots: checked })}
-              disabled={readOnly}
-              testId={`${testId}-respect-robots`}
-            />
-            <Toggle
-              label={t("ragEditor.sources.includeSubdomains", "Include subdomains")}
-              checked={source.web?.includeSubdomains === true}
-              onChange={(checked) => onChangeWeb({ includeSubdomains: checked })}
-              disabled={readOnly}
-              testId={`${testId}-include-subdomains`}
-            />
+            {!isUpload && (
+              <>
+                <Toggle
+                  label={t("ragEditor.sources.respectRobots", "Respect robots.txt")}
+                  hint={t(
+                    "ragEditor.sources.respectRobotsHint",
+                    "Turn off only for a site you own",
+                  )}
+                  checked={source.web?.respectRobots !== false}
+                  onChange={(checked) => onChangeWeb({ respectRobots: checked })}
+                  disabled={readOnly}
+                  testId={`${testId}-respect-robots`}
+                />
+                <Toggle
+                  label={t("ragEditor.sources.includeSubdomains", "Include subdomains")}
+                  checked={source.web?.includeSubdomains === true}
+                  onChange={(checked) => onChangeWeb({ includeSubdomains: checked })}
+                  disabled={readOnly}
+                  testId={`${testId}-include-subdomains`}
+                />
+              </>
+            )}
           </div>
 
-          <Field
-            label={t("ragEditor.sources.excludePatterns", "Exclude patterns")}
-            hint={t(
-              "ragEditor.sources.excludePatternsHint",
-              "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
-            )}
-          >
-            <PatternListInput
-              patterns={source.web?.excludePatterns ?? []}
-              onCommit={(patterns) => onChangeWeb({ excludePatterns: patterns })}
-              disabled={readOnly}
-              testId={`${testId}-exclude-patterns`}
+          {!isUpload && (
+            <Field
+              label={t("ragEditor.sources.excludePatterns", "Exclude patterns")}
+              hint={t(
+                "ragEditor.sources.excludePatternsHint",
+                "Globs matched against the URL path, comma separated — * stays in one segment, ** crosses them",
+              )}
+            >
+              <PatternListInput
+                patterns={source.web?.excludePatterns ?? []}
+                onCommit={(patterns) => onChangeWeb({ excludePatterns: patterns })}
+                disabled={readOnly}
+                testId={`${testId}-exclude-patterns`}
+              />
+            </Field>
+          )}
+
+          {!isUpload && (
+            <Field
+              label={t("ragEditor.sources.sitemapUrls", "Sitemaps")}
+              hint={t(
+                "ragEditor.sources.sitemapUrlsHint",
+                "Sitemap URLs to discover pages from, comma separated. Only needed when robots.txt does not list them; sitemap indexes are followed",
+              )}
+            >
+              <PatternListInput
+                patterns={source.web?.sitemapUrls ?? []}
+                onCommit={(urls) => onChangeWeb({ sitemapUrls: urls })}
+                disabled={readOnly}
+                testId={`${testId}-sitemap-urls`}
+              />
+            </Field>
+          )}
+
+          {isUpload && (
+            <IngestionFilesPanel
+              kbId={kbId}
+              sourceId={source.id}
+              version={version}
+              readOnly={readOnly}
+              hasUnsavedChanges={hasUnsavedChanges}
+              onRunSource={
+                // A disabled source refuses to run; the banner's button must
+                // not offer what the source card's own button withholds.
+                isSaved && source.enabled !== false
+                  ? () => runMutation.mutate(source.id as string)
+                  : undefined
+              }
+              isRunning={runMutation.isPending || Boolean(activeRun)}
+              testId={testId}
             />
-          </Field>
+          )}
 
           {!isSaved ? (
             <p className="text-xs italic text-muted-foreground" data-testid={`${testId}-save-first`}>
@@ -393,7 +576,9 @@ function SourceCard({
                   data-testid={`${testId}-preview`}
                 >
                   {previewMutation.isPending ? <Loader2 className="animate-spin" /> : <Eye />}
-                  {t("ragEditor.sources.preview", "Preview")}
+                  {isUpload
+                    ? t("ragEditor.sources.previewFiles", "Preview changes")
+                    : t("ragEditor.sources.preview", "Preview")}
                 </Button>
                 <Button
                   size="sm"
@@ -492,6 +677,40 @@ function SourceCard({
           )}
         </div>
       )}
+
+      <AlertDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        title={t("ragEditor.sources.removeTitle", "Remove this source?")}
+        description={t(
+          "ragEditor.sources.removeDescription",
+          "When you save, its uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+        )}
+        confirmLabel={t("ragEditor.sources.remove", "Remove source")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmRemove(false);
+          onRemove();
+        }}
+      />
+
+      <AlertDialog
+        open={confirmTypeSwitch}
+        onOpenChange={setConfirmTypeSwitch}
+        title={t("ragEditor.sources.switchTypeTitle", "Turn this into a website source?")}
+        description={t(
+          "ragEditor.sources.switchTypeDescription",
+          "When you save, this source's uploaded files and everything the knowledge base learned from them are deleted. This cannot be undone.",
+        )}
+        confirmLabel={t("ragEditor.sources.switchTypeConfirm", "Switch to website")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmTypeSwitch(false);
+          onChange({ type: "web" });
+        }}
+      />
 
       <AlertDialog
         open={confirmPurge}
@@ -768,4 +987,52 @@ function StatusLine({
       {text}
     </p>
   );
+}
+
+/** One of the two kinds of source, as a pressable card rather than a select. */
+function TypeChoice({
+  label,
+  icon: Icon,
+  selected,
+  disabled,
+  onSelect,
+  testId,
+}: {
+  label: string;
+  icon: typeof Globe;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      disabled={disabled}
+      className={cn(
+        "flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+        selected
+          ? "border-primary bg-primary/10 font-medium text-foreground"
+          : "border-border bg-card/50 text-muted-foreground hover:bg-secondary",
+        disabled && "cursor-not-allowed opacity-60",
+      )}
+      data-testid={testId}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+      {label}
+    </button>
+  );
+}
+
+/** Bytes shown as whole megabytes, which is how the limit is typed. */
+function megabytesOf(bytes: number | undefined): number | undefined {
+  return bytes === undefined ? undefined : Math.max(1, Math.round(bytes / (1024 * 1024)));
+}
+
+function bytesFromMegabytes(value: string): number | undefined {
+  const megabytes = numberOrUndefined(value);
+  return megabytes === undefined ? undefined : megabytes * 1024 * 1024;
 }

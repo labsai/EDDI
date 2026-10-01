@@ -1,6 +1,10 @@
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueries, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { ENVIRONMENTS, type Environment } from "@/lib/constants";
+import { withAnyDeployedVersion } from "@/lib/deployment-environments";
 import { updateDescriptor } from "@/lib/api/descriptors";
 import { agentKeys } from "@/lib/query-keys";
+import { parseVersionFromLocation } from "@/lib/api/location-version";
 import {
   getAgentDescriptors,
   getAgentDescriptorsWithVersions,
@@ -13,9 +17,13 @@ import {
   undeployAgent,
   getDeploymentStatus,
   getDeploymentStatuses,
+  getDeploymentImpact,
+  listDeploymentStatuses,
+  type AgentDeploymentSummary,
   type Agent,
   type AgentDescriptor,
   type EnvironmentStatus,
+  type Ownership,
   parseResourceUri,
 } from "@/lib/api/agents";
 
@@ -32,22 +40,61 @@ export function useAgentDescriptors(
   });
 }
 
-/** Infinite-scroll agent list with offset-based pagination */
-export function useInfiniteAgentDescriptors(filter = "", space = "") {
+/**
+ * Infinite-scroll agent list.
+ *
+ * The page param is a PAGE INDEX, not a row offset: the backend skips
+ * `index * limit` rows (`DescriptorStore.readDescriptors`). Sending
+ * `allPages.length * PAGE_SIZE` made page 2 skip 2,500 rows, so the list stopped
+ * at 50 — and the sync page, which matches against these pages, created
+ * duplicates of every local agent past the first 50.
+ */
+export function useInfiniteAgentDescriptors(filter = "", space = "", ownership: Ownership = "", keySuffix?: string) {
   return useInfiniteQuery({
-    // The space is part of the key: switching workspace must refetch rather
-    // than re-render a cached page belonging to the previous one.
-    queryKey: [...agentKeys.descriptorsInfinite(filter), space],
-    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space),
+    // The space and ownership are part of the key: switching either must
+    // refetch rather than re-render a cached page belonging to the previous one.
+    queryKey: keySuffix
+      ? [...agentKeys.descriptorsInfinite(filter), space, ownership, keySuffix]
+      : [...agentKeys.descriptorsInfinite(filter), space, ownership],
+    queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space, ownership),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       // If we got a full page, there are probably more
       if (lastPage.length === PAGE_SIZE) {
-        return allPages.length * PAGE_SIZE;
+        return allPages.length;
       }
       return undefined; // no more pages
     },
   });
+}
+
+/**
+ * Every local agent, for pickers and matchers that must see the whole list —
+ * the sync page's auto-match by name, the import dialog's target pickers.
+ *
+ * Those used `useInfiniteAgentDescriptors` and never asked for a second page,
+ * so an agent past the first 50 could not be picked and was never matched: the
+ * sync then created a duplicate of it. This keeps fetching until the backend
+ * returns a short page (or a page fails). `isComplete` says whether the list is
+ * whole yet.
+ */
+export function useAllAgentDescriptors() {
+  // Its own cache entry: sharing the Agents list's key would leave that list
+  // holding every page after a visit to Sync, and each later invalidation
+  // (deploy, save) would re-fetch all of them one page after another.
+  const query = useInfiniteAgentDescriptors("", "", "", "all-pages");
+  const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = query;
+  // The page count is a dependency on purpose: the in-flight render can be
+  // batched away, so after a page lands every other dependency may read exactly
+  // as before (hasNextPage true, not fetching) and the effect would never fire
+  // again — the list stopped after two pages.
+  const pageCount = query.data?.pages.length ?? 0;
+  useEffect(() => {
+    // cancelRefetch: false — a repeat call while a page is in flight joins it
+    // instead of cancelling and restarting it.
+    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage({ cancelRefetch: false });
+  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage, pageCount]);
+  return { ...query, isComplete: query.isSuccess && !hasNextPage };
 }
 
 export function useAgent(id: string, version?: number) {
@@ -72,6 +119,22 @@ export function useDeploymentStatus(agentId: string, version: number, environmen
   });
 }
 
+/**
+ * What deploying `version` in `environment` would do to the conversations on
+ * the agent's other deployed versions — FOLLOW (they move to it on their next
+ * turn) or STAY. Informational only: nothing should wait on it, so it does not
+ * retry and callers render nothing while it loads or when it fails.
+ */
+export function useDeploymentImpact(agentId: string, version: number, environment = "production") {
+  return useQuery({
+    queryKey: agentKeys.deploymentImpact(environment, agentId, version),
+    queryFn: () => getDeploymentImpact(environment, agentId, version),
+    enabled: !!agentId && version > 0,
+    retry: false,
+    staleTime: 10_000,
+  });
+}
+
 export function useAgentVersions(agentId: string) {
   return useQuery({
     queryKey: [...agentKeys.all, "versions", agentId],
@@ -93,12 +156,23 @@ export function useAgentVersions(agentId: string) {
     // Both are fixed by resolving the id alongside the version and keeping only
     // this agent's, one entry per version.
     select: (descriptors) => {
-      const byVersion = new Map<number, { version: number; lastModifiedOn: number; name: string }>();
+      // `resource` and `callerLevel` ride along so the detail page can decide
+      // which controls to offer (see `accessForDetail` in `@/lib/access`).
+      const byVersion = new Map<
+        number,
+        { version: number; lastModifiedOn: number; name: string; resource: string; callerLevel?: string }
+      >();
       for (const d of descriptors) {
         const { id, version } = parseResourceUri(d.resource);
         if (id !== agentId) continue;
         if (!byVersion.has(version)) {
-          byVersion.set(version, { version, lastModifiedOn: d.lastModifiedOn, name: d.name });
+          byVersion.set(version, {
+            version,
+            lastModifiedOn: d.lastModifiedOn,
+            name: d.name,
+            resource: d.resource,
+            callerLevel: d.callerLevel,
+          });
         }
       }
       return [...byVersion.values()].sort((a, b) => b.version - a.version);
@@ -113,19 +187,39 @@ export function useUpdateAgent() {
       id,
       version,
       agent,
+      compatible,
     }: {
       id: string;
       version: number;
       agent: Agent;
-    }) => updateAgent(id, version, agent),
-    onSuccess: () => {
+      /** See `UpdateAgentOptions.compatible` — omitted means breaking. */
+      compatible?: boolean;
+    }) => updateAgent(id, version, agent, compatible ? { compatible } : undefined),
+    onSuccess: (result, { id, agent }) => {
+      // Seed the version the save created with the document just written, so
+      // a page that moves onto it renders the edit at once rather than the
+      // previous version's placeholder.
+      const newVersion = parseVersionFromLocation(result?.location);
+      if (newVersion !== null) {
+        queryClient.setQueryData([...agentKeys.all, id, newVersion], agent);
+      }
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
   });
 }
 
+/**
+ * Per-environment deployment status of an agent — at `version`, except that an
+ * environment with nothing at `version` (NOT_FOUND) reports whichever older
+ * version is still live there (flagged with `deployedVersion`; see
+ * `withAnyDeployedVersion`). An ERROR at `version` is never covered up.
+ *
+ * The environment-wide listing is only fetched when some environment has
+ * nothing at `version`, and is shared by key across every card on the page, so
+ * a list of 50 agents costs one listing per environment, not 50.
+ */
 export function useDeploymentStatuses(agentId: string, version: number) {
-  return useQuery({
+  const exact = useQuery({
     queryKey: [...agentKeys.all, "deploymentStatuses", agentId, version],
     queryFn: () => getDeploymentStatuses(agentId, version),
     enabled: !!agentId && version > 0,
@@ -136,6 +230,22 @@ export function useDeploymentStatuses(agentId: string, version: number) {
       return false;
     },
   });
+  // Only NOT_FOUND is ever replaced (see withAnyDeployedVersion), so only it
+  // needs the listing.
+  const needsListing = !!exact.data?.some((s) => s.status === "NOT_FOUND");
+  const listings = useQueries({
+    queries: ENVIRONMENTS.map((environment) => ({
+      queryKey: [...agentKeys.all, "deploymentListing", environment],
+      queryFn: () => listDeploymentStatuses(environment),
+      enabled: needsListing,
+      staleTime: 10_000,
+    })),
+  });
+  const deployed: Partial<Record<Environment, AgentDeploymentSummary[] | undefined>> = {};
+  ENVIRONMENTS.forEach((environment, i) => {
+    deployed[environment] = listings[i]?.data;
+  });
+  return { ...exact, data: withAnyDeployedVersion(exact.data, deployed, agentId, version) };
 }
 
 export function useCreateAgent() {

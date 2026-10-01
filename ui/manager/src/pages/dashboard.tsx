@@ -14,13 +14,13 @@ import {
   FileText,
   ShieldCheck,
   KeyRound,
-  Boxes,
-  Activity,
   Server,
   Cloud,
   CheckCircle2,
   AlertTriangle,
   Sparkles,
+  Network,
+  Users,
 } from "lucide-react";
 import {
   useDashboardStats,
@@ -38,7 +38,8 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { parseConversationUri } from "@/lib/api/conversations";
 import { useAgentDescriptors } from "@/hooks/use-agents";
-import { useOperatorConfig } from "@/hooks/use-operator";
+import { useOperatorConfig, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
+import { OperatorUpgradeHint } from "@/components/operator/operator-upgrade";
 
 // ─── State badge color helper ────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ export function DashboardPage() {
     {
       label: t("pages.dashboard.activeAgents"),
       value: stats?.agentCount ?? 0,
+      capped: stats?.agentCountCapped ?? false,
       icon: Bot,
       gradient: "from-amber-500/10 to-primary/5",
       iconColor: "text-primary bg-primary/10",
@@ -97,6 +99,7 @@ export function DashboardPage() {
     {
       label: t("pages.dashboard.totalWorkflows"),
       value: stats?.workflowCount ?? 0,
+      capped: stats?.workflowCountCapped ?? false,
       icon: Workflow,
       gradient: "from-emerald-500/10 to-emerald-500/5",
       iconColor: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
@@ -105,6 +108,7 @@ export function DashboardPage() {
     {
       label: t("pages.dashboard.totalConversations"),
       value: stats?.conversationCount ?? 0,
+      capped: stats?.conversationCountCapped ?? false,
       icon: MessageSquare,
       gradient: "from-blue-500/10 to-blue-500/5",
       iconColor: "text-blue-600 dark:text-blue-400 bg-blue-500/10",
@@ -113,6 +117,7 @@ export function DashboardPage() {
     {
       label: t("pages.dashboard.totalResources"),
       value: stats?.resourceCount ?? 0,
+      capped: false,
       icon: FileCode,
       gradient: "from-violet-500/10 to-violet-500/5",
       iconColor: "text-violet-600 dark:text-violet-400 bg-violet-500/10",
@@ -171,7 +176,7 @@ export function DashboardPage() {
               <Server className="h-3.5 w-3.5 text-purple-500" />
             )
           ) : (
-            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+            <Network className="h-3.5 w-3.5 text-muted-foreground" />
           )}
           <span className="text-muted-foreground">
             {coordinatorStatus
@@ -216,8 +221,12 @@ export function DashboardPage() {
                 </CardContent>
               </Card>
             ))
-          : visibleStatCards.map((stat) => (
-              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${stat.value}`}>
+          : visibleStatCards.map((stat) => {
+              // A count that filled its whole page is a lower bound — say so
+              // rather than presenting the page size as the total.
+              const shown = `${stat.value.toLocaleString()}${stat.capped ? "+" : ""}`;
+              return (
+              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${shown}`}>
                 <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0">
                   {/* Gradient background */}
                   <div className={cn("absolute inset-0 bg-linear-to-br opacity-0 transition-opacity group-hover:opacity-100", stat.gradient)} />
@@ -229,8 +238,8 @@ export function DashboardPage() {
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         {stat.label}
                       </p>
-                      <p className="text-2xl font-bold text-foreground tabular-nums">
-                        {stat.value > 0 ? stat.value.toLocaleString() : (
+                      <p className="text-2xl font-bold text-foreground tabular-nums" data-testid={`stat-value-${stat.to.split("/").pop()}`}>
+                        {stat.value > 0 ? shown : (
                           <span className="flex items-center gap-1 text-muted-foreground/50">
                             0 <Plus className="h-3 w-3" />
                           </span>
@@ -240,7 +249,8 @@ export function DashboardPage() {
                   </CardContent>
                 </Card>
               </Link>
-            ))}
+              );
+            })}
       </div>
 
       {/* Quick Actions */}
@@ -281,7 +291,7 @@ export function DashboardPage() {
           </Button>
           <Button variant="outline" asChild>
             <Link to="/manage/groups/wizard">
-              <Boxes className="h-4 w-4" />
+              <Users className="h-4 w-4" />
               {t("dashboard.createGroup", "Create Group")}
             </Link>
           </Button>
@@ -442,10 +452,15 @@ export function DashboardPage() {
 function OperatorDiscoveryCard() {
   const { t } = useTranslation();
   const { data: config, isLoading, isError } = useOperatorConfig();
+  const upgrade = useOperatorUpgradeAssessment(config);
 
-  // Hide once an operator exists at all — a paused one is configured, not
-  // undiscovered — and while the config cannot be read.
-  if (isLoading || isError || config?.agentId) return null;
+  if (isLoading || isError) return null;
+  // A running operator that predates this Manager is the one thing about an
+  // existing operator worth a dashboard line — it will not update itself.
+  if (upgrade?.needed) return <OperatorUpgradeHint testId="operator-dashboard-upgrade-hint" />;
+  // Otherwise hide once an operator exists at all — a paused one is
+  // configured, not undiscovered.
+  if (config?.agentId) return null;
 
   return (
     <Card className="border-primary/30 bg-primary/5" data-testid="operator-discovery-card">

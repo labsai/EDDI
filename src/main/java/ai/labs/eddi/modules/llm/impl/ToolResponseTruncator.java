@@ -19,7 +19,6 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -220,8 +219,8 @@ public class ToolResponseTruncator {
 
         try {
             // Build summarizer params: inherit parent task's params, override modelName
-            Map<String, String> summarizerParams = new HashMap<>(taskParameters);
-            summarizerParams.put("modelName", summarizerModel);
+            // (every provider's model key — see ModelParameterKeys#withModel)
+            Map<String, String> summarizerParams = ModelParameterKeys.withModel(taskParameters, taskType, summarizerModel);
             // Strip responseFormat — summarizer must return plain text, not JSON
             summarizerParams.remove("responseFormat");
 

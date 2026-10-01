@@ -167,6 +167,82 @@ describe("ChatPanel", () => {
     });
   });
 
+  /**
+   * The restart control on the Manager's main 1:1 agent chat.
+   *
+   * It has always been here and has always worked — but nothing asserted it,
+   * while the drawer's equivalent (`drawer-new-conversation`) and the history
+   * panel's (`new-conversation-btn`) both had coverage. A control that exists
+   * and quietly does nothing is a real failure mode on this page: the group
+   * page's "New Discussion" was exactly that for months, because an effect put
+   * back the state the handler had just cleared.
+   */
+  describe("New Conversation", () => {
+    it("offers restart and end once a conversation is open", () => {
+      useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+      useChatStore.getState().setConversationId("conv1");
+
+      renderWithProviders(<ChatPanel />);
+
+      expect(screen.getByTestId("new-conversation")).toBeInTheDocument();
+      expect(screen.getByTestId("end-conversation")).toBeInTheDocument();
+    });
+
+    it("offers neither before a conversation exists", () => {
+      useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+
+      renderWithProviders(<ChatPanel />);
+
+      // Nothing to restart or end yet — the gate is deliberate, not an oversight.
+      expect(screen.queryByTestId("new-conversation")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("end-conversation")).not.toBeInTheDocument();
+    });
+
+    it("starts a fresh conversation and clears the transcript", async () => {
+      const user = userEvent.setup();
+      let started = 0;
+      server.use(
+        http.post("*/agents/agent1/start", () => {
+          started += 1;
+          return HttpResponse.json(null, {
+            status: 201,
+            headers: {
+              Location:
+                "eddi://ai.labs.conversation/conversationstore/conversations/conv-fresh",
+            },
+          });
+        }),
+        http.get("*/agents/conv-fresh", () =>
+          HttpResponse.json({ conversationSteps: [], conversationOutputs: [] }),
+        ),
+      );
+
+      useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+      useChatStore.getState().setConversationId("conv1");
+      useChatStore.getState().addMessage({
+        id: "m1",
+        role: "agent",
+        content: "Something from the conversation being left behind",
+        timestamp: Date.now(),
+      });
+
+      renderWithProviders(<ChatPanel />);
+      expect(
+        screen.getByText("Something from the conversation being left behind"),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("new-conversation"));
+
+      await waitFor(() => {
+        expect(useChatStore.getState().conversationId).toBe("conv-fresh");
+      });
+      expect(started).toBe(1);
+      expect(
+        screen.queryByText("Something from the conversation being left behind"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("supports sending a normal text message and quick replies", async () => {
     const user = userEvent.setup();
     
@@ -192,6 +268,8 @@ describe("ChatPanel", () => {
     const input = screen.getByTestId("chat-input");
     const sendBtn = screen.getByTestId("chat-send");
     expect(sendBtn).toBeInTheDocument();
+    // Sends open once the agent's review lookup has answered.
+    await waitFor(() => expect(input).toBeEnabled());
 
     await user.type(input, "Hello bot");
     await user.click(sendBtn);
@@ -209,6 +287,33 @@ describe("ChatPanel", () => {
       const messages = useChatStore.getState().messages;
       expect(messages.some((m) => m.role === "user" && m.content === "Yes")).toBe(true);
     });
+  });
+
+  it("holds every send until the agent's review notice has had its chance to appear", async () => {
+    // The notice loads on its own; sending was open as soon as a conversation
+    // existed, so a turn could be committed before the person was told it may be read.
+    let answer: () => void = () => {};
+    const answered = new Promise<void>((resolve) => { answer = resolve; });
+    server.use(
+      http.get("*/agents/:agentId/profile", async () => {
+        await answered;
+        return HttpResponse.json({ agentId: "agent1", reviewNotice: "The team may read this chat." });
+      })
+    );
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().setQuickReplies(["Yes"]);
+
+    renderWithProviders(<ChatPanel />);
+
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
+    expect(screen.queryByTestId("quick-reply-btn")).not.toBeInTheDocument();
+
+    answer();
+
+    expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent("The team may read this chat.");
+    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
+    expect(screen.getByTestId("quick-reply-btn")).toBeInTheDocument();
   });
 
   it("toggles secret mode and sends a masked input", async () => {
@@ -647,7 +752,59 @@ describe("ChatPanel", () => {
     await user.click(redoBtn);
   });
 
-  it("auto-starts conversation if agentId query parameter is present", async () => {
+  it("holds every other way of changing the conversation while an undo is in flight", async () => {
+    // The undo finishes by replacing the transcript with a fresh read, so a
+    // send, quick reply or redo issued meanwhile would race that read.
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().setUndoRedo(true, true);
+    useChatStore.getState().setQuickReplies(["Yes"]);
+    server.use(
+      // Never answers: the assertions read the in-flight state.
+      http.post("*/agents/conv1/undo", () => new Promise<never>(() => {})),
+    );
+
+    renderWithProviders(<ChatPanel />);
+    // Sends open once the agent's review lookup has answered.
+    await waitFor(() => expect(screen.getByTestId("chat-input")).toBeEnabled());
+    expect(screen.getByTestId("quick-reply-btn")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("undo-btn"));
+
+    await waitFor(() => expect(screen.getByTestId("chat-input")).toBeDisabled());
+    expect(screen.queryByTestId("quick-reply-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("redo-btn")).not.toBeInTheDocument();
+  });
+
+  it("offers no undo, redo or send while a rerun is in flight", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().setUndoRedo(true, true);
+    useChatStore.getState().addMessage({
+      id: "m1",
+      role: "agent",
+      content: "⚠️ Error: Something went wrong",
+      timestamp: Date.now(),
+    });
+    server.use(http.post("*/agents/conv1/rerun", () => new Promise<never>(() => {})));
+
+    renderWithProviders(<ChatPanel />);
+    expect(screen.getByTestId("undo-btn")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("rerun-btn"));
+
+    await waitFor(() => expect(screen.queryByTestId("undo-btn")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("redo-btn")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
+  });
+
+  it("preselects the agent from ?agentId= but does NOT auto-start a conversation", async () => {
+    // Auto-starting from a URL param let a crafted link silently open a
+    // conversation as the admin the moment the page loaded. A deep link may only
+    // PRESELECT; starting stays an explicit user action.
+    let started = false;
     server.use(
       http.get("*/agentstore/agents/descriptors", () => {
         return HttpResponse.json([
@@ -669,6 +826,7 @@ describe("ChatPanel", () => {
         return HttpResponse.json({ status: "READY" });
       }),
       http.post("*/agents/agent-query-1/start", () => {
+        started = true;
         return HttpResponse.json(null, {
           status: 201,
           headers: {
@@ -676,25 +834,60 @@ describe("ChatPanel", () => {
           },
         });
       }),
-      http.get("*/agents/conv-query", () => {
-        return HttpResponse.json({
-          conversationSteps: [],
-          conversationOutputs: [
-            {
-              output: [{ type: "text", text: "Auto hello!" }],
-            },
-          ],
-        });
-      })
     );
 
     renderWithProviders(<ChatPanel />, { initialRoute: "/?agentId=agent-query-1" });
 
+    // The agent is preselected...
     await waitFor(() => {
       expect(useChatStore.getState().selectedAgentId).toBe("agent-query-1");
-      expect(useChatStore.getState().conversationId).toBe("conv-query");
-      expect(screen.getByText("Auto hello!")).toBeInTheDocument();
     });
+    // ...but no conversation was started and no /start call was made.
+    expect(useChatStore.getState().conversationId).toBeNull();
+    expect(started).toBe(false);
+
+    // The explicit start is offered instead — without it the input stays disabled
+    // and the user has to re-pick the agent they were deep-linked to.
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("open-chat"));
+    await waitFor(() => {
+      expect(useChatStore.getState().conversationId).not.toBeNull();
+    });
+    expect(screen.queryByTestId("open-chat")).not.toBeInTheDocument();
+  });
+
+  it("ignores ?agentName= and resolves the display name from the deployed list", async () => {
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () => {
+        return HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent-query-1?version=1",
+            name: "Real Agent Name",
+            description: "Loaded via query param",
+          },
+        ]);
+      }),
+      http.get("*/documentdescriptor/descriptors/agentstore/agents/agent-query-1", () => {
+        return HttpResponse.json({
+          resource: "eddi://ai.labs.agent/agentstore/agents/agent-query-1?version=1",
+          name: "Real Agent Name",
+          description: "Loaded via query param",
+        });
+      }),
+      http.get("*/deployment/production/agentstore/agents/agent-query-1/version/1", () => {
+        return HttpResponse.json({ status: "READY" });
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />, {
+      initialRoute: "/?agentId=agent-query-1&agentName=%3Cb%3EInjected%3C%2Fb%3E",
+    });
+
+    await waitFor(() => {
+      expect(useChatStore.getState().selectedAgentId).toBe("agent-query-1");
+    });
+    // The attacker-supplied name must never win over the deployed-list name.
+    expect(useChatStore.getState().selectedAgentName).toBe("Real Agent Name");
   });
 });
 
@@ -705,6 +898,8 @@ describe("ChatPanel — shared live status line", () => {
     useChatStore.getState().addMessage({ id: "u1", role: "user", content: "hi", timestamp: Date.now() });
     useChatStore.getState().setProcessing(true);
     useDebugStore.setState({
+      // Not bound to an earlier test's conversation: the turn is conv1's own.
+      boundConversationId: null,
       currentTurnEvents: [
         { type: "task_start", taskType: "ai.labs.httpcalls", taskId: "1", index: 0, timestamp: Date.now() },
       ],

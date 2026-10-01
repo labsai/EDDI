@@ -29,4 +29,9 @@ class InMemoryIngestionStateStoreTest implements IngestionStateStoreContract {
     public IIngestionStateStore store() {
         return store;
     }
+
+    @Override
+    public void forceDocumentOwner(String sourceId, String documentId, String runId) {
+        store.forceDocumentOwner(sourceId, documentId, runId);
+    }
 }

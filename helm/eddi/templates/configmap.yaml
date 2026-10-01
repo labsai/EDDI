@@ -158,18 +158,16 @@ data:
     MongoDB store. Guard and render now read the same binding.
   */}}
   EDDI_DATASTORE_TYPE: {{ $declaredType | quote }}
-  {{- if .Values.mongodb.enabled }}
-  MONGODB_CONNECTIONSTRING: "mongodb://{{ include "eddi.fullname" . }}-mongodb:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
-  {{- end }}
   {{- /*
-    eddi.datastore.externalConnectionString is NOT rendered here. It is
-    documented as "mongodb://user:pass@host:27017/eddi", i.e. credential-bearing,
-    and a ConfigMap is readable by every principal with `get configmaps` in the
-    namespace. It goes into the projected Secret as
-    mongodb.connectionString instead (secret.yaml), which is the same path the
-    vault key and the in-chart PostgreSQL credentials take: secrets arrive as
-    FILES, never as env vars (see deployment.yaml). The in-chart URL above
-    carries no credentials, so it stays.
+    The in-chart MongoDB now runs WITH authentication, so its connection string
+    carries credentials (mongodb://user:pass@…). Like the external URL below and
+    the PostgreSQL credentials, that is NOT rendered here — a ConfigMap is readable
+    by anything holding `get configmaps` in the namespace. It goes into the
+    projected Secret as mongodb.connectionString (secret.yaml), which reaches EDDI
+    as a FILE. Nothing MongoDB-related is emitted into this ConfigMap any more.
+
+    eddi.datastore.externalConnectionString is NOT rendered here either, for the
+    same reason — it is documented as "mongodb://user:pass@host:27017/eddi".
 
     Same for the external PostgreSQL username/password — only the JDBC URL,
     which is an address rather than a credential, is rendered below.
@@ -186,6 +184,12 @@ data:
   EDDI_NATS_URL: "nats://{{ include "eddi.fullname" . }}-nats:4222"
   {{- end }}
   QUARKUS_HTTP_CORS_ORIGINS: {{ .Values.eddi.corsOrigins | quote }}
+  {{- with (.Values.eddi.metrics | default dict).httpPolicy }}
+  EDDI_METRICS_HTTP_POLICY: {{ . | quote }}
+  {{- end }}
+  {{- with (.Values.eddi.chat | default dict).frameAncestors }}
+  EDDI_CHAT_FRAME_ANCESTORS: {{ . | quote }}
+  {{- end }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
   {{- /*
     With OIDC off, AuthStartupGuard refuses a production boot unless the escape
@@ -207,9 +211,45 @@ data:
   {{- $allowAll := .Values.eddi.security.allowUnauthenticated }}
   {{- $allowMcp := .Values.eddi.security.allowUnauthenticatedMcp }}
   {{- $allowSecretStore := .Values.eddi.security.allowUnauthenticatedSecretStore }}
-  EDDI_SECURITY_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowAll) $allowAll }}{{ $allowAll | quote }}{{ else }}{{ $oidcOff | quote }}{{ end }}
-  EDDI_MCP_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowMcp) $allowMcp }}{{ $allowMcp | quote }}{{ else }}{{ $oidcOff | quote }}{{ end }}
-  EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowSecretStore) $allowSecretStore }}{{ $allowSecretStore | quote }}{{ else }}{{ $oidcOff | quote }}{{ end }}
+  {{- $allowAllSet := or (kindIs "bool" $allowAll) $allowAll }}
+  {{- /*
+    Publishing EDDI through an Ingress while OIDC is off would put every endpoint
+    on the network with no authentication — the exact default this chart used to
+    ship. Refuse to render it unless the operator has EXPLICITLY acknowledged an
+    unauthenticated deployment via eddi.security.allowUnauthenticated. A local
+    install without an Ingress (the dev quickstart) is unaffected: the gate only
+    fires when ingress.enabled is true.
+  */}}
+  {{- if and .Values.ingress.enabled $oidcOff (not $allowAllSet) }}
+  {{- fail "ingress.enabled=true with eddi.oidc.enabled=false would publish EDDI to the network with no authentication on any endpoint. Enable OIDC (eddi.oidc.enabled=true, the supported production posture), or — to expose it unauthenticated on purpose (air-gapped/demo) — acknowledge it explicitly by setting eddi.security.allowUnauthenticated=true (and, for the MCP server and the secrets vault, allowUnauthenticatedMcp / allowUnauthenticatedSecretStore). This gate does not fire without an Ingress, so the local quickstart is unaffected." }}
+  {{- end }}
+  {{- /*
+    The same decision HighValueSurfaceGuard enforces at boot, taken at render
+    time instead. With OIDC off, authorization.enabled is false (it tracks
+    quarkus.oidc.tenant-enabled), and a production-mode EDDI refuses to start
+    unless BOTH /mcp and /secretstore are explicitly opted in. Rendering that
+    anyway gave `helm install` a success message and a pod in CrashLoopBackOff —
+    for the chart's own no-flag default. Refuse it here, naming the same values
+    the boot failure would. Nothing is opened by default: the operator still has
+    to choose, or turn OIDC on.
+  */}}
+  {{- $mcpOpen := eq (lower (toString (default "" $allowMcp))) "true" }}
+  {{- $secretStoreOpen := eq (lower (toString (default "" $allowSecretStore))) "true" }}
+  {{- if and $oidcOff (not (and $mcpOpen $secretStoreOpen)) }}
+  {{- fail (printf "eddi.oidc.enabled=false, and without OIDC EDDI refuses to boot (HighValueSurfaceGuard) unless the MCP server and the secrets vault are each opted in to unauthenticated access — so this release would install and then crash-loop. Currently allowUnauthenticatedMcp=%q, allowUnauthenticatedSecretStore=%q. Either enable OIDC (eddi.oidc.enabled=true with keycloak.enabled=true or eddi.oidc.authServerUrl — the supported production posture), or, for a local/port-forward install you alone can reach, acknowledge both explicitly: --set eddi.security.allowUnauthenticatedMcp=true --set eddi.security.allowUnauthenticatedSecretStore=true." (toString (default "" $allowMcp)) (toString (default "" $allowSecretStore))) }}
+  {{- end }}
+  EDDI_SECURITY_ALLOW_UNAUTHENTICATED: {{ if $allowAllSet }}{{ $allowAll | quote }}{{ else }}{{ $oidcOff | quote }}{{ end }}
+  {{- /*
+    The MCP server (agent CRUD, conversations, memories, audit trails) and the
+    secrets vault are NOT derived from oidcOff any more. Deriving them meant that
+    turning OIDC off silently opened both — the very thing HighValueSurfaceGuard
+    exists to prevent. Unset now renders "false", so an OIDC-off deployment must
+    opt each surface in explicitly (allowUnauthenticatedMcp / …SecretStore=true)
+    or the pod refuses to boot, naming exactly what to set. This is deliberate:
+    a no-OIDC install no longer ships an open credential store by default.
+  */}}
+  EDDI_MCP_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowMcp) $allowMcp }}{{ $allowMcp | quote }}{{ else }}{{ "false" | quote }}{{ end }}
+  EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowSecretStore) $allowSecretStore }}{{ $allowSecretStore | quote }}{{ else }}{{ "false" | quote }}{{ end }}
   {{- if .Values.eddi.oidc.enabled }}
   {{- if .Values.keycloak.enabled }}
   QUARKUS_OIDC_AUTH_SERVER_URL: "http://{{ include "eddi.fullname" . }}-keycloak:8080/realms/eddi"
@@ -283,6 +323,9 @@ data:
   {{- $metadata := .Values.eddi.oidc.resourceMetadata | default dict }}
   {{- with $metadata.authorizationServer }}
   QUARKUS_OIDC_RESOURCE_METADATA_AUTHORIZATION_SERVER: {{ . | quote }}
+  {{- end }}
+  {{- with $metadata.resource }}
+  QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE: {{ . | quote }}
   {{- end }}
   {{- $forceHttps := $metadata.forceHttpsScheme }}
   {{- if kindIs "invalid" $forceHttps }}

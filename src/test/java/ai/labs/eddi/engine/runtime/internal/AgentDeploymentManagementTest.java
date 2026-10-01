@@ -28,6 +28,8 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -87,6 +89,15 @@ class AgentDeploymentManagementTest {
                 migrationManager, v6RenameMigration, v6QuteMigration,
                 channelConnectorMigration, mock(WorkspaceAccessIndexMigration.class),
                 runtime, workflowStore, ruleSetStore, 30);
+        // What the real factory answers once deployAgent has succeeded; the sweep
+        // records a deployment as done only on READY.
+        IAgent readyAgent = mock(IAgent.class);
+        when(readyAgent.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+        try {
+            when(agentFactory.getAgent(any(), any(), any())).thenReturn(readyAgent);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Nested
@@ -131,6 +142,36 @@ class AgentDeploymentManagementTest {
             verify(deploymentStore, never()).setDeploymentInfo(any(), any(), any(), any());
             // Scoped, never agent-wide — sibling versions were not checked.
             verify(deploymentStore, never()).deleteDeploymentInfos(any());
+        }
+
+        /**
+         * The sweep runs on its own ten-second schedule, not after the startup
+         * migrations. Until the 6.x rename migration has completed, the agent configs
+         * are still in {@code bots} and {@code agents} does not exist — so every
+         * deployed agent reads as deleted and the retire path above deletes the
+         * deployment row of every agent in the database. Observed on a real EDDI 5.5.1
+         * staging database: both deployed agents lost their deployment rows before the
+         * migration had started.
+         */
+        @Test
+        @DisplayName("deletes nothing while the V6 rename migration is still pending")
+        void skipsTheSweepWhileTheRenameMigrationIsPending() throws Exception {
+            var info = new DeploymentInfo();
+            info.setEnvironment(Environment.production);
+            info.setAgentId("agentStillUnderItsV5Name");
+            info.setAgentVersion(1);
+
+            when(v6RenameMigration.isPending()).thenReturn(true);
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
+            // What a pre-rename database answers: there is no `agents` collection yet.
+            when(agentStore.read(anyString(), anyInt())).thenThrow(new IResourceStore.ResourceNotFoundException("no agents collection"));
+
+            management.checkDeployments();
+
+            verify(deploymentStore, never()).deleteDeploymentInfo(any(), any(), any());
+            verify(deploymentStore, never()).deleteDeploymentInfos(any());
+            verify(deploymentStore, never()).setDeploymentInfo(any(), any(), any(), any());
+            verify(agentFactory, never()).deployAgent(any(), anyString(), anyInt(), any());
         }
 
         @Test

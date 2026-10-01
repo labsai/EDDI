@@ -1,6 +1,6 @@
 ---
 name: eddi-ui
-description: EDDI Manager's UI vocabulary — the 25 existing components, their variant props, the brand tokens, and the styling rules. Load before writing or editing any component that renders.
+description: EDDI Manager's UI vocabulary — the existing primitives and shared components, their variant props, the brand tokens, and the styling rules. Load before writing or editing any component that renders.
 ---
 
 # EDDI Manager UI
@@ -15,7 +15,7 @@ class system, never use raw hex.
 
 | Component | Notes |
 |---|---|
-| `Button` | `variant`: primary (default) · secondary · destructive · outline · ghost · link. `size`: sm · md (default) · lg · icon. `asChild` for link buttons. Lucide icon as a child auto-sizes to 16px. |
+| `Button` | `variant`: primary (default) · secondary · destructive · warning · outline · ghost · link. `size`: sm · md (default) · lg · icon. `asChild` for link buttons. Lucide icon as a child auto-sizes to 16px. |
 | `Badge` | `variant`: default (gold) · secondary · success · warning · destructive · outline. Pill, `text-xs font-semibold`. |
 | `Card` | Compose `Card` > `CardHeader` (`CardTitle`, `CardDescription`) + `CardContent` + `CardFooter`. `rounded-xl border bg-card shadow-sm`; header is `p-5 pb-0`, content `p-5`. |
 | `Input` | `h-10 rounded-lg`, gold focus ring. Plain `InputHTMLAttributes`. |
@@ -26,6 +26,7 @@ class system, never use raw hex.
 | `DropdownMenu` | Radix wrapper. |
 | `ErrorBoundary` | Wrap risky subtrees. |
 | `StreamBadge` | Live/streaming indicator. |
+| `ResizeHandle` | Draggable, keyboard-operable separator between panels: `direction`, `label`, `onResize(delta)` — the delta is logical (positive = this panel grows), so it is RTL-safe. `value`/`min`/`max` let it report its position. |
 
 ### `src/components/shared/` — app-level
 
@@ -43,6 +44,9 @@ class system, never use raw hex.
 | `CreateOrWizardDialog` | "Quick create or launch the wizard" fork. |
 | `ModeSwitcher`, `RefetchErrorNotice` | Mode switch; background-refetch failure notice. |
 | `UpdateCheckCard` | "Is a newer EDDI released?" panel for the dashboard. No props. Opt-in — issues no request until the operator asks. |
+| `ChipInput` | A list of short values entered one at a time (scopes, origins, keywords). `values`/`onChange`, plus `pending`/`onPendingChange` — the half-typed text is the caller's state — and optional `validate`. |
+| `StepDots` | Wizard progress (`total`, `current`); announces the step to screen readers. |
+| `ConnectionReferenceButton`, `ConnectionReferenceWarning` | Insert a `${connection:…}` reference, and explain in place why a value will be refused. Only where the backend resolves references (httpcall headers, MCP / A2A `apiKey`). |
 
 ### `src/components/layout/` — the shell
 
@@ -70,7 +74,10 @@ Declared in `@theme` in `src/index.css`; `.dark` overrides them. Use the semanti
 | `muted` / `muted-foreground` | `#f5f5f4` / `#78716c` | subtle surface, secondary text |
 | `border`, `input` | `#e7e5e4` | hairlines, field borders |
 | `destructive` / `destructive-foreground` | `#dc2626` / `#fff` | danger |
-| `accent` | `#fbbf24` | brighter gold |
+| `accent` / `accent-foreground` | `#fbbf24` / `#0c0a09` | brighter gold |
+| `warning` / `warning-foreground` | `#92400e` / `#fff` | caution — Button, Badge and AlertDialog `warning` variants |
+| `popover` / `popover-foreground` | `#ffffff` / `#1c1917` | menus, popovers |
+| `ring` | `#f59e0b` | focus ring |
 | `sidebar` / `sidebar-foreground` | `#ffffff` / `#44403c` | sidebar surface + text |
 | `sidebar-border` | `#e7e5e4` | sidebar hairlines |
 | `sidebar-accent` / `-foreground` | `#b45309` / `#ffffff` | active nav; dark mode restores bright gold `#f59e0b` on `#0c0a09` |
@@ -80,7 +87,8 @@ containers, `rounded-full` badges), `--font-sans` is Noto Sans Variable with per
 fallbacks — do not set another font.
 
 Status colors outside the token set (emerald for success/deploy, amber for dirty state,
-blue for update) exist in a few places. Reuse the existing pattern rather than inventing
+blue for update) exist in a few places; the `warning` token is what the Button, Badge and
+AlertDialog `warning` variants use. Reuse the existing pattern rather than inventing
 a new palette: `text-emerald-600 dark:text-emerald-400`, `bg-amber-100 … dark:bg-amber-900/30`.
 
 ## Examples

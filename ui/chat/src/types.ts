@@ -10,6 +10,8 @@ export interface ChatMessage {
   timestamp: number;
   /** True while the agent is still streaming tokens. */
   isStreaming?: boolean;
+  /** `image` output items, rendered by the widget rather than as markdown. */
+  images?: { uri: string; alt?: string }[];
 }
 
 /**
@@ -60,7 +62,7 @@ export type ConversationState =
 
 /**
  * SSE event types emitted by POST /agents/{conversationId}/stream.
- * Mirrors RestAgentEngineStreaming — all eight.
+ * Mirrors RestAgentEngineStreaming — all nine.
  *
  * Note: there is no "thinking" event. The UI previously declared one and the
  * backend never emitted it, so the thinking indicator was only ever cleared by
@@ -72,6 +74,7 @@ export type SSEEventType =
   | "task_start"
   | "task_complete"
   | "task_failed"
+  | "tool_call"
   | "cascade_step_start"
   | "cascade_escalation"
   | "done"
@@ -111,6 +114,13 @@ export interface ConversationStep {
 export interface ConversationSnapshot {
   agentId: string;
   agentVersion: number;
+  /**
+   * The agent's display name. The backend sets it on a conversation read, for
+   * a caller who may use the agent — including one holding only `eddi-user`,
+   * who cannot read the descriptor store. Absent when it cannot be resolved,
+   * and on every other snapshot (say, stream `done`, undo/redo).
+   */
+  agentName?: string;
   conversationId: string;
   conversationState: ConversationState;
   environment: string;
@@ -119,7 +129,20 @@ export interface ConversationSnapshot {
   conversationProperties?: Record<string, unknown>;
   undoAvailable?: boolean;
   redoAvailable?: boolean;
+  /**
+   * Why the conversation ended, when the backend recorded a reason — today
+   * only {@link END_REASON_AGENT_VERSION_RETIRED}. Absent otherwise.
+   */
+  endReason?: string;
 }
+
+/**
+ * `endReason` of a conversation ended because the agent version it ran on was
+ * undeployed with "end all active conversations" — the assistant was updated
+ * in a way the conversation could not follow (backend
+ * `IConversationService.END_REASON_AGENT_VERSION_RETIRED`).
+ */
+export const END_REASON_AGENT_VERSION_RETIRED = "agent-version-retired";
 
 /** A single output item from the backend output array. */
 export interface OutputItem {
@@ -129,10 +152,20 @@ export interface OutputItem {
   placeholder?: string;
   label?: string;
   defaultValue?: string;
+  /** image */
+  uri?: string;
+  alt?: string;
+  /** applicationLink */
+  path?: string;
 }
 
 /** Per-step output block from POST /agents responses. */
 export interface ConversationOutput {
+  /**
+   * The display copy of the user's message — `<secret input>` for a turn sent
+   * with `secretInput`, where the step's `input:initial` stays raw.
+   */
+  input?: string;
   actions?: string[];
   output?: OutputItem[];
   quickReplies?: QuickReply[];

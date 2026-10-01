@@ -20,6 +20,12 @@ export interface ChatState {
   messages: ChatMessage[];
   conversationId: string | null;
   conversationState: ConversationState | null;
+  /**
+   * Why an ENDED conversation ended, when the backend said (snapshot
+   * `endReason`). Null while the conversation is not ended, or when no reason
+   * is known.
+   */
+  endReason: string | null;
   quickReplies: QuickReply[];
   isProcessing: boolean;
   isThinking: boolean;
@@ -30,9 +36,22 @@ export interface ChatState {
    * cost — those stay admin-side in EDDI-Manager.
    */
   isEscalating: boolean;
+  /**
+   * Name of the tool the agent is running right now, from the live `tool_call`
+   * event, or null. There is no "tool finished" event, so resumed output is the
+   * completion signal: the next token clears it, as does anything that ends the
+   * turn. Transient by design — it drives the status line only and never
+   * becomes part of the transcript.
+   */
+  activeTool: string | null;
   undoAvailable: boolean;
   redoAvailable: boolean;
   agentName: string | null;
+  /**
+   * Shown before the first message when the agent's maintainers may read this
+   * conversation. Null when they may not.
+   */
+  reviewNotice: string | null;
   config: ChatConfig;
   /** Set when the backend requests a specific input field (e.g. password). */
   activeInputField: InputField | null;
@@ -78,13 +97,16 @@ export const initialState: ChatState = {
   messages: [],
   conversationId: null,
   conversationState: null,
+  endReason: null,
   quickReplies: [],
   isProcessing: false,
   isThinking: false,
   isEscalating: false,
+  activeTool: null,
   undoAvailable: false,
   redoAvailable: false,
   agentName: null,
+  reviewNotice: null,
   config: defaultConfig,
   activeInputField: null,
   isSecretMode: false,
@@ -97,7 +119,16 @@ export const initialState: ChatState = {
 
 export type ChatAction =
   | { type: "SET_CONVERSATION_ID"; id: string | null }
-  | { type: "SET_CONVERSATION_STATE"; state: ConversationState }
+  | {
+      type: "SET_CONVERSATION_STATE";
+      state: ConversationState;
+      /**
+       * The snapshot's `endReason`, from a read that carries one (`null` when
+       * it had none). Omit it from sources that never do — the trimmed `done`
+       * payload — so a reason already learned is kept.
+       */
+      endReason?: string | null;
+    }
   | { type: "ADD_MESSAGE"; message: ChatMessage }
   | { type: "ADD_SNAPSHOT_MESSAGE"; message: ChatMessage }
   | { type: "APPEND_TO_LAST_AGENT"; token: string }
@@ -106,10 +137,12 @@ export type ChatAction =
   | { type: "SET_PROCESSING"; value: boolean }
   | { type: "SET_THINKING"; value: boolean }
   | { type: "SET_ESCALATING"; value: boolean }
+  | { type: "SET_ACTIVE_TOOL"; tool: string | null }
   | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
   | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
   | { type: "SET_AGENT_NAME"; name: string | null }
+  | { type: "SET_REVIEW_NOTICE"; notice: string | null }
   | { type: "CLEAR_MESSAGES" }
   | { type: "SET_CONFIG"; config: Partial<ChatConfig> }
   | { type: "SET_INPUT_FIELD"; field: InputField }
@@ -158,7 +191,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, conversationId: action.id };
 
     case "SET_CONVERSATION_STATE":
-      return { ...state, conversationState: action.state };
+      return {
+        ...state,
+        conversationState: action.state,
+        // A reason only ever describes an ENDED conversation.
+        endReason:
+          action.state !== "ENDED"
+            ? null
+            : action.endReason !== undefined
+              ? action.endReason
+              : state.endReason,
+      };
 
     case "ADD_MESSAGE":
       return { ...state, messages: [...state.messages, action.message] };
@@ -228,6 +271,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         isProcessing: false,
         isThinking: false,
         isEscalating: false,
+        activeTool: null,
       };
     }
 
@@ -245,10 +289,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ? state
         : { ...state, isThinking: action.value };
 
-    case "SET_ESCALATING":
-      return state.isEscalating === action.value
+    case "SET_ESCALATING": {
+      // An escalation abandons the model that was calling tools, so a tool
+      // named before it is no longer what the agent is doing.
+      const activeTool = action.value ? null : state.activeTool;
+      return state.isEscalating === action.value && state.activeTool === activeTool
         ? state
-        : { ...state, isEscalating: action.value };
+        : { ...state, isEscalating: action.value, activeTool };
+    }
+
+    // Cleared on every token, so the same unchanged-value bail-out applies.
+    case "SET_ACTIVE_TOOL":
+      return state.activeTool === action.tool
+        ? state
+        : { ...state, activeTool: action.tool };
 
     case "CLEAR_MESSAGES":
       return {
@@ -257,6 +311,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         conversationId: null,
         quickReplies: [],
         conversationState: null,
+        endReason: null,
         // A cleared conversation is not processing anything. This used to be
         // lowered only as a side effect of the abandoned stream's
         // FINISH_STREAMING safety net, which meant New Conversation mid-stream
@@ -265,6 +320,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         isProcessing: false,
         isThinking: false,
         isEscalating: false,
+        activeTool: null,
         undoAvailable: false,
         redoAvailable: false,
         activeInputField: null,
@@ -290,6 +346,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "SET_AGENT_NAME":
       return { ...state, agentName: action.name };
+
+    case "SET_REVIEW_NOTICE":
+      return { ...state, reviewNotice: action.notice };
 
     case "SET_CONFIG":
       return { ...state, config: { ...state.config, ...action.config } };
@@ -348,11 +407,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
       const withdrawn = msgs[targetIndex];
       restored.messages = msgs.filter((_, i) => i !== targetIndex);
-      // A secret is never handed back as plain text — the composer that would
-      // receive it is unmasked, and the secret marking would be lost.
-      restored.restoreDraft = action.wasSecret
-        ? null
-        : action.draft ?? withdrawn.content;
+      // A secret is never handed back as plain text: it goes back into the
+      // composer with secret mode ON, so it stays masked and is re-sent with
+      // `secretInput`. Dropping it instead (the earlier behaviour) made the
+      // user retype a key the server had refused without ever seeing.
+      if (action.wasSecret) {
+        restored.restoreDraft = action.draft ?? null;
+        restored.isSecretMode = action.draft ? true : state.isSecretMode;
+        return restored;
+      }
+      restored.restoreDraft = action.draft ?? withdrawn.content;
       return restored;
     }
 

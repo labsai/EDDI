@@ -4,6 +4,7 @@ import { Save, X, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useUpdateGroup } from "@/hooks/use-groups";
+import { getErrorMessage } from "@/lib/api-client";
 import type { AgentGroupConfiguration } from "@/lib/api/groups";
 import type { GroupHitlConfig } from "@/lib/api/hitl";
 import {
@@ -29,11 +30,14 @@ export function GroupHitlEditor({
   groupId,
   groupVersion,
   onDone,
+  onSaved,
 }: {
   config: AgentGroupConfiguration;
   groupId: string;
   groupVersion: number;
   onDone: () => void;
+  /** The version the save created — the page must move onto it (see `useUpdateGroup`). */
+  onSaved?: (version: number) => void;
 }) {
   const { t } = useTranslation();
   const update = useUpdateGroup();
@@ -73,7 +77,7 @@ export function GroupHitlEditor({
 
   const save = () => {
     if (timeoutInvalid || noPhaseSelected) return;
-    let phases = config.phases;
+    let phases: AgentGroupConfiguration["phases"];
     let hitlConfig: GroupHitlConfig | undefined;
     if (enabled) {
       phases = applyApprovalPhases(basePhases, [...approvalPhases]);
@@ -98,11 +102,13 @@ export function GroupHitlEditor({
     update.mutate(
       { id: groupId, version: groupVersion, config: next },
       {
-        onSuccess: () => {
+        onSuccess: ({ version }) => {
+          if (version !== null) onSaved?.(version);
           toast.success(t("groups.hitlSaved", "Approval settings saved"));
           onDone();
         },
-        onError: () => toast.error(t("common.error", "Something went wrong")),
+        // The backend names the field and the rule it broke; keep its sentence.
+        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
   };

@@ -31,6 +31,28 @@ class ChatTranscriptCodecTest {
                 UserMessage.from(TextContent.from("what about this attachment?")));
     }
 
+    /**
+     * DeepSeek and Kimi reject a tool-loop follow-up whose assistant turn lacks the
+     * {@code reasoning_content} of that turn, so a paused-then-resumed tool call
+     * must come back with its thinking intact.
+     */
+    @Test
+    void roundTrip_preservesAiMessageThinking() throws Exception {
+        ToolExecutionRequest req = ToolExecutionRequest.builder().id("call_1").name("transfer_funds").arguments("{}").build();
+        AiMessage gating = AiMessage.builder().text("checking").thinking("step-by-step reasoning").toolExecutionRequests(List.of(req))
+                .build();
+        var codec = new ChatTranscriptCodec();
+
+        var full = codec.serialize(List.of(UserMessage.from("pay"), gating), TRANSCRIPT_MAX_BYTES_DEFAULT);
+        AiMessage fromTranscript = (AiMessage) codec.deserialize(full.json()).get(1);
+        assertEquals("step-by-step reasoning", fromTranscript.thinking());
+
+        String single = codec.serializeMessage(gating, TRANSCRIPT_MAX_BYTES_DEFAULT);
+        AiMessage fromMessage = (AiMessage) codec.deserializeMessage(single);
+        assertEquals("step-by-step reasoning", fromMessage.thinking());
+        assertEquals("call_1", fromMessage.toolExecutionRequests().get(0).id());
+    }
+
     @Test
     void roundTrip_preservesToolExecutionRequests_idsNamesArgs() throws Exception {
         var codec = new ChatTranscriptCodec();

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -15,6 +16,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
@@ -29,7 +31,9 @@ import java.util.Date;
 import java.util.List;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.quarkus.security.ForbiddenException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -94,7 +98,11 @@ class RestConversationStoreOwnershipTest {
         lenient().when(conversationMemoryStore.loadConversationMemorySnapshot(anyString())).thenReturn(snapshot);
     }
 
-    /** A conversation descriptor already carrying its owner and agent name. */
+    /**
+     * A conversation descriptor already carrying its owner and agent name. The id
+     * must be hex: a non-hex id resolves to a null resource id, the snapshot stub
+     * above never matches it, and the listing then drops the row as orphaned.
+     */
     private ConversationDescriptor descriptor(String conversationId, String ownerId) {
         var descriptor = new ConversationDescriptor();
         descriptor.setResource(URI.create(
@@ -118,7 +126,7 @@ class RestConversationStoreOwnershipTest {
         var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true),
                 mock(IConversationDescriptorStore.class));
         return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
-                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
     }
 
@@ -143,7 +151,7 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("a caller sees only their own conversations, never another user's")
     void filtersToOwnConversations() throws Exception {
-        firstPage(descriptor("conv-owner", OWNER), descriptor("conv-intruder", INTRUDER));
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
 
         List<ConversationDescriptor> result = asOwner().readConversationDescriptors(
                 0, 20, null, null, null, null, null, null);
@@ -155,7 +163,7 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("a non-owner enumerating the store sees nothing of another user's conversations")
     void nonOwnerSeesNoForeignConversations() throws Exception {
-        firstPage(descriptor("conv-owner", OWNER));
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER));
 
         List<ConversationDescriptor> result = asIntruder().readConversationDescriptors(
                 0, 20, null, null, null, null, null, null);
@@ -166,7 +174,7 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("an admin sees every user's conversations")
     void adminSeesAllConversations() throws Exception {
-        firstPage(descriptor("conv-owner", OWNER), descriptor("conv-intruder", INTRUDER));
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
 
         List<ConversationDescriptor> result = asAdmin().readConversationDescriptors(
                 0, 20, null, null, null, null, null, null);
@@ -177,7 +185,7 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("an unowned (legacy) conversation stays visible — matching requireOwnerOrAdmin")
     void unownedLegacyConversationRemainsVisible() throws Exception {
-        firstPage(descriptor("conv-legacy", null));
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a03", null));
 
         List<ConversationDescriptor> result = asIntruder().readConversationDescriptors(
                 0, 20, null, null, null, null, null, null);
@@ -192,7 +200,7 @@ class RestConversationStoreOwnershipTest {
         // and stops on the MAX_OWNER_SCAN budget — the truncation the List can't
         // signal.
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
-                .thenReturn(List.of(descriptor("conv-foreign-a", INTRUDER), descriptor("conv-foreign-b", INTRUDER)));
+                .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a04", INTRUDER), descriptor("0a0a0a0a0a0a0a0a0a0a0a05", INTRUDER)));
 
         var registry = new SimpleMeterRegistry();
         var store = asOwner();
@@ -211,9 +219,9 @@ class RestConversationStoreOwnershipTest {
         // the do-while must page forward (index is a page number: skip = index*limit)
         // until the owner's conversation is found.
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean()))
-                .thenReturn(List.of(descriptor("conv-foreign-1", INTRUDER), descriptor("conv-foreign-2", INTRUDER)));
+                .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a06", INTRUDER), descriptor("0a0a0a0a0a0a0a0a0a0a0a07", INTRUDER)));
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(1), anyInt(), anyBoolean()))
-                .thenReturn(List.of(descriptor("conv-owner", OWNER)));
+                .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER)));
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(2), anyInt(), anyBoolean()))
                 .thenReturn(List.of());
 
@@ -266,6 +274,98 @@ class RestConversationStoreOwnershipTest {
                 "a legacy conversation whose snapshot resolves to another user must not leak");
         // ...but the owner does.
         assertEquals(1, asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null).size());
+    }
+
+    @Test
+    @DisplayName("Finding 10: a legacy unowned conversation is NOT deletable by a non-admin (strict owner check)")
+    void deleteUnownedConversationForbiddenForNonAdmin() throws Exception {
+        var guardDescriptorStore = mock(IConversationDescriptorStore.class);
+        var unowned = new ConversationDescriptor();
+        unowned.setUserId(null); // legacy conversation with no recorded owner
+        when(guardDescriptorStore.readDescriptor(anyString(), anyInt())).thenReturn(unowned);
+
+        var identity = mock(SecurityIdentity.class);
+        var principal = mock(Principal.class);
+        lenient().when(principal.getName()).thenReturn(INTRUDER);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        lenient().when(identity.hasRole("eddi-viewer")).thenReturn(true);
+        var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), guardDescriptorStore);
+        var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
+                30, 90, attachmentStorageInstance);
+
+        assertThrows(ForbiddenException.class, () -> store.deleteConversationLog("conv-legacy", false));
+        verify(conversationDescriptorStore, never()).deleteDescriptor(anyString(), anyInt());
+        verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot(anyString());
+    }
+
+    /**
+     * The store as {@code caller}, whose guard resolves descriptors through
+     * {@code guardDescriptorStore}.
+     */
+    private RestConversationStore storeWithGuardDescriptors(IConversationDescriptorStore guardDescriptorStore,
+                                                            String caller) {
+        var identity = mock(SecurityIdentity.class);
+        var principal = mock(Principal.class);
+        lenient().when(principal.getName()).thenReturn(caller);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        lenient().when(identity.hasRole("eddi-viewer")).thenReturn(true);
+        var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), guardDescriptorStore);
+        return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
+                30, 90, attachmentStorageInstance);
+    }
+
+    private void legacySnapshotOwnedBy(String conversationId, String ownerId) throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setUserId(ownerId);
+        snapshot.setConversationSteps(new ArrayList<>());
+        when(conversationMemoryStore.loadConversationMemorySnapshot(conversationId)).thenReturn(snapshot);
+    }
+
+    @Test
+    @DisplayName("a pre-v5.1.6 conversation (no descriptor owner) is deletable by the owner its snapshot records")
+    void deleteLegacyConversation_snapshotOwnerMayDelete() throws Exception {
+        var guardDescriptorStore = mock(IConversationDescriptorStore.class);
+        when(guardDescriptorStore.readDescriptor(anyString(), anyInt())).thenReturn(new ConversationDescriptor());
+        legacySnapshotOwnedBy("conv-legacy", OWNER);
+
+        storeWithGuardDescriptors(guardDescriptorStore, OWNER).deleteConversationLog("conv-legacy", false);
+
+        verify(conversationDescriptorStore).deleteDescriptor("conv-legacy", 0);
+    }
+
+    @Test
+    @DisplayName("a pre-v5.1.6 conversation whose snapshot names another owner stays forbidden to a non-admin")
+    void deleteLegacyConversation_snapshotOwnedByOtherForbidden() throws Exception {
+        var guardDescriptorStore = mock(IConversationDescriptorStore.class);
+        when(guardDescriptorStore.readDescriptor(anyString(), anyInt())).thenReturn(new ConversationDescriptor());
+        legacySnapshotOwnedBy("conv-legacy", OWNER);
+
+        var store = storeWithGuardDescriptors(guardDescriptorStore, INTRUDER);
+
+        assertThrows(ForbiddenException.class, () -> store.deleteConversationLog("conv-legacy", false));
+        verify(conversationDescriptorStore, never()).deleteDescriptor(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("an archived (soft-deleted) legacy descriptor also resolves its owner from the snapshot")
+    void permanentDeleteArchivedLegacyConversation_snapshotOwnerMayDelete() throws Exception {
+        var guardDescriptorStore = mock(IConversationDescriptorStore.class);
+        when(guardDescriptorStore.readDescriptor(anyString(), anyInt()))
+                .thenThrow(new ResourceNotFoundException("archived"));
+        when(guardDescriptorStore.readDescriptorWithHistory("conv-legacy", 0)).thenReturn(new ConversationDescriptor());
+        legacySnapshotOwnedBy("conv-legacy", OWNER);
+
+        assertThrows(ForbiddenException.class,
+                () -> storeWithGuardDescriptors(guardDescriptorStore, INTRUDER).deleteConversationLog("conv-legacy", true));
+        verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot(anyString());
+
+        storeWithGuardDescriptors(guardDescriptorStore, OWNER).deleteConversationLog("conv-legacy", true);
+
+        verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-legacy");
     }
 
     @Test

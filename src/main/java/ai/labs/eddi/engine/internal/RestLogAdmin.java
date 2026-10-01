@@ -23,6 +23,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * REST implementation for log administration — provides real-time SSE streaming
  * from the in-memory ring buffer and historical queries from the database.
@@ -133,7 +135,8 @@ public class RestLogAdmin implements IRestLogAdmin {
             }
         });
 
-        log.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})", listenerId, agentId, level);
+        log.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})", listenerId, sanitize(agentId),
+                sanitize(level));
     }
 
     @Override

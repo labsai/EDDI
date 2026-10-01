@@ -12,7 +12,7 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
@@ -23,6 +23,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
@@ -59,7 +61,7 @@ public class ChannelTargetRouter {
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
-    private final IRestAgentAdministration agentAdmin;
+    private final IDeploymentStatusReader agentAdmin;
     private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
 
@@ -110,7 +112,7 @@ public class ChannelTargetRouter {
     @Inject
     public ChannelTargetRouter(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore descriptorStore,
-            IRestAgentAdministration agentAdmin,
+            IDeploymentStatusReader agentAdmin,
             IAgentStore agentStore,
             SecretResolver secretResolver,
             ICacheFactory cacheFactory) {
@@ -194,6 +196,191 @@ public class ChannelTargetRouter {
                     firstLegacy.botToken(), firstLegacy.signingSecret());
         }
         return null;
+    }
+
+    /**
+     * Resolve a DM's default target from ONE named integration — the one whose
+     * signing secret authenticated the event.
+     * <p>
+     * {@link #resolveDefaultForDm(String, String)} takes the first integration in
+     * map order, which with several Slack apps is an arbitrary one: a DM to app B
+     * could run on app A's default target and credentials. The webhook knows which
+     * app signed the request, so it names the integration and this uses only that
+     * one.
+     *
+     * @return the named integration's default (or trigger-matched) target, or
+     *         {@code null} if the integration is unknown or has none
+     */
+    public ResolvedTarget resolveDefaultForDm(String channelType, String messageText, String integrationName) {
+        if (integrationName == null) {
+            return resolveDefaultForDm(channelType, messageText);
+        }
+        return getIntegrationByName(channelType, integrationName)
+                .map(integration -> resolveFromIntegration(integration, messageText))
+                .orElse(null);
+    }
+
+    /**
+     * Resolve a DM's default target from the legacy connector whose secret verified
+     * it — the DM counterpart of
+     * {@link #resolveDefaultForDm(String, String, String)} for a legacy per-agent
+     * connector, which has no name. Only legacy connectors holding
+     * {@code verifiedSigningSecret} are considered (lowest channel key first); a
+     * new-style integration never is, so a DM to a legacy app cannot be routed to
+     * another app's agent and credentials.
+     *
+     * @return the connector's target with its credentials, or {@code null}
+     */
+    public ResolvedTarget resolveLegacyDefaultForDm(String messageText, String verifiedSigningSecret) {
+        refreshIfNeeded();
+        String trimmed = messageText != null ? messageText.trim() : "";
+        if (trimmed.isEmpty() || "help".equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        return legacyMap.entrySet().stream()
+                .filter(entry -> secretsEqual(entry.getValue().signingSecret(), verifiedSigningSecret))
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> new ResolvedTarget(entry.getValue().toChannelTarget(), messageText, null,
+                        entry.getValue().botToken(), entry.getValue().signingSecret()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Credentials for a thread reply whose lock carries none — a thread in a
+     * channel no integration owns (a DM). Only an integration (lowest key first) or
+     * legacy connector that holds {@code verifiedSigningSecret} AND has
+     * {@code lockedTarget} among its own targets qualifies, so one app's secret
+     * cannot continue a thread locked to another app's agent.
+     *
+     * @return the locked target with that owner's credentials, or {@code null} when
+     *         no integration or connector of the verifying app serves it
+     */
+    public ResolvedTarget threadCredentialsForDm(String channelType, ChannelTarget lockedTarget,
+                                                 String verifiedSigningSecret) {
+        refreshIfNeeded();
+        if (lockedTarget == null || verifiedSigningSecret == null || verifiedSigningSecret.isBlank()) {
+            return null;
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String prefix = normalizedType + ":";
+        var integration = integrationMap.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(prefix))
+                .sorted(Map.Entry.comparingByKey())
+                .map(Map.Entry::getValue)
+                .filter(cfg -> cfg.getPlatformConfig() != null
+                        && secretsEqual(cfg.getPlatformConfig().get("signingSecret"), verifiedSigningSecret))
+                .filter(cfg -> cfg.getTargets() != null
+                        && cfg.getTargets().stream().anyMatch(target -> sameTarget(target, lockedTarget)))
+                .findFirst();
+        if (integration.isPresent()) {
+            return new ResolvedTarget(lockedTarget, null, integration.get(), null, null);
+        }
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            return legacyMap.entrySet().stream()
+                    .filter(entry -> secretsEqual(entry.getValue().signingSecret(), verifiedSigningSecret))
+                    .filter(entry -> sameTarget(entry.getValue().toChannelTarget(), lockedTarget))
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(entry -> new ResolvedTarget(lockedTarget, null, null, entry.getValue().botToken(),
+                            entry.getValue().signingSecret()))
+                    .findFirst()
+                    .orElse(null);
+        }
+        return null;
+    }
+
+    private static boolean sameTarget(ChannelTarget a, ChannelTarget b) {
+        return a != null && b != null && a.getType() == b.getType() && a.getTargetId() != null
+                && a.getTargetId().equals(b.getTargetId());
+    }
+
+    /**
+     * Constant-time comparison of two signing secrets; {@code false} when either is
+     * missing or blank.
+     */
+    public static boolean secretsEqual(String a, String b) {
+        if (a == null || b == null || a.isBlank() || b.isBlank()) {
+            return false;
+        }
+        return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * The signing secret of whoever owns {@code platformChannelId}: the new-style
+     * integration configured for it, else (Slack only) the legacy connector.
+     * <p>
+     * The events webhook verifies every request against this once it has read the
+     * channel out of the body. Verifying only against the POOLED set of secrets
+     * proves the request came from SOME configured app, not from the one that owns
+     * the channel — so a holder of one integration's secret could otherwise drive
+     * another integration's agents, credentials and approval flow.
+     *
+     * @return the owner's secret; empty when nobody owns the channel (a DM, or an
+     *         unconfigured channel) or the owner has no secret configured
+     */
+    public Optional<String> getSigningSecretForChannel(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        if (platformChannelId == null || platformChannelId.isBlank()) {
+            return Optional.empty();
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        if (integration != null) {
+            return nonBlank(integration.getPlatformConfig().get("signingSecret"));
+        }
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            LegacyTarget legacy = legacyMap.get(platformChannelId);
+            if (legacy != null) {
+                return nonBlank(legacy.signingSecret());
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Whether any integration or legacy connector owns {@code platformChannelId}.
+     * An owned channel whose owner has no signing secret can never be verified, and
+     * the webhook refuses its events rather than falling back to the pool.
+     */
+    public boolean isChannelOwned(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        if (platformChannelId == null || platformChannelId.isBlank()) {
+            return false;
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        if (integrationMap.containsKey(normalizedType + ":" + platformChannelId)) {
+            return true;
+        }
+        return CHANNEL_TYPE_SLACK.equals(normalizedType) && legacyMap.containsKey(platformChannelId);
+    }
+
+    /**
+     * Every configured signing identity of a channel type: each new-style
+     * integration's name with its secret, then each legacy connector's secret with
+     * a {@code null} name. Used to find which app signed an event whose channel
+     * nobody owns (a DM), so it can be routed to that app's integration.
+     */
+    public List<SigningIdentity> getSigningIdentities(String channelType) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String prefix = normalizedType + ":";
+        List<SigningIdentity> identities = new ArrayList<>();
+        integrationMap.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(prefix))
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> nonBlank(entry.getValue().getPlatformConfig().get("signingSecret"))
+                        .ifPresent(secret -> identities.add(new SigningIdentity(entry.getValue().getName(), secret))));
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            legacyMap.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(entry -> nonBlank(entry.getValue().signingSecret())
+                            .ifPresent(secret -> identities.add(new SigningIdentity(null, secret))));
+        }
+        return identities;
+    }
+
+    private static Optional<String> nonBlank(String value) {
+        return value != null && !value.isBlank() ? Optional.of(value) : Optional.empty();
     }
 
     /**
@@ -319,16 +506,28 @@ public class ChannelTargetRouter {
             return Optional.empty();
         }
         String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        ChannelIntegrationConfiguration match = null;
         for (var entry : integrationMap.entrySet()) {
             if (!entry.getKey().startsWith(prefix)) {
                 continue;
             }
             var cfg = entry.getValue();
             if (name.equals(cfg.getName())) {
-                return Optional.of(cfg);
+                if (match != null) {
+                    // AMBIGUOUS: two integrations share this display name. Names are not
+                    // globally unique in older data, and a HITL decision authorizes and
+                    // verifies against the integration this resolves to while the
+                    // approval record is keyed by the same name string — so resolving to
+                    // EITHER of two same-named integrations would let one approve the
+                    // other's paused conversation (Finding C). Refuse rather than pick.
+                    LOGGER.warnf("Multiple '%s' integrations are named '%s' — refusing to resolve by name",
+                            prefix, name);
+                    return Optional.empty();
+                }
+                match = cfg;
             }
         }
-        return Optional.empty();
+        return Optional.ofNullable(match);
     }
 
     /**
@@ -609,7 +808,7 @@ public class ChannelTargetRouter {
         // 2. Load legacy ChannelConnector entries (backward compat)
         var newLegacyMap = new HashMap<String, LegacyTarget>();
         try {
-            List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(
+            List<AgentDeploymentStatus> statuses = agentAdmin.readAllDeploymentStatuses(
                     Deployment.Environment.production);
             for (AgentDeploymentStatus status : statuses) {
                 if (status.getDescriptor() == null || status.getDescriptor().isDeleted()) {
@@ -743,6 +942,17 @@ public class ChannelTargetRouter {
                 return integration.getPlatformConfig().get("signingSecret");
             }
             return legacySigningSecret;
+        }
+    }
+
+    /**
+     * A signing secret and the integration it belongs to — {@code null} name for a
+     * legacy per-agent connector. Holds a resolved secret: never log or serialize.
+     */
+    public record SigningIdentity(String integrationName, String signingSecret) {
+        @Override
+        public String toString() {
+            return "SigningIdentity[integrationName=" + integrationName + "]";
         }
     }
 

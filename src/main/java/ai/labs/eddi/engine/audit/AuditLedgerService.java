@@ -181,7 +181,12 @@ public class AuditLedgerService {
     };
     private final int maxQueueSize;
 
-    private byte[] hmacKey;
+    /**
+     * The signing and verification keys. Null until {@link #init()} when the
+     * service was built outside CDI, which derives one from the master key exactly
+     * as this service always did.
+     */
+    private AuditKeyring keyring;
     private final ConcurrentLinkedQueue<AuditEntry> queue = new ConcurrentLinkedQueue<>();
     /**
      * Tracks {@link #queue}'s length. {@link ConcurrentLinkedQueue#size()} is an
@@ -244,6 +249,26 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.max-queue-size", defaultValue = "100000") int maxQueueSize,
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy", defaultValue = "true") boolean recoverLegacyTimestamps,
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy-max-rows", defaultValue = "500") int recoverLegacyMaxRows,
+            MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
+            AgentSigningService agentSigningService, ObjectMapper objectMapper, AuditKeyring keyring) {
+        this(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, deadLetterPath, agentSigningEnabled, defaultTenantId, maxQueueSize,
+                recoverLegacyTimestamps, recoverLegacyMaxRows, meterRegistry, natsConnectionInstance, agentSigningService, objectMapper);
+        this.keyring = keyring;
+    }
+
+    /**
+     * Without a keyring: {@link #init()} derives one from {@code masterKeyConfig},
+     * with no independent key, no retired keys and no vault pin.
+     */
+    public AuditLedgerService(IAuditStore auditStore, boolean enabled,
+            int flushIntervalSeconds,
+            Optional<String> masterKeyConfig,
+            String deadLetterPath,
+            boolean agentSigningEnabled,
+            String defaultTenantId,
+            int maxQueueSize,
+            boolean recoverLegacyTimestamps,
+            int recoverLegacyMaxRows,
             MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
             AgentSigningService agentSigningService, ObjectMapper objectMapper) {
         this.recoverLegacyTimestamps = recoverLegacyTimestamps;
@@ -357,11 +382,13 @@ public class AuditLedgerService {
             return;
         }
 
-        if (masterKeyConfig.isPresent() && !masterKeyConfig.get().isBlank()) {
-            this.hmacKey = AuditHmac.deriveHmacKey(masterKeyConfig.get());
+        if (keyring == null) {
+            keyring = AuditKeyring.fromMasterKey(masterKeyConfig.filter(key -> !key.isBlank()).orElse(null));
+        }
+        if (keyring.signingKey() != null) {
             LOGGER.info("Audit Ledger: HMAC integrity signing enabled.");
         } else {
-            LOGGER.info("Audit Ledger: HMAC signing disabled (no vault master key).");
+            LOGGER.info("Audit Ledger: HMAC signing disabled (no vault master key and no eddi.audit.hmac-key).");
         }
 
         checkDeadLetterSinkReachable();
@@ -495,6 +522,7 @@ public class AuditLedgerService {
     public void submit(AuditEntry entry) {
         if (!enabled || entry == null)
             return;
+        entry = pseudonymiseIfErased(entry);
 
         // Take the queue slot BEFORE a chain position is consumed. G18 puts the
         // sequence inside the signed payload so a deleted row leaves a gap that
@@ -556,8 +584,9 @@ public class AuditLedgerService {
 
             // Compute HMAC if key is available
             AuditEntry signed;
-            if (hmacKey != null) {
-                String hmac = AuditHmac.computeHmac(scrubbed, hmacKey);
+            AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
+            if (signingKey != null) {
+                String hmac = AuditHmac.computeHmac(scrubbed, signingKey);
                 signed = scrubbed.withHmac(hmac);
             } else {
                 signed = scrubbed;
@@ -860,7 +889,9 @@ public class AuditLedgerService {
             AuditEntry entry;
             while ((entry = queue.poll()) != null) {
                 queueSize.decrementAndGet();
-                batch.add(entry);
+                // Again at drain time: an entry queued before the erasure and flushed
+                // after the store-side pseudonymisation would otherwise land raw.
+                batch.add(pseudonymiseIfErased(entry));
             }
             inFlightBatch = batch;
         } finally {
@@ -1265,7 +1296,7 @@ public class AuditLedgerService {
      * evidence.
      */
     public boolean isSigningEnabled() {
-        return hmacKey != null;
+        return keyring != null && keyring.signingKey() != null;
     }
 
     /**
@@ -1299,16 +1330,22 @@ public class AuditLedgerService {
         if (entry == null) {
             return AuditVerificationStatus.INVALID;
         }
-        if (hmacKey == null) {
+        if (!isSigningEnabled()) {
             return AuditVerificationStatus.SIGNING_DISABLED;
         }
         if (entry.hmac() == null || entry.hmac().isBlank()) {
             return AuditVerificationStatus.UNSIGNED;
         }
-        return switch (AuditHmac.verify(entry, hmacKey, recoveryBudget)) {
+        return switch (AuditHmac.verify(entry, keyring.verificationKeys(), recoveryBudget)) {
             case MATCH -> AuditVerificationStatus.VALID;
             case MATCH_RECOVERED -> AuditVerificationStatus.VALID_RECOVERED;
             case MISMATCH -> AuditVerificationStatus.INVALID;
+            // The id is text in the row, so it proves nothing on its own: only an id
+            // this deployment recorded as having signed is reported as a missing key.
+            // Any other is what a forged row would say, and is treated as one.
+            case UNKNOWN_KEY -> keyring.isRecordedKeyId(AuditHmac.keyIdOf(entry.hmac()))
+                    ? AuditVerificationStatus.UNKNOWN_KEY
+                    : AuditVerificationStatus.INVALID;
         };
     }
 
@@ -1381,6 +1418,65 @@ public class AuditLedgerService {
      * (covers full entry integrity), otherwise signs the entry ID. Gracefully
      * returns the original entry if no signing key exists.
      */
+    /**
+     * How long after an erasure this node keeps rewriting the erased user's id in
+     * new audit entries. It covers entries still produced by work the erasure
+     * cancelled (a turn blocked in an LLM or HTTP call flushes its audit buffer
+     * when it unwinds) and entries already queued. An hour is far longer than any
+     * turn; a user who comes back within it has their first hour of new records
+     * pseudonymised too, which errs in the privacy-preserving direction.
+     */
+    static final Duration ERASED_USER_REWRITE_WINDOW = Duration.ofHours(1);
+
+    /**
+     * userId -> until when this node rewrites it; node-local, see markUserErased.
+     */
+    private final ConcurrentHashMap<String, Instant> recentlyErasedUsers = new ConcurrentHashMap<>();
+
+    /**
+     * Tells the ledger a GDPR erasure of {@code userId} has started, so audit
+     * entries for that user written from now on — by work the erasure cancelled but
+     * which is still unwinding, or already queued — carry the pseudonym instead of
+     * the raw id. The erasure pseudonymises the stored rows once; without this,
+     * anything flushed after that step landed with the raw id and stayed that way.
+     * <p>
+     * The signature is unaffected: since the v3 canonical form the HMAC covers
+     * {@code AuditHmac.identityToken}, which maps an id and its pseudonym to the
+     * same value, and the agent signature signs the HMAC.
+     * <p>
+     * The pseudonym is the <em>keyed</em> one whenever the ledger signs, as the
+     * stores write into v5 rows — new entries are signed v5 — so a late entry does
+     * not carry the unkeyed hash an offline guess could be tested against.
+     * <p>
+     * Node-local: an entry produced on another replica after the erasure is not
+     * covered (documented residual, like the rest of the in-flight handling).
+     */
+    public void markUserErased(String userId) {
+        if (userId == null) {
+            return;
+        }
+        Instant now = Instant.now();
+        recentlyErasedUsers.values().removeIf(until -> until.isBefore(now));
+        recentlyErasedUsers.put(userId, now.plus(ERASED_USER_REWRITE_WINDOW));
+    }
+
+    AuditEntry pseudonymiseIfErased(AuditEntry entry) {
+        String userId = entry.userId();
+        if (userId == null || recentlyErasedUsers.isEmpty()) {
+            return entry;
+        }
+        Instant until = recentlyErasedUsers.get(userId);
+        if (until == null || until.isBefore(Instant.now())) {
+            return entry;
+        }
+        AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
+        String pseudonym = signingKey != null ? AuditHmac.keyedPseudonymFor(userId, signingKey.pseudonymKey()) : AuditHmac.pseudonymFor(userId);
+        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(), pseudonym, entry.environment(),
+                entry.stepIndex(), entry.taskId(), entry.taskType(),
+                entry.taskIndex(), entry.durationMs(), entry.input(), entry.output(), entry.llmDetail(), entry.toolCalls(),
+                entry.actions(), entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
+    }
+
     private AuditEntry applyAgentSignature(AuditEntry entry) {
         try {
             String payload = entry.hmac() != null ? entry.hmac() : entry.id();
@@ -1474,7 +1570,8 @@ public class AuditLedgerService {
     }
 
     byte[] getHmacKey() {
-        return hmacKey;
+        AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
+        return signingKey != null ? signingKey.hmacKey() : null;
     }
 
     // ==================== Private Helpers ====================

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { FileStack, ChevronDown, ChevronUp, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -110,7 +111,7 @@ export function ArtifactsPanel({ artifacts, className }: ArtifactsPanelProps) {
                     </pre>
                   ) : artifact.type === "MARKDOWN" ? (
                     <div className="prose prose-sm dark:prose-invert max-w-none rounded-md bg-background p-2.5 text-xs">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{artifact.content}</ReactMarkdown>
                     </div>
                   ) : (
                     <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-2.5 text-xs text-foreground">

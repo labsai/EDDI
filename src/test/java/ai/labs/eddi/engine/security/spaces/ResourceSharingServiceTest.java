@@ -9,18 +9,22 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.ResourceGrant;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.datastore.IResourceStore;
 import io.quarkus.security.ForbiddenException;
+import jakarta.enterprise.event.Event;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,6 +38,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -49,6 +54,7 @@ class ResourceSharingServiceTest {
     private IDocumentDescriptorStore store;
     private ResourceAccessGuard accessGuard;
     private ConfigGraphResolver graphResolver;
+    private Event<SharingChangedEvent> sharingChanged;
     private ResourceSharingService service;
     private Map<String, DocumentDescriptor> descriptors;
 
@@ -124,7 +130,28 @@ class ResourceSharingServiceTest {
         graphResolver = mock(ConfigGraphResolver.class);
         when(graphResolver.referencedResourceIds(AGENT)).thenReturn(Set.of(OWNED_CHILD, BORROWED_CHILD));
 
-        service = new ResourceSharingService(store, accessGuard, graphResolver);
+        @SuppressWarnings("unchecked")
+        Event<SharingChangedEvent> event = mock(Event.class);
+        sharingChanged = event;
+        service = new ResourceSharingService(store, accessGuard, graphResolver, mock(UserDirectory.class), null, sharingChanged);
+    }
+
+    @Test
+    @DisplayName("a written sharing change is announced, so ownership-derived caches drop it at once")
+    void sharingChangeFiresEvent() {
+        service.setVisibility(AGENT, ResourceVisibility.published, false);
+
+        ArgumentCaptor<SharingChangedEvent> fired = ArgumentCaptor.forClass(SharingChangedEvent.class);
+        verify(sharingChanged).fire(fired.capture());
+        assertEquals(List.of(AGENT), fired.getValue().resourceIds());
+    }
+
+    @Test
+    @DisplayName("nothing written, nothing announced")
+    void noChangeNoEvent() {
+        service.revoke("0000000000000000000000ff", Subjects.user("carol"), false);
+
+        verifyNoInteractions(sharingChanged);
     }
 
     @Test
@@ -211,6 +238,41 @@ class ResourceSharingServiceTest {
                 () -> service.share(BORROWED_CHILD, Subjects.user("carol"), AccessLevel.VIEW, false));
     }
 
+    /**
+     * A {@code PUT} that moves the descriptor from v1 to v2 between the read and
+     * the write leaves the grant in the history row of v1 - the live descriptor
+     * never carries it. That used to be reported as applied.
+     */
+    @Test
+    @DisplayName("a share whose descriptor moved on while it was written is reported as skipped, not applied")
+    void shareOverAConcurrentVersionBumpIsSkipped() throws Exception {
+        var written = new AtomicBoolean();
+        doAnswer(i -> {
+            written.set(true);
+            return null;
+        }).when(store).setDescriptor(eq(AGENT), anyInt(), any());
+        when(store.getCurrentResourceId(AGENT)).thenAnswer(i -> resourceId(AGENT, written.get() ? 2 : 1));
+
+        var result = service.share(AGENT, Subjects.user("carol"), AccessLevel.VIEW, false);
+
+        assertTrue(result.skippedIds().contains(AGENT));
+        assertFalse(result.updatedIds().contains(AGENT));
+    }
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return id;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return version;
+            }
+        };
+    }
+
     @Test
     @DisplayName("every write rebuilds the access index, or the change never reaches a listing")
     void writesRebuildTheIndex() throws Exception {
@@ -247,5 +309,78 @@ class ResourceSharingServiceTest {
             return null;
         }
         return d.getGrants().stream().filter(g -> subject.equals(g.getSubject())).map(ResourceGrant::accessLevel).findFirst().orElse(null);
+    }
+
+    @Test
+    @DisplayName("a dry run reports the same lists as the real change and writes nothing")
+    void dryRunWritesNothing() throws Exception {
+        var preview = service.share(AGENT, Subjects.user("carol"), AccessLevel.VIEW, true, true);
+
+        assertTrue(preview.dryRun());
+        assertEquals(Set.of(AGENT, OWNED_CHILD), Set.copyOf(preview.updatedIds()));
+        assertEquals(List.of(BORROWED_CHILD), preview.skippedIds(),
+                "the preview must name what the share will leave alone, or the dialog shows a promise the share breaks");
+        verify(store, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("every kind of change can be previewed without a write")
+    void everyChangeHasADryRun() throws Exception {
+        when(accessGuard.isAdmin()).thenReturn(true);
+        when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
+
+        service.revoke(AGENT, Subjects.user("carol"), true, true);
+        service.setVisibility(AGENT, ResourceVisibility.published, true, true);
+        service.moveToSpace(AGENT, Subjects.teamSpace("engineering"), true, true);
+        service.transferOwnership(AGENT, "bob", null, true, true);
+
+        verify(store, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("moving files the owner's resources under a team space they belong to, keeping ownership")
+    void moveToOwnTeam() throws Exception {
+        when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
+
+        var result = service.moveToSpace(AGENT, Subjects.teamSpace("engineering"), true, false);
+
+        assertEquals(Set.of(AGENT, OWNED_CHILD), Set.copyOf(result.updatedIds()));
+        assertEquals(Subjects.teamSpace("engineering"), descriptors.get(AGENT).getSpaceId());
+        assertEquals("alice", descriptors.get(AGENT).getOwnerId(), "moving is not a transfer: delete and re-share stay with the owner");
+        assertEquals(Subjects.personalSpace("bob"), descriptors.get(BORROWED_CHILD).getSpaceId(),
+                "a colleague's resource is never moved by somebody who only borrowed it");
+    }
+
+    @Test
+    @DisplayName("moving into a space the caller is not in is refused")
+    void moveIntoForeignSpaceRefused() throws Exception {
+        when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
+
+        assertThrows(ForbiddenException.class, () -> service.moveToSpace(AGENT, Subjects.teamSpace("finance"), true, false));
+        verify(store, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("an administrator's move still needs a well-formed space id")
+    void malformedSpaceRefusedEvenForAdmins() throws Exception {
+        // Admins skip the membership check, so this is the only thing standing
+        // between a typo'd prefix and a cascade filed under a space nobody holds.
+        when(accessGuard.isAdmin()).thenReturn(true);
+
+        for (String bad : List.of("group:engineering", "team:", "engineering", "team:/engineering/", "user:")) {
+            assertThrows(IllegalArgumentException.class, () -> service.moveToSpace(AGENT, bad, true, false), bad);
+        }
+        verify(store, never()).setDescriptor(anyString(), anyInt(), any());
+
+        assertTrue(ResourceSharingService.isCanonicalSpace(Subjects.teamSpace("engineering/backend")));
+        assertTrue(ResourceSharingService.isCanonicalSpace(Subjects.personalSpace("alice@example.com")));
+    }
+
+    @Test
+    @DisplayName("only the owner may move a resource")
+    void onlyOwnerMoves() {
+        when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
+
+        assertThrows(ForbiddenException.class, () -> service.moveToSpace(BORROWED_CHILD, Subjects.teamSpace("engineering"), false, false));
     }
 }

@@ -130,10 +130,10 @@ class LlmTaskStreamingDowngradeTest {
         meterRegistry = new SimpleMeterRegistry();
         templateData = new HashMap<>();
 
-        lenient().when(promptSnippetService.getAll()).thenReturn(Map.of());
+        lenient().when(promptSnippetService.getForAgent(any())).thenReturn(Map.of());
         lenient().when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(counterweightService.apply(anyString(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(identityMaskingService.apply(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         llmTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
@@ -289,7 +289,7 @@ class LlmTaskStreamingDowngradeTest {
     @Test
     @DisplayName("the cascade agent path records the downgrade when it emits the answer as one chunk")
     void cascadeAgentModeRecordsDowngrade() throws Exception {
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("agent answer", new ArrayList<>(), Map.of()));
 
         var task = toolTask();
@@ -313,7 +313,7 @@ class LlmTaskStreamingDowngradeTest {
         // The orchestrator declines (no tools resolved) → the cascade step falls back
         // to the legacy executor, whose single-chunk emit is a different (non-tool)
         // situation and must NOT be labelled a tools_enabled downgrade.
-        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
                 .thenReturn(null);
         when(chatModel.chat(anyList())).thenReturn(ChatResponse.builder()
                 .aiMessage(aiMessage("legacy answer"))

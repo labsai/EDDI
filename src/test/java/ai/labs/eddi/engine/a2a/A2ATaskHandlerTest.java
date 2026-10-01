@@ -161,6 +161,35 @@ class A2ATaskHandlerTest {
         }
 
         @Test
+        @DisplayName("returns only the text output to the peer, not the serialized output map")
+        void returnsOnlyTextOutput() throws Exception {
+            String agentId = "agent-xyz";
+            when(conversationService.startConversation(eq(Environment.production), eq(agentId), anyString(), anyMap()))
+                    .thenReturn(conversation("conv-t"));
+
+            doAnswer(invocation -> {
+                ConversationResponseHandler responseHandler = invocation.getArgument(8);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                var output = new ConversationOutput();
+                output.put("output", "Clean answer");
+                // Metadata a raw toString() of the ConversationOutput map would leak.
+                output.put("actions", List.of("secret_action"));
+                output.put("audit:compiled_prompt", "SYSTEM PROMPT LEAK");
+                snapshot.setConversationOutputs(List.of(output));
+                responseHandler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(eq(Environment.production), eq(agentId), eq("conv-t"),
+                    eq(false), eq(true), isNull(), any(), eq(false), any());
+
+            A2ATask result = handler.handleTaskSend(agentId, sendParams("task-x", null, "Hi"));
+
+            String text = result.artifacts().get(0).parts().get(0).text();
+            assertEquals("Clean answer", text);
+            assertFalse(text.contains("audit:compiled_prompt"), "must not serialize internal output keys to the peer");
+            assertFalse(text.contains("secret_action"), "must not serialize pipeline metadata to the peer");
+        }
+
+        @Test
         @DisplayName("refuses an agent that was never opted into A2A, and starts no conversation")
         void refusesAgentNotExposedOverA2A() throws Exception {
             // Discovery already enforced this — listA2AAgents and getAgentCard both hide

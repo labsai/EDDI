@@ -122,7 +122,19 @@ public class ConversationLogGenerator {
                 }
             }
 
-            if (!includeFirstAgentMessage && !conversationLog.getMessages().isEmpty()) {
+            // Only an AGENT message is dropped, whatever the flag says. The flag's
+            // whole purpose is to remove EDDI's opening greeting, and for every agent
+            // with an `ai.labs.output` step producing one at CONVERSATION_START the
+            // first message genuinely is the agent's -- so this is behaviour-neutral
+            // there. An agent with no output step opens on the USER's turn instead,
+            // and the unconditional removeFirst() deleted that: a one-turn history
+            // went out EMPTY, and Anthropic answered
+            // "invalid_request_error: messages: Field required". Ollama accepts an
+            // empty message list, so a local smoke test passed on a config that could
+            // not work against the real provider.
+            if (!includeFirstAgentMessage
+                    && !conversationLog.getMessages().isEmpty()
+                    && KEY_ROLE_ASSISTANT.equals(conversationLog.getMessages().getFirst().getRole())) {
                 conversationLog.getMessages().removeFirst();
             }
         }

@@ -11,6 +11,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 
 /**
  * The shared {@link IngestionStateStoreContract} against PostgreSQL.
@@ -40,5 +43,18 @@ class PostgresIngestionStateStoreTest extends PostgresTestBase implements Ingest
     @Override
     public IIngestionStateStore store() {
         return store;
+    }
+
+    @Override
+    public void forceDocumentOwner(String sourceId, String documentId, String runId) {
+        String sql = "UPDATE rag_ingestion_documents SET fencing_run_id = ? WHERE source_id = ? AND document_id = ?";
+        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, runId);
+            statement.setString(2, sourceId);
+            statement.setString(3, documentId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("could not set the document owner", e);
+        }
     }
 }

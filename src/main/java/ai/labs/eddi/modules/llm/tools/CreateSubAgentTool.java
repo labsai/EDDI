@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
@@ -14,6 +15,7 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
+import ai.labs.eddi.modules.templating.TemplateEscaping;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
@@ -57,6 +59,12 @@ public class CreateSubAgentTool {
     private final DynamicAgentConfig config;
     private final List<String> createdAgentIds;
     private final Set<String> retainedAgentIds;
+    /**
+     * The conversation this tool runs in — recorded as the created agent's origin.
+     */
+    private final String callerConversationId;
+    /** The group discussion that conversation belongs to, or null. */
+    private final String groupConversationId;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -65,6 +73,29 @@ public class CreateSubAgentTool {
             DynamicAgentConfig config,
             List<String> createdAgentIds,
             Set<String> retainedAgentIds) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds, null, null);
+    }
+
+    /**
+     * @param callerConversationId
+     *            the calling conversation, stamped into the created agent's
+     *            {@link DynamicOrigin} so {@code teardown_agent} can later prove
+     *            this conversation created it
+     * @param groupConversationId
+     *            the discussion that conversation belongs to, or {@code null} —
+     *            lets another member of the same discussion tear the agent down
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId) {
+        this.callerConversationId = callerConversationId;
+        this.groupConversationId = groupConversationId;
         this.agentSetupService = agentSetupService;
         this.conversationService = conversationService;
         this.parentAgentId = parentAgentId;
@@ -171,7 +202,7 @@ public class CreateSubAgentTool {
             // omission, because a null model skipped the guard and AgentSetupService
             // then substituted DEFAULT_MODEL — deploying a model the policy never saw.
             final String resolvedModel = requestedModel == null || requestedModel.isBlank()
-                    ? AgentSetupService.DEFAULT_MODEL
+                    ? AgentSetupService.defaultModelFor(resolvedProvider)
                     : requestedModel;
 
             // A vault reference names ONE provider's secret. Handing the parent's
@@ -243,7 +274,12 @@ public class CreateSubAgentTool {
             String prefixedName = parentAgentId + "/" + name.trim();
             SetupAgentRequest request = new SetupAgentRequest(
                     prefixedName,
-                    systemPrompt,
+                    // The prompt is written by the parent MODEL, which a chat user can steer,
+                    // and it is stored as the sub-agent's system prompt — a template LlmTask
+                    // renders on every turn. Unescaped, "{vars.apiKey}" or a "{#for}" loop in
+                    // it would be evaluated with the server's template data. An unparsed
+                    // block makes it literal text; the rendered prompt is byte-identical.
+                    TemplateEscaping.unparsedBlock(systemPrompt),
                     resolvedProvider,
                     resolvedModel,
                     inheritedApiKey, // the parent's vault reference, or null if it has none
@@ -266,7 +302,8 @@ public class CreateSubAgentTool {
 
             SetupResult result;
             try {
-                result = agentSetupService.setupAgent(request);
+                result = agentSetupService.setupAgent(request,
+                        new DynamicOrigin(parentAgentId, callerConversationId, groupConversationId, userId));
             } catch (AgentSetupException e) {
                 // Inheritance was asked for but supplied no key: say why, instead of
                 // leaving the model with a bare "API key is required" it cannot act on.

@@ -21,7 +21,8 @@ import {
   MessageCircle,
   Download,
   Search,
-  HandMetal,
+  Hand,
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -37,7 +38,16 @@ import type {
   ConversationOutput,
   SimpleConversationStep,
 } from "@/lib/api/conversations";
-import { extractInput, extractOutput, extractActions } from "@/lib/api/conversations";
+import {
+  extractInput,
+  extractOutput,
+  extractActions,
+  displayUserInput,
+  extractAgentSwitch,
+  extractAgentVersion,
+  END_REASON_AGENT_VERSION_RETIRED,
+} from "@/lib/api/conversations";
+import { AgentSwitchNotice } from "@/components/conversations/agent-switch-notice";
 import { useNavigate } from "react-router-dom";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { RequestPreview } from "@/components/operator/request-preview";
@@ -48,6 +58,7 @@ import {
   useApprovalStatus,
 } from "@/hooks/use-hitl";
 import type { HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
+import { isPauseChanged, shownPauseOf } from "@/lib/hitl-pause-binding";
 
 /** Same redacted-preview render prop the approvals inbox uses. */
 function renderCallExtra(call: PendingToolCallView) {
@@ -65,7 +76,7 @@ const stateIcons: Record<
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
   EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
-  AWAITING_HUMAN: { icon: HandMetal, color: "text-orange-500", bg: "bg-orange-500/10" },
+  AWAITING_HUMAN: { icon: Hand, color: "text-orange-500", bg: "bg-orange-500/10" },
 };
 
 export function ConversationDetailPage() {
@@ -146,7 +157,7 @@ export function ConversationDetailPage() {
       "",
     ];
     conversation.conversationSteps?.forEach((step, i) => {
-      const input = extractInput(step);
+      const input = displayUserInput(extractInput(step));
       const output = extractOutput(conversation.conversationOutputs?.[i]);
       if (input) lines.push(`**User**: ${input}`, "");
       if (output) lines.push(`**Agent**: ${output}`, "");
@@ -266,6 +277,18 @@ export function ConversationDetailPage() {
         </div>
       </div>
 
+      {/* Why it ended, when the backend recorded a reason */}
+      {state === "ENDED" && conversation.endReason === END_REASON_AGENT_VERSION_RETIRED && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-foreground"
+          data-testid="end-reason-retired"
+        >
+          <Info className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          {t("conversationDetail.endReasonRetired", "Ended: the agent version was retired")}
+        </div>
+      )}
+
       {/* HITL Approval Banner */}
       {state === "AWAITING_HUMAN" && (
         /* Pause metadata comes from approval-status, not the conversation: this
@@ -320,7 +343,15 @@ export function ConversationDetailPage() {
             toolDecisions?: Record<string, ToolCallDecision>,
           ) => {
             resumeMutation.mutate(
-              { conversationId: id!, decision: { verdict, note, toolDecisions } },
+              {
+                conversationId: id!,
+                decision: { verdict, note, toolDecisions },
+                // Bound to the pause this banner rendered, so a decision cannot
+                // land on a later pause of the same conversation unseen.
+                shown: approvalStatus
+                  ? shownPauseOf(approvalStatus)
+                  : { pausedAt: conversation.hitlPausedAt ?? null },
+              },
               {
                 onSuccess: () => {
                   toast.success(verdict === "APPROVED"
@@ -328,7 +359,17 @@ export function ConversationDetailPage() {
                     : t("hitl.rejected", "Rejected"));
                   refetch();
                 },
-                onError: (err) => toast.error(getErrorMessage(err)),
+                onError: (err) => {
+                  if (isPauseChanged(err)) {
+                    toast.error(t(
+                      "hitl.pauseChanged",
+                      "This request changed since you opened it — nothing was decided. Review it again.",
+                    ));
+                    refetch();
+                    return;
+                  }
+                  toast.error(getErrorMessage(err));
+                },
               }
             );
           }}
@@ -509,9 +550,13 @@ function ChatBubbleStep({
   const [showRaw, setShowRaw] = useState(false);
 
   // Parse input/output/actions from the conversationStep key/value pairs
-  const input = extractInput(step);
+  const input = displayUserInput(extractInput(step));
   const output = extractOutput(conversationOutput);
   const actions = extractActions(step);
+  // Version following: which agent version ran this step, and whether the
+  // conversation moved to it on this step. Both absent on older steps.
+  const agentVersion = extractAgentVersion(step);
+  const agentSwitch = extractAgentSwitch(step);
 
   // Calculate processing time from timestamps of conversationStep data entries
   const processingTime = (() => {
@@ -528,6 +573,12 @@ function ChatBubbleStep({
 
   return (
     <div className={cn("space-y-3", !isLast && "pb-3")}>
+      {agentSwitch && (
+        <div className="flex justify-center">
+          <AgentSwitchNotice from={agentSwitch.from} to={agentSwitch.to} />
+        </div>
+      )}
+
       {/* User message — right aligned */}
       {input && (
         <div className="flex justify-end">
@@ -582,6 +633,15 @@ function ChatBubbleStep({
         >
           <Code className="h-3 w-3" />
           {t("conversationDetail.step", "Step")} {stepNumber}
+          {agentVersion !== null && (
+            <span
+              className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title={t("conversationDetail.stepAgentVersion", "Answered by agent version {{version}}", { version: agentVersion })}
+              data-testid={`step-agent-version-${stepNumber}`}
+            >
+              v{agentVersion}
+            </span>
+          )}
           {processingTime && (
             <span className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
               <Clock className="h-2.5 w-2.5" />

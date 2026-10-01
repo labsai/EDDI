@@ -34,7 +34,7 @@ Brings up MongoDB, EDDI, Open WebUI on <http://localhost:3000>, and a one-shot s
 
 Two things worth knowing about it:
 
-- **EDDI is built from the working tree**, not pulled from Docker Hub — the adapter is not in any published image yet, so `labsai/eddi:latest` would start fine and then 404 on `/v1`. The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
+- **EDDI is built from the working tree**, not pulled from Docker Hub, so the demo always runs the adapter as it is in your checkout, including changes that have not reached a published image. (The adapter itself has shipped since 6.4.0.) The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
 - **The demo agent has no LLM.** It needs no provider credentials and its replies are deterministic — but it also *cannot answer questions about anything*, including an uploaded PDF. To get an agent that actually thinks, set `EDDI_DEMO_LLM_API_KEY` and a second LLM-backed agent is deployed alongside it:
 
   ```bash
@@ -151,6 +151,8 @@ Each deployed agent is exposed under two ids:
 
 The format is `<slugified agent name>-<last 6 characters of the agent id>`. The suffix is there because agent names are not unique — two agents both called "Support" would otherwise be indistinguishable. Accented characters are folded (`Übersicht` → `ubersicht`) rather than dropped.
 
+In the rare case that two deployed agents share both the name slug and the last six id characters, each of them is listed as `<slugified agent name>-<full agent id>` instead, so both stay selectable. The short id still works as an alias when the caller may use exactly one of the two; when both are usable it is rejected as ambiguous rather than guessed. Agents that do not collide keep their short id.
+
 The adapter also accepts the bare agent id, the exact agent name, or the bare slug — the last two only when they match exactly one agent. An ambiguous name returns `400` listing the candidates rather than picking one.
 
 ### Stateless requests
@@ -240,6 +242,7 @@ Because every message goes through `IConversationService`, the whole pipeline ap
 | `eddi.openai-compat.max-concurrent-requests` | `64` | In-flight completions; excess gets `429`. |
 | `eddi.openai-compat.model-cache-seconds` | `30` | Model catalogue TTL. |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Enable stateless requests — lists the `:stateless` ids and accepts the `stateless` body field. Disabling blocks both. |
+| `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let a chat mapped under the raw `X-OpenWebUI-User-Id` (before ids were namespaced) keep its conversation. Enable only if `/v1` never ran with `http-policy=authenticated` — see §4. |
 
 Every property has an environment-variable form: `eddi.openai-compat.api-key` → `EDDI_OPENAI_COMPAT_API_KEY`.
 
@@ -259,10 +262,27 @@ Every property has an environment-variable form: `eddi.openai-compat.api-key` �
 
 ```
 1. OIDC principal                       (http-policy=authenticated)
-2. X-OpenWebUI-User-Id                  (when trust-user-headers=true)
+2. X-OpenWebUI-User-Id → openwebui:<id> (when trust-user-headers=true)
 3. default-user                         (only when allow-anonymous=true)
 4. otherwise → 401
 ```
+
+The header value is namespaced to `openwebui:<id>`, so a header can never name an
+OIDC principal or any other identity source. The prefix is reserved: an OIDC
+principal that begins with `openwebui:` is refused with `401`.
+
+Chats created before header ids were namespaced are mapped under the raw id. Such
+a mapping does not record whether the header or an OIDC principal (while `/v1`
+ran with `http-policy=authenticated`) created it, so it is only adopted when
+`adopt-legacy-header-mappings=true`. Leave it off if `/v1` ever ran in OIDC mode;
+otherwise a pre-upgrade chat starts a new conversation on its next message.
+
+An adopted chat keeps its conversation, and that conversation keeps its raw-id
+owner (so its memories keep loading). GDPR export and erasure resolve data by
+user id, so for an Open WebUI user of such a chat **address both
+`openwebui:<id>` and the raw `<id>`**. EDDI does not do this automatically: the
+raw id shares a namespace with OIDC principals, so deriving it from the
+namespaced id could export or erase another user's data.
 
 > [!IMPORTANT]
 > **`trust-user-headers` is a deliberate delegation.** The header is believed only because the caller already proved possession of the API key — i.e. Open WebUI is a trusted proxy that authenticated its own users. **A leaked API key therefore allows impersonating any user.** Rotate it as you would any shared secret, and prefer `http-policy=authenticated` where per-user tokens are available.
@@ -620,7 +640,7 @@ Assembled from the standard shapes — see [`langchain.md`](langchain.md) for th
 }
 ```
 
-> A single unconditional `inputmatcher` deliberately departs from the guidance in [`AGENTS.md` §5.3](../AGENTS.md) that every rule carry an `actionmatcher` on `lastStep`. That rule exists to stop wizard-style agents firing out of order; here, firing on every turn *is* the intent.
+> A single unconditional `inputmatcher` deliberately departs from the guidance in [Agent Config Authoring](agent-config-authoring.md#behavior-rule-safety-rules) that every rule carry an `actionmatcher` on `lastStep`. That rule exists to stop wizard-style agents firing out of order; here, firing on every turn *is* the intent.
 
 **2. `…0003.langchain.json`** — the model:
 

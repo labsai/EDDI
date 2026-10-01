@@ -550,45 +550,6 @@ const RESOURCE_SCHEMAS: Record<string, object> = {
   },
 };
 
-// ─── Audit mock data generator ─────────────────────────────────────
-const TASK_TYPES = ["langchain", "behavior", "output", "httpcalls", "propertysetter", "expressions"];
-function generateMockAuditEntries(conversationId: string, count: number) {
-  const now = Date.now();
-  return Array.from({ length: count }, (_, i) => ({
-    id: `audit-${conversationId}-${i}`,
-    conversationId,
-    agentId: "agent1",
-    agentVersion: 1,
-    userId: "manager-user",
-    environment: i % 3 === 0 ? "production" : "test",
-    stepIndex: Math.floor(i / 2),
-    taskId: `task-${i}`,
-    taskType: TASK_TYPES[i % TASK_TYPES.length]!,
-    taskIndex: i % 2,
-    durationMs: 50 + Math.floor(Math.random() * 500),
-    input: i === 0 ? { "input:initial": "Tell me about the weather" } : null,
-    output: i % 2 === 0 ? { "output:text": "Here's the latest weather information..." } : null,
-    llmDetail: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? {
-      model: "gpt-5.4-mini",
-      modelName: "gpt-5.4-mini",
-      provider: "openai",
-      tokens: { input: 128, output: 64 },
-      tokenUsage: { inputTokens: 128, outputTokens: 64 },
-      compiledPrompt: JSON.stringify([
-        { role: "system", content: "You are a helpful weather assistant." },
-        { role: "user", content: "Tell me about the weather in Vienna" },
-      ]),
-      modelResponse: "The weather in Vienna is currently sunny with a temperature of 22°C and humidity of 45%.",
-    } : null,
-    toolCalls: i === 3 ? [{ name: "fetch_weather", args: { city: "Vienna" }, result: "sunny 22°C" }] : null,
-    actions: ["greet", "respond"].slice(0, (i % 2) + 1),
-    cost: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? 0.003 + Math.random() * 0.01 : 0,
-    timestamp: new Date(now - (count - i) * 60000).toISOString(),
-    hmac: i % 4 === 0 ? "a1b2c3d4e5f6a1b2c3d4e5f6789012345678901234567890abcdef" : null,
-    agentSignature: i % 4 === 0 ? "ed25519:sig_" + conversationId + "_" + i : null,
-  }));
-}
-
 /**
  * A finished DEBATE, reproducing the two things a real one does that the tidy
  * `gconv1` fixture does not — both of which broke the board in a demo:
@@ -718,6 +679,22 @@ export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
 /** Where an E2E spec plants the sharing state of one resource, keyed by id. */
 export const SHARE_SEED_KEY = "eddi-e2e-shares";
 
+/** Where an E2E spec plants the signed-in user's notifications. */
+export const NOTIFICATION_SEED_KEY = "eddi-e2e-notifications";
+
+/**
+ * A chat message containing this makes the mocked turn fail the way a rejected
+ * LLM call does: `conversationState: ERROR`, no reply, and the reason under
+ * `taskErrors` — on the plain and the streaming path.
+ */
+export const TASK_FAILURE_TRIGGER = "trigger a task failure";
+
+/** The reason the mocked failed turn reports. */
+export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
+
+/** What the mocked ingestion status says for a `replace=true` ingestion. */
+export const MOCK_REPLACE_WARNING = "The new version is stored, but the previous version is still retrievable (mock).";
+
 function readSeed<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
@@ -732,6 +709,65 @@ function readSeed<T>(key: string): T | null {
 
 function readWorkspaceSeed() {
   return readSeed<typeof WORKSPACES_DISABLED>(WORKSPACE_SEED_KEY);
+}
+
+/** The shape `SpaceTenants.tenantFor` produces; the hash is fixed here. */
+function tenantOf(request: Request): string {
+  const space = new URL(request.url).searchParams.get("space") ?? "";
+  return space.startsWith("team:") ? "t.engineering.1a2b3c4d" : "u.alice.5e6f7a8b";
+}
+
+function workspaceSettings(defaultSpace: string | null, legacyVisibility: string | null) {
+  return {
+    enforcing: readWorkspaceSeed()?.enabled === true,
+    groupsClaim: "groups",
+    defaultSpace: {
+      value: defaultSpace,
+      source: defaultSpace ? "STORED" : "DEFAULT",
+      property: "eddi.workspaces.default-space",
+    },
+    legacyVisibility: {
+      value: legacyVisibility ?? "shared",
+      source: legacyVisibility ? "STORED" : "DEFAULT",
+      property: "eddi.workspaces.legacy-visibility",
+    },
+    updatedAt: null,
+    updatedBy: null,
+    warnings: [],
+  };
+}
+
+/**
+ * What the space-store mock holds, per tenant and kind, for the page's lifetime.
+ * In memory on purpose: it holds secret metadata, and nothing that describes a
+ * secret belongs in localStorage, mock or not.
+ */
+const spaceStore = new Map<string, Map<string, unknown>>();
+
+function readSpaceStore(request: Request, kind: "secrets" | "variables"): unknown[] {
+  return [...(spaceStore.get(`${tenantOf(request)}/${kind}`)?.values() ?? [])];
+}
+
+function writeSpaceStore(request: Request, kind: "secrets" | "variables", key: string, value: unknown | null) {
+  const bucketKey = `${tenantOf(request)}/${kind}`;
+  const bucket = spaceStore.get(bucketKey) ?? new Map<string, unknown>();
+  if (value === null) bucket.delete(key);
+  else bucket.set(key, value);
+  spaceStore.set(bucketKey, bucket);
+}
+
+type SeededNotification = { id: string; readAt?: string | null } & Record<string, unknown>;
+
+function readNotificationSeed(): SeededNotification[] {
+  return readSeed<SeededNotification[]>(NOTIFICATION_SEED_KEY) ?? [];
+}
+
+function writeNotificationSeed(value: SeededNotification[]) {
+  try {
+    localStorage.setItem(NOTIFICATION_SEED_KEY, JSON.stringify(value));
+  } catch {
+    // No localStorage (the node tier): nothing to remember.
+  }
 }
 
 function readShareSeed(id: string) {
@@ -807,6 +843,101 @@ export const handlers = [
   http.put("*/descriptorstore/descriptors/:id/shares/visibility", ({ params }) =>
     HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
   ),
+  http.put("*/descriptorstore/descriptors/:id/shares/space", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  // The real endpoint answers the same for an id that matches nothing, so
+  // this one does too.
+  http.post("*/descriptorstore/descriptors/:id/shares/requests", () => HttpResponse.json({ outcome: "SENT" })),
+
+  // Notifications. Empty unless a spec seeds some; marking read is remembered
+  // for the page's lifetime so the badge behaves.
+  http.get("*/workspaces/notifications/count", () =>
+    HttpResponse.json({ unread: readNotificationSeed().filter((n) => !n.readAt).length })
+  ),
+  http.get("*/workspaces/notifications", () => HttpResponse.json(readNotificationSeed())),
+  http.post("*/workspaces/notifications/read", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { ids?: string[] };
+    const all = readNotificationSeed();
+    const now = new Date().toISOString();
+    let marked = 0;
+    const next = all.map((n) => {
+      if (n.readAt || (body.ids && !body.ids.includes(n.id))) return n;
+      marked += 1;
+      return { ...n, readAt: now };
+    });
+    writeNotificationSeed(next);
+    return HttpResponse.json({ marked });
+  }),
+
+  // The user directory behind the share box's suggestions.
+  http.get("*/workspaces/directory", ({ request }) => {
+    const q = (new URL(request.url).searchParams.get("q") ?? "").toLowerCase();
+    const people = [
+      { subject: "user:bob", kind: "user", label: "Bob Builder", detail: "bob@example.com" },
+      { subject: "user:carol", kind: "user", label: "Carol Test", detail: "carol@example.com" },
+      { subject: "team:engineering", kind: "team", label: "engineering", detail: null },
+    ];
+    return HttpResponse.json(q ? people.filter((p) => `${p.label} ${p.detail ?? ""}`.toLowerCase().includes(q)) : people);
+  }),
+
+  // Runtime workspace settings (administrators).
+  http.get("*/workspaces/settings", () => HttpResponse.json(workspaceSettings(null, null))),
+  http.put("*/workspaces/settings", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      defaultSpace?: string | null;
+      legacyVisibility?: string | null;
+    };
+    return HttpResponse.json(workspaceSettings(body.defaultSpace ?? null, body.legacyVisibility ?? null));
+  }),
+
+  // A space's own secrets and variables.
+  http.get("*/spacestore/tenant", ({ request }) =>
+    HttpResponse.json({ space: new URL(request.url).searchParams.get("space") ?? "", tenant: tenantOf(request) })
+  ),
+  // Stored per tenant for the page's lifetime, so a saved entry shows up in
+  // the list the page re-reads. Values are never returned, as on the server.
+  http.get("*/spacestore/secrets", ({ request }) => HttpResponse.json(readSpaceStore(request, "secrets"))),
+  http.put("*/spacestore/secrets/:key", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { description?: string };
+    const key = String(params.key);
+    const secret = {
+      keyName: key,
+      reference: `\${vault:${tenantOf(request)}/${key}}`,
+      description: body.description ?? null,
+      allowedAgents: ["*"],
+      createdAt: new Date().toISOString(),
+    };
+    writeSpaceStore(request, "secrets", key, secret);
+    return HttpResponse.json(secret);
+  }),
+  http.delete("*/spacestore/secrets/:key", ({ params, request }) => {
+    writeSpaceStore(request, "secrets", String(params.key), null);
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.get("*/spacestore/variables", ({ request }) => HttpResponse.json(readSpaceStore(request, "variables"))),
+  http.put("*/spacestore/variables/:key", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { value?: string; description?: string };
+    const key = String(params.key);
+    const variable = {
+      key,
+      value: body.value ?? "",
+      description: body.description ?? null,
+      reference: `\${vars:${tenantOf(request)}/${key}}`,
+    };
+    writeSpaceStore(request, "variables", key, variable);
+    return HttpResponse.json(variable);
+  }),
+  http.delete("*/spacestore/variables/:key", ({ params, request }) => {
+    writeSpaceStore(request, "variables", String(params.key), null);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // What a chat window shows about an agent, and how much it is used.
+  http.get("*/agents/:agentId/profile", ({ params }) =>
+    HttpResponse.json({ agentId: String(params.agentId), name: null, description: null, reviewNotice: null })
+  ),
+  http.get("*/agents/:agentId/usage", () => HttpResponse.json({ total: 0, active: 0, distinctUsers: 0 })),
 
   // Template preview — resolves Qute templates for the LLM editor preview
   http.post("*/administration/preview/template", async ({ request }) => {
@@ -859,6 +990,18 @@ export const handlers = [
   // dictionaries). Echoes the id so a test can tell which one it asked for.
   http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
     const version = Number(new URL(request.url).searchParams.get("version") ?? 1);
+    // A known agent or workflow answers with its own fixture at the asked
+    // version — this is how version lists are read now (one descriptor read
+    // per version), so detail pages keep showing the fixture's real name.
+    const known = [...AGENTS_MOCK, ...WORKFLOWS_MOCK].find((d) =>
+      d.resource.includes(`/${String(params.id)}?`),
+    );
+    if (known) {
+      return HttpResponse.json({
+        ...known,
+        resource: known.resource.replace(/version=\d+/, `version=${version}`),
+      });
+    }
     return HttpResponse.json({
       resource: `eddi://ai.labs.mock/descriptorstore/descriptors/${params.id}?version=${version}`,
       name: `Mock descriptor ${params.id}`,
@@ -955,9 +1098,22 @@ export const handlers = [
     // space switcher pass its own E2E test while doing nothing — which is
     // exactly the bug this feature already shipped once.
     const space = url.searchParams.get("space") ?? "";
-    const scoped = space
+    const inSpace = space
       ? matched.filter((a) => "spaceId" in a && a.spaceId === space)
       : matched;
+
+    // `?ownership=` narrows the same way: "mine" is what the caller owns,
+    // "shared" what somebody else owns. Only while enforced — the backend
+    // ignores it otherwise, since everyone sees everything.
+    const ownership = url.searchParams.get("ownership") ?? "";
+    const seed = readWorkspaceSeed() as { enabled?: boolean; principal?: string } | null;
+    const me = seed?.enabled ? seed.principal : undefined;
+    const scoped =
+      me && ownership === "mine"
+        ? inSpace.filter((a) => "ownerId" in a && a.ownerId === me)
+        : me && ownership === "shared"
+          ? inSpace.filter((a) => "ownerId" in a && !!a.ownerId && a.ownerId !== me)
+          : inSpace;
 
     // `callerLevel` is stamped by the server ONLY while enforcement is on —
     // ResourceAccessGuard omits it otherwise, and NON_NULL keeps it off the
@@ -977,7 +1133,10 @@ export const handlers = [
       (a, b) => b.lastModifiedOn - a.lastModifiedOn,
     );
 
-    return HttpResponse.json(ordered.slice(index, index + limit));
+    // `index` is a PAGE index: the backend skips `index * limit` rows
+    // (DescriptorStore.readDescriptors). Slicing at `index` as a row offset let
+    // the app send `allPages.length * 50` as the page and still pass.
+    return HttpResponse.json(ordered.slice(index * limit, index * limit + limit));
   }),
 
   // Get agent
@@ -1089,13 +1248,52 @@ export const handlers = [
       description: "AI agent configured for EDDI platform",
       a2aSkills: [],
     };
-    return HttpResponse.json({ ...config, _version: version });
+    // Server-owned compatibility generation (AgentConfiguration). agent1's
+    // v2 and v3 share one; every other mock agent predates version following.
+    const compatibilityGeneration = agentId === "agent1" ? (version >= 2 ? 2 : 1) : null;
+    return HttpResponse.json({ ...config, compatibilityGeneration, _version: version });
+  }),
+
+  // Deployment impact — what deploying `version` does to the conversations on
+  // the agent's OTHER deployed versions (IRestAgentAdministration
+  // .getDeploymentImpact). Highest version first; agent1 has a compatible v2
+  // (FOLLOW) and a legacy v1 (STAY), every other agent has nothing else live.
+  http.get("*/administration/:env/deploymentimpact/:agentId", ({ request, params }) => {
+    const url = new URL(request.url);
+    const version = parseInt(url.searchParams.get("version") ?? "1", 10);
+    const agentId = params.agentId as string;
+    const generation = agentId === "agent1" ? (version >= 2 ? 2 : 1) : null;
+    const deployedVersions =
+      agentId === "agent1" && version === 3
+        ? [
+            { version: 2, compatibilityGeneration: 2, activeConversations: 12, outcome: "FOLLOW" },
+            { version: 1, compatibilityGeneration: null, activeConversations: 4, outcome: "STAY" },
+          ]
+        : [];
+    return HttpResponse.json({ agentId, version, compatibilityGeneration: generation, deployedVersions });
   }),
 
   // Deployment status
   http.get("*/administration/:env/deploymentstatus/:agentId", () => {
     return HttpResponse.json({ status: "READY" });
   }),
+
+  // Every deployed agent in an environment, each at its highest deployed
+  // version (AgentFactory.getAllLatestAgents) — consistent with the READY the
+  // per-agent handler above answers for every agent.
+  http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+    HttpResponse.json(
+      AGENTS_MOCK.map((a) => {
+        const match = /agents\/([^?]+)\?version=(\d+)/.exec(a.resource);
+        return {
+          environment: params.env,
+          agentId: match?.[1] ?? "",
+          agentVersion: Number(match?.[2] ?? 1),
+          status: "READY",
+        };
+      }),
+    ),
+  ),
 
   // Deploy agent
   http.post("*/administration/:env/deploy/:agentId", () => {
@@ -1121,7 +1319,9 @@ export const handlers = [
     });
   }),
 
-  // Update agent
+  // Update agent. `?compatible=true` (absent = breaking) only decides the new
+  // version's server-owned compatibilityGeneration, which this mock derives
+  // in the GET above, so the answer is the same either way.
   http.put("*/agentstore/agents/:id", ({ request, params }) => {
     const url = new URL(request.url);
     const currentVersion = parseInt(
@@ -1170,8 +1370,13 @@ export const handlers = [
   }),
 
   // Workflow descriptors
-  http.get("*/workflowstore/workflows/descriptors", () => {
-    return HttpResponse.json(WORKFLOWS_MOCK);
+  // `limit`/`index` honoured with the backend's page-index semantics (skip
+  // `index * limit`), so a hook that sends a row offset gets an empty page.
+  http.get("*/workflowstore/workflows/descriptors", ({ request }) => {
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    const index = Number(url.searchParams.get("index") ?? "0");
+    return HttpResponse.json(WORKFLOWS_MOCK.slice(index * limit, index * limit + limit));
   }),
 
   // Get package
@@ -1249,10 +1454,18 @@ export const handlers = [
     if (agentId) result = result.filter((c) => c.agentId === agentId);
     if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
     if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
-    return HttpResponse.json(result);
+    // RestConversationStore.readConversationDescriptors defaults `limit` to 20
+    // and CLAMPS it to 100 — a caller asking for 1000 gets 100, and a mock that
+    // returned everything hid that the dashboard reported the clamp as a total.
+    const rawLimit = Number(url.searchParams.get("limit") ?? "20");
+    const limit = Math.min(rawLimit < 1 ? 20 : rawLimit, 100);
+    const index = Math.max(0, Number(url.searchParams.get("index") ?? "0"));
+    return HttpResponse.json(result.slice(index * limit, index * limit + limit));
   }),
 
-  // Simple conversation log
+  // Simple conversation log. Detailed (non-public) keys included: every step
+  // records `agent:version`, and step 4 is where the conversation moved from
+  // v2 to a compatible v3 (`agent:switch`).
   http.get("*/conversationstore/conversations/simple/:id", () => {
     const now = new Date();
     const stepTime = (offsetMs: number) => new Date(now.getTime() - offsetMs).toISOString();
@@ -1268,6 +1481,7 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "Hi, I need help with my order", timestamp: stepTime(300000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(299900), originWorkflowId: null },
             { key: "actions", value: ["greet", "order_inquiry"], timestamp: stepTime(299500), originWorkflowId: "wf1" },
             { key: "output:text:greet", value: "Hello! I'd be happy to help with your order. Could you share your order number?", timestamp: stepTime(299000), originWorkflowId: "wf1" },
           ],
@@ -1276,6 +1490,7 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "It's ORD-2024-78542", timestamp: stepTime(240000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(239900), originWorkflowId: null },
             { key: "actions", value: ["lookup_order"], timestamp: stepTime(239500), originWorkflowId: "wf1" },
             { key: "output:text:lookup_order", value: "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd. Is there anything specific you'd like to know about it?", timestamp: stepTime(238000), originWorkflowId: "wf1" },
           ],
@@ -1284,6 +1499,7 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "Can I change the delivery address?", timestamp: stepTime(180000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(179900), originWorkflowId: null },
             { key: "actions", value: ["address_change"], timestamp: stepTime(179500), originWorkflowId: "wf1" },
             { key: "output:text:address_change", value: "Since your order is already in transit, I can try to redirect the package. Please provide the new delivery address and I'll check if a redirect is possible with the carrier.", timestamp: stepTime(178000), originWorkflowId: "wf1" },
             { key: "quickReplies", value: ["Keep current address", "Provide new address", "Cancel order instead"], timestamp: stepTime(177500), originWorkflowId: "wf1" },
@@ -1293,6 +1509,8 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "123 Oak Street, Suite 4B, Portland OR 97201", timestamp: stepTime(120000), originWorkflowId: null },
+            { key: "agent:version", value: 3, timestamp: stepTime(119900), originWorkflowId: null },
+            { key: "agent:switch", value: { from: 2, to: 3 }, timestamp: stepTime(119900), originWorkflowId: null },
             { key: "actions", value: ["update_address", "notify_carrier"], timestamp: stepTime(119000), originWorkflowId: "wf1" },
             { key: "output:text:update_address", value: "Great news! I've submitted a redirect request to the carrier for: 123 Oak Street, Suite 4B, Portland OR 97201. You'll receive a confirmation email within the next 2 hours. The estimated delivery date may shift by 1 business day.", timestamp: stepTime(117000), originWorkflowId: "wf1" },
           ],
@@ -1301,6 +1519,7 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "Perfect, thank you!", timestamp: stepTime(60000), originWorkflowId: null },
+            { key: "agent:version", value: 3, timestamp: stepTime(59900), originWorkflowId: null },
             { key: "actions", value: ["farewell"], timestamp: stepTime(59500), originWorkflowId: "wf1" },
             { key: "output:text:farewell", value: "You're welcome! Your redirect reference is RDR-98765. Is there anything else I can help you with?", timestamp: stepTime(58000), originWorkflowId: "wf1" },
             { key: "quickReplies", value: ["Track my order", "View other orders", "No thanks, goodbye"], timestamp: stepTime(57500), originWorkflowId: "wf1" },
@@ -1385,8 +1604,58 @@ export const handlers = [
     });
   }),
 
+  // Streaming send (v6: POST /agents/:conversationId/stream). A plain reply, or —
+  // for TASK_FAILURE_TRIGGER — the frames a rejected LLM call produces.
+  http.post("*/agents/:conversationId/stream", async ({ request }) => {
+    const body = await request.clone().text();
+    const frame = (name: string, data: unknown) =>
+      `event: ${name}\ndata: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
+    const frames = body.includes(TASK_FAILURE_TRIGGER)
+      ? [
+          frame("task_failed", {
+            taskId: "eddi://ai.labs.llm",
+            taskType: "langchain",
+            errorType: "unknown",
+            error: "Streaming chat failed: `temperature` is deprecated for this model.",
+          }),
+          frame("done", {
+            conversationState: "ERROR",
+            conversationOutputs: [
+              {
+                actions: ["send_message"],
+                taskErrors: [{ type: "errorDigest", taskId: "ai.labs.llm", taskType: "langchain", text: MOCK_TASK_ERROR_TEXT }],
+              },
+            ],
+          }),
+        ]
+      : [
+          frame("token", "Happy to help."),
+          frame("done", {
+            conversationState: "READY",
+            conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
+          }),
+        ];
+    return new HttpResponse(frames.join(""), { headers: { "Content-Type": "text/event-stream" } });
+  }),
+
   // Send message (text/plain or JSON) — returns snapshot (v6: POST /agents/:conversationId)
-  http.post("*/agents/:conversationId", () => {
+  http.post("*/agents/:conversationId", async ({ request }) => {
+    if ((await request.clone().text()).includes(TASK_FAILURE_TRIGGER)) {
+      return HttpResponse.json({
+        agentId: "agent1",
+        agentVersion: 3,
+        conversationId: "conv-mock",
+        conversationState: "ERROR",
+        environment: "production",
+        conversationSteps: [],
+        conversationOutputs: [
+          {
+            actions: ["send_message"],
+            taskErrors: [{ type: "errorDigest", taskId: "ai.labs.llm", taskType: "langchain", text: MOCK_TASK_ERROR_TEXT }],
+          },
+        ],
+      });
+    }
     return HttpResponse.json({
       agentId: "agent1",
       agentVersion: 3,
@@ -1498,77 +1767,12 @@ export const handlers = [
     });
   }),
 
-  // --- Backup / Import / Export ---
-  http.post("*/backup/export/:agentId", () => {
-    return new HttpResponse(null, {
-      status: 200,
-      headers: { Location: "/backup/export/test-agent-1.zip" },
-    });
-  }),
-
-  http.get("*/backup/export/:filename", () => {
-    return new HttpResponse(new Blob(["fake-zip"]), {
-      status: 200,
-      headers: { "Content-Type": "application/zip" },
-    });
-  }),
-
-  http.post("*/backup/import/preview", () => {
-    return HttpResponse.json({
-      agentOriginId: "origin-agent-1",
-      agentName: "Weather Agent",
-      resources: [
-        {
-          originId: "origin-agent-1",
-          resourceType: "agent",
-          name: "Weather Agent",
-          action: "UPDATE",
-          localId: "agent1",
-          localVersion: 1,
-        },
-        {
-          originId: "origin-wf-1",
-          resourceType: "package",
-          name: "Main Workflow",
-          action: "UPDATE",
-          localId: "wf1",
-          localVersion: 1,
-        },
-        {
-          originId: "origin-beh-1",
-          resourceType: "behavior",
-          name: "Greeting Rules",
-          action: "CREATE",
-          localId: null,
-          localVersion: null,
-        },
-        {
-          originId: "origin-dict-1",
-          resourceType: "dictionary",
-          name: "English Dictionary",
-          action: "UPDATE",
-          localId: "dict1",
-          localVersion: 1,
-        },
-      ],
-    });
-  }),
-
-  // NOTE: This generic handler must come AFTER the /preview handler
-  http.post("*/backup/import", ({ request }) => {
-    const url = new URL(request.url);
-    const strategy = url.searchParams.get("strategy");
-    if (strategy === "merge") {
-      return new HttpResponse(null, {
-        status: 200,
-        headers: { Location: "/agentstore/agents/agent1?version=2" },
-      });
-    }
-    return new HttpResponse(null, {
-      status: 200,
-      headers: { Location: "/agentstore/agents/imported-agent?version=1" },
-    });
-  }),
+  // Undo / redo — RestAgentEngine.undo/redo answer an EMPTY 200 when the step
+  // moved (409 when there was nothing to move). No snapshot body: tests used to
+  // mock one, which is how the app came to read `.conversationSteps` off
+  // `undefined` against the real backend.
+  http.post("*/agents/:conversationId/undo", () => new HttpResponse(null, { status: 200 })),
+  http.post("*/agents/:conversationId/redo", () => new HttpResponse(null, { status: 200 })),
 
   // --- Extension Store ---
   http.get("*/extensionstore/extensions", () => {
@@ -1650,7 +1854,8 @@ export const handlers = [
     }
 
     const all = ["res1", "res2", "res3"].map((id, i) => descriptor(id, i + 1));
-    return HttpResponse.json(all.slice(index, index + limit));
+    // Page index, not row offset — see the agent descriptors handler.
+    return HttpResponse.json(all.slice(index * limit, index * limit + limit));
   }),
 
   // Specific handlers for behavior and httpcalls with realistic mock data
@@ -2346,6 +2551,7 @@ export const handlers = [
             maxDepth: 3,
             maxPages: 200,
             excludePatterns: ["*.pdf"],
+            sitemapUrls: ["https://example.com/docs/sitemap.xml"],
             requestDelayMs: 500,
             respectRobots: true,
           },
@@ -2360,15 +2566,20 @@ export const handlers = [
   }),
 
   // RAG ingestion endpoints (mock)
-  http.post("*/ragstore/rags/:id/ingest", () => {
+  http.post("*/ragstore/rags/:id/ingest", ({ request }) => {
+    // The id records whether the client asked to replace, so the status below can
+    // answer the way a store that cannot delete by metadata does.
+    const replace = new URL(request.url).searchParams.get("replace") === "true";
     return HttpResponse.json({
-      ingestionId: `ingest-${Date.now()}`,
+      ingestionId: `ingest-${replace ? "replace-" : ""}${Date.now()}`,
     });
   }),
 
-  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", () => {
+  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", ({ params }) => {
+    const replaced = String(params.ingestionId).startsWith("ingest-replace-");
     return HttpResponse.json({
       status: "completed",
+      ...(replaced ? { warning: MOCK_REPLACE_WARNING } : {}),
     });
   }),
 
@@ -2419,6 +2630,42 @@ export const handlers = [
 
   http.delete("*/ragstore/rags/:id/sources/:sourceId/documents", () => {
     return HttpResponse.json({ status: "purged", sourceId: "src-1" });
+  }),
+
+  // Uploaded files of an ingestion source of type "upload".
+  http.get("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+    return HttpResponse.json([
+      {
+        fileId: "3f2a91c4e5b6d7089a1b2c3d4e5f6071",
+        fileName: "employee-handbook.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1048576,
+        contentHash: "a1b2c3",
+        uploadedAt: "2026-09-18T09:12:00Z",
+        indexState: "INDEXED",
+      },
+    ]);
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+    return HttpResponse.json({
+      stored: [
+        {
+          fileId: "aa11bb22cc33dd44ee55ff6677889900",
+          fileName: "notes.md",
+          mimeType: "text/markdown",
+          sizeBytes: 64,
+          contentHash: "d4e5f6",
+          uploadedAt: "2026-09-18T09:20:00Z",
+          indexState: "NOT_INDEXED",
+        },
+      ],
+      rejected: [],
+    });
+  }),
+
+  http.delete("*/ragstore/rags/:id/sources/:sourceId/files/:fileId", ({ params }) => {
+    return HttpResponse.json({ status: "deleted", fileId: params.fileId });
   }),
 
   // --- Group Store Mock Handlers ---
@@ -2837,7 +3084,7 @@ export const handlers = [
   }),
 
   // Group conversations
-  http.get("*/groups/:groupId/conversations", ({ params }) => {
+  http.get("*/groups/:groupId/conversations", ({ params, request }) => {
     const now = Date.now();
     const groupConversations: Record<string, object[]> = {
       grp1: [
@@ -2876,7 +3123,12 @@ export const handlers = [
       ],
     };
     const id = params.groupId as string;
-    return HttpResponse.json(groupConversations[id] ?? []);
+    // The backend's `index` is a ROW offset here (GroupConversationStore hands it
+    // to findResources as `skip`), unlike the descriptor stores' page index.
+    const url = new URL(request.url);
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    return HttpResponse.json((groupConversations[id] ?? []).slice(index, index + limit));
   }),
 
   http.post("*/groups/:groupId/conversations", ({ params }) => {
@@ -3146,71 +3398,10 @@ function createResourceHandlers(
   plural: string,
   label: string
 ) {
-  // Per-type descriptors with meaningful names
-  const descriptorsByType: Record<string, { id: string; name: string; desc: string }[]> = {
-    rules: [
-      { id: "beh1", name: "Intent Classification Rules", desc: "Routes user input to intents based on expression patterns" },
-      { id: "beh2", name: "Escalation Rules", desc: "Detects frustration signals and triggers live-agent handoff" },
-      { id: "beh3", name: "Fallback Handler", desc: "Catches unrecognized input and offers guided alternatives" },
-    ],
-    apicalls: [
-      { id: "hc1", name: "Weather API Integration", desc: "Fetches current weather from OpenWeatherMap for any city" },
-      { id: "hc2", name: "Payment Gateway", desc: "Stripe payment intent creation and status check" },
-      { id: "hc3", name: "CRM Lookup", desc: "Queries Salesforce for customer account details by email" },
-      { id: "hc4", name: "Email Notification Service", desc: "Sends transactional emails via SendGrid API" },
-    ],
-    output: [
-      { id: "out1", name: "English Responses", desc: "Standard conversational responses in English" },
-      { id: "out2", name: "German Responses", desc: "Localized German output set for DACH market" },
-      { id: "out3", name: "Quick Reply Templates", desc: "Pre-built quick reply options for common intents" },
-    ],
-    dictionary: [
-      { id: "dict1", name: "English Intent Dictionary", desc: "Core NLP expressions for greetings, farewells, and common queries" },
-      { id: "dict2", name: "Medical Terminology", desc: "Symptom and condition phrases for healthcare triage scenarios" },
-      { id: "dict3", name: "Financial Glossary", desc: "Banking and investment terms for financial advisor agents" },
-    ],
-    llm: [
-      { id: "llm1", name: "GPT-5.4 Support Config", desc: "OpenAI GPT-5.4 with tool calling enabled for customer support" },
-      { id: "llm2", name: "Claude Analysis Config", desc: "Anthropic Claude for document analysis and summarization" },
-      { id: "llm3", name: "Gemini Creative Writing", desc: "Google Gemini 2.5 Flash for creative content generation" },
-    ],
-    propertysetter: [
-      { id: "ps1", name: "Session Tracker", desc: "Persists user session context: language, timezone, last topic" },
-      { id: "ps2", name: "User Profile Builder", desc: "Extracts and stores user preferences from conversation history" },
-      { id: "ps3", name: "Context Enrichment", desc: "Adds metadata (channel, device, region) to conversation memory" },
-    ],
-    mcpcalls: [
-      { id: "mcp1", name: "Document Search Server", desc: "MCP server providing semantic search over enterprise documents" },
-      { id: "mcp2", name: "Calendar Integration", desc: "Google Calendar read/write via MCP for appointment scheduling" },
-    ],
-    rag: [
-      { id: "rag1", name: "Product Knowledge Base", desc: "Vector store of 10k product descriptions with pgvector embeddings" },
-      { id: "rag2", name: "Legal Document Store", desc: "Contract clauses and regulatory texts for compliance review" },
-      { id: "rag3", name: "Employee Handbook", desc: "HR policies, benefits info, and onboarding procedures" },
-    ],
-    parser: [
-      { id: "par1", name: "Default Parser", desc: "Standard expression parser" },
-    ],
-    snippets: [
-      { id: "snip1", name: "Cautious Mode", desc: "Makes the agent more careful and hedging in responses" },
-      { id: "snip2", name: "Compliance Disclaimer", desc: "Adds regulatory compliance disclaimers to financial advice" },
-      { id: "snip3", name: "Friendly Persona", desc: "Sets a warm, approachable conversational tone" },
-    ],
-  };
-
-  const items = descriptorsByType[label] ?? [
-    { id: "res1", name: `${label} Config 1`, desc: `First ${label} configuration` },
-    { id: "res2", name: `${label} Config 2`, desc: `Second ${label} configuration` },
-  ];
-
-  const mockDescriptors = items.map((item, i) => ({
-    resource: `eddi://ai.labs.${label}/${store}/${plural}/${item.id}?version=1`,
-    name: item.name,
-    description: item.desc,
-    createdOn: Date.now() - (items.length - i) * 3 * 86400000,
-    lastModifiedOn: Date.now() - i * 12 * 3600000,
-  }));
-
+  // No `/descriptors` handler here: the generic `*/:store/:plural/descriptors`
+  // registered earlier answers every one of these stores, so a copy here was
+  // unreachable (it once carried an `includePreviousVersions` branch no test
+  // could ever hit).
   return [
     // JSON Schema endpoint
     http.get(`*/${store}/${plural}/jsonSchema`, () => {
@@ -3224,32 +3415,6 @@ function createResourceHandlers(
         title: `${label}Configuration`,
         properties: {},
       });
-    }),
-    http.get(`*/${store}/${plural}/descriptors`, ({ request }) => {
-      const url = new URL(request.url);
-      const includePrevious = url.searchParams.get("includePreviousVersions");
-      const filter = url.searchParams.get("filter");
-
-      if (includePrevious === "true" && filter) {
-        // Return multiple versions for a specific resource
-        return HttpResponse.json([
-          {
-            resource: `eddi://ai.labs.${label}/${store}/${plural}/${filter}?version=2`,
-            name: `${label} Config`,
-            description: `${label} configuration`,
-            createdOn: Date.now() - 86400000,
-            lastModifiedOn: Date.now(),
-          },
-          {
-            resource: `eddi://ai.labs.${label}/${store}/${plural}/${filter}?version=1`,
-            name: `${label} Config`,
-            description: `${label} configuration`,
-            createdOn: Date.now() - 172800000,
-            lastModifiedOn: Date.now() - 86400000,
-          },
-        ]);
-      }
-      return HttpResponse.json(mockDescriptors);
     }),
     http.get(`*/${store}/${plural}/:id`, () => {
       return HttpResponse.json({ type: label, config: {} });
@@ -3540,7 +3705,19 @@ export const logAdminHandlers = [
 ];
 
 // --- Secrets Vault Mock ---
-const MOCK_SECRETS = [
+type MockSecret = {
+  tenantId: string;
+  keyName: string;
+  createdAt: string;
+  lastAccessedAt: string | null;
+  lastRotatedAt: string | null;
+  checksum: string;
+  description: string;
+  allowedAgents: string[];
+};
+
+/** The seed. Never mutated: the handlers work on `secretsState` below. */
+const MOCK_SECRETS: readonly MockSecret[] = [
   {
     tenantId: "default",
     keyName: "openai-api-key",
@@ -3731,6 +3908,27 @@ export const variablesHandlers = [
   }),
 ];
 
+/**
+ * **These handlers hold state.** The list, metadata GET, store PUT, grant PUT
+ * and DELETE all read and write this one array, so a key created through the
+ * mocked Add flow is found by the next lookup (and a second create of it is
+ * refused as a duplicate), and a deleted key is gone. A fixed array the writes
+ * never touched let a lookup contradict a write that had just succeeded.
+ * `server.resetHandlers()` does not reset module state, so `src/test/setup.ts`
+ * calls {@link resetSecretsMockState} after every test.
+ */
+let secretsState: MockSecret[] = [];
+
+/** Restore the seed secrets; called after every test. */
+export function resetSecretsMockState(): void {
+  secretsState = MOCK_SECRETS.map((s) => ({ ...s, allowedAgents: [...s.allowedAgents] }));
+}
+resetSecretsMockState();
+
+function findMockSecret(tenantId: unknown, keyName: unknown): MockSecret | undefined {
+  return secretsState.find((s) => s.tenantId === tenantId && s.keyName === keyName);
+}
+
 export const secretsHandlers = [
   // List secrets (tenant-scoped, no agentId)
   http.get("*/secretstore/secrets/:tenantId", ({ params, request }) => {
@@ -3740,16 +3938,99 @@ export const secretsHandlers = [
     // Skip paths like /tenantId/keyName (those are getMetadata)
     const segments = url.pathname.split("/").filter(Boolean);
     if (segments.length > 3) return;
-    const filtered = MOCK_SECRETS.filter(
+    const filtered = secretsState.filter(
       (s) => s.tenantId === params.tenantId,
     );
     return HttpResponse.json(filtered);
   }),
 
-  // Store secret (tenant-scoped)
-  http.put("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+  // One key's metadata (never its value); 404 when the key does not exist.
+  http.get("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const found = findMockSecret(params.tenantId, params.keyName);
+    return found
+      ? HttpResponse.json(found)
+      : HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+  }),
+
+  // Update a secret's agent grant. Registered BEFORE the generic secret PUT so
+  // the more specific path wins; it echoes the requested list back and reports no
+  // affected agents, which is the "widening a grant" case. A test that needs the
+  // "these deployed agents lose access" warning overrides this via server.use().
+  http.put(
+    "*/secretstore/secrets/:tenantId/:keyName/grant",
+    async ({ params, request }) => {
+      const tenantId = params.tenantId as string;
+      const keyName = params.keyName as string;
+      const body = (await request.json()) as {
+        allowedAgents?: string[];
+        description?: string;
+      };
+      const existing = findMockSecret(tenantId, keyName);
+      if (!existing) {
+        return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+      }
+      // An empty array is truthy, so a bare falsiness check accepted `[]` — which
+      // the backend rejects, because everywhere else an empty list means "every
+      // agent". A mock that accepts it hides exactly the regression that matters.
+      if (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0) {
+        return HttpResponse.json(
+          { error: "allowedAgents is required and must not be empty" },
+          { status: 400 },
+        );
+      }
+      const url = new URL(request.url);
+      const dryRun = url.searchParams.get("dryRun") === "true";
+      const previousAllowedAgents = existing.allowedAgents;
+      if (!dryRun) {
+        existing.allowedAgents = [...body.allowedAgents];
+        if (body.description !== undefined) existing.description = body.description;
+      }
+      return HttpResponse.json({
+        reference:
+          tenantId === "default"
+            ? `\${vault:${keyName}}`
+            : `\${vault:${tenantId}/${keyName}}`,
+        tenantId,
+        keyName,
+        dryRun,
+        allowedAgents: body.allowedAgents,
+        previousAllowedAgents,
+        grantsAllAgents: body.allowedAgents.includes("*"),
+        description: body.description ?? existing.description,
+        createdAt: existing.createdAt,
+        lastRotatedAt: existing.lastRotatedAt,
+        agentsLosingAccess: [],
+      });
+    },
+  ),
+
+  // Store secret (tenant-scoped): create, or replace the value of an existing
+  // key. The value itself is never kept — only the metadata a lookup returns.
+  http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ params, request }) => {
     const tenantId = params.tenantId as string;
     const keyName = params.keyName as string;
+    const body = (await request.json().catch(() => ({}))) as {
+      description?: string;
+      allowedAgents?: string[];
+    };
+    const now = new Date().toISOString();
+    const existing = findMockSecret(tenantId, keyName);
+    if (existing) {
+      existing.lastRotatedAt = now;
+      if (body.description !== undefined) existing.description = body.description;
+      if (body.allowedAgents) existing.allowedAgents = [...body.allowedAgents];
+    } else {
+      secretsState.push({
+        tenantId,
+        keyName,
+        createdAt: now,
+        lastAccessedAt: null,
+        lastRotatedAt: null,
+        checksum: "0".repeat(64),
+        description: body.description ?? "",
+        allowedAgents: body.allowedAgents ? [...body.allowedAgents] : ["*"],
+      });
+    }
     const ref = tenantId === "default"
       ? `\${vault:${keyName}}`
       : `\${vault:${tenantId}/${keyName}}`;
@@ -3764,28 +4045,24 @@ export const secretsHandlers = [
   }),
 
   // Delete secret (tenant-scoped)
-  http.delete(
-    "*/secretstore/secrets/:tenantId/:keyName",
-    () => new HttpResponse(null, { status: 204 }),
-  ),
+  http.delete("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const index = secretsState.findIndex(
+      (s) => s.tenantId === params.tenantId && s.keyName === params.keyName,
+    );
+    if (index < 0) {
+      return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+    }
+    secretsState.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
 
   // Health check
   http.get("*/secretstore/secrets/health", () =>
     HttpResponse.json({ status: "UP", provider: "VaultSecretProvider", available: true }),
   ),
 
-  // Rotate secret
-  http.post("*/secretstore/secrets/:tenantId/:keyName/rotate", ({ params }) => {
-    const tenantId = params.tenantId as string;
-    const keyName = params.keyName as string;
-    const ref = tenantId === "default"
-      ? `\${vault:${keyName}}`
-      : `\${vault:${tenantId}/${keyName}}`;
-    return HttpResponse.json(
-      { reference: ref, tenantId, keyName },
-      { status: 200 },
-    );
-  }),
+  // No rotate handler: EDDI has no rotate endpoint. A rotation is a PUT of the
+  // new value with the current grant (see `rotateSecret`), answered above.
 ];
 
 // ─── Audit Trail Handlers ────────────────────────────────────────────────────
@@ -3859,7 +4136,13 @@ const MOCK_AUDIT_ENTRIES = [
       },
       temperature: 0.7,
     },
-    toolCalls: null,
+    // AuditEntry.toolCalls is a MAP on the wire: trace events under `calls`.
+    toolCalls: {
+      calls: [
+        { type: "tool_call", tool: "get_weather", arguments: "{\"city\":\"Vienna\"}" },
+        { type: "tool_result", tool: "get_weather", result: "sunny, 22°C" },
+      ],
+    },
     actions: ["greet", "chat"],
     cost: 0.003,
     timestamp: new Date(Date.now() - 57000).toISOString(),
@@ -3890,7 +4173,37 @@ const MOCK_AUDIT_ENTRIES = [
   },
 ];
 
+/** A clean `AuditVerificationReport` for the mock entries — every signature recomputes. */
+function mockAuditVerification(scope: "conversation" | "agent", scopeId: string) {
+  return {
+    scope,
+    scopeId,
+    signingEnabled: true,
+    entriesChecked: MOCK_AUDIT_ENTRIES.length,
+    valid: MOCK_AUDIT_ENTRIES.length,
+    recovered: 0,
+    recoverySkipped: 0,
+    invalid: 0,
+    unsigned: 0,
+    chainStatus: scope === "conversation" ? "INTACT" : "NOT_APPLICABLE",
+    missingSequences: [],
+    undeliveredSequences: [],
+    duplicateSequences: [],
+    problems: [],
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
 export const auditHandlers = [
+  // Integrity verification — registered before `/:conversationId`, which would
+  // otherwise never see these two-segment paths anyway, but keeps the intent plain.
+  http.get("*/auditstore/verify/agent/:agentId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("agent", params.agentId as string)),
+  ),
+  http.get("*/auditstore/verify/:conversationId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("conversation", params.conversationId as string)),
+  ),
+
   // Get audit trail by conversation
   http.get("*/auditstore/:conversationId/count", () => {
     return HttpResponse.json(MOCK_AUDIT_ENTRIES.length);
@@ -3949,351 +4262,18 @@ export const quotaHandlers = [
   }),
 ];
 
-// ─── Schedule Handlers ───────────────────────────────────────────────────────
+// ─── Misc handlers (exported as `scheduleHandlers`) ─────────────────────────
 
-const SCHEDULES_MOCK = [
-  {
-    id: "sched-1",
-    name: "Daily Health Check",
-    triggerType: "CRON",
-    agentId: "agent1",
-    agentVersion: 0,
-    environment: "production",
-    cronExpression: "0 9 * * MON-FRI",
-    cronDescription: "At 09:00 AM, Monday through Friday",
-    message: "health_check",
-    conversationStrategy: "new",
-    enabled: true,
-    nextFire: Date.now() + 3600000,
-    lastFired: Date.now() - 86400000,
-    fireStatus: "COMPLETED",
-    failCount: 0,
-    createdAt: Date.now() - 604800000,
-    updatedAt: Date.now() - 86400000,
-  },
-  {
-    id: "sched-2",
-    name: "Heartbeat Monitor",
-    triggerType: "HEARTBEAT",
-    agentId: "agent2",
-    agentVersion: 0,
-    environment: "production",
-    heartbeatIntervalSeconds: 300,
-    message: "ping",
-    conversationStrategy: "persistent",
-    enabled: true,
-    nextFire: Date.now() + 60000,
-    lastFired: Date.now() - 300000,
-    fireStatus: "PENDING",
-    failCount: 0,
-    createdAt: Date.now() - 172800000,
-    updatedAt: Date.now() - 300000,
-  },
-  {
-    id: "sched-3",
-    name: "Weekly Summary Report",
-    triggerType: "CRON",
-    agentId: "agent1",
-    agentVersion: 0,
-    environment: "production",
-    cronExpression: "0 8 * * 1",
-    cronDescription: "Every Monday at 8:00 AM",
-    message: "generate_weekly_summary",
-    conversationStrategy: "new",
-    enabled: false,
-    nextFire: null,
-    lastFired: Date.now() - 7200000,
-    fireStatus: "DEAD_LETTERED",
-    failCount: 3,
-    createdAt: Date.now() - 259200000,
-    updatedAt: Date.now() - 7200000,
-  },
-  {
-    id: "sched-4",
-    name: "Nightly Invoice Processing",
-    triggerType: "CRON",
-    agentId: "agent4",
-    agentVersion: 0,
-    environment: "production",
-    cronExpression: "0 2 * * *",
-    cronDescription: "Every day at 2:00 AM",
-    message: "process_pending_invoices",
-    conversationStrategy: "new",
-    enabled: true,
-    nextFire: Date.now() + 18000000,
-    lastFired: Date.now() - 68400000,
-    fireStatus: "COMPLETED",
-    failCount: 0,
-    createdAt: Date.now() - 1209600000,
-    updatedAt: Date.now() - 68400000,
-  },
-  {
-    id: "sched-5",
-    name: "Knowledge Base Reindex",
-    triggerType: "CRON",
-    agentId: "agent7",
-    agentVersion: 0,
-    environment: "production",
-    cronExpression: "0 4 * * SUN",
-    cronDescription: "Every Sunday at 4:00 AM",
-    message: "reindex_knowledge_base",
-    conversationStrategy: "new",
-    enabled: true,
-    nextFire: Date.now() + 432000000,
-    lastFired: Date.now() - 172800000,
-    fireStatus: "COMPLETED",
-    failCount: 0,
-    createdAt: Date.now() - 2592000000,
-    updatedAt: Date.now() - 172800000,
-  },
-  {
-    id: "sched-6",
-    name: "Product Catalog Sync",
-    triggerType: "HEARTBEAT",
-    agentId: "agent5",
-    agentVersion: 0,
-    environment: "production",
-    heartbeatIntervalSeconds: 900,
-    message: "sync_catalog",
-    conversationStrategy: "persistent",
-    enabled: true,
-    nextFire: Date.now() + 420000,
-    lastFired: Date.now() - 480000,
-    fireStatus: "COMPLETED",
-    failCount: 0,
-    createdAt: Date.now() - 864000000,
-    updatedAt: Date.now() - 480000,
-  },
-];
-
-const FIRE_LOGS_MOCK = [
-  {
-    id: "fire-1",
-    scheduleId: "sched-1",
-    fireId: "f-1-1",
-    fireTime: new Date(Date.now() - 86400000).toISOString(),
-    startedAt: new Date(Date.now() - 86400000).toISOString(),
-    completedAt: new Date(Date.now() - 86399000).toISOString(),
-    status: "COMPLETED",
-    conversationId: "conv-123",
-    attemptNumber: 1,
-    cost: 0.001,
-  },
-  {
-    id: "fire-2",
-    scheduleId: "sched-1",
-    fireId: "f-1-2",
-    fireTime: new Date(Date.now() - 172800000).toISOString(),
-    startedAt: new Date(Date.now() - 172800000).toISOString(),
-    completedAt: new Date(Date.now() - 172799500).toISOString(),
-    status: "FAILED",
-    conversationId: "conv-124",
-    errorMessage: "Connection timeout",
-    attemptNumber: 2,
-    cost: 0,
-  },
-];
-
+// Despite the name, this block no longer holds schedule handlers: those, and the
+// setup / vault-health / coordinator / audit / quota / currentversion /
+// descriptor copies that used to sit here, were exact duplicates of handlers
+// registered EARLIER (in `handlers` or their own export). MSW answers with the
+// first match, so every one of them was dead fixture that looked authoritative —
+// `descriptor-handlers.test.ts` now fails if a handler is shadowed again.
 export const scheduleHandlers = [
-  // List all schedules
-  http.get("*/schedulestore/schedules", ({ request }) => {
-    const url = new URL(request.url);
-    const agentId = url.searchParams.get("agentId");
-    if (agentId) {
-      return HttpResponse.json(SCHEDULES_MOCK.filter((s) => s.agentId === agentId));
-    }
-    return HttpResponse.json(SCHEDULES_MOCK);
-  }),
-
-  // Get single schedule
-  http.get("*/schedulestore/schedules/:id", ({ params, request }) => {
-    const url = new URL(request.url);
-    // Skip sub-paths like /fires, /enable, etc.
-    if (url.pathname.includes("/fires") || url.pathname.includes("/admin")) return;
-    const schedule = SCHEDULES_MOCK.find((s) => s.id === params.id);
-    if (schedule) return HttpResponse.json(schedule);
-    return new HttpResponse(null, { status: 404 });
-  }),
-
-  // Create schedule
-  http.post("*/schedulestore/schedules", () => {
-    return new HttpResponse(null, {
-      status: 201,
-      headers: { Location: "/schedulestore/schedules/new-sched-1" },
-    });
-  }),
-
-  // Update schedule
-  http.put("*/schedulestore/schedules/:id", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Delete schedule
-  http.delete("*/schedulestore/schedules/:id", () => {
-    return new HttpResponse(null, { status: 204 });
-  }),
-
-  // Enable
-  http.post("*/schedulestore/schedules/:id/enable", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Disable
-  http.post("*/schedulestore/schedules/:id/disable", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Fire now
-  http.post("*/schedulestore/schedules/:id/fire", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Fire logs
-  http.get("*/schedulestore/schedules/:id/fires", () => {
-    return HttpResponse.json(FIRE_LOGS_MOCK);
-  }),
-
-  // Admin - failed fires
-  http.get("*/schedulestore/schedules/admin/failed", () => {
-    return HttpResponse.json(
-      FIRE_LOGS_MOCK.filter((l) => l.status !== "COMPLETED")
-    );
-  }),
-
-  // Retry dead letter
-  http.post("*/schedulestore/schedules/:id/retry", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Dismiss dead letter
-  http.post("*/schedulestore/schedules/:id/dismiss", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // --- Agent Setup Wizard ---
-  http.post("*/administration/agents/setup", async ({ request }) => {
-    const body = (await request.json()) as Record<string, unknown>;
-    return HttpResponse.json(
-      {
-        action: "setup_complete",
-        agentId: `agent-${Date.now()}`,
-        agentName: body.name ?? "New Agent",
-        provider: body.provider ?? "anthropic",
-        model: body.model ?? "claude-sonnet-4-6",
-        deployed: body.deploy !== false,
-        deploymentStatus: body.deploy !== false ? "READY" : undefined,
-        quickRepliesEnabled: body.enableQuickReplies ?? false,
-        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
-        resources: { agentLocation: "/agentstore/agents/mock-agent?version=1" },
-      },
-      { status: 201 },
-    );
-  }),
-
-
-  // ==========================================
-  // === Secrets Vault Mocks ===
-  // ==========================================
-
-  // Vault health check (health endpoint is only here, not in secretsHandlers)
-  http.get("*/secretstore/secrets/health", () => {
-    return HttpResponse.json({
-      status: "UP",
-      provider: "VaultSecretProvider",
-      available: true,
-    });
-  }),
-
-  // List/Store/Delete secrets are in the secretsHandlers export (used by server.ts)
-
-  // ==========================================
-  // === Coordinator Mocks ===
-  // ==========================================
-
-  // Coordinator status
-  http.get("*/administration/coordinator/status", () => {
-    return HttpResponse.json({
-      coordinatorType: "nats",
-      connected: true,
-      connectionStatus: "CONNECTED",
-      activeConversations: 24,
-      totalProcessed: 142_897,
-      totalDeadLettered: 7,
-      queueDepths: {
-        "conv-abc123": 1,
-        "conv-def456": 2,
-        "conv-ghi789": 3,
-      },
-    });
-  }),
-
-  // Coordinator dead-letters
-  http.get("*/administration/coordinator/dead-letters", () => {
-    return HttpResponse.json([
-      {
-        id: "dl-001",
-        conversationId: "conv-failed-1",
-        error: "LLM provider timeout after 30s — model gpt-5.4-mini did not respond",
-        timestamp: Date.now() - 3600000,
-        payload: JSON.stringify({ input: "What is the weather?", agentId: "agent1", step: 2 }),
-      },
-      {
-        id: "dl-002",
-        conversationId: "conv-failed-2",
-        error: "HttpCallTask failed: 503 Service Unavailable from https://api.weather.com",
-        timestamp: Date.now() - 7200000,
-        payload: JSON.stringify({ input: "Book a flight", agentId: "agent2", step: 1 }),
-      },
-    ]);
-  }),
-
-  // Replay dead-letter
-  http.post("*/administration/coordinator/dead-letters/:id/replay", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
-  // Discard dead-letter
-  http.delete("*/administration/coordinator/dead-letters/:id", () => {
-    return new HttpResponse(null, { status: 204 });
-  }),
-
-  // Purge all dead-letters
-  http.delete("*/administration/coordinator/dead-letters", () => {
-    return HttpResponse.json(2);
-  }),
-
   // Coordinator SSE stream
   http.get("*/administration/coordinator/stream", () => {
     return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
-  }),
-
-  // ==========================================
-  // === Audit Trail Mocks ===
-  // ==========================================
-
-  // Audit by conversation
-  http.get("*/auditstore/:conversationId", ({ request, params }) => {
-    const url = new URL(request.url);
-    // Don't match /count sub-path
-    if (url.pathname.endsWith("/count")) return;
-    const convId = params.conversationId as string;
-    // Don't match the /agent/ path
-    if (convId === "agent") return;
-    if (convId === "recent") {
-      // Recent entries endpoint
-      return HttpResponse.json(generateMockAuditEntries("conv-recent-1", 10));
-    }
-    return HttpResponse.json(generateMockAuditEntries(convId, 5));
-  }),
-
-  // Audit by agent
-  http.get("*/auditstore/agent/:agentId", () => {
-    return HttpResponse.json(generateMockAuditEntries("conv-from-agent", 8));
-  }),
-
-  // Audit count
-  http.get("*/auditstore/:conversationId/count", () => {
-    return HttpResponse.json(5);
   }),
 
   // ==========================================
@@ -4301,35 +4281,6 @@ export const scheduleHandlers = [
   // ==========================================
   // NOTE: Group config handlers (descriptors, detail, styles, schema, CRUD) are
   // in the main `handlers` export. Only group *conversation* handlers are here.
-
-  // List group conversations
-  http.get("*/groups/:groupId/conversations", ({ request }) => {
-    const url = new URL(request.url);
-    const pathParts = url.pathname.split("/");
-    // Don't match specific conversation GETs (which have an extra path segment)
-    if (pathParts.length > 4 && !url.pathname.endsWith("/conversations")) return;
-    return HttpResponse.json([
-      {
-        id: "gconv1",
-        groupId: "group1",
-        userId: "manager-user",
-        state: "COMPLETED",
-        originalQuestion: "Should we expand into the European market this quarter?",
-        transcript: [],
-        memberConversationIds: {},
-        currentPhaseIndex: 2,
-        currentPhaseName: "Synthesis",
-        synthesizedAnswer: "After careful consideration, the panel recommends a phased European market expansion starting in Q3.",
-        depth: 0,
-        taskList: null,
-        dynamicMembers: [],
-        createdAgentIds: [],
-        retainedAgentIds: [],
-        created: new Date(Date.now() - 3600000).toISOString(),
-        lastModified: new Date(Date.now() - 1800000).toISOString(),
-      },
-    ]);
-  }),
 
   // Cross-group HITL inbox (GET /groups/pending-approvals). Group summaries
   // carry a groupId (that drives the "Group" badge / View link on the queue).
@@ -4364,6 +4315,11 @@ export const scheduleHandlers = [
       groupId: "group1",
       userId: "manager-user",
       state: "COMPLETED",
+      // The backend computes this from `state` and always serializes it
+      // (GroupConversation.getAvailableActions, READ_ONLY). Omitting it here made
+      // the Manager read `[]` and disable the composer, so a fixture-backed test
+      // could not tell "continue this discussion" from "this discussion is over".
+      availableActions: ["followup", "continue", "close"],
       originalQuestion: "Should we expand into the European market this quarter?",
       transcript: [
         { speakerAgentId: "user", speakerDisplayName: "User", content: "Should we expand into the European market this quarter?", phaseIndex: -1, phaseName: null, type: "QUESTION", timestamp: new Date(now.getTime() - 600000).toISOString(), errorReason: null, targetAgentId: null },
@@ -4439,29 +4395,6 @@ export const scheduleHandlers = [
       transcriptSummary:
         "The panel opened with independent positions: Marketing saw brand opportunity but flagged GDPR; Sales pointed to demand in Germany and France; Product estimated three months of localization; Tech priced EU hosting at ~$50k/month; Legal warned against rushing compliance.",
     });
-  }),
-
-  // Start group discussion
-  http.post("*/groups/:groupId/conversations", () => {
-    return HttpResponse.json({
-      id: `gconv-${Date.now()}`,
-      groupId: "group1",
-      userId: "manager-user",
-      state: "IN_PROGRESS",
-      originalQuestion: "New discussion started",
-      transcript: [],
-      memberConversationIds: {},
-      currentPhaseIndex: 0,
-      currentPhaseName: "Initial Opinions",
-      synthesizedAnswer: null,
-      depth: 0,
-      taskList: null,
-      dynamicMembers: [],
-      createdAgentIds: [],
-      retainedAgentIds: [],
-      created: new Date().toISOString(),
-      lastModified: new Date().toISOString(),
-    }, { status: 201 });
   }),
 
   // SSE stream group discussion
@@ -4585,25 +4518,43 @@ export const scheduleHandlers = [
   }),
 
   // Tool history
+  // A `ToolExecutionTrace` OBJECT (RestToolHistory.getToolHistory), not an array:
+  // the calls sit under `toolCalls`, with `arguments` as the JSON string the
+  // model sent.
   http.get("*/llm/tools/history/:convId", () => {
-    return HttpResponse.json([
+    const toolCalls = [
       {
         toolName: "fetch_weather",
-        args: { city: "Vienna" },
+        arguments: '{"city":"Vienna"}',
         result: '{"temp": 22, "condition": "sunny"}',
-        durationMs: 156,
+        executionTimeMs: 156,
+        error: null,
+        success: true,
         cost: 0.0005,
-        timestamp: new Date().toISOString(),
+        fromCache: false,
+        timestamp: Date.now(),
       },
       {
         toolName: "websearch",
-        args: { query: "EDDI AI platform" },
+        arguments: '{"query":"EDDI AI platform"}',
         result: '{"results": [{"title": "EDDI docs", "url": "https://docs.labs.ai"}]}',
-        durationMs: 342,
+        executionTimeMs: 342,
+        error: null,
+        success: true,
         cost: 0.001,
-        timestamp: new Date().toISOString(),
+        fromCache: false,
+        timestamp: Date.now(),
       },
-    ]);
+    ];
+    return HttpResponse.json({
+      toolCalls,
+      totalExecutionTimeMs: 498,
+      hasErrors: false,
+      totalCost: 0.0015,
+      cacheHits: 0,
+      cacheMisses: 0,
+      toolMetrics: {},
+    });
   }),
 
   // Global tool costs
@@ -4615,26 +4566,6 @@ export const scheduleHandlers = [
   }),
 
   // Rerun last conversation step (replay) — handler at end of file uses /rerun path
-
-  // Detailed conversation (memory inspector)
-  http.get("*/agents/:convId", ({ request }) => {
-    const url = new URL(request.url);
-    if (url.searchParams.get("returnDetailed") === "true") {
-      return HttpResponse.json({
-        conversationSteps: [
-          {
-            conversationStep: [
-              { key: "actions", value: ["greet"], timestamp: new Date().toISOString(), originWorkflowId: null },
-              { key: "output:text:en", value: "Hello!", timestamp: new Date().toISOString(), originWorkflowId: "wf-1" },
-            ],
-            timestamp: new Date().toISOString(),
-          },
-        ],
-        conversationProperties: { environment: "test" },
-      });
-    }
-    return HttpResponse.json({});
-  }),
 
   // Recent logs (log viewer)
   http.get("*/logs/recent", () => {
@@ -4648,176 +4579,6 @@ export const scheduleHandlers = [
     return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
   }),
 
-  // ─── Quotas ───────────────────────────────────────────────────────
-  http.get("*/administration/quotas/:tenantId/usage", () => {
-    return HttpResponse.json({
-      tenantId: "default",
-      conversationsToday: 3842,
-      apiCallsThisMinute: 312,
-      monthlyCostUsd: 1847.63,
-      minuteWindowStart: new Date().toISOString(),
-      dayStart: new Date().toISOString(),
-    });
-  }),
-
-  http.get("*/administration/quotas/:tenantId", () => {
-    return HttpResponse.json({
-      tenantId: "default",
-      maxConversationsPerDay: 5000,
-      maxAgentsPerTenant: 100,
-      maxApiCallsPerMinute: 500,
-      maxMonthlyCostUsd: 2500,
-      enabled: true,
-    });
-  }),
-
-  http.put("*/administration/quotas/:tenantId", async ({ request }) => {
-    const body = await request.json();
-    return HttpResponse.json(body);
-  }),
-
-  http.post("*/administration/quotas/:tenantId/usage/reset", () => {
-    return new HttpResponse(null, { status: 204 });
-  }),
-
-  // ─── Currentversion endpoints (used by version pickers) ─────────
-  // Returns mock latest version for any resource type
-  ...[
-    "agentstore/agents", "workflowstore/workflows",
-    "rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
-    "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms",
-    "propertysetterstore/propertysetters", "mcpcallsstore/mcpcalls",
-    "ragstore/rags", "snippetstore/snippets",
-  ].map((storePath) =>
-    http.get(`*/${storePath}/:id/currentversion`, () => {
-      // Return 2 as default latest version for test data
-      return HttpResponse.text("2", { headers: { "Content-Type": "text/plain" } });
-    })
-  ),
-
-  // ─── Generic resource store descriptors ──────────────────────────
-  // One handler per resource store type to avoid catching agent/workflow descriptors.
-  // For filter lookups, return filtered results.
-  // For list requests, return sample data so the resource-list test has items.
-  ...["rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
-      "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms", "propertysetterstore/propertysetters",
-      "mcpcallsstore/mcpcalls", "ragstore/rags", "snippetstore/snippets"].map((storePath) => {
-    const store = storePath.split("/")[0];
-    const plural = storePath.split("/")[1];
-    return http.get(`*/${storePath}/descriptors`, ({ request }) => {
-      const url = new URL(request.url);
-      const filter = url.searchParams.get("filter");
-
-      if (filter) {
-        // Version or filter lookup — return a descriptor matching the filter ID
-        return HttpResponse.json([
-          {
-            resource: `eddi://ai.labs.resource/${store}/${plural}/${filter}?version=1`,
-            name: `Resource ${filter}`,
-            description: "A resource",
-            createdOn: Date.now() - 86400000,
-            lastModifiedOn: Date.now() - 3600000,
-          },
-        ]);
-      }
-
-      // Normal list request
-      return HttpResponse.json([
-        {
-          resource: `eddi://ai.labs.resource/${store}/${plural}/res1?version=1`,
-          name: "Sample Resource 1",
-          description: "A sample resource for testing",
-          createdOn: Date.now() - 86400000,
-          lastModifiedOn: Date.now() - 3600000,
-        },
-        {
-          resource: `eddi://ai.labs.resource/${store}/${plural}/res2?version=2`,
-          name: "Sample Resource 2",
-          description: "Another sample resource",
-          createdOn: Date.now() - 2 * 86400000,
-          lastModifiedOn: Date.now() - 7200000,
-        },
-      ]);
-    });
-  }),
-
-  // ─── Tool Metrics (Cost Dashboard / Debugger) ────────────────────
-  http.get("*/llm/tools/costs/conversation/:conversationId", ({ params }) => {
-    const conversationId = params.conversationId as string;
-    return HttpResponse.json({
-      conversationId,
-      totalCost: 0.0847,
-      toolCallCount: 14,
-      toolUsage: {
-        "fetch_weather": 5,
-        "search_products": 4,
-        "create_ticket": 3,
-        "send_email": 2,
-      },
-    });
-  }),
-
-  http.get("*/llm/tools/ratelimit/:toolName", ({ params }) => {
-    const toolName = params.toolName as string;
-    return HttpResponse.json({
-      tool: toolName,
-      limit: 60,
-      remaining: 42,
-      resetTimeMs: Date.now() + 45_000,
-    });
-  }),
-
-  http.get("*/llm/tools/cache/stats", () => {
-    return HttpResponse.json({
-      size: 425,
-      hits: 328,
-      misses: 97,
-      hitRate: 0.772,
-      perToolStats: {
-        "fetch_weather": { hits: 145, misses: 32 },
-        "search_products": { hits: 98, misses: 41 },
-        "create_ticket": { hits: 85, misses: 24 },
-      },
-      details: "Cache: 425 entries, 328 hits, 97 misses (77.2%)",
-    });
-  }),
-
-  http.get("*/llm/tools/history/:conversationId", () => {
-    const now = Date.now();
-    return HttpResponse.json([
-      {
-        toolName: "fetch_weather",
-        args: { city: "Vienna", units: "metric" },
-        result: "Sunny, 22°C, humidity 45%",
-        durationMs: 187,
-        cost: 0.0025,
-        timestamp: new Date(now - 120_000).toISOString(),
-      },
-      {
-        toolName: "search_products",
-        args: { query: "summer jackets", limit: 5 },
-        result: "Found 5 matching products",
-        durationMs: 342,
-        cost: 0.0024,
-        timestamp: new Date(now - 90_000).toISOString(),
-      },
-      {
-        toolName: "create_ticket",
-        args: { title: "Return request #4521", priority: "high" },
-        result: "Ticket JIRA-4521 created",
-        durationMs: 520,
-        cost: 0.014,
-        timestamp: new Date(now - 60_000).toISOString(),
-      },
-    ]);
-  }),
-
-  http.get("*/llm/tools/costs", () => {
-    return HttpResponse.json({
-      totalCost: 1.247,
-      summary: "Tool Cost Summary:\nTotal Cost: $1.2470\nPer-Tool Costs:\n  - fetch_weather: 312 calls\n  - search_products: 245 calls\n  - create_ticket: 189 calls\n  - send_email: 146 calls\n",
-    });
-  }),
 ];
 
 // ─── GDPR Admin Handlers ────────────────────────────────────────────────────
@@ -5040,21 +4801,32 @@ export const userMemoryHandlers = [
 
 // ─── Properties Handlers ────────────────────────────────────────────────────
 
+// RAW values, keyed by property name — what MongoUserMemoryStore.readProperties
+// returns (the `value` of each global user-memory entry). The previous fixture
+// used `Property` wrappers (`valueString`, `valueInt`, …) the endpoint never
+// sends, so the page's type column was verified against a shape that only
+// existed here.
 const MOCK_PROPERTIES = {
-  user_name: { name: "user_name", scope: "longTerm", valueString: "Jane Doe" },
-  email: { name: "email", scope: "longTerm", valueString: "jane.doe@acme-corp.com" },
-  age: { name: "age", scope: "longTerm", valueInt: 32 },
-  is_vip: { name: "is_vip", scope: "longTerm", valueBoolean: true },
-  company: { name: "company", scope: "longTerm", valueString: "Acme Corp" },
-  department: { name: "department", scope: "longTerm", valueString: "Engineering" },
-  preferences: { name: "preferences", scope: "longTerm", valueObject: { theme: "dark", lang: "en", notifications: true, timezone: "Europe/Vienna" } },
-  tags: { name: "tags", scope: "longTerm", valueList: ["loyal", "premium", "early-adopter"] },
-  last_login: { name: "last_login", scope: "conversation", valueString: new Date(Date.now() - 3600000).toISOString() },
-  session_count: { name: "session_count", scope: "longTerm", valueInt: 147 },
+  user_name: "Jane Doe",
+  email: "jane.doe@acme-corp.com",
+  age: 32,
+  is_vip: true,
+  company: "Acme Corp",
+  department: "Engineering",
+  preferences: { theme: "dark", lang: "en", notifications: true, timezone: "Europe/Vienna" },
+  tags: ["loyal", "premium", "early-adopter"],
+  last_login: new Date(Date.now() - 3600000).toISOString(),
+  session_count: 147,
 };
 
+/** A user id the mock treats as having no properties — the backend answers 204. */
+export const MOCK_PROPERTIES_EMPTY_USER = "user-without-properties";
+
 export const propertiesHandlers = [
-  http.get("*/propertiesstore/properties/:userId", () => {
+  http.get("*/propertiesstore/properties/:userId", ({ params }) => {
+    if (params.userId === MOCK_PROPERTIES_EMPTY_USER) {
+      return new HttpResponse(null, { status: 204 });
+    }
     return HttpResponse.json(MOCK_PROPERTIES);
   }),
 
@@ -5205,6 +4977,25 @@ const MOCK_EXPORT_PREVIEW = {
   ],
 };
 
+/**
+ * What EDDI's `UpgradeResult` looks like on the wire: a per-resource tally and
+ * the failures, if any. `hasFailures`/`wroteAnything` are derived methods on the
+ * Java record, not components, so they are deliberately absent here.
+ */
+const MOCK_UPGRADE_RESULT = {
+  agentUri: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+  agentUpdated: true,
+  updated: 2,
+  created: 0,
+  skipped: 3,
+  failures: [] as Array<{
+    sourceId: string;
+    resourceType: string;
+    name: string | null;
+    reason: string;
+  }>,
+};
+
 const MOCK_IMPORT_PREVIEW = {
   sourceAgentId: "agent1",
   sourceAgentName: "Support Agent",
@@ -5264,10 +5055,19 @@ export const backupSyncHandlers = [
   }),
 
   // Import execute (create, merge, or upgrade)
-  http.post("*/backup/import", () => {
+  // RestImportService.importAgentZipFile answers 201 Created with the agent's
+  // URI in Location. A merge lands on the existing agent as a new version.
+  http.post("*/backup/import", ({ request }) => {
+    const url = new URL(request.url);
+    if (url.searchParams.get("strategy") === "merge") {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: { Location: "/agentstore/agents/agent1?version=2" },
+      });
+    }
     const newId = `imported-${Date.now()}`;
     return new HttpResponse(null, {
-      status: 202,
+      status: 201,
       headers: { Location: `/agentstore/agents/${newId}?version=1` },
     });
   }),
@@ -5293,14 +5093,33 @@ export const backupSyncHandlers = [
     );
   }),
 
-  // Sync execute (single)
+  // Sync execute (single) — 201 and an UpgradeResult, as EDDI answers when a
+  // sync wrote something. The status is what the client branches on: 200 means
+  // the two instances already agreed, 207 that some resources failed.
   http.post("*/backup/import/sync", () => {
-    return new HttpResponse(null, { status: 202 });
+    return HttpResponse.json(MOCK_UPGRADE_RESULT, {
+      status: 201,
+      headers: { Location: MOCK_UPGRADE_RESULT.agentUri },
+    });
   }),
 
-  // Sync execute (batch)
-  http.post("*/backup/import/sync/batch", () => {
-    return new HttpResponse(null, { status: 202 });
+  // Sync execute (batch) — one BatchSyncResult per request, in request order.
+  // This used to answer 202 with no body at all, a shape the backend never
+  // produces, so every assertion about what a sync *did* was really an
+  // assertion about an empty response.
+  http.post("*/backup/import/sync/batch", async ({ request }) => {
+    const requests = (await request.json()) as Array<{
+      sourceAgentId: string;
+      targetAgentId: string | null;
+    }>;
+    return HttpResponse.json(
+      requests.map((r) => ({
+        sourceAgentId: r.sourceAgentId,
+        targetAgentId: r.targetAgentId,
+        result: MOCK_UPGRADE_RESULT,
+        error: null,
+      }))
+    );
   }),
 
   // ── User Conversation Store ──

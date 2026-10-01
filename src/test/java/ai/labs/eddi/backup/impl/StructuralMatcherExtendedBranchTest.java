@@ -99,13 +99,13 @@ class StructuralMatcherExtendedBranchTest {
             var agentDescriptor = new DocumentDescriptor();
             agentDescriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/112233445566aabbccddeeff?version=1"));
             agentDescriptor.setName("Target Agent");
-            when(documentDescriptorStore.readDescriptor("112233445566aabbccddeeff", null)).thenReturn(agentDescriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("112233445566aabbccddeeff")).thenReturn(agentDescriptor);
             when(agentStore.readAgent("112233445566aabbccddeeff", 1)).thenReturn(targetConfig);
 
             // Target workflow
             var wfDescriptor = new DocumentDescriptor();
             wfDescriptor.setName("Target WF");
-            when(documentDescriptorStore.readDescriptor("aabbccddeeff112233445566", null)).thenReturn(wfDescriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("aabbccddeeff112233445566")).thenReturn(wfDescriptor);
             when(workflowStore.readWorkflow("aabbccddeeff112233445566", 1)).thenReturn(wfConfig);
 
             // Same content for both
@@ -141,7 +141,7 @@ class StructuralMatcherExtendedBranchTest {
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
             descriptor.setName("Target");
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("target1")).thenReturn(descriptor);
             when(agentStore.readAgent("target1", 1)).thenReturn(targetConfig);
 
             var wfDescriptor = new DocumentDescriptor();
@@ -181,7 +181,7 @@ class StructuralMatcherExtendedBranchTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("target1")).thenReturn(descriptor);
             when(agentStore.readAgent("target1", 1)).thenReturn(agentConfig);
             when(jsonSerialization.serialize(any())).thenReturn("{\"test\":true}");
 
@@ -214,12 +214,12 @@ class StructuralMatcherExtendedBranchTest {
 
             var agentDescriptor = new DocumentDescriptor();
             agentDescriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/112233445566aabbccddeeff?version=1"));
-            when(documentDescriptorStore.readDescriptor("112233445566aabbccddeeff", null)).thenReturn(agentDescriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("112233445566aabbccddeeff")).thenReturn(agentDescriptor);
             when(agentStore.readAgent("112233445566aabbccddeeff", 1)).thenReturn(targetConfig);
 
             var wfDescriptor = new DocumentDescriptor();
             wfDescriptor.setName("TargetWF");
-            when(documentDescriptorStore.readDescriptor("aabbccddeeff112233445566", null)).thenReturn(wfDescriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("aabbccddeeff112233445566")).thenReturn(wfDescriptor);
             when(workflowStore.readWorkflow("aabbccddeeff112233445566", 1)).thenReturn(new WorkflowConfiguration());
             when(jsonSerialization.serialize(any())).thenReturn("{\"same\":true}");
 
@@ -264,7 +264,7 @@ class StructuralMatcherExtendedBranchTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("target1")).thenReturn(descriptor);
             when(agentStore.readAgent("target1", 1)).thenReturn(targetConfig);
 
             // Target workflow with NO extensions (empty steps)
@@ -391,7 +391,7 @@ class StructuralMatcherExtendedBranchTest {
 
             var descriptor = new DocumentDescriptor();
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
+            when(documentDescriptorStore.readCurrentDescriptor("target1")).thenReturn(descriptor);
             when(agentStore.readAgent("target1", 1)).thenReturn(targetConfig);
 
             var wfDescriptor = new DocumentDescriptor();

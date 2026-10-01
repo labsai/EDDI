@@ -1,4 +1,42 @@
 {{- if .Values.mongodb.enabled }}
+{{- /*
+  Upgrade guard for installs that predate MongoDB authentication. The mongo
+  image creates MONGO_INITDB_ROOT_USERNAME only when /data/db is EMPTY, yet it
+  turns --auth on whenever those variables are set. Upgrading a release whose
+  volume was initialised unauthenticated therefore enforces auth for a user that
+  was never created, and EDDI loses its database on the spot. Such a release is
+  recognisable on a live `helm upgrade`: its MongoDB StatefulSet exists but the
+  <release>-mongodb Secret (introduced together with authentication) does not.
+  `lookup` is empty under `helm template` and client-side dry runs, so this never
+  fires there — it is a best-effort brake on the one path that loses data.
+*/}}
+{{- if and .Release.IsUpgrade (not .Values.mongodb.authMigrated) }}
+{{- $mongoName := printf "%s-mongodb" (include "eddi.fullname" .) }}
+{{- $existingSts := lookup "apps/v1" "StatefulSet" .Release.Namespace $mongoName }}
+{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $mongoName }}
+{{- if and $existingSts (not $existingSecret) }}
+{{- fail (printf `This upgrade turns on MongoDB authentication for an existing in-chart MongoDB (%[1]s) whose data was initialised WITHOUT it. The mongo image creates the root user only on an empty volume, so after this upgrade MongoDB would require a user that does not exist and EDDI would lose database access. Create the user first, in the still-unauthenticated database (the password prompt keeps it out of shell history):
+
+  kubectl exec -it -n %[2]s %[1]s-0 -- mongosh admin --quiet --eval 'db.createUser({user: "%[3]s", pwd: passwordPrompt(), roles: ["root"]})'
+
+enter the SAME value you pass as mongodb.rootPassword, then re-run the upgrade with --set mongodb.authMigrated=true. Existing data is untouched. See docs/kubernetes.md, "Upgrading to an authenticated MongoDB".` $mongoName .Release.Namespace .Values.mongodb.rootUsername) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "eddi.fullname" . }}-mongodb
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+type: Opaque
+stringData:
+  # Consumed by the mongo container itself, which reads its bootstrap root
+  # credentials from these env vars during initdb. mirrors postgres.yaml.
+  MONGO_INITDB_ROOT_USERNAME: {{ .Values.mongodb.rootUsername | quote }}
+  {{- $mongoPassword := required "mongodb.rootPassword is required when mongodb.enabled=true — the chart no longer ships an unauthenticated MongoDB. Generate one: openssl rand -base64 24" .Values.mongodb.rootPassword }}
+  MONGO_INITDB_ROOT_PASSWORD: {{ $mongoPassword | quote }}
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -20,11 +58,29 @@ spec:
         app.kubernetes.io/component: database
         app.kubernetes.io/part-of: eddi
     spec:
+      # MongoDB never talks to the Kubernetes API.
+      automountServiceAccountToken: false
       securityContext:
         fsGroup: 999
       containers:
         - name: mongodb
           image: "{{ .Values.mongodb.image.repository }}:{{ .Values.mongodb.image.tag }}"
+          # Providing MONGO_INITDB_ROOT_USERNAME/PASSWORD makes the official mongo
+          # image create the root user on first init AND enable authentication —
+          # the same mechanism docker-compose.yml relies on. Every client (EDDI
+          # included) must then authenticate; an unauthenticated in-cluster MongoDB
+          # was reachable by any pod that could resolve the Service.
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_INITDB_ROOT_PASSWORD
           ports:
             - containerPort: 27017
               name: mongo
