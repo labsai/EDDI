@@ -87,3 +87,74 @@ per row. Counting off earlier pages would have multiplied that.
 The listing's paging contract is on `IRestConversationStore.readConversationDescriptors`;
 [`upgrading-from-5x.md`](../upgrading-from-5x.md) says to page until empty and that earlier versions
 over-counted.
+
+## ⚡ perf(search): descriptor search is a literal substring test, not a `.*text.*` regex (2026-10-01)
+
+**Repo:** EDDI (`fix/conversation-listing-pagination`)
+
+Every descriptor listing's search box — conversations, agents, every config type — sent the escaped
+term as the regex `.*<text>.*`, ORed over five fields (`userId`, `name`, `agentName`, `description`,
+`resource`). An unanchored regex already matches anywhere, so the wrapping changed no result and only
+added backtracking; PostgreSQL then ran it as `~`, which costs more per row than a literal test.
+
+- New filter value `IResourceFilter.Contains(text)`: the field contains the text as a literal,
+  case-sensitive substring; an absent field does not match. `DescriptorStore` builds the search from
+  it (`StringUtilities.searchText` keeps the old quoted-term handling).
+- **MongoDB** renders it as a bare escaped regex — no `.*` wrapping.
+- **PostgreSQL** renders it as `LIKE '%…%' ESCAPE '\'` with `%`, `_` and `\` escaped. `LIKE` rather
+  than `strpos()` (which measures the same) because a `pg_trgm` GIN index serves `LIKE` and never
+  `strpos()`.
+
+Measured on 300k descriptors (250k conversations) in throwaway `mongo:7` and `postgres:16-alpine`
+containers, back to back on an otherwise idle machine, medians of 5 (MongoDB) and 7 (PostgreSQL)
+runs:
+
+| Query | MongoDB before → after | PostgreSQL before → after |
+|---|---|---|
+| selective search (hit) | 276 → 121 ms (2.3×) | 464 → 292 ms (1.6×) |
+| search with no hit | 405 → 411 ms (no change) | 402 → 307 ms (1.3×) |
+
+A search that matches nothing still examines every descriptor on MongoDB; only an index changes that
+(see below).
+
+Results are unchanged: same rows, same case sensitivity, same quoted-term handling. Real-database
+tests on both backends (`MongoContainsFilterTest`, `PostgresResourceStorageContainerTest`) assert the
+same rows for literal metacharacters (`+`, `(`, `%`, `_`, `\`, `'`), case, an absent field and an
+empty search.
+
+**Not done (needs a decision):** a `pg_trgm` GIN index on the five searched fields took the same
+PostgreSQL search to 9.6 ms (hit) and 1.5 ms (miss). It needs `CREATE EXTENSION pg_trgm`, which is a
+trusted extension since PostgreSQL 13 but is still a schema change on the operator's database. MongoDB
+has no index that serves a substring search; a text index would change matching to word-based.
+
+### The "nothing matched, list everything" fallback keeps its meaning
+
+A search that matches no conversation lists everything instead. That was decided from the first
+unfiltered descriptor page; with the listing's filters now pushed into the query, an empty first page
+no longer means the search matched nothing — "Billing" within agent A comes back empty when it matches
+agent B's conversations. A one-row probe without the pushed-down filters now decides it, so that search
+lists nothing (as before) instead of falling back to all of agent A.
+
+### Verified against a running EDDI on both databases
+
+The packaged jar, run against fresh `mongo:7` and `postgres:16-alpine` containers and driven only
+through its REST API (two database edits aside: orphaning three conversations and marking four
+`SEEN`). 67 conversations on two agents, some ended:
+
+| Run | MongoDB | PostgreSQL |
+|---|---|---|
+| Paging at limits 3/7/10/20 for every filter (none, agent, agent+version, state, agent+state, view state), row content, orphans, search (by id, metacharacters, `%`/`_`, quoted, case, inside a filter), the orphan counter | 293/293 | 293/293 |
+| With Keycloak: two `eddi-user`s and an admin, 50 conversations, one legacy descriptor without an owner — each user pages through exactly their own (the legacy one by its conversation's owner), the admin through all, searches never leak or fall back across owners | 121/121 | 121/121 |
+
+The same unauthenticated checks against `labsai/eddi:latest` (6.4.0, before this fix) fail 98 times —
+agent A's 45 conversations came back as 88 rows — so they do detect the bug.
+
+Mutation-checked: nine more mutants in the search and fallback code (LIKE wildcards unescaped, ILIKE,
+MongoDB text unescaped, back to a regex string, quotes kept, fallback always / never, a failed batch
+dropping the page, an unreadable row counted as an orphan), all killed.
+
+### Also
+
+`docs/changelog.d/2026-09-26-fix-outbound-http-hardening.md` linked to a fragment the nightly
+collation (#894) had already folded into `changelog.md`, which failed `DocumentationLinksTest` on
+`main`. The link now points at the live changelog.

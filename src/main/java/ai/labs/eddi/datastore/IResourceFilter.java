@@ -72,6 +72,25 @@ public interface IResourceFilter<T> {
     }
 
     /**
+     * A filter value that matches when the field contains {@code text} as a
+     * literal, case-sensitive substring. A document without the field does not
+     * match.
+     * <p>
+     * A search box used to send {@code .*<escaped text>.*} as a regex. That selects
+     * the same rows, and costs a regex evaluation per field per row. With this
+     * value type each backend uses its cheapest native form: MongoDB an unwrapped
+     * escaped regex (the {@code .*} wrapping doubled the time of a selective
+     * search), PostgreSQL an escaped {@code LIKE '%…%'}, which is no regex at all,
+     * 1.3–1.6× faster than {@code ~} on the same scan, and the form a
+     * {@code pg_trgm} index can serve.
+     *
+     * @param text
+     *            the literal text to find; not a pattern
+     */
+    record Contains(String text) {
+    }
+
+    /**
      * One condition on one field. A {@code String} filter is a regular expression
      * on both backends; any other value is compared for equality. Use
      * {@link #exact(String, String)} to compare a string for equality instead.

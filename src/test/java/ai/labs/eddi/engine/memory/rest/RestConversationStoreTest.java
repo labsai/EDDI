@@ -2206,6 +2206,32 @@ class RestConversationStoreTest {
         }
 
         @Test
+        @DisplayName("a search that matches only outside the listing's filters lists nothing — it does not fall back to everything")
+        void searchMatchingOutsideTheFiltersListsNothing() throws Exception {
+            // Within agent A's conversations "Billing" matches nothing, but it does match
+            // conversations of another agent: the search found something, so no fallback.
+            when(conversationDescriptorStore.readDescriptors(anyString(), eq("Billing"), anyInt(), anyInt(), anyBoolean(),
+                    argThat(restrictions -> restrictions != null && !restrictions.isEmpty())))
+                    .thenReturn(List.of());
+            when(conversationDescriptorStore.readDescriptors(anyString(), eq("Billing"), eq(0), eq(1), anyBoolean(), eq(List.of())))
+                    .thenReturn(List.of(store.get(2)));
+
+            assertTrue(restConversationStore.readConversationDescriptors(0, 10, "Billing", null, AGENT_A, null, null, null).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a search that matches no conversation at all falls back to the listing without it")
+        void searchMatchingNothingFallsBack() throws Exception {
+            when(conversationDescriptorStore.readDescriptors(anyString(), eq("zzz"), anyInt(), anyInt(), anyBoolean(), any()))
+                    .thenReturn(List.of());
+
+            List<ConversationDescriptor> page = restConversationStore.readConversationDescriptors(0, 10, "zzz", null, AGENT_A, null,
+                    null, null);
+
+            assertEquals(agentAConversations().subList(0, 10), resources(page));
+        }
+
+        @Test
         @DisplayName("a state filter pages through the conversations in that state")
         void stateFilterPagesThroughMatchingStates() throws Exception {
             // Every fourth conversation has ENDED.

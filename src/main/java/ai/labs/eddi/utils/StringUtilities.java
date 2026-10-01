@@ -17,6 +17,20 @@ public final class StringUtilities {
         // utility class
     }
 
+    /**
+     * The literal text a search box asks for: the input itself, or what is between
+     * the quotes of a quoted one. Both find the text anywhere in a field; the
+     * quotes predate substring search and are accepted for compatibility. A lone
+     * {@code "} or an empty {@code ""} is an empty search, which matches everything
+     * — as it did when this was a regex.
+     */
+    public static String searchText(String filter) {
+        if (filter.startsWith("\"") && filter.endsWith("\"")) {
+            return filter.length() > 2 ? filter.substring(1, filter.length() - 1) : "";
+        }
+        return filter;
+    }
+
     public static String convertToSearchString(String filter) {
         if (filter.startsWith("\"") && filter.endsWith("\"")) {
             if (filter.length() > 2) {

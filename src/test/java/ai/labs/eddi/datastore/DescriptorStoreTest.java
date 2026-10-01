@@ -182,6 +182,30 @@ class DescriptorStoreTest {
         assertEquals("data-res-1", result.getFirst());
     }
 
+    @Test
+    @DisplayName("readDescriptors — a search is a literal substring test on every searchable field, not a .*text.* regex")
+    void searchIsALiteralContainsOnEverySearchableField() throws Exception {
+        when(resourceStorage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        store.readDescriptors("agents", "\"a+b (x)\"", 0, 20, false);
+
+        var captor = ArgumentCaptor.forClass(IResourceFilter.QueryFilters[].class);
+        verify(resourceStorage).findResources(captor.capture(), anyString(), anyInt(), anyInt());
+        IResourceFilter.QueryFilters search = null;
+        for (IResourceFilter.QueryFilters group : captor.getValue()) {
+            if (group.getConnectingType() == IResourceFilter.QueryFilters.ConnectingType.OR) {
+                search = group;
+            }
+        }
+        assertNotNull(search, "the search is one OR group");
+        assertEquals(List.of("userId", "name", "agentName", "description", "resource"),
+                search.getQueryFilters().stream().map(IResourceFilter.QueryFilter::getField).toList());
+        for (IResourceFilter.QueryFilter filter : search.getQueryFilters()) {
+            assertEquals(new IResourceFilter.Contains("a+b (x)"), filter.getFilter(), filter.getField());
+        }
+    }
+
     // ==================== batching / indexing ====================
 
     @Test

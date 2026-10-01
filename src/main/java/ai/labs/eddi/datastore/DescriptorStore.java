@@ -174,12 +174,14 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
 
         List<IResourceFilter.QueryFilter> queryFiltersOptional = new LinkedList<>();
         if (filter != null) {
-            filter = StringUtilities.convertToSearchString(filter);
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_USER_ID, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_AGENT_NAME, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, filter));
-            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, filter));
+            // A literal substring search, which each backend runs in its cheapest form
+            // (see IResourceFilter.Contains) — not a .*<text>.* regex.
+            var contains = new IResourceFilter.Contains(StringUtilities.searchText(filter));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_USER_ID, contains));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_NAME, contains));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_AGENT_NAME, contains));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_DESCRIPTION, contains));
+            queryFiltersOptional.add(new IResourceFilter.QueryFilter(FIELD_RESOURCE, contains));
         }
 
         int effectiveLimit = IDescriptorStore.resolveDescriptorLimit(limit);

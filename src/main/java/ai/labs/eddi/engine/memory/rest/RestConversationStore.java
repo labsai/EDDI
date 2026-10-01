@@ -274,10 +274,11 @@ public class RestConversationStore implements IRestConversationStore {
 
             do {
                 conversationDescriptors = readConversationDescriptors(descriptorPage, scanSize, textFilter, restrictions);
-                if (conversationDescriptors.isEmpty() && descriptorPage == 0 && !isNullOrEmpty(textFilter)) {
-                    // A search that matches nothing lists everything instead — decided
-                    // once, on the first descriptor page, so every result page of the
-                    // listing agrees on which rows it is paging through.
+                if (conversationDescriptors.isEmpty() && descriptorPage == 0 && !isNullOrEmpty(textFilter)
+                        && searchMatchesNothing(textFilter, restrictions)) {
+                    // A search that matches no conversation at all lists everything
+                    // instead — decided once, on the first descriptor page, so every
+                    // result page of the listing agrees on which rows it is paging through.
                     textFilter = null;
                     conversationDescriptors = readConversationDescriptors(descriptorPage, scanSize, null, restrictions);
                 }
@@ -566,6 +567,18 @@ public class RestConversationStore implements IRestConversationStore {
             restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_VIEW_STATE, viewState.name()))));
         }
         return restrictions;
+    }
+
+    /**
+     * Whether the search finds no conversation at all — the only case in which the
+     * listing drops it and lists everything. The listing's own filters are pushed
+     * into its query, so its first page also comes back empty when the search does
+     * match, only outside them ("Billing" within another agent's conversations);
+     * that listing is empty, as it was before the filters moved into the query.
+     */
+    private boolean searchMatchesNothing(String textFilter, List<QueryFilters> restrictions)
+            throws ResourceStoreException, ResourceNotFoundException {
+        return restrictions.isEmpty() || readConversationDescriptors(0, 1, textFilter, List.of()).isEmpty();
     }
 
     private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,

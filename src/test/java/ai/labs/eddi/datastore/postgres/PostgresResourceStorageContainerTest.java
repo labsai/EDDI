@@ -363,6 +363,56 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         }
     }
 
+    @Nested
+    @DisplayName("Contains filter")
+    class ContainsFilter {
+
+        @Test
+        @DisplayName("matches the text literally, anywhere, case-sensitively; an absent field does not match")
+        void containsIsALiteralSubstring() throws Exception {
+            String middle = store(Map.of("name", "the a+b (x) agent"));
+            String start = store(Map.of("name", "a+b (x)"));
+            store(Map.of("name", "aab (x)")); // "+" is literal, not "one or more"
+            store(Map.of("name", "the A+B (X) agent")); // case-sensitive
+            store(Map.of("description", "a+b (x)")); // the field is absent
+
+            assertEquals(Set.of(middle, start), find("name", new IResourceFilter.Contains("a+b (x)")));
+        }
+
+        @Test
+        @DisplayName("an empty text matches every row that has the field")
+        void emptyTextMatchesEveryPresentField() throws Exception {
+            String a = store(Map.of("name", "anything"));
+            String b = store(Map.of("name", ""));
+            store(Map.of("description", "no name"));
+
+            assertEquals(Set.of(a, b), find("name", new IResourceFilter.Contains("")));
+        }
+
+        @Test
+        @DisplayName("a quote, a percent, an underscore or a backslash in the text is just text")
+        void noCharacterIsSpecial() throws Exception {
+            String hit = store(Map.of("name", "50% off 'today' \\o/ a_b"));
+            store(Map.of("name", "50X off 'today' \\o/ axb")); // % and _ are not wildcards
+
+            assertEquals(Set.of(hit), find("name", new IResourceFilter.Contains("% off 'today' \\o/ a_b")));
+        }
+
+        private Set<String> find(String field, Object value) {
+            Set<String> ids = new HashSet<>();
+            storage.findResources(new IResourceFilter.QueryFilters[]{
+                    new IResourceFilter.QueryFilters(List.of(new IResourceFilter.QueryFilter(field, value)))}, null, 0, 50)
+                    .forEach(id -> ids.add(id.getId()));
+            return ids;
+        }
+
+        private String store(Map<String, Object> content) throws IOException {
+            var resource = storage.newResource(content);
+            storage.store(resource);
+            return resource.getId();
+        }
+    }
+
     // ─── findResources ──────────────────────────────────────────
 
     @Nested

@@ -7,6 +7,7 @@ package ai.labs.eddi.datastore.mongo;
 import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.utils.StringUtilities;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import org.bson.BsonDocument;
@@ -75,6 +76,8 @@ public class ResourceFilter<T> implements IResourceFilter<T> {
                     filters.add(Filters.regex(queryFilter.getField(), queryFilter.getFilter().toString()));
                 } else if (queryFilter.getFilter() instanceof IResourceFilter.NotMatching notMatching) {
                     filters.add(Filters.not(Filters.regex(queryFilter.getField(), notMatching.pattern())));
+                } else if (queryFilter.getFilter() instanceof IResourceFilter.Contains contains) {
+                    filters.add(Filters.regex(queryFilter.getField(), StringUtilities.escapeRegexChars(contains.text())));
                 } else {
                     filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
                 }

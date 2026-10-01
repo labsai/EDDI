@@ -756,6 +756,14 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
      * to what this class emitted before, so the expression indexes created for
      * those fields still match.
      */
+    /**
+     * Makes {@code text} literal inside a {@code LIKE … ESCAPE '\'} pattern: the
+     * escape character first, then the two wildcards.
+     */
+    static String escapeLike(String text) {
+        return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+    }
+
     private static String toTextPathExpression(String field) {
         String[] segments = sanitizeJsonPath(field).split("\\.");
         StringBuilder expression = new StringBuilder("data");
@@ -791,6 +799,13 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                     // MongoDB: NULL !~ x is NULL, which a WHERE clause treats as false.
                     clauses.add("COALESCE(" + fieldExpression + ", '') !~ ?");
                     params.add(notMatching.pattern());
+                } else if (qf.getFilter() instanceof IResourceFilter.Contains contains) {
+                    // A literal substring test, not a regex: 1.3-1.6x cheaper per row than
+                    // `~`. LIKE rather than strpos(), which measures the same, because a
+                    // pg_trgm GIN index serves LIKE and never strpos(). NULL (an absent
+                    // field) is not LIKE anything, so it does not match — as on MongoDB.
+                    clauses.add(fieldExpression + " LIKE ? ESCAPE '\\'");
+                    params.add("%" + escapeLike(contains.text()) + "%");
                 } else if (qf.getFilter() instanceof Boolean boolVal) {
                     clauses.add("COALESCE((" + fieldExpression + ")::boolean, false) = ?");
                     params.add(boolVal);
