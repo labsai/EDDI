@@ -131,7 +131,7 @@ class CascadingModelExecutorPartialExchangeTest {
         var toolExecutionService = mock(ToolExecutionService.class);
         lenient()
                 .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), nullable(String.class),
-                        any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt()))
+                        any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
         var truncator = mock(ToolResponseTruncator.class);
         lenient().when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(1));

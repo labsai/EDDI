@@ -84,6 +84,18 @@ public class EddiToolBridge {
     }
 
     /**
+     * The conversation bound to this thread, or {@code null}.
+     * <p>
+     * Read by {@code ToolExecutionService} when it hands a time-bounded tool call
+     * to a worker thread: this binding is thread-local, so without carrying it
+     * across, every bridge call that ran under a timeout would report "no
+     * conversation context available".
+     */
+    public static String currentConversationId() {
+        return CURRENT_CONVERSATION_ID.get();
+    }
+
+    /**
      * Executes a pre-configured EDDI API call.
      * <p>
      * The LLM only needs to provide the httpcall URI — the conversation context is

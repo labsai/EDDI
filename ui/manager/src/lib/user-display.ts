@@ -28,9 +28,14 @@ const ARABIC = /\p{Script=Arabic}/u;
  * punctuation and symbols are skipped. `toUpperCase`, not `toLocaleUpperCase`:
  * the browser's locale is not the app's language, and a Turkish system locale
  * would otherwise turn "isabel" into "İ".
+ *
+ * Upper-casing can lengthen a letter — "ß" becomes "SS" and the ligature "ﬁ"
+ * becomes "FI" — which would put three characters in an avatar sized for two,
+ * so only the first of them is kept.
  */
 function initialOf(value: string): string {
-  return value.normalize("NFC").match(INITIAL)?.[0].toUpperCase() ?? "";
+  const initial = value.normalize("NFC").match(INITIAL)?.[0].toUpperCase() ?? "";
+  return Array.from(initial)[0] ?? "";
 }
 
 /**

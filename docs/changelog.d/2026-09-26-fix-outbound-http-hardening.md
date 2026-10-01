@@ -2,7 +2,7 @@
 
 **Repo:** EDDI (`fix/outbound-http-hardening`)
 
-Outbound fetches made on a model's or a peer's behalf could be held open, or made to exhaust the heap, by the server they fetched from. Most of that was fixed independently on main by #862 (see its entry, "close SSRF, unbounded-download and resource-exhaustion gaps on outbound paths", in [the changelog](../changelog.md)); this branch now carries only what #862 left open.
+Outbound fetches made on a model's or a peer's behalf could be held open, or made to exhaust the heap, by the server they fetched from. Most of that was fixed independently on main by #862 (see [its entry](../changelog.md)); this branch now carries only what #862 left open.
 
 ### What changed and why
 
