@@ -26,7 +26,6 @@ import {
   loadManagedConversation,
   undoConversation,
   redoConversation,
-  fetchAgentDescriptor,
   fetchAgentProfile,
   rerunLastStep,
   endManagedConversation,
@@ -685,20 +684,25 @@ export function ChatWidget() {
     [dispatch],
   );
 
-  /** Show the agent's name, once per open, when the descriptor is readable. */
+  /**
+   * Show the agent's name, once per open, from the conversation read itself.
+   *
+   * It used to be fetched from `/descriptorstore/descriptors/{id}/simple`, an
+   * authoring endpoint that refuses a user holding only `eddi-user` — so the
+   * very people the chat is for never saw it. The backend now puts the name on
+   * the conversation snapshot for anyone allowed to use the agent. With no name
+   * the header simply shows the logo, titled with the configured `title`.
+   */
   const loadAgentName = useCallback(
-    (snapshot: { agentId?: string; agentVersion?: number }, gen: number) => {
+    (snapshot: { agentName?: unknown }, gen: number) => {
       if (isDemo || state.config.showAgentName === false) return;
-      const id = snapshot.agentId || agentId;
-      const version = snapshot.agentVersion;
-      if (!id || typeof version !== "number") return;
-      fetchAgentDescriptor(id, version).then((desc) => {
-        if (desc.name && gen === generationRef.current) {
-          dispatch({ type: "SET_AGENT_NAME", name: desc.name });
-        }
-      });
+      const name = snapshot.agentName;
+      if (typeof name !== "string" || !name.trim()) return;
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_AGENT_NAME", name });
+      }
     },
-    [dispatch, isDemo, agentId, state.config.showAgentName],
+    [dispatch, isDemo, state.config.showAgentName],
   );
 
   /**

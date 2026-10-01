@@ -34,7 +34,7 @@ Brings up MongoDB, EDDI, Open WebUI on <http://localhost:3000>, and a one-shot s
 
 Two things worth knowing about it:
 
-- **EDDI is built from the working tree**, not pulled from Docker Hub — the adapter is not in any published image yet, so `labsai/eddi:latest` would start fine and then 404 on `/v1`. The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
+- **EDDI is built from the working tree**, not pulled from Docker Hub, so the demo always runs the adapter as it is in your checkout, including changes that have not reached a published image. (The adapter itself has shipped since 6.4.0.) The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
 - **The demo agent has no LLM.** It needs no provider credentials and its replies are deterministic — but it also *cannot answer questions about anything*, including an uploaded PDF. To get an agent that actually thinks, set `EDDI_DEMO_LLM_API_KEY` and a second LLM-backed agent is deployed alongside it:
 
   ```bash

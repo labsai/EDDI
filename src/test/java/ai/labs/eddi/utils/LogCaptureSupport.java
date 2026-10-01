@@ -5,6 +5,8 @@
 package ai.labs.eddi.utils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.IllegalFormatException;
 import java.util.List;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -53,15 +55,66 @@ public final class LogCaptureSupport {
      */
     public static List<String> captureLogsOf(Class<?> loggerClass, Runnable body) {
         List<String> captured = new ArrayList<>();
+        for (LogRecord record : captureLogRecordsOf(loggerClass, body)) {
+            captured.add(String.valueOf(record.getMessage()));
+            if (record.getParameters() != null) {
+                for (Object parameter : record.getParameters()) {
+                    captured.add(String.valueOf(parameter));
+                }
+            }
+        }
+        return captured;
+    }
+
+    /**
+     * One captured log line: its level, and its message with the parameters
+     * formatted in.
+     */
+    public record CapturedRecord(Level level, String message) {
+
+        /** ERROR in JBoss Logging, SEVERE in JUL. */
+        public boolean isError() {
+            return level.intValue() >= Level.SEVERE.intValue();
+        }
+
+        /** WARN in JBoss Logging, WARNING in JUL — and not an error. */
+        public boolean isWarning() {
+            return level.intValue() >= Level.WARNING.intValue() && !isError();
+        }
+    }
+
+    /**
+     * As {@link #captureLogsOf}, keeping each line's level, for tests that assert
+     * on how loudly something is logged rather than only on what. The message is
+     * formatted as JBoss Logging's {@code errorf}/{@code warnf} format it.
+     */
+    public static List<CapturedRecord> captureRecordsOf(Class<?> loggerClass, Runnable body) {
+        List<CapturedRecord> captured = new ArrayList<>();
+        for (LogRecord record : captureLogRecordsOf(loggerClass, body)) {
+            captured.add(new CapturedRecord(record.getLevel(), formatted(record)));
+        }
+        return captured;
+    }
+
+    private static String formatted(LogRecord record) {
+        String message = String.valueOf(record.getMessage());
+        Object[] parameters = record.getParameters();
+        if (parameters == null || parameters.length == 0) {
+            return message;
+        }
+        try {
+            return String.format(message, parameters);
+        } catch (IllegalFormatException e) {
+            return message + " " + Arrays.toString(parameters);
+        }
+    }
+
+    private static List<LogRecord> captureLogRecordsOf(Class<?> loggerClass, Runnable body) {
+        List<LogRecord> captured = new ArrayList<>();
         Handler handler = new Handler() {
             @Override
             public void publish(LogRecord record) {
-                captured.add(String.valueOf(record.getMessage()));
-                if (record.getParameters() != null) {
-                    for (Object parameter : record.getParameters()) {
-                        captured.add(String.valueOf(parameter));
-                    }
-                }
+                captured.add(record);
             }
 
             @Override

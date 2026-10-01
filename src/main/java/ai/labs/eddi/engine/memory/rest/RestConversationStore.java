@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -57,6 +58,7 @@ import java.util.Set;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -213,6 +215,7 @@ public class RestConversationStore implements IRestConversationStore {
             List<ConversationDescriptor> conversationDescriptors;
             List<ConversationDescriptor> retConversationDescriptors = new LinkedList<>();
             int scannedDescriptors = 0;
+            int orphanedDescriptors = 0;
 
             do {
                 conversationDescriptors = readConversationDescriptors(index, limit, filter);
@@ -253,7 +256,14 @@ public class RestConversationStore implements IRestConversationStore {
                             continue;
                         }
 
-                        populateDataToDescriptor(conversationDescriptor, conversationResourceId);
+                        // A descriptor whose conversation memory is gone is an orphan:
+                        // there is no conversation to open, so it is not listed. 5.x left
+                        // many of these behind, and once the v6 rename gives them an
+                        // agentResource they would otherwise surface in by-agent listings.
+                        if (!populateDataToDescriptor(conversationDescriptor, conversationResourceId)) {
+                            orphanedDescriptors++;
+                            continue;
+                        }
 
                         // Legacy safety net: the descriptor recorded no owner; populate
                         // has now resolved it from the snapshot (pre-v5.1.6 fallback), so
@@ -315,6 +325,11 @@ public class RestConversationStore implements IRestConversationStore {
                 meterRegistry.counter("eddi.conversations.listing.owner_scan_exhausted").increment();
             }
 
+            if (orphanedDescriptors > 0) {
+                meterRegistry.counter("eddi.conversations.listing.orphaned_descriptors").increment(orphanedDescriptors);
+                log.debug(format("Left %d orphaned conversation descriptor(s) out of the listing.", orphanedDescriptors));
+            }
+
             return retConversationDescriptors;
 
         } catch (ResourceStoreException | ResourceNotFoundException e) {
@@ -328,16 +343,23 @@ public class RestConversationStore implements IRestConversationStore {
         return conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, filter, index, limit, false);
     }
 
-    private void populateDataToDescriptor(ConversationDescriptor conversationDescriptor, IResourceId resourceId)
+    /**
+     * @return {@code false} when the descriptor is orphaned — its conversation
+     *         memory no longer exists — so the caller can leave it out.
+     */
+    private boolean populateDataToDescriptor(ConversationDescriptor conversationDescriptor, IResourceId resourceId)
             throws ResourceStoreException, ResourceNotFoundException {
 
         try {
             var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
 
             if (memorySnapshot == null) {
-                log.warn(format("Memory snapshot not found for conversation [%s, %s]. Descriptor is orphaned.",
+                // DEBUG, not WARN: a database carried over from 5.x can hold thousands
+                // of these, and every listing page would log each one again. The
+                // listing reports the count once instead.
+                log.debug(format("Memory snapshot not found for conversation [%s, %s]. Descriptor is orphaned.",
                         resourceId.getId(), resourceId.getVersion()));
-                return;
+                return false;
             }
 
             if (conversationDescriptor.getUserId() == null) {
@@ -347,6 +369,16 @@ public class RestConversationStore implements IRestConversationStore {
             conversationDescriptor.setEnvironment(memorySnapshot.getEnvironment());
             conversationDescriptor.setConversationStepSize(memorySnapshot.getConversationSteps().size());
             conversationDescriptor.setConversationState(memorySnapshot.getConversationState());
+            if (conversationDescriptor.getAgentResource() == null && !isNullOrEmpty(memorySnapshot.getAgentId())) {
+                // A descriptor an earlier 6.x rewrote without its v5 botResource (see
+                // V6RenameMigration's backfill) names no agent; the conversation does.
+                // Without this it is missing from every per-agent listing.
+                Integer agentVersion = memorySnapshot.getAgentVersion();
+                conversationDescriptor.setAgentResource(agentVersion == null
+                        ? createURI(IRestAgentStore.resourceURI, memorySnapshot.getAgentId())
+                        : createURI(IRestAgentStore.resourceURI, memorySnapshot.getAgentId(), IRestAgentStore.versionQueryParam,
+                                agentVersion));
+            }
             if (isNullOrEmpty(conversationDescriptor.getAgentName())) {
                 var documentDescriptor = documentDescriptorStore.readDescriptor(memorySnapshot.getAgentId(), memorySnapshot.getAgentVersion());
 
@@ -358,6 +390,7 @@ public class RestConversationStore implements IRestConversationStore {
             message += "Ignoring this resource.";
             log.warn(format(message, resourceId.getId(), resourceId.getVersion()));
         }
+        return true;
     }
 
     /**

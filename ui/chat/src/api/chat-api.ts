@@ -367,8 +367,8 @@ export async function redoConversation(
  *
  * Readable by anybody who may chat with the agent — unlike the configuration
  * store, which someone the agent was shared with "for chatting" cannot read. An
- * older EDDI without the endpoint answers 404; callers fall back to
- * {@link fetchAgentDescriptor}.
+ * older EDDI without the endpoint answers 404. The name itself arrives with the
+ * conversation read (`agentName` on the snapshot), which needs no editor role.
  */
 export async function fetchAgentProfile(
   agentId: string,
@@ -379,38 +379,4 @@ export async function fetchAgentProfile(
     undefined,
     "Failed to read the agent profile",
   );
-}
-
-/* ─── Agent descriptor ─────────────────────────── */
-
-/**
- * Fetch the agent's display name from its descriptor.
- *
- * The name lives on the DESCRIPTOR (`/descriptorstore/descriptors/{id}/simple`),
- * which requires a version — `/agentstore/agents/{id}` returns the
- * configuration, which carries no name at all, and was called without the
- * bearer token and without a version, so it could never succeed.
- *
- * The descriptor store is an editor endpoint: an end user holding only
- * `eddi-user` is refused, and the header then shows the configured `title`.
- * Any failure resolves to `{}` — a name is decoration, never a reason to fail.
- */
-export async function fetchAgentDescriptor(
-  agentId: string,
-  version: number,
-): Promise<{ name?: string; description?: string }> {
-  try {
-    const params = new URLSearchParams({ version: String(version) });
-    const data = await requestJson<{ name?: unknown; description?: unknown }>(
-      `/descriptorstore/descriptors/${encodeSegment(agentId)}/simple?${params}`,
-      undefined,
-      "Failed to read agent descriptor",
-    );
-    return {
-      name: typeof data?.name === "string" && data.name.trim() ? data.name : undefined,
-      description: typeof data?.description === "string" ? data.description : undefined,
-    };
-  } catch {
-    return {};
-  }
 }

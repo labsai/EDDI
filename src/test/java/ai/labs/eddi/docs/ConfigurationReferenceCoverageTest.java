@@ -194,6 +194,13 @@ class ConfigurationReferenceCoverageTest {
         for (String property : collectProperties(root).keySet()) {
             valid.add(property.replaceAll("[^A-Za-z0-9]", "_").toUpperCase(Locale.ROOT));
         }
+        // Real properties too, read through ${...} expressions rather than by Java (see
+        // DECLARED_BUT_UNREAD), so collectProperties cannot see them. Without this, a
+        // doc
+        // could not name EDDI_CHAT_FRAME_ANCESTORS, which the Helm chart itself sets.
+        for (String property : DECLARED_BUT_UNREAD) {
+            valid.add(property.replaceAll("[^A-Za-z0-9]", "_").toUpperCase(Locale.ROOT));
+        }
 
         var wrong = new TreeSet<String>();
         for (Path file : documentationFiles(root)) {
@@ -239,7 +246,10 @@ class ConfigurationReferenceCoverageTest {
             "EDDI_API_KEY", "EDDI_API_URL", "EDDI_URL", "EDDI_PORT", "EDDI_HTTPS_PORT", "EDDI_DOMAIN",
             "EDDI_SCHEME", "EDDI_DIR", "EDDI_CONFIG", "EDDI_NAMESPACE", "EDDI_BRANCH", "EDDI_RELEASE",
             "EDDI_CLI", "EDDI_REPO_ROOT", "EDDI_ALREADY_RUNNING", "EDDI_URI_PATTERN", "EDDI_AUTH",
-            "EDDI_DEMO_LLM_API_KEY", "EDDI_DEMO_LLM_MODEL", "EDDI_DEMO_LLM_TYPE");
+            "EDDI_DEMO_LLM_API_KEY", "EDDI_DEMO_LLM_MODEL", "EDDI_DEMO_LLM_TYPE",
+            // The host address the compose files publish EDDI's ports on (127.0.0.1 by
+            // default).
+            "EDDI_BIND");
 
     /**
      * Names a document quotes deliberately because they do <em>not</em> work.

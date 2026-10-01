@@ -464,6 +464,59 @@ public final class DiscussionStylePresets {
         };
     }
 
+    /**
+     * Restores {@link #TEMPLATE_ARBITRATION} on a NEGOTIATION group whose stored
+     * Arbitration phase has no prompt of its own.
+     * <p>
+     * Such groups exist: the Manager used to materialize NEGOTIATION's phases with
+     * {@code inputTemplate: null} (enabling an approval point does that), and the
+     * REST and MCP APIs and ZIP import accept whatever phases they are given. With
+     * no template, {@code GroupContextBuilder} falls back to the generic SYNTHESIS
+     * prompt ("synthesize a balanced conclusion"), so the moderator summarised the
+     * deadlock instead of deciding it, and {@code NegotiationEngine} still recorded
+     * that summary as the arbitrated VERDICT. Nothing failed; the outcome was just
+     * wrong. The Manager repairs these on its next save, which left the behaviour
+     * depending on which client last wrote the group.
+     * <p>
+     * Only the exact phase the preset produces is touched: NEGOTIATION style, named
+     * {@code "Arbitration"}, a SYNTHESIS spoken by the MODERATOR and skipped on
+     * {@code AGREEMENT_REACHED}, with a {@code null} template. An author's own
+     * phase, or one with any template at all, is left as written. The same test as
+     * {@code repairNegotiationArbitration} in
+     * {@code ui/manager/src/lib/hitl-config.ts}.
+     *
+     * @return the same list when nothing needed repairing, else a copy with the
+     *         Arbitration phase's template filled in
+     */
+    public static List<DiscussionPhase> withNegotiationArbitrationRepaired(DiscussionStyle style, List<DiscussionPhase> phases) {
+        if (style != DiscussionStyle.NEGOTIATION || phases == null) {
+            return phases;
+        }
+        List<DiscussionPhase> repaired = null;
+        for (int i = 0; i < phases.size(); i++) {
+            DiscussionPhase phase = phases.get(i);
+            if (isPromptlessPresetArbitration(phase)) {
+                if (repaired == null) {
+                    repaired = new ArrayList<>(phases);
+                }
+                repaired.set(i, new DiscussionPhase(phase.name(), phase.type(), phase.participants(), phase.turnOrder(),
+                        phase.contextScope(), phase.targetEachPeer(), TEMPLATE_ARBITRATION, phase.repeats(),
+                        phase.requiresApproval(), phase.convergence(), phase.allowAbstention(), phase.voteConfig(),
+                        phase.skipIf()));
+            }
+        }
+        return repaired != null ? repaired : phases;
+    }
+
+    private static boolean isPromptlessPresetArbitration(DiscussionPhase phase) {
+        return phase != null
+                && "Arbitration".equals(phase.name())
+                && phase.type() == PhaseType.SYNTHESIS
+                && "MODERATOR".equalsIgnoreCase(phase.participants())
+                && phase.skipIf() == AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED
+                && phase.inputTemplate() == null;
+    }
+
     // --- NEGOTIATION (I11) ---
 
     /**

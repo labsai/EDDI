@@ -342,8 +342,10 @@ public class ConversationMemorySnapshot {
          * Also accepts {@code packages}, the key EDDI 5 stored a step's runs under.
          * Without the alias that key was silently ignored, so every conversation
          * created on 5.x loaded with no data in any step — and the next save wrote the
-         * empty steps back. {@code V6RenameMigration} renames the stored key; this
-         * keeps a document the migration has not reached loadable.
+         * empty steps back. {@code V6RenameMigration} renames the stored key, once;
+         * this keeps loadable every document it has not reached — all of them on a
+         * database an earlier 6.x migrated, until the 6.5 catch-up has run, and any v5
+         * step written after the pass. It is a safety net, not a leftover: keep it.
          */
         @JsonAlias("packages")
         public void setWorkflows(List<WorkflowRunSnapshot> packages) {

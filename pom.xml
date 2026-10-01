@@ -5,9 +5,9 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.4.0</version>
+    <version>6.5.0</version>
     <properties>
-        <compiler-plugin.version>3.15.0</compiler-plugin.version>
+        <compiler-plugin.version>3.16.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <maven.compiler.release>25</maven.compiler.release>
@@ -15,7 +15,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.39.5</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1</quarkus.platform.version>
         <!-- langchain4j ships two release lines from the same reactor. Every
              dev.langchain4j artifact below is pinned to ONE of these two, and
              they must be bumped together: a split leaves modules resolving
@@ -25,8 +25,13 @@
              langchain4j-community.version were byte-identical duplicates of
              langchain4j.version and langchain4j-beta.version), which made a
              half-finished bump the likely outcome of any upgrade. -->
-        <langchain4j.version>1.20.0</langchain4j.version>
-        <langchain4j-beta.version>1.20.0-beta30</langchain4j-beta.version>
+        <langchain4j.version>1.20.2</langchain4j.version>
+        <langchain4j-beta.version>1.20.2-beta30</langchain4j-beta.version>
+        <!-- langchain4j-community-oci-genai is published on its own schedule: its newest release is
+             1.20.0-beta30, with no 1.20.2-beta30. Pinned separately so the rest of the beta line can
+             move; a patch-level core difference is binary compatible. Rejoin the beta property when
+             the module catches up. -->
+        <langchain4j-community-oci.version>1.20.0-beta30</langchain4j-community-oci.version>
         <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.6.0</surefire-plugin.version>
@@ -66,8 +71,8 @@
         <!-- Pinned: Maven only warns when a declared plugin carries no version, then
              takes whatever its default lifecycle binding says, which moves with the
              Maven wrapper. -->
-        <maven-resources-plugin.version>3.3.1</maven-resources-plugin.version>
-        <maven-clean-plugin.version>3.2.0</maven-clean-plugin.version>
+        <maven-resources-plugin.version>3.5.0</maven-resources-plugin.version>
+        <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -337,7 +342,7 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-community-oci-genai</artifactId>
-            <version>${langchain4j-beta.version}</version>
+            <version>${langchain4j-community-oci.version}</version>
         </dependency>
         <!-- RAG Provider Expansion: additional embedding stores + models -->
         <dependency>
@@ -463,7 +468,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.20.0</version>
+            <version>3.21.0</version>
             <scope>compile</scope>
         </dependency>
         <dependency>

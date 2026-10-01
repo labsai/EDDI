@@ -14,7 +14,7 @@ set -euo pipefail
 # ── Configuration ──────────────────────────────────────────
 # EDDI_BRANCH selects which git ref the compose/support files are fetched from.
 # When it is not set explicitly, it is DERIVED from EDDI_VERSION after argument
-# parsing (see resolve_eddi_branch): pinning a release with --eddi-version=6.4.0
+# parsing (see resolve_eddi_branch): pinning a release with --eddi-version=6.5.0
 # must fetch that release's compose files from its tag, not whatever is on `main`,
 # which can be a compose file newer than the pinned image.
 EDDI_BRANCH_EXPLICIT="${EDDI_BRANCH:-}"
@@ -489,7 +489,7 @@ resolve_eddi_branch() {
     EDDI_BRANCH="$EDDI_BRANCH_EXPLICIT"
   elif [[ -n "${EDDI_VERSION:-}" && "$EDDI_VERSION" != "latest" ]]; then
     # Release tags are not v-prefixed (see AGENTS.md CI notes), so the tag IS the
-    # version string, e.g. EDDI_VERSION=6.4.0 -> ref 6.4.0.
+    # version string, e.g. EDDI_VERSION=6.5.0 -> ref 6.5.0.
     EDDI_BRANCH="$EDDI_VERSION"
   else
     EDDI_BRANCH="main"
@@ -2350,7 +2350,7 @@ case "${1:-help}" in
       # check refuses. Docker's tag grammar, which also keeps the value inert
       # inside the sed replacements below.
       if [[ ! "$NEW_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then
-        echo "Invalid --eddi-version: $NEW_VERSION (expected an image tag such as 6.4.0 or latest)" >&2
+        echo "Invalid --eddi-version: $NEW_VERSION (expected an image tag such as 6.5.0 or latest)" >&2
         exit 1
       fi
       echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."

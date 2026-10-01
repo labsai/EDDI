@@ -31,6 +31,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -38,6 +40,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -67,6 +71,7 @@ class AgentDeploymentManagementIdleSweepTest {
     private static final int MAX_IDLE_DAYS = 30;
 
     private IDeploymentStore deploymentStore;
+    private IAgentFactory agentFactory;
     private IAgentStore agentStore;
     private IConversationMemoryStore conversationMemoryStore;
     private IDocumentDescriptorStore documentDescriptorStore;
@@ -75,19 +80,21 @@ class AgentDeploymentManagementIdleSweepTest {
     @BeforeEach
     void setUp() {
         deploymentStore = mock(IDeploymentStore.class);
-        var agentFactory = mock(IAgentFactory.class);
+        agentFactory = mock(IAgentFactory.class);
         agentStore = mock(IAgentStore.class);
-        var agentsReadiness = mock(IAgentsReadiness.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
-        var migrationManager = mock(IMigrationManager.class);
+        management = managementWithIdleLimit(MAX_IDLE_DAYS);
+    }
+
+    /** A sweep over this test's mocks, with the given idle limit. */
+    private AgentDeploymentManagement managementWithIdleLimit(int maxIdleDays) {
         var runtime = mock(IRuntime.class);
         when(runtime.getScheduledExecutorService()).thenReturn(mock(ScheduledExecutorService.class));
-
-        management = new AgentDeploymentManagement(deploymentStore, agentFactory, agentStore, agentsReadiness, conversationMemoryStore,
-                documentDescriptorStore, migrationManager, mock(V6RenameMigration.class), mock(V6QuteMigration.class),
-                mock(ChannelConnectorMigration.class), mock(WorkspaceAccessIndexMigration.class), runtime,
-                mock(IWorkflowStore.class), mock(IRuleSetStore.class), MAX_IDLE_DAYS);
+        return new AgentDeploymentManagement(deploymentStore, agentFactory, agentStore, mock(IAgentsReadiness.class),
+                conversationMemoryStore, documentDescriptorStore, mock(IMigrationManager.class), mock(V6RenameMigration.class),
+                mock(V6QuteMigration.class), mock(ChannelConnectorMigration.class), mock(WorkspaceAccessIndexMigration.class), runtime,
+                mock(IWorkflowStore.class), mock(IRuleSetStore.class), maxIdleDays);
     }
 
     @Nested
@@ -315,31 +322,144 @@ class AgentDeploymentManagementIdleSweepTest {
 
             verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
         }
+    }
 
-        private void givenOldAgentVersionWithConversation(ConversationMemorySnapshot snapshot, Instant agentLastModified) throws Exception {
-            var info = new DeploymentInfo();
-            info.setEnvironment(Environment.production);
-            info.setAgentId("agent-1");
-            info.setAgentVersion(1);
-            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
+    /**
+     * A limit below one day switches the ending off. Taken literally, {@code -1}
+     * and {@code 0} made every conversation "idle" ({@code DAYS.between(..) >= -1}
+     * is always true) and the sweep ENDED all of them, and {@code -1} is how the
+     * retention settings next to this one say "never".
+     */
+    @Nested
+    @DisplayName("a limit below one day disables ending")
+    class DisabledLimit {
 
-            // Version 1 is not the latest, so the undeploy path (and the sweep) runs.
-            var latest = mock(IResourceId.class);
-            when(latest.getId()).thenReturn("agent-1");
-            when(latest.getVersion()).thenReturn(2);
-            when(agentStore.getCurrentResourceId("agent-1")).thenReturn(latest);
+        @ParameterizedTest(name = "limit {0}")
+        @ValueSource(ints = {-1, 0})
+        @DisplayName("no conversation is ended, however old")
+        void nothingIsEnded(int limit) throws Exception {
+            management = managementWithIdleLimit(limit);
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)),
+                    Instant.now().minus(400, ChronoUnit.DAYS));
 
-            when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(1L);
-            when(conversationMemoryStore.compareAndSetState(any(), any(), any())).thenReturn(true);
-            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", 1)).thenReturn(List.of(snapshot));
-            // The sweep re-reads the conversation immediately before ending it.
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+            management.manageAgentDeployments();
 
-            var descriptor = new DocumentDescriptor();
-            descriptor.setName("Test Agent");
-            descriptor.setLastModifiedOn(agentLastModified != null ? Date.from(agentLastModified) : null);
-            when(documentDescriptorStore.readDescriptor("agent-1", 1)).thenReturn(descriptor);
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
+            verify(conversationMemoryStore, never()).setConversationState(any(), any());
         }
+
+        /**
+         * The idle conversation is still open, so it still counts as active and keeps
+         * its version deployed: the same answer a positive limit gives while the
+         * conversation is younger than the limit.
+         */
+        @ParameterizedTest(name = "limit {0}")
+        @ValueSource(ints = {-1, 0})
+        @DisplayName("an old version with an open conversation stays deployed")
+        void versionWithOpenConversationStaysDeployed(int limit) throws Exception {
+            management = managementWithIdleLimit(limit);
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)),
+                    Instant.now().minus(400, ChronoUnit.DAYS));
+            // The store as it behaves: an ENDED conversation stops counting as active,
+            // so ending it would free the version for the undeploy check after it.
+            var ended = new AtomicBoolean();
+            when(conversationMemoryStore.compareAndSetState(any(), any(), eq(ConversationState.ENDED))).thenAnswer(inv -> {
+                ended.set(true);
+                return true;
+            });
+            when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenAnswer(inv -> ended.get() ? 0L : 1L);
+
+            management.manageAgentDeployments();
+
+            verify(agentFactory, never()).undeployAgent(any(), any(), any());
+            verify(deploymentStore, never()).setDeploymentInfo(any(), any(), any(), eq(DeploymentInfo.DeploymentStatus.undeployed));
+        }
+
+        /**
+         * Undeploying a version nobody is talking to ends nothing, so it is not part of
+         * what "disabled" switches off.
+         */
+        @ParameterizedTest(name = "limit {0}")
+        @ValueSource(ints = {-1, 0})
+        @DisplayName("an old version with no active conversation is still undeployed")
+        void versionWithNoActiveConversationIsUndeployed(int limit) throws Exception {
+            management = managementWithIdleLimit(limit);
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)),
+                    Instant.now().minus(400, ChronoUnit.DAYS));
+            when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(0L);
+
+            management.manageAgentDeployments();
+
+            // atLeastOnce: the sweep checks an old version twice, before and after the
+            // ending pass, and a version with nothing active is undeployed by the first.
+            verify(agentFactory, atLeastOnce()).undeployAgent(Environment.production, "agent-1", 1);
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
+        }
+
+        @Test
+        @DisplayName("a positive limit is enabled, a limit below one day is not")
+        void enabledFlag() {
+            assertTrue(managementWithIdleLimit(1).idleEndingEnabled());
+            assertTrue(managementWithIdleLimit(90).idleEndingEnabled());
+            assertFalse(managementWithIdleLimit(0).idleEndingEnabled());
+            assertFalse(managementWithIdleLimit(-1).idleEndingEnabled());
+        }
+    }
+
+    /** The shipped default still ends what it always ended, and only that. */
+    @Nested
+    @DisplayName("the default limit of 90 days")
+    class DefaultLimit {
+
+        @BeforeEach
+        void defaultLimit() {
+            management = managementWithIdleLimit(90);
+        }
+
+        @Test
+        @DisplayName("a conversation idle for 91 days is ended")
+        void ninetyOneDaysIsEnded() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(91, ChronoUnit.DAYS)), Instant.now());
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore).compareAndSetState(eq("conv-1"), any(), eq(ConversationState.ENDED));
+        }
+
+        @Test
+        @DisplayName("a conversation idle for 89 days is not")
+        void eightyNineDaysIsKept() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(89, ChronoUnit.DAYS)), Instant.now());
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
+        }
+    }
+
+    private void givenOldAgentVersionWithConversation(ConversationMemorySnapshot snapshot, Instant agentLastModified) throws Exception {
+        var info = new DeploymentInfo();
+        info.setEnvironment(Environment.production);
+        info.setAgentId("agent-1");
+        info.setAgentVersion(1);
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
+
+        // Version 1 is not the latest, so the undeploy path (and the sweep) runs.
+        var latest = mock(IResourceId.class);
+        when(latest.getId()).thenReturn("agent-1");
+        when(latest.getVersion()).thenReturn(2);
+        when(agentStore.getCurrentResourceId("agent-1")).thenReturn(latest);
+
+        when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(1L);
+        when(conversationMemoryStore.compareAndSetState(any(), any(), any())).thenReturn(true);
+        when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", 1)).thenReturn(List.of(snapshot));
+        // The sweep re-reads the conversation immediately before ending it.
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+
+        var descriptor = new DocumentDescriptor();
+        descriptor.setName("Test Agent");
+        descriptor.setLastModifiedOn(agentLastModified != null ? Date.from(agentLastModified) : null);
+        when(documentDescriptorStore.readDescriptor("agent-1", 1)).thenReturn(descriptor);
     }
 
     /** A snapshot whose steps carry exactly the given data timestamps. */

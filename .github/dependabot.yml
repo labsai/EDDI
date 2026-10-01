@@ -35,6 +35,14 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # reactor-netty-http 1.3.x is built against Netty 4.2, while Quarkus still manages Netty 4.1:
+      # the Azure OpenAI client's first request then fails with NoClassDefFoundError
+      # (ReactorNettyNettyCompatibilityTest). Stay on 1.2 patch releases until Quarkus moves to Netty 4.2;
+      # see the comment on the pin in pom.xml. Without this, every minor-and-patch group bundles the
+      # breaking bump and the safe updates in it cannot merge either.
+      - dependency-name: "io.projectreactor.netty:reactor-netty-http"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   # Docker base image digests
   - package-ecosystem: docker

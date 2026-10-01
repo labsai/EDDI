@@ -98,7 +98,11 @@ class RestConversationStoreOwnershipTest {
         lenient().when(conversationMemoryStore.loadConversationMemorySnapshot(anyString())).thenReturn(snapshot);
     }
 
-    /** A conversation descriptor already carrying its owner and agent name. */
+    /**
+     * A conversation descriptor already carrying its owner and agent name. The id
+     * must be hex: a non-hex id resolves to a null resource id, the snapshot stub
+     * above never matches it, and the listing then drops the row as orphaned.
+     */
     private ConversationDescriptor descriptor(String conversationId, String ownerId) {
         var descriptor = new ConversationDescriptor();
         descriptor.setResource(URI.create(
@@ -147,7 +151,7 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("a caller sees only their own conversations, never another user's")
     void filtersToOwnConversations() throws Exception {
-        firstPage(descriptor("conv-owner", OWNER), descriptor("conv-intruder", INTRUDER));
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
 
         List<ConversationDescriptor> result = asOwner().readConversationDescriptors(
                 0, 20, null, null, null, null, null, null);
@@ -159,7 +163,7 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("a non-owner enumerating the store sees nothing of another user's conversations")
     void nonOwnerSeesNoForeignConversations() throws Exception {
-        firstPage(descriptor("conv-owner", OWNER));
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER));
 
         List<ConversationDescriptor> result = asIntruder().readConversationDescriptors(
                 0, 20, null, null, null, null, null, null);
@@ -170,7 +174,7 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("an admin sees every user's conversations")
     void adminSeesAllConversations() throws Exception {
-        firstPage(descriptor("conv-owner", OWNER), descriptor("conv-intruder", INTRUDER));
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
 
         List<ConversationDescriptor> result = asAdmin().readConversationDescriptors(
                 0, 20, null, null, null, null, null, null);
@@ -181,7 +185,7 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("an unowned (legacy) conversation stays visible — matching requireOwnerOrAdmin")
     void unownedLegacyConversationRemainsVisible() throws Exception {
-        firstPage(descriptor("conv-legacy", null));
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a03", null));
 
         List<ConversationDescriptor> result = asIntruder().readConversationDescriptors(
                 0, 20, null, null, null, null, null, null);
@@ -196,7 +200,7 @@ class RestConversationStoreOwnershipTest {
         // and stops on the MAX_OWNER_SCAN budget — the truncation the List can't
         // signal.
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
-                .thenReturn(List.of(descriptor("conv-foreign-a", INTRUDER), descriptor("conv-foreign-b", INTRUDER)));
+                .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a04", INTRUDER), descriptor("0a0a0a0a0a0a0a0a0a0a0a05", INTRUDER)));
 
         var registry = new SimpleMeterRegistry();
         var store = asOwner();
@@ -215,9 +219,9 @@ class RestConversationStoreOwnershipTest {
         // the do-while must page forward (index is a page number: skip = index*limit)
         // until the owner's conversation is found.
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), anyInt(), anyBoolean()))
-                .thenReturn(List.of(descriptor("conv-foreign-1", INTRUDER), descriptor("conv-foreign-2", INTRUDER)));
+                .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a06", INTRUDER), descriptor("0a0a0a0a0a0a0a0a0a0a0a07", INTRUDER)));
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(1), anyInt(), anyBoolean()))
-                .thenReturn(List.of(descriptor("conv-owner", OWNER)));
+                .thenReturn(List.of(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER)));
         when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(2), anyInt(), anyBoolean()))
                 .thenReturn(List.of());
 
