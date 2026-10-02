@@ -57,11 +57,9 @@ import java.util.Set;
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Integrations / Slack Webhook", description = "Slack Events API webhook receiver")
 // Explicitly public: Slack calls these with no EDDI credential, and each
-// request is
-// authenticated by its Slack signature in the handler (the HTTP policy permits
-// the
-// path). quarkus.security.jaxrs.deny-unannotated-endpoints denies anything
-// unannotated.
+// request is authenticated by its Slack signature in the handler (the HTTP
+// policy permits the path). quarkus.security.jaxrs.deny-unannotated-endpoints
+// denies anything unannotated.
 @PermitAll
 public class RestSlackWebhook {
 

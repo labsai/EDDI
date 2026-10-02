@@ -187,10 +187,10 @@ public class ConversationAccessGuard {
      * included.
      * <p>
      * {@code requireConversationOwner} returns null for two different situations:
-     * an admin addressing a conversation without a descriptor, or a conversation
-     * that exists but is unowned (a legacy row, which {@code OwnershipValidator}
-     * deliberately admits). A caller that merely invokes the guard for its side
-     * effect therefore cannot tell "no such conversation" from "allowed", and
+     * an admin addressing a conversation without a descriptor, or an admin
+     * addressing a conversation that exists but records no owner anywhere (which
+     * nobody else is admitted to). A caller that merely invokes the guard for its
+     * side effect therefore cannot tell "no such conversation" from "allowed", and
      * proceeds in both cases. That is harmless where the underlying store 404s on
      * its own, but not for attachments: blobs can outlive the conversation that
      * owned them, so a deleted conversation's id would still reach the store with

@@ -19,9 +19,8 @@ import org.jboss.resteasy.reactive.Cache;
 @Path("/workforce")
 @Produces(MediaType.TEXT_HTML)
 // Explicitly public — the Workforce SPA shell: loaded by the browser before it
-// holds a token.
-// quarkus.security.jaxrs.deny-unannotated-endpoints denies anything
-// unannotated.
+// holds a token. quarkus.security.jaxrs.deny-unannotated-endpoints denies
+// anything unannotated.
 @PermitAll
 public interface IRestWorkforceResource {
 

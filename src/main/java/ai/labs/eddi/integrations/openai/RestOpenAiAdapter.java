@@ -60,8 +60,7 @@ import java.util.concurrent.Semaphore;
 // HTTP policy (eddi.openai-compat.http-policy) and by OpenAiAuthFilter — the
 // shared key in permit mode, a token with a conversing role in OIDC mode. With
 // quarkus.security.jaxrs.deny-unannotated-endpoints an unannotated adapter
-// would be
-// refused to every caller.
+// would be refused to every caller.
 @PermitAll
 public class RestOpenAiAdapter {
 

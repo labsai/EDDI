@@ -23,10 +23,9 @@ import org.jboss.resteasy.reactive.Cache;
 @Path("/chat")
 @Produces(MediaType.TEXT_HTML)
 @Tag(name = "UI / Chat", description = "Embedded responsive chat window")
-// Explicitly public — the chat SPA shell: loaded by the browser before it holds
-// a token.
-// quarkus.security.jaxrs.deny-unannotated-endpoints denies anything
-// unannotated.
+// Explicitly public — the chat SPA shell: loaded by the browser before it
+// holds a token. quarkus.security.jaxrs.deny-unannotated-endpoints denies
+// anything unannotated.
 @PermitAll
 public interface IRestHtmlChatResource {
 

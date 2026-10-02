@@ -20,10 +20,9 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
  */
 @Path("/")
 // Explicitly public — the Manager SPA shell and its runtime auth config: the
-// browser loads them before it holds a token, and the HTTP policy permits these
-// paths.
-// quarkus.security.jaxrs.deny-unannotated-endpoints denies anything
-// unannotated.
+// browser loads them before it holds a token, and the HTTP policy permits
+// these paths. quarkus.security.jaxrs.deny-unannotated-endpoints denies
+// anything unannotated.
 @PermitAll
 public interface IRestManagerResource {
 
