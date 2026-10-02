@@ -132,6 +132,8 @@ Status codes are discriminating: `400` invalid body (missing verdict, note > 4 K
 
 `GET /agents/pending-approvals` entries also carry `pauseType` (`RULE`/`TOOL_CALL`; a pause stored without a type — rule pauses before 6.4 — is reported as `RULE`) and `toolNames` (names only, no arguments) so inbox UIs can badge tool-call pauses without a second round trip.
 
+The listing has no offset parameter, so a caller sees at most `limit` entries. The Manager's **Approvals** page asks for 200 and, when exactly that many come back, says that more are pending than it shows (decide some and the rest move up) instead of presenting the first 200 as the whole queue. The group inbox does the same with its own list.
+
 ### What the Agent Sees After a Decision
 
 | Where | Key | Notes |

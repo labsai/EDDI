@@ -352,3 +352,27 @@ describe("ApprovalsPage — confirmation gate on irreversible queue actions", ()
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledTimes(1));
   });
 });
+
+describe("ApprovalsPage — capped 1:1 inbox", () => {
+  // Regression: the 1:1 list is fetched with limit=200 and the endpoint has no
+  // offset, so the 201st pending approval was silently invisible.
+  it("says more are pending when the list comes back at the cap", async () => {
+    mockInbox(
+      Array.from({ length: 200 }, (_, i) => ({
+        ...toolPause,
+        conversationId: `conv-cap-${i}`,
+      })),
+    );
+    renderWithProviders(<ApprovalsPage />);
+
+    expect(await screen.findByTestId("approvals-regular-truncated")).toBeInTheDocument();
+  }, 60_000);
+
+  it("says nothing below the cap", async () => {
+    mockInbox([toolPause]);
+    renderWithProviders(<ApprovalsPage />);
+
+    expect(await screen.findByTestId("tool-badge-conv-tool-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("approvals-regular-truncated")).not.toBeInTheDocument();
+  });
+});

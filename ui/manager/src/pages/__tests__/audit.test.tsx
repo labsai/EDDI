@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { AuditPage } from "@/pages/audit";
 import { server } from "@/test/mocks/server";
@@ -410,4 +410,59 @@ describe("AuditPage", () => {
     // This test renders three full 100-row pages, so give it headroom: under
     // full-suite parallel load the default 30s timeout is not enough.
   }, 60_000);
+
+  // ─── Auto-refresh after "Load more" ──────────────────────────────
+
+  describe("auto-refresh after paging", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("re-reads the newest page and shows each row once when rows were written meanwhile", async () => {
+      // Regression: auto-refresh used to refetch the query at the CURRENT
+      // offset (skip=100), so the newest rows never appeared, and the rows the
+      // new writes pushed across the page boundary rendered twice.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const PAGE_SIZE = 100;
+      let total = 250; // rows e-0 … e-249, newest first
+      server.use(
+        http.get("*/auditstore/:conversationId", ({ request, params }) => {
+          const url = new URL(request.url);
+          if (url.pathname.endsWith("/count")) return;
+          if (params.conversationId === "agent") return;
+          const skip = Number(url.searchParams.get("skip") ?? "0");
+          const rows = Array.from(
+            { length: Math.max(0, Math.min(PAGE_SIZE, total - skip)) },
+            (_, i) => ({ ...makeAuditPage("x", 1, 0)[0]!, id: `e-${total - 1 - skip - i}` }),
+          );
+          return HttpResponse.json(rows);
+        }),
+      );
+
+      renderAudit();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+      await user.click(screen.getByTestId("mode-conversation"));
+      await user.type(screen.getByTestId("conversation-input"), "conv-load-more");
+      await user.click(screen.getByTestId("search-button"));
+      await waitFor(() => expect(screen.getByTestId("audit-entry-e-249")).toBeInTheDocument());
+
+      await user.click(screen.getByTestId("load-more"));
+      await waitFor(() => expect(screen.getByTestId("audit-entry-e-50")).toBeInTheDocument());
+
+      // Three rows are written at the head; then auto-refresh fires.
+      total = 253;
+      await user.click(screen.getByTestId("auto-refresh-toggle"));
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+
+      await waitFor(() => expect(screen.getByTestId("audit-entry-e-252")).toBeInTheDocument());
+      // e-150 … e-152 were on page 1 and are now on the shifted page 2 as well.
+      for (const id of ["e-150", "e-151", "e-152"]) {
+        expect(screen.getAllByTestId(`audit-entry-${id}`)).toHaveLength(1);
+      }
+      expect(screen.getByTestId("audit-entry-e-50")).toBeInTheDocument();
+    }, 60_000);
+  });
 });
