@@ -196,6 +196,8 @@ The property-setter config picks the value type by which `value*` field you writ
 | `valueList` | `{properties.tags}` | `{#for item in properties.tags}...{/for}` |
 | `valueBoolean` | `{properties.isPremium}` | `{#if properties.isPremium}...{/if}` |
 
+A decimal renders in plain digits — `12500000.5`, `0.00025` — not in the `1.25000005E7` / `2.5E-4` notation Java's `toString()` switches to (outside the range JavaScript also prints plainly, `1e-7 <= |x| < 1e21`, the notation is kept). A whole decimal keeps its `.0` (`3.0`).
+
 ---
 
 ## Property Lifecycle
