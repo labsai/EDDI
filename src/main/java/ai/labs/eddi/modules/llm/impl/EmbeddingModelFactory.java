@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.rag.model.EmbeddingParameters;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
@@ -30,8 +31,14 @@ import software.amazon.awssdk.regions.Region;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Creates and caches {@link EmbeddingModel} instances based on
@@ -143,6 +150,18 @@ public class EmbeddingModelFactory {
             throw new IllegalArgumentException("No embedding provider configured for this knowledge base. " + SUPPORTED_PROVIDERS_HINT);
         }
         params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
+        // Checked again here, not only at save time: a knowledge base stored before
+        // the save-time check existed must not keep sending its documents to the
+        // provider's public endpoint because a baseUrl it carries is ignored.
+        String problem = EmbeddingParameters.findProblem(provider, params);
+        if (problem != null) {
+            throw new IllegalArgumentException(problem);
+        }
+        Set<String> unrecognised = EmbeddingParameters.unrecognised(provider, params);
+        if (!unrecognised.isEmpty()) {
+            LOGGER.warnf("Embedding provider %s ignores embeddingParameters %s (supported: %s)", provider,
+                    sanitize(unrecognised.toString()), new TreeSet<>(EmbeddingParameters.honoured(provider)));
+        }
         LOGGER.infof("Building embedding model for provider: %s", provider);
 
         EmbeddingModel model = switch (provider) {
@@ -214,7 +233,7 @@ public class EmbeddingModelFactory {
         if (configured == null || configured.isBlank()) {
             return false;
         }
-        String modelName = params.getOrDefault("model", "gemini-embedding-2");
+        String modelName = EmbeddingParameters.modelName(params, "gemini-embedding-2");
         if (modelName.contains("embedding-2")) {
             return false;
         }
@@ -233,11 +252,29 @@ public class EmbeddingModelFactory {
      * <ul>
      * <li>{@code apiKey} — OpenAI API key, supports {@code ${eddivault:...}}
      * (required)</li>
-     * <li>{@code model} — model name (default: "text-embedding-3-small")</li>
+     * <li>{@code model} / {@code modelName} — model name (default:
+     * "text-embedding-3-small")</li>
+     * <li>{@code baseUrl} — an OpenAI-compatible endpoint (default: OpenAI's). Used
+     * to be ignored, which sent documents meant for a private endpoint to
+     * api.openai.com</li>
+     * <li>{@code timeout} (ms), {@code organizationId}, {@code projectId},
+     * {@code dimensions}, {@code maxRetries}</li>
      * </ul>
      */
     private EmbeddingModel buildOpenAi(Map<String, String> params) {
-        return OpenAiEmbeddingModel.builder().modelName(params.getOrDefault("model", "text-embedding-3-small")).apiKey(params.get("apiKey")).build();
+        var builder = OpenAiEmbeddingModel.builder().modelName(EmbeddingParameters.modelName(params, "text-embedding-3-small"))
+                .apiKey(params.get("apiKey"));
+        String baseUrl = params.get("baseUrl");
+        if (!isBlank(baseUrl)) {
+            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            builder.baseUrl(baseUrl);
+        }
+        applyTimeout(params, builder::timeout);
+        applyString(params, "organizationId", builder::organizationId);
+        applyString(params, "projectId", builder::projectId);
+        applyInt(params, "dimensions", builder::dimensions);
+        applyInt(params, "maxRetries", builder::maxRetries);
+        return builder.build();
     }
 
     // ──────────────────────────────────────────────────
@@ -254,16 +291,22 @@ public class EmbeddingModelFactory {
      * (required)</li>
      * <li>{@code deploymentName} — deployment name (default:
      * "text-embedding-3-small")</li>
-     * <li>{@code endpoint} — Azure endpoint (optional)</li>
+     * <li>{@code endpoint} — Azure endpoint</li>
+     * <li>{@code timeout} (ms), {@code dimensions}, {@code maxRetries}</li>
      * </ul>
      */
     private EmbeddingModel buildAzureOpenAi(Map<String, String> params) {
         var builder = AzureOpenAiEmbeddingModel.builder()
                 .deploymentName(params.getOrDefault("deploymentName", "text-embedding-3-small")).apiKey(params.get("apiKey"));
 
-        if (params.containsKey("endpoint")) {
-            builder.endpoint(params.get("endpoint"));
+        String endpoint = params.get("endpoint");
+        if (!isBlank(endpoint)) {
+            UrlValidationUtils.rejectCloudMetadataTarget(endpoint);
+            builder.endpoint(endpoint);
         }
+        applyTimeout(params, builder::timeout);
+        applyInt(params, "dimensions", builder::dimensions);
+        applyInt(params, "maxRetries", builder::maxRetries);
         return builder.build();
     }
 
@@ -279,6 +322,7 @@ public class EmbeddingModelFactory {
      * <li>{@code model} — model name (default: "nomic-embed-text")</li>
      * <li>{@code baseUrl} — Ollama server URL (default:
      * "http://localhost:11434")</li>
+     * <li>{@code timeout} (ms), {@code maxRetries}</li>
      * </ul>
      */
     private EmbeddingModel buildOllama(Map<String, String> params) {
@@ -286,8 +330,11 @@ public class EmbeddingModelFactory {
         // Never let the embedding endpoint point at the cloud instance-metadata
         // service (always-on, independent of eddi.security.ssrf-protection.enabled).
         UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
-        return OllamaEmbeddingModel.builder().modelName(params.getOrDefault("model", "nomic-embed-text"))
-                .baseUrl(baseUrl).build();
+        var builder = OllamaEmbeddingModel.builder().modelName(EmbeddingParameters.modelName(params, "nomic-embed-text"))
+                .baseUrl(baseUrl);
+        applyTimeout(params, builder::timeout);
+        applyInt(params, "maxRetries", builder::maxRetries);
+        return builder.build();
     }
 
     // ──────────────────────────────────────────────────
@@ -311,12 +358,15 @@ public class EmbeddingModelFactory {
         TaskType taskType = parseTaskType(params.getOrDefault("taskType", "RETRIEVAL_DOCUMENT"));
         Integer outputDimensionality = parseIntParam(params, "outputDimensionality", 3072);
 
-        return GoogleAiEmbeddingModel.builder()
-                .modelName(params.getOrDefault("model", "gemini-embedding-2"))
+        var builder = GoogleAiEmbeddingModel.builder()
+                .modelName(EmbeddingParameters.modelName(params, "gemini-embedding-2"))
                 .apiKey(params.get("apiKey"))
                 .outputDimensionality(outputDimensionality)
-                .taskType(taskType)
-                .build();
+                .taskType(taskType);
+        applyBaseUrl(params, builder::baseUrl);
+        applyTimeout(params, builder::timeout);
+        applyInt(params, "maxRetries", builder::maxRetries);
+        return builder.build();
     }
 
     // ──────────────────────────────────────────────────
@@ -335,7 +385,12 @@ public class EmbeddingModelFactory {
      * </ul>
      */
     private EmbeddingModel buildMistral(Map<String, String> params) {
-        return MistralAiEmbeddingModel.builder().modelName(params.getOrDefault("model", "mistral-embed")).apiKey(params.get("apiKey")).build();
+        var builder = MistralAiEmbeddingModel.builder().modelName(EmbeddingParameters.modelName(params, "mistral-embed"))
+                .apiKey(params.get("apiKey"));
+        applyBaseUrl(params, builder::baseUrl);
+        applyTimeout(params, builder::timeout);
+        applyInt(params, "maxRetries", builder::maxRetries);
+        return builder.build();
     }
 
     // ──────────────────────────────────────────────────
@@ -353,9 +408,11 @@ public class EmbeddingModelFactory {
      * </ul>
      */
     private EmbeddingModel buildBedrock(Map<String, String> params) {
-        String model = params.getOrDefault("model", "amazon.titan-embed-text-v2:0");
+        String model = EmbeddingParameters.modelName(params, "amazon.titan-embed-text-v2:0");
         String region = params.getOrDefault("region", "us-east-1");
-        return BedrockTitanEmbeddingModel.builder().model(model).region(Region.of(region)).build();
+        var builder = BedrockTitanEmbeddingModel.builder().model(model).region(Region.of(region));
+        applyInt(params, "dimensions", builder::dimensions);
+        return builder.build();
     }
 
     // ──────────────────────────────────────────────────
@@ -373,7 +430,11 @@ public class EmbeddingModelFactory {
      * </ul>
      */
     private EmbeddingModel buildCohere(Map<String, String> params) {
-        return CohereEmbeddingModel.builder().modelName(params.getOrDefault("model", "embed-english-v3.0")).apiKey(params.get("apiKey")).build();
+        var builder = CohereEmbeddingModel.builder().modelName(EmbeddingParameters.modelName(params, "embed-english-v3.0"))
+                .apiKey(params.get("apiKey"));
+        applyBaseUrl(params, builder::baseUrl);
+        applyTimeout(params, builder::timeout);
+        return builder.build();
     }
 
     // ──────────────────────────────────────────────────
@@ -394,11 +455,60 @@ public class EmbeddingModelFactory {
     private EmbeddingModel buildVertex(Map<String, String> params) {
         String project = params.get("project");
         String location = params.getOrDefault("location", "us-central1");
-        String model = params.getOrDefault("model", "text-embedding-005");
+        String model = EmbeddingParameters.modelName(params, "text-embedding-005");
         if (project == null || project.isBlank()) {
             throw new IllegalArgumentException("Vertex AI embedding requires 'project' parameter");
         }
-        return VertexAiEmbeddingModel.builder().project(project).location(location).modelName(model).build();
+        var builder = VertexAiEmbeddingModel.builder().project(project).location(location).modelName(model);
+        applyString(params, "endpoint", builder::endpoint);
+        applyInt(params, "maxRetries", builder::maxRetries);
+        return builder.build();
+    }
+
+    // ──────────────────────────────────────────────────
+    // Parameter helpers
+    // ──────────────────────────────────────────────────
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static void applyBaseUrl(Map<String, String> params, Consumer<String> setter) {
+        String baseUrl = params.get("baseUrl");
+        if (!isBlank(baseUrl)) {
+            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            setter.accept(baseUrl);
+        }
+    }
+
+    private static void applyString(Map<String, String> params, String key, Consumer<String> setter) {
+        String value = params.get(key);
+        if (!isBlank(value)) {
+            setter.accept(value);
+        }
+    }
+
+    private void applyInt(Map<String, String> params, String key, IntConsumer setter) {
+        if (!isBlank(params.get(key))) {
+            setter.accept(parseIntParam(params, key, 0));
+        }
+    }
+
+    /** {@code timeout} in milliseconds — the unit the LLM task uses. */
+    private static void applyTimeout(Map<String, String> params, Consumer<Duration> setter) {
+        String raw = params.get("timeout");
+        if (isBlank(raw)) {
+            return;
+        }
+        try {
+            long millis = Long.parseLong(raw.trim());
+            if (millis <= 0) {
+                throw new IllegalArgumentException("embeddingParameters.timeout must be a positive number of milliseconds: " + raw);
+            }
+            setter.accept(Duration.ofMillis(millis));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("embeddingParameters.timeout must be a number of milliseconds: " + raw, e);
+        }
     }
 
     private static TaskType parseTaskType(String taskTypeStr) {
