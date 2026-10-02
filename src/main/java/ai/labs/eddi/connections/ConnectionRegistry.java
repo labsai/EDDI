@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.connections;
 
+import jakarta.annotation.PostConstruct;
+import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
+import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.model.ConnectionReference;
@@ -15,6 +18,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -80,8 +84,31 @@ public class ConnectionRegistry {
 
     /** Drops every cached document. Called by the REST layer on any write. */
     public void invalidate() {
+        invalidateLocal();
+        if (clusterEvents != null) {
+            clusterEvents.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
+        }
+    }
+
+    /** The local half of {@link #invalidate}, for a change made on another node. */
+    public void invalidateLocal() {
         cache.invalidateAll();
         LOGGER.debug("Connection registry cache invalidated");
+    }
+
+    /**
+     * Cluster mode: announces connection writes to the other nodes. Field-injected
+     * (null in tests); a no-op on a single node.
+     */
+    @Inject
+    IClusterEventBus clusterEvents;
+
+    @PostConstruct
+    void subscribeToCluster() {
+        if (clusterEvents != null) {
+            clusterEvents.subscribe(ClusterEvent.CONNECTION_CHANGED, event -> invalidateLocal());
+            clusterEvents.onResync(this::invalidateLocal);
+        }
     }
 
     private Optional<ConnectionConfiguration> load(ConnectionReference reference) {

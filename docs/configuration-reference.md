@@ -98,6 +98,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.model-cache.max-age` | `15m` | A cached chat model is rebuilt at least this often even while busy, so a rotated key reaches it even if the rotation event was lost |
 | `eddi.cluster.hitl-recovery.interval` | `60s` | Period of the leader-elected sweep that recovers conversations a crashed node left `IN_PROGRESS` |
 | `eddi.cluster.hitl-recovery.min-age` | `3m` | A conversation must have been seen `IN_PROGRESS`, with no lease and an unchanged revision, for at least this long before the sweep recovers it |
+| `eddi.a2a.task-ttl` | `24h` | How long an A2A task/context mapping is kept in the shared bucket, so a peer's follow-up reaches the conversation whichever node it lands on |
 | `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
 | `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
 | `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error |

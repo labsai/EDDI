@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import java.util.Set;
+import java.util.HashSet;
+import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
+import ai.labs.eddi.engine.cluster.events.ClusterEvent;
+import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -179,6 +184,29 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      */
     private final Object sweepLock = new Object();
 
+    /**
+     * Cluster mode only. Deployment changes made on other nodes arrive as events
+     * (an undeploy is applied at once; a deploy runs the sweep), and the sweep
+     * becomes two-way: an agent this node serves whose record is no longer
+     * {@code deployed} is undeployed here too. Field-injected; null in tests.
+     */
+    @Inject
+    ClusterConfig clusterConfig;
+
+    @Inject
+    IClusterEventBus clusterEvents;
+
+    /**
+     * Locally deployed agents first seen without a {@code deployed} record — an
+     * undeploy needs two consecutive sweeps, so an agent whose REST deploy has not
+     * written its record yet is never taken down by the race.
+     */
+    private final Map<String, Instant> missingSince = new ConcurrentHashMap<>();
+
+    private boolean clustered() {
+        return clusterConfig != null && clusterConfig.isNats();
+    }
+
     @Inject
     public AgentDeploymentManagement(IDeploymentStore deploymentStore, IAgentFactory agentFactory, IAgentStore agentStore,
             IAgentsReadiness agentsReadiness, IConversationMemoryStore conversationMemoryStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -233,6 +261,100 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      */
     boolean idleEndingEnabled() {
         return maximumLifeTimeOfIdleConversationsInDays >= 1;
+    }
+
+    void subscribeToCluster(@Observes
+    @Priority(60) StartupEvent ev) {
+        if (!clustered() || clusterEvents == null) {
+            return;
+        }
+        clusterEvents.subscribe(ClusterEvent.DEPLOYMENT_CHANGED, this::onRemoteDeploymentChange);
+        clusterEvents.onResync(() -> runtime.getExecutorService().submit(this::checkDeployments));
+    }
+
+    /**
+     * Another node changed a deployment record. An undeploy (or a deleted record)
+     * is applied here immediately; a deploy runs the sweep, which deploys whatever
+     * the records say is missing. Idempotent: both read the database, never the
+     * event.
+     */
+    void onRemoteDeploymentChange(ClusterEvent event) {
+        String status = event.getString("status");
+        String agentId = event.getString("agentId");
+        if (agentId == null) {
+            return;
+        }
+        if ("deployed".equals(status)) {
+            runtime.getExecutorService().submit(this::checkDeployments);
+            return;
+        }
+        Object version = event.get("version");
+        String env = event.getString("env");
+        for (Environment environment : Environment.values()) {
+            if (env != null && !environment.toString().equals(env)) {
+                continue;
+            }
+            try {
+                for (IAgent agent : agentFactory.getAllDeployedAgents(environment)) {
+                    if (agentId.equals(agent.getAgentId())
+                            && (version == null || String.valueOf(version).equals(String.valueOf(agent.getAgentVersion())))) {
+                        undeployLocally(environment, agent.getAgentId(), agent.getAgentVersion(), "undeployed on node " + event.originNode());
+                    }
+                }
+            } catch (ServiceException e) {
+                LOGGER.warnf("Could not apply a remote undeploy of %s: %s", agentId, e.getMessage());
+            }
+        }
+    }
+
+    private void undeployLocally(Environment environment, String agentId, Integer agentVersion, String why) {
+        try {
+            agentFactory.undeployAgent(environment, agentId, agentVersion);
+            synchronized (sweepLock) {
+                deploymentInfos.removeIf(info -> info.getEnvironment() == environment && agentId.equals(info.getAgentId())
+                        && agentVersion.equals(info.getAgentVersion()));
+            }
+            LOGGER.infof("Undeployed agent %s version %d in %s on this node (%s)", agentId, agentVersion, environment, why);
+        } catch (ServiceException | IllegalAccessException | RuntimeException e) {
+            LOGGER.warnf("Could not undeploy agent %s version %d locally: %s", agentId, agentVersion, e.getMessage());
+        }
+    }
+
+    /**
+     * The second direction of the sweep, cluster mode only: an agent this node
+     * serves whose record is no longer {@code deployed} — undeployed or deleted on
+     * another node — is undeployed here as well. Runs only on a list the store
+     * actually returned (an exception means "no information", never "undeploy
+     * everything"), and only after the agent was missing in two consecutive sweeps.
+     */
+    private void reconcileUndeployed(List<DeploymentInfo> meantToBeDeployed) {
+        Set<String> wanted = new HashSet<>();
+        for (DeploymentInfo info : meantToBeDeployed) {
+            wanted.add(info.getEnvironment() + "/" + info.getAgentId() + "/" + info.getAgentVersion());
+        }
+        Instant now = clock.instant();
+        Set<String> seenMissing = new HashSet<>();
+        for (Environment environment : Environment.values()) {
+            List<IAgent> served;
+            try {
+                served = agentFactory.getAllDeployedAgents(environment);
+            } catch (ServiceException e) {
+                continue;
+            }
+            for (IAgent agent : served) {
+                String key = environment + "/" + agent.getAgentId() + "/" + agent.getAgentVersion();
+                if (wanted.contains(key)) {
+                    continue;
+                }
+                seenMissing.add(key);
+                Instant first = missingSince.putIfAbsent(key, now);
+                if (first != null && Duration.between(first, now).toSeconds() >= 5) {
+                    missingSince.remove(key);
+                    undeployLocally(environment, agent.getAgentId(), agent.getAgentVersion(), "its deployment record is gone");
+                }
+            }
+        }
+        missingSince.keySet().retainAll(seenMissing);
     }
 
     void onStart(@Observes StartupEvent ev) {
@@ -425,6 +547,9 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
             // A deployment that is no longer meant to be deployed is no longer failing.
             failingDeployments.keySet().retainAll(meantToBeDeployed);
+            if (clustered()) {
+                reconcileUndeployed(meantToBeDeployed);
+            }
             Instant now = clock.instant();
             meantToBeDeployed.stream()
                     .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo))

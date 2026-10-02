@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -538,6 +541,75 @@ public class ConversationService implements IConversationService, UserErasurePar
         return "inFlightConversations";
     }
 
+    // ─── Cluster control (eddi.messaging.type=nats) ───
+
+    /**
+     * Cluster mode: the lease manager (who runs a conversation's turn) and the node
+     * RPC that reaches that node. Field-injected so the many tests that build this
+     * service with {@code new} keep the single-node behaviour (both null).
+     */
+    @Inject
+    IConversationLeaseManager leaseManager;
+
+    @Inject
+    IClusterRpc clusterRpc;
+
+    /**
+     * Signals the turn of {@code conversationId} running on THIS node, if any — the
+     * cooperative flag the pipeline checks at task boundaries.
+     *
+     * @return true when a running turn was signalled
+     */
+    public boolean signalLocalInFlight(String conversationId) {
+        var inFlightMemory = conversationId == null ? null : inFlightConversations.get(conversationId);
+        if (inFlightMemory == null) {
+            return false;
+        }
+        inFlightMemory.setCancelled(true);
+        return true;
+    }
+
+    /**
+     * Cluster mode: when the conversation's turn runs on ANOTHER node (it holds the
+     * lease), asks that node to signal it. Single node: always false.
+     *
+     * @return true when the executing node confirmed it signalled a running turn
+     */
+    boolean signalRemoteInFlight(String conversationId) {
+        if (leaseManager == null || clusterRpc == null || !leaseManager.isClustered() || !clusterRpc.isClustered()) {
+            return false;
+        }
+        var holder = leaseManager.peek(conversationId);
+        if (holder.isEmpty()) {
+            return false;
+        }
+        var reply = clusterRpc.call(holder.get().node(), IClusterRpc.CONVERSATION_CANCEL, Map.of("conversationId", conversationId));
+        boolean signalled = reply.map(r -> Boolean.TRUE.equals(r.get("signalled"))).orElse(false);
+        if (signalled) {
+            LOGGER.infof("Signalled the turn of conversation %s running on node %s", sanitize(conversationId), holder.get().node());
+        }
+        return signalled;
+    }
+
+    /**
+     * GDPR stop on behalf of another node: the erased user arrives as a hash, so
+     * the user id never travels between nodes.
+     */
+    @Override
+    public int stopInFlightWorkByHash(String userIdHash) {
+        if (userIdHash == null) {
+            return 0;
+        }
+        int signalled = 0;
+        for (IConversationMemory memory : inFlightConversations.values()) {
+            if (memory.getUserId() != null && userIdHash.equals(KvKeys.sha256(memory.getUserId()))) {
+                memory.setCancelled(true);
+                signalled++;
+            }
+        }
+        return signalled;
+    }
+
     /**
      * GDPR erasure: signals every turn running on this node for {@code userId} to
      * stop, through the same cooperative flag {@link #cancelConversation} sets. A
@@ -589,6 +661,9 @@ public class ConversationService implements IConversationService, UserErasurePar
         if (inFlightMemory != null) {
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight resume to abort — conversation %s is being ended", conversationId);
+        } else {
+            // Cluster mode: the turn may be running on the node that holds the lease.
+            signalRemoteInFlight(conversationId);
         }
         // Ending a PAUSED conversation terminally resolves its pending approval:
         // disarm the timeout schedule (a stale fire would log spurious errors and

@@ -1,0 +1,98 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.cluster.events;
+
+import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.NatsConnectionManager;
+import ai.labs.eddi.engine.cluster.NodeIdentity;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+@DisplayName("JetStreamEventBus")
+class JetStreamEventBusTest {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    private NatsConnectionManager connections;
+    private JetStreamEventBus bus;
+
+    @BeforeEach
+    void setUp() {
+        connections = mock(NatsConnectionManager.class);
+        when(connections.node()).thenReturn(new NodeIdentity("n1", "boot1"));
+        when(connections.config()).thenReturn(ClusterConfig.defaults().withMessagingType("nats").withEventsOutboxSize(3));
+        when(connections.scheduler()).thenReturn(mock(ScheduledExecutorService.class));
+        when(connections.isConnected()).thenReturn(false);
+        bus = new JetStreamEventBus(connections, new SimpleMeterRegistry());
+        bus.startCluster();
+    }
+
+    private static byte[] event(String type, String node, String boot) throws Exception {
+        return JSON.writeValueAsBytes(Map.of("v", 1, "id", "x", "type", type, "originNode", node, "originBoot", boot, "ts", 1,
+                "payload", Map.of("k", "v")));
+    }
+
+    @Test
+    @DisplayName("handles events from other nodes and ignores its own")
+    void originFilter() throws Exception {
+        List<ClusterEvent> seen = new CopyOnWriteArrayList<>();
+        CountDownLatch latch = new CountDownLatch(1);
+        bus.subscribe(ClusterEvent.SECRET_CHANGED, e -> {
+            seen.add(e);
+            latch.countDown();
+        });
+        bus.receive(event(ClusterEvent.SECRET_CHANGED, "n1", "boot1"), 1);
+        bus.receive(event(ClusterEvent.SECRET_CHANGED, "n2", "b2"), 2);
+        assertTrue(latch.await(5, TimeUnit.SECONDS));
+        Thread.sleep(100);
+        assertEquals(1, seen.size());
+        assertEquals("n2", seen.get(0).originNode());
+        assertEquals("v", seen.get(0).getString("k"));
+    }
+
+    @Test
+    @DisplayName("a gap in the stream sequence triggers a full local resync")
+    void gapTriggersResync() throws Exception {
+        CountDownLatch flushed = new CountDownLatch(1);
+        bus.onResync(flushed::countDown);
+        bus.receive(event("x", "n2", "b2"), 10);
+        bus.receive(event("x", "n2", "b2"), 11);
+        assertEquals(1, flushed.getCount(), "consecutive sequences are no gap");
+        bus.receive(event("x", "n2", "b2"), 40);
+        assertTrue(flushed.await(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisplayName("a resync request from another node flushes this node")
+    void resyncRequest() throws Exception {
+        CountDownLatch flushed = new CountDownLatch(1);
+        bus.onResync(flushed::countDown);
+        bus.receive(event(ClusterEvent.RESYNC_ALL, "n2", "b2"), 1);
+        assertTrue(flushed.await(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisplayName("while disconnected events go to a bounded outbox, never blocking the caller")
+    void outboxWhileDisconnected() {
+        for (int i = 0; i < 5; i++) {
+            bus.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
+        }
+        assertEquals(3, bus.outboxDepth(), "bounded by eddi.cluster.events.outbox-size");
+    }
+}

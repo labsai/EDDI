@@ -162,6 +162,9 @@ class ConversationHitlService {
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight cancellation (%s) for conversation %s", mode, conversationId);
         }
+        // Cluster mode: the turn may be running on another node (the lease holder) —
+        // ask that node to signal it. Always false on a single node.
+        boolean remoteSignalled = inFlightMemory == null && conversationService.signalRemoteInFlight(conversationId);
 
         boolean pauseCancelled = conversationMemoryStore.compareAndSetState(conversationId,
                 ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
@@ -191,7 +194,7 @@ class ConversationHitlService {
             }
             return IConversationService.CancelOutcome.CANCELLED;
         }
-        if (inFlightMemory != null) {
+        if (inFlightMemory != null || remoteSignalled) {
             // Nothing persisted to flip, but a running pipeline was signalled —
             // it will stop at the next task boundary and persist its own state.
             return IConversationService.CancelOutcome.CANCELLED;

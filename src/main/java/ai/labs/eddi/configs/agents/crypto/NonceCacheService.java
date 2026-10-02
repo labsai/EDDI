@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.agents.crypto;
 
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -57,6 +58,7 @@ public class NonceCacheService {
     private Counter replayRejections;
     private Counter freshnessRejections;
     private Counter clockSkewRejections;
+    private Counter unavailableRejections;
 
     @Inject
     public NonceCacheService(ICacheFactory cacheFactory, MeterRegistry meterRegistry) {
@@ -77,6 +79,7 @@ public class NonceCacheService {
         replayRejections = meterRegistry.counter("eddi.agent.nonce.replay.rejected");
         freshnessRejections = meterRegistry.counter("eddi.agent.nonce.freshness.rejected");
         clockSkewRejections = meterRegistry.counter("eddi.agent.nonce.clockskew.rejected");
+        unavailableRejections = meterRegistry.counter("eddi.agent.nonce.unavailable");
     }
 
     /**
@@ -116,7 +119,16 @@ public class NonceCacheService {
         // existing value if already present. This eliminates the TOCTOU race between
         // get() and put() that could allow two concurrent requests with the same nonce
         // to both pass the replay check.
-        Boolean existing = nonceCache.putIfAbsent(nonce, Boolean.TRUE);
+        Boolean existing;
+        try {
+            existing = nonceCache.putIfAbsent(nonce, Boolean.TRUE);
+        } catch (ClusterUnavailableException e) {
+            // Cluster mode, NATS unreachable, eddi.cluster.degraded.nonces=reject: the
+            // replay check cannot be made cluster-wide, so it fails closed.
+            unavailableRejections.increment();
+            LOGGER.warnf("Nonce check unavailable (cluster state unreachable) — rejecting: %s", e.getMessage());
+            return NonceValidation.UNAVAILABLE;
+        }
         if (existing != null) {
             replayRejections.increment();
             LOGGER.debugf("Nonce '%s' rejected: replay detected", nonce);
@@ -137,6 +149,11 @@ public class NonceCacheService {
         /** Timestamp is too far in the future (clock skew) */
         CLOCK_SKEW,
         /** Nonce was already used (replay attempt) */
-        REPLAY
+        REPLAY,
+        /**
+         * Cluster mode only: the shared nonce store is unreachable and the degraded
+         * policy is {@code reject} — the envelope is refused (fail closed).
+         */
+        UNAVAILABLE
     }
 }

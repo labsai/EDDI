@@ -147,6 +147,9 @@ public class ClusterConfig {
     @ConfigProperty(name = "eddi.cluster.cost.ttl", defaultValue = "30d")
     Duration costTtl = Duration.ofDays(30);
 
+    @ConfigProperty(name = "eddi.a2a.task-ttl", defaultValue = "24h")
+    Duration a2aTaskTtl = Duration.ofHours(24);
+
     @ConfigProperty(name = "eddi.cluster.presence.interval", defaultValue = "10s")
     Duration presenceInterval = Duration.ofSeconds(10);
 
@@ -367,6 +370,10 @@ public class ClusterConfig {
 
     public Duration costTtl() {
         return costTtl;
+    }
+
+    public Duration a2aTaskTtl() {
+        return a2aTaskTtl;
     }
 
     public Duration presenceInterval() {

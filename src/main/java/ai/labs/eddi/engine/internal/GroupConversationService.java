@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.NodeIdentity;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -825,6 +830,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // and tell the model it succeeded, for a mutation nothing will persist.
             if (liveDiscussionRegistry != null) {
                 liveDiscussionRegistry.register(gc);
+                holdGroupLease(gc.getId());
             }
 
             // Execute each phase
@@ -1604,6 +1610,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // — nothing remains to look the registry up.
             if (liveDiscussionRegistry != null) {
                 liveDiscussionRegistry.unregister(gc.getId());
+                releaseGroupLease(gc.getId());
             }
             // NEW-2: Always remove the control token — paused conversations have no
             // running thread, so a lingering token causes cancel-of-paused to take
@@ -2522,6 +2529,76 @@ public class GroupConversationService implements IGroupConversationService, User
      * gone rather than recreating it.
      */
     @Override
+    public int stopInFlightWorkByHash(String userIdHash) {
+        if (userIdHash == null) {
+            return 0;
+        }
+        int signalled = 0;
+        for (String groupConversationId : List.copyOf(discussionControls.keySet())) {
+            try {
+                GroupConversation gc = conversationStore.read(groupConversationId);
+                if (gc.getUserId() != null && userIdHash.equals(KvKeys.sha256(gc.getUserId()))
+                        && hitlCoordinator.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_IMMEDIATE)) {
+                    signalled++;
+                }
+            } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | RuntimeException e) {
+                LOGGER.warnf("Could not stop running group discussion %s for an erasure on another node: %s", groupConversationId,
+                        e.getMessage());
+            }
+        }
+        return signalled;
+    }
+
+    // ─── Cluster control ───
+
+    /**
+     * Cluster mode: a running discussion holds the group lease {@code g.<id>} on
+     * the node that runs it, so a cancel arriving on another node can be forwarded
+     * there instead of CAS-ing the stored state under the live discussion.
+     * Field-injected; null in tests built with {@code new}.
+     */
+    @Inject
+    IConversationLeaseManager leaseManager;
+
+    @Inject
+    IClusterRpc clusterRpc;
+
+    @Inject
+    NodeIdentity nodeIdentity;
+
+    private final Map<String, LeaseHandle> groupLeases = new ConcurrentHashMap<>();
+
+    private boolean clustered() {
+        return leaseManager != null && clusterRpc != null && leaseManager.isClustered() && clusterRpc.isClustered();
+    }
+
+    void holdGroupLease(String groupConversationId) {
+        if (clustered()) {
+            leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + groupConversationId)
+                    .ifPresent(lease -> groupLeases.put(groupConversationId, lease));
+        }
+    }
+
+    void releaseGroupLease(String groupConversationId) {
+        LeaseHandle lease = groupLeases.remove(groupConversationId);
+        if (lease != null) {
+            leaseManager.release(lease);
+        }
+    }
+
+    /**
+     * Cancels the discussion on this node, where it runs, or reports false. Served
+     * for other nodes through {@code IClusterRpc.GROUP_CONTROL}.
+     */
+    public boolean cancelLocalDiscussion(String groupConversationId, ControlSignal mode)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        if (!discussionControls.containsKey(groupConversationId)) {
+            return false;
+        }
+        return hitlCoordinator.cancelDiscussion(groupConversationId, mode);
+    }
+
+    @Override
     public int stopInFlightWork(String userId) {
         if (userId == null) {
             return 0;
@@ -2556,6 +2633,20 @@ public class GroupConversationService implements IGroupConversationService, User
     @Override
     public boolean cancelDiscussion(String conversationId, ControlSignal mode)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        if (clustered() && !discussionControls.containsKey(conversationId)) {
+            // Running on another node? Forward there: CAS-ing the stored state here
+            // would mark a live discussion CANCELLED while it keeps running and then
+            // overwrite the terminal state with its next phase.
+            var holder = leaseManager.peekKey(IConversationLeaseManager.GROUP + conversationId);
+            if (holder.isPresent() && nodeIdentity != null && !nodeIdentity.nodeId().equals(holder.get().node())) {
+                var reply = clusterRpc.call(holder.get().node(), IClusterRpc.GROUP_CONTROL,
+                        Map.of("groupConversationId", conversationId, "op", "cancel", "mode", String.valueOf(mode)));
+                if (reply.isPresent() && reply.get().get("error") == null) {
+                    return Boolean.TRUE.equals(reply.get().get("cancelled"));
+                }
+                // No answer: fall back to the database path below.
+            }
+        }
         return hitlCoordinator.cancelDiscussion(conversationId, mode);
     }
 

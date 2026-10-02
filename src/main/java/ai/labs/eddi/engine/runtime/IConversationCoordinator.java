@@ -122,6 +122,16 @@ public interface IConversationCoordinator extends IEventBus {
     }
 
     /**
+     * Removes every dead letter of one conversation — GDPR erasure: a dead letter
+     * carries the failed turn's input.
+     *
+     * @return the number of entries removed
+     */
+    default int purgeDeadLetters(String conversationId) {
+        return 0;
+    }
+
+    /**
      * Purge all dead-letter entries.
      *
      * @return the number of entries purged

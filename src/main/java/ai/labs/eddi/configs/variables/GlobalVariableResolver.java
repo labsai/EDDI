@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.variables;
 
+import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
+import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -86,7 +88,18 @@ public class GlobalVariableResolver {
                 .maximumSize(32)
                 .build();
         LOGGER.infof("GlobalVariableResolver initialized (cache TTL=%dmin)", cacheTtlMinutes);
+        if (clusterEvents != null) {
+            clusterEvents.subscribe(ClusterEvent.GLOBALVARS_CHANGED, event -> invalidateLocal());
+            clusterEvents.onResync(this::invalidateLocal);
+        }
     }
+
+    /**
+     * Cluster mode: announces variable changes to the other nodes. Field-injected
+     * (null in tests built with {@code new}); a no-op on a single node.
+     */
+    @Inject
+    IClusterEventBus clusterEvents;
 
     /**
      * Quick check whether a string contains any {@code ${vars:...}} reference.
@@ -285,6 +298,17 @@ public class GlobalVariableResolver {
      * writes. Also notifies all registered invalidation listeners.
      */
     public void invalidateCache() {
+        invalidateLocal();
+        if (clusterEvents != null) {
+            clusterEvents.publish(ClusterEvent.GLOBALVARS_CHANGED, Map.of());
+        }
+    }
+
+    /**
+     * The local half of {@link #invalidateCache}: what a node does when another
+     * node changed the variables — never re-published.
+     */
+    public void invalidateLocal() {
         cache.invalidateAll();
         LOGGER.info("Global variable cache invalidated");
         fireInvalidationListeners();
