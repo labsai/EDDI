@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory.rest;
 
 import java.util.Collection;
 import java.util.concurrent.Callable;
+import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
 import org.mockito.ArgumentCaptor;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -37,6 +38,8 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import jakarta.annotation.security.RolesAllowed;
+import com.mongodb.MongoTimeoutException;
+import com.mongodb.client.MongoDatabase;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
@@ -44,6 +47,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.ParameterizedTest;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -1337,6 +1342,33 @@ class RestConversationStoreTest {
             runSubmittedSweep();
 
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("old-conversation");
+        }
+
+        /**
+         * The real migration bean, on PostgreSQL, with no MongoDB anywhere. Live, its
+         * retention check opened a MongoClient against {@code mongodb:27017}, timed out
+         * after 30 s, failed safe to "hold" — and the sweep never deleted anything,
+         * logging that the database came from EDDI 5.
+         */
+        @SuppressWarnings("unchecked")
+        @ParameterizedTest(name = "v6-rename.enabled={0}")
+        @ValueSource(booleans = {false, true})
+        @DisplayName("on PostgreSQL the sweep deletes as configured, without asking MongoDB anything")
+        void runsOnPostgresWithoutMongo(boolean renameMigrationEnabled) throws Exception {
+            oneEndedConversationPastRetention();
+            MongoDatabase noMongo = mock(MongoDatabase.class, invocation -> {
+                throw new MongoTimeoutException("Timed out while waiting for a server ... mongodb:27017");
+            });
+            var migration = new V6RenameMigration(noMongo, mock(IMigrationLogStore.class), renameMigrationEnabled, "postgres");
+            Instance<V6RenameMigration> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(migration);
+            restConversationStore.v6RenameMigrationInstance = instance;
+
+            runSubmittedSweep();
+
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("old-conversation");
+            verifyNoInteractions(noMongo);
         }
     }
     @Nested

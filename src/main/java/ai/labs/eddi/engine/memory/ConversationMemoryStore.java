@@ -461,8 +461,24 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                         + "The conversation document was deleted concurrently (e.g. erasure or retention cleanup).");
     }
 
+    /**
+     * Whether {@code conversationId} can name a document here at all. An id that is
+     * not an ObjectId — a UUID from a PostgreSQL deployment, a typo, {@code xyz} —
+     * names nothing: every lookup answers "not found" and every write to it is a
+     * no-op, exactly like a well-formed id that does not exist. {@code new
+     * ObjectId(id)} used to throw {@link IllegalArgumentException} for it instead,
+     * which surfaced as a 400 on a GET and a 500 on a POST, while the PostgreSQL
+     * store answered 404 for the same request (see {@code PostgresIds}).
+     */
+    static boolean isStorableId(String conversationId) {
+        return conversationId != null && ObjectId.isValid(conversationId);
+    }
+
     @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return null;
+        }
         var memorySnapshot = conversationCollectionObject.find(new Document(OBJECT_ID, new ObjectId(conversationId))).first();
 
         if (memorySnapshot == null) {
@@ -529,6 +545,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
+        if (!isStorableId(conversationId)) {
+            return;
+        }
         var updateConversationStateField = new Document("$set", new Document(KEY_CONVERSATION_STATE, conversationState.name()));
 
         conversationCollectionDocument.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)), updateConversationStateField);
@@ -536,12 +555,18 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public void setConversationEndReason(String conversationId, String endReason) {
+        if (!isStorableId(conversationId)) {
+            return;
+        }
         conversationCollectionDocument.updateOne(new Document(OBJECT_ID, new ObjectId(conversationId)),
                 new Document("$set", new Document(KEY_END_REASON, endReason)));
     }
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return;
+        }
         conversationCollectionDocument.deleteOne(new Document(OBJECT_ID, new ObjectId(conversationId)));
     }
 
@@ -594,6 +619,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public ConversationState getConversationState(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return null;
+        }
         Document conversationMemoryDocument = conversationCollectionDocument.find(new Document(OBJECT_ID, new ObjectId(conversationId)))
                 .projection(new Document(KEY_CONVERSATION_STATE, 1).append(OBJECT_ID, 0)).first();
         if (conversationMemoryDocument == null) {
@@ -607,6 +635,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public Long getRevision(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return null;
+        }
         Document stored = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
                 .projection(new Document(KEY_REVISION, 1)).first();
         return stored == null ? null : longOrUnversioned(stored.get(KEY_REVISION));
@@ -644,6 +675,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target) {
+        if (!isStorableId(conversationId)) {
+            return false;
+        }
         var filter = Filters.and(
                 Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
                 Filters.eq(KEY_CONVERSATION_STATE, expected.name()));
@@ -724,6 +758,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public void clearHitlBookmark(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return;
+        }
         var unset = new Document();
         // Terminal cleanup (end/cancel) must remove ALL pause state, including the
         // tool-level HITL fields — otherwise a stale hitlPauseType / pending batch

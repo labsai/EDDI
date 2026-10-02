@@ -88,17 +88,41 @@ public class V6QuteMigration {
     private final TemplateSyntaxMigrator migrator;
     private final boolean enabled;
 
+    /**
+     * True on a PostgreSQL deployment. This migration rewrites EDDI 5 templates in
+     * MongoDB collections, and its {@code MongoDatabase} is a lazy client proxy:
+     * the first use opens a MongoClient, which on a deployment without MongoDB
+     * means connection attempts against {@code mongodb.connectionString} and a
+     * 30-second timeout. See {@code V6RenameMigration}.
+     */
+    private final boolean postgres;
+
     @Inject
     public V6QuteMigration(MongoDatabase database, IMigrationLogStore migrationLogStore, TemplateSyntaxMigrator migrator,
-            @ConfigProperty(name = "eddi.migration.v6-qute.enabled", defaultValue = "false") boolean enabled) {
+            @ConfigProperty(name = "eddi.migration.v6-qute.enabled", defaultValue = "false") boolean enabled,
+            @ConfigProperty(name = "eddi.datastore.type", defaultValue = "mongodb") String datastoreType) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;
         this.migrator = migrator;
         this.enabled = enabled;
+        this.postgres = "postgres".equals(datastoreType);
+    }
+
+    /**
+     * A MongoDB deployment — what every existing caller of this constructor means.
+     */
+    public V6QuteMigration(MongoDatabase database, IMigrationLogStore migrationLogStore, TemplateSyntaxMigrator migrator, boolean enabled) {
+        this(database, migrationLogStore, migrator, enabled, "mongodb");
     }
 
     /** Run if enabled and not already applied. */
     public void runIfNeeded() {
+        if (postgres) {
+            if (enabled) {
+                LOGGER.info("V6 Qute migration skipped: it migrates EDDI 5 MongoDB collections, and this deployment uses PostgreSQL");
+            }
+            return;
+        }
         if (!enabled) {
             LOGGER.info("V6 Qute migration disabled (eddi.migration.v6-qute.enabled=false)");
             return;

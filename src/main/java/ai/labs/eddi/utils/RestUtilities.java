@@ -126,34 +126,33 @@ public class RestUtilities {
         };
     }
 
-    private static boolean isValidId(String s) {
+    /**
+     * Whether a URI's last path segment is shaped like a resource id either backend
+     * mints: hex digits only (a MongoDB ObjectId is 24; 18 is the historical floor
+     * test fixtures rely on), or a canonical 8-4-4-4-12 UUID (PostgreSQL).
+     * <p>
+     * Dashes used to be accepted anywhere, so a segment of eighteen dashes was an
+     * "id" and travelled on to the store. Whether a well-shaped id exists is the
+     * store's question; both answer "not found" for one they cannot hold.
+     */
+    static boolean isValidId(String s) {
         if (s == null || s.length() < 18) {
             return false;
         }
+        if (s.length() == 36 && s.charAt(8) == '-' && s.charAt(13) == '-' && s.charAt(18) == '-' && s.charAt(23) == '-') {
+            return isHex(s.substring(0, 8)) && isHex(s.substring(9, 13)) && isHex(s.substring(14, 18)) && isHex(s.substring(19, 23))
+                    && isHex(s.substring(24));
+        }
+        return isHex(s);
+    }
 
+    private static boolean isHex(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-
-            if (c >= '0' && c <= '9') {
-                continue;
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                return false;
             }
-
-            if (c >= 'a' && c <= 'f') {
-                continue;
-            }
-
-            if (c >= 'A' && c <= 'F') {
-                continue;
-            }
-
-            // Allow dashes for UUID format (e.g. "5262b802-dc6c-4008-b54c-7c0b58100f97")
-            if (c == '-') {
-                continue;
-            }
-
-            return false;
         }
-
         return true;
     }
 

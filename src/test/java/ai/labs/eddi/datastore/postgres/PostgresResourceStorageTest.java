@@ -10,6 +10,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.postgresql.PGStatement;
@@ -20,18 +22,26 @@ import javax.sql.DataSource;
 import java.sql.*;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link PostgresResourceStorage} with mocked JDBC connections.
  */
 class PostgresResourceStorageTest {
+
+    private static final String ID1 = "00000000-0000-4000-8000-000000000001";
+    private static final String UNKNOWN_ID = "00000000-0000-4000-8000-0000000000ff";
+    private static final String ID_A = "00000000-0000-4000-8000-00000000000a";
+    private static final String ID_B = "00000000-0000-4000-8000-00000000000b";
+    private static final String ID_GONE = "00000000-0000-4000-8000-00000000000c";
 
     private DataSource dataSource;
     private Connection connection;
@@ -116,10 +126,12 @@ class PostgresResourceStorageTest {
         String all = String.join("\n", executed.getAllValues());
 
         // The factory used to accept the hints and drop them on the floor.
-        assertTrue(all.contains("idx_resources_field_name"), all);
-        assertTrue(all.contains("(collection_name, (data ->> 'name'))"), all);
+        assertTrue(all.contains("idx_resources_fdesc_name"), all);
+        // In the order findResources sorts by, so a sorted page is read off the index.
+        assertTrue(all.contains("(collection_name, (data ->> 'name') DESC NULLS LAST)"), all);
         // Dotted paths address values inside arrays — a btree expression index
         // cannot represent those, the GIN index serves them instead.
+        assertFalse(all.contains("idx_resources_fdesc_workflowsteps"), all);
         assertFalse(all.contains("idx_resources_field_workflowsteps"), all);
     }
 
@@ -149,8 +161,8 @@ class PostgresResourceStorageTest {
         verify(indexStatement, atLeastOnce()).execute(executed.capture());
 
         List<String> indexNames = executed.getAllValues().stream()
-                .filter(s -> s.contains("idx_resources_field_"))
-                .map(s -> s.substring(s.indexOf("idx_resources_field_"), s.indexOf(" ON ")))
+                .filter(s -> s.startsWith("CREATE INDEX") && s.contains("idx_resources_fdesc_"))
+                .map(s -> s.substring(s.indexOf("idx_resources_fdesc_"), s.indexOf(" ON ")))
                 .toList();
 
         assertEquals(2, indexNames.size(), indexNames.toString());
@@ -178,14 +190,48 @@ class PostgresResourceStorageTest {
         // one with nothing but a NOTICE, so one of the two expressions was left
         // unindexed while this class believed it was indexed.
         List<String> indexNames = executed.getAllValues().stream()
-                .filter(s -> s.contains("idx_resources_field_"))
-                .map(s -> s.substring(s.indexOf("idx_resources_field_"), s.indexOf(" ON ")))
+                .filter(s -> s.startsWith("CREATE INDEX") && s.contains("idx_resources_fdesc_"))
+                .map(s -> s.substring(s.indexOf("idx_resources_fdesc_"), s.indexOf(" ON ")))
                 .toList();
         assertEquals(2, indexNames.size(), indexNames.toString());
         assertEquals(2, Set.copyOf(indexNames).size(), "both hints collapsed onto one index name: " + indexNames);
         // An all-lower-case hint keeps its historical name, so existing deployments
         // do not grow a duplicate index on upgrade.
-        assertTrue(indexNames.contains("idx_resources_field_userid"), indexNames.toString());
+        assertTrue(indexNames.contains("idx_resources_fdesc_userid"), indexNames.toString());
+    }
+
+    /**
+     * The ascending field index of earlier releases is replaced, not kept beside
+     * its successor — and only once the successor exists, so a role that may not
+     * create indexes keeps the one it has.
+     */
+    @Test
+    void legacyAscendingFieldIndexIsDroppedOnlyAfterItsReplacementExists() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+
+        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "lastModifiedOn");
+
+        InOrder inOrder = inOrder(indexStatement);
+        inOrder.verify(indexStatement).execute(contains("CREATE INDEX IF NOT EXISTS idx_resources_fdesc_lastmodifiedon_"));
+        inOrder.verify(indexStatement).execute(contains("DROP INDEX IF EXISTS idx_resources_field_lastmodifiedon_"));
+    }
+
+    @Test
+    void legacyFieldIndexSurvivesWhenItsReplacementCannotBeCreated() throws Exception {
+        Statement indexStatement = mock(Statement.class);
+        Connection indexConnection = mock(Connection.class);
+        DataSource indexDataSource = mock(DataSource.class);
+        when(indexDataSource.getConnection()).thenReturn(indexConnection);
+        when(indexConnection.createStatement()).thenReturn(indexStatement);
+        when(indexStatement.execute(contains("idx_resources_fdesc_"))).thenThrow(new SQLException("permission denied", "42501"));
+
+        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "name");
+
+        verify(indexStatement, never()).execute(contains("DROP INDEX"));
     }
 
     @Test
@@ -344,7 +390,7 @@ class PostgresResourceStorageTest {
         var sql = ArgumentCaptor.forClass(String.class);
         verify(connection).prepareStatement(sql.capture());
         assertTrue(sql.getValue().contains("data -> 'meta' ->> 'owner'"), sql.getValue());
-        assertTrue(sql.getValue().contains("ORDER BY data -> 'meta' ->> 'updatedAt' DESC"), sql.getValue());
+        assertTrue(sql.getValue().contains("ORDER BY data -> 'meta' ->> 'updatedAt' DESC NULLS LAST"), sql.getValue());
     }
 
     // ─── batch read ────────────────────────────────────────────
@@ -353,13 +399,13 @@ class PostgresResourceStorageTest {
     void readMany_readsThePageInOneStatementAndKeepsRequestOrder() throws Exception {
         when(resultSet.next()).thenReturn(true, true, false);
         // Deliberately returned in the opposite order to the request.
-        when(resultSet.getString("id")).thenReturn("id-a", "id-b");
+        when(resultSet.getString("id")).thenReturn(ID_A, ID_B);
         when(resultSet.getInt("version")).thenReturn(1, 1);
         when(resultSet.getString("data")).thenReturn("{}", "{}");
 
-        var results = storage.readMany(List.of(resourceId("id-b", 1), resourceId("id-a", 1)));
+        var results = storage.readMany(List.of(resourceId(ID_B, 1), resourceId(ID_A, 1)));
 
-        assertEquals(List.of("id-b", "id-a"), results.stream().map(IResourceStorage.IResource::getId).toList());
+        assertEquals(List.of(ID_B, ID_A), results.stream().map(IResourceStorage.IResource::getId).toList());
         verify(connection, times(1)).prepareStatement(anyString());
     }
 
@@ -372,14 +418,72 @@ class PostgresResourceStorageTest {
     @Test
     void readMany_skipsIdsThatNoLongerExist() throws Exception {
         when(resultSet.next()).thenReturn(true, false);
-        when(resultSet.getString("id")).thenReturn("id-a");
+        when(resultSet.getString("id")).thenReturn(ID_A);
         when(resultSet.getInt("version")).thenReturn(1);
         when(resultSet.getString("data")).thenReturn("{}");
 
-        var results = storage.readMany(List.of(resourceId("id-a", 1), resourceId("id-gone", 1)));
+        var results = storage.readMany(List.of(resourceId(ID_A, 1), resourceId(ID_GONE, 1)));
 
         assertEquals(1, results.size());
-        assertEquals("id-a", results.getFirst().getId());
+        assertEquals(ID_A, results.getFirst().getId());
+    }
+
+    // ─── id contract: an id that cannot be a UUID names nothing ──────────
+
+    /**
+     * Ids reach the store from URL path segments and archives. One that is not a
+     * UUID used to be bound into {@code ?::uuid}, PostgreSQL raised 22P02, and the
+     * REST layer answered 500 where MongoDB answers 404. Each case here must answer
+     * "not found" without ever reaching the database.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"000000000000000000000000", "------------------", "xyz", "",
+            "00000000000040008000000000000001", "{00000000-0000-4000-8000-000000000001}"})
+    void malformedIdIsNotFoundWithoutTouchingTheDatabase(String id) throws Exception {
+        clearInvocations(dataSource, connection);
+
+        assertNull(storage.read(id, 1));
+        assertNull(storage.readHistory(id, 1));
+        assertNull(storage.readHistoryLatest(id));
+        assertEquals(-1, storage.getCurrentVersion(id));
+        assertTrue(storage.readMany(List.of(resourceId(id, 1))).isEmpty());
+        storage.remove(id);
+        storage.removeAllPermanently(id);
+
+        verify(connection, never()).prepareStatement(anyString());
+    }
+
+    @Test
+    void nullIdIsNotFound() throws Exception {
+        clearInvocations(dataSource, connection);
+
+        assertNull(storage.read(null, 1));
+        assertEquals(-1, storage.getCurrentVersion(null));
+
+        verify(connection, never()).prepareStatement(anyString());
+    }
+
+    @Test
+    void readMany_malformedIdDoesNotCostTheOthersTheirAnswer() throws Exception {
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getString("id")).thenReturn(ID_A);
+        when(resultSet.getInt("version")).thenReturn(1);
+        when(resultSet.getString("data")).thenReturn("{}");
+
+        var results = storage.readMany(List.of(resourceId("xyz", 1), resourceId(ID_A, 1)));
+
+        assertEquals(List.of(ID_A), results.stream().map(IResourceStorage.IResource::getId).toList());
+        verify(preparedStatement).setString(2, ID_A);
+        verify(preparedStatement, never()).setString(anyInt(), eq("xyz"));
+    }
+
+    @Test
+    void canonicalUuidInUpperCaseIsStillLookedUp() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        assertNull(storage.read(ID1.toUpperCase(Locale.ROOT), 1));
+
+        verify(connection).prepareStatement(contains("WHERE id = ?::uuid"));
     }
 
     private static IResourceStore.IResourceId resourceId(String id, int version) {
@@ -557,17 +661,17 @@ class PostgresResourceStorageTest {
     @Test
     void shouldReadResource() throws Exception {
         when(resultSet.next()).thenReturn(true);
-        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getString("id")).thenReturn(ID1);
         when(resultSet.getInt("version")).thenReturn(1);
         when(resultSet.getString("data")).thenReturn("{\"name\":\"val\"}");
 
-        IResourceStorage.IResource<TestConfig> resource = storage.read("id1", 1);
+        IResourceStorage.IResource<TestConfig> resource = storage.read(ID1, 1);
 
         assertNotNull(resource);
-        assertEquals("id1", resource.getId());
+        assertEquals(ID1, resource.getId());
         assertEquals(1, resource.getVersion());
 
-        verify(preparedStatement).setString(1, "id1");
+        verify(preparedStatement).setString(1, ID1);
         verify(preparedStatement).setString(2, "test_collection");
         verify(preparedStatement).setInt(3, 1);
     }
@@ -576,7 +680,7 @@ class PostgresResourceStorageTest {
     void shouldReturnNullWhenResourceNotFound() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        IResourceStorage.IResource<TestConfig> resource = storage.read("nonexistent", 1);
+        IResourceStorage.IResource<TestConfig> resource = storage.read(UNKNOWN_ID, 1);
 
         assertNull(resource);
     }
@@ -586,9 +690,9 @@ class PostgresResourceStorageTest {
         reset(connection);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
 
-        storage.remove("id1");
+        storage.remove(ID1);
 
-        verify(preparedStatement).setString(1, "id1");
+        verify(preparedStatement).setString(1, ID1);
         verify(preparedStatement).setString(2, "test_collection");
         verify(preparedStatement).executeUpdate();
     }
@@ -598,10 +702,10 @@ class PostgresResourceStorageTest {
         reset(connection);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
 
-        storage.removeAllPermanently("id1");
+        storage.removeAllPermanently(ID1);
 
         // Two DELETE statements (current + history)
-        verify(preparedStatement, times(2)).setString(1, "id1");
+        verify(preparedStatement, times(2)).setString(1, ID1);
         verify(preparedStatement, times(2)).setString(2, "test_collection");
         verify(preparedStatement, times(2)).executeUpdate();
         verify(connection).commit();
@@ -610,15 +714,15 @@ class PostgresResourceStorageTest {
     @Test
     void shouldReadHistory() throws Exception {
         when(resultSet.next()).thenReturn(true);
-        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getString("id")).thenReturn(ID1);
         when(resultSet.getInt("version")).thenReturn(1);
         when(resultSet.getString("data")).thenReturn("{\"name\":\"old\"}");
         when(resultSet.getBoolean("deleted")).thenReturn(false);
 
-        IResourceStorage.IHistoryResource<TestConfig> history = storage.readHistory("id1", 1);
+        IResourceStorage.IHistoryResource<TestConfig> history = storage.readHistory(ID1, 1);
 
         assertNotNull(history);
-        assertEquals("id1", history.getId());
+        assertEquals(ID1, history.getId());
         assertEquals(1, history.getVersion());
         assertFalse(history.isDeleted());
     }
@@ -627,7 +731,7 @@ class PostgresResourceStorageTest {
     void shouldReturnNullWhenHistoryNotFound() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        IResourceStorage.IHistoryResource<TestConfig> history = storage.readHistory("id1", 99);
+        IResourceStorage.IHistoryResource<TestConfig> history = storage.readHistory(ID1, 99);
 
         assertNull(history);
     }
@@ -637,11 +741,11 @@ class PostgresResourceStorageTest {
         TestConfig config = new TestConfig("value1");
         when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
 
-        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 1, config);
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(ID1, 1, config);
         IResourceStorage.IHistoryResource<TestConfig> history = storage.newHistoryResourceFor(resource, true);
 
         assertTrue(history.isDeleted());
-        assertEquals("id1", history.getId());
+        assertEquals(ID1, history.getId());
         assertEquals(1, history.getVersion());
     }
 
@@ -650,7 +754,7 @@ class PostgresResourceStorageTest {
         when(resultSet.next()).thenReturn(true);
         when(resultSet.getInt("version")).thenReturn(5);
 
-        Integer version = storage.getCurrentVersion("id1");
+        Integer version = storage.getCurrentVersion(ID1);
 
         assertEquals(5, version);
     }
@@ -659,7 +763,7 @@ class PostgresResourceStorageTest {
     void shouldReturnMinusOneForNonExistentVersion() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        Integer version = storage.getCurrentVersion("nonexistent");
+        Integer version = storage.getCurrentVersion(UNKNOWN_ID);
 
         assertEquals(-1, version);
     }
@@ -668,12 +772,12 @@ class PostgresResourceStorageTest {
     void shouldDeserializeResourceData() throws Exception {
         TestConfig expected = new TestConfig("deserialized");
         when(resultSet.next()).thenReturn(true);
-        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getString("id")).thenReturn(ID1);
         when(resultSet.getInt("version")).thenReturn(1);
         when(resultSet.getString("data")).thenReturn("{\"name\":\"deserialized\"}");
         when(jsonSerialization.deserialize("{\"name\":\"deserialized\"}", TestConfig.class)).thenReturn(expected);
 
-        IResourceStorage.IResource<TestConfig> resource = storage.read("id1", 1);
+        IResourceStorage.IResource<TestConfig> resource = storage.read(ID1, 1);
         TestConfig data = resource.getData();
 
         assertEquals(expected, data);
@@ -704,7 +808,7 @@ class PostgresResourceStorageTest {
     void createNew_sqlException_throwsRuntimeException() throws Exception {
         TestConfig config = new TestConfig("val");
         when(jsonSerialization.serialize(config)).thenReturn("{}");
-        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 1, config);
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(ID1, 1, config);
 
         reset(connection);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
@@ -719,7 +823,7 @@ class PostgresResourceStorageTest {
     void shouldStoreHistory() throws Exception {
         TestConfig config = new TestConfig("val");
         when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"val\"}");
-        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 2, config);
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(ID1, 2, config);
         IResourceStorage.IHistoryResource<TestConfig> history = storage.newHistoryResourceFor(resource, false);
 
         reset(connection);
@@ -727,7 +831,7 @@ class PostgresResourceStorageTest {
 
         storage.store(history);
 
-        verify(preparedStatement).setString(1, "id1");
+        verify(preparedStatement).setString(1, ID1);
         verify(preparedStatement).setString(2, "test_collection");
         verify(preparedStatement).setInt(3, 2);
         verify(preparedStatement).setString(4, "{\"name\":\"val\"}");
@@ -739,7 +843,7 @@ class PostgresResourceStorageTest {
     void storeHistory_sqlException_throwsRuntimeException() throws Exception {
         TestConfig config = new TestConfig("v");
         when(jsonSerialization.serialize(config)).thenReturn("{}");
-        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 1, config);
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(ID1, 1, config);
         IResourceStorage.IHistoryResource<TestConfig> history = storage.newHistoryResourceFor(resource, true);
 
         reset(connection);
@@ -754,15 +858,15 @@ class PostgresResourceStorageTest {
     @Test
     void shouldReadHistoryLatest() throws Exception {
         when(resultSet.next()).thenReturn(true);
-        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getString("id")).thenReturn(ID1);
         when(resultSet.getInt("version")).thenReturn(3);
         when(resultSet.getString("data")).thenReturn("{\"name\":\"latest\"}");
         when(resultSet.getBoolean("deleted")).thenReturn(true);
 
-        IResourceStorage.IHistoryResource<TestConfig> latest = storage.readHistoryLatest("id1");
+        IResourceStorage.IHistoryResource<TestConfig> latest = storage.readHistoryLatest(ID1);
 
         assertNotNull(latest);
-        assertEquals("id1", latest.getId());
+        assertEquals(ID1, latest.getId());
         assertEquals(3, latest.getVersion());
         assertTrue(latest.isDeleted());
     }
@@ -771,7 +875,7 @@ class PostgresResourceStorageTest {
     void readHistoryLatest_notFound_returnsNull() throws Exception {
         when(resultSet.next()).thenReturn(false);
 
-        IResourceStorage.IHistoryResource<TestConfig> latest = storage.readHistoryLatest("missing");
+        IResourceStorage.IHistoryResource<TestConfig> latest = storage.readHistoryLatest(UNKNOWN_ID);
 
         assertNull(latest);
     }
@@ -780,33 +884,41 @@ class PostgresResourceStorageTest {
     void readHistoryLatest_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
 
-        assertThrows(RuntimeException.class, () -> storage.readHistoryLatest("id1"));
+        assertThrows(RuntimeException.class, () -> storage.readHistoryLatest(ID1));
     }
 
     // ─── getCurrentVersion UUID error handling ─────────────────
 
     @Test
-    void getCurrentVersion_invalidUuid_returnsMinusOne() throws Exception {
-        when(preparedStatement.executeQuery()).thenThrow(
-                new SQLException("invalid input syntax for type uuid"));
+    void getCurrentVersion_serverRefusesTheIdsSyntax_returnsMinusOne() throws Exception {
+        // Recognised by SQLSTATE 22P02 — the message is localised (lc_messages), so
+        // it carries no English text here on purpose.
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("ungültige Eingabesyntax für Typ uuid", "22P02"));
 
-        Integer version = storage.getCurrentVersion("not-a-uuid");
+        Integer version = storage.getCurrentVersion(ID1);
 
         assertEquals(-1, version);
+    }
+
+    @Test
+    void getCurrentVersion_englishMessageWithOtherSqlState_isNotMistakenForABadId() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("invalid input syntax for type uuid", "08006"));
+
+        assertThrows(RuntimeException.class, () -> storage.getCurrentVersion(ID1));
     }
 
     @Test
     void getCurrentVersion_otherSqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("Other error"));
 
-        assertThrows(RuntimeException.class, () -> storage.getCurrentVersion("id1"));
+        assertThrows(RuntimeException.class, () -> storage.getCurrentVersion(ID1));
     }
 
     @Test
     void getCurrentVersion_nullMessage_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException((String) null));
 
-        assertThrows(RuntimeException.class, () -> storage.getCurrentVersion("id1"));
+        assertThrows(RuntimeException.class, () -> storage.getCurrentVersion(ID1));
     }
 
     // ─── findResourceIdsContaining ─────────────────────────────
@@ -814,13 +926,13 @@ class PostgresResourceStorageTest {
     @Test
     void findResourceIdsContaining_returnsResults() throws Exception {
         when(resultSet.next()).thenReturn(true, false);
-        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getString("id")).thenReturn(ID1);
         when(resultSet.getInt("version")).thenReturn(1);
 
         var results = storage.findResourceIdsContaining("actions", "my_action");
 
         assertEquals(1, results.size());
-        assertEquals("id1", results.getFirst().getId());
+        assertEquals(ID1, results.getFirst().getId());
         assertEquals(1, results.getFirst().getVersion());
     }
 
@@ -867,7 +979,7 @@ class PostgresResourceStorageTest {
     @Test
     void findResources_withStringFilter() throws Exception {
         when(resultSet.next()).thenReturn(true, false);
-        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getString("id")).thenReturn(ID1);
         when(resultSet.getInt("version")).thenReturn(1);
 
         var filter = new IResourceFilter.QueryFilter("name", "test.*");
@@ -989,7 +1101,7 @@ class PostgresResourceStorageTest {
                 .thenReturn(1)
                 .thenThrow(new SQLException("History delete failed"));
 
-        assertThrows(RuntimeException.class, () -> storage.removeAllPermanently("id1"));
+        assertThrows(RuntimeException.class, () -> storage.removeAllPermanently(ID1));
         verify(connection).rollback();
     }
 
@@ -1025,7 +1137,7 @@ class PostgresResourceStorageTest {
     void read_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("Read error"));
 
-        assertThrows(RuntimeException.class, () -> storage.read("id1", 1));
+        assertThrows(RuntimeException.class, () -> storage.read(ID1, 1));
     }
 
     @Test
@@ -1034,14 +1146,14 @@ class PostgresResourceStorageTest {
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("Delete error"));
 
-        assertThrows(RuntimeException.class, () -> storage.remove("id1"));
+        assertThrows(RuntimeException.class, () -> storage.remove(ID1));
     }
 
     @Test
     void store_sqlException_throwsRuntimeException() throws Exception {
         TestConfig config = new TestConfig("v");
         when(jsonSerialization.serialize(config)).thenReturn("{}");
-        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 1, config);
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(ID1, 1, config);
 
         reset(connection);
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
@@ -1054,7 +1166,7 @@ class PostgresResourceStorageTest {
     void readHistory_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("History error"));
 
-        assertThrows(RuntimeException.class, () -> storage.readHistory("id1", 1));
+        assertThrows(RuntimeException.class, () -> storage.readHistory(ID1, 1));
     }
 
     // ─── Resource.getData deserializes correctly ───────────────
@@ -1063,13 +1175,13 @@ class PostgresResourceStorageTest {
     void historyResource_getData_deserializesJson() throws Exception {
         TestConfig expected = new TestConfig("historical");
         when(resultSet.next()).thenReturn(true);
-        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getString("id")).thenReturn(ID1);
         when(resultSet.getInt("version")).thenReturn(2);
         when(resultSet.getString("data")).thenReturn("{\"name\":\"historical\"}");
         when(resultSet.getBoolean("deleted")).thenReturn(false);
         when(jsonSerialization.deserialize("{\"name\":\"historical\"}", TestConfig.class)).thenReturn(expected);
 
-        IResourceStorage.IHistoryResource<TestConfig> history = storage.readHistory("id1", 2);
+        IResourceStorage.IHistoryResource<TestConfig> history = storage.readHistory(ID1, 2);
         TestConfig data = history.getData();
 
         assertEquals(expected, data);

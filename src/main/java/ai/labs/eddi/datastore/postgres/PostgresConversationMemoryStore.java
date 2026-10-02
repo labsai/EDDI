@@ -82,7 +82,15 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         this.jsonSerialization = jsonSerialization;
     }
 
-    private synchronized void ensureSchema() {
+    private void ensureSchema() {
+        // Lock-free once the table exists: this runs on every load, the hottest read
+        // in the engine.
+        if (!schemaInitialized) {
+            initSchema();
+        }
+    }
+
+    private synchronized void initSchema() {
         if (schemaInitialized)
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
@@ -412,6 +420,14 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            // Not a UUID: not a conversation this store can hold — see PostgresIds.
+            return null;
+        }
+        // A read can be the first statement against a fresh database (GET of an
+        // unknown conversation before any was created): without the table it failed
+        // with "relation does not exist" — a 500 for what is a plain 404.
+        ensureSchema();
         String sql = "SELECT conversation_state, data FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
@@ -477,6 +493,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return;
+        }
         ensureSchema();
         // Patch the JSONB copy of the state along with the column so direct
         // document readers can never observe the pre-transition state.
@@ -494,6 +513,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void setConversationEndReason(String conversationId, String endReason) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return;
+        }
         ensureSchema();
         String sql = "UPDATE conversation_memories SET data = jsonb_set(data, '{endReason}', to_jsonb(?::text)) WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -507,6 +529,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return;
+        }
         ensureSchema();
         String sql = "DELETE FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -566,6 +591,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public ConversationState getConversationState(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return null;
+        }
         ensureSchema();
         String sql = "SELECT conversation_state FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -583,6 +611,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public Long getRevision(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return null;
+        }
         ensureSchema();
         String sql = "SELECT COALESCE((data->>'_rev')::bigint, 0) AS rev FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -657,6 +688,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @Override
     public boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target)
             throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return false;
+        }
         ensureSchema();
         // Column is the CAS arbiter; the JSONB copy is patched in the same
         // statement so document and column can never diverge on this transition.
@@ -694,6 +728,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void clearHitlBookmark(String conversationId) throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return;
+        }
         ensureSchema();
         // Terminal cleanup must also drop the tool-level HITL fields so no stale
         // hitlPauseType / pending batch lingers on an ended or cancelled document.
