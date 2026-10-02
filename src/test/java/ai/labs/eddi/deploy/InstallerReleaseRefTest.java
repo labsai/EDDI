@@ -211,6 +211,13 @@ class InstallerReleaseRefTest {
         builder.environment().remove("EDDI_VERSION");
         builder.environment().put("EDDI_DIR", dir.resolve("eddi-home").toString());
         builder.environment().putAll(env);
+        // .NET reads either spelling; set the lowercase one too so an inherited value
+        // cannot win.
+        if (env.containsKey("HTTPS_PROXY")) {
+            builder.environment().put("https_proxy", env.get("HTTPS_PROXY"));
+            builder.environment().remove("NO_PROXY");
+            builder.environment().remove("no_proxy");
+        }
         return finish(builder.start(), null);
     }
 
