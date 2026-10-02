@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
@@ -633,5 +634,31 @@ class SlackGroupDiscussionListenerTest {
                 null, null, null, 0, null, null, false)));
 
         verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
+    }
+
+    // ─── mrkdwn escaping of member output ───
+
+    @Test
+    void memberContribution_withChannelBroadcast_isEscaped() {
+        initExpanded();
+        listener.onSpeakerComplete(speakerEvent("a0", "Agent <!here>", "Done. <!channel> look & see <https://evil|bank>", null, null));
+
+        ArgumentCaptor<String> texts = ArgumentCaptor.forClass(String.class);
+        verify(slackApi, atLeastOnce()).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), any(), texts.capture());
+        for (String text : texts.getAllValues()) {
+            assertFalse(text.contains("<!channel>"), text);
+            assertFalse(text.contains("<!here>"), text);
+            assertFalse(text.contains("<https://"), text);
+        }
+        assertTrue(texts.getAllValues().stream().anyMatch(t -> t.contains("&lt;!channel&gt; look &amp; see")), texts.getAllValues().toString());
+    }
+
+    @Test
+    void artifactName_isEscapedOnce_notTwice() {
+        initExpanded();
+        listener.onArtifactUpdated(
+                new GroupConversationEventSink.ArtifactUpdatedEvent("art-2", "plan <!channel> & co", "MARKDOWN", 1, "a0", "DRAFT", true));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), any(), contains("plan &lt;!channel&gt; &amp; co"));
     }
 }

@@ -1574,10 +1574,13 @@ public class SlackEventHandler {
      */
     private void postMessageChunked(String channelId, String threadTs, String text,
                                     String botToken) {
+        // The agent's reply is not EDDI's text: escaped so a "<!channel>" in it is
+        // shown, not broadcast (SlackMrkdwn). Each chunk is escaped after the split,
+        // so an entity is never cut in half.
         if (text == null || text.isEmpty())
             return;
         if (text.length() <= MAX_SLACK_MESSAGE_LENGTH) {
-            postMessage(channelId, threadTs, text, botToken);
+            postMessage(channelId, threadTs, SlackMrkdwn.escape(text), botToken);
             return;
         }
 
@@ -1596,7 +1599,7 @@ public class SlackEventHandler {
             if (end <= offset) {
                 end = Math.min(offset + MAX_SLACK_MESSAGE_LENGTH, text.length());
             }
-            postMessage(channelId, threadTs, text.substring(offset, end), botToken);
+            postMessage(channelId, threadTs, SlackMrkdwn.escape(text.substring(offset, end)), botToken);
             offset = end;
         }
     }
@@ -1673,7 +1676,7 @@ public class SlackEventHandler {
                     && name.equalsIgnoreCase(config.getDefaultTargetName())
                             ? " _(default)_"
                             : "";
-            sb.append("• *").append(name).append("*").append(isDefault);
+            sb.append("• *").append(SlackMrkdwn.escape(name)).append("*").append(isDefault);
             sb.append(" [").append(type).append("]\n");
             if (target.getTriggers() != null && !target.getTriggers().isEmpty()) {
                 sb.append("  Triggers: ");

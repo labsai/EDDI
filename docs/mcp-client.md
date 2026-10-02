@@ -65,6 +65,23 @@ curl -X POST http://localhost:7070/mcpcallsstore/mcpcalls/discover-tools \
 > security boundary is the credential you give the connection plus the
 > [approval gate](#approvals).
 
+### Rule-triggered calls (`mcpCalls`)
+
+The same configuration can carry a list of `mcpCalls`, which `McpCallsTask` runs when a behavior rule emits one of their `actions` — no LLM involved:
+
+| Field | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `name` | string | — | Name in logs; also the default `responseObjectName` prefix. |
+| `actions` | list | — | Behavior-rule actions that trigger the call (`"*"` matches any). |
+| `toolName` | string | — | The server tool to call. |
+| `toolArguments` | object | — | Arguments; string values are templates. |
+| `preRequest` / `postResponse` | object | — | Property instructions (and, after the call, output / quick-reply building) — the same as an httpcall's, see [Properties](properties.md#via-prepost-request-instructions). |
+| `saveResponse` | boolean | `true` | Store the result in memory as `memory.current.mcpCalls.<responseObjectName>`. |
+| `responseObjectName` | string | `<name>Response` | Name the result is stored under. |
+| `maxResponseSizeInBytes` | number | `2000000` | How much of the result is kept in conversation memory. A longer result is **truncated** (with a warning) and stored as text — memory is loaded on every turn, so an unbounded result costs every later turn. |
+| `continueOnError` | boolean | `false` | Record the failure under `<responseObjectName>Error` and continue instead of failing the turn. |
+| `retry` | object | — | Retry with exponential backoff on transient failures. |
+
 ---
 
 ## Transports

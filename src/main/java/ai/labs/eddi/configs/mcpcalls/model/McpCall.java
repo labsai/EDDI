@@ -85,6 +85,19 @@ public class McpCall {
      */
     private RetryConfiguration retry;
 
+    /**
+     * How much of a tool result is kept in conversation memory, in characters. A
+     * longer result is <em>truncated</em> (with a warning) before it is stored —
+     * the same rule {@code maxResponseSizeInBytes} applies to an httpcall. Unset or
+     * non-positive falls back to {@value #DEFAULT_MAX_RESPONSE_SIZE_IN_BYTES}.
+     * Conversation memory is loaded on every turn, and a rule-triggered call that
+     * returns megabytes used to be stored whole on every step it ran.
+     */
+    private Integer maxResponseSizeInBytes;
+
+    /** Default for {@link #maxResponseSizeInBytes} — the httpcall default, 2 MB. */
+    public static final int DEFAULT_MAX_RESPONSE_SIZE_IN_BYTES = 2_000_000;
+
     // --- Getters and Setters ---
 
     public String getName() {
@@ -165,6 +178,22 @@ public class McpCall {
 
     public void setContinueOnError(Boolean continueOnError) {
         this.continueOnError = continueOnError;
+    }
+
+    public Integer getMaxResponseSizeInBytes() {
+        return maxResponseSizeInBytes;
+    }
+
+    public void setMaxResponseSizeInBytes(Integer maxResponseSizeInBytes) {
+        this.maxResponseSizeInBytes = maxResponseSizeInBytes;
+    }
+
+    /**
+     * The effective cap: {@link #maxResponseSizeInBytes}, or the default when
+     * unset.
+     */
+    public int effectiveMaxResponseSizeInBytes() {
+        return maxResponseSizeInBytes != null && maxResponseSizeInBytes > 0 ? maxResponseSizeInBytes : DEFAULT_MAX_RESPONSE_SIZE_IN_BYTES;
     }
 
     public RetryConfiguration getRetry() {

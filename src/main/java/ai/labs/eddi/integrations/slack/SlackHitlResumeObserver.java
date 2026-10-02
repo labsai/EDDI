@@ -109,7 +109,9 @@ public class SlackHitlResumeObserver {
         if (event.verdict() == HitlVerdict.APPROVED && !isError(event.snapshot())) {
             String continuation = SlackHitlSupport.extractSlackResponseText(event.snapshot());
             if (continuation != null && !continuation.startsWith("_")) {
-                sb.append("\n\n").append(continuation);
+                // The agent's text, after EDDI's own summary (which may mention the
+                // approver): only the continuation is escaped.
+                sb.append("\n\n").append(SlackMrkdwn.escape(continuation));
             }
         }
 

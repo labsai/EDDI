@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.nlp;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
@@ -357,13 +358,14 @@ public class InputParserTask implements ILifecycleTask {
         if (isNullOrEmpty(uriObj)) {
             return null;
         }
+        URI uri = ResourceUris.require(uriObj, ID);
         try {
-            var document = resourceClientLibrary.getResource(URI.create(uriObj.toString()), ParserConfiguration.class);
+            var document = resourceClientLibrary.getResource(uri, ParserConfiguration.class);
             if (document == null) {
                 throw new WorkflowConfigurationException("Parser configuration " + uriObj + " could not be found.");
             }
             return document;
-        } catch (ServiceException | IllegalArgumentException e) {
+        } catch (ServiceException e) {
             throw new WorkflowConfigurationException("Error while fetching ParserConfiguration " + uriObj + "!\n" + e.getLocalizedMessage(), e);
         }
     }

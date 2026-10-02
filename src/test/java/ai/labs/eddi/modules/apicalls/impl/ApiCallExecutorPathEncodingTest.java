@@ -30,6 +30,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -218,9 +219,9 @@ class ApiCallExecutorPathEncodingTest {
 
     /**
      * The depth bound exists so a pathological or self-referential structure cannot
-     * turn a request into a stack overflow. Passing the value through past the
-     * ceiling (rather than dropping it) keeps a legitimate deep template rendering
-     * what it always did.
+     * turn a request into a stack overflow. Past the ceiling a container is
+     * replaced by an empty one (fail closed), see
+     * {@link #nothingUnencodedPastTheDepthCeiling()}.
      */
     @Test
     @DisplayName("recursion is depth-bounded and terminates on a self-referential map")
@@ -231,6 +232,24 @@ class ApiCallExecutorPathEncodingTest {
 
         assertDoesNotThrow(() -> ApiCallExecutor.encodePathValue(selfReferential, 0),
                 "a cyclic template structure must not blow the stack");
+    }
+
+    /**
+     * A string nested deeper than the ceiling used to reach the path unencoded —
+     * the container was passed through as it was.
+     */
+    @Test
+    @DisplayName("no string reaches the path unencoded, however deep it is nested")
+    void nothingUnencodedPastTheDepthCeiling() {
+        Object nested = new HashMap<>(Map.of("leaf", "../../admin?x=1#f"));
+        for (int i = 0; i < ApiCallExecutor.MAX_PATH_VIEW_DEPTH + 2; i++) {
+            nested = new HashMap<>(Map.of("n", i % 2 == 0 ? nested : List.of(nested)));
+        }
+
+        String encoded = String.valueOf(ApiCallExecutor.encodePathValue(nested, 0));
+
+        assertFalse(encoded.contains("../"), encoded);
+        assertFalse(encoded.contains("?x=1"), encoded);
     }
 
     // ==================== the encoder itself ====================

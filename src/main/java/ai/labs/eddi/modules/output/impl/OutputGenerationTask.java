@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.output.impl;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
@@ -260,7 +261,7 @@ public class OutputGenerationTask implements ILifecycleTask {
         try {
             Object uriObj = configuration.get(OUTPUT_SET_CONFIG_URI);
             if (uriObj != null) {
-                URI uri = URI.create(uriObj.toString());
+                URI uri = ResourceUris.require(uriObj, ID);
                 var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
                 var outputLanguage = outputConfigurationSet.getLang();
                 // A copy: the set comes from the resource cache and is shared — sorting

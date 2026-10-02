@@ -619,9 +619,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         if (preRequest != null && preRequest.getBatchRequests() != null) {
             BatchRequestBuildingInstruction batchRequest = preRequest.getBatchRequests();
-            if (batchRequest.getExecuteCallsSequentially() == null) {
-                batchRequest.setExecuteCallsSequentially(false);
-            }
+            // Read, not defaulted in place: the instruction is part of the cached
+            // configuration every conversation of the agent shares.
+            boolean executeCallsSequentially = Boolean.TRUE.equals(batchRequest.getExecuteCallsSequentially());
 
             // Every request is built here, on the turn's own thread, and only the sending
             // goes to the background. A request that cannot be built — an unsatisfiable
@@ -665,7 +665,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             runtime.submitCallable(callerIdentityContext.propagate(() -> {
                 for (BuiltRequest built : requests) {
                     IRequest request = built.request();
-                    if (batchRequest.getExecuteCallsSequentially()) {
+                    if (executeCallsSequentially) {
                         long executionStart = currentTimeMillis();
                         LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
                         IResponse response = request.send();
@@ -1470,10 +1470,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * Recursion is depth-bounded ({@link #MAX_PATH_VIEW_DEPTH}). Template data is
      * rebuilt per turn from conversation memory and is not expected to nest deeply;
      * the bound exists so a pathological or self-referential structure cannot turn
-     * a request into a stack overflow. Past it the value is passed through
-     * unencoded rather than dropped: losing data would silently change what a
-     * legitimate template renders, and nothing that deep is reachable by a path
-     * expression in practice.
+     * a request into a stack overflow. Past it a map or list is replaced by an
+     * empty one — fail closed. It used to be passed through unencoded, so a string
+     * nested more than ten levels deep (an upstream response saved in memory is
+     * enough) reached the request path with its {@code /}, {@code ?} and {@code #}
+     * intact. A string at any depth is still encoded.
      * <p>
      * Non-String scalars (numbers, booleans) are left alone — Qute renders them via
      * {@code toString()} and none can yield a {@code /}, {@code ?} or {@code #}.
@@ -1500,6 +1501,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return encodePathSegment(stringValue);
         }
         if (depth >= MAX_PATH_VIEW_DEPTH) {
+            if (value instanceof Map<?, ?>) {
+                return Map.of();
+            }
+            if (value instanceof List<?>) {
+                return List.of();
+            }
             return value;
         }
         if (value instanceof Map<?, ?> nested) {

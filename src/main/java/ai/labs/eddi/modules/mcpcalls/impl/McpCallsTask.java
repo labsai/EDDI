@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.mcpcalls.impl;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.mcpcalls.model.McpCall;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
@@ -37,8 +38,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
-
-import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * Lifecycle task for deterministic (action-triggered) MCP tool calls.
@@ -262,12 +261,22 @@ public class McpCallsTask implements ILifecycleTask {
                     responseObjectName = callName + "Response";
                 }
 
-                // Try to parse as JSON, fallback to raw string
+                // Capped before it reaches memory, like an httpcall response. A result over
+                // the cap is stored as its truncated text (a cut JSON document no longer
+                // parses), so the stored object never exceeds the cap either.
                 Object responseObject;
-                try {
-                    responseObject = jsonSerialization.deserialize(toolResult.trim(), Object.class);
-                } catch (IOException e) {
-                    responseObject = toolResult;
+                int maxSize = mcpCall.effectiveMaxResponseSizeInBytes();
+                if (toolResult.length() > maxSize) {
+                    LOGGER.warnf("MCP call '%s' returned %d chars, more than its maxResponseSizeInBytes of %d — truncating before "
+                            + "storing it in memory.", callName, toolResult.length(), maxSize);
+                    responseObject = toolResult.substring(0, maxSize);
+                } else {
+                    // Try to parse as JSON, fallback to raw string
+                    try {
+                        responseObject = jsonSerialization.deserialize(toolResult.trim(), Object.class);
+                    } catch (IOException e) {
+                        responseObject = toolResult;
+                    }
                 }
 
                 templateDataObjects.put(responseObjectName, responseObject);
@@ -451,11 +460,7 @@ public class McpCallsTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
-        Object uriObj = configuration.get("uri");
-        if (isNullOrEmpty(uriObj)) {
-            throw new WorkflowConfigurationException("No resource URI has been defined for McpCalls!");
-        }
-        URI uri = URI.create(uriObj.toString());
+        URI uri = ResourceUris.require(configuration == null ? null : configuration.get("uri"), ID);
         try {
             McpCallsConfiguration config = resourceClientLibrary.getResource(uri, McpCallsConfiguration.class);
             // Findings I3/A10: settings the engine cannot honour (unimplemented
