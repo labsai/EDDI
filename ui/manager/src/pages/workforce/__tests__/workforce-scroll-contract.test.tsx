@@ -168,6 +168,26 @@ describe("Workforce pages own their scroll container", () => {
     ).not.toBeNull();
   });
 
+  /**
+   * The loading state, which the page table above never holds still: its
+   * request resolves and the page moves on to the populated view, so that test
+   * would pass with this wrapper removed. The skeleton is several card rows
+   * tall, enough to outgrow a short window, so it gets the same scroller. The
+   * request is left pending so the skeleton stays on screen.
+   */
+  it("the dashboard's loading skeleton sits inside a scroller", async () => {
+    server.use(http.get("*/groupstore/groups/descriptors", () => new Promise<never>(() => {})));
+
+    renderPage("/workforce", <WorkforceDashboard />, "/workforce");
+
+    const skeleton = await screen.findByTestId("workforce-dashboard-skeleton");
+    let scroller: Element | null = skeleton;
+    while (scroller && !SCROLLER_PATTERN.test(scroller.getAttribute("class") ?? "")) {
+      scroller = scroller.parentElement;
+    }
+    expect(scroller, "the loading skeleton has no scrolling ancestor").not.toBeNull();
+  });
+
   /** Guards the guard: a tree with no scroller must actually fail the check. */
   it("does not pass a page that forgot its scroller", () => {
     const { container } = renderPage(

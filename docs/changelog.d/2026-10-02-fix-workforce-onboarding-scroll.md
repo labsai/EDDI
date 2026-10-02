@@ -32,8 +32,11 @@
   (45–289px) and 800px (unchanged at 360px). A first attempt at `min(360px, 60dvh)` ignored the footer and still
   overflowed below about 370px; CodeRabbit caught it in review.
 - Tests: the scroll contract gains a case that renders the dashboard with **zero** task forces and requires the
-  onboarding hero (new `data-testid="workforce-onboarding-hero"`) to sit inside a scroller. A new
-  `alert-dialog.test.tsx` pins the dialog's cap and scroller. Each was mutation-checked: removing the fix fails it.
+  onboarding hero (new `data-testid="workforce-onboarding-hero"`) to sit inside a scroller. A second case
+  holds the request pending and requires the same of the loading skeleton (`workforce-dashboard-skeleton`); the
+  page table never holds that state still. A new `alert-dialog.test.tsx` pins the dialog's cap and scroller, and
+  the palette test pins its list cap. The last two were added at CodeRabbit's suggestion. Each was
+  mutation-checked: removing the fix fails it.
 
 ### How the rest was ruled out
 

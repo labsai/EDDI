@@ -48,7 +48,7 @@ function getStoredViewMode(): "grid" | "list" {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-8">
+    <div data-testid="workforce-dashboard-skeleton" className="space-y-8">
       {/* Workforce skeleton */}
       <div>
         <Skeleton className="h-5 w-40 mb-4" />
