@@ -66,11 +66,24 @@ places where the two backends answered the same request differently:
 - **User-memory search** (`IUserMemoryStore.filterEntries`) has one meaning on both backends: every
   term in the key, in a string value, or in a string element of an array value — numbers, booleans and
   object values are not searched — newest first, at most `IUserMemoryStore.MAX_FILTER_RESULTS` (200).
+  The `forgetFact` tool used this search to find the agent's own entry by exact key; it now reads the
+  user's entries instead, so the cap cannot hide an older entry. Documented in
+  [`user-memory.md`](../user-memory.md#searchmemory).
+- **MCP `delete_user_memory`** answers an error for an id that names no entry, as the REST endpoint
+  answers 404. It reported `"status": "deleted"` — for any unknown id on both backends, and, with the
+  id contract above, for a malformed id on MongoDB that used to fail.
 - **Sort order:** `PostgresResourceStorage.findResources` sorts `DESC NULLS LAST`. So the sorted page is
   still read off an index, the field indexes are now built in that order
   (`idx_resources_fdesc_<field>`, `(collection_name, (data ->> field) DESC NULLS LAST)`); the old
-  ascending `idx_resources_field_<field>` is dropped once its replacement exists. On first boot of this
-  version each hinted field's index is built once — a plain `CREATE INDEX`, as for any new hint.
+  ascending `idx_resources_field_<field>` is dropped once its replacement exists **and is valid**. On a
+  database an earlier release built, the replacement is not built at boot: a plain `CREATE INDEX` holds a
+  SHARE lock on the shared `resources` table — one descriptor per conversation, nine hinted descriptor
+  fields — and would stop every write on every instance until all were built. `PostgresFieldIndexSwaps`
+  builds them with `CREATE INDEX CONCURRENTLY` on a background thread once boot has settled (as the
+  `pg_trgm` indexes are built), one advisory lock per index so two booting instances never build the
+  same one, repairs an index an interrupted build left INVALID, and drops the old index
+  `CONCURRENTLY` only after that. Until then the old index still serves equality filters; a refused
+  build (no privilege) logs one warning and keeps it. A fresh database builds the new index at boot.
 - **Orphan purge:** `RestOrphanAdmin` reads every parser document's current version and the parser
   version each workflow step pins, and counts their `extensions.dictionaries[n].config.uri` as
   references. The pre-delete re-check asks parser documents too, and fails closed. An unreadable parser
@@ -100,10 +113,17 @@ places where the two backends answered the same request differently:
 - `RestOrphanAdminSafetyTest.ParserDocumentReferences` (7 new): parser-document references in the scan,
   at the current and at the pinned version, the re-check, and failing closed.
 - `PostgresResourceStorageTest`, `RestUtilitiesTest`: the SQLSTATE match (a German message still
-  counts, an English one with another SQLSTATE does not), the index order and replacement, `isValidId`.
+  counts, an English one with another SQLSTATE does not), the index order, that an upgraded database
+  builds nothing blocking at boot, `isValidId`.
+- `PostgresFieldIndexSwapsTest` (new) and `PostgresResourceStorageContainerTest.FieldIndexReplacement`
+  (real PostgreSQL): the concurrent swap, its lock, its repair of an INVALID index, and that the old
+  index survives a refused or invalid build.
+- `UserMemoryToolScopingTest.forgetFactDoesNotDependOnTheCappedSearch`,
+  `McpMemoryToolsBranchCoverageTest.unknownEntryIsNotReportedAsDeleted`.
 
 ```decision-log
 | 2026-10-02 | Unknown, foreign and malformed ids are "not found" (404) on both datastores, checked before any statement is sent | PostgreSQL answered 500, MongoDB 400 on a GET and 500 on a POST, for the same request; archives and URLs from one backend carry the other's id format | 400 for a malformed id on both (MongoDB had it on some paths) — rejected: a UUID is not malformed, only foreign, and most callers cannot tell the backends apart |
 | 2026-10-02 | PostgreSQL sorts `DESC NULLS LAST`, and its field indexes are rebuilt in that order (`idx_resources_fdesc_*`, replacing `idx_resources_field_*`) | MongoDB sorts a missing field last, PostgreSQL first | `NULLS LAST` on the old ascending index — rejected: the planner can no longer read a sorted page off it and sorts the whole collection per listing page |
+| 2026-10-02 | On an upgraded database the `idx_resources_fdesc_*` replacements are built `CONCURRENTLY` in the background, under a per-index advisory lock, and the old index is dropped only once the new one is valid | A blocking `CREATE INDEX` at boot locks the shared `resources` table (a descriptor per conversation) against writes cluster-wide for the whole build | `CREATE INDEX CONCURRENTLY` at boot — rejected: it waits for every open transaction, so boot could stall, and two booting instances race on one name; keeping the ascending index and adding the new one beside it — rejected: two indexes per field cost every write |
 | 2026-10-02 | The EDDI 5 migrations are inert when `eddi.datastore.type=postgres` | `holdsRetention()` dereferenced the lazy `MongoDatabase` proxy on PostgreSQL and held retention for ever | Injecting `Instance<MongoDatabase>` — rejected: the proxy is already lazy; the defect was calling it, and EDDI 5 never ran on PostgreSQL |
 ```
