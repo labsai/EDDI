@@ -34,6 +34,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -104,10 +105,13 @@ class ContextSuppliedOutputTemplatingTest {
 
         runOutputAndTemplating(null);
 
-        IData<List<QuickReply>> quickReplies = memory.getCurrentStep().getLatestData("quickReplies:context");
-        assertNotNull(quickReplies, "precondition: the context quick replies were stored");
-        assertEquals(PROBE, quickReplies.getResult().getFirst().getValue());
-        assertEquals(PROBE, quickReplies.getResult().getFirst().getExpressions());
+        // Client-sent: shown literally, but never a quickReplies:* data entry (which
+        // the
+        // next turn's parser would turn into expressions) and without expressions.
+        assertNull(memory.getCurrentStep().getLatestData("quickReplies:context"));
+        var shown = displayedQuickReplies();
+        assertEquals(PROBE, shown.getFirst().getValue());
+        assertNull(shown.getFirst().getExpressions());
         assertNoSecretInConversationOutput();
     }
 
@@ -119,9 +123,13 @@ class ContextSuppliedOutputTemplatingTest {
 
         runOutputAndTemplating(null);
 
-        IData<List<QuickReply>> quickReplies = memory.getCurrentStep().getLatestData("quickReplies:context");
-        assertNotNull(quickReplies);
-        assertEquals(PROBE, quickReplies.getResult().getFirst().getValue());
+        assertNull(memory.getCurrentStep().getLatestData("quickReplies:context"));
+        assertEquals(PROBE, displayedQuickReplies().getFirst().getValue());
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<QuickReply> displayedQuickReplies() {
+        return (List<QuickReply>) memory.getCurrentStep().getConversationOutput().get("quickReplies");
     }
 
     @Test

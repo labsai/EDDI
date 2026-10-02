@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Extensions** are the building blocks of EDDI agents. In EDDI's composable architecture, agents are not monolithic applications but rather **assemblies of extensions**, each providing a specific capability. Extensions are referenced by packages, and packages are combined to form complete agents.
+**Extensions** are the building blocks of EDDI agents. In EDDI's composable architecture, agents are not monolithic applications but rather **assemblies of extensions**, each providing a specific capability. Extensions are referenced by workflows, and workflows are combined to form complete agents.
 
 ### The Agent Composition Hierarchy
 
@@ -27,8 +27,11 @@ Each extension type corresponds to a **lifecycle task** or **resource** that the
 | `ai.labs.parser.dictionaries.*` | Define vocabularies and entities | Used by parser to recognize intents and entities      |
 | `ai.labs.behavior`              | Define IF-THEN rules             | Decides what actions to take based on conditions      |
 | `ai.labs.httpcalls`             | Configure external API calls     | Executes HTTP requests to external services           |
+| `ai.labs.mcpcalls`              | Call tools on an MCP server      | Invokes MCP tools on behavior-rule actions, and offers them to the LLM — see [MCP Client](mcp-client.md) |
+| `ai.labs.rag`                   | Retrieval-augmented generation   | Retrieves knowledge-base chunks for the LLM — see [RAG](rag.md) |
 | `ai.labs.llm`                   | Configure LLM integrations       | Sends requests to LLM APIs (OpenAI, Claude, etc.)     |
 | `ai.labs.output`                | Define output templates          | Formats responses using conversation data             |
+| `ai.labs.templating`            | Render output templates          | Renders the `{...}` placeholders of the output; place it last |
 | `ai.labs.property`              | Extract and store data           | Manages conversation memory properties                |
 
 ### EDDI Resource URIs
@@ -36,7 +39,7 @@ Each extension type corresponds to a **lifecycle task** or **resource** that the
 All EDDI's resources start with `eddi://`, which is used to distinguish EDDI-specific extensions from other resources. This URI scheme allows:
 
 - **Version control**: Each extension can have multiple versions
-- **Reusability**: The same extension can be used by multiple packages/agents
+- **Reusability**: The same extension can be used by multiple workflows/agents
 - **Clear references**: Explicit URIs make configuration transparent
 
 Example URI:
@@ -84,7 +87,9 @@ The list of `extensions` will allow you to have an overview of what is enabled i
 
 ## Example
 
-> More about regular dictionaries can be found [here](creating-your-first-agent/#1-creating-a-regular-dictionary).
+> More about regular dictionaries can be found [here](creating-your-first-agent/creating-your-first-agent-1.md#1-creating-a-regular-dictionary-inside-parser).
+
+The response below is abridged: every registered step type is listed with its config fields, including `eddi://ai.labs.llm`, `eddi://ai.labs.mcpcalls` and `eddi://ai.labs.rag`, which are shown with their `uri` only.
 
 _Request URL_
 
@@ -98,6 +103,11 @@ _Response Body_
     type: "eddi://ai.labs.parser",
     displayName: "Input Parser",
     configs: {
+      uri: {
+        displayName: "Resource URI",
+        fieldType: "URI",
+        isOptional: true,
+      },
       includeUnknown: {
         displayName: "Include Unknown Expressions",
         fieldType: "BOOLEAN",
@@ -293,6 +303,30 @@ _Response Body_
         fieldType: "URI",
         isOptional: false,
       },
+    },
+    extensions: {},
+  },
+  {
+    type: "eddi://ai.labs.mcpcalls",
+    displayName: "MCP Calls",
+    configs: {
+      uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false },
+    },
+    extensions: {},
+  },
+  {
+    type: "eddi://ai.labs.rag",
+    displayName: "Knowledge Base (RAG)",
+    configs: {
+      uri: { displayName: "Knowledge Base URI", fieldType: "URI", isOptional: false },
+    },
+    extensions: {},
+  },
+  {
+    type: "eddi://ai.labs.llm",
+    displayName: "Lang Chain",
+    configs: {
+      uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false },
     },
     extensions: {},
   },

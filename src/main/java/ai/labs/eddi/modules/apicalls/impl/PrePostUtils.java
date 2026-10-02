@@ -256,6 +256,7 @@ public class PrePostUtils {
             }
 
             var context = new Context(Context.ContextType.object, output);
+            context.setServerGenerated(true);
             IData<Context> contextData = dataFactory.createData("context:output", context);
             memory.getCurrentStep().storeData(contextData);
         }
@@ -277,6 +278,10 @@ public class PrePostUtils {
             }
 
             var context = new Context(Context.ContextType.object, quickReplies);
+            // Built from this agent's own qrBuildInstructions: its expressions are
+            // configuration, so the next turn's parser may honour them — unlike quick
+            // replies a client sends as context (see OutputGenerationTask).
+            context.setServerGenerated(true);
             IData<Context> contextData = dataFactory.createData("context:quickReplies", context);
             memory.getCurrentStep().storeData(contextData);
         }
