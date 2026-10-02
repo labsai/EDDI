@@ -45,5 +45,9 @@ no meter is registered and nothing about NATS is logged.
   HITL are unchanged); only mutual exclusion moved to NATS. Routing turns to an owner node
   was rejected — it would have meant serializing caller identities and every response channel.
 - In-memory replay keeps its coordinator contract (remove the entry) so its tests stay
-  untouched; the admin REST replay is what became honest — it rebuilds the turn from the
-  captured input and refuses (409, entry kept) an entry without one.
+  untouched. Every dead letter now carries the turn's input, which is what lets the admin
+  replay in the follow-up `feat/nats-cluster-state` rebuild the turn instead of only
+  dropping the entry.
+- Shared state beyond leases and dead letters (caches, rate limits, nonces, audit
+  sequences, cross-node cancel/GDPR/HITL) follows in `feat/nats-cluster-state`; Helm,
+  Kubernetes, Compose and the demo in `feat/nats-cluster-deploy`.
