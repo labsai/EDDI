@@ -112,7 +112,10 @@ export function CommandPalette() {
             </kbd>
           </div>
 
-          <Command.List className="max-h-[360px] overflow-y-auto p-2">
+          {/* 360px, but never more than the window leaves below the 15% offset
+              and the search row: a fixed 360px ran past the bottom edge of a
+              short window, where scrolling the list cannot reach. */}
+          <Command.List className="max-h-[min(360px,60dvh)] overflow-y-auto p-2">
             <Command.Empty className="py-8 text-center text-sm text-muted-foreground">
               {t("commandPalette.noResults", "No results found.")}
             </Command.Empty>

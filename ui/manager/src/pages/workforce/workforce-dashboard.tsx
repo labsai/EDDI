@@ -335,10 +335,16 @@ function WorkforceDashboard() {
     }
   }, [viewMode]);
 
+  // Every state below is its own scroller. `workforce-main` clips its content
+  // (see the scroll contract in workforce-scroll-contract.test.tsx), so a state
+  // rendered without one loses everything below the fold. The empty state did:
+  // the onboarding hero is taller than a laptop screen, and its templates — the
+  // way to create a first task force — could not be scrolled into view.
+
   // Loading
   if (isLoading) {
     return (
-      <div className="p-5 md:p-8">
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 md:p-8">
         <DashboardSkeleton />
       </div>
     );
@@ -347,7 +353,7 @@ function WorkforceDashboard() {
   // Error
   if (isError) {
     return (
-      <div className="p-5 md:p-8">
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 md:p-8">
         <DashboardError onRetry={() => refetch()} />
       </div>
     );
@@ -355,7 +361,11 @@ function WorkforceDashboard() {
 
   // Empty
   if (!boards || boards.length === 0) {
-    return <OnboardingHero />;
+    return (
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <OnboardingHero />
+      </div>
+    );
   }
 
   // Populated — 3-pillar Intelligence Dashboard
