@@ -40,7 +40,7 @@ That's it. The snippet content is automatically injected at template resolution 
 
 ### Auto-Loading
 
-Snippets are loaded from MongoDB at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Qute template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
+Snippets are loaded from the datastore (MongoDB or PostgreSQL) at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Qute template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
 
 ```
 Template Data Map:
@@ -96,7 +96,7 @@ the node that made the change; other nodes pick it up within the cache TTL below
 
 Snippets are cached in a Caffeine cache with a **5-minute TTL**. This means:
 
-- Snippets load once from MongoDB, then serve from cache
+- Snippets load once from the datastore (MongoDB or PostgreSQL, whichever the deployment uses), then serve from cache
 - `POST`/`PUT`/`DELETE` on `/snippetstore/snippets` invalidate the cache synchronously, so a snippet edited through the REST API takes effect on the next LLM turn
 - The 5-minute TTL is the fallback for changes made outside the REST API (a direct database write, or another node)
 - Cache hit/miss metrics are exposed at `/q/metrics` as `eddi.snippets.cache.hits` and `eddi.snippets.cache.misses`

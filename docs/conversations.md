@@ -433,8 +433,9 @@ One of EDDI's most powerful features is the ability to **go back in time** withi
 
 EDDI maintains a **redo cache** of undone conversation steps. When you undo a step, it's moved to this cache. You can then either:
 
-- Continue the conversation (the undone step stays in the cache)
-- Redo the step (restores it from cache)
+- Redo the step (restores it from the cache), or
+- Continue the conversation — which **discards** the cache: a new message starts a
+  new step, and redo is no longer available
 
 ```
 Step 1 → Step 2 → Step 3 (current)
@@ -555,12 +556,15 @@ curl -X POST "http://localhost:7070/agents/CONV_ID" \
 
 # 6. Wait, maybe flight was right. Check if redo is available
 curl -X GET "http://localhost:7070/agents/CONV_ID/redo"
-# Returns: true (the redo cache survives new messages — Step 3 is still cached)
+# Returns: false — sending "Book a hotel" discarded the undone "Book a flight" step
 ```
 
 ### Redo Cache Behavior
 
-**Important**: The redo cache is **not** cleared when you send a new message after an undo. The undone step stays on the stack, so a redo after continuing the conversation splices it back on top of the step you just appended.
+**Important**: The redo cache **is cleared** when you send a new message after an
+undo. Redo only restores steps undone since the last message; once the
+conversation continues, the undone steps are gone for good. Several consecutive
+undos can be redone one by one, as long as no message is sent in between.
 
 ```
 Normal flow:
@@ -571,9 +575,12 @@ Step 1 → Step 2 | [Step 3 cached]
          ↓ can redo
 
 After new message:
-Step 1 → Step 2 → Step 4 | [Step 3 still cached]
-         ↓ redo now yields Step 1 → Step 2 → Step 4 → Step 3
+Step 1 → Step 2 → Step 4 | [cache empty]
+         ↓ redo answers 409
 ```
+
+The redo cache is part of the stored conversation, so it survives between
+requests and across instances until the next message clears it.
 
 ### Checking Whether Undo / Redo Is Available
 
@@ -631,9 +638,8 @@ User: "Actually, let me see hotels instead"
 ```
 Developer tests:
 1. Input A → Response X
-2. Undo
-3. Input B → Response Y
-4. Undo, redo → Back to Response X
+2. Undo, redo → Back to Response X
+3. Undo, Input B → Response Y (X can no longer be redone)
 ```
 
 ### Limitations
@@ -641,13 +647,12 @@ Developer tests:
 - Undo/redo only affects conversation **history** and **memory**
 - External API calls made during undone steps are **not reversed**
   - Example: If a payment API was called, undoing won't refund the payment
-- Redo cache has a **size limit** (configurable)
-- Redo cache is **session-specific** (cleared on conversation end)
+- The redo cache is cleared by the next message; there is no separate size limit
 
 ### Best Practices
 
 1. **Always check availability** before calling undo/redo to avoid errors
-2. **Inform users** that continuing after an undo leaves the undone step redoable (UX consideration)
+2. **Inform users** that continuing after an undo discards the undone step for good (UX consideration)
 3. **Be careful with side effects** - undo doesn't reverse external API calls
 4. **Use for user convenience** - great for conversational UX
 5. **Log undo/redo** - helps with analytics and debugging
@@ -656,11 +661,19 @@ Developer tests:
 
 - `POST /agents/{agentId}/start` - Start conversation
 - `POST /agents/{conversationId}` - Send message
-- `GET /agents/{conversationId}` - Get conversation state
+- `POST /agents/{conversationId}/stream` - Send message, receive the turn as Server-Sent Events
+- `GET /agents/{conversationId}` - Read the conversation
+- `GET /agents/{conversationId}/status` - Read the conversation state
 - `POST /agents/{conversationId}/undo` - Undo last step
 - `POST /agents/{conversationId}/redo` - Redo last step
 - `GET /agents/{conversationId}/undo` - Check undo availability
 - `GET /agents/{conversationId}/redo` - Check redo availability
+- `POST /agents/{conversationId}/endConversation` - End the conversation
+
+Every conversation endpoint — including rerun, cancel, the approval endpoints,
+the admin state reset, the conversation store and the streaming event contract —
+is described with captured requests and responses in the
+[REST API Reference](rest-api-reference.md).
 
 ## Sample Agent
 

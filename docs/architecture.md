@@ -14,10 +14,19 @@ This document provides a comprehensive overview of EDDI's architecture, design p
 6. [Agent Composition Model](#agent-composition-model)
 7. [Key Components](#key-components)
 8. [Technology Stack](#technology-stack)
-9. [Multi-Agent Orchestration](#multi-agent-orchestration)
-10. [MCP Integration (Bilateral)](#mcp-integration-bilateral)
-11. [Persistent User Memory](#persistent-user-memory)
-12. [Agent Sync & Portability](#agent-sync--portability)
+9. [Design Patterns Used](#design-patterns-used)
+10. [Performance Characteristics](#performance-characteristics)
+11. [Deployment & Operations](#deployment--operations)
+12. [Case Study: The Platform Operator](#case-study-the-platform-operator)
+13. [Configuration Model Deep Dive](#configuration-model-deep-dive)
+14. [Database Architecture](#database-architecture)
+15. [Multi-Agent Orchestration](#multi-agent-orchestration)
+16. [MCP Integration (Bilateral)](#mcp-integration-bilateral)
+17. [Persistent User Memory](#persistent-user-memory)
+18. [Agent Sync & Portability](#agent-sync--portability)
+19. [Security Architecture](#security-architecture)
+20. [Summary](#summary)
+21. [Related Documentation](#related-documentation)
 
 ---
 
@@ -35,7 +44,7 @@ E.D.D.I. (Enhanced Dialog Driven Interface) is a **multi-agent orchestration mid
 - **A Configuration Engine**: Agent orchestration defined through JSON configurations, not code
 - **A Middleware Service**: Acts as an intermediary that adds intelligence and control to conversation flows
 - **Business System Integrator**: Connects AI agents with your existing APIs, databases, and services
-- **Cloud-Native**: Built with Quarkus for fast startup, low memory footprint, and containerized deployment
+- **Container-Packaged**: A Quarkus application running on the JVM, shipped as a container image (`labsai/eddi`) with health and metrics endpoints
 - **Stateful**: Maintains complete conversation history and context throughout interactions
 
 ### EDDI Is Not:
@@ -56,7 +65,7 @@ EDDI's architecture is built on several key principles:
 2. **Composability**: Agents are assembled from reusable workflows and extensions
 3. **Asynchronous Processing**: Non-blocking I/O for handling concurrent conversations
 4. **State-Driven**: All operations transform or query the conversation state
-5. **Cloud-Native**: Designed for containerized, distributed deployments
+5. **Container-Ready**: Packaged as a container image, configured through environment variables, observable through health and metrics endpoints
 
 ### High-Level Architecture Diagram
 
@@ -108,8 +117,9 @@ EDDI's architecture is built on several key principles:
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    MongoDB + Cache                           │
-│         (Persistent Storage + Fast Retrieval)                │
+│             Datastore: MongoDB or PostgreSQL                 │
+│     (one per deployment, selected by eddi.datastore.type)    │
+│     + in-process Caffeine caches for short-lived lookups     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -168,8 +178,17 @@ Here's what happens when a user sends a message to an EDDI agent:
 
 ```
 POST /agents/{conversationId}
-Body: { "input": "Hello, what's the weather?", "context": {...} }
+Content-Type: application/json
+
+{
+  "input": "Hello, what's the weather?",
+  "context": {
+    "language": { "type": "string", "value": "en" }
+  }
+}
 ```
+
+The JSON body is an `InputData`: `input` is the user's text, and `context` maps each name to a `{type, value}` entry whose `type` is `string`, `expressions`, `object` or `array`. An entry may also set `"secret": true`, which makes its value usable for this turn only and keeps it out of storage and responses. A `text/plain` body is accepted too, as the input with no context. The conversation itself was created beforehand with `POST /agents/{agentId}/start`.
 
 #### 2. RestAgentEngine Receives Request
 
@@ -185,9 +204,8 @@ Body: { "input": "Hello, what's the weather?", "context": {...} }
 
 #### 4. IConversationMemory Loaded/Created
 
-- If existing conversation: Loads from MongoDB
-- If new conversation: Creates fresh memory object
-- Includes all previous steps, user data, context
+- Every turn loads the conversation's memory snapshot from the configured datastore (MongoDB or PostgreSQL) — conversation memory is not cached; only the conversation *state* is, for 30 seconds
+- Includes all previous steps and the conversation properties; the context sent with this turn is added to the new step
 
 #### 5. LifecycleManager Executes Pipeline
 
@@ -204,8 +222,8 @@ Each task in sequence:
 
 #### 6. State Persistence
 
-- Updated `IConversationMemory` saved to MongoDB
-- Cache updated with latest conversation state
+- Updated `IConversationMemory` saved to the datastore
+- Cached conversation state updated
 - Metrics recorded (duration, success/failure)
 
 #### 7. Response Returned
@@ -215,8 +233,10 @@ Each task in sequence:
   "conversationState": "READY",
   "conversationOutputs": [
     {
-      "output": ["The weather today is sunny with a high of 75°F"],
-      "actions": ["weather_response"]
+      "actions": ["weather_response"],
+      "output": [
+        { "type": "text", "text": "The weather today is sunny with a high of 75°F", "delay": 0 }
+      ]
     }
   ]
 }
@@ -359,10 +379,10 @@ Extensions are the **actual agent logic**:
       "id": "openaiChat",
       "type": "openai",
       "parameters": {
-        "apiKey": "...",
+        "apiKey": "${vault:openai-key}",
         "modelName": "gpt-4o",
         "systemMessage": "You are a helpful assistant",
-        "sendConversation": "true",
+        "logSizeLimit": "10",
         "addToOutput": "true"
       }
     }
@@ -540,16 +560,14 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ### Core Framework
 
-- **Quarkus**: Supersonic, subatomic Java framework
-  - Fast startup times (~0.05s)
-  - Low memory footprint
-  - Native compilation support
+- **Quarkus**: Java application framework (the version is pinned in `pom.xml`)
+  - Build-time CDI wiring and configuration
   - Built-in observability (metrics, health checks)
 
 ### Language & Runtime
 
-- **Java 25**: Latest LTS with modern language features
-- **GraalVM**: Optional native compilation for even faster startup
+- **Java 25** on the JVM. The published image (`src/main/docker/Dockerfile`) is a JVM image on a Red Hat UBI 10 OpenJDK 25 runtime
+- **No native image.** EDDI does not ship or support a GraalVM native executable. `pom.xml` still carries a `native` Maven profile, but native compilation is planned work (`planning/native-image-migration.md`), not a supported build
 
 ### Dependency Injection
 
@@ -560,12 +578,13 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 - **JAX-RS**: Jakarta REST API standard
 - **AsyncResponse**: Non-blocking, scalable request handling
-- **JSON-B**: JSON binding for serialization/deserialization
+- **Jackson**: JSON serialization and deserialization (`quarkus-rest-jackson`; Jackson 2.x, managed by the Quarkus BOM)
 
 ### Database (DB-Agnostic)
 
 - **MongoDB 6.0+** (default): Document store for agent configurations and conversation logs
-- **PostgreSQL** (alternative): JDBC + JSONB storage, switchable via `eddi.datastore.type=postgres`
+- **PostgreSQL** (alternative): JDBC + JSONB storage, selected by starting with the `postgres` Quarkus profile (`QUARKUS_PROFILE=postgres`), which sets `eddi.datastore.type=postgres` and activates the datasource
+- One datastore per deployment — the two are alternatives, not a combination
 - Both backends support:
   - Agent, workflow, and extension configuration storage
   - Conversation history persistence
@@ -574,10 +593,10 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ### Caching
 
-- **Caffeine**: High-performance in-memory cache (replaced Infinispan in v6)
-  - Caches conversation state and agent configurations
-  - Configurable size limits per cache type
-  - Zero external dependencies — provided transitively by `quarkus-cache`
+- **Caffeine**: In-process cache (replaced Infinispan in v6)
+  - Caches short-lived lookups: conversation *state* (30-second TTL), compiled templates, built LLM model instances, prompt snippets, resolved secrets and similar. Conversation memory itself is read from the datastore on every turn
+  - Size limits per cache name (`CacheFactory`); caches are local to each instance
+  - Declared explicitly in `pom.xml` (version managed by the Quarkus BOM) alongside `quarkus-cache`
 
 ### LLM Integration
 
@@ -594,8 +613,8 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ### Security
 
-- **OAuth 2.0**: Authentication and authorization
-- **Keycloak**: Identity and access management
+- **OpenID Connect** (`quarkus-oidc`): bearer-token validation and role checks, off until `quarkus.oidc.tenant-enabled=true`
+- **Keycloak**: the identity provider EDDI's shipped realm and manifests are built for; any OIDC provider can issue the tokens
 
 ### Templating
 
@@ -642,20 +661,20 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ## Performance Characteristics
 
+EDDI publishes no benchmark figures, so measure on your own hardware and agents. What can be said from the design:
+
 ### Startup Time
 
-- **JVM mode**: < 2 seconds
-- **Native mode**: < 50ms (with GraalVM)
+- EDDI runs on the JVM only (there is no native build). Startup is dominated by JVM start, Quarkus boot and the datastore connection, plus any startup migrations
 
 ### Memory Footprint
 
-- **JVM mode**: ~200MB baseline
-- **Native mode**: ~50MB baseline
+- A JVM process; size the heap for the number of concurrent conversations, the attachment and request-body limits, and any in-process models (`jlama`)
 
 ### Request Latency
 
-- **Without LLM**: 10-50ms (parsing, rules, simple API calls)
-- **With LLM**: 500-5000ms (depends on LLM provider)
+- **Without an LLM**: a turn costs a memory load and a save against the datastore, plus the pipeline's own work (parsing, rules, any HTTP calls)
+- **With an LLM**: dominated by the provider's response time, and by every tool round-trip the model makes
 
 ### Scalability
 
@@ -665,19 +684,18 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ---
 
-## Cloud-Native Features
+## Deployment & Operations
 
 ### Containerization
 
-- Official Docker images: `labsai/eddi`
-- Certified by IBM/Red Hat
-- Multi-stage builds for minimal image size
+- Official Docker images: `labsai/eddi`, built from `src/main/docker/Dockerfile` on a digest-pinned Red Hat UBI 10 OpenJDK 25 runtime base
+- Two-stage build (a `docs` stage and the runtime stage)
 
 ### Orchestration
 
-- Kubernetes-ready
-- OpenShift certified
-- Health checks built-in
+- Kubernetes manifests (`k8s/`) and a Helm chart (`helm/`) ship in the repository — see [Kubernetes](kubernetes.md)
+- OpenShift: each stable release's image is submitted for Red Hat container certification — see [Red Hat OpenShift](redhat-openshift.md)
+- Liveness and readiness health checks built in
 
 ### Configuration
 
@@ -689,7 +707,8 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 - Prometheus metrics endpoint: `/q/metrics`
 - Health checks: `/q/health/live`, `/q/health/ready`
-- Structured logging with correlation IDs
+- Conversation turns log with `agentId`, `conversationId`, `userId` and `environment` in the logging MDC (`ContextLogger`)
+- Per-task OpenTelemetry tracing — see [Monitoring](monitoring/monitoring-guide.md)
 
 ---
 
@@ -730,20 +749,6 @@ The operator isn't special code—it's a **regular EDDI agent** that uses:
 This demonstrates EDDI's power: **the same architecture that powers conversational agents can orchestrate complex, multi-step workflows**, even self-modifying the system itself — and the deterministic governance layer (Pillar 2) is what makes that safe rather than reckless.
 
 **See [Human-in-the-Loop](hitl.md) for the approval gate, and [HTTP Calls](httpcalls.md) for how the generated tools are executed.**
-
----
-
-## Summary
-
-EDDI's architecture is built on principles of **modularity**, **composability**, and **orchestration**. It's not a chatbot—it's the **infrastructure for building sophisticated conversational AI systems** that can:
-
-- Orchestrate multiple APIs and LLMs
-- Apply complex business logic through configurable rules
-- Maintain stateful, context-aware conversations
-- Scale horizontally in cloud environments
-- Be assembled from reusable, version-controlled components
-
-The **Lifecycle Pipeline** is the heart of this architecture, providing a flexible, pluggable system where agent behavior is configuration, not code.
 
 ---
 
@@ -835,11 +840,15 @@ REST API → Store Interface (IResourceStore<T>)
          └── PostgresResourceStorage<T> (PostgreSQL + JSONB implementation)
 ```
 
-Switching databases requires only a config change:
+Switching databases is configuration, not code. MongoDB is the default; PostgreSQL is selected with the `postgres` profile, which sets `eddi.datastore.type=postgres` and activates the JDBC datasource (`quarkus.datasource.active` is `false` outside that profile, so setting `eddi.datastore.type` alone is not enough):
 ```properties
-eddi.datastore.type=mongodb   # default
-# eddi.datastore.type=postgres  # alternative
+# environment: QUARKUS_PROFILE=postgres
+%postgres.quarkus.datasource.jdbc.url=jdbc:postgresql://localhost:5432/eddi
+%postgres.quarkus.datasource.username=eddi
+%postgres.quarkus.datasource.password=eddi
 ```
+
+See [Configuration Reference → Settings operators set first](configuration-reference.md#settings-operators-set-first).
 
 ---
 
@@ -895,7 +904,6 @@ EDDI's memory model extends beyond single conversations. The `IUserMemoryStore` 
   "cronExpression": "0 3 * * *",
   "timeZone": "UTC",
   "userId": "alice",
-  "message": "dream",
   "metadata": { "dreamType": "dream_consolidation" },
   "enabled": true
 }
@@ -904,8 +912,8 @@ EDDI's memory model extends beyond single conversations. The `IUserMemoryStore` 
 Three things this body does that are easy to get wrong:
 
 - **The `create_schedule` MCP tool cannot do this.** Its arguments (`agentId`, `triggerType`, `cron`, `heartbeatIntervalSeconds`, `message`, `name`, `timeZone`, `conversationStrategy`, `userId`, `environment`) contain no `metadata`, so a schedule created that way has `metadata == null`, `DreamService.isDreamSchedule(…)` returns `false`, and the schedule fires an ordinary chat turn against the agent on the dream cron forever — logged COMPLETED, consolidating nothing. REST is the only route that produces a working Dream schedule today.
-- **`message` is required even though Dream never reads it.** `RestScheduleStore.validateSchedule` rejects a CRON schedule without a non-blank `message`; the Dream fast-path bypasses `say()` entirely, so the value is inert — supply any placeholder.
-- **`userId` must name the real user whose memories are consolidated.** Left unset it defaults to `system:scheduler`, which `DreamService` rejects (the cycle is marked FAILED rather than consolidating an empty memory set).
+- **`message` is optional and ignored.** `RestScheduleStore.validateSchedule` requires a non-blank `message` for ordinary CRON schedules but exempts a Dream schedule (`metadata.dreamType=dream_consolidation`): the Dream fast-path bypasses `say()` entirely, so nothing would read it.
+- **`userId` must name the real user whose memories are consolidated.** A Dream schedule with no `userId`, a blank one, or the `system:scheduler` placeholder is rejected with 400 when it is created or updated.
 
 Memory visibility is enforced at the storage level — agents can only see memories matching their visibility scope, preventing cross-tenant memory leaks.
 
@@ -970,13 +978,14 @@ Master Key (env var EDDI_VAULT_MASTER_KEY)
   └→ PBKDF2-HMAC-SHA256 (600k iterations, per-deployment salt via VaultSaltManager)
        └→ Key Encryption Key (KEK)
             └→ AES-256-GCM encrypt/decrypt
-                 └→ Data Encryption Key (DEK, per-secret)
+                 └→ Data Encryption Key (DEK, one per tenant, in generations)
                       └→ AES-256-GCM encrypt/decrypt
                            └→ Secret plaintext
 ```
 
 - **Per-deployment salt**: `VaultSaltManager` generates and stores a unique 16-byte salt per EDDI instance
-- **Envelope encryption**: Rotating the master key re-wraps KEK→DEK without touching individual secrets
+- **Envelope encryption**: Each tenant has its own DEK, and every secret in that tenant is sealed under it (AES-256-GCM, with tenant, key name and DEK id bound in as associated data). Rotating the master key re-wraps every tenant's DEKs without touching any secret's ciphertext
+- **DEK rotation**: per tenant and additive — it installs a new DEK generation and re-seals the tenant's secrets onto it; each ciphertext records the generation that sealed it, so a rotation stopped halfway leaves everything readable
 - **Export scrubbing**: Agent export/sync automatically strips secrets from ZIP files
 
 ### Cryptographic Agent Identity
@@ -1025,6 +1034,22 @@ Production response headers (configured via `application.properties`):
 - `Content-Security-Policy: default-src 'self'; ...`
 
 `Strict-Transport-Security` is **not** set by EDDI — configure it at your TLS terminator / ingress.
+
+---
+
+## Summary
+
+EDDI's architecture is built on principles of **modularity**, **composability**, and **orchestration**. It's not a chatbot—it's the **infrastructure for building sophisticated conversational AI systems** that can:
+
+- Orchestrate multiple APIs and LLMs
+- Apply complex business logic through configurable rules
+- Maintain stateful, context-aware conversations
+- Scale horizontally in cloud environments
+- Be assembled from reusable, version-controlled components
+
+The **Lifecycle Pipeline** is the heart of this architecture, providing a flexible, pluggable system where agent behavior is configuration, not code.
+
+---
 
 ## Related Documentation
 
