@@ -140,17 +140,18 @@ value, so a changed name orphans everything filed under the old one.
 
 ### Role Tiers
 
-Roles are checked literally (`hasRole`), never inherited, so every endpoint and every MCP tool enumerates the roles it admits. The REST API and the MCP server share one matrix — a tier admits the same roles on both doors:
+Roles are checked literally (`hasRole`), never inherited, so every endpoint and every MCP tool enumerates the roles it admits. The REST API and the MCP server share one matrix — a tier admits the same roles on both doors, except where the table says otherwise:
 
 | Tier | Roles | Covers |
 | ---- | ----- | ------ |
 | Docs | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | Published documentation |
-| Converse | `eddi-admin`, `eddi-editor`, `eddi-user` (+ `eddi-viewer` over MCP) | Starting, continuing and reading one's **own** conversations, group discussions and memories |
+| Converse | `eddi-admin`, `eddi-editor`, `eddi-user` (+ `eddi-viewer` over MCP) | Starting, continuing and reading one's **own** conversations, group discussions and memories (the REST memory store admits only `eddi-admin` and `eddi-user`; over MCP an editor may read its own memories too) |
 | Author | `eddi-admin`, `eddi-editor` | Configuration stores, deployment, triggers, channels, groups, schedules (REST) |
 | Admin | `eddi-admin` | Agent setup (writes API keys to the vault), GDPR, logs, audit, secrets, tenant quotas; over MCP also schedules and memory writes for arbitrary users |
+| Observe (MCP only) | `eddi-admin`, `eddi-viewer` | The audit trail and pipeline logs of a conversation the caller owns (`read_audit_trail`, conversation-scoped `read_agent_logs`). Over REST these are Admin |
 | HITL | owner, `eddi-admin`, `eddi-approver` | Approval decisions, per conversation |
 
-`eddi-viewer` is the MCP read-and-converse role: over REST it reaches only the docs, usage and workspace listings. The per-tool assignment is in [MCP Server → Role Mapping](mcp-server.md#role-mapping), and `McpRoleTierParityTest` fails the build if an MCP tier and the REST endpoints it mirrors disagree.
+`eddi-viewer` is the MCP read-and-converse role: over REST it reaches only the docs, usage and workspace listings. The per-tool assignment is in [MCP Server → Role Mapping](mcp-server.md#role-mapping), and `McpRoleTierParityTest` fails the build if an MCP tier and the REST endpoints it mirrors disagree beyond these documented differences.
 
 ### Auth Permissions
 

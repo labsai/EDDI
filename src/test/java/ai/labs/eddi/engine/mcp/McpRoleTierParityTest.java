@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.api.IRestAgentSetup;
 import ai.labs.eddi.engine.api.IRestDocs;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
+import ai.labs.eddi.engine.api.IRestLogAdmin;
+import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.gdpr.IRestGdprAdmin;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
@@ -88,11 +90,19 @@ class McpRoleTierParityTest {
             "read_agent_logs");
 
     private static final Set<String> CONVERSE_TOOLS = Set.of("create_conversation", "talk_to_agent", "chat_with_agent", "chat_managed",
-            "read_conversation", "read_conversation_log", "list_conversations", "read_audit_trail", "discover_agents",
+            "read_conversation", "read_conversation_log", "list_conversations", "discover_agents",
             "describe_discussion_styles", "discuss_with_group", "start_group_discussion", "read_group_conversation",
             "list_group_conversations", "followup_with_member", "continue_group_discussion", "close_group_conversation",
             "delete_group_conversation", "list_user_memories", "get_visible_memories", "search_user_memories", "get_memory_by_key",
             "count_user_memories");
+
+    /**
+     * Conversation diagnostics: admin plus the MCP observer role. Their REST
+     * counterparts (audit, logs) are admin-only; see {@link McpRoles#OBSERVE}.
+     * read_agent_logs is listed under ADMIN_ONLY_TOOLS because the measured call
+     * passes no conversationId; readAgentLogsScoping covers the scoped read.
+     */
+    private static final Set<String> OBSERVE_TOOLS = Set.of("read_audit_trail");
 
     private static final Set<String> DOCS_TOOLS = Set.of("list_docs", "read_docs");
 
@@ -109,6 +119,9 @@ class McpRoleTierParityTest {
         }
         if (CONVERSE_TOOLS.contains(tool)) {
             return McpRoles.CONVERSE;
+        }
+        if (OBSERVE_TOOLS.contains(tool)) {
+            return McpRoles.OBSERVE;
         }
         if (DOCS_TOOLS.contains(tool)) {
             return McpRoles.DOCS;
@@ -208,7 +221,7 @@ class McpRoleTierParityTest {
     void editorWithoutViewerCanRead() throws Exception {
         for (String role : List.of(ADMIN, EDITOR)) {
             Object tools = instantiate(McpConversationTools.class, identityWith(Set.of(role)));
-            for (String tool : List.of("readConversation", "readConversationLog", "listConversations", "discoverAgents")) {
+            for (String tool : List.of("readConversation", "readConversationLog", "listConversations", "discoverAgents", "chatWithAgent")) {
                 Method m = Arrays.stream(McpConversationTools.class.getMethods()).filter(x -> x.getName().equals(tool)).findFirst().orElseThrow();
                 assertTrue(admitted(tools, m, new Object[m.getParameterCount()]), role + " refused " + tool);
             }
@@ -216,13 +229,13 @@ class McpRoleTierParityTest {
     }
 
     @Test
-    @DisplayName("read_agent_logs: conversation-scoped reads are in the conversation tier, unscoped reads are admin-only")
+    @DisplayName("read_agent_logs: conversation-scoped reads are in the observer tier, unscoped reads are admin-only")
     void readAgentLogsScoping() throws Exception {
         for (String role : ALL_ROLES) {
             Object tools = instantiate(McpConversationTools.class, identityWith(Set.of(role)));
             Method m = McpConversationTools.class.getMethod("readAgentLogs", String.class, String.class, String.class, Integer.class);
             boolean scoped = admitted(tools, m, new Object[]{null, "conv-1", null, null});
-            assertEquals(McpRoles.CONVERSE.contains(role), scoped, "scoped read for " + role);
+            assertEquals(McpRoles.OBSERVE.contains(role), scoped, "scoped read for " + role);
         }
     }
 
@@ -275,6 +288,27 @@ class McpRoleTierParityTest {
         converseWithoutViewer.remove(VIEWER);
         assertEquals(restRoles(IRestAgentEngine.class), converseWithoutViewer);
         assertEquals(restRoles(IRestGroupConversation.class), converseWithoutViewer);
+
+        // The observer tier is REST's audit/log tier (admin-only) plus eddi-viewer.
+        // It must never admit eddi-user or eddi-editor: an audit entry carries the
+        // agent's system prompt and tool-call arguments, which neither can read over
+        // REST.
+        var observeWithoutViewer = new HashSet<>(McpRoles.OBSERVE);
+        observeWithoutViewer.remove(VIEWER);
+        assertEquals(restRoles(IRestAuditStore.class), observeWithoutViewer, "IRestAuditStore");
+        assertEquals(restRoles(IRestLogAdmin.class), observeWithoutViewer, "IRestLogAdmin");
+    }
+
+    @Test
+    @DisplayName("the MCP memory reads admit every REST memory role; the extra roles reach only the caller's own userId")
+    void memoryReadsCoverRest() {
+        assertTrue(McpRoles.CONVERSE.containsAll(restRoles(IRestUserMemoryStore.class)));
+        var extra = new HashSet<>(McpRoles.CONVERSE);
+        extra.removeAll(restRoles(IRestUserMemoryStore.class));
+        // eddi-editor and eddi-viewer: both pass OwnershipValidator.validateUserAccess
+        // only for their own userId (it exempts eddi-admin alone) — documented in
+        // McpRoles and docs/mcp-server.md.
+        assertEquals(Set.of(EDITOR, VIEWER), extra);
     }
 
     @Test

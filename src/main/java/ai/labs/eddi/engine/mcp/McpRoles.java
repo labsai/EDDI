@@ -20,10 +20,14 @@ import java.util.List;
  * <p>
  * Each tier mirrors the {@code @RolesAllowed} of the REST resource the tools
  * correspond to; {@code McpRoleTierParityTest} reads both and fails when they
- * disagree. The one deliberate difference is {@link #CONVERSE}: it also admits
+ * disagree. The deliberate differences: {@link #CONVERSE} also admits
  * {@code eddi-viewer}, the MCP read-and-converse role that REST has no
- * counterpart for. Every tool in that tier is ownership-guarded, so the viewer
- * only ever reaches its own conversations and memories. The full matrix is
+ * counterpart for (every tool in that tier is ownership-guarded, so the viewer
+ * only ever reaches its own conversations and memories), and its memory reads
+ * admit {@code eddi-editor}, which the REST memory store does not (again only
+ * for the caller's own userId); {@link #OBSERVE} admits {@code eddi-viewer}
+ * next to the admin; and the {@link #ADMIN_ONLY} schedule and memory-write
+ * tools are narrower than the REST stores they touch. The full matrix is
  * documented in {@code docs/mcp-server.md} (Role Mapping).
  */
 final class McpRoles {
@@ -54,6 +58,19 @@ final class McpRoles {
      * plus {@code eddi-viewer}.
      */
     static final List<String> CONVERSE = List.of(ADMIN, EDITOR, USER, VIEWER);
+
+    /**
+     * Diagnostics of a conversation the caller owns: {@code read_audit_trail} and
+     * the conversation-scoped {@code read_agent_logs}. The REST counterparts
+     * ({@code IRestAuditStore}, {@code IRestLogAdmin}) are admin-only, because an
+     * audit entry carries the LLM request — the agent's system prompt, tool calls
+     * and their arguments — which {@code eddi-user} cannot read over REST at all.
+     * So this tier is <em>not</em> {@link #CONVERSE}: it is {@code eddi-admin} plus
+     * {@code eddi-viewer}, the MCP observer role that has always held these two
+     * tools (ownership-guarded). {@code eddi-editor} and {@code eddi-user} are
+     * deliberately absent; an editor who needs them is granted {@code eddi-viewer}.
+     */
+    static final List<String> OBSERVE = List.of(ADMIN, VIEWER);
 
     /** Published documentation — every EDDI role, as {@code IRestDocs}. */
     static final List<String> DOCS = List.of(ADMIN, EDITOR, USER, APPROVER, VIEWER);

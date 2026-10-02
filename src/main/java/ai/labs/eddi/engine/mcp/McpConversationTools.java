@@ -535,7 +535,7 @@ public class McpConversationTools {
                                          required = false) String level,
                                 @ToolArg(description = "Maximum number of log entries to return (default: 50)", required = false,
                                          defaultValue = "50") Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpRoles.OBSERVE);
         // An unscoped or agent-only read pulls from a shared server-side buffer that
         // mixes every user's workflow logs, provider errors and diagnostics — an
         // operator surface, not one user's data. The REST log endpoint
@@ -547,7 +547,7 @@ public class McpConversationTools {
         // error rather than the ownership "Access denied" message.
         String convFilter = (conversationId != null && !conversationId.isBlank()) ? conversationId : null;
         if (convFilter == null) {
-            // In addition to the conversation tier above, which eddi-admin is part of.
+            // In addition to the observer tier above, which eddi-admin is part of.
             requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         }
         try {
@@ -591,7 +591,7 @@ public class McpConversationTools {
     public String readAuditTrail(@ToolArg(description = "Conversation ID (required)") String conversationId,
                                  @ToolArg(description = "Maximum number of entries to return (default: 20)", required = false,
                                           defaultValue = "20") Integer limit) {
-        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        requireAnyRole(identity, authEnabled, McpRoles.OBSERVE);
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
         try {
