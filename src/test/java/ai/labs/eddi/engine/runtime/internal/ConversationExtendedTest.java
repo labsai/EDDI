@@ -526,24 +526,23 @@ class ConversationExtendedTest {
         }
 
         @Test
-        @DisplayName("loads unknown type as toString fallback")
-        void convertsFallbackEntry() throws Exception {
+        @DisplayName("loads a stored Double as a Double (it used to come back as a string)")
+        void convertsDoubleEntry() throws Exception {
             var store = mock(IUserMemoryStore.class);
             when(propertiesHandler.getUserMemoryStore()).thenReturn(store);
             when(memory.getUserId()).thenReturn("u1");
             when(memory.getAgentId()).thenReturn("a1");
 
-            // Use a type that doesn't match String/Map/List/Integer/Float/Boolean
-            var entry = createEntry("data", 99.9d, "double"); // Double, not Float
+            // MongoDB decodes every stored decimal as a Double
+            var entry = createEntry("data", 99.9d, "double");
             when(store.getVisibleEntries(anyString(), anyString(), anyList(), anyString(), anyInt()))
                     .thenReturn(List.of(entry));
 
             var conv = createConversation();
             conv.init(new HashMap<>());
 
-            // Falls through to toString fallback
             verify(conversationProperties).put(eq("data"),
-                    argThat(prop -> prop.getValueString() != null && prop.getValueString().contains("99.9")));
+                    argThat(prop -> Double.valueOf(99.9d).equals(prop.getValueDouble()) && prop.getValueString() == null));
         }
 
         private UserMemoryEntry createEntry(String key, Object value, String category) {

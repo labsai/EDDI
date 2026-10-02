@@ -160,16 +160,26 @@ We will emphasize the `httpCall` model and go through an example step by step, y
   "httpCalls": [
     {
       "name": "string",
+      "description": "string",
+      "parameters": { "<name>": "<description>" },
       "saveResponse": boolean,
       "fireAndForget": boolean,
       "responseObjectName": "string",
+      "responseHeaderObjectName": "string",
+      "timeoutInMillis": integer,
+      "maxResponseSizeInBytes": integer,
       "actions": [
         "string"
       ],
       "preRequest": {
+        "delayBeforeExecutingInMillis": integer,
+        "propertyInstructions": [ <property instruction, as in postResponse> ],
         "batchRequests": {
           "pathToTargetArray": "string",
-          "iterationObjectName": "string"
+          "iterationObjectName": "string",
+          "templateFilterExpression": "string",
+          "executeCallsSequentially": boolean,
+          "maxBatchSize": integer
         }
       },
       "request": {
@@ -181,6 +191,24 @@ We will emphasize the `httpCall` model and go through an example step by step, y
         "body": "string"
       },
       "postResponse": {
+        "retryApiCallInstruction": {
+          "maxRetries": integer,
+          "exponentialBackoffDelayInMillis": integer,
+          "maxBackoffDelayInMillis": integer,
+          "retryOnHttpCodes": [ <array of Integers> ],
+          "responseValuePathMatchers": [
+            { "valuePath": "string", "equals": "string", "contains": "string", "trueIfNoMatch": boolean }
+          ]
+        },
+        "outputBuildInstructions": [
+          {
+            "pathToTargetArray": "String",
+            "iterationObjectName": "String",
+            "templateFilterExpression": "String",
+            "outputType": "String",
+            "outputValue": "String"
+          }
+        ],
         "qrBuildInstructions": [
           {
             "pathToTargetArray": "String",
@@ -194,8 +222,12 @@ We will emphasize the `httpCall` model and go through an example step by step, y
             "name": "string",
             "valueString": "string",
             "scope": "string",
-            "fromObjectPath": "savedObjName.something.something",
+            "visibility": "string",
+            "fromObjectPath": "<responseObjectName>.something.something",
+            "toObjectPath": "string",
+            "convertToObject": boolean,
             "override": boolean,
+            "runOnValidationError": boolean,
             "httpCodeValidator": {
               "runOnHttpCode": [
                 <array of Integers>
@@ -227,7 +259,14 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.fireAndForget                                                      | (`Boolean`) whether to execute the request without waiting for a response to be returned, (useful for `POST`)                                                                                                                    |
 | httpCall.responseObjectName                                                 | (`String`) name of the `JSON` object so it can be accessed from other `httpCalls` or `outputsets`.                                                                                                                               |
 | httpCall.responseHeaderObjectName                                           | (`String`) name under which the RESPONSE headers are stored, reachable as `{memory.current.httpCalls.<responseHeaderObjectName>.<Header-Name>}` and, for an LLM tool, returned under the result's `headers` key. Unset by default — set it only when the answer you need is in a header (a `201`'s `Location`, say) rather than the body, since headers reach conversation memory unredacted. Header names are matched case-insensitively, and credential-bearing headers (`Set-Cookie`, `WWW-Authenticate`, …) are never stored. |
-| httpCall.actions                                                            | (`String`) name of the `output`/`behavior` set mapped to this http call.                                                                                                                                                         |
+| httpCall.description                                                        | (`String`) what the call does, in natural language — shown to an LLM when the call is offered as a tool.                                                                                                                       |
+| httpCall.parameters                                                         | (`Map<String, String>`) parameter name → description, for an LLM calling the call as a tool.                                                                                                                                    |
+| httpCall.actions                                                            | (`List<String>`) the behavior-rule actions that trigger this call (`"*"` matches any action).                                                                                                                                   |
+| httpCall.timeoutInMillis                                                    | (`Integer`) request timeout for this call; unset falls back to `eddi.httpcalls.default-timeout-millis` (30 s).                                                                                                                  |
+| httpCall.maxResponseSizeInBytes                                             | (`Integer`) how much of the response body is kept in conversation memory. A larger body is **truncated** (with a warning) rather than failing the call; unset falls back to `eddi.httpcalls.default-max-response-size-bytes` (2 MB). |
+| httpCall.preRequest.delayBeforeExecutingInMillis                            | (`Integer`, default `0`) wait this long before sending the request.                                                                                                                                                            |
+| httpCall.preRequest.propertyInstructions                                    | (`List`) property instructions run before the request is built, with the same fields and behaviour as `postResponse.propertyInstructions` (no HTTP-code gate).                                                                  |
+| httpCall.preRequest.batchRequests.executeCallsSequentially                  | (`Boolean`, default `false`) send the expanded batch requests one after another instead of concurrently.                                                                                                                       |
 | httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`". Only honoured when `fireAndForget` is `true`; on a call that waits for a response the batch instruction is ignored and exactly one request is sent. |
 | httpCall.preRequest.batchRequests.iterationObjectName                       | (`String`) name of the variable to be used for each element of array found in `pathToTargetArray`                                                                                                                                |
 | httpCall.preRequest.batchRequests.maxBatchSize                              | (`Integer`, default `100`, at most `1000` — both operator-configurable, see `eddi.httpcalls.batch.*` in the [configuration reference](configuration-reference.md)) most requests the batch may expand into. A target array with more elements refuses the whole call — nothing is sent and the turn fails with a message naming the limit — instead of silently dropping the tail. Saving a value above the ceiling is refused with `400`. |
@@ -237,17 +276,29 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.request.method                                                     | (`String`) `HTTP` Method of the `httpCall` (e.g `GET`,`POST`,etc...)                                                                                                                                                             |
 | httpCall.request.contentType                                                | (`String`) value of the `contentType HTTP header` of the `httpCall`                                                                                                                                                              |
 | httpCall.request.body                                                       | (`String`) an escaped `JSON` object that goes in the `HTTP Request` body if needed.                                                                                                                                              |
+| httpCall.postResponse.retryApiCallInstruction.maxRetries                    | (`Integer`, default `3`) how often the call is repeated when a retry condition below matches.                                                                                                                                   |
+| httpCall.postResponse.retryApiCallInstruction.exponentialBackoffDelayInMillis | (`Integer`, default `1000`) base delay of the exponential backoff between attempts.                                                                                                                                            |
+| httpCall.postResponse.retryApiCallInstruction.maxBackoffDelayInMillis       | (`Integer`) upper bound for one backoff delay — the engine clamps it to 30 s in any case.                                                                                                                                      |
+| httpCall.postResponse.retryApiCallInstruction.retryOnHttpCodes              | (`List<Integer>`, default `[502, 503]`) response codes that trigger a retry.                                                                                                                                                   |
+| httpCall.postResponse.retryApiCallInstruction.responseValuePathMatchers     | (`List`) `{valuePath, equals, contains, trueIfNoMatch}` checks on the response; a match (or, with `trueIfNoMatch`, a non-match) triggers a retry.                                                                                |
+| httpCall.postResponse.outputBuildInstructions[]                             | (`List`) builds output items from the response: one item of `outputType` per element of `pathToTargetArray` (bound to `iterationObjectName`, optionally filtered by `templateFilterExpression`), its text rendered from `outputValue`. Without `pathToTargetArray`, `outputValue` is rendered once. The items reach the reply through the output task. |
 | httpCall.postResponse.qrBuildInstructions[].pathToTargetArray               | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
 | httpCall.postResponse.qrBuildInstructions[].iterationObjectName             | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
 | httpCall.postResponse.qrBuildInstructions[].quickReplyValue                 | (`String`) `Qute expression` to use as a `quickReply` value.                                                                                                                                                                |
 | httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
 | httpCall.postResponse.propertyInstructions.name                             | (`String`) name of property to be used in templating                                                                                                                                                                             |
-| httpCall.postResponse.propertyInstructions.valueString                      | (`String`) a static value can be set here if `fromObjectPath` is not defined. Typed siblings exist for other value types: `valueInt`, `valueFloat`, `valueBoolean`, `valueObject`, `valueList`.                                   |
-| httpCall.postResponse.propertyInstructions.scope                            | <p>(<code>String</code>) Can be either : </p><p><code>step</code> used for only for one user interaction </p><p><code>conversation</code> for entire conversation and </p><p><code>longTerm</code> for between conversations</p> |
-| httpCall.postResponse.propertyInstructions.fromObjectPath                   | (`String`) JSON path to the saved object e.g `savedObjName.something.something`. The value found is response data and is never rendered as a template (only `valueString` is). A string is stored as found — or, with `convertToObject` and a value shaped like a JSON object (`{...}`), parsed into an object. Any other value (number, boolean, JSON object or array) is stored as an empty string                         |
-| httpCall.postResponse.propertyInstructions.override                         | (`Boolean`) flag for override                                                                                                                                                                                                    |
+| httpCall.postResponse.propertyInstructions.valueString                      | (`String`) a static value (a template) used when `fromObjectPath` is not defined. Typed siblings exist for other value types: `valueInt`, `valueLong`, `valueFloat`, `valueDouble`, `valueBoolean`, `valueObject`, `valueList`. |
+| httpCall.postResponse.propertyInstructions.scope                            | <p>(<code>String</code>) one of: </p><p><code>step</code> for this user interaction only, </p><p><code>conversation</code> for the entire conversation, </p><p><code>longTerm</code> across conversations, </p><p><code>secret</code> vaulted — see [Properties](properties.md#secret-properties)</p> |
+| httpCall.postResponse.propertyInstructions.visibility                       | (`String`) `self`, `group` or `global` — who can read a `longTerm` property; see [Properties](properties.md#visibility-v6).                                                                                                      |
+| httpCall.postResponse.propertyInstructions.fromObjectPath                   | (`String`) path to the value, starting at the call's `responseObjectName` — e.g. `weatherApi.main.temp` (there is no `httpCalls.` root here). The value is response data and is never rendered as a template (only `valueString` is). It is stored **as found, with its type**: a string as a string (or, with `convertToObject` and a value shaped like a JSON object, parsed into an object), a number as `valueInt` / `valueLong` / `valueDouble`, a boolean as a boolean, an object or array as `valueObject` / `valueList`. A path that resolves to nothing sets nothing. |
+| httpCall.postResponse.propertyInstructions.toObjectPath                     | (`String`) instead of setting a property, copy the value found at `fromObjectPath` to this path in the template data of the current task.                                                                                       |
+| httpCall.postResponse.propertyInstructions.convertToObject                  | (`Boolean`, default `false`) parse a string value shaped like a JSON object (`{...}`) into an object.                                                                                                                          |
+| httpCall.postResponse.propertyInstructions.override                         | (`Boolean`, default `true`) `false` leaves an already-set property alone.                                                                                                                                                        |
+| httpCall.postResponse.propertyInstructions.runOnValidationError             | (`Boolean`, default `false`) also run the instruction when the call ended in a validation error (an MCP call's error path uses this).                                                                                         |
 | httpCall.postResponse.propertyInstructions.httpCodeValidator.runOnHttpCode  | (`Array`: \<Integer> ) a list of http code that enables this property instruction e.g \[`200`]                                                                                                                                   |
-| httpCall.postResponse.propertyInstructions.httpCodeValidator.skipOnHttpCode | (`Array`: \<Integer>) list of http code that enables this property instruction e.g \[`500,501,400`]                                                                                                                              |
+| httpCall.postResponse.propertyInstructions.httpCodeValidator.skipOnHttpCode | (`Array`: \<Integer>) list of http codes that skip this property instruction e.g \[`500,501,400`]                                                                                                                              |
+
+A property instruction here runs on the same implementation as a `property.json` instruction, so the two store the same values. A failing one (a template that does not render) no longer disappears into the log: it is logged with the conversation id and recorded in the step under `propertyInstructions:errors`, and the remaining instructions still run. See [Properties](properties.md#via-prepost-request-instructions).
 
 ### HttpCall API endpoints
 
@@ -280,7 +331,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
           "token": "<token>"
         },
         "contentType": "application/json",
-        "body": "{\"text\": \"{memory.current.input}\",\"message_type\": \"incoming\",\"user_id\": \"{memory.current.userInfo.userId}\",\"platform\": \"eddi\"}"
+        "body": "{\"text\": \"{memory.current.input}\",\"message_type\": \"incoming\",\"user_id\": \"{userInfo.userId}\",\"platform\": \"eddi\"}"
       }
     },
     {
@@ -302,7 +353,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
           "token": "<token>"
         },
         "contentType": "application/json",
-        "body": "{\"text\": \"{output}\",\"message_type\": \"outgoing\",\"user_id\": \"{memory.current.userInfo.userId}\",\"platform\": \"eddi\"}"
+        "body": "{\"text\": \"{output}\",\"message_type\": \"outgoing\",\"user_id\": \"{userInfo.userId}\",\"platform\": \"eddi\"}"
       },
       "postResponse": {
         "propertyInstructions": [
@@ -355,7 +406,7 @@ For the sake of simplicity we will use a free weather API to fetch weather of ci
 
 ### 1 - Create regularDictionnary
 
-> More about regular dictionaries can be found [here](creating-your-first-agent/#1-creating-a-regular-dictionary).
+> More about regular dictionaries can be found [here](creating-your-first-agent/creating-your-first-agent-1.md#1-creating-a-regular-dictionary-inside-parser).
 
 _Request URL_
 
@@ -458,7 +509,9 @@ _Request Body_
 
 ### 3 - Create the **httpCall**
 
-Note that we can pass user input to the http call using _**`{memory.current.input}`**_
+Note that we can pass user input to the http call using _**`{memory.current.input}`**_.
+
+The OpenWeatherMap API key is a credential, so it is not written into the configuration: store it once in the [secrets vault](secrets-vault.md) under the name `openweathermap-appid` and reference it as `${vault:openweathermap-appid}` — it is resolved when the request is sent and never stored in the configuration or the conversation.
 
 _Request URL_
 
@@ -481,7 +534,7 @@ _Request Body_
         "path": "",
         "headers": {},
         "queryParams": {
-          "APPID": "c3366d78c7c0f76d63eb4cdf1384ddbf",
+          "APPID": "${vault:openweathermap-appid}",
           "units": "metric",
           "q": "{memory.current.input}"
         },
@@ -561,13 +614,13 @@ _Response Code_
 
 > The `Location` header contains the resource URI, e.g. `eddi://ai.labs.output/outputstore/outputsets/<id>?version=1`
 
-### 5 - Creating the package
+### 5 - Creating the workflow
 
-> More about packages can be found [here](creating-your-first-agent/#4-creating-the-package).
+> More about workflows can be found [here](creating-your-first-agent/creating-your-first-agent-1.md#4-creating-the-workflow).
 >
 > Important Workflow note
 >
-> - `ai.labs.httpcalls` & `ai.labs.output` must come after `ai.labs.behavior` in order of the package definition
+> - `ai.labs.httpcalls` & `ai.labs.output` must come after `ai.labs.behavior` in the order of the workflow steps
 > - `ai.labs.templating` has to be after `ai.labs.output`
 
 _Request URL_
@@ -609,13 +662,6 @@ _Request Body_
           }
         ],
         "corrections": [
-          {
-            "type": "eddi://ai.labs.parser.corrections.stemming",
-            "config": {
-              "language": "english",
-              "lookupIfKnown": "false"
-            }
-          },
           {
             "type": "eddi://ai.labs.parser.corrections.levenshtein",
             "config": {
@@ -677,7 +723,7 @@ _Request Body_
 ```javascript
 {
   "workflows": [
-    "eddi://ai.labs.workflow/workflowstore/workflows/{{package_id}}?version=1"
+    "eddi://ai.labs.workflow/workflowstore/workflows/{{workflow_id}}?version=1"
   ],
   "channels": []
 }

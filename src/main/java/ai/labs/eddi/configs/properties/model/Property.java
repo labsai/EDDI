@@ -15,9 +15,22 @@ public class Property {
     private List<Object> valueList;
     private Integer valueInt;
     private Float valueFloat;
+    /**
+     * A whole number outside the {@code int} range — a JSON number Jackson reads as
+     * a {@code Long}, such as an epoch-millisecond timestamp or a large id. Added
+     * next to {@link #valueInt} rather than widening it, so stored documents and
+     * existing configurations keep their shape.
+     */
+    private Long valueLong;
+    /**
+     * A decimal number at full precision — a JSON number with a fraction, which
+     * Jackson reads as a {@code Double}. {@link #valueFloat} keeps about seven
+     * significant digits and would round a price or a coordinate.
+     */
+    private Double valueDouble;
     private Boolean valueBoolean;
     private Scope scope = Scope.conversation;
-    private Visibility visibility; // null = self (backward compat)
+    private Visibility visibility; // null = the agent's default (ConversationGroups.persistedVisibility)
 
     /**
      * Provenance marker: {@code TRUE} on the value
@@ -81,6 +94,18 @@ public class Property {
         this.scope = scope;
     }
 
+    public Property(String name, Long valueLong, Scope scope) {
+        this.name = name;
+        this.valueLong = valueLong;
+        this.scope = scope;
+    }
+
+    public Property(String name, Double valueDouble, Scope scope) {
+        this.name = name;
+        this.valueDouble = valueDouble;
+        this.scope = scope;
+    }
+
     public Property(String name, Boolean valueBoolean, Scope scope) {
         this.name = name;
         this.valueBoolean = valueBoolean;
@@ -93,11 +118,13 @@ public class Property {
 
     /**
      * Controls which agents can see a {@code longTerm} property. Only meaningful
-     * when {@code scope == longTerm}. {@code null} is treated as {@code self} for
-     * backward compatibility.
+     * when {@code scope == longTerm}. {@code null} takes the agent's
+     * {@code userMemoryConfig.defaultVisibility} at the persistence boundary —
+     * {@code self} when the agent declares the block, {@code global} when it does
+     * not.
      */
     public enum Visibility {
-        /** Only the agent that stored it can see it (default). */
+        /** Only the agent that stored it can see it. */
         self,
         /** All agents in the same group can see it. */
         group,
@@ -174,6 +201,22 @@ public class Property {
         this.valueFloat = valueFloat;
     }
 
+    public Long getValueLong() {
+        return valueLong;
+    }
+
+    public void setValueLong(Long valueLong) {
+        this.valueLong = valueLong;
+    }
+
+    public Double getValueDouble() {
+        return valueDouble;
+    }
+
+    public void setValueDouble(Double valueDouble) {
+        this.valueDouble = valueDouble;
+    }
+
     public Boolean getValueBoolean() {
         return valueBoolean;
     }
@@ -226,12 +269,14 @@ public class Property {
         return Objects.equals(name, that.name) && Objects.equals(valueString, that.valueString)
                 && Objects.equals(valueObject, that.valueObject) && Objects.equals(valueList, that.valueList)
                 && Objects.equals(valueInt, that.valueInt) && Objects.equals(valueFloat, that.valueFloat)
+                && Objects.equals(valueLong, that.valueLong) && Objects.equals(valueDouble, that.valueDouble)
                 && Objects.equals(valueBoolean, that.valueBoolean) && Objects.equals(scope, that.scope)
                 && Objects.equals(visibility, that.visibility) && Objects.equals(autoVaulted, that.autoVaulted);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueBoolean, scope, visibility, autoVaulted);
+        return Objects.hash(name, valueString, valueObject, valueList, valueInt, valueFloat, valueLong, valueDouble, valueBoolean, scope, visibility,
+                autoVaulted);
     }
 }

@@ -304,6 +304,9 @@ If you store large API responses, consider cleaning them after use:
 
 ```json
 {
+  "name": "getWeather",
+  "saveResponse": true,
+  "responseObjectName": "weatherResponse",
   "postResponse": {
     "propertyInstructions": [
       {
@@ -316,7 +319,7 @@ If you store large API responses, consider cleaning them after use:
 }
 ```
 
-Extract only what you need instead of storing the entire response.
+Extract only what you need instead of storing the entire response. Inside the call's own `postResponse` the path starts at its `responseObjectName`; the value is stored with its type (a number stays a number).
 
 ### 3. Leverage History for Context
 

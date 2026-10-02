@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.OutputValue;
+import ai.labs.eddi.modules.properties.impl.PropertyInstructionExecutor;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -27,14 +28,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import ai.labs.eddi.utils.PathNavigator;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.*;
 import java.util.regex.Pattern;
 
-import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -44,6 +43,12 @@ public class PrePostUtils {
     private static final String KEY_VALUE_ALTERNATIVES = "valueAlternatives";
     private static final String KEY_VALUE = "value";
     private static final String KEY_EXPRESSIONS = "expressions";
+
+    /**
+     * Step data key under which failed {@code preRequest} / {@code postResponse}
+     * property instructions are recorded (a list of messages).
+     */
+    public static final String KEY_PROPERTY_INSTRUCTION_ERRORS = "propertyInstructions:errors";
 
     /**
      * Template data keys under which the per-invocation field/row delimiters are
@@ -70,7 +75,7 @@ public class PrePostUtils {
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
     private final IDataFactory dataFactory;
-    private final SecretPropertyVault secretPropertyVault;
+    private final PropertyInstructionExecutor propertyInstructionExecutor;
 
     private static final Logger LOGGER = Logger.getLogger(PrePostUtils.class);
 
@@ -81,18 +86,7 @@ public class PrePostUtils {
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
         this.dataFactory = dataFactory;
-        this.secretPropertyVault = secretPropertyVault;
-    }
-
-    /**
-     * Carries the instruction's {@code visibility} onto the property it produced —
-     * without it a {@code longTerm} property from an HTTP response was persisted
-     * under the agent-wide default whatever the instruction said (the same defect
-     * {@code PropertySetterTask} had).
-     */
-    private static Property withVisibility(Property property, PropertyInstruction instruction) {
-        property.setVisibility(instruction.getVisibility());
-        return property;
+        this.propertyInstructionExecutor = new PropertyInstructionExecutor(templatingEngine, secretPropertyVault, jsonSerialization::deserialize);
     }
 
     public Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory, Map<String, Object> templateDataObjects,
@@ -108,6 +102,19 @@ public class PrePostUtils {
     }
 
     /**
+     * Runs the instructions whose HTTP-code gate matches, each through the shared
+     * {@link PropertyInstructionExecutor} — so a {@code postResponse} instruction
+     * stores exactly what a {@code property.json} instruction would: a number as a
+     * number, an object as an object.
+     * <p>
+     * A failing instruction does not fail the call or the turn (the response has
+     * already been received and the remaining instructions still apply), but it is
+     * no longer only a log line: the reason is logged with the conversation id and
+     * recorded in the step under {@value #KEY_PROPERTY_INSTRUCTION_ERRORS}, which a
+     * detailed conversation snapshot shows. A {@code scope: "secret"} instruction
+     * that cannot be vaulted is the exception — it fails, as it does in the
+     * property setter, rather than leaving the credential unset or in plaintext.
+     *
      * @return the plaintexts that {@code scope: "secret"} instructions vaulted —
      *         the caller removes them from anything it still holds that did not
      *         pass through conversation memory (an LLM tool result); empty when
@@ -120,100 +127,23 @@ public class PrePostUtils {
         Set<String> vaulted = new LinkedHashSet<>();
         if (propertyInstructions != null) {
             for (PropertyInstruction propertyInstruction : propertyInstructions) {
-                if ((validationError && propertyInstruction.getRunOnValidationError())
+                if ((validationError && Boolean.TRUE.equals(propertyInstruction.getRunOnValidationError()))
                         || (httpCode == 0 || verifyHttpCode(propertyInstruction.getHttpCodeValidator(), httpCode))) {
-
-                    String propertyName = propertyInstruction.getName();
-                    checkNotNull(propertyName, "name");
-                    propertyName = templateValues(propertyName, templateDataObjects);
-
-                    String path = propertyInstruction.getFromObjectPath();
-                    checkNotNull(path, "fromObjectPath");
-
-                    Property.Scope scope = propertyInstruction.getScope();
-                    Object propertyValue;
                     try {
-                        // Only the authored valueString is a template. A value reached through
-                        // fromObjectPath is conversation data — typically the HTTP response this
-                        // instruction runs against — and is used as resolved: rendering it would
-                        // evaluate whatever "{vars.x}" or "{#for ...}" the upstream API returned.
-                        boolean fromPath = !isNullOrEmpty(path);
-                        if (fromPath) {
-                            propertyValue = PathNavigator.getValue(path, templateDataObjects);
-                        } else {
-                            propertyValue = propertyInstruction.getValueString();
+                        String plaintext = propertyInstructionExecutor.apply(propertyInstruction, memory, templateDataObjects);
+                        if (plaintext != null) {
+                            vaulted.add(plaintext);
                         }
-
-                        if (!isNullOrEmpty(propertyValue) && propertyValue instanceof String propertyValueString) {
-                            var value = fromPath ? propertyValueString : templateValues(propertyValueString, templateDataObjects);
-                            var valueTrimmed = value.trim();
-                            if (propertyInstruction.getConvertToObject() && valueTrimmed.startsWith("{") && valueTrimmed.endsWith("}")) {
-                                try {
-                                    propertyValue = jsonSerialization.deserialize(valueTrimmed);
-                                } catch (IOException e) {
-                                    propertyValue = value;
-                                }
-                            } else {
-                                propertyValue = value;
-                            }
-                        } else {
-                            if (scope == Property.Scope.secret && propertyValue != null && !(propertyValue instanceof String)) {
-                                // A native object, array, number or boolean reached through
-                                // fromObjectPath. It used to be replaced by "" below, which the
-                                // secret branch then skipped: the secret was silently dropped,
-                                // neither vaulted nor refused. Only a string can be vaulted.
-                                throw new SecretPropertyVault.SecretPropertyException("Cannot store property '" + propertyName
-                                        + "' with scope 'secret': only string values can be vaulted, but the instruction produced a "
-                                        + propertyValue.getClass().getSimpleName() + ". Refusing to persist it in plaintext.", null);
-                            }
-                            propertyValue = "";
+                    } catch (LifecycleException | RuntimeException e) {
+                        if (propertyInstruction.getScope() == Property.Scope.secret) {
+                            // Fail closed: a credential that could not be vaulted must not be
+                            // left unset (the next call fails with a 401 that names nothing)
+                            // or anywhere in plaintext.
+                            throw e instanceof SecretPropertyVault.SecretPropertyException secretFailure
+                                    ? secretFailure
+                                    : new SecretPropertyVault.SecretPropertyException(e.getMessage(), e);
                         }
-
-                        if (scope == Property.Scope.secret) {
-                            // scope:secret is honoured here too: this path used to store the
-                            // value as a plaintext property like any other scope. A value that
-                            // cannot be vaulted (not a string, or the vault is disabled) fails
-                            // the turn, like it does in the property setter — skipping it would
-                            // leave {properties.x} empty and the next call failing with a 401
-                            // that names nothing.
-                            if (!(propertyValue instanceof String str) || !str.isEmpty()) {
-                                try {
-                                    memory.getConversationProperties().put(propertyName,
-                                            secretPropertyVault.vault(memory, propertyName, propertyValue));
-                                    vaulted.add((String) propertyValue);
-                                } catch (LifecycleException e) {
-                                    throw new SecretPropertyVault.SecretPropertyException(e.getMessage(), e);
-                                }
-                            }
-                        } else if (propertyValue instanceof String s) {
-                            memory.getConversationProperties().put(propertyName,
-                                    withVisibility(new Property(propertyName, s, scope), propertyInstruction));
-                        } else if (propertyValue instanceof Map<?, ?>) {
-                            @SuppressWarnings("unchecked")
-                            var m = (Map<String, Object>) propertyValue;
-                            memory.getConversationProperties().put(propertyName,
-                                    withVisibility(new Property(propertyName, m, scope), propertyInstruction));
-                        } else if (propertyValue instanceof List<?>) {
-                            @SuppressWarnings("unchecked")
-                            var l = (List<Object>) propertyValue;
-                            memory.getConversationProperties().put(propertyName,
-                                    withVisibility(new Property(propertyName, l, scope), propertyInstruction));
-                        } else if (propertyValue instanceof Integer i) {
-                            memory.getConversationProperties().put(propertyName,
-                                    withVisibility(new Property(propertyName, i, scope), propertyInstruction));
-                        } else if (propertyValue instanceof Float f) {
-                            memory.getConversationProperties().put(propertyName,
-                                    withVisibility(new Property(propertyName, f, scope), propertyInstruction));
-                        } else if (propertyValue instanceof Boolean b) {
-                            memory.getConversationProperties().put(propertyName,
-                                    withVisibility(new Property(propertyName, b, scope), propertyInstruction));
-                        }
-
-                        templateDataObjects.put("properties", memory.getConversationProperties().toMap());
-                    } catch (SecretPropertyVault.SecretPropertyException e) {
-                        throw e;
-                    } catch (Exception e) {
-                        LOGGER.error(e.getLocalizedMessage(), e);
+                        recordFailure(memory, propertyInstruction, e);
                     }
                 }
             }
@@ -221,19 +151,36 @@ public class PrePostUtils {
         return vaulted;
     }
 
-    public boolean verifyHttpCode(HttpCodeValidator httpCodeValidator, int httpCode) {
-        if (httpCodeValidator == null) {
-            httpCodeValidator = HttpCodeValidator.DEFAULT;
-        } else {
-            if (httpCodeValidator.getRunOnHttpCode() == null) {
-                httpCodeValidator.setRunOnHttpCode(HttpCodeValidator.DEFAULT.getRunOnHttpCode());
-            }
-            if (httpCodeValidator.getSkipOnHttpCode() == null) {
-                httpCodeValidator.setSkipOnHttpCode(HttpCodeValidator.DEFAULT.getSkipOnHttpCode());
-            }
+    private void recordFailure(IConversationMemory memory, PropertyInstruction instruction, Exception e) {
+        String message = "Property instruction '" + instruction.getName() + "' failed: " + e.getLocalizedMessage();
+        String conversationId = memory != null ? memory.getConversationId() : null;
+        LOGGER.warnf(e, "[conversation %s] %s", conversationId, message);
+        IConversationMemory.IWritableConversationStep currentStep = memory != null ? memory.getCurrentStep() : null;
+        if (currentStep == null) {
+            return;
         }
+        List<String> errors = new ArrayList<>();
+        IData<List<String>> existing = currentStep.getLatestData(KEY_PROPERTY_INSTRUCTION_ERRORS);
+        if (existing != null && existing.getResult() != null) {
+            errors.addAll(existing.getResult());
+        }
+        errors.add(message);
+        currentStep.storeData(dataFactory.createData(KEY_PROPERTY_INSTRUCTION_ERRORS, errors));
+    }
 
-        return httpCodeValidator.getRunOnHttpCode().contains(httpCode) && !httpCodeValidator.getSkipOnHttpCode().contains(httpCode);
+    /**
+     * Whether an instruction with this validator runs for {@code httpCode}. The
+     * validator belongs to the cached, shared configuration: the defaults for an
+     * unset list are applied locally, never written back into it.
+     */
+    public boolean verifyHttpCode(HttpCodeValidator httpCodeValidator, int httpCode) {
+        var runOn = httpCodeValidator != null && httpCodeValidator.getRunOnHttpCode() != null
+                ? httpCodeValidator.getRunOnHttpCode()
+                : HttpCodeValidator.DEFAULT.getRunOnHttpCode();
+        var skipOn = httpCodeValidator != null && httpCodeValidator.getSkipOnHttpCode() != null
+                ? httpCodeValidator.getSkipOnHttpCode()
+                : HttpCodeValidator.DEFAULT.getSkipOnHttpCode();
+        return runOn.contains(httpCode) && !skipOn.contains(httpCode);
     }
 
     public String templateValues(String toBeTemplated, Map<String, Object> properties) throws ITemplatingEngine.TemplateEngineException {
