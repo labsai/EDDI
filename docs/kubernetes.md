@@ -570,7 +570,9 @@ Default configuration uses in-memory messaging — suitable for development and 
 ### Upgrades replace the pod (no surge)
 
 The EDDI Deployment uses the **`Recreate`** strategy in the Helm chart
-(`eddi.updateStrategy`), the Kustomize base and `quickstart.yaml`: an upgrade stops
+(`eddi.updateStrategy`, from chart 2.4.0), the Kustomize base and `quickstart.yaml`
+(after EDDI 6.5.0; the manifests 6.5.0 shipped still surge, see
+[Upgrading from 6.4](upgrading-from-6.4.md#1-before-you-start)): an upgrade stops
 the running pod before the new one starts, so each upgrade is unavailable for as long
 as EDDI takes to boot and become ready. A `RollingUpdate` with `maxSurge: 1` would
 avoid that, but only by running **two EDDI JVMs against the same database** for the
