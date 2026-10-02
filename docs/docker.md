@@ -8,7 +8,7 @@
 docker compose up
 ```
 
-This starts EDDI on port `7070` and MongoDB. No login required.
+This starts EDDI on port `7070` and MongoDB, both published on `127.0.0.1` only. No login required: `docker-compose.yml` sets the three authentication opt-outs described below, which is why it does not publish EDDI on other interfaces unless you set `EDDI_BIND`.
 
 ### With Keycloak Authentication
 
@@ -39,10 +39,11 @@ ship as `eddi`/`eddi`, `viewer`/`viewer` and `user`/`user`.
 
 ### Manual Docker Setup
 
-Start MongoDB:
+Create a network and start MongoDB on it (the same `mongo:7.0.14` image `docker-compose.yml` pins). EDDI's default connection string points at a host named `mongodb`, so the container name matters:
 
 ```bash
-docker run --name mongodb -d mongo:6.0
+docker network create eddi
+docker run --name mongodb --network eddi -d mongo:7.0.14
 ```
 
 Start EDDI (without auth) — **local development only:**
@@ -55,7 +56,7 @@ Start EDDI (without auth) — **local development only:**
 
 ```bash
 docker run --name eddi \
-  --link mongodb:mongodb \
+  --network eddi \
   -p 127.0.0.1:7070:7070 \
   -e EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_MCP_ALLOW_UNAUTHENTICATED=true \
@@ -69,8 +70,9 @@ Start EDDI (with auth):
 
 ```bash
 docker run --name eddi \
-  --link mongodb:mongodb \
+  --network eddi \
   -p 7070:7070 \
+  -e EDDI_VAULT_MASTER_KEY="$EDDI_VAULT_MASTER_KEY" \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL=http://your-keycloak:8080/realms/eddi \
   -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
@@ -93,6 +95,16 @@ docker run --name eddi \
 
 > **Note:** `QUARKUS_OIDC_TENANT_ENABLED` is a **runtime** toggle. No rebuild needed to enable/disable auth.
 
+### Storage and Secrets
+
+| Variable                   | Default                                       | Description |
+| -------------------------- | --------------------------------------------- | ----------- |
+| `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?...`            | MongoDB connection string |
+| `EDDI_DATASTORE_TYPE`      | `mongodb`                                     | `mongodb` or `postgres` |
+| `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled and the audit ledger is unsigned. Production refuses a weak key (under 16 characters or a known default) |
+
+Set configuration through environment variables like these rather than by overriding `JAVA_OPTS_APPEND`: the image sets `JAVA_OPTS_APPEND` itself, and a runtime value replaces it instead of adding to it.
+
 ### AI Tools
 
 ```bash
@@ -109,8 +121,9 @@ docker run --name eddi \
 
 ```bash
 docker run --name eddi \
-  --link mongodb:mongodb \
+  --network eddi \
   -p 7070:7070 \
+  -e EDDI_VAULT_MASTER_KEY="$EDDI_VAULT_MASTER_KEY" \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
   -e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \

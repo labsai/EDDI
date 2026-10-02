@@ -13,10 +13,10 @@ EDDI is delivered as an OCI-compliant Docker container image and runs on any pla
 
 | Platform                               | Support Level                                                                         |
 | -------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Red Hat Enterprise Linux 10**        | ✅ Primary — UBI 10 base image, Red Hat-certified                                     |
+| **Red Hat Enterprise Linux 10**        | ✅ Primary — UBI 10 base image                                                         |
 | **Red Hat Enterprise Linux 9**         | ✅ Supported — mismatched majors, see the host compatibility note below               |
 | **Red Hat Enterprise Linux 8**         | ❌ Not supported for a UBI 10 image — pin an EDDI release built on UBI 9              |
-| **Red Hat OpenShift 4.12+**            | ✅ Certified — listed in the [Red Hat Ecosystem Catalog](https://catalog.redhat.com/) |
+| **Red Hat OpenShift 4.12+**            | ✅ Supported — each stable release is submitted for Red Hat container certification   |
 | **Docker** (any Linux, macOS, Windows) | ✅ Full support — standard OCI container                                              |
 | **Kubernetes** (any distribution)      | ✅ Full support — standard OCI container                                              |
 | **Podman**                             | ✅ Full support — OCI-compliant runtime                                               |
@@ -25,13 +25,13 @@ EDDI is delivered as an OCI-compliant Docker container image and runs on any pla
 
 > **Running on a RHEL 9 host**: supported. Red Hat's [container compatibility matrix](https://access.redhat.com/support/policy/rhel-container-compatibility) lists a UBI 10 image on a RHEL 9 host as **Supported** — a container supplies its own userspace, so the host only has to be new enough. Because the majors do not match, the usual conditions for a mismatched pair apply: the workload must run unprivileged, must not interact directly with kernel-version-specific interfaces (`ioctl`, `/proc`, `/sys`, routing, iptables, nftables, eBPF), and the image's RHEL version must stay within its supported lifecycle. EDDI satisfies these — it runs as UID `185` and touches nothing below the JVM. One support consequence is worth planning for: Red Hat may ask that a reported issue be reproduced in a fully compatible configuration, meaning on a RHEL 10 host, before it is investigated. A RHEL 8 host is the one combination Red Hat marks unsupported for a UBI 10 image.
 
-All EDDI releases are continuously validated against Red Hat certification requirements via automated [preflight checks](https://github.com/redhat-openshift-ecosystem/openshift-preflight) in CI/CD.
+Every image CI builds is checked against Red Hat's container certification requirements with the [preflight tool](https://github.com/redhat-openshift-ecosystem/openshift-preflight): a dry-run on pull requests, and a check of the pushed image on `main` and on tags.
 
 ---
 
 ## Red Hat Ecosystem Catalog
 
-EDDI is listed in the [Red Hat Ecosystem Catalog](https://catalog.redhat.com/) as a certified container image, and is available on [Docker Hub](https://hub.docker.com/r/labsai/eddi):
+EDDI has a container certification project with Red Hat Partner Connect. Every stable release is published to Red Hat's hosted certification registry and its preflight results are submitted to Red Hat (see [Automated Certification Workflow](#automated-certification-workflow)); once Red Hat accepts a submission, that version is served from `registry.connect.redhat.com` and shown in the [Red Hat Ecosystem Catalog](https://catalog.redhat.com/). The primary distribution is [Docker Hub](https://hub.docker.com/r/labsai/eddi):
 
 🔗 **[hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)**
 
@@ -39,7 +39,7 @@ EDDI is listed in the [Red Hat Ecosystem Catalog](https://catalog.redhat.com/) a
 
 ## Container Certification
 
-The EDDI container image is certified by Red Hat / IBM for use on OpenShift. Certification is automated via the [`redhat-certify.yml`](../.github/workflows/redhat-certify.yml) GitHub Actions workflow.
+The EDDI container image is submitted to Red Hat for container certification for use on OpenShift. The submission is automated by the [`redhat-certify.yml`](../.github/workflows/redhat-certify.yml) GitHub Actions workflow, which `ci.yml` calls on every stable release tag.
 
 ### Certification Compliance
 
@@ -63,17 +63,17 @@ The workflow certifies the image that was **already released** — it never rebu
 2. **Verify** — Checks the Red Hat labels and the `/licenses` directory inside the pulled image
 3. **Publish** — Retags to `quay.io/redhat-isv-containers/<project-id>` as `<version>` and `<version>-<release>` (a retag reuses the manifest, so the hosted tags carry the *same digest* as the release — asserted after pushing) 
 4. **Preflight** — Runs the [Red Hat preflight tool](https://github.com/redhat-openshift-ecosystem/openshift-preflight) against the hosted `<version>-<release>` coordinate
-5. **Submit** — Optionally submits results to Red Hat Partner Connect for review
+5. **Submit** — Submits the results to Red Hat Partner Connect for review (`submit: true`, the default)
 
-To trigger a certification release, go to **Actions → Red Hat Certification Release → Run workflow** and provide:
+`ci.yml`'s `redhat-publish` job runs this automatically for every stable release tag (`X.Y.Z`, no pre-release suffix) once the image has passed its smoke test, with `release: 1` and `submit: true`. To re-submit a version by hand, go to **Actions → Red Hat Certification Release → Run workflow** and provide:
 
 - `version` — EDDI version (e.g., `6.4.0`) — must already be released on Docker Hub
-- `release` — Incremental release number (e.g., `1`, `2`, `3`) — lets the same version be re-submitted
+- `release` — Incremental release number (`2`, `3`, … for a re-submission; the automatic run uses `1`)
 - `submit` — Whether to submit results to Red Hat (`true`/`false`)
 
 ### Preflight Quality Gate
 
-Every push to `main` or release tag that produces a Docker image is validated by a **preflight check** in CI. Pull requests also run a preflight dry-run. This catches certification regressions before they reach production (e.g., missing labels, license issues, prohibited packages).
+Every push to `main` or release tag that produces a Docker image is validated by a **preflight check** in CI (`preflight-push`). Pull requests that change code also run a preflight dry-run against the image CI built (`preflight-check`). This catches certification regressions before they reach production (e.g., missing labels, license issues, prohibited packages).
 
 ### Required GitHub Secrets
 
@@ -106,7 +106,7 @@ This generates:
 | `licenses/third-party/`    | Downloaded license text files for each dependency |
 | `licenses/licenses.xml`    | Machine-readable license index                    |
 
-The profile is **not activated during normal dev builds** to keep them fast. CI workflows (`redhat-certify.yml`, `ci.yml`) activate it automatically.
+The profile is **not activated during normal dev builds** to keep them fast. `ci.yml` activates it in the build that produces the Docker image. `redhat-certify.yml` never builds anything: it certifies the image `ci.yml` already released, `/licenses` included.
 
 These files are **not committed to git** — they're generated fresh and accurate in every Docker image build.
 
@@ -158,7 +158,7 @@ The operator creates a route automatically. With the CR above, the route would b
 | ------------------- | --------------------------------------------------------- |
 | **Image**           | `docker.io/labsai/eddi`                                   |
 | **Base**            | `registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24` |
-| **Digest pinning**  | SHA256 digest for supply-chain integrity (OpenSSF Silver) |
+| **Digest pinning**  | Base image pinned by SHA256 digest (OpenSSF Scorecard Pinned-Dependencies check) |
 | **User**            | `185` (non-root)                                          |
 | **Port**            | `7070`                                                    |
 | **Health endpoint** | `GET /q/health/ready`                                     |
@@ -167,29 +167,34 @@ The operator creates a route automatically. With the CR above, the route would b
 
 ### Quick Start
 
+EDDI needs a database. This starts MongoDB on a private Docker network (no published port) and EDDI next to it, published on `127.0.0.1` only, so the unauthenticated instance is not reachable from other machines:
+
 ```bash
-docker pull labsai/eddi:latest
-docker run -i --rm -p 7070:7070 \
+docker network create eddi
+docker run -d --name mongodb --network eddi mongo:7.0.14
+docker run -i --rm --network eddi -p 127.0.0.1:7070:7070 \
+  -e MONGODB_CONNECTIONSTRING='mongodb://mongodb:27017/eddi?retryWrites=true&w=majority' \
   -e EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_MCP_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true \
-  labsai/eddi
+  labsai/eddi:6.4.0
 ```
 
-> The container runs in production launch mode, where `AuthStartupGuard` and `HighValueSurfaceGuard` refuse to boot while OIDC is disabled. Either enable OIDC (`QUARKUS_OIDC_TENANT_ENABLED=true` plus a configured realm) or pass the three opt-outs above — without one of the two, startup fails and the container never serves traffic.
+Open `http://localhost:7070`. Clean up with `docker rm -f mongodb` and `docker network rm eddi`.
 
-For production deployments with MongoDB, enable OIDC rather than the
-unauthenticated opt-outs — those exist so a local container can boot past
-`AuthStartupGuard`, and they leave `/secretstore` and `/mcp` open to anyone who
-can reach the port:
+> The container runs in production launch mode, where `AuthStartupGuard` and `HighValueSurfaceGuard` refuse to boot while OIDC is disabled. Either enable OIDC (`QUARKUS_OIDC_TENANT_ENABLED=true` plus a configured realm) or pass the three opt-outs above — without one of the two, startup fails and the container never serves traffic. The opt-outs leave every endpoint, `/mcp` and `/secretstore` open to anyone who can reach the port, which is why the port above is published on loopback only. Never combine them with `-p 7070:7070` (all interfaces) or an OpenShift route.
+
+For production deployments, enable OIDC rather than the unauthenticated opt-outs, point EDDI at an authenticated MongoDB and set a vault master key. `eddi-backend` is the bearer-only client the shipped Keycloak realm defines and the default of `quarkus.oidc.client-id`; access tokens must carry it as their audience:
 
 ```bash
 docker run -d \
   -p 7070:7070 \
-  -e MONGODB_CONNECTIONSTRING='mongodb://mongo:27017/eddi?retryWrites=true&w=majority' \
+  -e MONGODB_CONNECTIONSTRING="$MONGODB_CONNECTIONSTRING" \
+  -e EDDI_VAULT_MASTER_KEY="$EDDI_VAULT_MASTER_KEY" \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL='https://keycloak.example.com/realms/eddi' \
-  -e QUARKUS_OIDC_CLIENT_ID=eddi \
-  -e QUARKUS_OIDC_CREDENTIALS_SECRET="$OIDC_CLIENT_SECRET" \
+  -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
   labsai/eddi:6.4.0
 ```
+
+Supply the connection string (for example `mongodb://<user>:<password>@<host>:27017/eddi?authSource=admin`) and the master key from your secret store rather than typing them on the command line; on OpenShift, inject them from a `Secret` with `secretKeyRef`. See [Security](security.md) for the realm and roles and [Secrets Vault](secrets-vault.md) for the master key.

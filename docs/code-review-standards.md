@@ -41,7 +41,7 @@ Changes touching the following areas require **extra scrutiny** and explicit sec
 
 - **Squash and merge** is the default merge strategy for feature branches.
 - **Merge commits** are used only for long-lived branches or release merges.
-- All CI checks (build, test, security scans) must pass before merge.
+- Branch protection on `main` requires two status checks: **CodeQL Analysis** and **Build & Test** (both from `ci.yml`). The branch does not have to be up to date with `main` first. The other checks (integration and E2E tests, secret scanning, Trivy, changelog discipline, review bots) are not merge-blocking, but a red one is expected to be fixed or explained before merging.
 - Force-push to `main` is prohibited (enforced by branch protection and `.githooks/pre-push`).
 
 ## AI-Assisted Code

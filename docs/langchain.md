@@ -110,7 +110,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | Parameter                  | Type    | Description                                           | Default           |
 | -------------------------- | ------- | ----------------------------------------------------- | ----------------- |
 | **Core Parameters**        |         |                                                       |                   |
-| `apiKey`                   | string  | API key for the LLM provider                          | Required          |
+| `apiKey`                   | string  | API key for providers that authenticate with one: `openai`, `anthropic`, `gemini`, `mistral`, `azure-openai` and the OpenAI-compatible types. Prefer a `${vault:...}` reference over a plaintext key. Other providers authenticate differently and take no `apiKey`: `ollama` needs none, `bedrock` uses the AWS credential chain, `gemini-vertex` uses Google application default credentials, `oracle-genai` an OCI config profile (`configProfile`), `huggingface` an `accessToken` and `jlama` an optional `authToken` | Provider-specific |
 | `modelName`                | string  | Model identifier (e.g., "gpt-4o", "Claude")           | Provider-specific |
 | `systemMessage`            | string  | System message for LLM context                        | ""                |
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
@@ -247,7 +247,6 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
         "maxTokens": "16384",
         "timeout": "60000",
         "systemMessage": "You are a helpful assistant",
-        "includeFirstAgentMessage": "false",
         "addToOutput": "true"
       }
     }
@@ -255,8 +254,9 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 }
 ```
 
-> **`includeFirstAgentMessage` is deprecated and no longer needed for Anthropic.** This example keeps
-> `"false"` only because countless existing configs carry it. The advice it used to
+> **No `includeFirstAgentMessage` needed.** Older Anthropic examples set
+> `"includeFirstAgentMessage": "false"`; the parameter is deprecated (see
+> [Deprecated parameters](#deprecated-parameters)) and has no replacement. The advice it used to
 > illustrate — "Anthropic doesn't allow the first message to be from the agent, so set
 > this to `false`" — described a restriction the
 > [Messages API](https://platform.claude.com/docs/en/api/messages) no longer documents,

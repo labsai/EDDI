@@ -127,10 +127,17 @@ First, you need to set up a `AgentTrigger`.
 
 | HTTP Method | API Endpoint                                | Request Body         | Response             |
 | ----------- | ------------------------------------------- | -------------------- | -------------------- |
-| DELETE      | `/AgentTriggerStore/agenttriggers/{intent}` | N/A                  | N/A                  |
-| GET         | `/AgentTriggerStore/agenttriggers/{intent}` | N/A                  | Agent Triggers-model |
-| PUT         | `/AgentTriggerStore/agenttriggers/{intent}` | Agent Triggers-model | N/A                  |
-| POST        | `/AgentTriggerStore/agenttriggers`          | Agent Triggers-model | N/A                  |
+| GET         | `/AgentTriggerStore/agenttriggers`          | N/A                  | Array of Agent Trigger models |
+| GET         | `/AgentTriggerStore/agenttriggers/{intent}` | N/A                  | Agent Trigger model  |
+| POST        | `/AgentTriggerStore/agenttriggers`          | Agent Trigger model  | N/A (200)            |
+| PUT         | `/AgentTriggerStore/agenttriggers/{intent}` | Agent Trigger model  | N/A (200)            |
+| DELETE      | `/AgentTriggerStore/agenttriggers/{intent}` | N/A                  | N/A (200)            |
+
+All five require the `eddi-admin` or `eddi-editor` role when authorization is enabled. The list
+endpoint returns every trigger to a caller who can see all resources; anyone else gets only the
+triggers whose every target agent they may use. A single trigger routing to an agent the caller may
+not use answers 404, exactly like an intent that does not exist, so the endpoint cannot be used to
+discover another team's intents.
 
 ## Triggering a ManagedAgent
 
@@ -205,21 +212,19 @@ _Response Body_
 
 ```javascript
 {
+  "conversationId": "65f1c0ffee0123456789abcd",
   "agentId": "5bf5418c46e0fb000b7636d0",
   "agentVersion": 10,
   "userId": "myUserId",
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "undoAvailable": true,
+  "redoAvailable": false,
   "conversationOutputs": [
     {
       "input": "Hello managed agent!",
-      "expressions": "unknown(Hello), unknown(managed), unknown(agent!)",
-      "intents": [
-        "unknown",
-        "unknown",
-        "unknown"
-      ]
+      "actions": ["greet"],
+      "output": [ { "type": "text", "text": "Hello! How can I help?", "delay": 0 } ]
     }
   ],
   "conversationProperties": {},
@@ -228,7 +233,9 @@ _Response Body_
       "conversationStep": [
         {
           "key": "input:initial",
-          "value": "Hello managed agent!"
+          "value": "Hello managed agent!",
+          "timestamp": 1552869578596,
+          "originWorkflowId": "<workflowId>"
         }
       ],
       "timestamp": 1552869578596
@@ -236,6 +243,14 @@ _Response Body_
   ]
 }
 ```
+
+The response is the same `SimpleConversationMemorySnapshot` that `POST /agents/{conversationId}`
+returns (abridged here; the actions and output depend entirely on the agent). Undo and redo state is
+reported as two booleans, `undoAvailable` and `redoAvailable` — the steps an undo removed are kept on
+the stored conversation (its `redoCache`) and are not part of this response. The `.../undo` and
+`.../redo` endpoints above act on the user's current managed conversation for the intent. Fields such
+as `endReason` or the HITL pause fields (`hitlPausedAt`, `hitlPauseType`, `hitlPendingToolCalls`)
+appear only when they have a value.
 
 _Response Code_
 

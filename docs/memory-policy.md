@@ -54,13 +54,14 @@ Turn 1: User asks "What's the weather?"
 
 ```text
 Turn 1: User asks "What's the weather?"
-  → WeatherTool fails with HTTP 503
+  → The httpcalls task (the weather API call) fails with HTTP 503
   → Raw error is marked as UNCOMMITTED (hidden from LLM)
-  → Error digest injected: {"type": "errorDigest", "taskId": "weather", "text": "Weather lookup failed"}
-  → Action emitted: "task_failed_weather"
+  → Error digest injected: {"type": "errorDigest", "taskId": "ai.labs.httpcalls", "taskType": "httpCalls",
+                            "text": "Task 'eddi://ai.labs.httpcalls' failed: ..."}
+  → Action emitted: "task_failed_ai.labs.httpcalls"
   → LLM sees concise digest on next turn
   → LLM can respond: "I'm sorry, I couldn't check the weather right now."
-  → Behavior rules can react to "task_failed_weather" action
+  → Behavior rules can react to "task_failed_ai.labs.httpcalls" action
 ```
 
 ## Commit Flags
@@ -78,6 +79,8 @@ When strict write discipline is enabled and a task fails:
 3. An error digest replaces the raw output
 4. A `task_failed_<taskId>` action is emitted for behavior rule routing
 
+`<taskId>` is the id of the **lifecycle task** that failed — the workflow step type without its `eddi://` prefix, such as `ai.labs.httpcalls`, `ai.labs.mcpcalls` or `ai.labs.llm` — not the name of the HTTP call, tool or LLM task configured inside it. Every failure of that step type emits the same action: `task_failed_ai.labs.httpcalls` does not say which of the configured calls failed.
+
 ## Error Digest Format
 
 The error digest is stored as a special output type:
@@ -86,14 +89,19 @@ The error digest is stored as a special output type:
 {
   "type": "errorDigest",
   "taskId": "ai.labs.httpcalls",
-  "text": "API call to payment-service failed: HTTP 500"
+  "taskType": "httpCalls",
+  "text": "Task 'eddi://ai.labs.httpcalls' failed: <reason>"
 }
 ```
 
-The digest is kept short on purpose: URLs are replaced with `[url]`, stack frames and fully-qualified
-exception class names are stripped, a provider's raw JSON error body is reduced to its `message`, and
-the result is capped at 200 characters. A failing model call reads, for example,
+`text` is always `Task '<eddi:// task id>' failed: ` followed by the reason. The reason is kept short
+on purpose: URLs are replaced with `[url]`, stack frames and fully-qualified exception class names are
+stripped, a provider's raw JSON error body is reduced to its `message`, secrets are redacted, and the
+reason is then cut at 200 characters (with `...` appended when cut). The cap applies to the reason
+only — the `Task '…' failed: ` prefix comes on top of it. A failing model call reads, for example,
 `Task 'eddi://ai.labs.llm' failed: Chat model execution failed: model 'x' not found`.
+
+The same text is also stored as step data under `taskError:eddi://<taskId>`.
 
 The UI can render error digests with distinct styling (warning icon, collapsible panel). The LLM receives the concise `text` summary rather than raw error noise.
 
@@ -113,7 +121,8 @@ reports nothing.
 The `text` names the task and the most specific reason in the failure's cause chain — for a provider
 rejection, the `message` from the provider's error body, e.g. `` Task 'eddi://ai.labs.llm' failed:
 Streaming chat failed: `temperature` is deprecated for this model. `` It is redacted with the same
-secret filter as the logs, URLs are removed, and it is capped at 200 characters. The streaming
+secret filter as the logs, URLs are removed, and the reason is capped at 200 characters (the
+`Task '…' failed: ` prefix is not counted). The streaming
 `task_failed` event carries the same unwrapped reason.
 
 The Manager's chat shows it in place of the empty reply. The Chat UI shows end users its own generic
