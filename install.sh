@@ -16,7 +16,10 @@ set -euo pipefail
 # When it is not set explicitly, it is DERIVED from EDDI_VERSION after argument
 # parsing (see resolve_eddi_branch): pinning a release with --eddi-version=6.5.0
 # must fetch that release's compose files from its tag, not whatever is on `main`,
-# which can be a compose file newer than the pinned image.
+# which can be a compose file newer than the pinned image. The default `latest`
+# image is matched the same way: the files come from the newest release's tag,
+# looked up through the GitHub API, and only fall back to `main` (with a warning)
+# when that lookup fails.
 EDDI_BRANCH_EXPLICIT="${EDDI_BRANCH:-}"
 EDDI_BRANCH="${EDDI_BRANCH:-main}"
 EDDI_VERSION="${EDDI_VERSION:-latest}"
@@ -48,8 +51,22 @@ RESERVED_PORTS=()
 EDDI_DIR="${EDDI_DIR:-$HOME/.eddi}"
 # Strip trailing slash to avoid double-slash paths in output/config
 EDDI_DIR="${EDDI_DIR%/}"
-# Validate branch name (prevent path traversal in download URLs)
-if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+# A git ref that is safe to splice into the raw.githubusercontent.com download
+# URL. The character class alone does NOT stop path traversal: `.` and `/` are in
+# it, so EDDI_BRANCH=../../someone/else/main passed it, and curl resolves the dot
+# segments — the "compose files" then came from another repository. git itself
+# forbids `..`, `//`, a leading or trailing `/`, a component starting with `.`,
+# a trailing `.` and a `.lock` suffix in ref names, so refusing them costs no
+# ref that can exist.
+valid_git_ref() {
+  local ref="$1"
+  [[ "$ref" =~ ^[a-zA-Z0-9._/-]+$ ]] || return 1
+  case "$ref" in
+    *..*|*//*|/*|*/|.*|*/.*|-*|*.|*.lock) return 1 ;;
+  esac
+  return 0
+}
+if ! valid_git_ref "$EDDI_BRANCH"; then
   echo "Invalid EDDI_BRANCH: $EDDI_BRANCH" >&2; exit 1
 fi
 COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
@@ -414,6 +431,7 @@ WITH_AUTH=false
 WITH_MONITORING=false
 DEMO_USERS=false
 LOCAL_IMAGE=false
+DRY_RUN=false
 VAULT_KEY_ARG=""
 
 # Detect piped stdin (curl | bash) — disable interactive prompts
@@ -434,6 +452,7 @@ for arg in "$@"; do
     --mongo-port=*)   MONGO_PORT_REQUESTED="${arg#*=}" ;;
     --full)           DB_CHOICE="2"; WITH_AUTH=true; WITH_MONITORING=true ;;
     --local)          LOCAL_IMAGE=true ;;
+    --dry-run)        DRY_RUN=true ;;
     --help|-h)
       echo "EDDI Install Script"
       echo ""
@@ -453,6 +472,8 @@ for arg in "$@"; do
       echo "  --mongo-port=<port>     Host port for MongoDB (default: 27017)"
       echo "  --full                  All options enabled"
       echo "  --local                 Use locally built Docker image (skip pull)"
+      echo "  --dry-run               Print the image tag and the git ref the compose"
+      echo "                          files would come from, then exit (changes nothing)"
       echo ""
       echo "Environment variables:"
       echo "  EDDI_PORT           HTTP port (default: 7070)"
@@ -470,6 +491,8 @@ for arg in "$@"; do
       echo "  OTLP_HTTP_PORT      Host port for Jaeger OTLP HTTP (default: 4318)"
       echo "  EDDI_DIR            Install directory (default: ~/.eddi)"
       echo "  EDDI_VERSION        Image tag to pull (default: latest)"
+      echo "  EDDI_BRANCH         Git ref to fetch compose files from (default: the"
+      echo "                      EDDI_VERSION tag; for latest, the newest release)"
       echo ""
       echo "  Every port is resolved before the containers start. A port left"
       echo "  at its default is kept when free and moved to the next free port"
@@ -481,25 +504,63 @@ for arg in "$@"; do
   esac
 done
 
-# Resolve EDDI_BRANCH now that --eddi-version has been parsed. An explicit
-# EDDI_BRANCH always wins; otherwise a pinned version fetches its matching tag and
-# only the floating "latest" falls back to main.
+# The newest stable EDDI release tag, from the GitHub releases API (`/latest`
+# skips drafts and pre-releases, which is also what the `latest` image tracks).
+# Prints nothing and returns 1 when the API is unreachable, rate-limited, or
+# answers anything but a plain MAJOR.MINOR.PATCH tag — the caller then falls
+# back. Parsed with grep/sed so the installer needs neither jq nor python.
+EDDI_RELEASES_API="https://api.github.com/repos/labsai/EDDI/releases/latest"
+latest_release_tag() {
+  local body tag
+  body=$(curl -fsSL --max-time 10 -H "Accept: application/vnd.github+json" "$EDDI_RELEASES_API" 2>/dev/null) || return 1
+  tag=$(printf '%s\n' "$body" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 \
+    | sed 's/.*"\([^"]*\)"$/\1/') || return 1
+  [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s\n' "$tag"
+}
+
+# Resolve EDDI_BRANCH now that --eddi-version has been parsed, and record WHY in
+# EDDI_BRANCH_SOURCE (kept in .eddi-config, so `eddi update` knows whether to
+# re-resolve):
+#   explicit        EDDI_BRANCH was set by the caller — always wins
+#   version         a pinned EDDI_VERSION — its release tag (tags are not
+#                   v-prefixed, so EDDI_VERSION=6.5.0 -> ref 6.5.0)
+#   latest-release  EDDI_VERSION=latest — the newest release's tag, so the
+#                   compose files match the image `latest` points at
+#   fallback-main   the release lookup failed — `main`, which can be newer
+#                   than the image, so the installer says so
 resolve_eddi_branch() {
   if [[ -n "$EDDI_BRANCH_EXPLICIT" ]]; then
     EDDI_BRANCH="$EDDI_BRANCH_EXPLICIT"
+    EDDI_BRANCH_SOURCE="explicit"
   elif [[ -n "${EDDI_VERSION:-}" && "$EDDI_VERSION" != "latest" ]]; then
-    # Release tags are not v-prefixed (see AGENTS.md CI notes), so the tag IS the
-    # version string, e.g. EDDI_VERSION=6.5.0 -> ref 6.5.0.
     EDDI_BRANCH="$EDDI_VERSION"
+    EDDI_BRANCH_SOURCE="version"
+  elif EDDI_BRANCH=$(latest_release_tag); then
+    EDDI_BRANCH_SOURCE="latest-release"
   else
     EDDI_BRANCH="main"
+    EDDI_BRANCH_SOURCE="fallback-main"
+    echo "WARNING: could not look up the newest EDDI release (GitHub API unreachable or rate-limited)." >&2
+    echo "         The compose files will come from 'main', which can be newer than the 'latest' image." >&2
+    echo "         To match them exactly, re-run with EDDI_BRANCH=<release tag> or --eddi-version=<tag>." >&2
   fi
-  if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+  if ! valid_git_ref "$EDDI_BRANCH"; then
     echo "Invalid EDDI_BRANCH: $EDDI_BRANCH" >&2; exit 1
   fi
   COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
 }
+EDDI_BRANCH_SOURCE=""
 resolve_eddi_branch
+
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo "EDDI image:     labsai/eddi:${EDDI_VERSION}"
+  echo "Compose files:  ${EDDI_BRANCH} (${EDDI_BRANCH_SOURCE})"
+  echo "Download from:  ${COMPOSE_BASE_URL}"
+  echo "Install dir:    ${EDDI_DIR}"
+  echo "Dry run: nothing was downloaded, written or started."
+  exit 0
+fi
 
 # ── Pre-flight checks ─────────────────────────────────────
 
@@ -1068,6 +1129,7 @@ resolve_compose_files() {
   echo "EDDI_PORT=$EDDI_PORT" >> "$EDDI_DIR/.eddi-config"
   echo "EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT" >> "$EDDI_DIR/.eddi-config"
   echo "EDDI_BRANCH=$EDDI_BRANCH" >> "$EDDI_DIR/.eddi-config"
+  echo "EDDI_BRANCH_SOURCE=$EDDI_BRANCH_SOURCE" >> "$EDDI_DIR/.eddi-config"
 
   # Write .env file for docker compose variable substitution
   # Escape double quotes in vault key to prevent .env corruption
@@ -2288,9 +2350,40 @@ fi
 _cfg() { grep "^$1=" "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^"//;s/"$//'; }
 EDDI_PORT=$(_cfg EDDI_PORT)
 EDDI_HTTPS_PORT=$(_cfg EDDI_HTTPS_PORT)
-EDDI_BRANCH="${EDDI_BRANCH:-$(_cfg EDDI_BRANCH)}"
+# Same rules as the installer's valid_git_ref: the character class alone lets
+# `..` through, and curl resolves it into another repository's path.
+_valid_ref() {
+  [[ "$1" =~ ^[a-zA-Z0-9._/-]+$ ]] || return 1
+  case "$1" in
+    *..*|*//*|/*|*/|.*|*/.*|-*|*.|*.lock) return 1 ;;
+  esac
+  return 0
+}
+# The newest stable release tag (see latest_release_tag in install.sh).
+_latest_release_tag() {
+  local body tag
+  body=$(curl -fsSL --max-time 10 -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/labsai/EDDI/releases/latest" 2>/dev/null) || return 1
+  tag=$(printf '%s\n' "$body" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 \
+    | sed 's/.*"\([^"]*\)"$/\1/') || return 1
+  [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s\n' "$tag"
+}
+# Replace or append KEY=VALUE in a file without `sed -i` (whose syntax differs
+# on macOS), keeping the file's mode: the content is written back in place.
+_set_kv() {
+  local key="$1" value="$2" file="$3" tmp
+  tmp=$(mktemp)
+  grep -v "^${key}=" "$file" > "$tmp" 2>/dev/null || true
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  cat "$tmp" > "$file"
+  rm -f "$tmp"
+}
+EDDI_BRANCH_FROM_ENV="${EDDI_BRANCH:-}"
+EDDI_BRANCH_SOURCE=$(_cfg EDDI_BRANCH_SOURCE || true)
+EDDI_BRANCH="${EDDI_BRANCH:-$(_cfg EDDI_BRANCH || true)}"
 EDDI_BRANCH="${EDDI_BRANCH:-main}"
-if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+if ! _valid_ref "$EDDI_BRANCH"; then
   echo "Invalid EDDI_BRANCH: $EDDI_BRANCH" >&2
   exit 1
 fi
@@ -2354,34 +2447,43 @@ case "${1:-help}" in
         exit 1
       fi
       echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."
-      if grep -q '^EDDI_VERSION=' "$ENV_FILE" 2>/dev/null; then
-        sed -i "s|^EDDI_VERSION=.*|EDDI_VERSION=${NEW_VERSION}|" "$ENV_FILE"
-      else
-        echo "EDDI_VERSION=${NEW_VERSION}" >> "$ENV_FILE"
-      fi
-
-      # Fetch the pinned release's compose files from its matching git tag, not
-      # from whatever ref this install was originally set to. A pinned image
-      # served compose files from `main` can drift — a compose file newer than the
-      # image it is meant to run. Release tags are not v-prefixed, so the tag is
-      # the version string. "latest" has no tag, so it stays on main.
-      if [[ "$NEW_VERSION" == "latest" ]]; then
-        EDDI_BRANCH="main"
-      else
-        EDDI_BRANCH="$NEW_VERSION"
-      fi
-      if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
-        echo "Invalid EDDI_BRANCH derived from --eddi-version: $EDDI_BRANCH" >&2
-        exit 1
-      fi
-      COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
-      # Persist so `eddi start`/`restart`/`update` stay on the pinned ref.
-      if grep -q '^EDDI_BRANCH=' "$CONFIG_FILE" 2>/dev/null; then
-        sed -i "s|^EDDI_BRANCH=.*|EDDI_BRANCH=${EDDI_BRANCH}|" "$CONFIG_FILE"
-      else
-        echo "EDDI_BRANCH=${EDDI_BRANCH}" >> "$CONFIG_FILE"
-      fi
+      _set_kv EDDI_VERSION "$NEW_VERSION" "$ENV_FILE"
     fi
+
+    # Fetch the compose files from the git ref that matches the image about to be
+    # pulled, not from whatever ref this install started on: a compose file newer
+    # or older than the image it runs drifts. An EDDI_BRANCH from the environment,
+    # or one the operator set explicitly at install time, always wins. Otherwise a
+    # pinned version uses its release tag (tags are not v-prefixed), and `latest`
+    # is looked up again on every update — the newest release may have moved
+    # since the install — falling back to main with a warning.
+    TARGET_VERSION="${NEW_VERSION:-$({ grep '^EDDI_VERSION=' "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2- | sed 's/^"//;s/"$//')}"
+    TARGET_VERSION="${TARGET_VERSION:-latest}"
+    if [[ -n "$EDDI_BRANCH_FROM_ENV" ]]; then
+      EDDI_BRANCH_SOURCE="explicit"
+    elif [[ "$EDDI_BRANCH_SOURCE" == "explicit" && -z "$NEW_VERSION" ]]; then
+      :
+    elif [[ "$TARGET_VERSION" != "latest" ]]; then
+      EDDI_BRANCH="$TARGET_VERSION"
+      EDDI_BRANCH_SOURCE="version"
+    elif LATEST_TAG=$(_latest_release_tag); then
+      EDDI_BRANCH="$LATEST_TAG"
+      EDDI_BRANCH_SOURCE="latest-release"
+    else
+      EDDI_BRANCH="main"
+      EDDI_BRANCH_SOURCE="fallback-main"
+      echo "WARNING: could not look up the newest EDDI release; refreshing compose files from 'main'," >&2
+      echo "         which can be newer than the 'latest' image." >&2
+    fi
+    if ! _valid_ref "$EDDI_BRANCH"; then
+      echo "Invalid EDDI_BRANCH: $EDDI_BRANCH" >&2
+      exit 1
+    fi
+    COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
+    # Persist so `eddi start`/`restart`/`update` know which ref the files are from.
+    _set_kv EDDI_BRANCH "$EDDI_BRANCH" "$CONFIG_FILE"
+    _set_kv EDDI_BRANCH_SOURCE "$EDDI_BRANCH_SOURCE" "$CONFIG_FILE"
+    echo "Compose files from: ${EDDI_BRANCH} (${EDDI_BRANCH_SOURCE})"
 
     echo "Refreshing compose files from GitHub..."
     for f in "${COMPOSE_FILE_LIST[@]}"; do
