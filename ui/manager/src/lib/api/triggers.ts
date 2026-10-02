@@ -22,14 +22,6 @@ export async function getAllTriggers(): Promise<AgentTriggerConfiguration[]> {
   return result || [];
 }
 
-export async function getTrigger(
-  intent: string,
-): Promise<AgentTriggerConfiguration> {
-  return api.get<AgentTriggerConfiguration>(
-    `${BASE}/${encodeURIComponent(intent)}`,
-  );
-}
-
 export async function createTrigger(
   config: AgentTriggerConfiguration,
 ): Promise<void> {

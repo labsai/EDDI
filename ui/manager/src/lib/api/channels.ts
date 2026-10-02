@@ -45,18 +45,6 @@ export interface ChannelIntegrationConfiguration {
   defaultTargetName: string;
 }
 
-/**
- * Platform-specific config keys.
- * Slack: channelId, botToken, signingSecret
- * Teams: channelId, appId, appPassword, serviceUrl (future)
- * Discord: guildId, channelId, botToken, publicKey (future)
- */
-export const SLACK_PLATFORM_KEYS = [
-  "channelId",
-  "botToken",
-  "signingSecret",
-] as const;
-
 export type ChannelDescriptor = AgentDescriptor;
 
 // ─── CRUD ───────────────────────────────────────────────────────

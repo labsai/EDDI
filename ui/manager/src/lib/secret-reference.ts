@@ -280,9 +280,6 @@ const AUTH_REFERENCE_PREFIXES = [
   "${caller:",
 ] as const;
 
-/** Human-readable list of the accepted forms, for a validation message. */
-export const AUTH_REFERENCE_EXAMPLES = "${vault:…}, ${vars:…} or ${caller:…}";
-
 /**
  * Whether a value is acceptable where EDDI wants a credential reference.
  *
