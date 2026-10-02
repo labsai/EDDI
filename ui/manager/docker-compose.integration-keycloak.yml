@@ -9,7 +9,7 @@
 # Then:  npm run test:e2e:auth
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7
+    image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
     ports:
       # Loopback only, and 8180 rather than 8080 because that is the port
@@ -99,7 +99,7 @@ services:
       EDDI_A2A_CAPABILITIES_PUBLIC: "true"
 
   mongodb:
-    image: mongo:6.0
+    image: mongo:7.0.43
     restart: always
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]

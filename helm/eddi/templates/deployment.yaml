@@ -15,11 +15,10 @@ spec:
   # Always rendered — autoscaling is gated off above, so there is never an HPA
   # competing for ownership of this field.
   replicas: {{ .Values.eddi.replicas }}
+  # eddi.updateStrategy — Recreate by default, so an upgrade never runs two EDDI
+  # JVMs against one database; see the value's comment in values.yaml.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    {{- toYaml .Values.eddi.updateStrategy | nindent 4 }}
   selector:
     matchLabels:
       {{- include "eddi.selectorLabels" . | nindent 6 }}
