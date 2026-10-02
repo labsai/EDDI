@@ -187,7 +187,10 @@ memory.getCurrentStep().storeData(
 // Reads a context entry the client sent with this turn. Each entry is stored
 // as step data under "context:<name>", holding the Context ({type, value})
 IData<Context> userIdContext = memory.getCurrentStep().getLatestData("context:userId");
-String userId = userIdContext != null ? String.valueOf(userIdContext.getResult().getValue()) : null;
+if (userIdContext == null || userIdContext.getResult() == null || userIdContext.getResult().getValue() == null) {
+    return; // no userId sent with this turn: skip the lookup rather than call /users/null
+}
+String userId = String.valueOf(userIdContext.getResult().getValue());
 
 // Makes API call
 JsonObject response = httpClient.get("/users/" + userId);

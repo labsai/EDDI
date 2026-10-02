@@ -65,11 +65,14 @@ aws secretsmanager create-secret --name eddi/vault-master-key \
   `mongodb` that does not exist on ECS.
 - **`EDDI_VAULT_MASTER_KEY`** enables the [secrets vault](secrets-vault.md). Without it EDDI still starts, but the vault
   is disabled: secret-scoped properties and `${vault:...}` references cannot be stored or resolved, and the
-  [audit ledger](audit-ledger.md) is written without an HMAC signature. In production EDDI refuses to start on a weak
+  [audit ledger](audit-ledger.md) is written without an HMAC signature unless the independent audit key
+  `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. In production EDDI refuses to start on a weak
   key (shorter than 16 characters or a known default). Keep the key: the vault's data keys are wrapped with it, so
   replacing it later requires a key rotation, not just a new value.
 
-The ECS **task execution role** must be allowed to read both secrets (`secretsmanager:GetSecretValue` on their ARNs).
+`valueFrom` takes the secret's name when the secret is in the task's region; otherwise use the secret's **complete** ARN as
+`create-secret` printed it, including the six-character random suffix Secrets Manager appends. The ECS
+**task execution role** must be allowed to read both secrets (`secretsmanager:GetSecretValue` on their ARNs).
 
 ## Step 3: Set Up Amazon ECS
 
@@ -98,11 +101,11 @@ the `<...>` placeholders:
       "secrets": [
         {
           "name": "MONGODB_CONNECTIONSTRING",
-          "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:eddi/mongodb-connectionstring"
+          "valueFrom": "eddi/mongodb-connectionstring"
         },
         {
           "name": "EDDI_VAULT_MASTER_KEY",
-          "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:eddi/vault-master-key"
+          "valueFrom": "eddi/vault-master-key"
         }
       ],
       "environment": [

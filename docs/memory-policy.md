@@ -95,7 +95,7 @@ The error digest is stored as a special output type:
 ```
 
 `text` is always `Task '<eddi:// task id>' failed: ` followed by the reason. The reason is kept short
-on purpose: URLs are replaced with `[url]`, stack frames and fully-qualified exception class names are
+on purpose: HTTP(S) URLs are replaced with `[url]` (other schemes, such as a `mongodb://` URL, are not), stack frames and fully-qualified exception class names are
 stripped, a provider's raw JSON error body is reduced to its `message`, secrets are redacted, and the
 reason is then cut at 200 characters (with `...` appended when cut). The cap applies to the reason
 only — the `Task '…' failed: ` prefix comes on top of it. A failing model call reads, for example,
