@@ -465,7 +465,7 @@ public class ConnectionConfiguration {
         String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[\\-._]", "");
         if (CREDENTIAL_PARAM_NAMES.contains(normalized)) {
             throw new IllegalArgumentException("oauth.extraAuthParams may carry only non-secret protocol parameters (prompt, audience, …). '"
-                    + key + "' is credential-shaped; store it with POST /secretstore/secrets and reference it instead.");
+                    + key + "' is credential-shaped; store it with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it instead.");
         }
         if (RESERVED_OAUTH_PARAM_NAMES.contains(normalized)) {
             throw new IllegalArgumentException("oauth.extraAuthParams must not set '" + key + "': it is a protocol parameter EDDI "
@@ -546,7 +546,7 @@ public class ConnectionConfiguration {
         if (CREDENTIAL_SHAPED_VALUE.matcher(value).find()) {
             throw new IllegalArgumentException("oauth.extraAuthParams['" + key + "'] looks like a credential ('" + quoteLiteral(value)
                     + "'). The map may carry only non-secret protocol parameters (prompt, audience, access_type, …); store a credential "
-                    + "with POST /secretstore/secrets and reference it from the field that expects it.");
+                    + "with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it from the field that expects it.");
         }
     }
 
@@ -563,7 +563,7 @@ public class ConnectionConfiguration {
         }
         if (!isReferenceOnly(value)) {
             throw new IllegalArgumentException(field + " must be a ${vault:…} or ${vars:…} reference, not a literal. Store the value with "
-                    + "POST /secretstore/secrets and reference it here — a literal here bypasses the vault, export scrubbing and deploy-time "
+                    + "PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here — a literal here bypasses the vault, export scrubbing and deploy-time "
                     + "grant enforcement at once.");
         }
     }
@@ -611,20 +611,20 @@ public class ConnectionConfiguration {
         }
         if (!sawReference) {
             throw new IllegalArgumentException("staticAuth.valueTemplate contains no ${vault:…} reference, so it is a plaintext credential. "
-                    + "Store it with POST /secretstore/secrets and reference it here.");
+                    + "Store it with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here.");
         }
         for (String literal : literals) {
             if (literal.length() > MAX_TEMPLATE_LITERAL_CHARS) {
                 throw new IllegalArgumentException("staticAuth.valueTemplate carries " + literal.length() + " characters of literal text ('"
                         + quoteLiteral(literal) + "') around its references; a literal segment may hold at most " + MAX_TEMPLATE_LITERAL_CHARS
                         + " characters — a scheme such as 'Bearer ' — so a plaintext credential cannot ride alongside a reference. Store the "
-                        + "value with POST /secretstore/secrets and reference it here.");
+                        + "value with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here.");
             }
             Matcher run = CREDENTIAL_SHAPED_RUN.matcher(literal);
             if (run.find()) {
                 throw new IllegalArgumentException("staticAuth.valueTemplate carries a credential-shaped literal ('" + quoteLiteral(run.group())
                         + "') around its references — a run of twelve or more key characters. Literal text may only carry a scheme such as "
-                        + "'Bearer '; store the value with POST /secretstore/secrets and reference it here.");
+                        + "'Bearer '; store the value with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here.");
             }
         }
     }

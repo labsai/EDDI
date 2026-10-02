@@ -323,7 +323,7 @@ Two things stay behind, by design or because they are not configuration:
 on a first promotion the reference is what travels: the value never leaves the
 source instance, by design. A promoted agent therefore carries a reference to a
 vault entry the target may not have, and the first LLM call fails when it does
-not. Create the entry on the target under the same name — `POST /secretstore/secrets/{tenantId}/{keyName}`
+not. Create the entry on the target under the same name — `PUT /secretstore/secrets/{tenantId}/{keyName}`
 — or edit the promoted config to name one it already has. From then on the
 target's choice sticks: an agent that is *updated* keeps its own credentials and
 its own vault references, whatever the source names, so a sync never overwrites a

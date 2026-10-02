@@ -200,6 +200,18 @@ class RestApiCallsStoreBranchTest {
         }
 
         @Test
+        @DisplayName("a literal authHeaderRef is refused with a hint naming the PUT endpoint that stores a secret")
+        void literalAuthHeaderRefNamesThePutEndpoint() {
+            Response response = restApiCallsStore
+                    .discoverEndpoints(new ApiEndpointDiscoveryRequest("https://example.com/openapi.json", null, "Bearer sk-live-abc"));
+
+            assertEquals(400, response.getStatus());
+            String error = String.valueOf(((Map<?, ?>) response.getEntity()).get("error"));
+            assertTrue(error.contains("PUT /secretstore/secrets/{tenantId}/{keyName}"), error);
+            assertFalse(error.contains("POST /secretstore"), error);
+        }
+
+        @Test
         @DisplayName("blank apiBaseUrl and authHeaderRef are treated as null")
         void blankApiBaseUrlAndAuthRef() {
             // This will fail on parseAndBuild since the URL is invalid, but tests the
