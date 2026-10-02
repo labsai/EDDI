@@ -59,7 +59,9 @@ import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
@@ -178,6 +180,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Inject
     void useSecretScrubber(SecretScrubber secretScrubber) {
         this.remoteSecretScrubber = secretScrubber::scrubJson;
+    }
+
+    /**
+     * Applies the knowledge-base storage rules to imported knowledge bases. Null
+     * when built outside the container, where an import still gets the per-id
+     * layout but the explicit-location check is skipped.
+     */
+    private KnowledgeBaseStorageGuard knowledgeBaseStorageGuard;
+
+    @Inject
+    void useKnowledgeBaseStorageGuard(KnowledgeBaseStorageGuard guard) {
+        this.knowledgeBaseStorageGuard = guard;
     }
 
     /**
@@ -1612,6 +1626,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // orphaning the history), nothing was validated, and no schedule was
             // created, so a source with a cron looked scheduled and never ran.
             prepareImportedRag(config);
+            // An imported knowledge base is a new one, addressed by its new id: an
+            // archive's knowledge base named like a local one must not land in the
+            // local one's store.
+            if (knowledgeBaseStorageGuard != null) {
+                knowledgeBaseStorageGuard.prepareNew(config, false);
+            } else if (config != null) {
+                config.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
+            }
             URI created = createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
             syncImportedRagSchedules(created, config);
             return created;

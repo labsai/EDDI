@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
@@ -15,6 +16,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.filter.Filter;
 import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
 import dev.langchain4j.store.embedding.chroma.ChromaApiVersion;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
@@ -33,6 +35,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -43,7 +46,6 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.regex.Pattern;
 
 /**
  * Creates and caches {@link EmbeddingStore} instances based on
@@ -61,9 +63,6 @@ public class EmbeddingStoreFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingStoreFactory.class);
     private static final MongoDriverInformation DRIVER_INFO = MongoDriverInfoFactory.build();
-
-    private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
-    private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
 
     /** Ceiling on cached embedding stores across every knowledge base. */
     static final int MAX_STORES = 50;
@@ -165,28 +164,56 @@ public class EmbeddingStoreFactory {
     }
 
     /**
-     * Returns a cached or newly created embedding store for the given configuration
-     * and knowledge base ID.
+     * Returns a cached or newly created embedding store for a knowledge base.
+     * <p>
+     * The store is addressed by the RAG configuration's <em>id</em>, never by a
+     * name or by anything a request carries. Up to 6.5.0 this took a free-form
+     * {@code kbId} — the knowledge base's name, or whatever {@code ?kbId=} an
+     * ingestion request named — so two knowledge bases with one name shared a
+     * store, and an editor of one could write into another's by naming it. Where
+     * the vectors physically live is decided by {@link KnowledgeBaseStorage}.
+     *
+     * @param ragConfigId
+     *            the RAG configuration's id (the same for every version)
      */
-    public EmbeddingStore<TextSegment> getOrCreate(RagConfiguration config, String kbId) {
+    public EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config) {
+        if (ragConfigId == null || ragConfigId.isBlank()) {
+            throw new IllegalArgumentException("An embedding store is addressed by its knowledge base's id, and none was given");
+        }
         // Include storeParameters in cache key (different connection params = different
         // store)
         String paramsKey = config.getStoreParameters() != null ? new TreeMap<>(config.getStoreParameters()).toString() : "";
-        String cacheKey = config.getStoreType() + ":" + kbId + ":" + paramsKey;
-        return cache.get(cacheKey, k -> build(config, kbId));
+        String namespace = KnowledgeBaseStorage.usesIdNamespace(config)
+                ? KnowledgeBaseStorage.NAMESPACE_ID
+                : KnowledgeBaseStorage.NAMESPACE_NAME + "=" + config.getName();
+        String cacheKey = config.getStoreType() + ":" + ragConfigId + ":" + namespace + ":" + paramsKey;
+        return cache.get(cacheKey, k -> build(ragConfigId, config));
     }
 
-    private EmbeddingStore<TextSegment> build(RagConfiguration config, String kbId) {
+    /**
+     * The filter retrieval applies so a knowledge base only ever sees its own
+     * chunks, or {@code null} for a knowledge base in the 6.5.0 layout — whose
+     * chunks carry no id tag, see {@link KnowledgeBaseStorage#filtersRetrieval}.
+     */
+    public static Filter retrievalFilter(String ragConfigId, RagConfiguration config) {
+        if (!KnowledgeBaseStorage.filtersRetrieval(config)) {
+            return null;
+        }
+        return metadataKey(KnowledgeBaseStorage.METADATA_KB_ID).isEqualTo(KnowledgeBaseStorage.chunkKbId(ragConfigId, config));
+    }
+
+    private EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config) {
         String storeType = config.getStoreType();
-        LOGGER.infof("Building embedding store: type=%s, kbId=%s", sanitize(storeType), sanitize(kbId));
+        LOGGER.infof("Building embedding store: type=%s, knowledgeBase=%s, namespace=%s", sanitize(storeType), sanitize(ragConfigId),
+                KnowledgeBaseStorage.usesIdNamespace(config) ? KnowledgeBaseStorage.NAMESPACE_ID : KnowledgeBaseStorage.NAMESPACE_NAME);
 
         return switch (storeType) {
             case "in-memory" -> new InMemoryEmbeddingStore<>();
-            case "pgvector" -> buildPgVector(config, kbId);
-            case "mongodb-atlas" -> buildMongoDbAtlas(config, kbId);
-            case "elasticsearch" -> buildElasticsearch(config, kbId);
-            case "qdrant" -> buildQdrant(config, kbId);
-            case "chroma" -> buildChroma(config, kbId);
+            case "pgvector" -> buildPgVector(config, ragConfigId);
+            case "mongodb-atlas" -> buildMongoDbAtlas(config, ragConfigId);
+            case "elasticsearch" -> buildElasticsearch(config, ragConfigId);
+            case "qdrant" -> buildQdrant(config, ragConfigId);
+            case "chroma" -> buildChroma(config, ragConfigId);
             default -> throw new IllegalArgumentException(
                     "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant, chroma");
         };
@@ -208,12 +235,13 @@ public class EmbeddingStoreFactory {
      * <li>{@code user} — database user (default: "eddi")</li>
      * <li>{@code password} — database password, supports {@code ${vault:...}}
      * (required)</li>
-     * <li>{@code table} — table name (default: auto-generated from kbId)</li>
+     * <li>{@code table} — table name (default: derived per knowledge base, see
+     * KnowledgeBaseStorage)</li>
      * <li>{@code dimension} — embedding vector dimension (default: 1536 for OpenAI
      * text-embedding-3-small)</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
@@ -224,8 +252,7 @@ public class EmbeddingStoreFactory {
         String password = requireParam(params, "password", "pgvector");
         int dimension = parseIntParam(params, "dimension", 1536);
 
-        // Table name: use explicit param, or derive a safe name from kbId
-        String table = params.getOrDefault("table", sanitizeTableName(kbId));
+        String table = physicalName(params, "table", ragConfigId, config);
 
         LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", sanitize(host), port, sanitize(database),
                 sanitize(table), dimension);
@@ -247,17 +274,17 @@ public class EmbeddingStoreFactory {
      * {@code ${vault:...}})</li>
      * <li>{@code databaseName} — database name (default: "eddi")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
-     * kbId)</li>
+     * the knowledge base, see KnowledgeBaseStorage)</li>
      * <li>{@code indexName} — Atlas Search index name (default:
      * "vector_index")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildMongoDbAtlas(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildMongoDbAtlas(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String connectionString = requireParam(params, "connectionString", "mongodb-atlas");
         String databaseName = params.getOrDefault("databaseName", "eddi");
-        String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId);
+        String collectionName = physicalName(params, "collectionName", ragConfigId, config);
         String indexName = params.getOrDefault("indexName", "vector_index");
 
         LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", sanitize(databaseName), sanitize(collectionName),
@@ -288,17 +315,18 @@ public class EmbeddingStoreFactory {
      * <li>{@code serverUrl} — Elasticsearch URL (default:
      * "http://localhost:9200")</li>
      * <li>{@code apiKey} — API key (optional, supports {@code ${vault:...}})</li>
-     * <li>{@code indexName} — index name (default: auto-generated from kbId)</li>
+     * <li>{@code indexName} — index name (default: derived per knowledge base, see
+     * KnowledgeBaseStorage)</li>
      * </ul>
      */
     @SuppressWarnings("removal") // serverUrl/apiKey/userName/password deprecated in favor of
                                  // restClient(RestClient), but usable without direct ES REST client dependency
-    private EmbeddingStore<TextSegment> buildElasticsearch(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildElasticsearch(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String serverUrl = params.getOrDefault("serverUrl", "http://localhost:9200");
         UrlValidationUtils.rejectCloudMetadataTarget(serverUrl);
-        String indexName = params.getOrDefault("indexName", "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_"));
+        String indexName = physicalName(params, "indexName", ragConfigId, config);
 
         var builder = ElasticsearchEmbeddingStore.builder().serverUrl(serverUrl).indexName(indexName);
 
@@ -327,19 +355,19 @@ public class EmbeddingStoreFactory {
      * <li>{@code host} — Qdrant host (default: "localhost")</li>
      * <li>{@code port} — Qdrant gRPC port (default: 6334)</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
-     * kbId)</li>
+     * the knowledge base, see KnowledgeBaseStorage)</li>
      * <li>{@code apiKey} — Qdrant API key (optional, supports
      * {@code ${vault:...}})</li>
      * <li>{@code useTls} — use TLS (default: "false")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
         guardMetadataHost(host);
         int port = parseIntParam(params, "port", 6334);
-        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
+        String collectionName = physicalName(params, "collectionName", ragConfigId, config);
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
 
         LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", sanitize(host), port, sanitize(collectionName), useTls);
@@ -367,17 +395,17 @@ public class EmbeddingStoreFactory {
      * <li>{@code tenantName} — tenant name (default: "default_tenant")</li>
      * <li>{@code databaseName} — database name (default: "default_database")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
-     * kbId)</li>
+     * the knowledge base, see KnowledgeBaseStorage)</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
         UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
         String tenantName = params.getOrDefault("tenantName", "default_tenant");
         String databaseName = params.getOrDefault("databaseName", "default_database");
-        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
+        String collectionName = physicalName(params, "collectionName", ragConfigId, config);
 
         ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
 
@@ -473,16 +501,24 @@ public class EmbeddingStoreFactory {
         }
     }
 
+    /**
+     * The 6.5.0 Qdrant/Chroma collection name — see {@link KnowledgeBaseStorage}.
+     */
     static String sanitizeCollection(String kbId) {
-        String name = "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
-        // A scan from the end, not the "_+$" regex it replaces: an unanchored-start
-        // "_+$" retries at every underscore, quadratic on a name that is a long run of
-        // them (CodeQL java/polynomial-redos), and the name is operator input.
-        int end = name.length();
-        while (end > 0 && name.charAt(end - 1) == '_') {
-            end--;
+        return KnowledgeBaseStorage.legacyCollectionName(kbId);
+    }
+
+    /**
+     * The physical location: the explicit storeParameters value (after variable and
+     * vault resolution) when there is one, otherwise the knowledge base's default
+     * from {@link KnowledgeBaseStorage#defaultPhysicalName}.
+     */
+    private static String physicalName(Map<String, String> resolvedParams, String key, String ragConfigId, RagConfiguration config) {
+        String explicit = resolvedParams.get(key);
+        if (explicit != null && !explicit.isBlank()) {
+            return explicit;
         }
-        return name.substring(0, end);
+        return KnowledgeBaseStorage.defaultPhysicalName(ragConfigId, config);
     }
 
     /**
@@ -501,19 +537,9 @@ public class EmbeddingStoreFactory {
         UrlValidationUtils.rejectCloudMetadataTarget("http://" + authority);
     }
 
-    /**
-     * Converts a knowledge base ID into a safe PostgreSQL table name. Replaces
-     * non-alphanumeric characters with underscores, lowercases, prefixes with
-     * {@code eddi_kb_}, and truncates to the PostgreSQL identifier limit (63
-     * chars).
-     */
+    /** The 6.5.0 pgvector table name — see {@link KnowledgeBaseStorage}. */
     static String sanitizeTableName(String kbId) {
-        String sanitized = UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
-        String result = "eddi_kb_" + sanitized;
-        if (result.length() > MAX_PG_IDENTIFIER_LENGTH) {
-            result = result.substring(0, MAX_PG_IDENTIFIER_LENGTH);
-        }
-        return result;
+        return KnowledgeBaseStorage.legacyTableName(kbId);
     }
 
     /**

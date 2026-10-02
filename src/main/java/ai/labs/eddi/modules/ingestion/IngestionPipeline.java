@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
@@ -210,7 +211,8 @@ public class IngestionPipeline {
         try {
             source.validate();
             String name = knowledgeBase.getName();
-            if (name == null || name.isBlank()) {
+            boolean keyedByName = !KnowledgeBaseStorage.usesIdNamespace(knowledgeBase);
+            if (keyedByName && (name == null || name.isBlank())) {
                 early = IngestionReport.failed(reservedRunId, source.effectiveId(),
                         "The knowledge base has no name, and its name is what the vector store is keyed by");
             } else if (!source.isEnabled() && mode == Mode.INGEST) {
@@ -229,7 +231,8 @@ public class IngestionPipeline {
             return early;
         }
 
-        String knowledgeBaseId = knowledgeBase.getName();
+        // Only a metric tag now; the store is addressed by ragConfigId.
+        String knowledgeBaseId = knowledgeBase.getName() != null ? knowledgeBase.getName() : ragConfigId;
         String runId;
         if (mode == Mode.INGEST) {
             if (reservedRunId != null) {
@@ -250,7 +253,7 @@ public class IngestionPipeline {
         }
 
         Instant startedAt = Instant.now();
-        Collector collector = new Collector(knowledgeBase, knowledgeBaseId, source, sourceKey, runId, mode);
+        Collector collector = new Collector(knowledgeBase, ragConfigId, knowledgeBaseId, source, sourceKey, runId, mode);
 
         // Everything after the run is claimed is guarded, and by Throwable rather
         // than Exception. A claimed run that is never finished blocks its source for
@@ -494,7 +497,7 @@ public class IngestionPipeline {
         // unchanged over vectors that were never deleted.
         stateStore.markTombstoned(sourceKey, List.of(documentId));
         try {
-            embeddingStoreFactory.getOrCreate(knowledgeBase, knowledgeBase.getName())
+            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase)
                     .removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
                             .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
             return ForgetOutcome.REMOVED;
@@ -544,7 +547,7 @@ public class IngestionPipeline {
     public boolean forgetSource(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
         String sourceKey = stateKey(ragConfigId, source);
         try {
-            embeddingStoreFactory.getOrCreate(knowledgeBase, knowledgeBase.getName())
+            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase)
                     .removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey));
             stateStore.purgeSource(sourceKey);
             return true;
@@ -864,6 +867,10 @@ public class IngestionPipeline {
 
         private final RagConfiguration knowledgeBase;
         private final String knowledgeBaseId;
+        /** Addresses the store; see {@link KnowledgeBaseStorage}. */
+        private final String ragConfigId;
+        /** What every chunk this run writes is tagged with. */
+        private final String chunkKbId;
         private final IngestionSource source;
         private final String sourceKey;
         private final String runId;
@@ -902,10 +909,12 @@ public class IngestionPipeline {
         private boolean superseded;
         private Instant nextOwnershipCheck = Instant.MIN;
 
-        private Collector(RagConfiguration knowledgeBase, String knowledgeBaseId,
+        private Collector(RagConfiguration knowledgeBase, String ragConfigId, String knowledgeBaseId,
                 IngestionSource source, String sourceKey, String runId, Mode mode) {
             this.knowledgeBase = knowledgeBase;
             this.knowledgeBaseId = knowledgeBaseId;
+            this.ragConfigId = ragConfigId;
+            this.chunkKbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, knowledgeBase);
             this.source = source;
             this.sourceKey = sourceKey;
             this.runId = runId;
@@ -917,7 +926,7 @@ public class IngestionPipeline {
 
         EmbeddingStore<TextSegment> store() {
             if (store == null) {
-                store = embeddingStoreFactory.getOrCreate(knowledgeBase, knowledgeBaseId);
+                store = embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase);
             }
             return store;
         }
@@ -1182,7 +1191,10 @@ public class IngestionPipeline {
                     .put(METADATA_SOURCE, String.valueOf(source.getName()))
                     .put(METADATA_SOURCE_KEY, sourceKey)
                     .put(METADATA_RUN_ID, runId)
-                    .put(METADATA_INGESTED_AT, Instant.now().toString());
+                    .put(METADATA_INGESTED_AT, Instant.now().toString())
+                    // What retrieval filters on in the per-id layout. Without it a
+                    // crawled chunk would be invisible to its own knowledge base.
+                    .put(KnowledgeBaseStorage.METADATA_KB_ID, chunkKbId);
 
             var splitter = DocumentSplitters.recursive(
                     knowledgeBase.getChunkSize() == null ? 1000 : knowledgeBase.getChunkSize(),
