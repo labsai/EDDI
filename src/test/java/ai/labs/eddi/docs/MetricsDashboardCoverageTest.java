@@ -112,6 +112,13 @@ class MetricsDashboardCoverageTest {
     private static final Path METRICS_REFERENCE = Path.of("docs", "metrics.md");
 
     /**
+     * The cluster meters (registered only with {@code eddi.messaging.type=nats})
+     * are charted on their own dashboard rather than the Full Metrics Reference;
+     * either one satisfies the coverage check.
+     */
+    private static final Path CLUSTER_DASHBOARD = Path.of("docs", "monitoring", "eddi-cluster-dashboard.json");
+
+    /**
      * Meters that are registered but deliberately not on the dashboard, as
      * {@code meter → why}.
      * <p>
@@ -125,7 +132,7 @@ class MetricsDashboardCoverageTest {
     @DisplayName("every registered eddi meter appears on the Full Metrics Reference dashboard")
     void everyRegisteredMeterIsCharted() {
         Path root = repoRoot();
-        String dashboard = read(root.resolve(DASHBOARD));
+        String dashboard = read(root.resolve(DASHBOARD)) + read(root.resolve(CLUSTER_DASHBOARD));
 
         var uncharted = new TreeSet<String>();
         for (var meter : collectMeters(root).values()) {

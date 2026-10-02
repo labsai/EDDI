@@ -241,6 +241,14 @@ public class ConversationService implements IConversationService, UserErasurePar
      * log.
      */
     final Counter counterConversationStoreConflict;
+
+    /**
+     * Whether a dead letter records the turn's input and context so an operator can
+     * replay it. Field-injected with its default so the many tests that build this
+     * service with {@code new} keep the documented behaviour.
+     */
+    @ConfigProperty(name = "eddi.coordinator.dead-letter.capture-input", defaultValue = "true")
+    boolean captureDeadLetterInput = true;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
     private final MeterRegistry meterRegistry;
@@ -823,7 +831,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, !rerunOnly, notifySkipped, processingTurn);
+                    turnBuilder, !rerunOnly, notifySkipped, processingTurn, inputData, rerunOnly);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -1053,7 +1061,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, true, notifySkipped, processingTurn);
+                    turnBuilder, true, notifySkipped, processingTurn, inputData, false);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -1804,10 +1812,40 @@ public class ConversationService implements IConversationService, UserErasurePar
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                      Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
                                                      boolean rebuildWhenSuperseded, Consumer<IConversationMemory> skipNotifier,
-                                                     ProcessingTurn processingTurn)
+                                                     ProcessingTurn processingTurn, InputData inputData, boolean rerun)
             throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
-                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn);
+                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn,
+                describeTurn(environment, conversationMemory, conversationId, inputData, rerun));
+    }
+
+    /**
+     * What a dead letter of this turn records, so an operator can replay it as a
+     * new turn: the conversation, agent and environment, the user, and — unless
+     * {@code eddi.coordinator.dead-letter.capture-input=false} — the input and its
+     * context.
+     */
+    Map<String, Object> describeTurn(Environment environment, IConversationMemory memory, String conversationId, InputData inputData,
+                                     boolean rerun) {
+        Map<String, Object> turn = new LinkedHashMap<>();
+        turn.put("conversationId", conversationId);
+        turn.put("agentId", memory.getAgentId());
+        turn.put("agentVersion", memory.getAgentVersion());
+        turn.put("environment", environment == null ? null : environment.toString());
+        turn.put("userId", memory.getUserId());
+        turn.put("rerun", rerun);
+        if (captureDeadLetterInput && inputData != null) {
+            turn.put("input", inputData.getInput());
+            if (inputData.getContext() != null && !inputData.getContext().isEmpty()) {
+                turn.put("context", inputData.getContext());
+            }
+        }
+        return turn;
+    }
+
+    /** A turn's write was refused by the cluster fence (cluster mode only). */
+    void counterFenceRejected() {
+        meterRegistry.counter("eddi.cluster.fence.rejected").increment();
     }
 
     void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {

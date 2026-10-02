@@ -129,7 +129,7 @@ the fix.
 [`ConversationMemoryStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryStore.java),
 [`PostgresConversationMemoryStore.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStore.java),
 [`Conversation.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/Conversation.java),
-[`NatsConversationCoordinator.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/NatsConversationCoordinator.java),
+`NatsConversationCoordinator.java` (since removed),
 [`ScheduleFireExecutor.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/ScheduleFireExecutor.java),
 [`AgentDeploymentManagement.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java),
 [`MongoDeploymentStorage.java`](../../src/main/java/ai/labs/eddi/configs/deployment/mongo/MongoDeploymentStorage.java)

@@ -25,7 +25,9 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
+import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -547,8 +549,24 @@ class ConversationHitlService {
             // #4: guard the resume with the same watchdog the say path uses — a
             // hung LLM call or crashed executor must not leave the conversation
             // stuck IN_PROGRESS forever.
-            IDiscardableTask guardedResume = new IDiscardableTask() {
+            IDiscardableTask guardedResume = new ILeaseAwareTask() {
+                /** The cluster lease (cluster mode); null on a single node. */
+                private volatile LeaseHandle lease;
+
+                @Override
+                public void bindLease(LeaseHandle lease) {
+                    this.lease = lease;
+                }
+
                 public Void call() {
+                    LeaseHandle held = lease;
+                    if (held != null && held.fence() != null) {
+                        // Same fencing as a say turn: the resumed turn's write is refused if
+                        // another node took the conversation over, and losing the lease
+                        // cancels it at the next task boundary.
+                        memory.setFenceToken(held.fence());
+                        held.onLost(() -> memory.setCancelled(true));
+                    }
                     try {
                         // The identities were captured on the REST request thread
                         // above, because this body already runs on a pool thread with

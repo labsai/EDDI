@@ -17,18 +17,16 @@ import java.util.concurrent.Callable;
  * <h2>Implementations</h2>
  * <ul>
  * <li><strong>InMemoryConversationCoordinator</strong> (default) — In-process
- * queue, zero dependencies</li>
- * <li><strong>NatsConversationCoordinator</strong> — NATS JetStream-backed,
- * durable, scalable</li>
+ * queue, zero dependencies, single node</li>
+ * <li><strong>ClusterConversationCoordinator</strong> — the same per-node queue
+ * plus a cluster-wide lease per conversation on NATS JetStream KV, so any
+ * number of replicas can serve one conversation without overlapping turns</li>
  * </ul>
  *
  * <p>
- * Selected at <strong>build</strong> time, not at runtime: the in-memory
- * coordinator is the {@code @DefaultBean} and the NATS one is gated on
- * {@code @IfBuildProfile("nats")}, so only an artifact built with that profile
- * contains it. The {@code eddi.messaging.type} property in
- * {@code application.properties} is read by no Java code and does not switch
- * implementations — this javadoc previously said it did.
+ * Selected at <strong>runtime</strong> by {@code eddi.messaging.type}
+ * ({@code in-memory} or {@code nats}) — see {@code ClusterProducers}. One
+ * published image serves both.
  * </p>
  *
  * @author ginccc

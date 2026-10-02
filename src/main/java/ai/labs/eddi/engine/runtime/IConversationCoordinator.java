@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.model.DeadLetterEntry;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Conversation coordinator — ensures sequential message processing per
@@ -89,11 +90,21 @@ public interface IConversationCoordinator extends IEventBus {
     }
 
     /**
-     * Replay a dead-letter entry (re-inject into the main processing workflow).
+     * @return one dead-letter entry, if it exists
+     */
+    default Optional<DeadLetterEntry> getDeadLetter(String entryId) {
+        return getDeadLetters().stream().filter(e -> e.id().equals(entryId)).findFirst();
+    }
+
+    /**
+     * Removes an entry after its replay was submitted. The replay itself — a NEW
+     * turn built from the entry's captured input — is performed by the admin API
+     * through the conversation service; the failed task object is gone and is never
+     * re-run.
      *
      * @param entryId
      *            the dead-letter entry ID
-     * @return true if the entry was found and replayed
+     * @return true if the entry was found and removed
      */
     default boolean replayDeadLetter(String entryId) {
         return false;
