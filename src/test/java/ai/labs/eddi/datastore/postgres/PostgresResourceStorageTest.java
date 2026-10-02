@@ -118,6 +118,7 @@ class PostgresResourceStorageTest {
         DataSource indexDataSource = mock(DataSource.class);
         when(indexDataSource.getConnection()).thenReturn(indexConnection);
         when(indexConnection.createStatement()).thenReturn(indexStatement);
+        answerNoSuchIndex(indexConnection);
 
         new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "name", "workflowSteps.config.uri");
 
@@ -150,6 +151,7 @@ class PostgresResourceStorageTest {
         DataSource indexDataSource = mock(DataSource.class);
         when(indexDataSource.getConnection()).thenReturn(indexConnection);
         when(indexConnection.createStatement()).thenReturn(indexStatement);
+        answerNoSuchIndex(indexConnection);
 
         // identical for the first 50 characters, differing only at the end
         String a = "averyLongCustomerFacingConfigurationFieldNameForA_one";
@@ -179,6 +181,7 @@ class PostgresResourceStorageTest {
         DataSource indexDataSource = mock(DataSource.class);
         when(indexDataSource.getConnection()).thenReturn(indexConnection);
         when(indexConnection.createStatement()).thenReturn(indexStatement);
+        answerNoSuchIndex(indexConnection);
 
         new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "userid", "userId");
 
@@ -200,38 +203,60 @@ class PostgresResourceStorageTest {
         assertTrue(indexNames.contains("idx_resources_fdesc_userid"), indexNames.toString());
     }
 
+    /** The catalogue lookup finds no index of any name. */
+    private static void answerNoSuchIndex(Connection conn) throws SQLException {
+        PreparedStatement lookup = mock(PreparedStatement.class);
+        ResultSet none = mock(ResultSet.class);
+        when(conn.prepareStatement(anyString())).thenReturn(lookup);
+        when(lookup.executeQuery()).thenReturn(none);
+    }
+
     /**
-     * The ascending field index of earlier releases is replaced, not kept beside
-     * its successor — and only once the successor exists, so a role that may not
-     * create indexes keeps the one it has.
+     * An upgraded database still has the ascending index of earlier releases.
+     * Building its replacement with a plain CREATE INDEX at boot took a SHARE lock
+     * on the shared resources table — one descriptor per conversation — and stopped
+     * every write on every instance for the whole build. The replacement is left to
+     * the background, concurrent swap; the legacy index is not touched here.
      */
     @Test
-    void legacyAscendingFieldIndexIsDroppedOnlyAfterItsReplacementExists() throws Exception {
+    void legacyFieldIndexIsReplacedInTheBackgroundNotAtBoot() throws Exception {
         Statement indexStatement = mock(Statement.class);
         Connection indexConnection = mock(Connection.class);
         DataSource indexDataSource = mock(DataSource.class);
         when(indexDataSource.getConnection()).thenReturn(indexConnection);
         when(indexConnection.createStatement()).thenReturn(indexStatement);
+        PreparedStatement lookup = mock(PreparedStatement.class);
+        ResultSet found = mock(ResultSet.class);
+        when(indexConnection.prepareStatement(contains("indisvalid"))).thenReturn(lookup);
+        when(lookup.executeQuery()).thenReturn(found);
+        when(found.next()).thenReturn(true);
+        when(found.getBoolean(1)).thenReturn(true);
 
-        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "lastModifiedOn");
+        var built = new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "lastModifiedOn");
 
-        InOrder inOrder = inOrder(indexStatement);
-        inOrder.verify(indexStatement).execute(contains("CREATE INDEX IF NOT EXISTS idx_resources_fdesc_lastmodifiedon_"));
-        inOrder.verify(indexStatement).execute(contains("DROP INDEX IF EXISTS idx_resources_field_lastmodifiedon_"));
+        verify(indexStatement, never()).execute(contains("idx_resources_fdesc_lastmodifiedon_"));
+        verify(indexStatement, never()).execute(contains("DROP INDEX"));
+        var pending = built.fieldIndexSwaps().pending();
+        assertEquals(1, pending.size(), pending.toString());
+        assertTrue(pending.get(0).name().startsWith("idx_resources_fdesc_lastmodifiedon_"), pending.toString());
+        assertTrue(pending.get(0).legacyName().startsWith("idx_resources_field_lastmodifiedon_"), pending.toString());
+        assertTrue(pending.get(0).target().endsWith("DESC NULLS LAST)"), pending.toString());
     }
 
     @Test
-    void legacyFieldIndexSurvivesWhenItsReplacementCannotBeCreated() throws Exception {
+    void freshDatabaseBuildsTheFieldIndexAtBootAndSchedulesNoSwap() throws Exception {
         Statement indexStatement = mock(Statement.class);
         Connection indexConnection = mock(Connection.class);
         DataSource indexDataSource = mock(DataSource.class);
         when(indexDataSource.getConnection()).thenReturn(indexConnection);
         when(indexConnection.createStatement()).thenReturn(indexStatement);
-        when(indexStatement.execute(contains("idx_resources_fdesc_"))).thenThrow(new SQLException("permission denied", "42501"));
+        answerNoSuchIndex(indexConnection);
 
-        new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "name");
+        var built = new PostgresResourceStorage<>(indexDataSource, "descriptors", jsonSerialization, TestConfig.class, "name");
 
+        verify(indexStatement).execute(contains("CREATE INDEX IF NOT EXISTS idx_resources_fdesc_name ON"));
         verify(indexStatement, never()).execute(contains("DROP INDEX"));
+        assertNull(built.fieldIndexSwaps());
     }
 
     @Test
@@ -241,6 +266,7 @@ class PostgresResourceStorageTest {
         DataSource indexDataSource = mock(DataSource.class);
         when(indexDataSource.getConnection()).thenReturn(indexConnection);
         when(indexConnection.createStatement()).thenReturn(indexStatement);
+        answerNoSuchIndex(indexConnection);
         // Tables must still be created; only the index statements fail.
         doThrow(new SQLException("permission denied")).when(indexStatement).execute(contains("CREATE INDEX"));
 

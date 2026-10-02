@@ -55,6 +55,13 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     /** How long the background build waits after boot; tests shorten it. */
     long substringIndexStartDelayMillis = PostgresSubstringSearchIndexes.START_DELAY_MILLIS;
 
+    /**
+     * Replacements of earlier releases' ascending field indexes that initSchema
+     * found and left for {@link #startFieldIndexSwaps}; {@code null} when there are
+     * none.
+     */
+    private PostgresFieldIndexSwaps fieldIndexSwaps;
+
     // collection_name FIRST: every query in this class filters on it, and a
     // btree index can only be used from its leading column. With (id,
     // collection_name) — the original order — a descriptor listing could not use
@@ -179,6 +186,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     }
 
     private void initSchema(String... indexes) {
+        List<PostgresFieldIndexSwaps.Swap> swaps = new ArrayList<>();
         try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_RESOURCES_TABLE);
             stmt.execute(CREATE_HISTORY_TABLE);
@@ -186,11 +194,30 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
                 createIndexQuietly(stmt, createIndex);
             }
             for (String index : indexes) {
-                createFieldIndex(stmt, index);
+                createFieldIndex(conn, stmt, index, swaps);
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize PostgreSQL schema", e);
         }
+        fieldIndexSwaps = swaps.isEmpty() ? null : new PostgresFieldIndexSwaps(dataSource, swaps);
+    }
+
+    /**
+     * Starts the replacement of earlier releases' ascending field indexes on a
+     * background thread, if this database has any; see
+     * {@link PostgresFieldIndexSwaps}. The factory calls it; a storage built
+     * directly (tests, tools) never starts a thread.
+     */
+    PostgresResourceStorage<T> startFieldIndexSwaps() {
+        if (fieldIndexSwaps != null) {
+            fieldIndexSwaps.runInBackground(substringIndexStartDelayMillis);
+        }
+        return this;
+    }
+
+    /** Test seam: the pending replacements, run synchronously by a test. */
+    PostgresFieldIndexSwaps fieldIndexSwaps() {
+        return fieldIndexSwaps;
     }
 
     /**
@@ -208,18 +235,42 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
      * used to build (under {@link #LEGACY_INDEX_NAME_PREFIX}): scanned backwards
      * that one yields {@code DESC NULLS FIRST}, PostgreSQL's default for
      * {@code DESC}, which put documents without the field at the top of every
-     * listing while MongoDB puts them at the bottom. The legacy index is dropped
-     * only once its replacement exists.
+     * listing while MongoDB puts them at the bottom.
+     * <p>
+     * Where the legacy index exists — a database an earlier release built — the
+     * replacement is not built here: a plain {@code CREATE INDEX} blocks every
+     * write to the shared table for the whole build, and that table holds a
+     * descriptor per conversation. It is left to {@link PostgresFieldIndexSwaps},
+     * which builds it concurrently in the background and drops the legacy index
+     * only once the replacement is valid. On a fresh database, or once the swap is
+     * done, the index is created here as before.
      */
-    private void createFieldIndex(Statement stmt, String field) {
+    private void createFieldIndex(Connection conn, Statement stmt, String field, List<PostgresFieldIndexSwaps.Swap> swaps) {
         String sanitized = sanitizeJsonPath(field);
         if (sanitized.isEmpty() || sanitized.contains(".")) {
             return;
         }
-        boolean created = createIndexQuietly(stmt, "CREATE INDEX IF NOT EXISTS " + fieldIndexName(INDEX_NAME_PREFIX, sanitized)
-                + " ON resources (collection_name, (data ->> '" + sanitized + "') DESC NULLS LAST)");
-        if (created) {
-            createIndexQuietly(stmt, "DROP INDEX IF EXISTS " + fieldIndexName(LEGACY_INDEX_NAME_PREFIX, sanitized));
+        String name = fieldIndexName(INDEX_NAME_PREFIX, sanitized);
+        String target = "resources (collection_name, (data ->> '" + sanitized + "') DESC NULLS LAST)";
+        String legacyName = fieldIndexName(LEGACY_INDEX_NAME_PREFIX, sanitized);
+        if (legacyIndexMayExist(conn, legacyName)) {
+            swaps.add(new PostgresFieldIndexSwaps.Swap(name, target, legacyName));
+            return;
+        }
+        createIndexQuietly(stmt, "CREATE INDEX IF NOT EXISTS " + name + " ON " + target);
+    }
+
+    /**
+     * Whether the legacy index exists. When the catalogue cannot be asked, assume
+     * it does: the background swap is the path that never blocks writes, and it
+     * does nothing harmful when there is nothing to replace.
+     */
+    private static boolean legacyIndexMayExist(Connection conn, String legacyName) {
+        try {
+            return PostgresFieldIndexSwaps.isValid(conn, legacyName) != null;
+        } catch (SQLException e) {
+            LOGGER.debugf("Could not look up index %s: %s", legacyName, e.getMessage());
+            return true;
         }
     }
 
@@ -279,15 +330,13 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     /** The ascending field indexes built before {@link #INDEX_NAME_PREFIX}. */
     private static final String LEGACY_INDEX_NAME_PREFIX = "idx_resources_field_";
 
-    private boolean createIndexQuietly(Statement stmt, String createIndexSql) {
+    private void createIndexQuietly(Statement stmt, String createIndexSql) {
         try {
             stmt.execute(createIndexSql);
-            return true;
         } catch (SQLException e) {
             // An index is an optimisation, never a correctness requirement — a
             // deployment whose DB role may not CREATE INDEX must still boot.
             LOGGER.warnf("Could not create index (queries will fall back to a scan): %s — %s", createIndexSql, e.getMessage());
-            return false;
         }
     }
 
