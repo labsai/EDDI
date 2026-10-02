@@ -269,7 +269,10 @@ public class McpCallsTask implements ILifecycleTask {
                 if (toolResult.length() > maxSize) {
                     LOGGER.warnf("MCP call '%s' returned %d chars, more than its maxResponseSizeInBytes of %d — truncating before "
                             + "storing it in memory.", callName, toolResult.length(), maxSize);
-                    responseObject = toolResult.substring(0, maxSize);
+                    // Never end on the first half of a surrogate pair: a lone surrogate is not
+                    // valid UTF-16 and does not survive the memory store's encoding.
+                    int end = Character.isHighSurrogate(toolResult.charAt(maxSize - 1)) ? maxSize - 1 : maxSize;
+                    responseObject = toolResult.substring(0, end);
                 } else {
                     // Try to parse as JSON, fallback to raw string
                     try {

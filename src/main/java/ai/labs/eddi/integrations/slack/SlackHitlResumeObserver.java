@@ -16,6 +16,8 @@ import jakarta.enterprise.event.ObservesAsync;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.regex.Pattern;
+
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -162,14 +164,22 @@ public class SlackHitlResumeObserver {
 
     /**
      * Render a {@code slack:U123} decidedBy as a Slack mention {@code <@U123>};
-     * otherwise return it verbatim.
+     * otherwise return it escaped ({@link SlackMrkdwn}) — it is a principal name
+     * from the identity provider, not EDDI's text, and a {@code <!channel>} in it
+     * must not broadcast. A {@code slack:} id that is not a Slack user id is
+     * escaped the same way rather than wrapped into a control sequence.
      */
-    private static String slackMention(String decidedBy) {
+    static String slackMention(String decidedBy) {
         if (decidedBy.startsWith("slack:")) {
-            return "<@" + decidedBy.substring("slack:".length()) + ">";
+            String userId = decidedBy.substring("slack:".length());
+            if (SLACK_USER_ID.matcher(userId).matches()) {
+                return "<@" + userId + ">";
+            }
         }
-        return decidedBy;
+        return SlackMrkdwn.escape(decidedBy);
     }
+
+    private static final Pattern SLACK_USER_ID = Pattern.compile("[A-Z0-9]{1,32}");
 
     /**
      * Parse a Slack-routed managed-conversation intent into channel + thread.

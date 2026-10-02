@@ -88,6 +88,20 @@ class SlackHitlResumeObserverTest {
     // ─── Decision summary ───
 
     @Test
+    void decisionSummary_nonSlackApprover_isEscaped() {
+        String s = SlackHitlResumeObserver.decisionSummary(HitlVerdict.APPROVED, "<!channel>", snapshotWithText("x"));
+        assertTrue(s.contains("by &lt;!channel&gt;"), s);
+        assertFalse(s.contains("<!channel>"), s);
+    }
+
+    @Test
+    void decisionSummary_malformedSlackId_isNotWrappedIntoAMention() {
+        String s = SlackHitlResumeObserver.decisionSummary(HitlVerdict.APPROVED, "slack:U1> <!here", snapshotWithText("x"));
+        assertFalse(s.contains("<!here"), s);
+        assertFalse(s.contains("<@U1>"), s);
+    }
+
+    @Test
     void decisionSummary_approvedHuman_mentionsUser() {
         String s = SlackHitlResumeObserver.decisionSummary(HitlVerdict.APPROVED, "slack:U9", snapshotWithText("x"));
         assertTrue(s.contains("Approved"));

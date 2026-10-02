@@ -423,6 +423,37 @@ class McpCallsTaskBranchCoverageTest {
         }
 
         @Test
+        void truncationNeverEndsOnHalfASurrogatePair() throws Exception {
+            @SuppressWarnings("unchecked")
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("send_message"));
+            doReturn(actionsData).when(currentStep).getLatestData("actions");
+
+            var config = new McpCallsConfiguration();
+            config.setMcpServerUrl("http://mcp.local");
+            var call = new McpCall();
+            call.setActions(List.of("send_message"));
+            call.setToolName("myTool");
+            call.setName("myCall");
+            call.setSaveResponse(true);
+            call.setResponseObjectName("myResult");
+            call.setMaxResponseSizeInBytes(4);
+            config.setMcpCalls(List.of(call));
+
+            var toolSpec = ToolSpecification.builder().name("myTool").build();
+            var executor = mock(ToolExecutor.class);
+            // "abc" + an emoji (two UTF-16 chars): the cap of 4 falls between its halves.
+            when(executor.execute(any(), any())).thenReturn("abc" + new String(Character.toChars(0x1F600)) + "def");
+            var mcpResult = new McpToolProviderManager.McpToolsResult(List.of(toolSpec), Map.of("myTool", executor));
+            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(mcpResult);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+
+            task.execute(memory, config);
+
+            verify(prePostUtils).createMemoryEntry(eq(currentStep), eq("abc"), eq("myResult"), eq("mcpCalls"));
+        }
+
+        @Test
         @DisplayName("saveResponse=true with blank responseObjectName defaults to callName + Response")
         void saveResponseDefaultName() throws Exception {
             @SuppressWarnings("unchecked")
