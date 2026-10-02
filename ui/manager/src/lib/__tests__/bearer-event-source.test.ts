@@ -684,4 +684,33 @@ describe("BearerEventSource", () => {
 
     es.close();
   });
+
+  /**
+   * Review 2026-10-02: the headers were captured once at construction, so a
+   * stream that reconnected after the access token was refreshed kept sending
+   * the expired token, got 401 on every attempt and gave up — the live log and
+   * coordinator streams died one token lifetime after the page was opened.
+   */
+  it("asks a header provider again on every reconnect, so a refreshed token is used", async () => {
+    let token = "expired";
+    const provider = vi.fn(() => ({ Authorization: `Bearer ${token}` }));
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 401 }));
+    fetchSpy.mockResolvedValueOnce(
+      new Response(createSSEStream([]), { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    );
+
+    const es = new BearerEventSource("http://test/sse", provider);
+    await vi.advanceTimersByTimeAsync(0);
+    // The token is refreshed while the source waits to retry.
+    token = "fresh";
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const auth = fetchSpy.mock.calls.map(
+      ([, init]) => (init?.headers as Record<string, string>).Authorization,
+    );
+    expect(auth).toEqual(["Bearer expired", "Bearer fresh"]);
+    expect(provider).toHaveBeenCalledTimes(2);
+    es.close();
+  });
 });

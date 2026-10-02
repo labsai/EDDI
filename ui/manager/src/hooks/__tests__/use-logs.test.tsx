@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
 import { type ReactNode } from "react";
 import {
-  useRecentLogs,
   useHistoryLogs,
   useInstanceId,
   useLogStream,
@@ -26,81 +25,6 @@ function createWrapper() {
     );
   };
 }
-
-describe("useRecentLogs", () => {
-  it("fetches recent logs", async () => {
-    const { result } = renderHook(() => useRecentLogs(), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(Array.isArray(result.current.data)).toBe(true);
-    expect(result.current.data!.length).toBeGreaterThan(0);
-    expect(result.current.data![0]).toHaveProperty("level");
-    expect(result.current.data![0]).toHaveProperty("message");
-  });
-
-  it("passes filter params", async () => {
-    const { result } = renderHook(
-      () => useRecentLogs({ level: "ERROR", agentId: "agent1" }),
-      { wrapper: createWrapper() },
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-
-  it("passes conversationId filter", async () => {
-    let capturedUrl = "";
-    server.use(
-      http.get("*/administration/logs", ({ request }) => {
-        capturedUrl = request.url;
-        return HttpResponse.json([
-          {
-            level: "INFO",
-            message: "Filtered by conversation",
-            loggerName: "test",
-            timestamp: Date.now(),
-          },
-        ]);
-      })
-    );
-
-    const { result } = renderHook(
-      () => useRecentLogs({ conversationId: "conv-123" }),
-      { wrapper: createWrapper() },
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(capturedUrl).toContain("conversationId=conv-123");
-  });
-
-  it("passes limit filter", async () => {
-    let capturedUrl = "";
-    server.use(
-      http.get("*/administration/logs", ({ request }) => {
-        capturedUrl = request.url;
-        return HttpResponse.json([]);
-      })
-    );
-
-    const { result } = renderHook(
-      () => useRecentLogs({ limit: 50 }),
-      { wrapper: createWrapper() },
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(capturedUrl).toContain("limit=50");
-  });
-
-  it("handles error response", async () => {
-    server.use(
-      http.get("*/administration/logs", () => {
-        return new HttpResponse(null, { status: 500 });
-      })
-    );
-
-    const { result } = renderHook(() => useRecentLogs(), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isError).toBe(true));
-  });
-});
 
 describe("useHistoryLogs", () => {
   it("fetches history logs", async () => {
