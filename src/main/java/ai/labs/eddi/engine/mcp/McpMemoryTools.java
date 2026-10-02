@@ -231,7 +231,13 @@ public class McpMemoryTools {
             return errorJson("entryId is required");
         try {
             var existing = userMemoryStore.findEntryById(entryId);
-            if (existing.isPresent() && IUserMemoryStore.isReservedKey(existing.get().key())) {
+            if (existing.isEmpty()) {
+                // As the REST endpoint answers 404: reporting "deleted" for an id that
+                // names nothing (a typo, an id from the other datastore) told the caller
+                // a deletion had happened.
+                return errorJson("Memory entry not found: " + entryId);
+            }
+            if (IUserMemoryStore.isReservedKey(existing.get().key())) {
                 // The Art. 18 flag is lifted through the GDPR admin unrestrict endpoint, which
                 // audits it.
                 return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(existing.get().key()).getMessage());
