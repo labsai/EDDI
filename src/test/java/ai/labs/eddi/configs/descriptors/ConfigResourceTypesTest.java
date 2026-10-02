@@ -87,6 +87,22 @@ class ConfigResourceTypesTest {
     }
 
     @Test
+    @DisplayName("a partial answer is not cached — the store that failed is asked again")
+    void partialAnswerIsNotCached() {
+        IRestVersionInfo flaky = mock(IRestVersionInfo.class);
+        when(flaky.getResourceURI()).thenThrow(new IllegalStateException("not ready")).thenReturn(IRestWorkflowStore.resourceURI);
+
+        var types = new ConfigResourceTypes(instanceOf(List.of(flaky, store(IRestAgentStore.resourceURI))));
+
+        // First answer: the workflow store failed, so its type fails closed...
+        assertFalse(types.isConfigType("ai.labs.workflow"));
+        // ...but only until it answers: a partial set cached for good would turn every
+        // workflow descriptor into a 404 until the next restart.
+        assertTrue(types.isConfigType("ai.labs.workflow"));
+        assertTrue(types.isConfigType("ai.labs.agent"));
+    }
+
+    @Test
     @DisplayName("an empty answer is not cached — it fails closed and is asked again")
     void emptyAnswerIsNotCached() {
         List<IRestVersionInfo> stores = new ArrayList<>();

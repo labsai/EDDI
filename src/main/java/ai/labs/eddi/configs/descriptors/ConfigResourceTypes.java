@@ -48,7 +48,7 @@ public class ConfigResourceTypes {
 
     private static final String EDDI_SCHEME = "eddi";
 
-    private final Supplier<Set<String>> source;
+    private final Supplier<Resolution> source;
     private volatile Set<String> types;
 
     @Inject
@@ -57,7 +57,7 @@ public class ConfigResourceTypes {
     }
 
     private ConfigResourceTypes(Set<String> fixed) {
-        this.source = () -> fixed;
+        this.source = () -> new Resolution(fixed, true);
     }
 
     /** A fixed set — for tests and for callers outside a CDI container. */
@@ -69,10 +69,12 @@ public class ConfigResourceTypes {
     public Set<String> types() {
         Set<String> resolved = types;
         if (resolved == null) {
-            resolved = Set.copyOf(source.get());
-            if (!resolved.isEmpty()) {
-                // An empty answer is never cached: it fails closed (nothing is
-                // configuration), and must not stay that way if it was transient.
+            Resolution resolution = source.get();
+            resolved = Set.copyOf(resolution.types());
+            if (resolution.complete() && !resolved.isEmpty()) {
+                // An empty or partial answer is never cached: it fails closed (a type
+                // that could not be read is not configuration), and must not stay that
+                // way for the life of the process if the failure was transient.
                 types = resolved;
             }
         }
@@ -107,8 +109,13 @@ public class ConfigResourceTypes {
         return resource.getAuthority();
     }
 
-    private static Set<String> collect(Collection<? extends IRestVersionInfo> stores) {
+    /** The types read, and whether every store answered. */
+    private record Resolution(Set<String> types, boolean complete) {
+    }
+
+    private static Resolution collect(Collection<? extends IRestVersionInfo> stores) {
         Set<String> collected = new TreeSet<>();
+        boolean complete = true;
         for (IRestVersionInfo store : stores) {
             try {
                 String type = typeOf(URI.create(store.getResourceURI()));
@@ -116,10 +123,11 @@ public class ConfigResourceTypes {
                     collected.add(type);
                 }
             } catch (RuntimeException e) {
+                complete = false;
                 LOGGER.warnf("Could not read the resource type of configuration store %s: %s", store.getClass().getName(), e.getMessage());
             }
         }
         LOGGER.debugf("Configuration descriptor types: %s", collected);
-        return collected;
+        return new Resolution(collected, complete);
     }
 }
