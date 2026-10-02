@@ -68,6 +68,8 @@ public final class LegacyDocumentMigrations {
     static final String FIELD_NAME_VALUE_OBJECT = "valueObject";
     static final String FIELD_NAME_VALUE_INT = "valueInt";
     static final String FIELD_NAME_VALUE_FLOAT = "valueFloat";
+    static final String FIELD_NAME_VALUE_LONG = "valueLong";
+    static final String FIELD_NAME_VALUE_DOUBLE = "valueDouble";
     static final String FIELD_NAME_VALUE_LIST = "valueList";
     static final String FIELD_NAME_VALUE_BOOLEAN = "valueBoolean";
     static final String FIELD_NAME_VALUE = "value";
@@ -204,8 +206,15 @@ public final class LegacyDocumentMigrations {
         } else if (value instanceof Long longValue && longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE) {
             targetField = FIELD_NAME_VALUE_INT;
             migratedValue = longValue.intValue();
-        } else if (value instanceof Float || value instanceof Double) {
+        } else if (value instanceof Long) {
+            // Beyond the int range (the branch above takes the rest): the property model
+            // has carried a long slot since valueLong was added.
+            targetField = FIELD_NAME_VALUE_LONG;
+        } else if (value instanceof Float) {
             targetField = FIELD_NAME_VALUE_FLOAT;
+        } else if (value instanceof Double) {
+            // A BSON double. valueFloat would read it back rounded to about seven digits.
+            targetField = FIELD_NAME_VALUE_DOUBLE;
         } else {
             LOGGER.warnf("Keeping legacy property field '%s' of unsupported type %s as is — the property model has no "
                     + "field for it and dropping it would lose the value. Migrate this document manually.", FIELD_NAME_VALUE,

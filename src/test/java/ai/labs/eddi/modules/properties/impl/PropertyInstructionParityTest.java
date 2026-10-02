@@ -170,6 +170,37 @@ class PropertyInstructionParityTest {
         assertEquals(3, instructions.get(3).getValueInt());
     }
 
+    @Test
+    @DisplayName("an inline valueInt beyond the int range becomes valueLong instead of wrapping around")
+    void inlineValueIntBeyondIntRangeIsNotWrapped() throws Exception {
+        var task = newPropertySetterTask();
+        Map<String, Object> config = MAPPER.readValue("""
+                {"setOnActions":[{"actions":["go"],"setProperties":[
+                  {"name":"big","valueInt":3000000000},
+                  {"name":"neg","valueInt":-3000000000},
+                  {"name":"small","valueInt":7}]}]}""", Map.class);
+
+        var setter = (IPropertySetter) task.configure(config, Map.of());
+        var instructions = setter.getSetOnActionsList().getFirst().getSetProperties();
+
+        assertNull(instructions.get(0).getValueInt(), "3000000000 must not be wrapped to a negative int");
+        assertEquals(3_000_000_000L, instructions.get(0).getValueLong());
+        assertEquals(-3_000_000_000L, instructions.get(1).getValueLong());
+        assertEquals(7, instructions.get(2).getValueInt());
+        assertNull(instructions.get(2).getValueLong());
+    }
+
+    @Test
+    @DisplayName("a path that reaches a non-JSON value sets nothing and does not fail the turn, on both paths")
+    void nonJsonValueIsSkippedOnBothPaths() throws Exception {
+        response.put("live", new Object());
+        var instruction = instruction("value");
+        instruction.setFromObjectPath("repo.live");
+
+        assertNull(viaPropertySetter(instruction));
+        assertNull(viaPostResponse(instruction));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static PropertyInstruction instruction(String name) {

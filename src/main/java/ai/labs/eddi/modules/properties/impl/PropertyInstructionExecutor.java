@@ -88,10 +88,10 @@ public class PropertyInstructionExecutor {
      *         caller can scrub it from anything it still holds; {@code null}
      *         otherwise
      * @throws LifecycleException
-     *             when the name or the value template cannot be rendered, the value
-     *             is of a type no property can hold, or a {@code scope: "secret"}
-     *             value cannot be vaulted (it is not a string, or the vault refused
-     *             it) — never stored in plaintext instead
+     *             when the name or the value template cannot be rendered, or a
+     *             {@code scope: "secret"} value cannot be vaulted (it is not a
+     *             string, or the vault refused it) — never stored in plaintext
+     *             instead
      */
     public String apply(PropertyInstruction instruction, IConversationMemory memory, Map<String, Object> templateDataObjects)
             throws LifecycleException {
@@ -160,8 +160,13 @@ public class PropertyInstructionExecutor {
         } else {
             Property property = PropertyValues.toProperty(name, value, scope);
             if (property == null) {
-                throw new LifecycleException("Cannot store property '" + name + "': a value of type " + value.getClass().getName()
-                        + " fits no property slot (string, object, list, int, long, float, double, boolean).");
+                // Not a JSON value — a path into a live memory object (an output item, the
+                // conversation log, a BigInteger beyond the long range). Such an instruction
+                // was always a silent no-op in property.json; failing the turn now would break
+                // agents that ran fine, so it is skipped, loudly.
+                LOGGER.warnf("Property '%s' not set: a value of type %s fits no property slot (string, object, list, int, long, "
+                        + "float, double, boolean) (conversation %s).", name, value.getClass().getName(), memory.getConversationId());
+                return null;
             }
             property.setVisibility(instruction.getVisibility());
             conversationProperties.put(name, property);

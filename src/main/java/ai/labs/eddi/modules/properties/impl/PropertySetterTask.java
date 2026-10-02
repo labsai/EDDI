@@ -34,6 +34,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.net.URI;
+import java.math.BigInteger;
 import java.util.*;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
@@ -296,8 +297,17 @@ public class PropertySetterTask implements ILifecycleTask {
             } else if (property.get(VALUE_INT) instanceof Number n) {
                 // Number, not Integer: an inline config arrives through Jackson, which
                 // reads 3 as an Integer but 3.0 or 3000000000 as something else, and the
-                // value was dropped without a word.
-                propertyInstruction.setValueInt(n.intValue());
+                // value was dropped without a word. A whole number beyond the int range
+                // goes to valueLong — intValue() would wrap it to a different number.
+                if (n instanceof BigInteger big && big.bitLength() >= 64) {
+                    throw new IllegalArgumentException("valueInt of property '" + propertyInstruction.getName() + "' is beyond the long range: " + n);
+                }
+                long whole = n.longValue();
+                if (whole >= Integer.MIN_VALUE && whole <= Integer.MAX_VALUE) {
+                    propertyInstruction.setValueInt((int) whole);
+                } else {
+                    propertyInstruction.setValueLong(whole);
+                }
             } else if (property.get(VALUE_LONG) instanceof Number n) {
                 propertyInstruction.setValueLong(n.longValue());
             } else if (property.get(VALUE_FLOAT) instanceof Number n) {
