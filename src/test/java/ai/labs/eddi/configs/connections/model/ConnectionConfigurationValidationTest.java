@@ -145,6 +145,32 @@ class ConnectionConfigurationValidationTest {
         }
 
         @Test
+        @DisplayName("a literal oauth.clientSecret names the PUT endpoint that stores a secret")
+        void literalClientSecretHintNamesTheRealEndpoint() {
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setClientSecret("literal-client-secret");
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("oauth.clientSecret must be a"), error.getMessage());
+            assertTrue(error.getMessage().contains("PUT /secretstore/secrets/{tenantId}/{keyName}"), error.getMessage());
+            assertFalse(error.getMessage().contains("POST /secretstore"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a credential-shaped extraAuthParams value names the PUT endpoint that stores a secret")
+        void credentialShapedExtraAuthParamValueHintNamesTheRealEndpoint() {
+            var connection = oauthConnection(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setExtraAuthParams(Map.of("prompt", "sk-live-abcdef0123"));
+
+            var error = assertThrows(IllegalArgumentException.class, connection::validate);
+
+            assertTrue(error.getMessage().contains("looks like a credential"), error.getMessage());
+            assertTrue(error.getMessage().contains("PUT /secretstore/secrets/{tenantId}/{keyName}"), error.getMessage());
+            assertFalse(error.getMessage().contains("POST /secretstore"), error.getMessage());
+        }
+
+        @Test
         @DisplayName("a header template may mix literal text with a reference")
         void acceptsSchemePlusReference() {
             var connection = staticConnection();
