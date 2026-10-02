@@ -26,7 +26,12 @@ function readPomVersion(): string {
   }
 }
 
-const BACKEND = "http://localhost:7070";
+/**
+ * The EDDI backend the dev server proxies to. `EDDI_BACKEND_URL` points it at
+ * another instance (a second checkout on another port, a container) without
+ * editing this file.
+ */
+const BACKEND = process.env.EDDI_BACKEND_URL || "http://localhost:7070";
 
 /**
  * Wrap a proxy entry with an error handler so the dev server doesn't crash
@@ -158,6 +163,14 @@ export default defineConfig({
       "/schedulestore": p(),
       "/deploymentstore": p(),
       "/propertiesstore": p(),
+      // Tool cost / history reads (the debugger's cost dashboard).
+      "/llm": p(),
+      // Called by the User Memory tab and the Workspaces screens; missing here, the
+      // dev server answered them with index.html (200, not JSON) and both pages
+      // showed only "Something went wrong" in dev mode.
+      "/usermemorystore": p(),
+      "/workspaces": p(),
+      "/spacestore": p(),
       "/AgentTriggerStore": p(),
       // SSE stream at /administration/logs/stream needs unbuffered proxy
       "/administration": pSSE(),

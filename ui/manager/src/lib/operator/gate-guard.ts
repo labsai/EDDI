@@ -5,7 +5,21 @@ import type { PendingToolCallView } from "@/lib/api/hitl";
  * configuration document.
  *
  * Like `self-guard.ts` and unlike `escalation-flags.ts`, this is a **control**:
- * the approval surfaces disable Approve outright when it fires. The distinction
+ * the Manager's approval surfaces disable Approve outright when it fires.
+ *
+ * ## Where it holds — defence in depth, not the boundary
+ *
+ * This runs in the BROWSER, inside the Manager's approval UI (the inbox, the
+ * approval banner, the operator drawer). A pause can also be decided without
+ * the Manager: over the REST approval endpoint, an MCP tool, or a Slack approval
+ * channel — none of which ever load this file. On those paths the client guard
+ * does not exist, so the backend's own validation of the approved call is what
+ * enforces the rule (review 2026-10-02: server-side enforcement belongs to the
+ * HITL engine). Keep this guard: it refuses early, explains why, and keeps the
+ * Approve button honest — but never describe it as the thing that makes a
+ * gate-carrying write impossible.
+ *
+ * The distinction
  * is the same one `self-guard.ts` draws — what this blocks is not "a setting
  * worth reading twice" but the one field that can silently remove the operator's
  * oversight, and a warning label an approver can skim past is not a defence
