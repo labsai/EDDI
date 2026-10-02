@@ -10,7 +10,6 @@ import java.util.*;
  * @author ginccc
  */
 public final class StringUtilities {
-    private static final String REGEX_WILDCARD = ".*";
     private static final String REGEX_SPECIAL_CHARS = ".*+?()[]{}|^$\\";
 
     private StringUtilities() {
@@ -28,24 +27,6 @@ public final class StringUtilities {
         if (filter.startsWith("\"") && filter.endsWith("\"")) {
             return filter.length() > 2 ? filter.substring(1, filter.length() - 1) : "";
         }
-        return filter;
-    }
-
-    public static String convertToSearchString(String filter) {
-        if (filter.startsWith("\"") && filter.endsWith("\"")) {
-            if (filter.length() > 2) {
-                filter = escapeRegexChars(filter.substring(1, filter.length() - 1));
-            } else {
-                filter = "";
-            }
-        } else {
-            // Escape user input to prevent regex injection (CWE-400 / CodeQL
-            // java/regex-injection).
-            // Uses per-character escaping instead of Pattern.quote(\Q...\E)
-            // because PostgreSQL's ~ operator does not support \Q...\E syntax.
-            filter = REGEX_WILDCARD + escapeRegexChars(filter) + REGEX_WILDCARD;
-        }
-
         return filter;
     }
 
