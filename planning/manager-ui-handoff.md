@@ -1,5 +1,7 @@
 # EDDI Manager UI — Agentic Improvements Handoff
 
+> **Status: historical.** A hand-off written for the former separate `EDDI-Manager` repository; the Manager now lives in [`ui/manager`](../ui/manager) and records its work in changelog fragments. Not re-verified — check a field against the Manager before treating it as missing.
+
 > **Purpose:** Complete specification of all backend config fields added in the `feature/agentic-improvements` branch that need UI support in the EDDI Manager (React 19 + Vite + Tailwind).
 >
 > All features are **off by default** (backward-compatible). The Manager should expose them as opt-in configuration panels.

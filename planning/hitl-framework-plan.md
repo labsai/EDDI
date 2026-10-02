@@ -1,9 +1,12 @@
 # Human-in-the-Loop (HITL) Framework — Phase 9b (v6, Implementation-Ready)
 
-> **Status:** Code-verified, implementation-ready. This is the build spec. Every API name, signature,
-> field, exception type, and line reference below was verified against the EDDI source across five
-> review iterations. Where a snippet reproduces an existing 13-arg constructor or a cancel-plan detail,
-> **re-confirm the exact field order against the real class before compiling** — line numbers drift.
+> **Status: IMPLEMENTED** (changelog 2026-06-30, "HITL Framework", with the tool-level and MCP
+> follow-ups of July and August 2026). User documentation is [`docs/hitl.md`](../docs/hitl.md); this file
+> is kept as the design record and is not available work. Still not built: `toolApprovals.inGroupTurns:
+> INBOX` and `VoteConfig.tiePolicy: HUMAN_DECIDES`, both refused at save time (see AGENTS.md §3).
+>
+> *Original status (before it shipped):* code-verified, implementation-ready. Line numbers and
+> constructor shapes below describe the code of that time and have drifted.
 
 EDDI needs a **config-driven Human-in-the-Loop** capability: the pipeline pauses for human approval at
 config-marked points, then resumes on an explicit decision. Applies to **both regular (1:1) conversations
