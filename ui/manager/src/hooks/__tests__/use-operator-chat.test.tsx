@@ -1178,6 +1178,44 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+describe("stop keeps the trace of what the turn already did", () => {
+  it("files the partial trace under the stopped answer", async () => {
+    // stop() nulled the controller, and the send's finally only files a trace
+    // for the CURRENT turn — so stopping threw away the reads behind the
+    // partial answer on screen.
+    h.frames = [
+      { type: "task_start", data: JSON.stringify({ taskId: "llm", taskType: "langchain", index: 0 }) },
+      {
+        type: "task_complete",
+        data: JSON.stringify({ taskId: "llm", taskType: "langchain", index: 0, durationMs: 5 }),
+      },
+      { type: "token", data: "Partial" },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    let stopped = false;
+    h.duringStream = () => {
+      const state = useOperatorChatStore.getState();
+      if (!stopped && state.messages.some((m) => m.content === "Partial")) {
+        stopped = true;
+        state.stop();
+      }
+    };
+
+    await act(async () => {
+      await result.current.send("which agents exist?");
+    });
+
+    expect(stopped).toBe(true);
+    const answer = result.current.messages.find((m) => m.role === "agent");
+    expect(answer?.content).toBe("Partial");
+    expect(answer?.isStreaming).toBe(false);
+    const trace = result.current.tracesByMessageId[answer!.id];
+    expect(trace?.map((e) => e.taskId)).toEqual(["llm", "llm"]);
+    expect(result.current.events).toEqual([]);
+    expect(result.current.isStreaming).toBe(false);
+  });
+});
+
 /**
  * A turn can fail with NO stream-level error: the backend emits task_failed for
  * the failing step, streams zero tokens, and closes normally. That combination

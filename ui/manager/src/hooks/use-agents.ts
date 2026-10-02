@@ -102,7 +102,13 @@ export function useAgent(id: string, version?: number) {
     queryKey: [...agentKeys.all, id, version],
     queryFn: () => getAgent(id, version),
     enabled: !!id,
-    placeholderData: keepPreviousData,
+    // Keep the previous VERSION of the same agent on screen while another loads
+    // (no flash on a version switch) — but never another AGENT's document. With
+    // a blanket `keepPreviousData`, navigating from agent A to agent B rendered
+    // A's configuration under B's id, and an inline section save in that window
+    // wrote A's config into B. Callers still gate writes on `isPlaceholderData`.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[agentKeys.all.length] === id ? previous : undefined,
   });
 }
 

@@ -20,7 +20,9 @@ import {
   useRestrictProcessing,
   useUnrestrictProcessing,
   useIsProcessingRestricted,
+  gdprRestrictedKey,
 } from "@/hooks/use-gdpr";
+import { useDebounce } from "@/hooks/use-debounce";
 import type { GdprDeletionResult, UserDataExport } from "@/lib/api/gdpr";
 
 export function GdprPage() {
@@ -35,11 +37,18 @@ export function GdprPage() {
   const exportMutation = useExportUserData();
   const restrictMutation = useRestrictProcessing();
   const unrestrictMutation = useUnrestrictProcessing();
+  // The status is looked up once typing pauses, not on every keystroke: each
+  // character of an id used to fire its own GET for a user who does not exist.
+  const debouncedUserId = useDebounce(userId.trim(), 300);
+  const statusPending = userId.trim() !== debouncedUserId;
   const {
     data: isRestricted,
-    isLoading: restrictLoading,
+    isLoading: restrictQueryLoading,
     isError: restrictError,
-  } = useIsProcessingRestricted(userId.trim());
+  } = useIsProcessingRestricted(debouncedUserId);
+  // Until the debounced id catches up, the badge and the toggle would describe
+  // the previous id — show "Checking..." and keep the toggle disabled instead.
+  const restrictLoading = statusPending || restrictQueryLoading;
 
   const handleExport = useCallback(() => {
     if (!userId.trim()) return;
@@ -120,7 +129,7 @@ export function GdprPage() {
     if (isRestricted) {
       unrestrictMutation.mutate(uid, {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["gdpr", "restricted", uid] });
+          queryClient.invalidateQueries({ queryKey: gdprRestrictedKey(uid) });
           toast.success(t("gdpr.restrictionLifted", "Processing restriction removed"));
         },
         onError: (error) => toast.error(error.message),
@@ -128,7 +137,7 @@ export function GdprPage() {
     } else {
       restrictMutation.mutate(uid, {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["gdpr", "restricted", uid] });
+          queryClient.invalidateQueries({ queryKey: gdprRestrictedKey(uid) });
           toast.success(t("gdpr.restrictionApplied", "Processing restricted for user"));
         },
         onError: (error) => toast.error(error.message),

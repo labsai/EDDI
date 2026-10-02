@@ -94,3 +94,41 @@ describe("useIsProcessingRestricted", () => {
     expect(result.current.fetchStatus).toBe("idle");
   });
 });
+
+describe("useDeleteUserData — cache invalidation", () => {
+  it("marks every cached read the erasure touched as stale", async () => {
+    // Regression: erasure invalidated nothing, so memories, conversations,
+    // schedules and the restriction badge kept showing the erased user's data.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const seeded = [
+      ["user-memories", "user-123"],
+      ["user-properties", "user-123"],
+      ["conversations", { index: 0 }],
+      ["userConversations", "all", "user-123"],
+      ["groupConversations", "g1"],
+      ["schedules", "list", undefined],
+      ["audit", "trail", "c1", 0, 100],
+      ["gdpr", "restricted", "user-123"],
+      // The dashboard's "Recent conversations" card lists them too.
+      ["dashboard", "recent-conversations", 5],
+    ];
+    for (const key of seeded) queryClient.setQueryData(key, { seeded: true });
+    const untouched = ["agents"];
+    queryClient.setQueryData(untouched, []);
+
+    const { result } = renderHook(() => useDeleteUserData(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
+    result.current.mutate("user-123");
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    for (const key of seeded) {
+      expect(queryClient.getQueryState(key)?.isInvalidated, JSON.stringify(key)).toBe(true);
+    }
+    expect(queryClient.getQueryState(untouched)?.isInvalidated).toBe(false);
+  });
+});
