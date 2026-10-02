@@ -89,7 +89,9 @@ is an admin's to delete, not every caller's.
   does not define it), or set `EDDI_METRICS_HTTP_POLICY=authenticated`.
 - `/openapi`, `/q/openapi`, `/q/swagger-ui` require any EDDI role (`eddi.api-docs.http-policy`,
   `eddi.api-docs.roles-allowed`).
-- Helm chart 2.3.1: only the `eddi.metrics.httpPolicy` comment changed.
+- Helm: only the comment on `eddi.metrics.httpPolicy` in `values.yaml` changed (it named the old
+  default). The chart version is deliberately not bumped here: nothing renders differently, and the
+  chart's next version is taken by a concurrent change.
 
 ### Docs
 
