@@ -170,7 +170,7 @@ if (-not $EddiDir) { $EddiDir = Join-Path -Path $HOME -ChildPath ".eddi" }
 $EddiDir = $EddiDir.TrimEnd('\', '/')
 # The image tag docker-compose.yml pulls (labsai/eddi:${EDDI_VERSION:-latest}).
 $EddiVersion = if ($env:EDDI_VERSION) { $env:EDDI_VERSION } else { "latest" }
-if ($EddiVersion -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]*$') {
+if ($EddiVersion -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]*\z') {
     throw "Invalid EDDI_VERSION: '$EddiVersion' (expected an image tag such as 6.5.0 or latest)."
 }
 
@@ -181,7 +181,8 @@ if ($EddiVersion -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]*$') {
 # '..', '//', a leading or trailing '/', a component starting with '.', a trailing
 # '.' and a '.lock' suffix in ref names, so refusing them costs no real ref.
 function Test-GitRef([string]$Ref) {
-    if ($Ref -notmatch '^[a-zA-Z0-9._/-]+$') { return $false }
+    # \z, not $: in .NET '$' also matches before a trailing newline.
+    if ($Ref -notmatch '^[a-zA-Z0-9._/-]+\z') { return $false }
     if ($Ref -match '\.\.|//|^/|/$|^\.|/\.|^-|\.$|\.lock$') { return $false }
     return $true
 }
@@ -193,7 +194,7 @@ function Get-LatestReleaseTag {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/labsai/EDDI/releases/latest" `
             -Headers @{ Accept = "application/vnd.github+json" } -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
-        if ($release.tag_name -match '^\d+\.\d+\.\d+$') { return [string]$release.tag_name }
+        if ($release.tag_name -match '^\d+\.\d+\.\d+\z') { return [string]$release.tag_name }
     }
     catch { Write-Verbose $_.Exception.Message }
     return $null
@@ -1668,15 +1669,24 @@ if /i "!CFG_SOURCE!"=="explicit" goto update_ref_done
 set "TARGET_VERSION=%EDDI_VERSION%"
 if not defined TARGET_VERSION for /f "usebackq tokens=1,* delims==" %%A in ("%ENV_FILE%") do if "%%A"=="EDDI_VERSION" set "TARGET_VERSION=%%B"
 if not defined TARGET_VERSION set "TARGET_VERSION=latest"
+rem An install made before EDDI_BRANCH_SOURCE existed recorded only the ref, and the
+rem installer then only ever chose 'main' (or the version tag) by itself. Any other
+rem ref was set by hand: keep it, and record it as explicit from now on.
+if not defined CFG_SOURCE if /i not "!EDDI_BRANCH!"=="main" if /i not "!EDDI_BRANCH!"=="!TARGET_VERSION!" (
+    set "CFG_SOURCE=explicit"
+    goto update_ref_set
+)
 if /i not "!TARGET_VERSION!"=="latest" (
     set "EDDI_BRANCH=!TARGET_VERSION!"
     set "CFG_SOURCE=version"
     goto update_ref_set
 )
 set "LATEST_TAG="
-rem No backticks (usebackq) here: this is a PowerShell here-string, which would eat them.
-for /f "delims=" %%T in ('powershell -NoProfile -NonInteractive -Command "try { (Invoke-RestMethod -TimeoutSec 10 -UseBasicParsing -Uri https://api.github.com/repos/labsai/EDDI/releases/latest).tag_name } catch {}"') do set "LATEST_TAG=%%T"
-if defined LATEST_TAG echo !LATEST_TAG!| findstr /r /x "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" >nul || set "LATEST_TAG="
+rem No backticks (usebackq), no dollar signs and no exclamation marks here: this is a
+rem PowerShell here-string, which would eat the first two, and delayed expansion would
+rem eat the third. PowerShell itself keeps only a MAJOR.MINOR.PATCH tag, so nothing
+rem else from the API answer ever reaches a cmd.exe parser.
+for /f "delims=" %%T in ('powershell -NoProfile -NonInteractive -Command "try { (Invoke-RestMethod -TimeoutSec 10 -UseBasicParsing -Uri https://api.github.com/repos/labsai/EDDI/releases/latest).tag_name | Select-String -Pattern '^\d+\.\d+\.\d+\z' | ForEach-Object Line } catch {}"') do set "LATEST_TAG=%%T"
 if defined LATEST_TAG (
     set "EDDI_BRANCH=!LATEST_TAG!"
     set "CFG_SOURCE=latest-release"
@@ -1738,11 +1748,19 @@ goto :eof
 :check_ref
 rem Same rules as install.ps1's Test-GitRef: the character class alone lets '..'
 rem through, and the download then resolves into another repository's path.
-echo(!EDDI_BRANCH!| findstr /r /x "[a-zA-Z0-9._/-]*" >nul || goto check_ref_bad
-echo(!EDDI_BRANCH!| findstr /c:".." /c:"//" >nul && goto check_ref_bad
-echo(!EDDI_BRANCH!| findstr /r /b /c:"[/.-]" >nul && goto check_ref_bad
-echo(!EDDI_BRANCH!| findstr /r /e /c:"[/.]" /c:"\.lock" >nul && goto check_ref_bad
-echo(!EDDI_BRANCH!| findstr /c:"/." >nul && goto check_ref_bad
+rem The value reaches findstr through a FILE, never through a pipe: each side of a
+rem pipe is re-parsed by a child cmd.exe, so a ref carrying an ampersand ran what
+rem followed it as a command, and only the part before it was checked. A redirect
+rem of a delayed expansion is not re-parsed: the file holds the value as it is.
+set "REF_FILE=%TEMP%\eddi-ref-%RANDOM%%RANDOM%.txt"
+> "!REF_FILE!" (echo(!EDDI_BRANCH!)
+set "REF_BAD="
+findstr /r /x "[a-zA-Z0-9._/-][a-zA-Z0-9._/-]*" "!REF_FILE!" >nul || set "REF_BAD=1"
+findstr /c:".." /c:"//" /c:"/." "!REF_FILE!" >nul && set "REF_BAD=1"
+findstr /r /b /c:"[/.-]" "!REF_FILE!" >nul && set "REF_BAD=1"
+findstr /r /e /c:"[/.]" /c:"\.lock" "!REF_FILE!" >nul && set "REF_BAD=1"
+del "!REF_FILE!" >nul 2>nul
+if defined REF_BAD goto check_ref_bad
 exit /b 0
 :check_ref_bad
 echo Invalid EDDI_BRANCH: !EDDI_BRANCH!

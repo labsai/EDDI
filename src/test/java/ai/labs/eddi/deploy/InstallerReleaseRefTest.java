@@ -126,6 +126,58 @@ class InstallerReleaseRefTest {
                 Map.of("EDDI_BRANCH", "../../someone/else/main"), false);
         assertNotEquals(0, traversal.exit(), traversal.toString());
         assertFalse(traversal.output().contains("raw.githubusercontent.com"), traversal.toString());
+
+        // Installed before EDDI_BRANCH_SOURCE existed, on a ref set by hand: the old
+        // installer only ever chose `main` or the version tag itself, so this ref was
+        // the operator's and must survive the first update under the new wrapper.
+        Run legacyExplicit = cliUpdate(files + "EDDI_BRANCH=feature/x\n", "EDDI_VERSION=latest\n", List.of(), Map.of(), false);
+        assertTrue(legacyExplicit.output().contains("/EDDI/feature/x/docker-compose.yml"), legacyExplicit.toString());
+        assertTrue(legacyExplicit.config().contains("EDDI_BRANCH_SOURCE=explicit"), legacyExplicit.toString());
+    }
+
+    @Test
+    @DisplayName("eddi.cmd validates the ref without letting cmd.exe parse it")
+    void cmdWrapperRefCheck() throws Exception {
+        assumeTrue(WINDOWS, "eddi.cmd is a Windows batch file");
+        // :check_ref exactly as install.ps1 writes it into eddi.cmd. It used to pipe
+        // the value into findstr, and each side of a pipe is re-parsed by a child
+        // cmd.exe: an `&` ran what followed it, and only the part before it was
+        // checked, so a traversal hidden behind it was accepted too.
+        String ps1 = Files.readString(INSTALL_PS1, StandardCharsets.UTF_8).replace("\r\n", "\n");
+        int start = ps1.indexOf("\n:check_ref\n");
+        int bad = ps1.indexOf("\n:check_ref_bad\n", start);
+        int end = ps1.indexOf("exit /b 1\n", bad);
+        assertTrue(start >= 0 && bad > start && end > bad, "install.ps1 no longer writes a :check_ref subroutine into eddi.cmd");
+        String subroutine = ps1.substring(start + 1, end + "exit /b 1\n".length());
+        assertFalse(Pattern.compile("[^|]\\|\\s*findstr").matcher(subroutine).find(),
+                "eddi.cmd's :check_ref pipes the ref into a child cmd.exe again");
+
+        Path dir = sandbox("eddi-cmd");
+        Path marker = dir.resolve("pwned.txt");
+        String harness = "@echo off\nsetlocal EnableDelayedExpansion\ncall :check_ref || exit /b 1\necho ACCEPTED\nexit /b 0\n"
+                + subroutine;
+        Path script = dir.resolve("check-ref.cmd");
+        Files.writeString(script, harness.replace("\n", "\r\n"), StandardCharsets.US_ASCII);
+
+        List<String> refused = new ArrayList<>(TRAVERSALS);
+        refused.addAll(List.of("x&echo pwned>\"" + marker + "\"&rem /../../../evil/repo/main",
+                "x|echo pwned>\"" + marker + "\"", "a\"b", "a!PATH!b", "a b", "x^&y", "main;x"));
+        for (String ref : refused) {
+            Run run = runCmd(script, ref);
+            assertNotEquals(0, run.exit(), "eddi.cmd accepted EDDI_BRANCH=" + ref + ". " + run);
+            assertFalse(Files.exists(marker), "EDDI_BRANCH=" + ref + " ran a command inside eddi.cmd. " + run);
+        }
+        for (String ref : List.of("main", "6.5.0", "feature/x", "release-6.5", "dependabot/npm_and_yarn/x-1.2")) {
+            Run run = runCmd(script, ref);
+            assertEquals(0, run.exit(), "eddi.cmd refused the legitimate ref " + ref + ". " + run);
+        }
+    }
+
+    private static Run runCmd(Path script, String ref) throws Exception {
+        ProcessBuilder builder = new ProcessBuilder("cmd.exe", "/d", "/c", script.toString());
+        builder.redirectErrorStream(true);
+        builder.environment().put("EDDI_BRANCH", ref);
+        return finish(builder.start(), null);
     }
 
     @Test

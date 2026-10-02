@@ -550,6 +550,11 @@ resolve_eddi_branch() {
   fi
   COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
 }
+# The image tag, in Docker's tag grammar (as `eddi update --eddi-version` and
+# install.ps1 check it): it is written to .env and, when pinned, becomes the ref.
+if [[ ! "$EDDI_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]; then
+  echo "Invalid EDDI_VERSION: $EDDI_VERSION (expected an image tag such as 6.5.0 or latest)" >&2; exit 1
+fi
 EDDI_BRANCH_SOURCE=""
 resolve_eddi_branch
 
@@ -2437,6 +2442,10 @@ case "${1:-help}" in
       esac
     done
 
+    # The image tag this install ran before any --eddi-version below re-pins it.
+    ENV_VERSION_BEFORE="$({ grep '^EDDI_VERSION=' "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2- | sed 's/^"//;s/"$//')"
+    ENV_VERSION_BEFORE="${ENV_VERSION_BEFORE:-latest}"
+
     if [[ -n "$NEW_VERSION" ]]; then
       # Validate BEFORE touching .env or .eddi-config: a rejected value must leave
       # the installation exactly as it was, not pinned to an image tag this very
@@ -2463,6 +2472,12 @@ case "${1:-help}" in
       EDDI_BRANCH_SOURCE="explicit"
     elif [[ "$EDDI_BRANCH_SOURCE" == "explicit" && -z "$NEW_VERSION" ]]; then
       :
+    elif [[ -z "$EDDI_BRANCH_SOURCE" && -z "$NEW_VERSION" && "$EDDI_BRANCH" != "main" \
+            && "$EDDI_BRANCH" != "$ENV_VERSION_BEFORE" ]]; then
+      # Installed before EDDI_BRANCH_SOURCE existed: the installer then derived the
+      # ref only as `main` or the pinned version's tag, so any other ref was set by
+      # hand. Keep it, and record it as explicit from now on.
+      EDDI_BRANCH_SOURCE="explicit"
     elif [[ "$TARGET_VERSION" != "latest" ]]; then
       EDDI_BRANCH="$TARGET_VERSION"
       EDDI_BRANCH_SOURCE="version"
