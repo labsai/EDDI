@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { renderPage } from "@/test/test-utils";
+import { server } from "@/test/mocks/server";
+import { http, HttpResponse } from "msw";
 
 import { WorkforceWizard } from "../workforce-wizard";
 import { WorkforceDashboard } from "../workforce-dashboard";
@@ -140,6 +142,50 @@ describe("Workforce pages own their scroll container", () => {
     const root = container.firstElementChild;
     expect(root).toBeTruthy();
     expect(root!.getAttribute("class") ?? "").toMatch(SCROLLER_PATTERN);
+  });
+
+  /**
+   * The dashboard's empty state, which the table above never reaches: its mock
+   * returns task forces, and an empty render was waved through as "cannot
+   * overflow". It can. The onboarding hero — hero, three how-it-works cards and
+   * a grid of templates — is taller than a laptop screen, and it shipped in 6.5.0
+   * without a scroller, so a first-time user could not reach the templates that
+   * create their first task force. Pinned here as a state, not as a page.
+   */
+  it("the dashboard's onboarding hero (no task forces yet) sits inside a scroller", async () => {
+    server.use(http.get("*/groupstore/groups/descriptors", () => HttpResponse.json([])));
+
+    renderPage("/workforce", <WorkforceDashboard />, "/workforce");
+
+    const hero = await screen.findByTestId("workforce-onboarding-hero");
+    let scroller: Element | null = hero;
+    while (scroller && !SCROLLER_PATTERN.test(scroller.getAttribute("class") ?? "")) {
+      scroller = scroller.parentElement;
+    }
+    expect(
+      scroller,
+      "the onboarding hero has no scrolling ancestor — the Workforce shell clips it below the fold",
+    ).not.toBeNull();
+  });
+
+  /**
+   * The loading state, which the page table above never holds still: its
+   * request resolves and the page moves on to the populated view, so that test
+   * would pass with this wrapper removed. The skeleton is several card rows
+   * tall, enough to outgrow a short window, so it gets the same scroller. The
+   * request is left pending so the skeleton stays on screen.
+   */
+  it("the dashboard's loading skeleton sits inside a scroller", async () => {
+    server.use(http.get("*/groupstore/groups/descriptors", () => new Promise<never>(() => {})));
+
+    renderPage("/workforce", <WorkforceDashboard />, "/workforce");
+
+    const skeleton = await screen.findByTestId("workforce-dashboard-skeleton");
+    let scroller: Element | null = skeleton;
+    while (scroller && !SCROLLER_PATTERN.test(scroller.getAttribute("class") ?? "")) {
+      scroller = scroller.parentElement;
+    }
+    expect(scroller, "the loading skeleton has no scrolling ancestor").not.toBeNull();
   });
 
   /** Guards the guard: a tree with no scroller must actually fail the check. */
