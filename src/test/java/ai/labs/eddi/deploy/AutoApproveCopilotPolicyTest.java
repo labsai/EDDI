@@ -36,8 +36,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * {@code // --- policy:<name>} markers.
  * <p>
  * Both decisions were once too permissive: a Copilot review whose findings sat
- * only in the review BODY ("Comments suppressed due to low confidence") counted
- * as clean because only inline comments were counted, and the "never
+ * only in the review BODY (a collapsed "Suppressed comments (2)" section)
+ * counted as clean because only inline comments were counted, and the "never
  * auto-approve CI changes" rule protected {@code .github/**} alone, so a PR
  * that edited {@code pom.xml}, a release script, the Dockerfile or the
  * installer users pipe into bash was approved on a green CI run it could itself
@@ -74,24 +74,66 @@ class AutoApproveCopilotPolicyTest {
     @Test
     @DisplayName("a Copilot review body is clean only when it says so and carries no findings")
     void copilotBodyPolicy() throws Exception {
+        // The shapes below are the ones Copilot actually posts on this repository
+        // (`gh api repos/labsai/EDDI/pulls/<n>/reviews`), shortened: the overview-v2
+        // format since 2026-09 (#866 clean, #871 with findings) and the legacy
+        // "Pull request overview" format before it (#672, #688).
+        String tip = "\n\n---\n\n💡 <a href=\"/labsai/EDDI/new/main?filename=.github/skills/code-review/SKILL.md\">"
+                + "Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews.";
+        String perFile = "\n\n<details>\n<summary>Show a summary per file</summary>\n\n| File | Description |\n| ---- | ----------- |\n"
+                + "| `README.md` | Documents the change. |\n</details>";
+        String v2Head = "<!-- ccr-overview-v2 -->\n\n## Copilot review overview\n\n";
+        String v2Changed = "\n\n<details>\n<summary><strong>What changed in this PR</strong></summary>\n\nStabilizes a test.\n\n"
+                + "**Changes:**\n- Waits for toast removal.\n</details>";
+
         Map<String, Boolean> expected = new LinkedHashMap<>();
-        expected.put("", true);
-        expected.put("   \n ", true);
-        expected.put("## Pull request overview\n\nThis PR bumps a dependency.\n\n### Reviewed changes\n\n"
-                + "Copilot reviewed 3 out of 3 changed files in this pull request and generated no comments.\n\n"
-                + "<details><summary>Show a summary per file</summary>|File|Description|</details>\n\n---\n\n"
-                + "Tip: Customize your code reviews with copilot-instructions.md.", true);
-        expected.put("Copilot reviewed 2 out of 2 changed files in this pull request and generated no new comments.", true);
-        // Findings folded into the body: no inline comment and no review thread exists.
+        // --- overview v2 ---
+        expected.put(v2Head + "### 🟢 Approval recommended\n\nThe focused test-only change is correct.\n\n"
+                + "*Get a fresh assessment by requesting another Copilot review.*\n\n**Review effort:** Balanced  \n"
+                + "**Findings:** None" + v2Changed + tip, true);
+        expected.put(v2Head + "### 🟡 Changes recommended\n\nVault cleanup can orphan secrets.\n\n**Review effort:** Balanced  \n"
+                + "**Findings:** 3 <picture><img alt=\"High severity\"></picture>\n\n<details open>\n"
+                + "<summary><strong>Open (3)</strong></summary>\n\n- <picture></picture> [Snapshot deletion prevents cleanup]"
+                + "(#discussion_r1) · New\n</details>" + v2Changed + tip, false);
+        // Findings: None, but earlier reviews' findings are still unresolved.
+        expected.put(v2Head + "### 🟢 Approval recommended\n\nLooks good.\n\n**Findings:** None\n\n<details open>\n"
+                + "<summary><strong>Open (1)</strong></summary>\n\n- [Null check inverted](#discussion_r2)\n</details>"
+                + v2Changed + tip, false);
+        expected.put(v2Head + "### 🟢 Approval recommended\n\n**Findings:** 1" + v2Changed + tip, false);
+        expected.put(v2Head + "### 🟡 Changes recommended\n\n**Findings:** None" + v2Changed + tip, false);
+        // A v2 body without a verdict or a findings line: unknown, fail closed.
+        expected.put(v2Head + "The change looks fine." + v2Changed + tip, false);
+
+        // --- legacy "Pull request overview" ---
+        expected.put("## Pull request overview\n\nRemoves the obsolete bootstrap flow.\n\n**Changes:**\n- Removes the endpoint.\n\n"
+                + "### Reviewed changes\n\nCopilot reviewed 47 out of 53 changed files in this pull request and generated no "
+                + "comments." + perFile + tip, true);
+        expected.put("## Pull request overview\n\nCopilot reviewed 127 out of 276 changed files in this pull request and generated "
+                + "no new comments.\n\n\n\n", true);
+        expected.put("## Pull request overview\n\n### Reviewed changes\n\nCopilot reviewed 3 out of 4 changed files in this pull "
+                + "request and generated no comments." + perFile + "\n\n<details>\n<summary>Files not reviewed (1)</summary>\n\n"
+                + "* **ui/manager/package-lock.json**: Language not supported\n</details>" + tip, true);
+        // Findings folded into the body — no inline comment and no review thread exists
+        // for them. This is what #672 received three times; each read as clean.
+        expected.put("## Pull request overview\n\n### Reviewed changes\n\nCopilot reviewed 47 out of 53 changed files in this pull "
+                + "request and generated no comments." + perFile + "\n\n<details>\n<summary>Suppressed comments (2)</summary>\n\n"
+                + "**src/main/java/Foo.java:101**\n* The documented 400 contract is not met.\n</details>" + tip, false);
+        expected.put("## Pull request overview\n\nCopilot reviewed 127 out of 276 changed files in this pull request and generated "
+                + "no new comments.\n\n<details>\n<summary>Suppressed comments (1)</summary>\n\n**Foo.java:513**\n* x\n</details>",
+                false);
         expected.put("Copilot reviewed 4 out of 4 changed files in this pull request and generated no comments.\n\n"
                 + "<details>\n<summary>Comments suppressed due to low confidence (2)</summary>\n\n"
                 + "**src/main/java/Foo.java:12**\n* The null check is inverted.\n</details>", false);
-        expected.put("Copilot reviewed 4 out of 4 changed files in this pull request and generated 2 comments.", false);
-        expected.put("Copilot wasn't able to review any files in this pull request.", false);
+        expected.put("## Pull request overview\n\nCopilot reviewed 131 out of 254 changed files in this pull request and generated 2 "
+                + "comments.", false);
+        expected.put("Copilot wasn't able to review this pull request because it exceeds the maximum number of files (300). "
+                + "Try reducing the number of changed files and requesting a review from Copilot again.", false);
         expected.put("Copilot wasn’t able to review any files in this pull request.", false);
         expected.put("Copilot was not able to review this change. It generated no comments.", false);
-        // An overview with no explicit "no comments" statement: unknown format, fail
-        // closed.
+
+        // --- neither format: fail closed ---
+        expected.put("", false);
+        expected.put("   \n ", false);
         expected.put("## Pull request overview\n\nThis PR refactors the parser.", false);
 
         List<String> inputs = new ArrayList<>(expected.keySet());
@@ -117,12 +159,16 @@ class AutoApproveCopilotPolicyTest {
                 "docker-compose.yml", "docker-compose.auth.yml", "ui/manager/docker-compose.integration-keycloak.yml",
                 "install.sh", "install.ps1", "mise.toml", "ui/manager/mise.toml", ".gitleaksignore", ".trivyignore",
                 "ui/manager/package.json", "ui/manager/package-lock.json", "ui/chat/package.json",
-                "ui/chat/package-lock.json", "ui/manager/scripts/check-i18n.mjs");
+                "ui/chat/package-lock.json", "ui/manager/scripts/check-i18n.mjs",
+                "ui/manager/vitest.config.ts", "ui/chat/vite.config.ts", "ui/manager/playwright.config.ts",
+                "ui/chat/eslint.config.js", "ui/manager/tsconfig.app.json", "ui/manager/stryker.config.json",
+                ".dockerignore", "src/main/docker/Dockerfile.demo.dockerignore");
         List<String> ordinaryPaths = List.of(
                 "src/main/java/ai/labs/eddi/engine/Foo.java", "src/main/resources/application.properties",
                 "docs/changelog.d/2026-10-02-x.md", "docs/docker-compose-guide.md", "README.md",
                 "ui/manager/src/App.tsx", "ui/manager/src/lib/package.json", "ui/chat/src/main.tsx",
-                "scriptsx/run.sh", "src/test/java/ai/labs/eddi/FooTest.java");
+                "scriptsx/run.sh", "src/test/java/ai/labs/eddi/FooTest.java",
+                "ui/manager/src/vite-env.d.ts", "ui/manager/src/lib/vitest.config.ts");
 
         List<String> inputs = new ArrayList<>(protectedPaths);
         inputs.addAll(ordinaryPaths);
