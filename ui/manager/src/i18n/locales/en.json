@@ -218,7 +218,9 @@
     "removeItem": "Remove {{item}}",
     "stepOf": "Step {{current}} of {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "Resize {{panel}}"
+    "resizePanel": "Resize {{panel}}",
+    "deletePermanently": "Delete permanently",
+    "deletePermanentlyHint": "Cannot be undone. Without this, the item is only marked deleted and stays recoverable until it is purged."
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -485,7 +487,8 @@
       "notice": "What the chat tells people (leave empty for the standard wording)",
       "noticePlaceholder": "Conversations with this agent may be read by the people who maintain it, to improve it.",
       "versionNote": "Covers conversations on the version this change creates and later ones — never what was said before. Slack, Teams and API clients cannot show the notice; if people reach this agent there, say it in the greeting."
-    }
+    },
+    "copyUrl": "Copy URL"
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -799,7 +802,9 @@
     "reviewNoticeLabel": "Conversation review",
     "sendRejected": "Your message was not sent: {{reason}}",
     "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
-    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
+    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason.",
+    "errorWithReason": "Error: {{reason}}",
+    "endConversationFailed": "Could not end the conversation: {{reason}}"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -923,7 +928,8 @@
     "savedNotLive": "Saved — not yet live",
     "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
     "deployNow": "Deploy",
-    "deployStarted": "Deployment started"
+    "deployStarted": "Deployment started",
+    "invalidJsonNotSaved": "Not saved — the JSON is invalid: {{reason}}"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1576,7 +1582,8 @@
     "purgeError": "Failed to purge",
     "empty": "No coordinator data available",
     "emptyHint": "The coordinator service may still be starting up. Data will appear automatically.",
-    "lastNSnapshots": "Last {{count}} snapshots"
+    "lastNSnapshots": "Last {{count}} snapshots",
+    "refreshInterval": "Auto-refresh interval"
   },
   "contentEditor": {
     "expand": "Expand",
@@ -2308,7 +2315,8 @@
       "readyTitle": "Ready to Start?",
       "readySubtitle": "You can restart any tour from the sidebar Help menu",
       "startTour": "Start the Tour",
-      "exploreOwn": "I'll Explore on My Own"
+      "exploreOwn": "I'll Explore on My Own",
+      "panelN": "Panel {{n}}"
     },
     "tour": {
       "back": "Back",
@@ -2550,7 +2558,7 @@
     "count_one": "{{count}} group",
     "count_other": "{{count}} groups",
     "confirmDelete": "Delete this group?",
-    "confirmDeleteDesc": "This will permanently delete the group configuration.",
+    "confirmDeleteDesc": "The group is marked deleted and disappears from this list.",
     "duplicateSuccess": "Group duplicated",
     "members": "members",
     "discussionStyle": "Discussion Style",
@@ -2671,8 +2679,8 @@
     "deleteGroupOnlySuccess": "Group deleted (agents kept)",
     "deleteGroupOnlyWarning": "This will delete the group. All member agents will be kept.",
     "deleteGroupAndAgents": "Delete Group + All Agents",
-    "deleteWithMembersSuccess": "Group and all member agents deleted (soft-delete)",
-    "deleteWithMembersWarning": "This will soft-delete the group and all {{count}} member agents. They can be recovered.",
+    "deleteWithMembersSuccess": "Group and all member agents deleted",
+    "deleteWithMembersWarning": "This will delete the group and all {{count}} member agents.",
     "hideDiscussions": "Hide discussions panel",
     "showDiscussions": "Show discussions panel",
     "hideConfig": "Hide config panel",
@@ -3041,7 +3049,9 @@
       "humanNeedsName_other": "{{count}} human members need a display name.",
       "humanNeedsId_one": "{{count}} human member needs the person's user id.",
       "humanNeedsId_other": "{{count}} human members need the person's user id."
-    }
+    },
+    "deletePermanentlyHint": "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.",
+    "deletePermanentlyWithMembersHint": "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3173,7 +3183,11 @@
     "humanPrincipalId": "Principal ID",
     "humanPrincipalIdPlaceholder": "The user's login/principal id",
     "humanTurnSettingsHint": "The discussion pauses and waits when it's a human member's turn to speak. Choose what happens if they don't respond in time.",
-    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak."
+    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak.",
+    "memberPromptPlaceholder": "You are {{name}}. Provide insightful analysis from your domain perspective.",
+    "memberPromptPlaceholderRole": "You are {{name}}, a {{role}} expert. Provide insightful analysis from your domain perspective.",
+    "moderatorPromptPlaceholder": "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary…",
+    "modelPlaceholder": "e.g. {{model}}"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -3258,7 +3272,9 @@
     "created": "Created",
     "updated": "Updated",
     "sourceConversation": "Source Conversation",
-    "conflicted": "Conflicted"
+    "conflicted": "Conflicted",
+    "deleteEntryTitle": "Delete this memory?",
+    "deleteEntryDesc": "\"{{key}}\" is permanently removed for this user. Agents stop recalling it. This cannot be undone."
   },
   "properties": {
     "title": "User Properties",
@@ -3369,7 +3385,9 @@
     "partialBody": "The rest of the agent was written. These resources were left as they were and need attention.",
     "partialCounts": "{{created}} created, {{updated}} updated, {{failed}} failed.",
     "schedulesSkipped_one": "{{count}} schedule in the archive was not imported, because the selection did not include it.",
-    "schedulesSkipped_other": "{{count}} schedules in the archive were not imported, because the selection did not include them."
+    "schedulesSkipped_other": "{{count}} schedules in the archive were not imported, because the selection did not include them.",
+    "moveUp": "Move up",
+    "moveDown": "Move down"
   },
   "sync": {
     "actionCreate": "New",
@@ -3601,7 +3619,8 @@
     "groupLinkUnavailable": "This group could not be located, so there is no safe link to it.",
     "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
     "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually.",
-    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again."
+    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again.",
+    "regularTruncated": "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3631,7 +3650,9 @@
     "secretVault": "Secret Vault",
     "vaultDown": "Vault unavailable",
     "vaultUp": "Vault ready",
-    "viewLogs": "View Logs"
+    "viewLogs": "View Logs",
+    "coordAdminOnly": "Coordinator: requires admin",
+    "vaultAdminOnly": "Vault: requires admin"
   },
   "errorBoundary": {
     "retry": "Try Again",
@@ -3712,7 +3733,10 @@
     "found_other": "{{count}} orphans found",
     "scanIncomplete": "This scan did not finish",
     "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
-    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone."
+    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
+    "purgeIncompleteScan": "Nothing was deleted: EDDI could not finish checking which resources are still in use. Re-scan and try again.",
+    "purgeFailed": "Purge failed",
+    "scanFailed": "The scan failed: {{reason}}"
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",
@@ -3725,7 +3749,6 @@
     "enabled": "Enabled",
     "enforcementOff": "Enforcement is off.",
     "enforcementOffHint": "Quotas are not being enforced. Enable enforcement and save to start applying limits.",
-    "limitHint": "-1 = unlimited",
     "liveUsage": "Live Usage",
     "maxAgentsPerTenant": "Max Agents / Tenant",
     "maxApiCallsPerMinute": "Max API Calls / Minute",
@@ -3738,7 +3761,9 @@
     "resetSuccess": "Usage counters reset",
     "saveSuccess": "Quota saved",
     "tenantId": "Tenant ID",
-    "title": "Tenant Quotas"
+    "title": "Tenant Quotas",
+    "limitHintEmpty": "Empty or -1 = unlimited, 0 = blocked",
+    "invalidNumber": "Enter a number, or leave the field empty for unlimited."
   },
   "secretPicker": {
     "clearVault": "Clear vault reference",
@@ -4086,7 +4111,7 @@
       "deleteBoard": "Dissolve Task Force",
       "deleteBoardDesc": "Remove this task force configuration. Agents will remain.",
       "deleteBoardAll": "Dissolve Task Force + All Agents",
-      "deleteBoardAllDesc": "Remove this task force and all member agents permanently.",
+      "deleteBoardAllDesc": "Remove this task force and all of its member agents.",
       "unsavedChanges": "You have unsaved changes",
       "templateSaved": "Saved as template",
       "saveAsTemplate": "Save as Template",
@@ -4094,8 +4119,8 @@
       "saveChanges": "Save Changes",
       "deleteAllTitle": "Dissolve Task Force & All Agents?",
       "deleteTitle": "Dissolve Task Force?",
-      "deleteAllConfirm": "This will permanently dissolve this task force and remove all its member agents. This action cannot be undone.",
-      "deleteConfirm": "This will permanently dissolve this task force configuration. Member agents will not be affected.",
+      "deleteAllConfirm": "This dissolves this task force and deletes all of its member agents.",
+      "deleteConfirm": "This dissolves this task force. Member agents are not affected.",
       "title": "Settings"
     },
     "nav": {
@@ -4151,11 +4176,11 @@
     },
     "dashboard": {
       "assembleTaskForce": "Assemble Task Force",
-      "bulkDeleteConfirm": "This dissolves every selected task force and cannot be undone.",
+      "bulkDeleteConfirm": "This dissolves every selected task force. Member agents are not affected.",
       "bulkDeleteTitle_one": "Dissolve this task force?",
       "bulkDeleteTitle_other": "Dissolve {{count}} task forces?",
       "cancel": "Cancel",
-      "deleteConfirm": "Are you sure you want to dissolve this task force? This action cannot be undone.",
+      "deleteConfirm": "Are you sure you want to dissolve this task force? Member agents are not affected.",
       "deleteError": "Failed to delete task force",
       "deletePartialFail": "{{success}} deleted, {{fail}} failed",
       "deleteSelected": "Delete",
@@ -4220,7 +4245,8 @@
       "tryDifferent": "Try a different search term",
       "untitled": "Untitled Conversation",
       "loadListError": "Failed to load conversations",
-      "rejected": "Rejected"
+      "rejected": "Rejected",
+      "deleteFailed": "Could not delete the conversation"
     },
     "insights": "Insights",
     "memberCount": "{{count}} members",
@@ -5201,7 +5227,10 @@
     "legacyAdminOnly": "Visible to administrators only — once owners have been assigned",
     "lastChanged": "Last changed by {{who}}",
     "neverChanged": "Not changed here yet",
-    "saved": "Settings saved"
+    "saved": "Settings saved",
+    "deleteVariableTitle": "Delete this variable?",
+    "deleteVariableDescription": "Agents that use it lose its value until it is stored again. This cannot be undone.",
+    "legacyDefault": "Not set here — the default applies (visible to everyone)"
   },
   "cascadeSave": {
     "workflowChanged": "Workflow {{workflowId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",

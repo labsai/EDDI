@@ -218,7 +218,9 @@
     "removeItem": "{{item}} 제거",
     "stepOf": "{{total}}단계 중 {{current}}단계",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} 크기 조절"
+    "resizePanel": "{{panel}} 크기 조절",
+    "deletePermanently": "영구 삭제",
+    "deletePermanentlyHint": "되돌릴 수 없습니다. 선택하지 않으면 항목은 삭제됨으로만 표시되며 정리될 때까지 복구할 수 있습니다."
   },
   "agents": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 에이전트와 모든 데이터가 영구적으로 제거됩니다.",
@@ -458,7 +460,8 @@
       "notice": "채팅이 사용자에게 알리는 내용 (비워 두면 기본 문구 사용)",
       "noticePlaceholder": "이 에이전트와의 대화는 개선을 위해 에이전트를 관리하는 사람들이 읽을 수 있습니다.",
       "versionNote": "이 변경으로 생성되는 버전과 이후 버전의 대화에 적용됩니다 — 이전에 나눈 대화에는 적용되지 않습니다. Slack, Teams 및 API 클라이언트는 알림을 표시할 수 없으므로, 그곳에서 이 에이전트를 사용한다면 인사말에서 안내하세요."
-    }
+    },
+    "copyUrl": "URL 복사"
   },
   "wizard": {
     "title": "Agent 마법사"
@@ -772,7 +775,9 @@
     "reviewNoticeLabel": "대화 검토",
     "sendRejected": "메시지가 전송되지 않았습니다: {{reason}}",
     "sendWhileLoading": "메시지가 전송되지 않았습니다: 대화를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요.",
-    "turnFailed": "에이전트가 이 메시지에 응답하지 못했습니다. 이유는 서버 로그나 대화 감사 기록에서 확인하세요."
+    "turnFailed": "에이전트가 이 메시지에 응답하지 못했습니다. 이유는 서버 로그나 대화 감사 기록에서 확인하세요.",
+    "errorWithReason": "오류: {{reason}}",
+    "endConversationFailed": "대화를 종료할 수 없습니다: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -883,7 +888,8 @@
     "savedNotLive": "저장됨 — 아직 반영되지 않음",
     "savedNotLiveDescription": "실행 중인 에이전트는 여전히 배포된 버전을 제공합니다. 이 변경을 적용하려면 배포하세요.",
     "deployNow": "배포",
-    "deployStarted": "배포를 시작했습니다"
+    "deployStarted": "배포를 시작했습니다",
+    "invalidJsonNotSaved": "저장되지 않음 — JSON이 잘못되었습니다: {{reason}}"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1536,7 +1542,8 @@
     "purgeError": "삭제 실패",
     "empty": "사용 가능한 Coordinator 데이터가 없습니다",
     "emptyHint": "Coordinator 서비스가 아직 시작 중일 수 있습니다. 데이터가 자동으로 나타납니다.",
-    "lastNSnapshots": "최근 스냅샷 {{count}}건"
+    "lastNSnapshots": "최근 스냅샷 {{count}}건",
+    "refreshInterval": "자동 새로고침 간격"
   },
   "contentEditor": {
     "expand": "확장",
@@ -2227,7 +2234,8 @@
       "readyTitle": "시작할 준비가 되셨나요?",
       "readySubtitle": "사이드바의 도움말 메뉴에서 언제든지 투어를 다시 시작할 수 있습니다.",
       "startTour": "투어 시작",
-      "exploreOwn": "직접 둘러보기"
+      "exploreOwn": "직접 둘러보기",
+      "panelN": "패널 {{n}}"
     },
     "tour": {
       "back": "뒤로",
@@ -2495,7 +2503,7 @@
     "count_one": "{{count}}개 그룹",
     "count_other": "{{count}}개 그룹",
     "confirmDelete": "이 그룹을 삭제하시겠습니까?",
-    "confirmDeleteDesc": "그룹 구성이 영구적으로 삭제됩니다.",
+    "confirmDeleteDesc": "그룹이 삭제됨으로 표시되고 이 목록에서 사라집니다.",
     "duplicateSuccess": "그룹이 복제되었습니다",
     "noDescription": "설명 없음",
     "members": "멤버",
@@ -2617,8 +2625,8 @@
     "deleteGroupOnlySuccess": "그룹 삭제됨 (에이전트 유지)",
     "deleteGroupOnlyWarning": "그룹이 삭제됩니다. 모든 멤버 에이전트는 유지됩니다.",
     "deleteGroupAndAgents": "그룹 + 모든 에이전트 삭제",
-    "deleteWithMembersSuccess": "그룹과 모든 멤버 에이전트가 삭제되었습니다 (소프트 삭제)",
-    "deleteWithMembersWarning": "그룹과 {{count}}명의 멤버 에이전트가 모두 소프트 삭제됩니다. 복구할 수 있습니다.",
+    "deleteWithMembersSuccess": "그룹과 모든 멤버 에이전트가 삭제되었습니다",
+    "deleteWithMembersWarning": "그룹과 {{count}}명의 멤버 에이전트가 모두 삭제됩니다.",
     "hideDiscussions": "토론 패널 숨기기",
     "showDiscussions": "토론 패널 표시",
     "hideConfig": "설정 패널 숨기기",
@@ -2987,7 +2995,9 @@
       "humanNeedsName_other": "{{count}}명의 사람 멤버에게 표시 이름이 필요합니다.",
       "humanNeedsId_one": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다.",
       "humanNeedsId_other": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다."
-    }
+    },
+    "deletePermanentlyHint": "되돌릴 수 없습니다: 그룹과 그 작업 공간(백로그, 케이던스 및 해당 일정)이 영구적으로 제거됩니다. 선택하지 않으면 그룹은 삭제됨으로만 표시되며 정리될 때까지 복구할 수 있습니다.",
+    "deletePermanentlyWithMembersHint": "되돌릴 수 없습니다: 그룹, 그 작업 공간 및 모든 멤버 에이전트가 영구적으로 제거됩니다. 선택하지 않으면 삭제됨으로만 표시되며 정리될 때까지 복구할 수 있습니다."
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -3038,7 +3048,9 @@
     "created": "생성일",
     "updated": "수정일",
     "sourceConversation": "소스 대화",
-    "conflicted": "충돌 있음"
+    "conflicted": "충돌 있음",
+    "deleteEntryTitle": "이 메모리를 삭제할까요?",
+    "deleteEntryDesc": "\"{{key}}\"이(가) 이 사용자에게서 영구적으로 삭제됩니다. 에이전트는 더 이상 이를 기억하지 않습니다. 이 작업은 되돌릴 수 없습니다."
   },
   "properties": {
     "title": "사용자 속성",
@@ -3149,7 +3161,9 @@
     "partialBody": "에이전트의 나머지 부분은 기록되었습니다. 아래 리소스는 그대로 남아 있으며 조치가 필요합니다.",
     "partialCounts": "{{created}}개 생성, {{updated}}개 업데이트, {{failed}}개 실패.",
     "schedulesSkipped_other": "아카이브의 일정 {{count}}개가 선택에 포함되지 않아 가져오지 않았습니다.",
-    "schedulesSkipped_one": "아카이브의 일정 {{count}}개가 선택에 포함되지 않아 가져오지 않았습니다."
+    "schedulesSkipped_one": "아카이브의 일정 {{count}}개가 선택에 포함되지 않아 가져오지 않았습니다.",
+    "moveUp": "위로 이동",
+    "moveDown": "아래로 이동"
   },
   "syncPage": {
     "title": "에이전트 동기화",
@@ -3332,7 +3346,11 @@
     "humanTurnTimeoutInvalid": "유효한 ISO-8601 기간이 아닙니다(예: PT24H 또는 P1D).",
     "humanTurnTimeoutLabel": "차례 시간 제한(ISO-8601 기간)",
     "humanTurnTimeoutPlaceholder": "예: PT24H — 비워 두면 무기한 대기",
-    "memberTypeHuman": "사람"
+    "memberTypeHuman": "사람",
+    "memberPromptPlaceholder": "당신은 {{name}}입니다. 전문 분야의 관점에서 통찰력 있는 분석을 제공하세요.",
+    "memberPromptPlaceholderRole": "당신은 {{role}} 전문가인 {{name}}입니다. 전문 분야의 관점에서 통찰력 있는 분석을 제공하세요.",
+    "moderatorPromptPlaceholder": "당신은 숙련된 진행자입니다. 그룹의 토론을 명확하고 균형 잡힌 요약으로 정리하세요…",
+    "modelPlaceholder": "예: {{model}}"
   },
   "groupTemplates": {
     "advisoryBoard": "자문단",
@@ -3560,7 +3578,8 @@
     "groupLinkUnavailable": "이 그룹을 찾을 수 없어 안전한 링크를 제공할 수 없습니다.",
     "confirmApproveGroupDescription": "일시 중지된 단계 전체를 승인하고 토론을 재개합니다. 대기 중인 모든 작업도 함께 승인됩니다. 개별 결정은 그룹에서 하세요.",
     "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요.",
-    "pauseChanged": "이 요청은 연 이후 변경되었습니다. 아무것도 결정되지 않았습니다. 다시 검토하세요."
+    "pauseChanged": "이 요청은 연 이후 변경되었습니다. 아무것도 결정되지 않았습니다. 다시 검토하세요.",
+    "regularTruncated": "처음 {{limit}}개의 대화 승인만 표시합니다 — 대기 중인 항목이 더 있습니다. 일부를 처리하면 나머지가 표시됩니다."
   },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",
@@ -3590,7 +3609,9 @@
     "secretVault": "시크릿 저장소",
     "vaultDown": "볼트 사용 불가",
     "vaultUp": "볼트 준비됨",
-    "viewLogs": "로그 보기"
+    "viewLogs": "로그 보기",
+    "coordAdminOnly": "코디네이터: 관리자 권한 필요",
+    "vaultAdminOnly": "볼트: 관리자 권한 필요"
   },
   "errorBoundary": {
     "retry": "다시 시도",
@@ -3671,7 +3692,10 @@
     "found_one": "{{count}}개의 고아 항목을 찾았습니다",
     "scanIncomplete": "이 스캔이 완료되지 않았습니다",
     "scanIncompleteBody": "아직 사용 중인 리소스가 고아로 표시될 수 있습니다. 스캔이 완료될 때까지 정리가 차단됩니다.",
-    "confirmPurge": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다."
+    "confirmPurge": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "purgeIncompleteScan": "아무것도 삭제되지 않았습니다: EDDI가 아직 사용 중인 리소스 확인을 끝내지 못했습니다. 다시 스캔한 후 다시 시도하세요.",
+    "purgeFailed": "정리에 실패했습니다",
+    "scanFailed": "스캔에 실패했습니다: {{reason}}"
   },
   "quotas": {
     "apiCallsMinute": "API 호출 / 분",
@@ -3684,7 +3708,6 @@
     "enabled": "활성화됨",
     "enforcementOff": "적용이 꺼져 있습니다.",
     "enforcementOffHint": "할당량이 적용되고 있지 않습니다. 제한을 적용하려면 적용을 활성화하고 저장하세요.",
-    "limitHint": "-1 = 무제한",
     "liveUsage": "실시간 사용량",
     "maxAgentsPerTenant": "테넌트당 최대 에이전트",
     "maxApiCallsPerMinute": "분당 최대 API 호출",
@@ -3697,7 +3720,9 @@
     "resetSuccess": "사용량 카운터가 재설정되었습니다",
     "saveSuccess": "할당량이 저장되었습니다",
     "tenantId": "테넌트 ID",
-    "title": "테넌트 할당량"
+    "title": "테넌트 할당량",
+    "limitHintEmpty": "비어 있음 또는 -1 = 무제한, 0 = 차단",
+    "invalidNumber": "숫자를 입력하거나, 무제한으로 하려면 필드를 비워 두세요."
   },
   "secretPicker": {
     "clearVault": "볼트 참조 지우기",
@@ -4086,7 +4111,7 @@
       "deleteBoard": "태스크 포스 해산",
       "deleteBoardDesc": "이 태스크 포스 구성을 제거합니다. 에이전트는 유지됩니다.",
       "deleteBoardAll": "태스크 포스 + 모든 에이전트 해산",
-      "deleteBoardAllDesc": "이 태스크 포스와 모든 멤버 에이전트를 영구히 제거합니다.",
+      "deleteBoardAllDesc": "이 태스크포스와 모든 멤버 에이전트를 제거합니다.",
       "unsavedChanges": "저장되지 않은 변경 사항이 있습니다",
       "templateSaved": "템플릿으로 저장했습니다",
       "saveAsTemplate": "템플릿으로 저장",
@@ -4094,8 +4119,8 @@
       "saveChanges": "변경 사항 저장",
       "deleteAllTitle": "태스크 포스와 모든 에이전트를 해산할까요?",
       "deleteTitle": "태스크 포스를 해산할까요?",
-      "deleteAllConfirm": "이 태스크 포스와 모든 멤버 에이전트가 영구히 해산됩니다. 이 작업은 되돌릴 수 없습니다.",
-      "deleteConfirm": "이 태스크 포스 구성이 영구히 해산됩니다. 멤버 에이전트는 영향을 받지 않습니다.",
+      "deleteAllConfirm": "이 태스크포스를 해체하고 모든 멤버 에이전트를 삭제합니다.",
+      "deleteConfirm": "이 태스크포스를 해체합니다. 멤버 에이전트는 영향을 받지 않습니다.",
       "title": "설정"
     },
     "nav": {
@@ -4151,11 +4176,11 @@
     },
     "dashboard": {
       "assembleTaskForce": "태스크포스 구성",
-      "bulkDeleteConfirm": "선택한 태스크포스를 모두 해체하며 이 작업은 되돌릴 수 없습니다.",
+      "bulkDeleteConfirm": "선택한 모든 태스크포스를 해체합니다. 멤버 에이전트는 영향을 받지 않습니다.",
       "bulkDeleteTitle_one": "이 태스크포스를 해체하시겠습니까?",
       "bulkDeleteTitle_other": "태스크포스 {{count}}개를 해체하시겠습니까?",
       "cancel": "취소",
-      "deleteConfirm": "이 태스크포스를 해체하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+      "deleteConfirm": "이 태스크포스를 해체하시겠습니까? 멤버 에이전트는 영향을 받지 않습니다.",
       "deleteError": "태스크포스를 삭제하지 못했습니다",
       "deletePartialFail": "{{success}}개 삭제, {{fail}}개 실패",
       "deleteSelected": "삭제",
@@ -4220,7 +4245,8 @@
       "tryDifferent": "다른 검색어를 시도해 보세요",
       "untitled": "제목 없는 대화",
       "loadListError": "대화를 불러오지 못했습니다",
-      "rejected": "거부됨"
+      "rejected": "거부됨",
+      "deleteFailed": "대화를 삭제할 수 없습니다"
     },
     "insights": "인사이트",
     "memberCount": "구성원 {{count}}명",
@@ -5201,7 +5227,10 @@
     "legacyAdminOnly": "관리자에게만 표시 — 소유자가 지정된 후",
     "lastChanged": "마지막 변경: {{who}}",
     "neverChanged": "아직 여기서 변경되지 않음",
-    "saved": "설정을 저장했습니다"
+    "saved": "설정을 저장했습니다",
+    "deleteVariableTitle": "이 변수를 삭제할까요?",
+    "deleteVariableDescription": "이 변수를 사용하는 에이전트는 다시 저장될 때까지 값을 잃습니다. 이 작업은 되돌릴 수 없습니다.",
+    "legacyDefault": "여기서 설정되지 않음 — 기본값 적용(모두에게 표시)"
   },
   "cascadeSave": {
     "workflowChanged": "워크플로 {{workflowId}}이(가) 다른 곳에서 변경되었습니다(현재 버전 {{current}}, 이 페이지는 버전 {{version}}). 페이지를 새로 고치세요. 아무것도 저장되지 않았습니다.",

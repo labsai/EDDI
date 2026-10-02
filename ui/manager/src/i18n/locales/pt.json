@@ -218,7 +218,9 @@
     "removeItem": "Remover {{item}}",
     "stepOf": "Etapa {{current}} de {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "Redimensionar {{panel}}"
+    "resizePanel": "Redimensionar {{panel}}",
+    "deletePermanently": "Excluir permanentemente",
+    "deletePermanentlyHint": "Não pode ser desfeito. Sem esta opção, o item é apenas marcado como excluído e continua recuperável até ser expurgado."
   },
   "agents": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O agente e todos os seus dados serão removidos permanentemente.",
@@ -459,7 +461,8 @@
       "notice": "O que o chat informa às pessoas (deixe vazio para o texto padrão)",
       "noticePlaceholder": "As conversas com este agente podem ser lidas pelas pessoas que o mantêm, para melhorá-lo.",
       "versionNote": "Abrange conversas na versão criada por esta alteração e nas posteriores — nunca o que foi dito antes. Slack, Teams e clientes da API não conseguem exibir o aviso; se as pessoas usarem este agente por esses meios, mencione isso na saudação."
-    }
+    },
+    "copyUrl": "Copiar URL"
   },
   "wizard": {
     "title": "Assistente de Agent"
@@ -782,7 +785,9 @@
     "reviewNoticeLabel": "Revisão de conversas",
     "sendRejected": "A sua mensagem não foi enviada: {{reason}}",
     "sendWhileLoading": "A sua mensagem não foi enviada: a conversa ainda está a carregar. Tente novamente dentro de momentos.",
-    "turnFailed": "O agente não conseguiu responder a esta mensagem. Consulte o log do servidor ou a trilha de auditoria da conversa para ver o motivo."
+    "turnFailed": "O agente não conseguiu responder a esta mensagem. Consulte o log do servidor ou a trilha de auditoria da conversa para ver o motivo.",
+    "errorWithReason": "Erro: {{reason}}",
+    "endConversationFailed": "Não foi possível encerrar a conversa: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -897,7 +902,8 @@
     "savedNotLive": "Guardado — ainda não ativo",
     "savedNotLiveDescription": "O agente em execução continua a servir a versão implementada. Implemente para aplicar esta alteração.",
     "deployNow": "Implementar",
-    "deployStarted": "Implementação iniciada"
+    "deployStarted": "Implementação iniciada",
+    "invalidJsonNotSaved": "Não salvo — o JSON é inválido: {{reason}}"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1550,7 +1556,8 @@
     "purgeError": "Falha ao limpar",
     "empty": "Nenhum dado do coordenador disponível",
     "emptyHint": "O serviço do coordenador pode ainda estar iniciando. Os dados aparecerão automaticamente.",
-    "lastNSnapshots": "Últimos {{count}} instantâneos"
+    "lastNSnapshots": "Últimos {{count}} instantâneos",
+    "refreshInterval": "Intervalo de atualização automática"
   },
   "contentEditor": {
     "expand": "Expandir",
@@ -2249,7 +2256,8 @@
       "readyTitle": "Pronto para Começar?",
       "readySubtitle": "Você pode rever e reiniciar este e outros tours sempre que precisar no menu Ajuda",
       "startTour": "Iniciar o Tour",
-      "exploreOwn": "Vou explorar sozinho"
+      "exploreOwn": "Vou explorar sozinho",
+      "panelN": "Painel {{n}}"
     },
     "tour": {
       "back": "Voltar",
@@ -2517,7 +2525,7 @@
     "count_one": "{{count}} grupo",
     "count_other": "{{count}} grupos",
     "confirmDelete": "Excluir este grupo?",
-    "confirmDeleteDesc": "A configuração do grupo será excluída permanentemente.",
+    "confirmDeleteDesc": "O grupo é marcado como excluído e desaparece desta lista.",
     "duplicateSuccess": "Grupo duplicado",
     "noDescription": "Sem descrição",
     "members": "membros",
@@ -2639,8 +2647,8 @@
     "deleteGroupOnlySuccess": "Grupo excluído (agentes mantidos)",
     "deleteGroupOnlyWarning": "Isso excluirá o grupo. Todos os agentes membros serão mantidos.",
     "deleteGroupAndAgents": "Excluir grupo + todos os agentes",
-    "deleteWithMembersSuccess": "Grupo e todos os agentes membros excluídos (exclusão suave)",
-    "deleteWithMembersWarning": "Isso fará a exclusão suave do grupo e de todos os {{count}} agentes membros. Eles poderão ser recuperados.",
+    "deleteWithMembersSuccess": "Grupo e todos os agentes membros excluídos",
+    "deleteWithMembersWarning": "Isso excluirá o grupo e todos os {{count}} agentes membros.",
     "hideDiscussions": "Ocultar painel de discussões",
     "showDiscussions": "Mostrar painel de discussões",
     "hideConfig": "Ocultar painel de configuração",
@@ -3023,7 +3031,9 @@
       "humanNeedsId_many": "{{count}} membros humanos precisam do id de utilizador da pessoa.",
       "humanNeedsId_one": "{{count}} membro humano precisa do id de utilizador da pessoa.",
       "humanNeedsId_other": "{{count}} membros humanos precisam do id de utilizador da pessoa."
-    }
+    },
+    "deletePermanentlyHint": "Não pode ser desfeito: o grupo e seu espaço de trabalho (lista de pendências, cadências e seus agendamentos) são removidos definitivamente. Sem esta opção, o grupo é apenas marcado como excluído e continua recuperável até ser expurgado.",
+    "deletePermanentlyWithMembersHint": "Não pode ser desfeito: o grupo, seu espaço de trabalho e todos os agentes membros são removidos definitivamente. Sem esta opção, eles são apenas marcados como excluídos e continuam recuperáveis até serem expurgados."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -3074,7 +3084,9 @@
     "created": "Criado",
     "updated": "Atualizado",
     "sourceConversation": "Conversa de origem",
-    "conflicted": "Em conflito"
+    "conflicted": "Em conflito",
+    "deleteEntryTitle": "Eliminar esta memória?",
+    "deleteEntryDesc": "\"{{key}}\" é removido permanentemente para este utilizador. Os agentes deixam de o recordar. Esta ação não pode ser anulada."
   },
   "properties": {
     "title": "Propriedades do utilizador",
@@ -3186,7 +3198,9 @@
     "partialCounts": "{{created}} criados, {{updated}} atualizados, {{failed}} falharam.",
     "schedulesSkipped_one": "{{count}} agendamento do arquivo não foi importado, porque a seleção não o incluía.",
     "schedulesSkipped_other": "{{count}} agendamentos do arquivo não foram importados, porque a seleção não os incluía.",
-    "schedulesSkipped_many": "{{count}} agendamentos do arquivo não foram importados, porque a seleção não os incluía."
+    "schedulesSkipped_many": "{{count}} agendamentos do arquivo não foram importados, porque a seleção não os incluía.",
+    "moveUp": "Mover para cima",
+    "moveDown": "Mover para baixo"
   },
   "syncPage": {
     "title": "Sincronização",
@@ -3369,7 +3383,11 @@
     "humanTurnTimeoutInvalid": "Não é uma duração ISO-8601 válida, por exemplo PT24H ou P1D.",
     "humanTurnTimeoutLabel": "Tempo limite da vez (duração ISO-8601)",
     "humanTurnTimeoutPlaceholder": "por ex. PT24H — em branco espera indefinidamente",
-    "memberTypeHuman": "Humano"
+    "memberTypeHuman": "Humano",
+    "memberPromptPlaceholder": "Você é {{name}}. Forneça análises perspicazes a partir da perspectiva da sua área.",
+    "memberPromptPlaceholderRole": "Você é {{name}}, especialista em {{role}}. Forneça análises perspicazes a partir da perspectiva da sua área.",
+    "moderatorPromptPlaceholder": "Você é um moderador experiente. Sintetize a discussão do grupo em um resumo claro e equilibrado…",
+    "modelPlaceholder": "ex.: {{model}}"
   },
   "groupTemplates": {
     "advisoryBoard": "Conselho consultivo",
@@ -3598,7 +3616,8 @@
     "groupLinkUnavailable": "Este grupo não foi encontrado, por isso não há uma ligação fiável para ele.",
     "confirmApproveGroupDescription": "Aprovar toda a fase em pausa e retomar a discussão. Cada tarefa pendente é aprovada com ela — abra o grupo para as decidir individualmente.",
     "confirmRejectGroupDescription": "Rejeitar toda a fase em pausa. Cada tarefa pendente é rejeitada com ela e a discussão não avança para além dela — abra o grupo para as decidir individualmente.",
-    "pauseChanged": "Este pedido mudou desde que o abriu — nada foi decidido. Reveja-o novamente."
+    "pauseChanged": "Este pedido mudou desde que o abriu — nada foi decidido. Reveja-o novamente.",
+    "regularTruncated": "A mostrar as primeiras {{limit}} aprovações de conversas — há mais pendentes. Decida algumas para ver as restantes."
   },
   "chatDrawer": {
     "deploying": "Implantando agente…",
@@ -3628,7 +3647,9 @@
     "secretVault": "Cofre de segredos",
     "vaultDown": "Cofre indisponível",
     "vaultUp": "Cofre pronto",
-    "viewLogs": "Ver logs"
+    "viewLogs": "Ver logs",
+    "coordAdminOnly": "Coordenador: requer admin",
+    "vaultAdminOnly": "Cofre: requer admin"
   },
   "errorBoundary": {
     "retry": "Tentar novamente",
@@ -3712,7 +3733,10 @@
     "found_other": "{{count}} órfãos encontrados",
     "scanIncomplete": "Esta análise não terminou",
     "scanIncompleteBody": "Recursos ainda em uso podem aparecer como órfãos. A purga está bloqueada até que uma análise termine.",
-    "confirmPurge": "Eliminar permanentemente todos os {{count}} recursos órfãos? Esta ação não pode ser anulada."
+    "confirmPurge": "Eliminar permanentemente todos os {{count}} recursos órfãos? Esta ação não pode ser anulada.",
+    "purgeIncompleteScan": "Nada foi eliminado: o EDDI não conseguiu terminar de verificar que recursos ainda estão em uso. Volte a analisar e tente novamente.",
+    "purgeFailed": "A limpeza falhou",
+    "scanFailed": "A análise falhou: {{reason}}"
   },
   "quotas": {
     "apiCallsMinute": "Chamadas de API / minuto",
@@ -3725,7 +3749,6 @@
     "enabled": "Ativado",
     "enforcementOff": "A aplicação está desativada.",
     "enforcementOffHint": "As cotas não estão sendo aplicadas. Ative a aplicação e salve para começar a aplicar os limites.",
-    "limitHint": "-1 = ilimitado",
     "liveUsage": "Uso ao vivo",
     "maxAgentsPerTenant": "Máx. de agentes / locatário",
     "maxApiCallsPerMinute": "Máx. de chamadas de API / minuto",
@@ -3738,7 +3761,9 @@
     "resetSuccess": "Contadores de uso redefinidos",
     "saveSuccess": "Cota salva",
     "tenantId": "ID do locatário",
-    "title": "Cotas do locatário"
+    "title": "Cotas do locatário",
+    "limitHintEmpty": "Vazio ou -1 = ilimitado, 0 = bloqueado",
+    "invalidNumber": "Introduza um número ou deixe o campo vazio para ilimitado."
   },
   "secretPicker": {
     "clearVault": "Limpar referência do cofre",
@@ -4128,7 +4153,7 @@
       "deleteBoard": "Dissolver força-tarefa",
       "deleteBoardDesc": "Remove a configuração desta força-tarefa. Os agentes são mantidos.",
       "deleteBoardAll": "Dissolver força-tarefa + todos os agentes",
-      "deleteBoardAllDesc": "Remove permanentemente esta força-tarefa e todos os agentes membros.",
+      "deleteBoardAllDesc": "Remover esta força-tarefa e todos os seus agentes membros.",
       "unsavedChanges": "Você tem alterações não salvas",
       "templateSaved": "Salvo como modelo",
       "saveAsTemplate": "Salvar como modelo",
@@ -4136,8 +4161,8 @@
       "saveChanges": "Salvar alterações",
       "deleteAllTitle": "Dissolver a força-tarefa e todos os agentes?",
       "deleteTitle": "Dissolver a força-tarefa?",
-      "deleteAllConfirm": "Isso dissolverá permanentemente esta força-tarefa e removerá todos os seus agentes membros. Esta ação não pode ser desfeita.",
-      "deleteConfirm": "Isso dissolverá permanentemente a configuração desta força-tarefa. Os agentes membros não serão afetados.",
+      "deleteAllConfirm": "Isso dissolve esta força-tarefa e exclui todos os seus agentes membros.",
+      "deleteConfirm": "Isso dissolve esta força-tarefa. Os agentes membros não são afetados.",
       "title": "Configurações"
     },
     "nav": {
@@ -4193,12 +4218,12 @@
     },
     "dashboard": {
       "assembleTaskForce": "Montar força-tarefa",
-      "bulkDeleteConfirm": "Isto dissolve todas as forças-tarefa selecionadas e não pode ser desfeito.",
+      "bulkDeleteConfirm": "Isso dissolve todas as forças-tarefa selecionadas. Os agentes membros não são afetados.",
       "bulkDeleteTitle_many": "Dissolver {{count}} forças-tarefa?",
       "bulkDeleteTitle_one": "Dissolver esta força-tarefa?",
       "bulkDeleteTitle_other": "Dissolver {{count}} forças-tarefa?",
       "cancel": "Cancelar",
-      "deleteConfirm": "Tem certeza de que deseja dissolver esta força-tarefa? Esta ação não pode ser desfeita.",
+      "deleteConfirm": "Tem certeza de que deseja dissolver esta força-tarefa? Os agentes membros não são afetados.",
       "deleteError": "Falha ao excluir a força-tarefa",
       "deletePartialFail": "{{success}} excluídas, {{fail}} com falha",
       "deleteSelected": "Excluir",
@@ -4264,7 +4289,8 @@
       "tryDifferent": "Tente outro termo de pesquisa",
       "untitled": "Conversa sem título",
       "loadListError": "Falha ao carregar as conversas",
-      "rejected": "Rejeitada"
+      "rejected": "Rejeitada",
+      "deleteFailed": "Não foi possível eliminar a conversa"
     },
     "insights": "Insights",
     "memberCount": "{{count}} membros",
@@ -5258,7 +5284,10 @@
     "legacyAdminOnly": "Visíveis apenas para administradores — depois que os proprietários forem atribuídos",
     "lastChanged": "Última alteração por {{who}}",
     "neverChanged": "Ainda não alterado aqui",
-    "saved": "Configurações salvas"
+    "saved": "Configurações salvas",
+    "deleteVariableTitle": "Eliminar esta variável?",
+    "deleteVariableDescription": "Os agentes que a utilizam perdem o seu valor até que seja guardada novamente. Esta ação não pode ser anulada.",
+    "legacyDefault": "Não definido aqui — aplica-se o valor predefinido (visível para todos)"
   },
   "cascadeSave": {
     "workflowChanged": "O fluxo de trabalho {{workflowId}} foi alterado noutro lugar (agora versão {{current}}, esta página tem a versão {{version}}). Recarregue a página. Nada foi guardado.",
