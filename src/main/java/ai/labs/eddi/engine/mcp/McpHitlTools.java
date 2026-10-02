@@ -58,6 +58,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.parseIntOrDefault;
  * and both are decided by a single verdict.
  */
 @ApplicationScoped
+@McpErrorResults
 public class McpHitlTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpHitlTools.class);
@@ -138,7 +139,8 @@ public class McpHitlTools {
                   + "other callers see only their own; unauthenticated callers see nothing. Includes RULE and "
                   + "TOOL_CALL pauses.")
     public String listPendingApprovals(
-                                       @ToolArg(description = "Max entries to return (optional, default 200, capped at 1000)") String limit) {
+                                       @ToolArg(description = "Max entries to return (default: 200, capped at 1000)", required = false,
+                                                defaultValue = "200") String limit) {
         try {
             int effectiveLimit = parseIntOrDefault(limit, 200);
             var result = hitlAccessGuard.listScopedPendingApprovals(effectiveLimit);
@@ -163,7 +165,8 @@ public class McpHitlTools {
                   + "(incl. any pending tool-call batch) — owner/admin, or approver only while awaiting approval.")
     public String getApprovalStatus(
                                     @ToolArg(description = "Conversation ID") String conversationId,
-                                    @ToolArg(description = "summary (default) or full (optional)") String detail) {
+                                    @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
+                                             defaultValue = "summary") String detail) {
         if (conversationId == null || conversationId.isBlank()) {
             return errorJson("conversationId is required", "BAD_REQUEST", null);
         }
@@ -229,7 +232,7 @@ public class McpHitlTools {
     public String resumeConversation(
                                      @ToolArg(description = "Conversation ID awaiting approval") String conversationId,
                                      @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
-                                     @ToolArg(description = "Optional reviewer note (max 4096 chars)") String note,
+                                     @ToolArg(description = "Reviewer note, max 4096 chars (optional)", required = false) String note,
                                      @ToolArg(description = "pauseId from get_approval_status — the pause this decision is for",
                                               required = false) String pauseId) {
         String disabled = disabledIfMutationsOff();
@@ -320,7 +323,8 @@ public class McpHitlTools {
                   + "callers see only their own; unauthenticated callers see nothing.")
     public String listGroupPendingApprovals(
                                             @ToolArg(description = "Group ID") String groupId,
-                                            @ToolArg(description = "Max entries to return (optional, default 100)") String limit) {
+                                            @ToolArg(description = "Max entries to return (default: 100)", required = false,
+                                                     defaultValue = "100") String limit) {
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -338,7 +342,8 @@ public class McpHitlTools {
           description = "Cross-group HITL inbox: all group conversations awaiting approval across all groups. Admins "
                   + "and approvers see all; other callers see only their own; unauthenticated callers see nothing.")
     public String listAllGroupPendingApprovals(
-                                               @ToolArg(description = "Max entries to return (optional, default 100)") String limit) {
+                                               @ToolArg(description = "Max entries to return (default: 100)", required = false,
+                                                        defaultValue = "100") String limit) {
         try {
             var result = hitlAccessGuard.listScopedGroupPendingApprovals(null, parseIntOrDefault(limit, 100));
             meterRegistry.counter("eddi.mcp.hitl.pending.listed", "surface", "group-all").increment();
@@ -356,7 +361,8 @@ public class McpHitlTools {
     public String getGroupApprovalStatus(
                                          @ToolArg(description = "Group ID") String groupId,
                                          @ToolArg(description = "Group conversation ID") String conversationId,
-                                         @ToolArg(description = "summary (default) or full (optional)") String detail) {
+                                         @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
+                                                  defaultValue = "summary") String detail) {
         if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()) {
             return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
         }
@@ -444,8 +450,9 @@ public class McpHitlTools {
                                     @ToolArg(description = "Group ID") String groupId,
                                     @ToolArg(description = "Group conversation ID") String conversationId,
                                     @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
-                                    @ToolArg(description = "Optional reviewer note (max 4096 chars)") String note,
-                                    @ToolArg(description = "Optional JSON object mapping task-id to APPROVED/REJECTED, e.g. {\"t1\":\"APPROVED\"}") String taskApprovalsJson,
+                                    @ToolArg(description = "Reviewer note, max 4096 chars (optional)", required = false) String note,
+                                    @ToolArg(description = "JSON object mapping task-id to APPROVED/REJECTED, e.g. {\"t1\":\"APPROVED\"} (optional)",
+                                             required = false) String taskApprovalsJson,
                                     @ToolArg(description = "pauseId from get_group_approval_status — the pause this decision is for",
                                              required = false) String pauseId) {
         String disabled = disabledIfMutationsOff();

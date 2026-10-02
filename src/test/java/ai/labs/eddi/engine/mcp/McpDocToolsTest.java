@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -75,7 +76,10 @@ class McpDocToolsTest {
         Field docsPathField = DocsService.class.getDeclaredField("docsPath");
         docsPathField.setAccessible(true);
         docsPathField.set(service, tempDir.resolve("nowhere").toString());
-        assertTrue(toolsWithAuthDisabled().listDocs().startsWith("No documentation is available"));
+        String answer = toolsWithAuthDisabled().listDocs();
+        assertTrue(answer.startsWith("No documentation is available"));
+        // The server's filesystem layout is not the caller's business.
+        assertFalse(answer.contains("nowhere"), answer);
     }
 
     @Test
