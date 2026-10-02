@@ -193,11 +193,13 @@ eddi:
     type: ClusterIP
     port: 7070
 
-  # Who may read /q/metrics. Empty keeps EDDI's default, "authenticated":
-  # with OIDC on, a Prometheus without a token gets 401. "permit" opens this
-  # one path — only where /q/metrics cannot be reached from outside the
-  # cluster (the chart's ingress routes every path, /q/* included, unless you
-  # change ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
+  # Who may read /q/metrics. Empty keeps EDDI's default, "eddi-metrics-reader":
+  # with OIDC on, the scrape needs a token carrying the eddi-admin or
+  # eddi-metrics realm role (a Prometheus without a token gets 401, one without
+  # the role 403). "authenticated" admits any token; "permit" opens this one
+  # path — only where /q/metrics cannot be reached from outside the cluster
+  # (the chart's ingress routes every path, /q/* included, unless you change
+  # ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
   metrics:
     httpPolicy: ""
 

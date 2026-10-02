@@ -11,6 +11,7 @@ import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.security.PermitAll;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -55,6 +56,13 @@ import java.util.Set;
 @Path("/integrations/slack")
 @Produces(MediaType.APPLICATION_JSON)
 @Tag(name = "Integrations / Slack Webhook", description = "Slack Events API webhook receiver")
+// Explicitly public: Slack calls these with no EDDI credential, and each
+// request is
+// authenticated by its Slack signature in the handler (the HTTP policy permits
+// the
+// path). quarkus.security.jaxrs.deny-unannotated-endpoints denies anything
+// unannotated.
+@PermitAll
 public class RestSlackWebhook {
 
     private static final Logger LOGGER = Logger.getLogger(RestSlackWebhook.class);

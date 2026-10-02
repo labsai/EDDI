@@ -27,7 +27,7 @@ type: application
 # `eddi.oidc.publicUrl` when OIDC is on, `nats.buildProfileImage` when
 # messagingType is not in-memory. An upgrade that keeps an old values file
 # either fails to render or silently drops a setting.
-version: 2.3.0
+version: 2.3.1
 appVersion: "6.4.0"
 home: https://eddi.labs.ai
 sources:

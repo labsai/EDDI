@@ -319,7 +319,10 @@ public class RestGroupConversation implements IRestGroupConversation {
     public Response deleteGroupConversation(String groupId, String groupConversationId) {
         try {
             GroupConversation gc = loadInGroup(groupId, groupConversationId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict: deletion is irreversible, so a legacy record that names no owner is
+            // an administrator's to remove — not, as requireOwnerOrAdmin would have it,
+            // every authenticated caller's.
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             groupConversationService.deleteGroupConversation(groupConversationId);
             return Response.ok().build();
         } catch (ForbiddenException e) {
@@ -763,7 +766,8 @@ public class RestGroupConversation implements IRestGroupConversation {
     public Response closeGroupConversation(String groupId, String gcId) {
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict, as delete: closing is terminal.
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             GroupConversation result = groupConversationService.closeGroupConversation(gcId);
             return Response.ok(result).build();
         } catch (ForbiddenException e) {

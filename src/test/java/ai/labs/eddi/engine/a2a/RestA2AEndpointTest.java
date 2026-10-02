@@ -204,7 +204,7 @@ class RestA2AEndpointTest {
     void searchCapabilities_success_returnsMatches() {
         endpoint = createEndpoint(true, true);
         var match = new CapabilityMatch(AGENT_ID, "greeting", "0.95", Map.of());
-        when(capabilityRegistryService.findBySkill("greeting", "highest_confidence"))
+        when(capabilityRegistryService.findA2aBySkill("greeting", "highest_confidence"))
                 .thenReturn(List.of(match));
 
         Response response = endpoint.searchCapabilities("greeting", "highest_confidence");
@@ -219,7 +219,7 @@ class RestA2AEndpointTest {
     @Test
     void searchCapabilities_emptyMatches_returns200() {
         endpoint = createEndpoint(true, true);
-        when(capabilityRegistryService.findBySkill("unknown", "highest_confidence"))
+        when(capabilityRegistryService.findA2aBySkill("unknown", "highest_confidence"))
                 .thenReturn(List.of());
 
         Response response = endpoint.searchCapabilities("unknown", "highest_confidence");
@@ -250,7 +250,7 @@ class RestA2AEndpointTest {
     @Test
     void listCapabilitySkills_success_returnsSkills() {
         endpoint = createEndpoint(true, true);
-        when(capabilityRegistryService.getAllSkills())
+        when(capabilityRegistryService.getA2aSkills())
                 .thenReturn(Set.of("greeting", "weather", "support"));
 
         Response response = endpoint.listCapabilitySkills();

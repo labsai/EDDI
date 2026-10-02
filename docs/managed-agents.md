@@ -132,6 +132,8 @@ First, you need to set up a `AgentTrigger`.
 | PUT         | `/AgentTriggerStore/agenttriggers/{intent}` | Agent Triggers-model | N/A                  |
 | POST        | `/AgentTriggerStore/agenttriggers`          | Agent Triggers-model | N/A                  |
 
+**Who may change a trigger.** Creating, updating and deleting a trigger require `EDIT` on every agent it routes to — for an update, on the agents it routes to before *and* after the change. With [workspaces](workspaces.md) off every editor holds `EDIT` on every agent, so this restricts nothing there. The `intent` in a `PUT` body must match the `{intent}` in the path (or be left out); a mismatch is a `400` — create the new intent and delete the old one to rename. `POST` for an intent that already exists is refused (`409`), never an overwrite.
+
 ## Triggering a ManagedAgent
 
 To trigger a managed agent you will have to call the following API endpoints.

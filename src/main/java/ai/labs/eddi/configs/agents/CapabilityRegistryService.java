@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -69,6 +70,12 @@ public class CapabilityRegistryService {
      * unregistered to avoid drift on topology changes.
      */
     private final Map<String, AtomicInteger> roundRobinCounters = new ConcurrentHashMap<>();
+
+    /**
+     * The agents whose configuration has {@code a2aEnabled} — the only ones the
+     * public A2A discovery endpoints may name (see {@link #findA2aBySkill}).
+     */
+    private final Set<String> a2aAgentIds = ConcurrentHashMap.newKeySet();
 
     private final MeterRegistry meterRegistry;
     private final IAgentStore agentStore;
@@ -143,6 +150,9 @@ public class CapabilityRegistryService {
     public synchronized void register(String agentId, AgentConfiguration config) {
         // Remove any previous entries for this agent
         unregister(agentId);
+        if (config.isA2aEnabled()) {
+            a2aAgentIds.add(agentId);
+        }
 
         if (config.getCapabilities() == null || config.getCapabilities().isEmpty()) {
             return;
@@ -177,6 +187,7 @@ public class CapabilityRegistryService {
      * </p>
      */
     public synchronized void unregister(String agentId) {
+        a2aAgentIds.remove(agentId);
         skillIndex.values().forEach(entries -> entries.removeIf(e -> e.agentId().equals(agentId)));
         // Clean up empty skill entries and reset round-robin counters
         skillIndex.entrySet().removeIf(entry -> {
@@ -286,6 +297,57 @@ public class CapabilityRegistryService {
         }).collect(Collectors.toList());
 
         return applyStrategy(filtered, resolvedStrategy, normalizedSkill);
+    }
+
+    /**
+     * As {@link #findBySkill}, restricted to agents that are published over A2A
+     * ({@code a2aEnabled}). For the anonymous {@code /.well-known/capabilities}
+     * discovery: it exists to tell A2A peers which agents they can reach, and it
+     * used to name every agent that declared the skill — internal ones included,
+     * which no peer can call and nobody chose to announce. The restriction is
+     * applied before the strategy, so a round robin cycles through what is actually
+     * published.
+     */
+    public List<CapabilityMatch> findA2aBySkill(String skill, String strategy) {
+        return findBySkill(skill, strategy, a2aAgentIds::contains);
+    }
+
+    /**
+     * As {@link #findBySkill(String, String)}, among the agents {@code agentFilter}
+     * admits. The filter runs <em>before</em> the strategy, so a
+     * {@code highest_confidence} or {@code round_robin} pick is made among the
+     * admitted agents rather than made first and then possibly dropped.
+     */
+    public List<CapabilityMatch> findBySkill(String skill, String strategy, Predicate<String> agentFilter) {
+        String resolvedStrategy = strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all";
+        List<CapabilityMatch> admitted = lookupBySkill(skill).stream()
+                .filter(match -> agentFilter.test(match.agentId()))
+                .collect(Collectors.toList());
+        if (admitted.isEmpty()) {
+            return admitted;
+        }
+        return applyStrategy(admitted, resolvedStrategy, skill.toLowerCase(Locale.ROOT).trim());
+    }
+
+    /**
+     * The skills at least one agent {@code agentFilter} admits declares.
+     */
+    public Set<String> getSkills(Predicate<String> agentFilter) {
+        Set<String> skills = new TreeSet<>();
+        skillIndex.forEach((skill, entries) -> {
+            if (entries.stream().anyMatch(entry -> agentFilter.test(entry.agentId()))) {
+                skills.add(skill);
+            }
+        });
+        return Collections.unmodifiableSet(skills);
+    }
+
+    /**
+     * The skills at least one A2A-published agent declares — the anonymous
+     * counterpart of {@link #getAllSkills()}.
+     */
+    public Set<String> getA2aSkills() {
+        return getSkills(a2aAgentIds::contains);
     }
 
     /**

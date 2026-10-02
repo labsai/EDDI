@@ -7,6 +7,7 @@ package ai.labs.eddi.ui;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import jakarta.annotation.security.PermitAll;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -22,6 +23,11 @@ import org.jboss.resteasy.reactive.Cache;
 @Path("/chat")
 @Produces(MediaType.TEXT_HTML)
 @Tag(name = "UI / Chat", description = "Embedded responsive chat window")
+// Explicitly public — the chat SPA shell: loaded by the browser before it holds
+// a token.
+// quarkus.security.jaxrs.deny-unannotated-endpoints denies anything
+// unannotated.
+@PermitAll
 public interface IRestHtmlChatResource {
 
     // Hidden from the generated OpenAPI document for the same reason as every

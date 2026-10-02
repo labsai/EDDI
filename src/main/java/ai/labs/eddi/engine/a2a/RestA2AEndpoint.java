@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.Set;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import io.quarkus.security.Authenticated;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -142,8 +141,13 @@ public class RestA2AEndpoint {
      * {@code @PermitAll} until 6.4.0, which never took effect because no permission
      * entry matched the path; the annotation was removed rather than a permit entry
      * added.
+     * <p>
+     * And a real EDDI role, not just a token: {@code @Authenticated} admitted any
+     * identity the realm issues, a role-less one included. The tier is the one the
+     * JSON-RPC endpoint below requires — whoever may converse with an A2A agent may
+     * see which ones exist.
      */
-    @Authenticated
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
     @GET
     @Path("a2a/agents")
     public Response listA2AAgents() {
@@ -185,7 +189,9 @@ public class RestA2AEndpoint {
                     .entity(Map.of("error", "Query parameter 'skill' is required")).build();
         }
 
-        List<CapabilityMatch> matches = capabilityRegistryService.findBySkill(skill, strategy);
+        // A2A-published agents only: this answers anonymous peers, and an agent that
+        // is not a2aEnabled is not something a peer can reach or anybody announced.
+        List<CapabilityMatch> matches = capabilityRegistryService.findA2aBySkill(skill, strategy);
 
         // Sanitize: expose only agentId, skill, confidence, attributes
         // (CapabilityMatch already has this shape — no internal fields to strip)
@@ -208,7 +214,7 @@ public class RestA2AEndpoint {
             return Response.status(Response.Status.NOT_FOUND).build();
         }
 
-        Set<String> skills = capabilityRegistryService.getAllSkills();
+        Set<String> skills = capabilityRegistryService.getA2aSkills();
         return Response.ok(skills).build();
     }
 

@@ -620,4 +620,63 @@ class CapabilityRegistryServiceTest {
         assertTrue(captured.stream().noneMatch(value -> value.contains("\n")),
                 "a newline reached the log, so a caller can forge log records; captured: " + captured);
     }
+
+    // --- F5: the anonymous /.well-known/capabilities names A2A-published agents
+    // only ---
+
+    private void registerAgent(String agentId, boolean a2aEnabled, String skill, String confidence) {
+        var config = new AgentConfiguration();
+        config.setA2aEnabled(a2aEnabled);
+        config.setCapabilities(List.of(new Capability(skill, Map.of(), confidence)));
+        service.register(agentId, config);
+    }
+
+    @Test
+    void findA2aBySkill_namesOnlyA2aEnabledAgents() {
+        registerAgent("public-agent", true, "support", "medium");
+        registerAgent("internal-agent", false, "support", "high");
+
+        var all = service.findA2aBySkill("support", "all");
+        assertEquals(List.of("public-agent"), all.stream().map(CapabilityMatch::agentId).toList());
+
+        // The strategy picks among the published agents — the internal one's higher
+        // confidence must not win the pick and then be dropped.
+        var best = service.findA2aBySkill("support", "highest_confidence");
+        assertEquals(List.of("public-agent"), best.stream().map(CapabilityMatch::agentId).toList());
+
+        // The internal endpoint still sees both.
+        assertEquals(2, service.findBySkill("support", "all").size());
+    }
+
+    @Test
+    void getA2aSkills_omitsSkillsOnlyInternalAgentsDeclare() {
+        registerAgent("public-agent", true, "support", "medium");
+        registerAgent("internal-agent", false, "payroll-internals", "high");
+
+        assertEquals(Set.of("support"), service.getA2aSkills());
+        assertEquals(Set.of("support", "payroll-internals"), service.getAllSkills());
+    }
+
+    @Test
+    void a2aFlagFollowsReRegistration() {
+        registerAgent("agent-x", true, "support", "medium");
+        registerAgent("agent-x", false, "support", "medium");
+        assertTrue(service.findA2aBySkill("support", "all").isEmpty(), "an agent taken off A2A must leave public discovery");
+
+        registerAgent("agent-y", true, "support", "medium");
+        service.unregister("agent-y");
+        assertTrue(service.findA2aBySkill("support", "all").isEmpty());
+    }
+
+    @Test
+    void findBySkillWithFilter_appliesTheFilterBeforeTheStrategy() {
+        registerAgent("visible", false, "support", "low");
+        registerAgent("hidden", false, "support", "high");
+
+        var best = service.findBySkill("support", "highest_confidence", "visible"::equals);
+
+        assertEquals(List.of("visible"), best.stream().map(CapabilityMatch::agentId).toList());
+        assertEquals(Set.of("support"), service.getSkills("visible"::equals));
+        assertTrue(service.getSkills(id -> false).isEmpty());
+    }
 }
