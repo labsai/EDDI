@@ -88,7 +88,7 @@ function ActionTags({
             {a}
             {!readOnly && (
               <button type="button" onClick={() => onChange(actions.filter((_, j) => j !== i))}
-                className="rounded p-0.5 hover:bg-primary/20 transition-colors" aria-label={`Remove ${a}`}>
+                className="rounded p-0.5 hover:bg-primary/20 transition-colors" aria-label={t("common.removeItem", { item: a, defaultValue: "Remove {{item}}" })}>
                 <X className="h-3 w-3" />
               </button>
             )}

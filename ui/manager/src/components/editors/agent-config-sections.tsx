@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
+import { useState, useRef, useEffect, useMemo, memo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -28,95 +28,11 @@ import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { isApiError } from "@/lib/api-client";
 import { EditorSection } from "./editor-section";
+import { DebouncedInput, DebouncedNumberInput } from "./debounced-inputs";
 import { ToolApprovalsEditor } from "./tool-approvals-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-
-// ─── Debounced input helpers ─────────────────────────────────────────────────
-
-/** Text input that buffers locally and debounces the mutation to avoid per-keystroke PUTs */
-function DebouncedInput({
-  value,
-  onCommit,
-  delay = 600,
-  ...rest
-}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange"> & {
-  value: string;
-  onCommit: (v: string) => void;
-  delay?: number;
-}) {
-  const [local, setLocal] = useState(value);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Sync from parent if the external value changes (version bump etc.)
-  useEffect(() => setLocal(value), [value]);
-
-  const commit = useCallback(
-    (v: string) => {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => onCommit(v), delay);
-    },
-    [onCommit, delay],
-  );
-
-  // Cleanup on unmount
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  return (
-    <input
-      {...rest}
-      value={local}
-      onChange={(e) => {
-        setLocal(e.target.value);
-        commit(e.target.value);
-      }}
-    />
-  );
-}
-
-/** Number input that buffers locally and debounces the mutation */
-function DebouncedNumberInput({
-  value,
-  onCommit,
-  delay = 600,
-  fallback = 0,
-  ...rest
-}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value"> & {
-  value: number;
-  onCommit: (v: number) => void;
-  delay?: number;
-  fallback?: number;
-}) {
-  const [local, setLocal] = useState(String(value));
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => setLocal(String(value)), [value]);
-
-  const commit = useCallback(
-    (raw: string) => {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        onCommit(parseFloat(raw) || fallback);
-      }, delay);
-    },
-    [onCommit, delay, fallback],
-  );
-
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  return (
-    <input
-      {...rest}
-      type="number"
-      value={local}
-      onChange={(e) => {
-        setLocal(e.target.value);
-        commit(e.target.value);
-      }}
-    />
-  );
-}
 
 // ─── Security & Identity ────────────────────────────────────────────────────
 
