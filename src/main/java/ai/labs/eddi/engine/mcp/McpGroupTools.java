@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
@@ -152,19 +153,23 @@ public class McpGroupTools {
 
     /**
      * The error a group tool answers with when it fails. The caller's own mistakes
-     * — an invalid argument, a 4xx from the store such as a validation message —
-     * are described, because the caller can act on them. A missing group or
-     * conversation is reported as such. Anything else is a server-side failure: its
-     * exception text can carry datastore or configuration detail (and a
-     * {@code NullPointerException} reads literally as "null"), so it goes to the
-     * log, and the caller gets a fixed message with errorCode {@code INTERNAL}.
+     * — an invalid argument, unparseable JSON in an argument, a 4xx from the store
+     * such as a validation message — are described, because the caller can act on
+     * them. A missing group or conversation is reported as such. Anything else is a
+     * server-side failure: its exception text can carry datastore or configuration
+     * detail (and a {@code NullPointerException} reads literally as "null"), so it
+     * goes to the log, and the caller gets a fixed message with errorCode
+     * {@code INTERNAL}.
      */
     private String failure(String tool, String message, Exception e) {
         if (e instanceof IResourceStore.ResourceNotFoundException || e instanceof NotFoundException) {
             LOGGER.debugf("%s: not found: %s", tool, LogSanitizer.sanitize(e.getMessage()));
             return errorJson(message + ": not found", "NOT_FOUND", null);
         }
-        if (e instanceof IllegalArgumentException || e instanceof ClientErrorException) {
+        // JsonProcessingException: a JSON argument the caller sent (roleAssignments,
+        // tasks) did not parse — the caller's mistake, and the parser's message
+        // quotes only the caller's own input.
+        if (e instanceof IllegalArgumentException || e instanceof ClientErrorException || e instanceof JsonProcessingException) {
             return errorJson(message, e);
         }
         LOGGER.error(tool + " failed", e);

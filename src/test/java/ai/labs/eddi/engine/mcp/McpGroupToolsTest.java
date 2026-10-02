@@ -307,6 +307,16 @@ class McpGroupToolsTest {
     }
 
     @Test
+    void createGroupFromTemplate_malformedRoleAssignments_isDescribedNotInternal() throws Exception {
+        // Unparseable roleAssignments JSON is the caller's mistake too: it must say
+        // what did not parse, not answer a fixed INTERNAL message.
+        String result = tools.create_group_from_template("research-pod", null, "{not json");
+
+        assertTrue(result.startsWith("{\"error\":\"Failed to create group from template: "), result);
+        assertFalse(result.contains("INTERNAL"), result);
+    }
+
+    @Test
     void createGroup_handlesException() {
         when(groupStore.createGroup(any())).thenThrow(new RuntimeException("Insert failed"));
 
