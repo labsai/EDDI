@@ -476,14 +476,18 @@ Returns a report listing all unreferenced resources across all stores (workflows
 ```
 
 > **Check `scanComplete` before acting on this list.** It is `false` when part of the traversal
-> failed — an unreadable agent or workflow, an unreadable deployment record, a store type past the
+> failed — an unreadable agent, workflow or parser document, an unreadable deployment record, a store type past the
 > scan ceiling — and `scanWarning` then says which. Every failure *removes* entries from the
 > referenced set, so a partial scan lists live, in-use resources as orphans. The read-only scan still
 > answers so you can see the cause; the purge refuses outright (409, below).
 
 What counts as a reference: the current version of every agent, the current version of every
 workflow, **and** every agent version named by a `deployed` deployment record together with the exact
-workflow versions that version pins. A resource referenced only by a superseded *and* undeployed
+workflow versions that version pins. Dictionaries are also referenced from **parser documents**
+(`extensions.dictionaries[n].config.uri`): every parser document's current version counts, and so does
+the parser version a workflow step pins. A parser that is itself an orphan keeps its dictionaries
+until it has been purged, so the next purge reaches them; an unreadable parser document makes the scan
+incomplete. A resource referenced only by a superseded *and* undeployed
 agent version is still reported as an orphan — history is not a reference — so rolling an agent back
 to an older version after a purge can leave it unresolvable. References are compared by resource
 identity, not by URI string, so a version-pinned reference protects every version of the resource,
@@ -517,7 +521,7 @@ reviewed.
 > old default now purges *less*; pass `includeDeleted=true` to restore the wider sweep.
 
 The purge refuses with **409** rather than proceeding when the referenced-resource scan could not be
-completed (an unreadable Agent or workflow, an unreadable deployment record, or a store type
+completed (an unreadable Agent, workflow or parser document, an unreadable deployment record, or a store type
 exceeding the scan ceiling). A partial reference set makes live, in-use resources look unreferenced,
 so purging against one could destroy working configuration.
 
