@@ -99,6 +99,8 @@ describe("use-chat handleSSEEvent — task_failed / error-JSON handling", () => 
     const messages = useChatStore.getState().messages;
     const lastAgent = [...messages].reverse().find((m) => m.role === "agent");
     expect(lastAgent?.content).toContain("⚠️ Error: Boom");
+    // Flagged, not matched on its (translated) text, for "Retry Last Step".
+    expect(lastAgent?.isError).toBe(true);
     // The raw JSON object must not leak into the bubble.
     expect(lastAgent?.content).not.toContain('{"message"');
   });

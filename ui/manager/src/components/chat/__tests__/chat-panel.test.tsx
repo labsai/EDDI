@@ -674,6 +674,7 @@ describe("ChatPanel", () => {
       id: "m1",
       role: "agent",
       content: "⚠️ Error: Something went wrong",
+      isError: true,
       timestamp: Date.now(),
     });
 
@@ -786,6 +787,7 @@ describe("ChatPanel", () => {
       id: "m1",
       role: "agent",
       content: "⚠️ Error: Something went wrong",
+      isError: true,
       timestamp: Date.now(),
     });
     server.use(http.post("*/agents/conv1/rerun", () => new Promise<never>(() => {})));
