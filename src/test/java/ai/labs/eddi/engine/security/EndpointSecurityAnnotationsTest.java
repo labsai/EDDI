@@ -26,6 +26,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -99,6 +100,7 @@ class EndpointSecurityAnnotationsTest {
     private static List<Class<?>> mainClasses() throws URISyntaxException, IOException {
         var root = Paths.get(RestA2AEndpoint.class.getProtectionDomain().getCodeSource().getLocation().toURI());
         List<Class<?>> classes = new ArrayList<>();
+        List<String> unloadableResources = new ArrayList<>();
         // `var`, not the type: java.nio.file.Path would collide with the JAX-RS @Path.
         try (var files = Files.walk(root)) {
             for (var file : files.filter(f -> f.toString().endsWith(".class") && !f.getFileName().toString().contains("$")).toList()) {
@@ -109,11 +111,16 @@ class EndpointSecurityAnnotationsTest {
                 }
                 try {
                     classes.add(Class.forName(name, false, EndpointSecurityAnnotationsTest.class.getClassLoader()));
-                } catch (Throwable ignored) {
-                    // not loadable without the container — not a resource either
+                } catch (Throwable notLoadable) {
+                    // Not loadable here. Only a problem if it is a resource: then this test
+                    // would pass without ever having looked at it.
+                    if (new String(Files.readAllBytes(file), StandardCharsets.ISO_8859_1).contains("Ljakarta/ws/rs/Path;")) {
+                        unloadableResources.add(name + " (" + notLoadable + ")");
+                    }
                 }
             }
         }
+        assertEquals(List.of(), unloadableResources, "these JAX-RS classes could not be loaded, so their endpoints went unchecked");
         return classes;
     }
 
@@ -162,18 +169,16 @@ class EndpointSecurityAnnotationsTest {
                 return true;
             }
         }
-        // Class-level: the implementation class, or the type that DECLARES the
-        // HTTP-annotated method. Not any @Path interface in the hierarchy: Quarkus
-        // reads a class-level annotation from the declaring type, so a default
-        // method inherited from an unannotated mixin (IRestVersionInfo) is denied
-        // even when the store interface carries @RolesAllowed — the live 403 this
-        // test was corrected after.
-        if (SECURITY.stream().anyMatch(type::isAnnotationPresent)) {
-            return true;
-        }
+        // Class-level: only a type that DECLARES the method — the implementation class
+        // when it overrides it, the interface that carries it. Not any @Path interface
+        // in the hierarchy, and not the implementation class when the method is a
+        // default it merely inherits: Quarkus reads a class-level annotation from the
+        // declaring type, so a default method inherited from an unannotated mixin
+        // (IRestVersionInfo) is denied even when the store interface — or the
+        // implementation class — carries @RolesAllowed. The live 403 this test was
+        // corrected after.
         for (Method declaration : declarations(type, method)) {
-            if (HTTP.stream().anyMatch(declaration::isAnnotationPresent)
-                    && SECURITY.stream().anyMatch(declaration.getDeclaringClass()::isAnnotationPresent)) {
+            if (SECURITY.stream().anyMatch(declaration.getDeclaringClass()::isAnnotationPresent)) {
                 return true;
             }
         }
