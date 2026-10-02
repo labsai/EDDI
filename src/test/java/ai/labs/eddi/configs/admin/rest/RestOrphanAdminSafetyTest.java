@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.parser.IParserStore;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -88,13 +90,16 @@ class RestOrphanAdminSafetyTest {
     @Mock
     private IDeploymentStore deploymentStore;
 
+    @Mock
+    private IParserStore parserStore;
+
     private RestOrphanAdmin restOrphanAdmin;
 
     @BeforeEach
     void setUp() {
         openMocks(this);
         restOrphanAdmin = new RestOrphanAdmin(agentStore, workflowStore, documentDescriptorStore, resourceClientLibrary, restWorkflowStore,
-                deploymentStore);
+                deploymentStore, parserStore);
     }
 
     private static DocumentDescriptor descriptor(URI resource, String name) {
@@ -1297,6 +1302,167 @@ class RestOrphanAdminSafetyTest {
 
             assertEquals(0, report.getDeletedCount(), "the re-check could not answer, so nothing may be erased");
             verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+    }
+
+    /**
+     * A dictionary is referenced from a parser DOCUMENT
+     * ({@code extensions.dictionaries[n].config.uri}) at least as often as from a
+     * workflow step — it is the shape {@code /parserstore/parsers} documents. The
+     * scan looked at workflow steps only, so such a dictionary was reported as an
+     * orphan and the purge erased it, leaving the parser naming a dictionary that
+     * no longer exists.
+     */
+    @Nested
+    @DisplayName("dictionaries referenced by parser documents")
+    class ParserDocumentReferences {
+
+        private static final String PARSER_ID = "aabbccddeeff1122334455a1";
+        private static final String DICTIONARY_ID = "aabbccddeeff1122334455d1";
+        private static final URI PARSER_URI = URI.create("eddi://ai.labs.parser/parserstore/parsers/" + PARSER_ID + "?version=1");
+        private static final URI DICTIONARY_URI = URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/" + DICTIONARY_ID
+                + "?version=1");
+
+        private ParserConfiguration parserNaming(URI... dictionaries) {
+            List<Object> entries = new ArrayList<>();
+            entries.add(Map.of("type", "eddi://ai.labs.parser.dictionaries.integer"));
+            for (URI dictionary : dictionaries) {
+                entries.add(Map.of("type", "eddi://ai.labs.parser.dictionaries.regular", "config", Map.of("uri", dictionary.toString())));
+            }
+            ParserConfiguration parser = new ParserConfiguration();
+            parser.setExtensions(new HashMap<>(Map.of("dictionaries", entries, "corrections", List.of())));
+            return parser;
+        }
+
+        private List<URI> dictionaryOrphans(OrphanReport report) {
+            return report.getOrphans().stream().filter(o -> "ai.labs.dictionary".equals(o.getType())).map(o -> o.getResourceUri()).toList();
+        }
+
+        private void givenOnly(String type, DocumentDescriptor... descriptors) throws Exception {
+            when(documentDescriptorStore.readDescriptors(eq(type), anyString(), eq(0), anyInt(), anyBoolean())).thenReturn(List.of(descriptors));
+        }
+
+        @BeforeEach
+        void noOtherDescriptors() throws Exception {
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean())).thenReturn(List.of());
+        }
+
+        @Test
+        @DisplayName("a dictionary only a parser document names is not an orphan, and is not purged")
+        void parserDocumentProtectsItsDictionary() throws Exception {
+            givenOnly("ai.labs.parser", descriptor(PARSER_URI, "parser"));
+            givenOnly("ai.labs.dictionary", descriptor(DICTIONARY_URI, "dictionary"));
+            when(parserStore.getCurrentResourceId(PARSER_ID)).thenReturn(resourceId(PARSER_ID, 1));
+            when(parserStore.read(PARSER_ID, 1)).thenReturn(parserNaming(DICTIONARY_URI));
+
+            OrphanReport scan = restOrphanAdmin.scanOrphans(false);
+            assertTrue(scan.getOrphans().stream().noneMatch(o -> o.getResourceUri().equals(DICTIONARY_URI)),
+                    "the parser document references this dictionary: " + scan.getOrphans());
+
+            restOrphanAdmin.purgeOrphans(false);
+            verify(resourceClientLibrary, never()).deleteResource(eq(DICTIONARY_URI), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("the parser document is read at its CURRENT version, not the descriptor's stale one")
+        void parserDocumentIsReadAtItsCurrentVersion() throws Exception {
+            givenOnly("ai.labs.parser", descriptor(PARSER_URI, "parser"));
+            givenOnly("ai.labs.dictionary", descriptor(DICTIONARY_URI, "dictionary"));
+            when(parserStore.getCurrentResourceId(PARSER_ID)).thenReturn(resourceId(PARSER_ID, 3));
+            when(parserStore.read(PARSER_ID, 3)).thenReturn(parserNaming(DICTIONARY_URI));
+
+            OrphanReport scan = restOrphanAdmin.scanOrphans(false);
+
+            // (The parser itself is an orphan here — no workflow uses it — but it still
+            // protects its dictionaries until it is gone.)
+            assertEquals(List.of(), dictionaryOrphans(scan));
+        }
+
+        @Test
+        @DisplayName("an unreferenced dictionary is still an orphan and is purged")
+        void unreferencedDictionaryIsStillPurged() throws Exception {
+            URI other = URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/aabbccddeeff1122334455d2?version=1");
+            givenOnly("ai.labs.parser", descriptor(PARSER_URI, "parser"));
+            givenOnly("ai.labs.dictionary", descriptor(DICTIONARY_URI, "dictionary"), descriptor(other, "unused"));
+            when(parserStore.getCurrentResourceId(PARSER_ID)).thenReturn(resourceId(PARSER_ID, 1));
+            when(parserStore.read(PARSER_ID, 1)).thenReturn(parserNaming(DICTIONARY_URI));
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertEquals(List.of(other), dictionaryOrphans(report));
+            verify(resourceClientLibrary).deleteResource(other, true);
+            verify(resourceClientLibrary, never()).deleteResource(eq(DICTIONARY_URI), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("the parser version a workflow PINS protects its dictionaries, even after the parser moved on")
+        void pinnedParserVersionProtectsItsDictionaries() throws Exception {
+            URI pinnedDictionary = URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/aabbccddeeff1122334455d3?version=1");
+            String workflowId = "aabbccddeeff1122334455b1";
+            URI workflowUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=1");
+            WorkflowConfiguration workflow = new WorkflowConfiguration();
+            WorkflowConfiguration.WorkflowStep parserStep = new WorkflowConfiguration.WorkflowStep();
+            parserStep.setType(URI.create("eddi://ai.labs.parser"));
+            parserStep.setConfig(new HashMap<>(Map.of("uri", PARSER_URI.toString())));
+            workflow.setWorkflowSteps(List.of(parserStep));
+
+            givenOnly("ai.labs.workflow", descriptor(workflowUri, "workflow"));
+            givenOnly("ai.labs.parser", descriptor(PARSER_URI, "parser"));
+            givenOnly("ai.labs.dictionary", descriptor(pinnedDictionary, "pinned"), descriptor(DICTIONARY_URI, "current"));
+            when(workflowStore.read(eq(workflowId), any())).thenReturn(workflow);
+            // v1 (pinned by the workflow) names one dictionary, v2 (current) another.
+            when(parserStore.read(PARSER_ID, 1)).thenReturn(parserNaming(pinnedDictionary));
+            when(parserStore.getCurrentResourceId(PARSER_ID)).thenReturn(resourceId(PARSER_ID, 2));
+            when(parserStore.read(PARSER_ID, 2)).thenReturn(parserNaming(DICTIONARY_URI));
+
+            OrphanReport scan = restOrphanAdmin.scanOrphans(false);
+
+            assertEquals(List.of(), dictionaryOrphans(scan), "v1's dictionary via the pin, v2's via the current document");
+        }
+
+        @Test
+        @DisplayName("an unreadable parser document aborts the purge with 409 and deletes nothing")
+        void unreadableParserDocumentAbortsPurge() throws Exception {
+            givenOnly("ai.labs.parser", descriptor(PARSER_URI, "parser"));
+            givenOnly("ai.labs.dictionary", descriptor(DICTIONARY_URI, "dictionary"));
+            when(parserStore.getCurrentResourceId(PARSER_ID)).thenReturn(resourceId(PARSER_ID, 1));
+            when(parserStore.read(PARSER_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+
+            WebApplicationException thrown = assertThrows(WebApplicationException.class, () -> restOrphanAdmin.purgeOrphans(false));
+
+            assertEquals(409, thrown.getResponse().getStatus());
+            assertTrue(thrown.getResponse().getEntity().toString().contains("db down"), String.valueOf(thrown.getResponse().getEntity()));
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("a parser descriptor whose document is gone references nothing and does not block the purge")
+        void goneParserDocumentDoesNotBlock() throws Exception {
+            givenOnly("ai.labs.parser", descriptor(PARSER_URI, "parser"));
+            givenOnly("ai.labs.dictionary", descriptor(DICTIONARY_URI, "dictionary"));
+            when(parserStore.getCurrentResourceId(PARSER_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertTrue(report.getDeletedCount() >= 1, report.getOrphans().toString());
+            verify(resourceClientLibrary).deleteResource(DICTIONARY_URI, true);
+        }
+
+        @Test
+        @DisplayName("a parser document that starts naming the dictionary between scan and delete saves it")
+        void reCheckSeesAParserDocumentWrittenAfterTheScan() throws Exception {
+            givenOnly("ai.labs.parser", descriptor(PARSER_URI, "parser"));
+            givenOnly("ai.labs.dictionary", descriptor(DICTIONARY_URI, "dictionary"));
+            when(parserStore.getCurrentResourceId(PARSER_ID)).thenReturn(resourceId(PARSER_ID, 1), resourceId(PARSER_ID, 2));
+            // At scan time the parser names no dictionary; by the re-check it does.
+            when(parserStore.read(PARSER_ID, 1)).thenReturn(parserNaming());
+            when(parserStore.read(PARSER_ID, 2)).thenReturn(parserNaming(DICTIONARY_URI));
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertTrue(report.getOrphans().stream().anyMatch(o -> o.getResourceUri().equals(DICTIONARY_URI)),
+                    "the scan saw no reference: " + report.getOrphans());
+            verify(resourceClientLibrary, never()).deleteResource(eq(DICTIONARY_URI), anyBoolean());
         }
     }
 }
