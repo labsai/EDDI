@@ -16,8 +16,9 @@
   window the Undeploy prompt measured −40px to 416px: Close above the screen, Cancel and Undeploy cut off at the
   bottom. Every confirm dialog shares the primitive; the ones with extra content (undeploy, agent delete,
   conversations, groups, operator upgrade) hit it first.
-- **The command palette's list was a fixed 360px** below a 15% offset, so on a window under about 470px tall its
-  bottom ran past the screen edge, where scrolling the list cannot reach it.
+- **The command palette's list was a fixed 360px** below a 15% offset. With the search row, footer and borders
+  (86px, measured), the palette ran past the bottom of any window under about 525px tall: its footer at 310px in a
+  300px window, where scrolling the list cannot reach it.
 
 ### What changed
 
@@ -26,7 +27,10 @@
 - [`alert-dialog.tsx`](../../ui/manager/src/components/ui/alert-dialog.tsx): `max-h-[calc(100dvh-2rem)]
   overflow-y-auto`, the same cap `AccessibleDialog` already had.
 - [`command-palette.tsx`](../../ui/manager/src/components/shared/command-palette.tsx): the list is capped at
-  `min(360px, 60dvh)`.
+  `min(360px, calc(85dvh - 6rem))`. The dialog starts at 15%, so 85dvh remain for all of it, and 6rem covers the
+  86px of fixed parts with a 10px margin. Measured in Chromium: the palette fits at 200px (30–189px), 300px
+  (45–289px) and 800px (unchanged at 360px). A first attempt at `min(360px, 60dvh)` ignored the footer and still
+  overflowed below about 370px; CodeRabbit caught it in review.
 - Tests: the scroll contract gains a case that renders the dashboard with **zero** task forces and requires the
   onboarding hero (new `data-testid="workforce-onboarding-hero"`) to sit inside a scroller. A new
   `alert-dialog.test.tsx` pins the dialog's cap and scroller. Each was mutation-checked: removing the fix fails it.

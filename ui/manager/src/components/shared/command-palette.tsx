@@ -112,10 +112,12 @@ export function CommandPalette() {
             </kbd>
           </div>
 
-          {/* 360px, but never more than the window leaves below the 15% offset
-              and the search row: a fixed 360px ran past the bottom edge of a
-              short window, where scrolling the list cannot reach. */}
-          <Command.List className="max-h-[min(360px,60dvh)] overflow-y-auto p-2">
+          {/* 360px, but never more than the window leaves: the dialog starts at
+              15%, so 85dvh remain for everything, and the search row, footer and
+              borders take 86px of that (measured). 6rem leaves a 10px margin. A
+              fixed 360px ran the footer past the bottom of a short window, where
+              scrolling the list cannot reach it. */}
+          <Command.List className="max-h-[min(360px,calc(85dvh-6rem))] overflow-y-auto p-2">
             <Command.Empty className="py-8 text-center text-sm text-muted-foreground">
               {t("commandPalette.noResults", "No results found.")}
             </Command.Empty>
