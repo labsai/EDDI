@@ -50,7 +50,7 @@ This starts Keycloak alongside EDDI with a pre-configured realm, clients and acc
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | one-time, printed by the installer | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access (`eddi-viewer` included deliberately — there is no role hierarchy, so an admin without it is refused every MCP read tool). Keycloak asks for a new password at the first login |
+| `eddi` | one-time, printed by the installer | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access. Keycloak asks for a new password at the first login |
 | `viewer` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-viewer` | Read-only access |
 | `user` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-user` | Standard user access |
 
@@ -137,6 +137,20 @@ value, so a changed name orphans everything filed under the old one.
 > *every* configuration in the deployment. To scope agents, workflows and the
 > rest to the user or team that created them — and to share them deliberately —
 > see [Workspaces](workspaces.md).
+
+### Role Tiers
+
+Roles are checked literally (`hasRole`), never inherited, so every endpoint and every MCP tool enumerates the roles it admits. The REST API and the MCP server share one matrix — a tier admits the same roles on both doors:
+
+| Tier | Roles | Covers |
+| ---- | ----- | ------ |
+| Docs | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | Published documentation |
+| Converse | `eddi-admin`, `eddi-editor`, `eddi-user` (+ `eddi-viewer` over MCP) | Starting, continuing and reading one's **own** conversations, group discussions and memories |
+| Author | `eddi-admin`, `eddi-editor` | Configuration stores, deployment, triggers, channels, groups, schedules (REST) |
+| Admin | `eddi-admin` | Agent setup (writes API keys to the vault), GDPR, logs, audit, secrets, tenant quotas; over MCP also schedules and memory writes for arbitrary users |
+| HITL | owner, `eddi-admin`, `eddi-approver` | Approval decisions, per conversation |
+
+`eddi-viewer` is the MCP read-and-converse role: over REST it reaches only the docs, usage and workspace listings. The per-tool assignment is in [MCP Server → Role Mapping](mcp-server.md#role-mapping), and `McpRoleTierParityTest` fails the build if an MCP tier and the REST endpoints it mirrors disagree.
 
 ### Auth Permissions
 

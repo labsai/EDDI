@@ -35,13 +35,17 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
@@ -54,6 +58,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  * @author ginccc
  */
 @ApplicationScoped
+@McpErrorResults
 public class McpGroupTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpGroupTools.class);
@@ -145,13 +150,34 @@ public class McpGroupTools {
         return errorJson("Access denied: you do not own this group conversation");
     }
 
+    /**
+     * The error a group tool answers with when it fails. The caller's own mistakes
+     * — an invalid argument, a 4xx from the store such as a validation message —
+     * are described, because the caller can act on them. A missing group or
+     * conversation is reported as such. Anything else is a server-side failure: its
+     * exception text can carry datastore or configuration detail (and a
+     * {@code NullPointerException} reads literally as "null"), so it goes to the
+     * log, and the caller gets a fixed message with errorCode {@code INTERNAL}.
+     */
+    private String failure(String tool, String message, Exception e) {
+        if (e instanceof IResourceStore.ResourceNotFoundException || e instanceof NotFoundException) {
+            LOGGER.debugf("%s: not found: %s", tool, LogSanitizer.sanitize(e.getMessage()));
+            return errorJson(message + ": not found", "NOT_FOUND", null);
+        }
+        if (e instanceof IllegalArgumentException || e instanceof ClientErrorException) {
+            return errorJson(message, e);
+        }
+        LOGGER.error(tool + " failed", e);
+        return errorJson(message, "INTERNAL", null);
+    }
+
     // --- Discovery ---
 
     @Tool(description = "Describe all available discussion styles for agent " + "groups. Returns the name, phase flow, and recommended use case "
             + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE, TASK_FORCE, NEGOTIATION, plus CUSTOM). Call this "
             + "before create_group to choose the right style.")
     public String describe_discussion_styles() {
-        requireRole(identity, authEnabled, "eddi-viewer");
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         return """
                 ## Discussion Styles
 
@@ -225,10 +251,10 @@ public class McpGroupTools {
     // --- Group Config CRUD ---
 
     @Tool(description = "List all agent group configurations. Returns " + "descriptors with name, ID, and last modified date.")
-    public String list_groups(@ToolArg(description = "Filter by group name (optional)") String filter,
-                              @ToolArg(description = "Page index, 0-based (default 0)") String index,
-                              @ToolArg(description = "Page size (default 20)") String limit) {
-        requireRole(identity, authEnabled, "eddi-editor");
+    public String list_groups(@ToolArg(description = "Filter by group name (optional)", required = false) String filter,
+                              @ToolArg(description = "Page index, 0-based (default: 0)", required = false, defaultValue = "0") String index,
+                              @ToolArg(description = "Page size (default: 20)", required = false, defaultValue = "20") String limit) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);
@@ -236,15 +262,14 @@ public class McpGroupTools {
             List<DocumentDescriptor> descriptors = groupStore.readGroupDescriptors(flt, idx, lim);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
-            LOGGER.errorf("list_groups failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("list_groups", "Failed to list groups", e);
         }
     }
 
     @Tool(description = "Read a group configuration including its members, " + "discussion style, phases, and protocol settings.")
     public String read_group(@ToolArg(description = "Group configuration ID") String groupId,
-                             @ToolArg(description = "Version number (0 or omit for latest)") String version) {
-        requireRole(identity, authEnabled, "eddi-editor");
+                             @ToolArg(description = "Version number (default: latest; 0 also means latest)", required = false) String version) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             int ver = parseIntOrDefault(version, 0);
             if (ver == 0) {
@@ -253,35 +278,50 @@ public class McpGroupTools {
             AgentGroupConfiguration config = groupStore.readGroup(groupId, ver);
             return jsonSerialization.serialize(config);
         } catch (Exception e) {
-            LOGGER.errorf("read_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("read_group", "Failed to read group", e);
         }
     }
 
     @Tool(description = "Create a new agent group for multi-agent discussions. " + "Call describe_discussion_styles first to choose a style. "
             + "Members can be agents (default) or nested groups (memberTypes=GROUP).")
-    public String create_group(@ToolArg(description = "Group name") String name,
-                               @ToolArg(description = "Group description (optional)") String description,
-                               @ToolArg(description = "Comma-separated member IDs (agent IDs or "
-                                       + "group IDs depending on memberTypes)") String memberAgentIds,
-                               @ToolArg(description = "Comma-separated display names (optional)") String memberDisplayNames,
-                               @ToolArg(description = "Comma-separated member roles: PARTICIPANT, "
-                                       + "DEVIL_ADVOCATE, PRO, CON (optional)") String memberRoles,
-                               @ToolArg(description = "Comma-separated member types: AGENT "
-                                       + "(default) or GROUP for nested groups (optional)") String memberTypes,
-                               @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
-                               @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
-                                       + "DEVIL_ADVOCATE, DELPHI, DEBATE, TASK_FORCE, NEGOTIATION, CUSTOM "
-                                       + "(default ROUND_TABLE). All eight work; see describe_discussion_styles") String style,
-                               @ToolArg(description = "Max rounds (default 2)") String maxRounds,
-                               @ToolArg(description = "Maximum total agent turns across all phases (default 50). "
-                                       + "Safety cap to prevent runaway discussions.") String maxTurns,
-                               @ToolArg(description = "JSON array of pre-configured tasks for TASK_FORCE style "
-                                       + "(optional). Each element: {\"subject\":\"...\",\"description\":\"...\","
-                                       + "\"assignToRole\":\"ALL\",\"dependsOn\":[],\"priority\":0}. "
-                                       + "If provided, the PLAN phase is skipped.") String tasks) {
-        requireRole(identity, authEnabled, "eddi-editor");
+    public String create_group(@ToolArg(description = "Group name (required)") String name,
+                               @ToolArg(description = "Group description (optional)", required = false) String description,
+                               @ToolArg(description = "Comma-separated member IDs (required) — agent IDs, or group IDs for members typed GROUP in memberTypes") String memberAgentIds,
+                               @ToolArg(description = "Comma-separated display names (optional)", required = false) String memberDisplayNames,
+                               @ToolArg(description = "Comma-separated member roles: PARTICIPANT, DEVIL_ADVOCATE, PRO, CON (optional)",
+                                        required = false) String memberRoles,
+                               @ToolArg(description = "Comma-separated member types: AGENT (default) or GROUP for nested groups (optional)",
+                                        required = false) String memberTypes,
+                               @ToolArg(description = "Moderator agent ID (optional)", required = false) String moderatorAgentId,
+                               @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI, DEBATE, TASK_FORCE, NEGOTIATION, CUSTOM (default: ROUND_TABLE). An unknown style is rejected; see describe_discussion_styles",
+                                        required = false, defaultValue = "ROUND_TABLE") String style,
+                               @ToolArg(description = "Max rounds (default: 2)", required = false, defaultValue = "2") String maxRounds,
+                               @ToolArg(description = "Maximum total agent turns across all phases (default: 50). Safety cap to prevent runaway discussions.",
+                                        required = false) String maxTurns,
+                               @ToolArg(description = "JSON array of pre-configured tasks for TASK_FORCE style (optional). Each element: {\"subject\":\"...\",\"description\":\"...\",\"assignToRole\":\"ALL\",\"dependsOn\":[],\"priority\":0}. If provided, the PLAN phase is skipped.",
+                                        required = false) String tasks) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
+            if (name == null || name.isBlank()) {
+                return errorJson("name is required", "BAD_REQUEST", null);
+            }
+            if (memberAgentIds == null || Arrays.stream(memberAgentIds.split(",")).allMatch(String::isBlank)) {
+                return errorJson("memberAgentIds is required: name at least one member", "BAD_REQUEST", null);
+            }
+            // An unknown style is refused rather than quietly turned into ROUND_TABLE:
+            // the caller asked for a specific protocol and would otherwise get a
+            // different discussion than the one it configured, with nothing saying so.
+            DiscussionStyle discussionStyle = DiscussionStyle.ROUND_TABLE;
+            if (style != null && !style.isBlank()) {
+                try {
+                    discussionStyle = DiscussionStyle.valueOf(style.trim().toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    return errorJson("Unknown discussion style '" + style.trim() + "'. Valid styles: "
+                            + Arrays.stream(DiscussionStyle.values()).map(Enum::name).collect(Collectors.joining(", ")),
+                            "BAD_REQUEST", null);
+                }
+            }
+
             AgentGroupConfiguration config = new AgentGroupConfiguration();
             config.setName(name);
             config.setDescription(description);
@@ -310,15 +350,6 @@ public class McpGroupTools {
                 config.setModeratorAgentId(moderatorAgentId.trim());
             }
 
-            // Style
-            DiscussionStyle discussionStyle = DiscussionStyle.ROUND_TABLE;
-            if (style != null && !style.isBlank()) {
-                try {
-                    discussionStyle = DiscussionStyle.valueOf(style.trim().toUpperCase());
-                } catch (IllegalArgumentException e) {
-                    // Fall back to ROUND_TABLE
-                }
-            }
             config.setStyle(discussionStyle);
             config.setMaxRounds(parseIntOrDefault(maxRounds, 2));
 
@@ -351,16 +382,16 @@ public class McpGroupTools {
             return ("Created group '%s' (style=%s, %d members, " + "moderator=%s)\nID: %s\nPhases: %s").formatted(name, discussionStyle,
                     members.size(), moderatorAgentId != null ? moderatorAgentId : "none", groupId, String.join(" → ", phaseNames));
         } catch (Exception e) {
-            LOGGER.errorf("create_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("create_group", "Failed to create group", e);
         }
     }
 
     @Tool(description = "Update an existing agent group. Pass the full " + "configuration as JSON.")
     public String update_group(@ToolArg(description = "Group ID") String groupId,
-                               @ToolArg(description = "Version number (0 for latest)") String version,
+                               @ToolArg(description = "Version number to update (default: latest; 0 also means latest)",
+                                        required = false) String version,
                                @ToolArg(description = "Full JSON configuration body") String configJson) {
-        requireRole(identity, authEnabled, "eddi-editor");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             int ver = parseIntOrDefault(version, 0);
             // Same strictness as PUT /groupstore/groups — AgentGroupConfiguration is a
@@ -379,15 +410,15 @@ public class McpGroupTools {
 
     @Tool(description = "Delete an agent group configuration")
     public String delete_group(@ToolArg(description = "Group ID") String groupId,
-                               @ToolArg(description = "Version number (0 for latest)") String version) {
-        requireRole(identity, authEnabled, "eddi-editor");
+                               @ToolArg(description = "Version number to delete (default: latest; 0 also means latest)",
+                                        required = false) String version) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             int ver = parseIntOrDefault(version, 0);
             groupStore.deleteGroup(groupId, ver, false);
             return "Deleted group " + groupId;
         } catch (Exception e) {
-            LOGGER.errorf("delete_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("delete_group", "Failed to delete group", e);
         }
     }
 
@@ -402,9 +433,9 @@ public class McpGroupTools {
             + "poll with read_group_conversation).")
     public String discuss_with_group(@ToolArg(description = "Group configuration ID (from create_group " + "or list_groups)") String groupId,
                                      @ToolArg(description = "The question or topic for the group to " + "discuss") String question,
-                                     @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the "
-                                             + "calling user and may not name another user.") String userId) {
-        requireRole(identity, authEnabled, "eddi-viewer");
+                                     @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
+                                              required = false) String userId) {
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
             // Parity with REST: running a group is the USE act on it (see
             // RestGroupConversation#requireGroupUseAccess).
@@ -419,8 +450,7 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return errorJson("Access denied: you cannot start a conversation as another user");
         } catch (Exception e) {
-            LOGGER.errorf("discuss_with_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("discuss_with_group", "Failed to run group discussion", e);
         }
     }
 
@@ -435,7 +465,7 @@ public class McpGroupTools {
                                           @ToolArg(description = "Group conversation ID (from "
                                                   + "discuss_with_group, start_group_discussion, "
                                                   + "or list_group_conversations)") String groupConversationId) {
-        requireRole(identity, authEnabled, "eddi-viewer");
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
@@ -443,16 +473,16 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return accessDenied("read_group_conversation", groupConversationId);
         } catch (Exception e) {
-            LOGGER.errorf("read_group_conversation failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("read_group_conversation", "Failed to read group conversation", e);
         }
     }
 
     @Tool(description = "List past group conversation transcripts for a " + "group. Returns conversation IDs, state, question, and " + "timestamps.")
     public String list_group_conversations(@ToolArg(description = "Group configuration ID") String groupId,
-                                           @ToolArg(description = "Page index, 0-based (default 0)") String index,
-                                           @ToolArg(description = "Page size (default 20)") String limit) {
-        requireRole(identity, authEnabled, "eddi-viewer");
+                                           @ToolArg(description = "Page index, 0-based (default: 0)", required = false,
+                                                    defaultValue = "0") String index,
+                                           @ToolArg(description = "Page size (default: 20)", required = false, defaultValue = "20") String limit) {
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
             int idx = parseIntOrDefault(index, 0);
             int lim = parseIntOrDefault(limit, 20);
@@ -477,8 +507,7 @@ public class McpGroupTools {
             }
             return jsonSerialization.serialize(conversations);
         } catch (Exception e) {
-            LOGGER.errorf("list_group_conversations failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("list_group_conversations", "Failed to list group conversations", e);
         }
     }
 
@@ -493,8 +522,9 @@ public class McpGroupTools {
     public String start_group_discussion(
                                          @ToolArg(description = "Group configuration ID (from create_group or list_groups)") String groupId,
                                          @ToolArg(description = "The question or topic for the group to discuss") String question,
-                                         @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.") String userId) {
-        requireRole(identity, authEnabled, "eddi-viewer");
+                                         @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
+                                                  required = false) String userId) {
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
             resourceAccessGuard.requireUseAccess(groupId, "group");
         } catch (ForbiddenException e) {
@@ -510,8 +540,7 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return errorJson("Access denied: you cannot start a conversation as another user");
         } catch (Exception e) {
-            LOGGER.errorf("start_group_discussion failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("start_group_discussion", "Failed to start group discussion", e);
         }
     }
 
@@ -520,7 +549,7 @@ public class McpGroupTools {
             + "remain readable afterwards.")
     public String delete_group_conversation(
                                             @ToolArg(description = "Group conversation ID to delete") String groupConversationId) {
-        requireRole(identity, authEnabled, "eddi-editor");
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
             requireConversationOwner(groupConversationId);
             groupConversationService.deleteGroupConversation(groupConversationId);
@@ -528,8 +557,7 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return accessDenied("delete_group_conversation", groupConversationId);
         } catch (Exception e) {
-            LOGGER.errorf("delete_group_conversation failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("delete_group_conversation", "Failed to delete group conversation", e);
         }
     }
 
@@ -544,7 +572,7 @@ public class McpGroupTools {
                                        @ToolArg(description = "Group conversation ID") String groupConversationId,
                                        @ToolArg(description = "Agent ID or display name of the member to address") String targetAgentId,
                                        @ToolArg(description = "The follow-up question") String question) {
-        requireRole(identity, authEnabled, "eddi-viewer");
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
             requireConversationOwner(groupConversationId);
             GroupConversation gc = groupConversationService.followUpWithMember(
@@ -568,7 +596,7 @@ public class McpGroupTools {
     public String continue_group_discussion(
                                             @ToolArg(description = "Group conversation ID") String groupConversationId,
                                             @ToolArg(description = "The follow-up question for the group") String question) {
-        requireRole(identity, authEnabled, "eddi-viewer");
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         GroupConversation owned;
         try {
             owned = requireConversationOwner(groupConversationId);
@@ -603,7 +631,7 @@ public class McpGroupTools {
             + "Returns the closed GroupConversation.")
     public String close_group_conversation(
                                            @ToolArg(description = "Group conversation ID") String groupConversationId) {
-        requireRole(identity, authEnabled, "eddi-editor");
+        requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
             requireConversationOwner(groupConversationId);
             GroupConversation gc = groupConversationService.closeGroupConversation(groupConversationId);
@@ -625,9 +653,10 @@ public class McpGroupTools {
             + "Higher priority runs earlier. Returns the created task.")
     public String add_team_task(@ToolArg(description = "Group configuration ID") String groupId,
                                 @ToolArg(description = "Task subject (short, unique within the backlog)") String subject,
-                                @ToolArg(description = "Task description (optional)") String description,
-                                @ToolArg(description = "Priority, higher runs earlier (default 0)") String priority) {
-        requireRole(identity, authEnabled, "eddi-editor");
+                                @ToolArg(description = "Task description (optional)", required = false) String description,
+                                @ToolArg(description = "Priority, higher runs earlier (default: 0)", required = false,
+                                         defaultValue = "0") String priority) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             if (subject == null || subject.isBlank()) {
                 return errorJson("subject is required");
@@ -668,15 +697,14 @@ public class McpGroupTools {
             }
             return errorJson("The workspace is being modified concurrently — retry the request");
         } catch (Exception e) {
-            LOGGER.errorf("add_team_task failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("add_team_task", "Failed to add team task", e);
         }
     }
 
     @Tool(description = "List a standing team's backlog (I13): every task with its status, priority, "
             + "assignee and verification outcome.")
     public String list_team_backlog(@ToolArg(description = "Group configuration ID") String groupId) {
-        requireRole(identity, authEnabled, "eddi-viewer");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             if (groupStore.getCurrentResourceId(groupId) == null) {
                 return errorJson("Group not found: " + groupId);
@@ -689,8 +717,7 @@ public class McpGroupTools {
             return jsonSerialization.serialize(
                     workspace != null ? workspace.getBacklog().getTasks() : List.of());
         } catch (Exception e) {
-            LOGGER.errorf("list_team_backlog failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("list_team_backlog", "Failed to list team backlog", e);
         }
     }
 
@@ -702,12 +729,11 @@ public class McpGroupTools {
             + "decision-board, negotiation-table. Each entry names its required roles — the keys "
             + "create_group_from_template expects.")
     public String list_group_templates() {
-        requireRole(identity, authEnabled, "eddi-viewer");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             return jsonSerialization.serialize(templateService.list());
         } catch (Exception e) {
-            LOGGER.errorf("list_group_templates failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("list_group_templates", "Failed to list group templates", e);
         }
     }
 
@@ -715,9 +741,10 @@ public class McpGroupTools {
             + "roleAssignments is a JSON object mapping role -> agent id (for HUMAN roles: the principal id). "
             + "Saves through the normal store path, so every save-time validation applies.")
     public String create_group_from_template(@ToolArg(description = "Template id, e.g. 'research-pod'") String templateId,
-                                             @ToolArg(description = "Name for the new group (optional)") String name,
+                                             @ToolArg(description = "Name for the new group (optional; defaults to the template's name)",
+                                                      required = false) String name,
                                              @ToolArg(description = "JSON object: role -> agent id") String roleAssignments) {
-        requireRole(identity, authEnabled, "eddi-editor");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             Map<String, String> assignments = roleAssignments != null && !roleAssignments.isBlank()
                     ? MAPPER.readValue(roleAssignments, new TypeReference<Map<String, String>>() {
@@ -731,11 +758,8 @@ public class McpGroupTools {
             String location = response.getLocation() != null ? response.getLocation().toString() : "";
             return "Created group '" + config.getName() + "' from template '" + templateId + "'"
                     + (location.isEmpty() ? "" : " at " + location);
-        } catch (IllegalArgumentException e) {
-            return errorJson(e.getMessage());
         } catch (Exception e) {
-            LOGGER.errorf("create_group_from_template failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return failure("create_group_from_template", "Failed to create group from template", e);
         }
     }
 }

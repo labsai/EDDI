@@ -223,15 +223,87 @@ class McpGroupToolsTest {
     }
 
     @Test
-    void createGroup_invalidStyle_fallsBackToRoundTable() throws Exception {
+    void createGroup_unknownStyle_isRejectedNotSilentlyRoundTable() throws Exception {
+        // Used to fall back to ROUND_TABLE without a word: the caller asked for one
+        // protocol and got another.
+        String result = tools.create_group("Test", null, "a1", null, null, null, null, "INVALID", null, null, null);
+
+        assertTrue(result.startsWith("{\"error\":"), result);
+        assertTrue(result.contains("Unknown discussion style 'INVALID'"), result);
+        assertTrue(result.contains("TASK_FORCE"), "lists the valid styles: " + result);
+        assertTrue(result.contains("BAD_REQUEST"), result);
+        verify(groupStore, never()).createGroup(any());
+    }
+
+    @Test
+    void createGroup_omittedStyle_defaultsToRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id")).build());
 
-        tools.create_group("Test", null, "a1", null, null, null, null, "INVALID", null, null, null);
+        tools.create_group("Test", null, "a1", null, null, null, null, null, null, null, null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
-
         assertEquals(AgentGroupConfiguration.DiscussionStyle.ROUND_TABLE, captor.getValue().getStyle());
+        assertEquals(2, captor.getValue().getMaxRounds());
+    }
+
+    @Test
+    void createGroup_withoutMembers_isAValidationErrorNotANullPointer() throws Exception {
+        // memberAgentIds == null threw an NPE whose message is null, which reached the
+        // caller as {"error":"null"}.
+        String nullMembers = tools.create_group("Test", null, null, null, null, null, null, null, null, null, null);
+        String blankMembers = tools.create_group("Test", null, " , ", null, null, null, null, null, null, null, null);
+
+        for (String result : List.of(nullMembers, blankMembers)) {
+            assertTrue(result.contains("memberAgentIds is required"), result);
+            assertFalse(result.contains("\"null\""), result);
+        }
+        verify(groupStore, never()).createGroup(any());
+    }
+
+    @Test
+    void createGroup_withoutName_isAValidationError() throws Exception {
+        String result = tools.create_group(" ", null, "a1", null, null, null, null, null, null, null, null);
+
+        assertTrue(result.contains("name is required"), result);
+        verify(groupStore, never()).createGroup(any());
+    }
+
+    @Test
+    void createGroup_serverFailure_doesNotEchoTheExceptionText() throws Exception {
+        when(groupStore.createGroup(any())).thenThrow(new RuntimeException("mongodb://admin:secret@db-7:27017 timed out"));
+
+        String result = tools.create_group("Test", null, "a1", null, null, null, null, null, null, null, null);
+
+        assertTrue(result.contains("Failed to create group"), result);
+        assertTrue(result.contains("INTERNAL"), result);
+        assertFalse(result.contains("secret"), result);
+        assertFalse(result.contains("db-7"), result);
+    }
+
+    @Test
+    void readGroup_missingGroup_isReportedAsNotFound() throws Exception {
+        // The store sneaky-throws its checked not-found exception, as the real one
+        // does.
+        when(groupStore.getCurrentVersion("nope")).thenAnswer(inv -> {
+            throw new IResourceStore.ResourceNotFoundException("no resource nope in coll");
+        });
+
+        String result = tools.read_group("nope", null);
+
+        assertTrue(result.contains("Failed to read group: not found"), result);
+        assertTrue(result.contains("NOT_FOUND"), result);
+        assertFalse(result.contains("coll"), result);
+    }
+
+    @Test
+    void createGroupFromTemplate_invalidArgument_isDescribedToTheCaller() throws Exception {
+        // An IllegalArgumentException is the caller's own mistake (an unknown
+        // template, a missing role) and stays actionable.
+        String result = tools.create_group_from_template("no-such-template", null, "{}");
+
+        assertTrue(result.startsWith("{\"error\":"), result);
+        assertTrue(result.contains("no-such-template"), result);
     }
 
     @Test
@@ -423,12 +495,13 @@ class McpGroupToolsTest {
     @Test
     void startGroupDiscussion_handlesException() throws Exception {
         when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any()))
-                .thenThrow(new RuntimeException("Group not found"));
+                .thenThrow(new RuntimeException("connection refused to 10.0.0.7"));
 
         String result = tools.start_group_discussion("g1", "Q?", null);
 
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("Group not found"));
+        assertTrue(result.contains("Failed to start group discussion"), result);
+        // The raw exception text stays in the server log.
+        assertFalse(result.contains("10.0.0.7"), result);
     }
 
     // --- delete_group_conversation ---
@@ -464,12 +537,12 @@ class McpGroupToolsTest {
     @Test
     void deleteGroupConversation_handlesException() throws Exception {
         stubConversation("gc-bad");
-        doThrow(new RuntimeException("Not found")).when(groupConversationService).deleteGroupConversation("gc-bad");
+        doThrow(new RuntimeException("internal detail")).when(groupConversationService).deleteGroupConversation("gc-bad");
 
         String result = tools.delete_group_conversation("gc-bad");
 
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("Not found"));
+        assertTrue(result.contains("Failed to delete group conversation"), result);
+        assertFalse(result.contains("internal detail"), result);
     }
 
     // --- execution model (must stay off the Vert.x event loop) ---

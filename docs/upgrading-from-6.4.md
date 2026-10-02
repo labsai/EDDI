@@ -280,7 +280,8 @@ Keep authentication on, and change the Keycloak admin password first.
   `eddi-viewer`.** An existing realm is not re-imported. Only if MCP clients should sign in
   through Keycloak: create `eddi-mcp` as described in [MCP server](mcp-server.md) and
   [security](security.md), and grant `eddi-viewer` to administrators who use MCP. There is no
-  role hierarchy: an administrator without `eddi-viewer` is refused the read tools over MCP.
+  role hierarchy: an administrator without `eddi-viewer` is refused the read tools over MCP. (Releases after 6.5.0
+  admit `eddi-admin` and `eddi-editor` to the MCP read tools directly — see [MCP role mapping](mcp-server.md#role-mapping).)
 - **The shipped realm seeds no passwords and disables the password grant.** New installs only:
   the `viewer` and `user` fixtures no longer ship as `viewer`/`viewer` and `user`/`user`, and
   `eddi-frontend` no longer allows the direct-access (password) grant. An existing realm keeps
