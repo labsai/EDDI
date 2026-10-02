@@ -78,8 +78,11 @@ class ThirdPartyImagePinsTest {
                 "helm eddi.updateStrategy must default to Recreate: a RollingUpdate surge pod is a second EDDI JVM "
                         + "against the same database for the length of every rollout");
         String template = read(Path.of("helm", "eddi", "templates", "deployment.yaml"));
-        assertTrue(template.contains("toYaml .Values.eddi.updateStrategy"),
-                "the Helm Deployment must render eddi.updateStrategy rather than a hard-coded strategy");
+        assertTrue(template.contains("toYaml (.Values.eddi.updateStrategy | default (dict \"type\" \"Recreate\"))"),
+                "the Helm Deployment must render eddi.updateStrategy rather than a hard-coded strategy, and fall back to "
+                        + "Recreate when the value is absent: `helm upgrade --reuse-values` from chart 2.3.0 carries no "
+                        + "updateStrategy, and `toYaml nil` renders `strategy: null`, which Kubernetes reads as a "
+                        + "25% RollingUpdate");
         assertFalse(template.contains("maxSurge"), "the Helm Deployment still hard-codes a surge");
 
         for (Path manifest : List.of(Path.of("k8s", "base", "eddi-deployment.yaml"), Path.of("k8s", "quickstart.yaml"))) {
