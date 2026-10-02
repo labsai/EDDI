@@ -156,6 +156,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
         long delay = until == null ? 0 : Math.max(0, until - System.currentTimeMillis());
         if (delay > 0) {
             waiter.contended = true;
+            waiter.notBeforeNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(delay);
             waiter.next = scheduler.schedule(() -> io.execute(() -> attempt(waiter)), delay, TimeUnit.MILLISECONDS);
         } else {
             io.execute(() -> attempt(waiter));
@@ -191,6 +192,13 @@ public class KvLeaseManager implements IConversationLeaseManager {
         try {
             if (System.nanoTime() >= w.deadlineNanos) {
                 timeout(w);
+                return;
+            }
+            long holdBack = w.notBeforeNanos - System.nanoTime();
+            if (holdBack > 0) {
+                // Yielding to another node's waiter (handoff grace): a release
+                // notification must not let this node jump the queue.
+                reschedule(w, Math.max(1, TimeUnit.NANOSECONDS.toMillis(holdBack)));
                 return;
             }
             if (!view.isConnected()) {
@@ -537,6 +545,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
         volatile boolean markerWritten;
         volatile boolean takenOver;
         volatile boolean rerun;
+        volatile long notBeforeNanos;
         volatile String lastHolder;
 
         Waiter(String key, long deadlineNanos) {

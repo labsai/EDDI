@@ -12,7 +12,7 @@ import ai.labs.eddi.engine.cluster.SharedBucket;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.nats.client.Connection;
 import io.nats.client.Dispatcher;
-import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Singleton;
 import jakarta.enterprise.inject.Typed;
 import jakarta.inject.Inject;
 
@@ -28,7 +28,7 @@ import java.util.function.Consumer;
  * NATS and presence-based takeover. Only instantiated when
  * {@code eddi.messaging.type=nats}.
  */
-@ApplicationScoped
+@Singleton
 @Typed(NatsLeaseManager.class)
 public class NatsLeaseManager extends KvLeaseManager {
 

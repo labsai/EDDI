@@ -18,7 +18,7 @@ import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Singleton;
 import jakarta.enterprise.inject.Typed;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -67,7 +67,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * turn's input captured so an admin can replay it; while NATS is down they fall
  * back to the node-local ring (ids prefixed {@code local-}).
  */
-@ApplicationScoped
+@Singleton
 @Typed(ClusterConversationCoordinator.class)
 public class ClusterConversationCoordinator extends AbstractQueuedConversationCoordinator {
 

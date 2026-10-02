@@ -7,7 +7,7 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.MeterRegistry;
-import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Singleton;
 import jakarta.enterprise.inject.Typed;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -44,7 +44,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * @author ginccc
  * @see ai.labs.eddi.engine.runtime.IEventBus
  */
-@ApplicationScoped
+@Singleton
 @Typed(InMemoryConversationCoordinator.class)
 public class InMemoryConversationCoordinator extends AbstractQueuedConversationCoordinator {
 

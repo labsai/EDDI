@@ -46,8 +46,14 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
 
     private static final Logger LOGGER = Logger.getLogger(JetStreamDeadLetterStore.class);
     private static final ObjectMapper JSON = new ObjectMapper();
-    /** JetStream "no message found". */
+    /** JetStream "no message found" (message get). */
     private static final int NO_MESSAGE = 10037;
+    /** JetStream "no message found" (message delete). */
+    private static final int NO_MESSAGE_TO_DELETE = 10057;
+
+    private static boolean notFound(JetStreamApiException e) {
+        return e.getApiErrorCode() == NO_MESSAGE || e.getApiErrorCode() == NO_MESSAGE_TO_DELETE;
+    }
 
     private final NatsConnectionManager connections;
     private final ClusterSubjects subjects;
@@ -110,7 +116,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 try {
                     info = jsm.getNextMessage(stream, seq, subjects.deadLetterTurnWildcard());
                 } catch (JetStreamApiException e) {
-                    if (e.getApiErrorCode() == NO_MESSAGE) {
+                    if (notFound(e)) {
                         break;
                     }
                     throw e;
@@ -140,7 +146,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             }
             return Optional.of(toEntry(info));
         } catch (JetStreamApiException e) {
-            if (e.getApiErrorCode() == NO_MESSAGE) {
+            if (notFound(e)) {
                 return Optional.empty();
             }
             throw new ClusterUnavailableException("dead-letter read failed: " + e.getMessage(), e);
@@ -158,7 +164,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         try {
             return connections.jetStreamManagement().deleteMessage(stream, seq);
         } catch (JetStreamApiException e) {
-            if (e.getApiErrorCode() == NO_MESSAGE) {
+            if (notFound(e)) {
                 return false;
             }
             throw new ClusterUnavailableException("dead-letter delete failed: " + e.getMessage(), e);
