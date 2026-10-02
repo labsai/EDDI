@@ -13,6 +13,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
+import { parseIdFromLocation } from "@/lib/api/location-version";
 import { useDuplicateGroup, useDeleteGroup } from "@/hooks/use-groups";
 import {
   type DiscussionStyle,
@@ -109,6 +111,8 @@ function WorkforceCard({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  /** Hard delete — explicit opt-in in the dialog; soft (recoverable) otherwise. */
+  const [deletePermanently, setDeletePermanently] = useState(false);
 
   const duplicateGroup = useDuplicateGroup();
   const deleteGroup = useDeleteGroup();
@@ -124,8 +128,11 @@ function WorkforceCard({
       { id, version: currentVersion },
       {
         onSuccess: (data) => {
-          // Extract new group ID from the location header (e.g. "/groupstore/groups/{newId}")
-          const newId = data.location?.split("/").pop();
+          // Extract the new group ID from the location header. It carries the
+          // version as a query string ("/groupstore/groups/{newId}?version=1"),
+          // which used to end up inside the settings URL as
+          // "/workforce/{newId}?version=1/settings".
+          const newId = parseIdFromLocation(data.location);
           if (newId && newId.length > 0) {
             toast.success(
               t("Workforce.card.duplicated", "Task Force duplicated"),
@@ -152,13 +159,14 @@ function WorkforceCard({
 
   function handleDelete() {
     deleteGroup.mutate(
-      { id, version: currentVersion, permanent: true },
+      { id, version: currentVersion, permanent: deletePermanently },
       {
         onSuccess: () => {
           toast.success(
             t("Workforce.dashboard.deleteSuccess", "Task Force deleted"),
           );
           setDeleteOpen(false);
+          setDeletePermanently(false);
         },
         onError: () =>
           toast.error(
@@ -461,18 +469,31 @@ function WorkforceCard({
       {/* Delete confirmation dialog */}
       <AlertDialog
         open={deleteOpen}
-        onOpenChange={setDeleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) setDeletePermanently(false);
+        }}
         title={t("Workforce.dashboard.deleteWorkforce", "Dissolve Task Force")}
         description={t(
           "Workforce.dashboard.deleteConfirm",
-          "Are you sure you want to dissolve this task force? This action cannot be undone.",
+          "Are you sure you want to dissolve this task force? Member agents are not affected.",
         )}
-        confirmLabel={t("common.delete", "Delete")}
+        confirmLabel={
+          deletePermanently
+            ? t("common.deletePermanently", "Delete permanently")
+            : t("common.delete", "Delete")
+        }
         cancelLabel={t("common.cancel", "Cancel")}
         onConfirm={handleDelete}
         variant="destructive"
         isPending={deleteGroup.isPending}
-      />
+      >
+        <PermanentDeleteOption
+          checked={deletePermanently}
+          onChange={setDeletePermanently}
+          consequence={t("groups.deletePermanentlyHint", "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.")}
+        />
+      </AlertDialog>
     </>
   );
 }

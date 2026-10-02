@@ -302,10 +302,14 @@ export function updateConnection(
   return api.put(`${STORE}/${id}?version=${version}`, config);
 }
 
+/**
+ * Delete a connection. SOFT by default, matching the backend default — a hard
+ * delete is only sent when the user explicitly chose "Delete permanently".
+ */
 export function deleteConnection(
   id: string,
   version: number,
-  permanent = true,
+  permanent = false,
 ): Promise<void> {
   const params = new URLSearchParams({
     version: String(version),

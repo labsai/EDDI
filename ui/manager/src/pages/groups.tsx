@@ -20,6 +20,7 @@ import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialo
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import {
@@ -88,6 +89,8 @@ export function GroupsPage() {
    * which is a poor way to learn what just happened.
    */
   const [deleteMembers, setDeleteMembers] = useState(false);
+  /** Hard delete — unchecked by default; soft delete is the backend default too. */
+  const [deletePermanently, setDeletePermanently] = useState(false);
 
   /**
    * Close the delete dialog and forget the cascade choice.
@@ -116,6 +119,7 @@ export function GroupsPage() {
     setReadingConfig(false);
     setDeleteTarget(null);
     setDeleteMembers(false);
+    setDeletePermanently(false);
   }, []);
 
   const groupedGroups = useMemo(() => {
@@ -188,13 +192,13 @@ export function GroupsPage() {
       if (deleteRequestRef.current !== request) return;
       setReadingConfig(false);
       deleteWithMembersMutation.mutate(
-        { groupId: deleteTarget.id, version: deleteTarget.version, config },
+        { groupId: deleteTarget.id, version: deleteTarget.version, config, permanent: deletePermanently },
         {
           onSuccess: () => {
             toast.success(
               t(
                 "groups.deleteWithMembersSuccess",
-                "Group and all member agents deleted (soft-delete)",
+                "Group and all member agents deleted",
               ),
             );
             closeDeleteDialog();
@@ -205,7 +209,7 @@ export function GroupsPage() {
       return;
     }
 
-    deleteMutation.mutate(deleteTarget, {
+    deleteMutation.mutate({ ...deleteTarget, permanent: deletePermanently }, {
       onSuccess: () => {
         toast.success(t("groups.deleteGroupOnlySuccess", "Group deleted (agents kept)"));
         closeDeleteDialog();
@@ -525,9 +529,11 @@ export function GroupsPage() {
         title={t("groups.confirmDelete", "Delete this group?")}
         description={t(
           "groups.confirmDeleteDesc",
-          "This will permanently delete the group configuration.",
+          "The group is marked deleted and disappears from this list.",
         )}
-        confirmLabel={t("common.delete")}
+        confirmLabel={
+          deletePermanently ? t("common.deletePermanently", "Delete permanently") : t("common.delete")
+        }
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={() => void confirmDelete()}
@@ -550,6 +556,16 @@ export function GroupsPage() {
             )}
           </span>
         </label>
+        <PermanentDeleteOption
+          className="mt-3"
+          checked={deletePermanently}
+          onChange={setDeletePermanently}
+          consequence={
+            deleteMembers
+              ? t("groups.deletePermanentlyWithMembersHint", "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged.")
+              : t("groups.deletePermanentlyHint", "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.")
+          }
+        />
       </AlertDialog>
     </div>
   );

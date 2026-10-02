@@ -226,3 +226,38 @@ describe("deleteGroupWithMembers", () => {
     expect(agentDeletes).toEqual([]);
   });
 });
+
+describe("deleteGroup — soft by default (review 2026-10-02 #7)", () => {
+  it("sends permanent=false when the caller does not ask for a hard delete", async () => {
+    const { api } = await import("../../api-client");
+    const { deleteGroup } = await import("../groups");
+    vi.mocked(api.delete).mockClear();
+    vi.mocked(api.delete).mockResolvedValue(undefined);
+
+    await deleteGroup("grp1", 2);
+
+    expect(vi.mocked(api.delete)).toHaveBeenCalledWith("/groupstore/groups/grp1?version=2&permanent=false");
+  });
+
+  it("sends permanent=true only when asked", async () => {
+    const { api } = await import("../../api-client");
+    const { deleteGroup } = await import("../groups");
+    vi.mocked(api.delete).mockClear();
+    vi.mocked(api.delete).mockResolvedValue(undefined);
+
+    await deleteGroup("grp1", 2, true);
+
+    expect(vi.mocked(api.delete)).toHaveBeenCalledWith("/groupstore/groups/grp1?version=2&permanent=true");
+  });
+});
+
+describe("parseIdFromLocation", () => {
+  it("drops the version query — the Workforce duplicate built /{id}?version=1/settings from it", async () => {
+    const { parseIdFromLocation } = await import("../location-version");
+    expect(parseIdFromLocation("/groupstore/groups/abc123?version=1")).toBe("abc123");
+    expect(parseIdFromLocation("eddi://ai.labs.group/groupstore/groups/abc123?version=7")).toBe("abc123");
+    expect(parseIdFromLocation("http://h/groupstore/groups/abc123")).toBe("abc123");
+    expect(parseIdFromLocation("")).toBeNull();
+    expect(parseIdFromLocation(undefined)).toBeNull();
+  });
+});

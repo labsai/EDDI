@@ -628,7 +628,6 @@ export interface StanceSummaryConfig {
   inputPricePer1M?: number | null;
   outputPricePer1M?: number | null;
 }
-export const STANCE_SUMMARY_DEFAULT_MAX_CHARS = 160;
 
 /** One member's current position in one line, as persisted on the conversation. */
 export interface MemberStance {
@@ -863,19 +862,17 @@ export interface ResumePoint {
   phaseIdx: number;
   repeatIdx: number;
   speakerIdx: number;
-  /** Free-text tag for observability; no resume logic reads it. */
+  /**
+   * Free-text tag for observability; no resume logic reads it. A HUMAN_TURN
+   * pause (I6) sets backend `ResumePoint` constants `"HUMAN_TURN"` or
+   * `"HUMAN_TURN_PARALLEL"`.
+   */
   pauseKind: string | null;
 }
-
-/** Backend `ResumePoint` pause-kind constants for a HUMAN_TURN pause (I6). Free text — display only. */
-export const RESUME_KIND_HUMAN_TURN = "HUMAN_TURN";
-export const RESUME_KIND_HUMAN_TURN_PARALLEL = "HUMAN_TURN_PARALLEL";
 
 /** Proposal status (I11). The backend's own Javadoc mentions a `"REJECTED"` status, but no such
  *  constant or code path exists — only these two are ever actually set. */
 export type ProposalStatus = "OPEN" | "SUPERSEDED";
-export const PROPOSAL_OPEN: ProposalStatus = "OPEN";
-export const PROPOSAL_SUPERSEDED: ProposalStatus = "SUPERSEDED";
 
 /**
  * One proposal on the negotiation table (I11). `acceptanceEntryIndices` maps
@@ -1163,10 +1160,17 @@ export function updateGroup(
   return api.put(`/groupstore/groups/${id}?version=${version}`, config);
 }
 
+/**
+ * Delete a group. SOFT by default, like the backend (`permanent` defaults to
+ * false there): the group is marked deleted and stays recoverable until purged.
+ * `permanent=true` removes it for good AND deletes its standing workspace
+ * (`RestAgentGroupStore.deleteGroup`) — callers must only pass it when the user
+ * explicitly ticked "Delete permanently".
+ */
 export function deleteGroup(
   id: string,
   version: number,
-  permanent = true
+  permanent = false
 ): Promise<void> {
   const params = new URLSearchParams({
     version: String(version),
@@ -1201,10 +1205,6 @@ export interface DiscussionStyleDescriptor {
 
 export function getDiscussionStyles(): Promise<DiscussionStyleDescriptor[]> {
   return api.get<DiscussionStyleDescriptor[]>("/groupstore/groups/styles");
-}
-
-export function getGroupJsonSchema(): Promise<Record<string, unknown>> {
-  return api.get<Record<string, unknown>>("/groupstore/groups/jsonSchema");
 }
 
 // --- Group Conversations ---
@@ -2119,14 +2119,15 @@ async function getCurrentAgentVersion(agentId: string): Promise<number> {
 }
 
 /**
- * Soft-delete a group and all its member agents.
- * Each member agent is deleted with permanent=false (soft-delete).
- * The group itself is also soft-deleted.
+ * Delete a group and all its member agents (and the moderator).
+ * Soft by default, for the group and every agent alike; `permanent` applies the
+ * same choice to all of them (and, for the group, deletes its workspace too).
  */
 export async function deleteGroupWithMembers(
   groupId: string,
   version: number,
   config: AgentGroupConfiguration,
+  permanent = false,
 ): Promise<void> {
   // Collect all agent IDs to delete (members + moderator). GROUP members
   // reference a nested group config, and HUMAN members' `agentId` holds a
@@ -2144,13 +2145,13 @@ export async function deleteGroupWithMembers(
   // was opened with after a save), and it used to run last: every member agent
   // was already soft-deleted when it failed, leaving a live group of deleted
   // agents. Refused now, it throws before any member is touched.
-  await deleteGroup(groupId, version, false);
+  await deleteGroup(groupId, version, permanent);
 
-  // Soft-delete each agent at its current version (best-effort)
+  // Delete each agent at its current version (best-effort)
   const memberDeletes = Array.from(agentIds).map(async (agentId) => {
     try {
       const currentVersion = await getCurrentAgentVersion(agentId);
-      await deleteAgent(agentId, currentVersion, { permanent: false });
+      await deleteAgent(agentId, currentVersion, { permanent });
     } catch {
       // Ignore — agent may already be deleted
     }

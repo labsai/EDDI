@@ -18,11 +18,13 @@ import {
 import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/lib/hitl-labels";
 import { formatIsoDuration } from "@/lib/hitl-config";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
 import { GroupAdvancedEditor } from "./group-advanced-editor";
 import { GroupHitlEditor } from "./group-hitl-editor";
 import { GroupPhaseEditor } from "./group-phase-editor";
 import { useNavigate } from "react-router-dom";
+import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
 
 interface GroupConfigPanelProps {
   config: AgentGroupConfiguration;
@@ -72,6 +74,8 @@ export function GroupConfigPanel({
   const styleInfo = styleDisplay(config.style, t);
   const styleColors = PANEL_STYLE_COLORS[config.style as DiscussionStyle] || PANEL_STYLE_COLORS.ROUND_TABLE;
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<"group" | "all" | null>(null);
+  // Hard delete is opt-in per confirmation and resets whenever the confirm closes.
+  const [deletePermanently, setDeletePermanently] = useState(false);
   // Mutually exclusive on purpose. Both editors write the whole config from
   // their own snapshot at the same `groupVersion`, so having both open means the
   // second save either loses the first one's edit or 409s — neither is a state
@@ -129,13 +133,13 @@ export function GroupConfigPanel({
   function handleDeleteGroupOnly() {
     if (!groupId || groupVersion == null) return;
     deleteGroupMutation.mutate(
-      { id: groupId, version: groupVersion },
+      { id: groupId, version: groupVersion, permanent: deletePermanently },
       {
         onSuccess: () => {
           toast.success(t("groups.deleteGroupOnlySuccess", "Group deleted (agents kept)"));
           navigate("/manage/groups");
         },
-        onError: () => toast.error(t("common.error")),
+        onError: (err) => toast.error(t("common.error"), { description: getErrorMessage(err) }),
       }
     );
   }
@@ -143,13 +147,13 @@ export function GroupConfigPanel({
   function handleDeleteWithMembers() {
     if (!groupId || groupVersion == null) return;
     deleteWithMembersMutation.mutate(
-      { groupId, version: groupVersion, config },
+      { groupId, version: groupVersion, config, permanent: deletePermanently },
       {
         onSuccess: () => {
-          toast.success(t("groups.deleteWithMembersSuccess", "Group and all member agents deleted (soft-delete)"));
+          toast.success(t("groups.deleteWithMembersSuccess", "Group and all member agents deleted"));
           navigate("/manage/groups");
         },
-        onError: () => toast.error(t("common.error")),
+        onError: (err) => toast.error(t("common.error"), { description: getErrorMessage(err) }),
       }
     );
   }
@@ -724,7 +728,11 @@ export function GroupConfigPanel({
                 variant="outline"
                 size="sm"
                 className="w-full text-muted-foreground border-border hover:bg-secondary/50"
-                onClick={() => setShowDeleteConfirm("group")}
+                onClick={() => {
+                  setDeletePermanently(false);
+                  setShowDeleteConfirm("group");
+                }}
+                data-testid="group-delete-only-btn"
                 disabled={deleteGroupMutation.isPending || deleteWithMembersMutation.isPending}
               >
                 <Trash2 className="h-3.5 w-3.5 me-1.5" />
@@ -734,7 +742,11 @@ export function GroupConfigPanel({
                 variant="outline"
                 size="sm"
                 className="w-full text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => setShowDeleteConfirm("all")}
+                onClick={() => {
+                  setDeletePermanently(false);
+                  setShowDeleteConfirm("all");
+                }}
+                data-testid="group-delete-all-btn"
                 disabled={deleteGroupMutation.isPending || deleteWithMembersMutation.isPending}
               >
                 <Trash2 className="h-3.5 w-3.5 me-1.5" />
@@ -743,20 +755,32 @@ export function GroupConfigPanel({
             </>
           ) : (
             <div className="space-y-2">
-              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2">
-                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
-                <p className="text-[10px] text-muted-foreground leading-relaxed">
+              <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 p-2">
+                <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0 mt-0.5" />
+                <p className="text-[10px] text-muted-foreground leading-relaxed" data-testid="group-delete-warning">
                   {showDeleteConfirm === "all"
-                    ? t("groups.deleteWithMembersWarning", "This will soft-delete the group and all {{count}} member agents. They can be recovered.", { count: config.members.length })
+                    ? t("groups.deleteWithMembersWarning", "This will delete the group and all {{count}} member agents.", { count: config.members.length })
                     : t("groups.deleteGroupOnlyWarning", "This will delete the group. All member agents will be kept.")}
                 </p>
               </div>
+              <PermanentDeleteOption
+                checked={deletePermanently}
+                onChange={setDeletePermanently}
+                consequence={
+                  showDeleteConfirm === "all"
+                    ? t("groups.deletePermanentlyWithMembersHint", "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged.")
+                    : t("groups.deletePermanentlyHint", "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.")
+                }
+              />
               <div className="flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
                   className="flex-1"
-                  onClick={() => setShowDeleteConfirm(null)}
+                  onClick={() => {
+                    setShowDeleteConfirm(null);
+                    setDeletePermanently(false);
+                  }}
                 >
                   {t("common.cancel", "Cancel")}
                 </Button>
@@ -765,6 +789,7 @@ export function GroupConfigPanel({
                   size="sm"
                   className="flex-1"
                   onClick={showDeleteConfirm === "all" ? handleDeleteWithMembers : handleDeleteGroupOnly}
+                  data-testid="group-delete-confirm-btn"
                   disabled={showDeleteConfirm === "all" ? deleteWithMembersMutation.isPending : deleteGroupMutation.isPending}
                 >
                   {(showDeleteConfirm === "all" ? deleteWithMembersMutation.isPending : deleteGroupMutation.isPending) ? (
@@ -772,7 +797,9 @@ export function GroupConfigPanel({
                   ) : (
                     <Trash2 className="h-3 w-3 me-1" />
                   )}
-                  {t("common.confirm", "Confirm")}
+                  {deletePermanently
+                    ? t("common.deletePermanently", "Delete permanently")
+                    : t("common.confirm", "Confirm")}
                 </Button>
               </div>
             </div>
