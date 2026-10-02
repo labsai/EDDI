@@ -76,9 +76,10 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 |---|---|---|
 | `name` | — | Display name / identifier for this knowledge base |
 | `embeddingProvider` | `openai` | Provider (see Embedding Providers table below) |
-| `embeddingParameters` | — | Provider-specific params (model, apiKey, baseUrl, etc.) |
+| `embeddingParameters` | — | Provider-specific params — which ones each provider honours is in [Embedding Providers](#embedding-providers). An endpoint parameter (`baseUrl`, `endpoint`) the provider cannot honour is refused rather than ignored |
 | `storeType` | `in-memory` | Vector store (see Vector Stores table below) |
 | `storeParameters` | — | Store-specific connection params |
+| `storeNamespace` | `id` for every new KB | How the vector store is addressed: `id` (by this KB's id — its own store) or, for a KB created before 6.6, absent/`name` (the 6.5.0 layout, by name). Set by EDDI; see [Knowledge base isolation](#knowledge-base-isolation) |
 | `chunkStrategy` | `recursive` | Document chunking strategy |
 | `chunkSize` | `512` | Chunk size in characters |
 | `chunkOverlap` | `64` | Chunk overlap in characters |
@@ -223,10 +224,15 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). Also accepts `kbId` — **see the warning below before using it** |
+| `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). `kbId` is deprecated — see below |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
 
-> **Leave `kbId` unset.** It overrides the key the documents are stored under, and it defaults to the knowledge base's `name`, which is the key **retrieval always uses** — `RagContextProvider` keys the store on `ragConfig.getName()` and has no way to be pointed anywhere else. So passing a `kbId` that is anything other than the KB's exact `name` ingests into a store nothing reads: the call returns `202`, the status goes to `completed`, the documents are really embedded and really stored, and retrieval finds nothing, permanently. Ingestion *sources* are not affected — `IngestionPipeline` keys on the name and cannot diverge.
+> **Documents always go into the knowledge base in the path.** `kbId` no longer selects a store. Up
+> to 6.5.0 it did: an editor of one knowledge base could pass another's name as `?kbId=` and write
+> into — and with `replace=true` delete from — a store they had no access to. It is still accepted
+> when it names the knowledge base in the path (its id, or its `name`, which is what it used to
+> default to), so existing clients keep working; any other value is refused with `400` and nothing
+> is ingested. Omit it. The `kbId` in the `202` response is the knowledge base's id.
 
 **Example: Ingest a document**
 
@@ -240,7 +246,7 @@ Response: `202 Accepted`
 ```json
 {
   "ingestionId": "550e8400-e29b-41d4-a716-446655440000",
-  "kbId": "product-docs",
+  "kbId": "abc123",
   "status": "pending"
 }
 ```
@@ -280,6 +286,51 @@ still retrievable. The Manager's drop zone offers the same thing as a checkbox.
 For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
 better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs
 the originals again.
+
+### Knowledge base isolation
+
+Every knowledge base has a vector store of its own, addressed by its **id** — the id in
+`/ragstore/rags/{id}`, which is the same for every version and unique. Ingestion through
+`/ingest`, ingestion sources and retrieval all address the store the same way, and nothing a
+request carries can point them at another knowledge base's store.
+
+| | `storeNamespace: "id"` (every KB created, duplicated or imported from 6.6 on) | absent or `"name"` (a KB created by 6.5.0 or earlier) |
+| --- | --- | --- |
+| Default location | `eddi_kbid_<id>` (table, collection or index) | Derived from the `name`, exactly as 6.5.0 did: pgvector `eddi_kb_<name, sanitised>`, Atlas `eddi_kb_<name>`, Elasticsearch/Qdrant/Chroma `eddi_kb_<name, sanitised>` |
+| Chunks are tagged | `kbId=<id>` | `kbId=<name>` (what 6.5.0 wrote) |
+| Retrieval | Filtered to `kbId=<id>`: the KB sees only its own chunks, even in a table it shares | Not filtered — chunks written by 6.5.0 carry no id |
+| Renaming | Changes nothing about the store | Moves the KB to `"id"` (see below) |
+| Same name as another KB | Harmless | Two such KBs share one store — as they always did. Migrate them |
+
+**Upgrading from 6.5.0.** Nothing has to be done for a knowledge base to keep working: one without
+`storeNamespace` keeps reading and writing the table, collection or index it always has, and its
+pgvector table is not touched. What it does not get is isolation from another *pre-existing*
+knowledge base with the same name, which in 6.5.0 shared its store. To migrate one, save it with
+`"storeNamespace": "id"` (`PUT /ragstore/rags/{id}?version=N`). That points it at a new, empty
+`eddi_kbid_<id>` location; EDDI clears its sources' ingestion state so their next run re-ingests
+everything, and documents ingested through `/ingest` have to be ingested again. The old location is
+left in place — drop the table or collection by hand once nothing uses it. Renaming a 6.5.0 knowledge
+base does the same migration automatically: in 6.5.0 a rename already moved it to a new, empty store —
+the one named after its new name, which could be another knowledge base's.
+
+Rules enforced when a knowledge base is saved:
+
+- A new knowledge base always gets `"id"`. Asking for `"name"` on create is refused with `400`; a
+  duplicate or an import of a 6.5.0 knowledge base gets `"id"` too, so a copy no longer shares — and
+  overwrites — the original's documents.
+- An update that omits `storeNamespace` keeps the stored value, so a client that does not know the
+  field cannot move a store by saving. Switching from `"id"` back to `"name"` is refused.
+- An explicit location (`storeParameters.table`, `collectionName` for Atlas/Qdrant/Chroma, `indexName`
+  for Elasticsearch) may not start with `eddi_kb` — that prefix is where EDDI's own default locations
+  live — and may name a location another knowledge base already uses only if you may edit that
+  knowledge base too. Two knowledge bases in the `"id"` layout that share a table still see only their
+  own chunks. These checks run when the value is new or changed; a stored value is never refused on a
+  save that leaves it alone. The comparison is by store type and name only (not host), so it can ask for
+  edit rights on a knowledge base that is actually on another server.
+
+> **MongoDB Atlas.** Atlas Vector Search can only filter on fields its search index declares. For a
+> knowledge base in the `"id"` layout, declare `metadata.kbId` as a `filter` field in the collection's
+> vector index, or retrieval fails with an index error (reported in the `rag:trace` entry).
 
 ## Ingestion Sources
 
@@ -562,7 +613,7 @@ source** is what extracts its text and embeds it — the same verb every other s
 | Field | Default | What it does |
 | --- | --- | --- |
 | `maxFiles` | `500` | Files this source may hold |
-| `maxFileBytes` | `25 MB` | Size of one file. Refused above 50 MB at save time: the request carrying it has to fit inside `quarkus.http.limits.max-body-size` (60 MB), and a larger file is refused by the server with a bare 413 before anything can explain why. That 60 MB applies to this upload only — every other endpoint is held to `eddi.http.limits.default-max-body-size` (25 MB) |
+| `maxFileBytes` | `25 MB` | Size of one file. Refused above 50 MB at save time: the request carrying it has to fit inside `quarkus.http.limits.max-body-size` (60 MB), and a larger file is refused by the server with a bare 413 before anything can explain why. That 60 MB applies to this upload only — every other endpoint is held to `eddi.http.limits.default-max-body-size` (25 MB), raised to what the largest allowed attachment needs once base64-encoded: about 27.7 MB with the default 20 MB `eddi.attachments.max-size-bytes` |
 | `maxTotalBytes` | `500 MB` | Size of everything the source holds |
 
 **The files are kept, not just their embeddings.** That is what makes this a source rather than a
@@ -700,7 +751,9 @@ which is only useful because the files are still there.
 **A ZIP export does not carry uploaded files,** and neither does duplicating a knowledge base. An
 imported or duplicated upload source arrives empty and its files have to be uploaded again — the backup
 format carries configuration, and a knowledge base's documents can be hundreds of megabytes of
-somebody's contracts.
+somebody's contracts. Nor do the vectors move: an imported or duplicated knowledge base has a store of
+its own (see [Knowledge base isolation](#knowledge-base-isolation)), empty until its sources run or
+documents are ingested into it.
 
 **A run over uploaded files honours `settings.timeBudgetMinutes`,** as a crawl does. A run that
 outlived its budget would eventually be treated as abandoned, and the next fire would start a second
@@ -798,7 +851,7 @@ all. Otherwise work through it in this order:
 | 4 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
 | 5 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
 | 6 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, confirm nothing has evicted it since (see [Vector Stores](#vector-stores)) |
-| 7 | Did ingestion write where retrieval reads? | If you passed `kbId` to `/ingest`, it must equal the KB's `name` exactly, or the documents are in a store retrieval never opens (see [Document Ingestion](#document-ingestion)) |
+| 7 | Did ingestion write where retrieval reads? | Both address the store by the knowledge base's id, so they cannot diverge any more. If the KB was renamed while in the 6.5.0 name layout, or switched to `storeNamespace: "id"`, it now has a new, empty store — re-ingest (see [Knowledge base isolation](#knowledge-base-isolation)) |
 
 Raise `RagContextProvider` to `DEBUG` to see the missing-step early return directly (it will not show
 the task-level or unmatched-name cases — rule those out with checks 1 and 4 above):
@@ -817,16 +870,29 @@ tighten it.
 
 ## Embedding Providers
 
-| Provider | Default Model | Required Parameters | Notes |
+| Provider | Default Model | Required Parameters | Every parameter it honours |
 |---|---|---|---|
-| `openai` | `text-embedding-3-small` | `apiKey` | Use `${vault:...}` for keys |
-| `azure-openai` | `text-embedding-3-small` | `endpoint`, `apiKey`, `deploymentName` | Azure-hosted OpenAI models |
-| `ollama` | `nomic-embed-text` | — | `baseUrl` (default: `localhost:11434`) |
-| `mistral` | `mistral-embed` | `apiKey` | Mistral AI embedding model |
-| `bedrock` | `amazon.titan-embed-text-v2:0` | — | Uses AWS credentials chain; `region` (default: `us-east-1`) |
-| `cohere` | `embed-english-v3.0` | `apiKey` | Excellent multilingual support |
-| `gemini` | `gemini-embedding-2` | `apiKey` | Google Gemini embeddings |
-| `vertex` | `text-embedding-005` | `project` | `location` (default: `us-central1`); uses GCP credentials |
+| `openai` | `text-embedding-3-small` | `apiKey` | `model`, `apiKey`, `baseUrl` (any OpenAI-compatible endpoint; default OpenAI's), `timeout`, `organizationId`, `projectId`, `dimensions`, `maxRetries` |
+| `azure-openai` | `text-embedding-3-small` | `endpoint`, `apiKey`, `deploymentName` | `deploymentName`, `apiKey`, `endpoint`, `timeout`, `dimensions`, `maxRetries` |
+| `ollama` | `nomic-embed-text` | — | `model`, `baseUrl` (default `http://localhost:11434`), `timeout`, `maxRetries` |
+| `mistral` | `mistral-embed` | `apiKey` | `model`, `apiKey`, `baseUrl`, `timeout`, `maxRetries` |
+| `bedrock` | `amazon.titan-embed-text-v2:0` | — | `model`, `region` (default `us-east-1`), `dimensions`; uses the AWS credentials chain |
+| `cohere` | `embed-english-v3.0` | `apiKey` | `model`, `apiKey`, `baseUrl`, `timeout` |
+| `gemini` | `gemini-embedding-2` | `apiKey` | `model`, `apiKey`, `baseUrl`, `timeout`, `maxRetries`, `taskType`, `outputDimensionality` |
+| `vertex` | `text-embedding-005` | `project` | `model`, `project`, `location` (default `us-central1`), `endpoint`, `maxRetries`; uses GCP credentials |
+
+- **`model` and `modelName` are the same parameter** — LLM tasks call it `modelName`, so either is
+  accepted. Setting both to different values is refused.
+- **`timeout` is in milliseconds**, as it is for LLM tasks.
+- **Every value may be a vault reference** (`${vault:…}`) or a global variable; both are resolved when
+  the model is built, and an unresolvable reference fails the build rather than reaching the provider.
+- **An endpoint the provider cannot honour is an error, not a silent fallback.** Until 6.6 the
+  `openai` provider ignored `baseUrl`, so a knowledge base configured for a private OpenAI-compatible
+  endpoint sent every document and query to `api.openai.com`. An endpoint-like parameter
+  (`baseUrl`, `endpoint`, `url`, `host`, …) that the provider does not honour is now refused when the
+  knowledge base is saved (`400`) and again when the model is built — so a stored configuration
+  carrying one fails its ingestion and retrieval with a message naming the parameter. Other
+  unrecognised parameters are logged as a warning and ignored.
 
 ### Asymmetric models: queries and documents are embedded differently
 
@@ -879,7 +945,7 @@ parameter rather than ignoring it.
 | Store Type | Required Parameters | Notes |
 |---|---|---|
 | `in-memory` | — | Ephemeral, for dev/test only — **loses every ingested document** on restart, after 30 minutes without a query, or on any secret rotation (see below) |
-| `pgvector` | `password` | PostgreSQL + pgvector; `host`, `port`, `database`, `user`, `table`, `dimension` |
+| `pgvector` | `password` | PostgreSQL + pgvector; `host`, `port`, `database`, `user`, `table`, `dimension`. `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation) |
 | `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
 | `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
