@@ -60,7 +60,7 @@ branch.
 [`agent-sync-guide.md`](../agent-sync-guide.md), [`connections.md`](../connections.md)
 and seven validation messages in `ConnectionConfiguration` and
 `RestApiCallsStore` told admins to `POST /secretstore/secrets`, which answers
-405. They now name `PUT /secretstore/secrets/{tenantId}/{keyName}`; new tests in
+404 (and `POST` on a key's path, 405). They now name `PUT /secretstore/secrets/{tenantId}/{keyName}`; new tests in
 `ConnectionConfigurationValidationTest` and `RestApiCallsStoreBranchTest` pin it.
 
 ### New and rewritten pages
@@ -81,6 +81,28 @@ and seven validation messages in `ConnectionConfiguration` and
 - [`configuration-reference.md`](../configuration-reference.md): a "settings
   operators set first" section — MongoDB and PostgreSQL connection settings, OIDC,
   CORS, body size, bind address, `QUARKUS_CONFIG_LOCATIONS`.
+
+### Corrections from the independent review of this branch
+
+- [`rest-api-reference.md`](../rest-api-reference.md): the streaming `done` event
+  carries a reduced snapshot (`conversationState`, `conversationOutputs`,
+  `hitlPausedAt`), not the full one; `POST /conversationstore/conversations/end`
+  takes an array of `{"conversationId": …}` objects (an array of id strings is a
+  400); a read of an unknown conversation answers `No conversation found! (…)`.
+- [`creating-your-first-agent/`](../creating-your-first-agent/README.md): the
+  JSON-with-context example was sent to the conversation the tutorial had just
+  ended (410); it now starts a new one. `returnDetailed=true` alone returns only
+  the last turn, so the "full memory" call adds `returnCurrentStepOnly=false`.
+- [`getting-started.md`](../getting-started.md) no longer says the compose file
+  pins a release (it defaults to `latest`); [`developer-quickstart.md`](../developer-quickstart.md)
+  drops release-tooling wording from user guidance; [`README.md`](../README.md)
+  says the compose quick start runs with the vault off until
+  `EDDI_VAULT_MASTER_KEY` is set; [`configuration-reference.md`](../configuration-reference.md)
+  states which value wins when `QUARKUS_CONFIG_LOCATIONS` and an environment
+  variable set the same key (the file's, checked against `labsai/eddi:6.5.0`).
+- `ConnectionConfigurationValidationTest` now also pins the vault hint of a
+  literal `oauth.clientSecret` and of a credential-shaped `extraAuthParams`
+  value, the two of the seven messages no test covered.
 
 ```decision-log
 | 2026-10-02 | The two "first agent" tutorials are folded into one page (creating-your-first-agent/README.md) and the sub-pages are deleted | Both repeated the same steps with different mistakes; one tested page is cheaper to keep correct than two. The anchors other pages link to are directory links and still resolve | Correcting both pages in place (two copies of the same steps to keep in sync) |

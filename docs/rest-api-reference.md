@@ -170,7 +170,7 @@ with `410 Conversation has ended`.
 `POST /agents/{conversationId}/stream` takes the same JSON body as a JSON
 message and answers with `Content-Type: text/event-stream`. The turn runs exactly
 as it would on the blocking endpoint; the stream reports its progress and ends
-with the same snapshot.
+with a `done` event carrying the turn's state and outputs.
 
 ```bash
 curl -s -N -X POST "$EDDI/agents/<CONVERSATION_ID>/stream" \
@@ -233,7 +233,7 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `tool_call` | `{"tool":"<name>"}` | Sent right before a tool runs — the name only. There is no "tool finished" event |
 | `cascade_step_start` | `{"stepIndex","modelType","modelName","totalSteps"}` | A [model cascade](model-cascade.md) step starts |
 | `cascade_escalation` | `{"fromStep","toStep","confidence","threshold","reason","durationMs"}` | The cascade escalates to the next model |
-| `done` | The turn's snapshot (as JSON) | **Terminal.** The turn completed |
+| `done` | A reduced snapshot: `conversationState`, `conversationOutputs`, and `hitlPausedAt` when the turn paused | **Terminal.** The turn completed. `GET /agents/{conversationId}` returns the full snapshot (properties, steps, undo and redo flags) |
 | `error` | `{"message", …}` | **Terminal.** The turn could not run or failed |
 
 Rules for clients:
@@ -443,7 +443,7 @@ Results are newest first. A non-admin sees only their own conversations.
 | `DELETE …/{conversationId}` | `204`. `?deletePermanently=true` removes the document instead of marking it deleted |
 | `DELETE …/?deleteOlderThanDays=N` | Admin only: permanently delete every **ended** conversation older than `N` days (`N ≥ 1`) |
 | `GET …/active/{agentId}` | Admin or editor: open (not `ENDED`) conversations of an agent, `[{"conversationId","agentId","agentVersion","conversationState","lastInteraction"}]` |
-| `POST …/end` | Admin or editor: end the listed conversations (body: that list); `?endReason=agent-version-retired` is the one accepted reason. The body reports `ended`, `skipped` and `failed` ids |
+| `POST …/end` | Admin or editor: end the listed conversations. The body is a JSON array of objects of which only `conversationId` is read, so the `active` list can be sent back as it is; an array of plain id strings is refused with `400`. `?endReason=agent-version-retired` is the one accepted reason. The response lists the `ended`, `skipped` and `failed` ids |
 
 Every per-conversation call checks ownership, so a caller can neither read nor
 delete a conversation they do not own.
@@ -456,7 +456,7 @@ delete a conversation they do not own.
 | `401` | — | OIDC on and no or invalid token |
 | `403` | — | Wrong role, not the conversation's owner, or processing restricted for this user ([GDPR](gdpr-compliance.md)) |
 | `404` | `Agent is not deployed or not ready` | No `READY` deployment of the agent in that environment |
-| `404` | `Conversation not found.` | Unknown conversation id |
+| `404` | `No conversation found! (conversationId=…)`; `Conversation not found.` from cancel, resume and approval-status | Unknown conversation id |
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
 | `410` | `Conversation has ended` | Message to an ended conversation |
 | `413` | — | Input longer than `eddi.conversations.max-input-chars` |

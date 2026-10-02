@@ -68,12 +68,10 @@ EDDI_VERSION=6.4.0 docker compose up -d
 open http://localhost:7070/manage
 ```
 
-> The version above is the release the docs' pointer files currently name; the
-> release tooling moves it after each release, so check the
-> [releases page](https://github.com/labsai/EDDI/releases) for a newer tag. The
-> compose file binds EDDI to `127.0.0.1` and switches authentication off through
-> three explicit escape hatches — fine on a laptop, never on a shared host (see
-> [Security](security.md)).
+> Use the newest tag from the [releases page](https://github.com/labsai/EDDI/releases)
+> if it is newer than the one above. The compose file binds EDDI to `127.0.0.1` and
+> switches authentication off through three explicit opt-outs — fine on a laptop,
+> never on a shared host (see [Security](security.md)).
 
 Optional overlays stack on top of the base file — for example, a local LLM on
 the same Docker network:

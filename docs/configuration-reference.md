@@ -114,7 +114,7 @@ two.
 | Setting | Default | Meaning |
 |---|---|---|
 | `EDDI_VAULT_MASTER_KEY` (`eddi.vault.master-key`) | *(empty — vault inactive)* | The master key the secrets vault derives its key-encryption key from. Set it before storing any secret, and keep it: secrets encrypted under a lost key cannot be recovered. A weak or known key fails a production boot. Details under [Secrets vault](#secrets-vault) and in [secrets-vault.md](secrets-vault.md) |
-| `QUARKUS_CONFIG_LOCATIONS` (`quarkus.config.locations`) | *(unset)* | Comma-separated list of extra properties files to load, for keeping secrets in a mounted file instead of environment variables. The `k8s/` manifests mount `/etc/eddi/secrets/application-secrets.properties` this way. Set as an environment variable, the listed file takes the environment's precedence, so do not set the same key in both places |
+| `QUARKUS_CONFIG_LOCATIONS` (`quarkus.config.locations`) | *(unset)* | Comma-separated list of extra properties files to load, for keeping secrets in a mounted file instead of environment variables. The `k8s/` manifests mount `/etc/eddi/secrets/application-secrets.properties` this way. Set as an environment variable, the listed file is loaded at environment-variable priority and its value wins over an environment variable that sets the same key, so keep each key in one place |
 
 ---
 

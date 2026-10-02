@@ -497,7 +497,8 @@ answer, and finally "See you soon!" with `"conversationState": "ENDED"`. A
 message to an ended conversation is refused with `410 Gone` ("Conversation has
 ended"); start a new one.
 
-The message can also be sent as JSON, which lets you pass context along with it:
+The message can also be sent as JSON, which lets you pass context along with it.
+The conversation above has ended, so start a new one first and use its id:
 
 ```bash
 curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>" \
@@ -512,8 +513,8 @@ Useful query parameters on that call:
 | `returnDetailed` | `false` | Return every memory entry of the step, not only the public ones (`input:initial`, `actions`, `output*`, `quickReplies*`) — use it to see which rules matched (`behavior_rules:success`) and what the parser produced (`expressions:parsed`) |
 | `returnCurrentStepOnly` | `true` | Return only the turn just processed rather than the whole conversation |
 
-`GET $EDDI/agents/<CONVERSATION_ID>?returnDetailed=true` returns the full
-conversation memory at any time. All conversation endpoints are listed in the
+`GET $EDDI/agents/<CONVERSATION_ID>?returnDetailed=true&returnCurrentStepOnly=false`
+returns the full conversation memory, every turn, at any time. All conversation endpoints are listed in the
 [REST API Reference](../rest-api-reference.md).
 
 > **Congratulations** — you have built, deployed and talked to your first EDDI agent.

@@ -118,7 +118,7 @@ Unblock-File .\install.ps1
 .\install.ps1
 ```
 
-**Without the installer:** download the Compose file into an empty directory and start it. It runs EDDI and MongoDB with authentication off, bound to `127.0.0.1` so they are reachable from this machine only.
+**Without the installer:** download the Compose file into an empty directory and start it. It runs EDDI and MongoDB with authentication off, bound to `127.0.0.1` so they are reachable from this machine only. The secrets vault stays disabled until you set `EDDI_VAULT_MASTER_KEY` (for example in a `.env` file next to the Compose file) — set it before storing any API key.
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/labsai/EDDI/main/docker-compose.yml

@@ -131,8 +131,9 @@ same three opt-outs the bundled `docker-compose.yml` makes, and bind the port to
 > Keep `EDDI_VAULT_MASTER_KEY` stable: secrets stored in the vault are encrypted
 > with a key derived from it, and a different passphrase on the next start cannot
 > decrypt them. Without the variable EDDI still starts, but the vault is
-> disabled. Pin a release tag (the one `docker-compose.yml` uses) instead of
-> `latest` for anything you keep.
+> disabled. For anything you keep, pin a release tag (for example
+> `labsai/eddi:6.4.0`; the [releases page](https://github.com/labsai/EDDI/releases)
+> lists the newest) instead of `latest`.
 >
 > To use a MongoDB that requires a password, pass the full connection string:
 > `-e MONGODB_CONNECTIONSTRING='mongodb://user:pass@host:27017/eddi?authSource=admin'`.
