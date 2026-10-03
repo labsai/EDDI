@@ -84,7 +84,7 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
             if (!allowed) {
                 return null;
             }
-            return (V) JSON.treeToValue(node.get("v"), Class.forName(type));
+            return (V) JSON.treeToValue(node.get("v"), Class.forName(type, false, SharedKvCache.class.getClassLoader()));
         } catch (IOException | ClassNotFoundException | RuntimeException e) {
             LOGGER.debugf("Unreadable shared cache value in %s: %s", shared.bucket(), e.getMessage());
             return null;

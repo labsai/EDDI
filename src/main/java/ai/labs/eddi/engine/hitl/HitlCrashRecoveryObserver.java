@@ -122,7 +122,6 @@ public class HitlCrashRecoveryObserver {
 
     // 'event' is the required CDI observer trigger — the method fires on
     // StartupEvent regardless of whether the payload is read.
-    @SuppressWarnings("unused")
     /**
      * Cluster mode: no recovery at startup. Every rolling update starts a node, and
      * recovering on boot parked the LIVE turns other nodes were running (their
@@ -135,6 +134,7 @@ public class HitlCrashRecoveryObserver {
     @Inject
     ClusterConfig clusterConfig;
 
+    @SuppressWarnings("unused")
     void onStartup(@Observes StartupEvent event) {
         if (!enabled) {
             LOGGER.info("HITL crash recovery disabled via config.");

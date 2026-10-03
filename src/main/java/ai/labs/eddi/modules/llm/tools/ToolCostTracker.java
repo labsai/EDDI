@@ -208,26 +208,6 @@ public class ToolCostTracker {
         return trackToolCall(ToolInvocation.of(toolName), conversationId);
     }
 
-    /**
-     * Track cost for a tool call.
-     *
-     * <p>
-     * The price is resolved from {@link ToolInvocation#canonicalName()} (or the
-     * per-call override), while every accounting key — the per-tool map, the
-     * per-conversation usage breakdown and the {@code tool} metric tag — stays on
-     * {@link ToolInvocation#dispatchName()}. Splitting them this way keeps the
-     * {@code eddi.tool.calls}/{@code eddi.tool.costs} tag vocabulary identical to
-     * every other {@code tool}-tagged meter in this package (which all report the
-     * dispatched method name), so no dashboard or alert has to be rewritten, while
-     * still charging the right amount.
-     * </p>
-     *
-     * @param invocation
-     *            the call being priced
-     * @param conversationId
-     *            conversation to bill
-     * @return the cost charged, in USD
-     */
     // ---- cluster mode: per-conversation totals shared by every node ----
 
     /** Field-injected; null in tests built with {@code new}. */
@@ -294,6 +274,26 @@ public class ToolCostTracker {
         }
     }
 
+    /**
+     * Track cost for a tool call.
+     *
+     * <p>
+     * The price is resolved from {@link ToolInvocation#canonicalName()} (or the
+     * per-call override), while every accounting key — the per-tool map, the
+     * per-conversation usage breakdown and the {@code tool} metric tag — stays on
+     * {@link ToolInvocation#dispatchName()}. Splitting them this way keeps the
+     * {@code eddi.tool.calls}/{@code eddi.tool.costs} tag vocabulary identical to
+     * every other {@code tool}-tagged meter in this package (which all report the
+     * dispatched method name), so no dashboard or alert has to be rewritten, while
+     * still charging the right amount.
+     * </p>
+     *
+     * @param invocation
+     *            the call being priced
+     * @param conversationId
+     *            conversation to bill
+     * @return the cost charged, in USD
+     */
     public double trackToolCall(ToolInvocation invocation, String conversationId) {
         String toolName = invocation.dispatchName();
         Double priceOverride = invocation.priceOverride();

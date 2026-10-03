@@ -2521,12 +2521,8 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * GDPR erasure: cancels, immediately, every discussion running on this node for
-     * {@code userId}. Deleting a running discussion's document did not stop it —
-     * its next phase wrote the document back — so the cascade signals first. A
-     * discussion on another node is not reachable from here; it is stopped by its
-     * next conditional write ({@link RunningDiscussionWrites}) finding the document
-     * gone rather than recreating it.
+     * The same stop for an erasure that another node runs; the user arrives as a
+     * hash.
      */
     @Override
     public int stopInFlightWorkByHash(String userIdHash) {
@@ -2598,6 +2594,14 @@ public class GroupConversationService implements IGroupConversationService, User
         return hitlCoordinator.cancelDiscussion(groupConversationId, mode);
     }
 
+    /**
+     * GDPR erasure: cancels, immediately, every discussion running on this node for
+     * {@code userId}. Deleting a running discussion's document did not stop it —
+     * its next phase wrote the document back — so the cascade signals first. A
+     * discussion on another node is not reachable from here; it is stopped by its
+     * next conditional write ({@link RunningDiscussionWrites}) finding the document
+     * gone rather than recreating it.
+     */
     @Override
     public int stopInFlightWork(String userId) {
         if (userId == null) {

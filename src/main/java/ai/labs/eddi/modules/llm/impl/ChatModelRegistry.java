@@ -172,12 +172,6 @@ public class ChatModelRegistry {
     }
 
     /**
-     * Register for write-through cache invalidation: when vault secrets are written
-     * or rotated, evict affected model instances so they are rebuilt with the new
-     * API key on next use. Surgical: only models whose parameters contain the
-     * changed vault reference are evicted.
-     */
-    /**
      * Cluster mode: evicts models built longer ago than
      * {@code eddi.cluster.model-cache.max-age}, busy or not, so a rotated key
      * reaches every node within that bound even if its event was lost.
@@ -209,6 +203,12 @@ public class ChatModelRegistry {
         }
     }
 
+    /**
+     * Register for write-through cache invalidation: when vault secrets are written
+     * or rotated, evict affected model instances so they are rebuilt with the new
+     * API key on next use. Surgical: only models whose parameters contain the
+     * changed vault reference are evicted.
+     */
     @PostConstruct
     void registerSecretInvalidation() {
         secretResolver.registerInvalidationListener(this::invalidateForSecret);
