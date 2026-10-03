@@ -23,172 +23,6 @@
   "links": [],
   "panels": [
     {
-      "id": 168,
-      "type": "row",
-      "title": "LLM — Per-call latency, tokens and errors",
-      "collapsed": true,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 0
-      },
-      "panels": [
-        {
-          "id": 169,
-          "type": "timeseries",
-          "title": "LLM call latency (p95) by provider and model",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "description": "`eddi_llm_request_duration_seconds` — every provider call, not just cascade steps. Counts attempts: a retried turn contributes more than one sample.",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 0,
-            "y": 1
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "histogram_quantile(0.95, sum by (le, provider, model) (rate(eddi_llm_request_duration_seconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "{{provider}} / {{model}}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "s",
-              "color": {
-                "mode": "palette-classic"
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 170,
-          "type": "timeseries",
-          "title": "LLM token rate by type",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "description": "`eddi_llm_tokens_total` — input vs output tokens per second. Do not add to `eddi_llm_cascade_tokens_total`; a cascading task reports through both.",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 1
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum by (provider, model, type) (rate(eddi_llm_tokens_total{job=~\"$job\"}[$__rate_interval]))",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "{{provider}} / {{model}} {{type}}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": {
-                "mode": "palette-classic"
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 171,
-          "type": "timeseries",
-          "title": "LLM error rate by exception",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "description": "`eddi_llm_request_errors_total` — failed attempts, tagged with the exception's simple name. `ChatTimeoutException` is the configured wall-clock `timeout` firing.",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 0,
-            "y": 8
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum by (provider, error) (rate(eddi_llm_request_errors_total{job=~\"$job\"}[$__rate_interval]))",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "{{provider}} / {{error}}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": {
-                "mode": "palette-classic"
-              }
-            },
-            "overrides": []
-          }
-        },
-        {
-          "id": 172,
-          "type": "timeseries",
-          "title": "LLM call outcome mix",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "description": "`eddi_llm_request_duration_seconds_count` split by outcome — the success/error ratio of actual provider calls.",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 8
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_llm_request_duration_seconds_count{job=~\"$job\"}[$__rate_interval]))",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "{{outcome}}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": {
-                "mode": "palette-classic"
-              }
-            },
-            "overrides": []
-          }
-        }
-      ]
-    },
-    {
       "id": 134,
       "type": "row",
       "title": "Overview — is EDDI healthy right now?",
@@ -244,7 +78,8 @@
               }
             ]
           },
-          "mappings": []
+          "mappings": [],
+          "noValue": "no samples yet"
         },
         "overrides": []
       },
@@ -310,7 +145,8 @@
               }
             ]
           },
-          "mappings": []
+          "mappings": [],
+          "noValue": "no samples yet"
         },
         "overrides": []
       },
@@ -351,7 +187,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(eddi_conversation_processing_count_total{job=~\"$job\"}[$__rate_interval]))",
+          "expr": "sum(rate(eddi_conversation_processing_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -418,7 +254,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(eddi_tool_execution_success_total{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_tool_execution_success_total{job=~\"$job\"}[$__rate_interval])) + sum(rate(eddi_tool_execution_failure_total{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+          "expr": "(sum(increase(eddi_tool_execution_success_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)) / clamp_min((sum(increase(eddi_tool_execution_success_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)) + (sum(increase(eddi_tool_execution_failure_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)), 1e-9) and on() ((sum(increase(eddi_tool_execution_success_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)) + (sum(increase(eddi_tool_execution_failure_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0))) > 0",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -452,7 +288,8 @@
               }
             ]
           },
-          "mappings": []
+          "mappings": [],
+          "noValue": "no tool calls"
         },
         "overrides": []
       },
@@ -486,7 +323,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval])) + sum(rate(eddi_tool_cache_misses_total{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+          "expr": "(sum(increase(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)) / clamp_min((sum(increase(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)) + (sum(increase(eddi_tool_cache_misses_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)), 1e-9) and on() ((sum(increase(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)) + (sum(increase(eddi_tool_cache_misses_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0))) > 0",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -520,7 +357,8 @@
               }
             ]
           },
-          "mappings": []
+          "mappings": [],
+          "noValue": "no cacheable calls"
         },
         "overrides": []
       },
@@ -554,7 +392,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(eddi_pipeline_task_errors_total{job=~\"$job\"}[$__rate_interval]))",
+          "expr": "sum(rate(eddi_pipeline_task_errors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -624,7 +462,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(eddi_tool_costs_accrued{job=~\"$job\"})",
+          "expr": "sum(eddi_tool_costs_accrued{job=~\"$job\"}) or on() vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -681,7 +519,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "`eddi_operator_gate_verified` — 1 only while every provisioned operator version read back with a sound approval gate. 0 also means 'never reported', so a fresh deployment reads 0. This is the meter worth alerting on.",
+      "description": "1 when every provisioned Platform Operator version last read back with a sound approval gate. 0 also before any report has arrived (fresh deployment, operator never activated). min, so one unverified replica reads 0. Alert EddiOperatorGateRegressed fires on a 1 -> 0 transition.",
       "gridPos": {
         "h": 5,
         "w": 3,
@@ -691,7 +529,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(eddi_operator_gate_verified{job=~\"$job\"})",
+          "expr": "min(eddi_operator_gate_verified{job=~\"$job\"}) or on() vector(0)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -739,6 +577,173 @@
       }
     },
     {
+      "id": 168,
+      "type": "row",
+      "title": "LLM — Per-call latency, tokens and errors",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "panels": [
+        {
+          "id": 169,
+          "type": "timeseries",
+          "title": "LLM call latency (p95) by provider and model",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_request_duration_seconds` — every provider call, not just cascade steps. Counts attempts: a retried turn contributes more than one sample.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 1
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le, provider, model) (rate(eddi_llm_request_duration_seconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} / {{model}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "noValue": "no samples yet"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 170,
+          "type": "timeseries",
+          "title": "LLM token rate by type",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_tokens_total` — input vs output tokens per second. Do not add to `eddi_llm_cascade_tokens_total`; a cascading task reports through both.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 1
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (provider, model, type) (rate(eddi_llm_tokens_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} / {{model}} {{type}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 171,
+          "type": "timeseries",
+          "title": "LLM error rate by exception",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_request_errors_total` — failed attempts, tagged with the exception's simple name. `ChatTimeoutException` is the configured wall-clock `timeout` firing.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (provider, error) (rate(eddi_llm_request_errors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} / {{error}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 172,
+          "type": "timeseries",
+          "title": "LLM call outcome mix",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_request_duration_seconds_count` split by outcome — the success/error ratio of actual provider calls.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_llm_request_duration_seconds_count{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        }
+      ]
+    },
+    {
       "id": 135,
       "type": "row",
       "title": "Conversations",
@@ -747,7 +752,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 7
       },
       "panels": [
         {
@@ -768,7 +773,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_conversation_start_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversation_start_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -779,7 +784,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_conversation_end_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversation_end_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -790,7 +795,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_conversation_processing_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversation_processing_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -801,7 +806,7 @@
             },
             {
               "refId": "D",
-              "expr": "sum(rate(eddi_conversation_load_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversation_load_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -812,7 +817,7 @@
             },
             {
               "refId": "E",
-              "expr": "sum(rate(eddi_conversation_undo_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversation_undo_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -823,7 +828,7 @@
             },
             {
               "refId": "F",
-              "expr": "sum(rate(eddi_conversation_redo_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversation_redo_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -834,7 +839,7 @@
             },
             {
               "refId": "G",
-              "expr": "sum(rate(eddi_conversation_store_conflict_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversation_store_conflict_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -845,7 +850,7 @@
             },
             {
               "refId": "H",
-              "expr": "sum(rate(eddi_conversation_agent_version_switch_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversation_agent_version_switch_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -1017,7 +1022,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -1148,7 +1154,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -1223,7 +1230,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -1298,7 +1306,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -1333,7 +1342,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_conversations_listing_owner_scan_exhausted_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversations_listing_owner_scan_exhausted_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "legendFormat": "owner scan exhausted",
               "datasource": {
                 "type": "prometheus",
@@ -1344,7 +1353,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_conversations_listing_orphaned_descriptors_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_conversations_listing_orphaned_descriptors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "legendFormat": "orphaned descriptors skipped",
               "datasource": {
                 "type": "prometheus",
@@ -1420,7 +1429,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (action) (rate(eddi_session_checkpoint_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (action) (rate(eddi_session_checkpoint_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -1489,7 +1498,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 7
+        "y": 8
       },
       "panels": [
         {
@@ -1550,7 +1559,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -1625,7 +1635,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -1660,7 +1671,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_coordinator_total_processed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_coordinator_total_processed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -1798,7 +1809,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -1874,7 +1886,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -1909,7 +1922,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (error_type) (rate(eddi_pipeline_task_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (error_type) (rate(eddi_pipeline_task_errors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2017,7 +2030,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "none in this time range"
             },
             "overrides": []
           },
@@ -2047,6 +2061,204 @@
               }
             }
           ]
+        },
+        {
+          "id": 183,
+          "type": "timeseries",
+          "title": "Dead-lettered turns (in-memory coordinator)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 29
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(eddi_coordinator_dead_lettered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "refId": "A",
+              "legendFormat": "dead-lettered / s"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(eddi_coordinator_dead_letters_retained{job=~\"$job\"})",
+              "refId": "B",
+              "legendFormat": "retained for inspection"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Turns that failed after they had started. The rate is cumulative across purges; 'retained' is what GET /administration/coordinator/dead-letters lists now (capped by eddi.coordinator.max-dead-letters). The NATS coordinator reports eddi_nats_dead_letter_count instead."
+        },
+        {
+          "id": 184,
+          "type": "timeseries",
+          "title": "Turn executor load",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 29
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (pool) (eddi_runtime_executor_active{job=~\"$job\"})",
+              "refId": "A",
+              "legendFormat": "running ({{pool}})"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (pool) (eddi_runtime_executor_queued{job=~\"$job\"})",
+              "refId": "B",
+              "legendFormat": "waiting for a thread ({{pool}})"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(eddi_runtime_executor_max_threads{job=~\"$job\"})",
+              "refId": "C",
+              "legendFormat": "worker pool size"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Conversation work on the worker pool (managed) and the nested virtual-thread executor. Sustained 'waiting for a thread' means the pool is saturated (alert EddiExecutorSaturated)."
+        },
+        {
+          "id": 185,
+          "type": "timeseries",
+          "title": "Quarkus worker pool",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 36
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (pool_name) (worker_pool_ratio{job=~\"$job\"})",
+              "refId": "A",
+              "legendFormat": "busy ratio {{pool_name}}"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (pool_name) (worker_pool_queue_size{job=~\"$job\"})",
+              "refId": "B",
+              "legendFormat": "queued {{pool_name}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Quarkus' own view of its worker pools: blocking REST requests and work dispatched through Vert.x. Turns submitted by the coordinator are on 'Turn executor load'."
         }
       ]
     },
@@ -2059,7 +2271,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 9
       },
       "panels": [
         {
@@ -2080,7 +2292,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_tool_execution_success_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_execution_success_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2091,7 +2303,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_tool_execution_failure_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_execution_failure_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2102,7 +2314,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_tool_execution_cached_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_execution_cached_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2113,7 +2325,7 @@
             },
             {
               "refId": "D",
-              "expr": "sum(rate(eddi_tool_execution_ratelimited_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_execution_ratelimited_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2124,7 +2336,7 @@
             },
             {
               "refId": "E",
-              "expr": "sum(rate(eddi_tool_execution_timeout_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_execution_timeout_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2200,7 +2412,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_tool_calls_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_tool_calls_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2317,7 +2529,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -2393,7 +2606,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -2456,7 +2670,8 @@
                   }
                 ]
               },
-              "mappings": []
+              "mappings": [],
+              "noValue": "none in this time range"
             },
             "overrides": []
           },
@@ -2500,7 +2715,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_tool_budget_exceeded_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_budget_exceeded_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2575,7 +2790,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(eddi_tool_costs_accrued{job=~\"$job\"})",
+              "expr": "sum(eddi_tool_costs_accrued{job=~\"$job\"}) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2650,7 +2865,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_tool_costs_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_tool_costs_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2758,7 +2973,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "none in this time range"
             },
             "overrides": []
           },
@@ -2790,7 +3006,7 @@
           ]
         },
         {
-          "id": 171,
+          "id": 174,
           "type": "timeseries",
           "title": "Abandoned tool workers",
           "datasource": {
@@ -2807,7 +3023,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(eddi_tool_execution_abandoned{job=~\"$job\"})",
+              "expr": "sum(eddi_tool_execution_abandoned{job=~\"$job\"}) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2876,7 +3092,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 10
       },
       "panels": [
         {
@@ -2896,7 +3112,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval])) + sum(rate(eddi_tool_cache_misses_total{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+              "expr": "sum(rate(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval])) + sum(rate(eddi_tool_cache_misses_total{job=~\"$job\"}[$__rate_interval])), 1e-9) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2964,7 +3180,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_cache_hits_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -2975,7 +3191,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_tool_cache_misses_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_cache_misses_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3091,7 +3307,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -3126,7 +3343,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_tool_cache_hits_by_tool_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_tool_cache_hits_by_tool_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3202,7 +3419,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_tool_cache_misses_by_tool_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_tool_cache_misses_by_tool_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3278,7 +3495,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_tool_cache_puts_by_tool_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_tool_cache_puts_by_tool_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3354,7 +3571,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_tool_cache_bypassed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_tool_cache_bypassed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3482,7 +3699,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -3510,7 +3728,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 11
       },
       "panels": [
         {
@@ -3530,7 +3748,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_tool_ratelimit_allowed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_ratelimit_allowed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3541,7 +3759,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_tool_ratelimit_denied_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tool_ratelimit_denied_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3617,7 +3835,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_tool_ratelimit_denied_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_tool_ratelimit_denied_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3692,7 +3910,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_tool_ratelimit_allowed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_tool_ratelimit_allowed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3768,7 +3986,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (eddi_tool_ratelimit_remaining{job=~\"$job\"})",
+              "expr": "sum by (tool) (eddi_tool_ratelimit_remaining{job=~\"$job\"}) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3837,7 +4055,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 11
+        "y": 12
       },
       "panels": [
         {
@@ -3858,7 +4076,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (provider) (rate(eddi_llm_cascade_tokens_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (provider) (rate(eddi_llm_cascade_tokens_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -3934,7 +4152,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (provider) (rate(eddi_llm_cascade_cost_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (provider) (rate(eddi_llm_cascade_cost_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -4050,7 +4268,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -4126,7 +4345,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -4161,7 +4381,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (reason) (rate(eddi_llm_streaming_downgraded_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (reason) (rate(eddi_llm_streaming_downgraded_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -4237,7 +4457,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_llm_streaming_no_partials_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_llm_streaming_no_partials_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -4248,7 +4468,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum by (path) (rate(eddi_llm_stream_timeouts_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (path) (rate(eddi_llm_stream_timeouts_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -4324,7 +4544,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_llm_tool_context_evictions_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_llm_tool_context_evictions_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -4404,7 +4624,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (agentMode) (rate(eddi_llm_cascade_executions_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (agentMode) (rate(eddi_llm_cascade_executions_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "legendFormat": "agentMode={{agentMode}}",
               "range": true,
               "refId": "A"
@@ -4480,7 +4700,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (reason) (rate(eddi_llm_cascade_escalations_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (reason) (rate(eddi_llm_cascade_escalations_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "legendFormat": "{{reason}}",
               "range": true,
               "refId": "A"
@@ -4556,7 +4776,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (step) (rate(eddi_llm_cascade_accepted_step_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (step) (rate(eddi_llm_cascade_accepted_step_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "legendFormat": "step {{step}}",
               "range": true,
               "refId": "A"
@@ -4632,7 +4852,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (provider, type) (rate(eddi_llm_cascade_step_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (provider, type) (rate(eddi_llm_cascade_step_errors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "legendFormat": "{{provider}} / {{type}}",
               "range": true,
               "refId": "A"
@@ -4708,7 +4928,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "sum by (kind) (rate(eddi_llm_cascade_ceiling_exceeded_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (kind) (rate(eddi_llm_cascade_ceiling_exceeded_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "legendFormat": "{{kind}}",
               "range": true,
               "refId": "A"
@@ -4773,7 +4993,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 13
       },
       "panels": [
         {
@@ -4794,7 +5014,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (action) (rate(eddi_guardrail_toolresult_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (action) (rate(eddi_guardrail_toolresult_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -4870,7 +5090,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (source) (rate(eddi_guardrail_toolresult_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (source) (rate(eddi_guardrail_toolresult_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -4946,7 +5166,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (strategy) (rate(eddi_mcp_response_truncation_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (strategy) (rate(eddi_mcp_response_truncation_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5022,7 +5242,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (level) (rate(eddi_counterweight_activation_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (level) (rate(eddi_counterweight_activation_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5098,7 +5318,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_counterweight_strict_downgraded_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_counterweight_strict_downgraded_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5173,7 +5393,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_identity_masking_applied_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_identity_masking_applied_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5241,7 +5461,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 14
       },
       "panels": [
         {
@@ -5262,7 +5482,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (surface) (rate(eddi_hitl_pause_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (surface) (rate(eddi_hitl_pause_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5273,7 +5493,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum by (surface) (rate(eddi_hitl_resume_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (surface) (rate(eddi_hitl_resume_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5349,7 +5569,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (surface) (rate(eddi_hitl_timeout_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (surface) (rate(eddi_hitl_timeout_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5425,7 +5645,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_hitl_tool_pause_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_hitl_tool_pause_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5436,7 +5656,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum by (verdict) (rate(eddi_hitl_tool_resume_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (verdict) (rate(eddi_hitl_tool_resume_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5512,7 +5732,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (match) (rate(eddi_hitl_rule_matched_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (match) (rate(eddi_hitl_rule_matched_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5588,7 +5808,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (decision) (rate(eddi_operator_write_approval_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (decision) (rate(eddi_operator_write_approval_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5664,7 +5884,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (guard) (rate(eddi_hitl_tool_guard_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (guard) (rate(eddi_hitl_tool_guard_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5740,7 +5960,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (verdict) (rate(eddi_mcp_hitl_decision_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (verdict) (rate(eddi_mcp_hitl_decision_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5816,7 +6036,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (surface) (rate(eddi_mcp_hitl_cancelled_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (surface) (rate(eddi_mcp_hitl_cancelled_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5892,7 +6112,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (surface) (rate(eddi_mcp_hitl_pending_listed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (surface) (rate(eddi_mcp_hitl_pending_listed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5949,6 +6169,132 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 186,
+          "type": "stat",
+          "title": "Pending approvals",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 42
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(eddi_hitl_pending{job=~\"$job\"})",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 50
+                  },
+                  {
+                    "color": "red",
+                    "value": 500
+                  }
+                ]
+              },
+              "noValue": "refresh pending"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "description": "Conversations paused for a human (approval or input), read from the conversation store every eddi.hitl.metrics.refresh-interval. Every replica reports the store-wide number, hence max. Saturates at 1000."
+        },
+        {
+          "id": 187,
+          "type": "stat",
+          "title": "Oldest pending approval",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 42
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(eddi_hitl_pending_oldest_age_seconds{job=~\"$job\"})",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "orange",
+                    "value": 3600
+                  },
+                  {
+                    "color": "red",
+                    "value": 86400
+                  }
+                ]
+              },
+              "noValue": "refresh pending"
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "area",
+            "textMode": "auto"
+          },
+          "description": "How long the oldest pending approval has waited. Alert EddiApprovalWaitingLong fires past 24 h."
         }
       ]
     },
@@ -5961,7 +6307,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 15
       },
       "panels": [
         {
@@ -5981,7 +6327,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_group_discussion_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_group_discussion_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5992,7 +6338,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_group_discussion_failure_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_group_discussion_failure_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6068,7 +6414,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_group_discussion_failure_count_total{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_group_discussion_count_total{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+              "expr": "sum(rate(eddi_group_discussion_failure_count_total{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_group_discussion_count_total{job=~\"$job\"}[$__rate_interval])), 1e-9) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6188,7 +6534,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -6223,7 +6570,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_group_continue_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_group_continue_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6234,7 +6581,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_group_close_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_group_close_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6245,7 +6592,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_group_followup_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_group_followup_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6321,7 +6668,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_group_facilitator_moves_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_group_facilitator_moves_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6425,7 +6772,8 @@
                   }
                 ]
               },
-              "mappings": []
+              "mappings": [],
+              "noValue": "none in this time range"
             },
             "overrides": []
           },
@@ -6469,7 +6817,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(eddi_group_cost_dollars{job=~\"$job\"})",
+              "expr": "sum(eddi_group_cost_dollars{job=~\"$job\"}) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6545,7 +6893,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_group_cost_ceiling_hit_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_group_cost_ceiling_hit_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6620,7 +6968,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_group_member_pause_skipped_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_group_member_pause_skipped_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6695,7 +7043,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_team_cadence_runs_started_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_team_cadence_runs_started_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6706,7 +7054,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_team_cadence_runs_skipped_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_team_cadence_runs_skipped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6782,7 +7130,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_team_cadence_writebacks_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_team_cadence_writebacks_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6793,7 +7141,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_team_cadence_claims_reclaimed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_team_cadence_claims_reclaimed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6862,7 +7210,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 16
       },
       "panels": [
         {
@@ -6883,7 +7231,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_schedule_poll_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_schedule_poll_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6894,7 +7242,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_schedule_fire_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_schedule_fire_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6905,7 +7253,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_schedule_fire_failed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_schedule_fire_failed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -6916,7 +7264,7 @@
             },
             {
               "refId": "D",
-              "expr": "sum(rate(eddi_schedule_fire_skipped_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_schedule_fire_skipped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7043,7 +7391,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -7078,7 +7427,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_schedule_fire_deadlettered_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_schedule_fire_deadlettered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7153,7 +7502,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_schedule_claim_conflict_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_schedule_claim_conflict_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7228,7 +7577,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_schedule_firelog_pruned_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_schedule_firelog_pruned_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7296,7 +7645,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 17
       },
       "panels": [
         {
@@ -7317,7 +7666,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_dream_users_processed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_users_processed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7328,7 +7677,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_dream_entries_summarized_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_entries_summarized_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7339,7 +7688,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_dream_entries_pruned_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_entries_pruned_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7415,7 +7764,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_dream_cycles_failed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_cycles_failed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7426,7 +7775,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_dream_summarization_failed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_summarization_failed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7502,7 +7851,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_dream_contradictions_found_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_dream_contradictions_found_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7628,7 +7977,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -7714,7 +8064,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -7749,7 +8100,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_summarization_calls_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_summarization_calls_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7760,7 +8111,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_summarization_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_summarization_errors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7836,7 +8187,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_snippets_cache_hits_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_snippets_cache_hits_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7847,7 +8198,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_snippets_cache_misses_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_snippets_cache_misses_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7916,7 +8267,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 18
       },
       "panels": [
         {
@@ -7937,7 +8288,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_mcp_discovery_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_mcp_discovery_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8013,7 +8364,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_mcp_conversation_access_denied_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_mcp_conversation_access_denied_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8088,7 +8439,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tool) (rate(eddi_mcp_response_truncation_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tool) (rate(eddi_mcp_response_truncation_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8164,7 +8515,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_agent_identity_sign_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_agent_identity_sign_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8175,7 +8526,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_agent_identity_verify_success_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_agent_identity_verify_success_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8186,7 +8537,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_agent_identity_verify_fail_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_agent_identity_verify_fail_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8262,7 +8613,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_agent_nonce_replay_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_agent_nonce_replay_rejected_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8273,7 +8624,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_agent_nonce_freshness_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_agent_nonce_freshness_rejected_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8284,7 +8635,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_agent_nonce_clockskew_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_agent_nonce_clockskew_rejected_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8360,7 +8711,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_openai_requests_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_openai_requests_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8436,7 +8787,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (mode) (rate(eddi_openai_requests_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (mode) (rate(eddi_openai_requests_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8563,7 +8914,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -8598,7 +8950,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_openai_conversations_created_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_openai_conversations_created_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8673,7 +9025,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_attachment_forwarded_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_attachment_forwarded_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8684,7 +9036,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_attachment_reinlined_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_attachment_reinlined_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8695,7 +9047,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_attachment_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_attachment_errors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8771,7 +9123,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (reason) (rate(eddi_channel_observe_decisions_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (reason) (rate(eddi_channel_observe_decisions_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8840,7 +9192,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 18
+        "y": 19
       },
       "panels": [
         {
@@ -8861,7 +9213,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_capability_query_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_capability_query_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8872,7 +9224,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_capability_miss_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_capability_miss_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -8999,7 +9351,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -9018,13 +9371,13 @@
         },
         {
           "id": 100,
-          "type": "bargauge",
-          "title": "Top missing skills (1h)",
+          "type": "stat",
+          "title": "Capability misses (1h)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_capability_miss_count_total` by `skill` — capabilities agents asked for and no registered agent could serve. This is a backlog of missing agents.",
+          "description": "eddi_capability_miss_count is untagged on purpose: the skill string is caller-supplied, so a per-skill label would be unbounded. The skills themselves are in the WARN log line 'No capability match'.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -9033,16 +9386,12 @@
           },
           "targets": [
             {
-              "refId": "A",
-              "expr": "topk(15, sum by (skill) (increase(eddi_capability_miss_count_total{job=~\"$job\"}[1h])))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "editorMode": "code",
-              "range": false,
-              "legendFormat": "{{skill}}",
-              "instant": true
+              "expr": "sum(increase(eddi_capability_miss_count_total{job=~\"$job\"}[1h])) or on() vector(0)",
+              "refId": "A"
             }
           ],
           "fieldConfig": {
@@ -9070,22 +9419,11 @@
             "reduceOptions": {
               "calcs": [
                 "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
+              ]
             },
-            "orientation": "horizontal",
-            "displayMode": "basic",
-            "valueMode": "text",
-            "showUnfilled": true,
-            "minVizWidth": 8,
-            "minVizHeight": 12,
-            "maxVizHeight": 20,
-            "namePlacement": "left",
-            "sizing": "auto",
-            "legend": {
-              "showLegend": false
-            }
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto"
           }
         },
         {
@@ -9106,7 +9444,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (strategy) (rate(eddi_capability_strategy_applied_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (strategy) (rate(eddi_capability_strategy_applied_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9182,7 +9520,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_connection_resolve_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_connection_resolve_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9257,7 +9595,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (binding) (rate(eddi_connection_resolve_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (binding) (rate(eddi_connection_resolve_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9374,7 +9712,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -9409,7 +9748,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (binding) (rate(eddi_connection_grant_missing_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (binding) (rate(eddi_connection_grant_missing_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9485,7 +9824,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (reference) (rate(eddi_caller_identity_resolution_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (reference) (rate(eddi_caller_identity_resolution_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9561,7 +9900,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_caller_identity_resolution_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_caller_identity_resolution_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9637,7 +9976,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (authType) (rate(eddi_connection_oauth_authorize_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (authType) (rate(eddi_connection_oauth_authorize_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9713,7 +10052,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_connection_oauth_callback_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_connection_oauth_callback_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9789,7 +10128,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_connection_token_refresh_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_connection_token_refresh_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9865,7 +10204,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_connection_token_refresh_claim_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_connection_token_refresh_claim_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -9934,7 +10273,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 20
       },
       "panels": [
         {
@@ -9954,7 +10293,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_vault_cache_hits_total{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_vault_cache_hits_total{job=~\"$job\"}[$__rate_interval])) + sum(rate(eddi_vault_cache_misses_total{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+              "expr": "sum(rate(eddi_vault_cache_hits_total{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_vault_cache_hits_total{job=~\"$job\"}[$__rate_interval])) + sum(rate(eddi_vault_cache_misses_total{job=~\"$job\"}[$__rate_interval])), 1e-9) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10022,7 +10361,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_vault_cache_hits_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_cache_hits_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10033,7 +10372,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_vault_cache_misses_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_cache_misses_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10109,7 +10448,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_vault_errors_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_errors_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10120,7 +10459,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_vault_resolve_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_resolve_errors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10196,7 +10535,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_vault_resolve_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_resolve_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10207,7 +10546,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_vault_store_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_store_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10218,7 +10557,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_vault_delete_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_delete_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10229,7 +10568,7 @@
             },
             {
               "refId": "D",
-              "expr": "sum(rate(eddi_vault_rotate_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_rotate_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10240,7 +10579,7 @@
             },
             {
               "refId": "E",
-              "expr": "sum(rate(eddi_vault_grant_update_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_vault_grant_update_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10379,7 +10718,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -10476,7 +10816,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -10504,7 +10845,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 21
       },
       "panels": [
         {
@@ -10525,7 +10866,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_tenant_quota_allowed_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tenant_quota_allowed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10536,7 +10877,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_tenant_quota_denied_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_tenant_quota_denied_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10612,7 +10953,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (type) (rate(eddi_tenant_quota_denied_total{job=~\"$job\", tenant!=\"\"}[$__rate_interval]))",
+              "expr": "sum by (type) (rate(eddi_tenant_quota_denied_total{job=~\"$job\", tenant!=\"\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10720,7 +11061,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "none in this time range"
             },
             "overrides": []
           },
@@ -10769,7 +11111,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tenant) (rate(eddi_tenant_usage_conversations_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tenant) (rate(eddi_tenant_usage_conversations_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10780,7 +11122,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum by (tenant) (rate(eddi_tenant_usage_api_calls_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tenant) (rate(eddi_tenant_usage_api_calls_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10856,7 +11198,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (tenant) (rate(eddi_tenant_usage_cost_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (tenant) (rate(eddi_tenant_usage_cost_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -10932,7 +11274,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_audit_entries_dropped_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_audit_entries_dropped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11007,7 +11349,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_audit_sequence_collisions_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_audit_sequence_collisions_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11065,7 +11407,7 @@
           }
         },
         {
-          "id": 158,
+          "id": 175,
           "type": "timeseries",
           "title": "Quota refusals caused by the store, not by a limit",
           "datasource": {
@@ -11082,7 +11424,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (type) (rate(eddi_tenant_quota_unavailable_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (type) (rate(eddi_tenant_quota_unavailable_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11139,6 +11481,69 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 188,
+          "type": "timeseries",
+          "title": "Audit queue depth vs capacity",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 49
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(eddi_audit_queue_depth{job=~\"$job\"})",
+              "refId": "A",
+              "legendFormat": "queued"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(eddi_audit_queue_capacity{job=~\"$job\"})",
+              "refId": "B",
+              "legendFormat": "capacity (eddi.audit.max-queue-size)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Entries waiting to be written to the audit store. Entries are dropped (and counted on eddi_audit_entries_dropped_total) once the queue is full; alert EddiAuditQueueFilling fires at half."
         }
       ]
     },
@@ -11151,7 +11556,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 22
       },
       "panels": [
         {
@@ -11162,7 +11567,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_operator_gate_verified` — 1 only while every provisioned operator version read back with a sound approval gate.",
+          "description": "1 when every provisioned Platform Operator version last read back with a sound approval gate. 0 also before any report has arrived (fresh deployment, operator never activated). min, so one unverified replica reads 0. Alert EddiOperatorGateRegressed fires on a 1 -> 0 transition.",
           "gridPos": {
             "h": 6,
             "w": 4,
@@ -11172,7 +11577,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(eddi_operator_gate_verified{job=~\"$job\"})",
+              "expr": "min(eddi_operator_gate_verified{job=~\"$job\"}) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11237,7 +11642,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_operator_canary_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (outcome) (rate(eddi_operator_canary_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11364,7 +11769,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -11380,6 +11786,61 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 189,
+          "type": "stat",
+          "title": "Gate last verified (this process)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "How long ago this EDDI process last received a verified gate report (eddi_operator_gate_last_verified_timestamp_seconds). Empty until one arrives after boot; EddiOperatorGateRegressed needs one before it can fire.",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 28
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "refId": "A",
+              "expr": "time() - max(eddi_operator_gate_last_verified_timestamp_seconds{job=~\"$job\"} > 0)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "not verified since boot",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto"
+          }
         }
       ]
     },
@@ -11392,7 +11853,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 23
       },
       "panels": [
         {
@@ -11412,7 +11873,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_nats_publish_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_nats_publish_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11423,7 +11884,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_nats_consume_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_nats_consume_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11550,7 +12011,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -11636,7 +12098,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -11671,7 +12134,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_nats_dead_letter_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_nats_dead_letter_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11731,7 +12194,7 @@
       ]
     },
     {
-      "id": 158,
+      "id": 176,
       "type": "row",
       "title": "Backup — Export, Import & Sync",
       "collapsed": true,
@@ -11739,11 +12202,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 24
       },
       "panels": [
         {
-          "id": 159,
+          "id": 177,
           "type": "timeseries",
           "title": "Export & import rate",
           "datasource": {
@@ -11760,7 +12223,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_backup_export_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_export_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11771,7 +12234,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_backup_import_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_import_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11847,7 +12310,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_backup_export_failure_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_export_failure_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11858,7 +12321,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_backup_import_failure_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_import_failure_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11934,7 +12397,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_backup_upgrade_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_upgrade_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -11945,7 +12408,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_backup_upgrade_failure_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_upgrade_failure_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12021,7 +12484,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(eddi_backup_upgrade_resource_updated_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_upgrade_resource_updated_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12032,7 +12495,7 @@
             },
             {
               "refId": "B",
-              "expr": "sum(rate(eddi_backup_upgrade_resource_created_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_upgrade_resource_created_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12043,7 +12506,7 @@
             },
             {
               "refId": "C",
-              "expr": "sum(rate(eddi_backup_upgrade_resource_skipped_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_upgrade_resource_skipped_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12054,7 +12517,7 @@
             },
             {
               "refId": "D",
-              "expr": "sum(rate(eddi_backup_upgrade_resource_failure_count_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum(rate(eddi_backup_upgrade_resource_failure_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12115,7 +12578,7 @@
       ]
     },
     {
-      "id": 168,
+      "id": 178,
       "type": "row",
       "title": "RAG Ingestion",
       "collapsed": true,
@@ -12123,11 +12586,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 25
       },
       "panels": [
         {
-          "id": 169,
+          "id": 179,
           "type": "timeseries",
           "title": "Segments stored by knowledge base",
           "datasource": {
@@ -12144,7 +12607,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (knowledgeBase, source) (rate(eddi_ingestion_segments_stored_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (knowledgeBase, source) (rate(eddi_ingestion_segments_stored_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12203,7 +12666,7 @@
           }
         },
         {
-          "id": 170,
+          "id": 180,
           "type": "timeseries",
           "title": "Ingestion errors by source",
           "datasource": {
@@ -12220,7 +12683,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (knowledgeBase, source) (rate(eddi_ingestion_errors_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (knowledgeBase, source) (rate(eddi_ingestion_errors_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12279,7 +12742,7 @@
           }
         },
         {
-          "id": 171,
+          "id": 181,
           "type": "timeseries",
           "title": "Files accepted by upload source",
           "datasource": {
@@ -12296,7 +12759,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (source) (rate(eddi_ingestion_files_stored_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (source) (rate(eddi_ingestion_files_stored_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12355,7 +12818,7 @@
           }
         },
         {
-          "id": 172,
+          "id": 182,
           "type": "timeseries",
           "title": "Files refused by upload source",
           "datasource": {
@@ -12372,7 +12835,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (source) (rate(eddi_ingestion_files_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (source) (rate(eddi_ingestion_files_rejected_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12448,7 +12911,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (source) (rate(eddi_ingestion_files_deleted_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (source) (rate(eddi_ingestion_files_deleted_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12517,7 +12980,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 26
       },
       "panels": [
         {
@@ -12579,7 +13042,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -12599,7 +13063,7 @@
         {
           "id": 128,
           "type": "timeseries",
-          "title": "HTTP latency P50 / P95 / P99",
+          "title": "HTTP latency (mean / peak)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -12612,37 +13076,22 @@
           },
           "targets": [
             {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(http_server_requests_seconds_sum{job=~\"$job\"}[$__rate_interval])) / clamp_min(sum(rate(http_server_requests_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
               "refId": "A",
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_requests_seconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+              "legendFormat": "mean"
+            },
+            {
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "p50"
-            },
-            {
+              "expr": "max(http_server_requests_seconds_max{job=~\"$job\"})",
               "refId": "B",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "p95"
-            },
-            {
-              "refId": "C",
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "p99"
+              "legendFormat": "peak"
             }
           ],
           "fieldConfig": {
@@ -12676,7 +13125,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -12691,7 +13141,8 @@
               "mode": "multi",
               "sort": "desc"
             }
-          }
+          },
+          "description": "Mean and peak, not percentiles: http.server.requests publishes no histogram buckets. Buckets would multiply every series by ~70 for each of up to quarkus.micrometer.binder.http-server.max-uri-tags URI tags. The peak is Micrometer's decaying max, and long-lived streams (SSE) count as one long request."
         },
         {
           "id": 129,
@@ -12762,7 +13213,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -12848,7 +13300,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -12922,7 +13375,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -12998,7 +13452,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -13023,7 +13478,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "EDDI is database-agnostic; whichever backend is active reports, the other shows no data.",
+          "description": "Only the active datastore's series exist: MongoDB pool listener or Agroal (quarkus.datasource.metrics.enabled).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -13032,26 +13487,58 @@
           },
           "targets": [
             {
-              "refId": "A",
-              "expr": "sum(mongodb_driver_pool_checkedout{job=~\"$job\"})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "editorMode": "code",
-              "range": true,
+              "expr": "sum(mongodb_driver_pool_checkedout{job=~\"$job\"})",
+              "refId": "A",
               "legendFormat": "MongoDB checked out"
             },
             {
-              "refId": "B",
-              "expr": "sum(agroal_active_count{job=~\"$job\"})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "editorMode": "code",
-              "range": true,
+              "expr": "sum(mongodb_driver_pool_size{job=~\"$job\"})",
+              "refId": "B",
+              "legendFormat": "MongoDB pool size"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(mongodb_driver_pool_waitqueuesize{job=~\"$job\"})",
+              "refId": "C",
+              "legendFormat": "MongoDB wait queue"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(agroal_active_count{job=~\"$job\"})",
+              "refId": "D",
               "legendFormat": "PostgreSQL active"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(agroal_available_count{job=~\"$job\"})",
+              "refId": "E",
+              "legendFormat": "PostgreSQL available"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(agroal_awaiting_count{job=~\"$job\"})",
+              "refId": "F",
+              "legendFormat": "PostgreSQL awaiting"
             }
           ],
           "fieldConfig": {
@@ -13085,7 +13572,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
@@ -13136,9 +13624,9 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(jvm_info, job)",
+        "definition": "label_values(process_uptime_seconds, job)",
         "query": {
-          "query": "label_values(jvm_info, job)",
+          "query": "label_values(process_uptime_seconds, job)",
           "refId": "job"
         },
         "current": {
@@ -13166,7 +13654,7 @@
   "timezone": "browser",
   "title": "E.D.D.I — Full Metrics Reference",
   "uid": "eddi-metrics-all",
-  "version": 1,
+  "version": 2,
   "weekStart": "",
   "description": "Every meter E.D.D.I registers with Micrometer, grouped by subsystem. Counters are shown as rates, timers as mean and peak from _seconds_sum/_seconds_count/_seconds_max. Only eddi_pipeline_task_duration publishes histogram buckets, so it is the only EDDI timer with true percentiles. Companion to the Operations Command Center dashboard."
 }

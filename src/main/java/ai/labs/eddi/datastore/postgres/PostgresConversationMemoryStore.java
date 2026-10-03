@@ -722,6 +722,20 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             + "data->'hitlPendingToolCalls'->'calls' AS pending_calls_json "
             + "FROM conversation_memories WHERE conversation_state = ?";
 
+    /**
+     * Oldest pause first, undated pauses last, so the limit never drops the oldest
+     * approval — which the retention sweep and
+     * {@code eddi_hitl_pending_oldest_age_seconds} both depend on. The pause time
+     * lives only inside {@code data}, as whatever the snapshot mapper wrote: epoch
+     * seconds (a JSON number) or an ISO-8601 string. Both are normalised to a
+     * timestamp; a string that does not look like a date sorts as undated instead
+     * of failing the whole listing on a cast error.
+     */
+    private static final String PENDING_OLDEST_FIRST = " ORDER BY CASE jsonb_typeof(data->'hitlPausedAt')"
+            + " WHEN 'number' THEN to_timestamp((data->>'hitlPausedAt')::double precision)"
+            + " WHEN 'string' THEN CASE WHEN data->>'hitlPausedAt' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9:]+)$'"
+            + " THEN (data->>'hitlPausedAt')::timestamptz END END ASC NULLS LAST";
+
     @Override
     public List<PendingApprovalSummary> findPendingApprovalSummaries(int limit)
             throws IResourceStore.ResourceStoreException {
@@ -729,7 +743,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         // Single bounded query with JSONB field extraction — this listing is
         // polled and backs the crash-recovery sweep; deserializing full multi-MB
         // documents here violates the interface's projection contract.
-        String sql = PENDING_SUMMARY_SELECT + " LIMIT ?";
+        String sql = PENDING_SUMMARY_SELECT + PENDING_OLDEST_FIRST + " LIMIT ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, ConversationState.AWAITING_HUMAN.name());
             ps.setInt(2, limit);
@@ -745,7 +759,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         ensureSchema();
         // Owner filter INSIDE the query: the limit applies after the restriction,
         // so a user's inbox is complete even behind a large global backlog.
-        String sql = PENDING_SUMMARY_SELECT + " AND data->>'userId' = ? LIMIT ?";
+        String sql = PENDING_SUMMARY_SELECT + " AND data->>'userId' = ?" + PENDING_OLDEST_FIRST + " LIMIT ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, ConversationState.AWAITING_HUMAN.name());
             ps.setString(2, ownerUserId);

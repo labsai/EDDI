@@ -735,6 +735,7 @@ function Step-Ports {
 # even after the file is restored.
 $script:MonitoringFiles = @(
     "docs/monitoring/prometheus.yml",
+    "docs/monitoring/eddi-alerts.yml",
     "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
     "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
     "docs/monitoring/eddi-grafana-dashboard.json",

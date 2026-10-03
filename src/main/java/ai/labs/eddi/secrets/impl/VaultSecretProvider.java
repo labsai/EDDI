@@ -300,7 +300,13 @@ public class VaultSecretProvider implements ISecretProvider {
 
             return plaintext;
         } catch (SecretNotFoundException e) {
-            errorCounter.increment();
+            // Not a vault failure: the store answered, and the answer is "no such
+            // key". Counting it made eddi.vault.errors.count useless as a signal —
+            // AgentSigningService probes for a signing key on every signing attempt,
+            // most agents never have one, and the counter climbed by one per turn
+            // on a healthy deployment, so the EddiVaultErrors alert could only ever
+            // be on. A missing ${eddivault:...} reference is still counted, by
+            // SecretResolver as eddi.vault.resolve.errors.
             throw e;
         } catch (PersistenceException e) {
             errorCounter.increment();

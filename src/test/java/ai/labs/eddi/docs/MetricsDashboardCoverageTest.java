@@ -4,115 +4,67 @@
  */
 package ai.labs.eddi.docs;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
+import static ai.labs.eddi.docs.MonitoringSeries.collectMeters;
+import static ai.labs.eddi.docs.MonitoringSeries.knownSeries;
+import static ai.labs.eddi.docs.MonitoringSeries.metricNames;
+import static ai.labs.eddi.docs.MonitoringSeries.read;
+import static ai.labs.eddi.docs.MonitoringSeries.repoRoot;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Keeps the Full Metrics Reference dashboard honest about covering every meter.
+ * Keeps the Grafana dashboards honest: about covering every meter, and about
+ * querying series that exist.
  * <p>
- * {@code docs/metrics.md} promises that the dashboard "covers all registered
- * meters — it is generated from the registration sites in the source, so a
- * metric cannot be added to the codebase and silently go unwatched". That was a
- * description of intent, not of a mechanism: nothing generated the file and
- * nothing checked it. By the time the claim was audited it was already false —
- * the five {@code eddi.llm.cascade.*} decision counters ({@code executions},
- * {@code escalations}, {@code accepted.step}, {@code step.errors},
- * {@code ceiling.exceeded}) were registered and on no panel. Those are
- * precisely the meters that say whether model cascading is saving money or
- * silently paying twice per turn, so the gap sat over the one subsystem whose
- * value cannot be judged without them.
+ * {@code docs/metrics.md} promises that the Full Metrics Reference dashboard
+ * "covers all registered meters". That was a description of intent, not of a
+ * mechanism: nothing generated the file and nothing checked it. By the time the
+ * claim was audited it was already false — the five {@code eddi.llm.cascade.*}
+ * decision counters were registered and on no panel.
  * <p>
- * A promise about coverage is only worth making if something enforces it. This
- * test is that something: add a meter, and the build tells you the dashboard
- * has not caught up.
+ * The first version of this test then only checked the Full dashboard, and by
+ * substring. A live review evaluated all 360 panel queries against Prometheus
+ * and found what that let through: a query for
+ * {@code eddi_nats_dead_letter_count} (the meter is scraped as
+ * {@code ..._total}), a {@code $job} variable sourced from {@code jvm_info}
+ * (scraped as {@code jvm_info_total}), HTTP percentile panels over a histogram
+ * nobody publishes, duplicate panel ids, and an operations dashboard with its
+ * job and datasource uid hard-coded. Every dashboard is now parsed as JSON and
+ * every query checked against the series a scrape can actually contain.
  *
- * @see ai.labs.eddi.docs.DocumentedRestPathsTest
+ * @see MonitoringSeries
+ * @see AlertRulesTest
  */
 @DisplayName("metrics dashboard coverage")
 class MetricsDashboardCoverageTest {
 
-    /**
-     * Meter registration through a
-     * {@link io.micrometer.core.instrument.MeterRegistry} handle, or through a
-     * local helper that forwards to one. The receiver is deliberately unanchored:
-     * registrations go through {@code meterRegistry},
-     * {@code Metrics.globalRegistry} and private {@code increment(...)} helpers
-     * alike, and the name is the first argument in every case. Group 1 is the meter
-     * <em>type</em>, which decides the exposition suffix.
-     * <p>
-     * The name group is deliberately <em>not</em> anchored on {@code eddi}. It was,
-     * and fourteen meters across four subsystems — every Dream,
-     * connection-resolution, summarization and guardrail meter — simply did not
-     * match, so the guard that exists to make an unwatched meter impossible could
-     * not see them. They were absent from the metrics reference for exactly that
-     * reason, on a green build. The sanity floor below still passed on the ~130
-     * that did match. Those fourteen are now prefixed, and dropping the anchor
-     * means the next unprefixed meter is a failure here rather than an invisible
-     * one.
-     */
-    private static final Pattern REGISTRATION = Pattern.compile(
-            "(?:^|[^\\w])(counter|timer|gauge|summary|increment)\\s*\\(\\s*\"([a-z][\\w.]*)\"");
+    private static final ObjectMapper JSON = new ObjectMapper();
 
-    /**
-     * The builder form, e.g.
-     * {@code FunctionCounter.builder("eddi.coordinator.total_processed", …)}.
-     */
-    private static final Pattern BUILDER = Pattern.compile(
-            "(Counter|Timer|Gauge|FunctionCounter|DistributionSummary)\\.builder\\(\\s*\"([a-z][\\w.]*)\"");
+    private static final Path MONITORING = Path.of("docs", "monitoring");
 
-    /**
-     * The name a meter is actually scraped under, which is what a dashboard query
-     * and a documentation table have to name.
-     * <p>
-     * Micrometer's Prometheus exposition appends {@code _total} to counters and
-     * {@code _seconds} to timers, and leaves gauges alone. Matching the raw
-     * dotted-to-underscore name instead was <em>vacuous for four meters</em>:
-     * {@code eddi_tool_cache_hits} is a substring of
-     * {@code eddi_tool_cache_hits_by_tool}, so charting only the by-tool variant
-     * satisfied a check for the plain one. {@code eddi.tool.costs} was passing that
-     * way for real — it had no independent occurrence on the dashboard at all.
-     * Comparing full exposition names removes the ambiguity, because
-     * {@code eddi_tool_cache_hits_total} is not a substring of
-     * {@code eddi_tool_cache_hits_by_tool_total}.
-     * <p>
-     * A handful of meters are registered in snake_case with {@code _total} already
-     * in the name (e.g. {@code eddi_audit_entries_dropped_total}); those must not
-     * have a second one appended.
-     */
-    private static String expositionName(String meter, String type) {
-        String base = meter.replace('.', '_');
-        return switch (type) {
-            case "counter" -> base.endsWith("_total") ? base : base + "_total";
-            case "timer" -> base + "_seconds";
-            default -> base;
-        };
-    }
-
-    private static final Path DASHBOARD = Path.of("docs", "monitoring", "eddi-full-metrics-dashboard.json");
+    private static final Path FULL_DASHBOARD = MONITORING.resolve("eddi-full-metrics-dashboard.json");
 
     private static final Path METRICS_REFERENCE = Path.of("docs", "metrics.md");
 
     /**
-     * Meters that are registered but deliberately not on the dashboard, as
+     * Meters that are registered but deliberately not on the Full dashboard, as
      * {@code meter → why}.
      * <p>
      * Empty, and it should stay that way. An entry here is a claim that a number
@@ -125,24 +77,31 @@ class MetricsDashboardCoverageTest {
     @DisplayName("every registered eddi meter appears on the Full Metrics Reference dashboard")
     void everyRegisteredMeterIsCharted() {
         Path root = repoRoot();
-        String dashboard = read(root.resolve(DASHBOARD));
+        // Metric names parsed out of the queries, not a substring search of the
+        // file: eddi_tool_cache_hits_total is a substring of
+        // eddi_tool_cache_hits_by_tool_total, and a meter named only in a panel
+        // description is not charted.
+        var queried = new TreeSet<String>();
+        for (String expr : expressions(dashboard(root.resolve(FULL_DASHBOARD)))) {
+            queried.addAll(metricNames(expr));
+        }
 
         var uncharted = new TreeSet<String>();
         for (var meter : collectMeters(root).values()) {
             if (INTENTIONALLY_UNCHARTED.contains(meter.name())) {
                 continue;
             }
-            if (!dashboard.contains(meter.exposedAs())) {
+            if (meter.series().stream().noneMatch(queried::contains)) {
                 uncharted.add(meter.describe());
             }
         }
 
         assertTrue(uncharted.isEmpty(),
                 "docs/metrics.md promises the Full Metrics Reference covers every registered meter. "
-                        + "These are registered and on no panel, so the promise is false and the numbers are "
+                        + "These are registered and queried by no panel, so the promise is false and the numbers are "
                         + "invisible to anyone operating the deployment:\n  "
                         + String.join("\n  ", uncharted)
-                        + "\n\nAdd a panel to " + DASHBOARD
+                        + "\n\nAdd a panel to " + FULL_DASHBOARD
                         + ", or justify the omission in INTENTIONALLY_UNCHARTED.");
     }
 
@@ -165,79 +124,195 @@ class MetricsDashboardCoverageTest {
                         + String.join("\n  ", undescribed));
     }
 
-    /** A registered meter, and the name it is actually scraped under. */
-    private record Meter(String name, String type, String source) {
-
-        String exposedAs() {
-            return expositionName(name, type);
-        }
-
-        String describe() {
-            return String.format("%s (%s, scraped as %s, registered in %s)", name, type, exposedAs(), source);
-        }
-    }
-
-    private static void record(Matcher matcher, TreeMap<String, Meter> into, String source) {
-        while (matcher.find()) {
-            String type = matcher.group(1).toLowerCase(Locale.ROOT);
-            String name = matcher.group(2);
-            // increment(...) is a local helper that forwards to counter(...);
-            // FunctionCounter and DistributionSummary expose as counter/summary.
-            String normalised = switch (type) {
-                case "increment", "functioncounter" -> "counter";
-                case "distributionsummary" -> "summary";
-                default -> type;
-            };
-            into.putIfAbsent(name, new Meter(name, normalised, source));
-        }
-    }
-
-    /** Meter name → what is known about it. */
-    private static TreeMap<String, Meter> collectMeters(Path root) {
-        var found = new TreeMap<String, Meter>();
-        for (Path file : javaSources(root.resolve(Path.of("src", "main", "java")))) {
-            String body = read(file);
-            String relative = root.relativize(file).toString().replace('\\', '/');
-            record(REGISTRATION.matcher(body), found, relative);
-            record(BUILDER.matcher(body), found, relative);
-        }
-        assertTrue(found.size() > 100,
-                "expected to find the project's meter registrations; found only " + found.size()
-                        + ". The extraction patterns have probably drifted from how meters are registered.");
-        return found;
-    }
-
-    private static Path repoRoot() {
-        // Surefire runs with the project basedir as the working directory.
-        Path root = Path.of("").toAbsolutePath();
-        assertTrue(Files.isRegularFile(root.resolve("pom.xml")),
-                "expected the working directory to be the project root, was " + root);
-        return root;
-    }
-
-    private static List<Path> javaSources(Path base) {
-        List<Path> found = new ArrayList<>();
-        try {
-            Files.walkFileTree(base, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (attrs.isRegularFile() && file.getFileName().toString().endsWith(".java")) {
-                        found.add(file);
-                    }
-                    return FileVisitResult.CONTINUE;
+    @Test
+    @DisplayName("every query on every dashboard names a series a scrape can contain")
+    void everyQueryNamesASeriesThatExists() {
+        Path root = repoRoot();
+        Set<String> known = knownSeries(root);
+        var unknown = new TreeSet<String>();
+        for (Path file : dashboards(root)) {
+            JsonNode dashboard = dashboard(file);
+            List<String> queries = new ArrayList<>(expressions(dashboard));
+            for (JsonNode variable : dashboard.path("templating").path("list")) {
+                if (variable.has("definition")) {
+                    queries.add(variable.path("definition").asText());
                 }
-            });
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            }
+            for (JsonNode annotation : dashboard.path("annotations").path("list")) {
+                if (annotation.has("expr")) {
+                    queries.add(annotation.path("expr").asText());
+                }
+            }
+            for (String query : queries) {
+                for (String metric : metricNames(query)) {
+                    if (!known.contains(metric)) {
+                        unknown.add(file.getFileName() + ": " + metric + "   in   " + query.replaceAll("\\s+", " "));
+                    }
+                }
+            }
         }
-        return found;
+        assertTrue(unknown.isEmpty(),
+                "These dashboard queries name series that no EDDI meter and no Quarkus/Micrometer built-in produces, "
+                        + "so the panel reads \"No data\" forever — indistinguishable from an idle system. A counter is "
+                        + "scraped with _total, a timer with _seconds_{count,sum,max} (and _bucket only when it publishes "
+                        + "a histogram). A genuinely new built-in goes into MonitoringSeries.BUILT_IN:\n  "
+                        + String.join("\n  ", unknown));
     }
 
-    private static String read(Path file) {
-        try {
-            return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+    @Test
+    @DisplayName("panel ids are unique within each dashboard")
+    void panelIdsAreUnique() {
+        Path root = repoRoot();
+        var duplicates = new TreeSet<String>();
+        for (Path file : dashboards(root)) {
+            Map<Integer, String> seen = new HashMap<>();
+            for (JsonNode panel : panels(dashboard(file))) {
+                int id = panel.path("id").asInt(-1);
+                String title = panel.path("title").asText();
+                String previous = seen.putIfAbsent(id, title);
+                if (previous != null) {
+                    duplicates.add(file.getFileName() + ": id " + id + " is both '" + previous + "' and '" + title + "'");
+                }
+            }
+        }
+        assertTrue(duplicates.isEmpty(),
+                "Grafana keys panel state (viewPanel links, library panels, repeated rows) by id; a duplicate makes "
+                        + "one of the two panels unreachable:\n  " + String.join("\n  ", duplicates));
+    }
+
+    /**
+     * The operations dashboard hard-coded {@code job="eddi"} and datasource uid
+     * {@code prometheus}. Imported anywhere the datasource had another uid — the
+     * Kubernetes component provisioned it without one — every panel failed with
+     * "datasource not found"; scraped under another job name, every panel was
+     * empty.
+     */
+    @Test
+    @DisplayName("every dashboard picks its datasource and scrape job through variables")
+    void dashboardsAreNotPinnedToOneDeployment() {
+        Path root = repoRoot();
+        var problems = new ArrayList<String>();
+        for (Path file : dashboards(root)) {
+            JsonNode dashboard = dashboard(file);
+            var variables = new TreeSet<String>();
+            for (JsonNode variable : dashboard.path("templating").path("list")) {
+                variables.add(variable.path("name").asText());
+                if ("job".equals(variable.path("name").asText())) {
+                    String definition = variable.path("definition").asText();
+                    if (!definition.contains("process_uptime_seconds")) {
+                        problems.add(file.getFileName() + ": $job is sourced from '" + definition
+                                + "' — use process_uptime_seconds, a series every JVM target has");
+                    }
+                }
+            }
+            if (!variables.contains("datasource")) {
+                problems.add(file.getFileName() + ": no $datasource variable");
+            }
+            for (JsonNode panel : panels(dashboard)) {
+                Stream.concat(Stream.of(panel), stream(panel.path("targets"))).forEach(node -> {
+                    JsonNode uid = node.path("datasource").path("uid");
+                    if (!uid.isMissingNode() && !"${datasource}".equals(uid.asText())) {
+                        problems.add(file.getFileName() + ": panel '" + panel.path("title").asText()
+                                + "' pins datasource uid '" + uid.asText() + "'");
+                    }
+                });
+            }
+            if (variables.contains("job")) {
+                for (String expr : expressions(dashboard)) {
+                    if (expr.contains("job=\"")) {
+                        problems.add(file.getFileName() + ": hard-coded job in " + expr);
+                    }
+                }
+            }
+        }
+        assertTrue(problems.isEmpty(), String.join("\n", problems));
+    }
+
+    /**
+     * A KPI over a rate or an increase reads "No data" whenever nothing happened in
+     * the window — and, for a ratio, whenever the denominator's other half has
+     * never been registered: "Tool success %" was blank on a healthy system until
+     * the first tool ever failed. Each such stat or gauge must either fall back to
+     * zero ({@code or on() vector(0)}) or say why it is empty ({@code noValue}).
+     */
+    @Test
+    @DisplayName("KPI panels over rates say 0 or say why, instead of \"No data\"")
+    void kpiPanelsDoNotGoBlankOnAnIdleSystem() {
+        Path root = repoRoot();
+        var blank = new TreeSet<String>();
+        for (Path file : dashboards(root)) {
+            for (JsonNode panel : panels(dashboard(file))) {
+                String type = panel.path("type").asText();
+                if (!type.equals("stat") && !type.equals("gauge")) {
+                    continue;
+                }
+                boolean hasNoValue = panel.path("fieldConfig").path("defaults").hasNonNull("noValue");
+                for (JsonNode target : panel.path("targets")) {
+                    String expr = target.path("expr").asText();
+                    boolean overEvents = expr.contains("rate(") || expr.contains("increase(");
+                    if (overEvents && !expr.contains("vector(") && !hasNoValue) {
+                        blank.add(file.getFileName() + ": '" + panel.path("title").asText() + "'  " + expr);
+                    }
+                }
+            }
+        }
+        assertTrue(blank.isEmpty(), "These KPIs read \"No data\" on a quiet system:\n  " + String.join("\n  ", blank));
+    }
+
+    @Test
+    @DisplayName("the Full Metrics Reference opens on its Overview row")
+    void overviewComesFirst() {
+        JsonNode first = dashboard(repoRoot().resolve(FULL_DASHBOARD)).path("panels").get(0);
+        assertEquals("row", first.path("type").asText());
+        assertTrue(first.path("title").asText().startsWith("Overview"),
+                "the first row is '" + first.path("title").asText() + "'; the 'LLM — Per-call' row used to sit above Overview");
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    static List<Path> dashboards(Path root) {
+        try (Stream<Path> files = Files.list(root.resolve(MONITORING))) {
+            List<Path> found = files.filter(p -> p.getFileName().toString().endsWith(".json")).sorted().toList();
+            assertTrue(found.size() >= 3, "expected the three shipped dashboards under " + MONITORING + ", found " + found);
+            return found;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    static JsonNode dashboard(Path file) {
+        try {
+            return JSON.readTree(file.toFile());
+        } catch (IOException e) {
+            throw new UncheckedIOException(file + " is not valid JSON", e);
+        }
+    }
+
+    /** Every panel, including those nested in collapsed rows. */
+    static List<JsonNode> panels(JsonNode dashboard) {
+        List<JsonNode> all = new ArrayList<>();
+        for (JsonNode panel : dashboard.path("panels")) {
+            all.add(panel);
+            panel.path("panels").forEach(all::add);
+        }
+        return all;
+    }
+
+    static List<String> expressions(JsonNode dashboard) {
+        List<String> all = new ArrayList<>();
+        for (JsonNode panel : panels(dashboard)) {
+            for (JsonNode target : panel.path("targets")) {
+                if (target.hasNonNull("expr")) {
+                    all.add(target.path("expr").asText());
+                }
+            }
+        }
+        return all;
+    }
+
+    private static Stream<JsonNode> stream(JsonNode array) {
+        List<JsonNode> list = new ArrayList<>();
+        array.forEach(list::add);
+        return list.stream();
     }
 }

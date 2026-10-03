@@ -1,0 +1,321 @@
+# EDDI Prometheus alerting rules.
+#
+# Loaded by the compose monitoring stack (docker-compose.monitoring.yml mounts
+# this file and docs/monitoring/prometheus.yml lists it under rule_files), by the
+# Kubernetes monitoring component (k8s/overlays/monitoring) and, as a
+# PrometheusRule, by the Helm chart (prometheusRule.enabled=true). The copies in
+# k8s/overlays/monitoring/ and helm/eddi/files/ are generated from THIS file by
+# `python scripts/sync-monitoring-assets.py`; DeploymentManifestsTest fails when
+# they drift.
+#
+# Every alert carries a runbook in docs/monitoring/monitoring-guide.md
+# ("Alert runbooks"), linked from its runbook_url annotation.
+#
+# Assumptions:
+# - EDDI's scrape job is named "eddi". All three delivery paths name it so; the
+#   rules that read generic series (up, http_server_*, jvm_*, process_*) select
+#   on it, the ones that read eddi_* series need no selector.
+# - Thresholds are starting points for a single-replica deployment with modest
+#   traffic. Every ratio alert also requires a minimum number of events, so a
+#   single failure on an idle system does not page anyone.
+#
+# Validate with: promtool check rules docs/monitoring/eddi-alerts.yml
+#            and promtool test rules docs/monitoring/eddi-alerts.test.yml
+groups:
+  - name: eddi.availability
+    rules:
+      - alert: EddiDown
+        expr: up{job="eddi"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EDDI target {{ $labels.instance }} is down"
+          description: "Prometheus has not been able to scrape {{ $labels.instance }} for 2 minutes: the process is down, unreachable, or /q/metrics answers 401 (authentication on, scrape without a token)."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddidown"
+
+      - alert: EddiMetricsAbsent
+        expr: absent(up{job="eddi"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No EDDI scrape target exists"
+          description: "There is no series for job=\"eddi\" at all: service discovery found no EDDI pod, or the scrape job is named differently from what these rules expect."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddimetricsabsent"
+
+      - alert: EddiRestartLoop
+        expr: changes(process_start_time_seconds{job="eddi"}[30m]) >= 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "EDDI {{ $labels.instance }} restarted {{ $value }} times in 30 minutes"
+          description: "The process start time changed {{ $value }} times in 30 minutes. A crash loop, an OOM kill or a liveness probe that keeps failing."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddirestartloop"
+
+  - name: eddi.http
+    rules:
+      - alert: EddiHighHttp5xxRatio
+        expr: |
+          (
+            sum by (job, instance) (rate(http_server_requests_seconds_count{job="eddi", status=~"5.."}[5m]))
+              / clamp_min(sum by (job, instance) (rate(http_server_requests_seconds_count{job="eddi"}[5m])), 1e-9)
+          ) > 0.05
+          and on (job, instance)
+          sum by (job, instance) (increase(http_server_requests_seconds_count{job="eddi"}[5m])) >= 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of EDDI requests on {{ $labels.instance }} fail with 5xx"
+          description: "More than 5% of HTTP requests answered 5xx for 10 minutes (at least 20 requests per 5 minutes)."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddihighhttp5xxratio"
+
+  - name: eddi.conversations
+    rules:
+      - alert: EddiCoordinatorQueueBacklog
+        expr: sum by (job, instance) (eddi_coordinator_queue_depth) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} conversation turns are queued on {{ $labels.instance }}"
+          description: "Turns waiting behind an earlier turn of the same conversation stayed above 50 for 5 minutes. Turns are taking longer than users send them: slow LLM or tool calls, or a stuck turn."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddicoordinatorqueuebacklog"
+
+      - alert: EddiCoordinatorNearCapacity
+        expr: sum by (job, instance) (eddi_coordinator_active_conversations) > 9000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} active conversation queues on {{ $labels.instance }}"
+          description: "The in-memory coordinator refuses NEW conversations at eddi.coordinator.max-active-conversations (default 10000)."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddicoordinatornearcapacity"
+
+      - alert: EddiConversationTurnsDeadLettered
+        expr: sum by (job, instance) (increase(eddi_coordinator_dead_lettered_total[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} conversation turns were dead-lettered on {{ $labels.instance }} in 15 minutes"
+          description: "A turn failed after it had started and was dead-lettered. Inspect GET /administration/coordinator/dead-letters."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiconversationturnsdeadlettered"
+
+      - alert: EddiPipelineTaskErrors
+        expr: |
+          (
+            sum by (job, instance, task_type) (rate(eddi_pipeline_task_errors_total[10m]))
+              / clamp_min(sum by (job, instance, task_type) (rate(eddi_pipeline_task_duration_seconds_count[10m])), 1e-9)
+          ) > 0.1
+          and on (job, instance, task_type)
+          sum by (job, instance, task_type) (increase(eddi_pipeline_task_duration_seconds_count[10m])) >= 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of {{ $labels.task_type }} pipeline tasks fail on {{ $labels.instance }}"
+          description: "More than 10% of {{ $labels.task_type }} task executions threw for 10 minutes (at least 10 executions per 10 minutes)."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddipipelinetaskerrors"
+
+      - alert: EddiExecutorSaturated
+        expr: max by (job, instance) (eddi_runtime_executor_queued{pool="managed"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Conversation turns on {{ $labels.instance }} are waiting for a worker thread"
+          description: "For 5 minutes at least one turn was submitted to the worker pool and had to wait for a free thread. Every thread is busy: raise quarkus.thread-pool.max-threads or find what holds the threads (slow tools, slow LLM calls)."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiexecutorsaturated"
+
+      - alert: EddiApprovalWaitingLong
+        expr: max by (job) (eddi_hitl_pending_oldest_age_seconds) > 86400
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "A human approval has been waiting for {{ $value | humanizeDuration }}"
+          description: "The oldest conversation paused for human approval or input has waited more than 24 hours. Expected under WAIT_INDEFINITELY; otherwise nobody is answering the approval inbox."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiapprovalwaitinglong"
+
+  - name: eddi.llm
+    rules:
+      - alert: EddiLlmErrorRatio
+        expr: |
+          (
+            sum by (job, instance, provider) (rate(eddi_llm_request_duration_seconds_count{outcome="error"}[10m]))
+              / clamp_min(sum by (job, instance, provider) (rate(eddi_llm_request_duration_seconds_count[10m])), 1e-9)
+          ) > 0.1
+          and on (job, instance, provider)
+          sum by (job, instance, provider) (increase(eddi_llm_request_duration_seconds_count[10m])) >= 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of {{ $labels.provider }} LLM calls fail on {{ $labels.instance }}"
+          description: "More than 10% of calls to {{ $labels.provider }} failed for 5 minutes (at least 5 calls per 10 minutes). eddi_llm_request_errors_total names the exception."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddillmerrorratio"
+
+      - alert: EddiLlmLatencyHigh
+        expr: |
+          histogram_quantile(0.95, sum by (le, job, instance, provider) (rate(eddi_llm_request_duration_seconds_bucket[10m]))) > 30
+          and on (job, instance, provider)
+          sum by (job, instance, provider) (increase(eddi_llm_request_duration_seconds_count[10m])) >= 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency of {{ $labels.provider }} LLM calls is {{ $value | humanizeDuration }} on {{ $labels.instance }}"
+          description: "The 95th percentile of LLM provider call duration stayed above 30 seconds for 15 minutes."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddillmlatencyhigh"
+
+  - name: eddi.tools
+    rules:
+      - alert: EddiToolFailureRatio
+        expr: |
+          (
+            sum by (job, instance, tool) (rate(eddi_tool_execution_failure_total[10m]))
+              / clamp_min(
+                  sum by (job, instance, tool) (rate(eddi_tool_execution_failure_total[10m]))
+                  + (sum by (job, instance, tool) (rate(eddi_tool_execution_success_total[10m])) or sum by (job, instance, tool) (rate(eddi_tool_execution_failure_total[10m])) * 0),
+                  1e-9)
+          ) > 0.25
+          and on (job, instance, tool)
+          sum by (job, instance, tool) (increase(eddi_tool_execution_failure_total[10m])) >= 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of {{ $labels.tool }} tool calls fail on {{ $labels.instance }}"
+          description: "More than 25% of executions of tool {{ $labels.tool }} failed for 10 minutes (at least 5 failures per 10 minutes). Failures include rate-limit refusals and timeouts."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#edditoolfailureratio"
+
+  - name: eddi.security
+    rules:
+      - alert: EddiVaultErrors
+        expr: sum by (job, instance) (increase(eddi_vault_errors_count_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "The secrets vault on {{ $labels.instance }} reported {{ $value | printf \"%.0f\" }} errors in 10 minutes"
+          description: "The vault provider failed to store, read, rotate or delete a secret. LLM and API calls that need a secret fail with it."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddivaulterrors"
+
+      - alert: EddiVaultResolveErrors
+        expr: sum by (job, instance) (rate(eddi_vault_resolve_errors_total[10m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Secret references fail to resolve on {{ $labels.instance }}"
+          description: "More than one ${eddivault:...} reference every 20 seconds failed to resolve, for 10 minutes: a deleted secret, a missing grant, or a vault that cannot decrypt (wrong master key)."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddivaultresolveerrors"
+
+      - alert: EddiOperatorGateRegressed
+        # The gauge starts at 0 on every boot and reads 1 only after the Manager has
+        # reported a verified gate (it reports when someone opens the Platform Operator
+        # page), so after a restart "was 1, is 0" is just the process forgetting.
+        # last_verified_timestamp_seconds is set by a verified report and starts at 0
+        # with the process: non-zero means "verified in THIS process", so a
+        # regression right after a restart still pages, and a bare restart does not.
+        # No time window: a gate that was sound and no longer is stays an incident
+        # until someone re-verifies it.
+        expr: |
+          eddi_operator_gate_verified == 0
+          and on (job, instance) eddi_operator_gate_last_verified_timestamp_seconds > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "The Platform Operator's write-approval gate is no longer verified on {{ $labels.instance }}"
+          description: "The gate read back as sound earlier in this process's life and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddioperatorgateregressed"
+
+      - alert: EddiOperatorCanaryFailing
+        expr: sum by (job, instance) (increase(eddi_operator_canary_total{outcome="fail"}[1h])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "The Platform Operator write canary failed on {{ $labels.instance }}"
+          description: "The Manager's synthetic write canary reported a failure within the last hour."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddioperatorcanaryfailing"
+
+  - name: eddi.audit
+    rules:
+      - alert: EddiAuditEntriesDropped
+        expr: sum by (job, instance) (increase(eddi_audit_entries_dropped_total[10m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} audit entries were dropped on {{ $labels.instance }}"
+          description: "The audit queue was full and entries were dropped. A dropped entry is unrecoverable and invisible to /auditstore/verify."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiauditentriesdropped"
+
+      - alert: EddiAuditQueueFilling
+        expr: max by (job, instance) (eddi_audit_queue_depth / eddi_audit_queue_capacity) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The audit queue on {{ $labels.instance }} is {{ $value | humanizePercentage }} full"
+          description: "The audit store is not keeping up. Entries are dropped once the queue is full."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiauditqueuefilling"
+
+      - alert: EddiAuditSequenceCollisions
+        expr: sum by (job, instance) (increase(eddi_audit_sequence_collisions_total[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Audit chain positions were allocated by another replica"
+          description: "Several replicas wrote the same conversation's audit chain. /auditstore/verify grades those conversations BROKEN. Run one replica, or route a conversation to one replica."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiauditsequencecollisions"
+
+      - alert: EddiQuotaStoreUnavailable
+        expr: sum by (job, instance, type) (increase(eddi_tenant_quota_unavailable_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tenant quota checks fail closed on {{ $labels.instance }} ({{ $labels.type }})"
+          description: "Requests were refused because the quota store could not be read, not because a limit was reached."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiquotastoreunavailable"
+
+  - name: eddi.scheduling
+    rules:
+      - alert: EddiScheduleFiresDeadLettered
+        expr: sum by (job, instance) (increase(eddi_schedule_fire_deadlettered_total[30m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} scheduled fires were dead-lettered on {{ $labels.instance }}"
+          description: "A schedule exhausted its retries. GET /schedulestore/schedules/{id}/fires shows the failure; POST .../retry fires it again."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddischedulefiresdeadlettered"
+
+      - alert: EddiNatsDeadLetters
+        expr: sum by (job, instance) (increase(eddi_nats_dead_letter_count_total[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} NATS messages were dead-lettered on {{ $labels.instance }}"
+          description: "The NATS coordinator moved conversation tasks to the dead-letter stream after exhausting their retries."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddinatsdeadletters"
+
+  - name: eddi.jvm
+    rules:
+      - alert: EddiHeapAfterGcHigh
+        expr: max by (job, instance) (jvm_memory_usage_after_gc{job="eddi", area="heap"}) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} keeps {{ $value | humanizePercentage }} of its heap after GC"
+          description: "Live data after garbage collection stayed above 85% of the maximum heap for 10 minutes. The next allocation burst ends in long GC pauses or an OutOfMemoryError."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiheapaftergchigh"
+
+      - alert: EddiHeapAfterGcCritical
+        expr: max by (job, instance) (jvm_memory_usage_after_gc{job="eddi", area="heap"}) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} keeps {{ $value | humanizePercentage }} of its heap after GC"
+          description: "Live data after garbage collection stayed above 95% of the maximum heap for 5 minutes. An OutOfMemoryError is imminent."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiheapaftergccritical"

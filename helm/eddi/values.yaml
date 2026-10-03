@@ -201,6 +201,16 @@ eddi:
   metrics:
     httpPolicy: ""
 
+  # OpenTelemetry trace export. Empty (the default) leaves tracing off, as the
+  # image ships it (quarkus.otel.sdk.disabled=true). Set it to your collector's
+  # OTLP gRPC endpoint, e.g. "http://otel-collector.observability:4317", and the
+  # chart turns the SDK on and points it there. With networkPolicy.enabled the
+  # EDDI pod may then also open otlpPort to networkPolicy.otlpEgressTo — without
+  # that, the default-deny egress policy silently dropped every span.
+  tracing:
+    otlpEndpoint: ""
+    otlpPort: 4317
+
   # Origins allowed to embed the Chat UI (/chat) in an <iframe>, space-separated,
   # e.g. "https://www.example.com https://*.example.org". Empty keeps EDDI's
   # default, 'none': no page may frame it.
@@ -419,19 +429,66 @@ networkPolicy:
   # Extra destination ports opened for egress (DNS/443 and the in-chart
   # datastores are handled automatically).
   extraEgressPorts: []
+  # Where trace export may go when eddi.tracing.otlpEndpoint is set: a list of
+  # NetworkPolicy peers, opened on eddi.tracing.otlpPort only. The default is any
+  # pod in the cluster (an in-cluster collector, the usual shape). Narrow it to
+  # your collector, e.g.
+  #   - namespaceSelector:
+  #       matchLabels: { kubernetes.io/metadata.name: observability }
+  #     podSelector:
+  #       matchLabels: { app.kubernetes.io/name: opentelemetry-collector }
+  # A collector OUTSIDE the cluster on 443 needs nothing here: external HTTPS is
+  # already allowed. On any other port (4317, 4318, …) it needs an ipBlock for
+  # its address — the default namespaceSelector matches cluster pods only, so
+  # without one every span is dropped:
+  #   - ipBlock: { cidr: 203.0.113.10/32 }
+  # An empty list allows otlpPort to EVERY destination; use it only where that
+  # breadth is acceptable.
+  otlpEgressTo:
+    - namespaceSelector: {}
 
-# ── Monitoring ─────────────────────────────────────────────
+# ── Monitoring (Prometheus Operator) ───────────────────────
 #
-# No values. The chart ships no Prometheus or Grafana templates, and a
-# `monitoring.prometheus.enabled` / `monitoring.grafana.enabled` pair used to sit
-# here that no template consumed — `--set monitoring.prometheus.enabled=true`
-# rendered nothing and exited 0, so an operator believed metrics collection was
-# deployed and had none. (Exactly the failure templates/networkpolicy.yaml was
-# written to fix, left in place two values further down the file.)
+# EDDI exposes Prometheus metrics at /q/metrics and the pod carries the
+# prometheus.io/* scrape annotations (eddi.podAnnotations), so an
+# annotation-driven Prometheus picks it up with nothing set here. For a stack in
+# the same namespace without the operator, use the Kustomize component
+# k8s/overlays/monitoring/.
 #
-# EDDI exposes Prometheus metrics at /q/metrics and the pod already carries the
-# scrape annotations, so any cluster Prometheus picks it up. For a stack in the
-# same namespace use the Kustomize component: k8s/overlays/monitoring/.
+# The two switches below are for the Prometheus Operator (kube-prometheus-stack
+# and friends): both render custom resources whose CRDs only exist where the
+# operator is installed, so both stay off by default. They are top-level, not
+# under `monitoring.*` — that key was removed in chart 2.0.0, see Chart.yaml.
+#
+# With OIDC on, /q/metrics needs a token (eddi.metrics.httpPolicy). Give the
+# ServiceMonitor one through serviceMonitor.endpointConfig, e.g.
+#   authorization: { credentials: { name: eddi-metrics-token, key: token } }
+# or an `oauth2:` block — see docs/monitoring/monitoring-guide.md.
+
+serviceMonitor:
+  # Render a ServiceMonitor for the EDDI Service. It rewrites the scrape job to
+  # "eddi", which the shipped alert rules and dashboards select on. If your
+  # Prometheus ALSO honours the prometheus.io/* pod annotations, clear
+  # eddi.podAnnotations or EDDI is scraped twice. With networkPolicy.enabled, add
+  # the Prometheus namespace (kube-prometheus-stack: usually "monitoring") to
+  # networkPolicy.allowedIngressNamespaces, or every scrape times out.
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  # Extra labels for the ServiceMonitor, e.g. `release: kube-prometheus-stack`
+  # when your Prometheus selects ServiceMonitors by label.
+  labels: {}
+  # Merged into the endpoint as-is: authorization, oauth2, tlsConfig, …
+  endpointConfig: {}
+
+prometheusRule:
+  # Render the shipped alert rules (helm/eddi/files/eddi-alerts.yml, a copy of
+  # docs/monitoring/eddi-alerts.yml) as a PrometheusRule. Runbooks are in
+  # docs/monitoring/monitoring-guide.md.
+  enabled: false
+  # Extra labels, e.g. `release: kube-prometheus-stack` for a Prometheus that
+  # selects rules by label.
+  labels: {}
 
 # ── Service Account ────────────────────────────────────────
 #

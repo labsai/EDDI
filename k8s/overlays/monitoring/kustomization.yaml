@@ -27,3 +27,30 @@ kind: Component
 
 resources:
   - monitoring-stack.yaml
+
+# The alert rules and the dashboards, generated from copies of docs/monitoring/
+# (kustomize reads no file outside this directory). Refresh the copies with
+#   python scripts/sync-monitoring-assets.py
+# DeploymentManifestsTest fails when they drift from docs/monitoring/.
+#
+# kustomize appends a content hash to each name and rewrites the references in
+# monitoring-stack.yaml, so editing a rule or a dashboard rolls the pod that
+# mounts it.
+#
+# The Full Metrics Reference ConfigMap is ~230 KB once escaped, close to the
+# 256 KiB limit of the last-applied-configuration annotation that client-side
+# `kubectl apply` writes. If a later dashboard pushes it over, apply with
+# `kubectl apply --server-side -k`, which keeps no such annotation.
+configMapGenerator:
+  - name: prometheus-rules
+    files:
+      - eddi-alerts.yml
+  - name: grafana-dashboard-operations
+    files:
+      - dashboards/eddi-operations-dashboard.json
+  - name: grafana-dashboard-full-metrics
+    files:
+      - dashboards/eddi-full-metrics-dashboard.json
+  - name: grafana-dashboard-observability
+    files:
+      - dashboards/eddi-grafana-dashboard.json

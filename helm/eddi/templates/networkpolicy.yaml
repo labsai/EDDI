@@ -82,6 +82,19 @@ spec:
         - protocol: TCP
           port: 8080
     {{- end }}
+    {{- if .Values.eddi.tracing.otlpEndpoint }}
+    # OTLP trace export. The collector is normally an in-cluster pod, i.e. a
+    # private address the HTTPS rule below excludes, so without this rule a
+    # deployment with tracing configured exported nothing and logged only the
+    # exporter's own timeouts.
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.eddi.tracing.otlpPort }}
+      {{- with .Values.networkPolicy.otlpEgressTo }}
+      to:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
     # External HTTPS — LLM API providers (OpenAI, Anthropic, …).
     #
     # The `except` list mirrors the application's own SSRF blocklist

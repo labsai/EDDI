@@ -2895,7 +2895,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.3.0";
+        private static final String EXPECTED_CHART_VERSION = "2.4.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
@@ -3145,6 +3145,180 @@ class DeploymentManifestsTest {
                             + "what it advertises and the manual fix dies with the pod");
             assertTrue(stack.contains("url: http://prometheus:9090"),
                     "the provisioned datasource must point at the Prometheus Service this file declares");
+        }
+
+        private static final Path MONITORING_SOURCE = Path.of("docs", "monitoring");
+        private static final Path COMPONENT = K8S.resolve("overlays/monitoring");
+        private static final List<String> DASHBOARDS = List.of("eddi-operations-dashboard.json",
+                "eddi-full-metrics-dashboard.json", "eddi-grafana-dashboard.json");
+
+        /**
+         * A datasource provisioned without a uid gets a random one, and the Operations
+         * and Observability dashboards referenced uid {@code prometheus} directly —
+         * importing either by hand failed with "datasource not found". Compose pinned
+         * the uid; the Kubernetes component did not.
+         */
+        @Test
+        @DisplayName("grafana's prometheus datasource has the fixed uid on every delivery path")
+        void grafanaDatasourceHasAFixedUid() throws IOException {
+            JsonNode k8s = YAML.readTree(documentOfKind(STACK, "ConfigMap", "grafana-datasources")
+                    .path("data").path("datasources.yaml").asText());
+            assertEquals("prometheus", k8s.path("datasources").get(0).path("uid").asText());
+            JsonNode compose = YAML.readTree(MONITORING_SOURCE.resolve("grafana-provisioning/datasources/datasources.yml").toFile());
+            assertEquals("prometheus", compose.path("datasources").get(0).path("uid").asText());
+        }
+
+        /**
+         * The component shipped Grafana with a datasource and no dashboard, and
+         * Prometheus with no alert rule — the three dashboards and the rules existed
+         * only under docs/, which kustomize may not read.
+         */
+        @Test
+        @DisplayName("the kubernetes component provisions the dashboards and loads the alert rules")
+        void componentProvisionsDashboardsAndRules() throws IOException {
+            JsonNode kustomization = YAML.readTree(COMPONENT.resolve("kustomization.yaml").toFile());
+            Map<String, List<String>> generated = new LinkedHashMap<>();
+            for (JsonNode generator : kustomization.path("configMapGenerator")) {
+                generated.put(generator.path("name").asText(), stringList(generator.path("files")));
+            }
+            assertEquals(List.of("eddi-alerts.yml"), generated.get("prometheus-rules"), "generators: " + generated);
+            for (String dashboard : DASHBOARDS) {
+                assertTrue(generated.values().stream().anyMatch(files -> files.contains("dashboards/" + dashboard)),
+                        dashboard + " is generated into no ConfigMap: " + generated);
+            }
+
+            JsonNode prometheusConfig = YAML.readTree(documentOfKind(STACK, "ConfigMap", "prometheus-config")
+                    .path("data").path("prometheus.yml").asText());
+            assertEquals("/etc/prometheus-rules/eddi-alerts.yml", prometheusConfig.path("rule_files").get(0).asText(),
+                    "Prometheus only evaluates a rule file named under rule_files");
+            assertEquals("eddi", prometheusConfig.path("scrape_configs").get(0).path("job_name").asText(),
+                    "the shipped rules select on job=\"eddi\"");
+
+            JsonNode prometheus = documentOfKind(STACK, "Deployment", "prometheus").path("spec").path("template").path("spec");
+            assertTrue(mountsConfigMap(prometheus, "prometheus-rules", "/etc/prometheus-rules"),
+                    "the Prometheus Deployment must mount the generated prometheus-rules ConfigMap at /etc/prometheus-rules");
+
+            JsonNode grafana = documentOfKind(STACK, "Deployment", "grafana").path("spec").path("template").path("spec");
+            assertTrue(mountsConfigMap(grafana, "grafana-dashboard-provider", "/etc/grafana/provisioning/dashboards"),
+                    "Grafana needs a dashboard provider, or the mounted dashboards are never loaded");
+            String projected = grafana.path("volumes").toString();
+            for (String generator : generated.keySet()) {
+                if (generator.startsWith("grafana-dashboard-")) {
+                    assertTrue(projected.contains("\"" + generator + "\""), generator + " is not projected into Grafana");
+                }
+            }
+            JsonNode provider = YAML.readTree(documentOfKind(STACK, "ConfigMap", "grafana-dashboard-provider")
+                    .path("data").path("dashboards.yaml").asText());
+            assertEquals("/var/lib/grafana/dashboards", provider.path("providers").get(0).path("options").path("path").asText());
+        }
+
+        /**
+         * Helm reads only files inside the chart and kustomize only files inside its
+         * root, so both carry copies of docs/monitoring/. A copy that drifts ships
+         * rules or dashboards nobody reviewed.
+         */
+        @Test
+        @DisplayName("the chart's and the component's copies match docs/monitoring")
+        void generatedCopiesMatchTheirSource() throws IOException {
+            String rules = lf(read(MONITORING_SOURCE.resolve("eddi-alerts.yml")));
+            assertEquals(rules, lf(read(HELM.resolve("files/eddi-alerts.yml"))),
+                    "helm/eddi/files/eddi-alerts.yml is stale — run python scripts/sync-monitoring-assets.py");
+            assertEquals(rules, lf(read(COMPONENT.resolve("eddi-alerts.yml"))),
+                    "k8s/overlays/monitoring/eddi-alerts.yml is stale — run python scripts/sync-monitoring-assets.py");
+            for (String dashboard : DASHBOARDS) {
+                assertEquals(JSON.readTree(MONITORING_SOURCE.resolve(dashboard).toFile()),
+                        JSON.readTree(COMPONENT.resolve("dashboards").resolve(dashboard).toFile()),
+                        "k8s/overlays/monitoring/dashboards/" + dashboard + " is stale — run python scripts/sync-monitoring-assets.py");
+            }
+        }
+
+        /**
+         * Client-side {@code kubectl apply} stores the whole object, JSON-escaped, in
+         * the last-applied-configuration annotation, which is capped at 256 KiB. The
+         * Full Metrics Reference is the largest ConfigMap the component generates; this
+         * keeps headroom under that cap so a growing dashboard fails here, not in an
+         * operator's apply.
+         */
+        @Test
+        @DisplayName("each dashboard ConfigMap fits a client-side kubectl apply")
+        void dashboardConfigMapsFitClientSideApply() throws IOException {
+            for (String dashboard : DASHBOARDS) {
+                String payload = read(COMPONENT.resolve("dashboards").resolve(dashboard));
+                int escaped = JSON.writeValueAsString(payload).getBytes(StandardCharsets.UTF_8).length;
+                assertTrue(escaped < 245_000, dashboard + " escapes to " + escaped + " bytes; the last-applied annotation "
+                        + "is capped at 262144. Split the dashboard or document `kubectl apply --server-side`.");
+            }
+        }
+
+        /**
+         * The Prometheus Operator objects are opt-in (their CRDs exist only where the
+         * operator runs). The ServiceMonitor must rename the job to "eddi" — the rules
+         * and dashboards select on it, and without the relabel the job is the Service
+         * name — and the PrometheusRule must insert the rules verbatim: the rules' own
+         * {{ $labels }} templates are for Prometheus, and `tpl` would hand them to
+         * Helm.
+         */
+        @Test
+        @DisplayName("helm: the ServiceMonitor and PrometheusRule are opt-in and consistent with the rules")
+        void prometheusOperatorObjectsAreOptIn() throws IOException {
+            JsonNode values = YAML.readTree(HELM.resolve("values.yaml").toFile());
+            assertFalse(values.path("serviceMonitor").path("enabled").asBoolean(true), "serviceMonitor must default off");
+            assertFalse(values.path("prometheusRule").path("enabled").asBoolean(true), "prometheusRule must default off");
+
+            String serviceMonitor = read(HELM_TEMPLATES.resolve("servicemonitor.yaml"));
+            assertTrue(serviceMonitor.startsWith("{{- if .Values.serviceMonitor.enabled }}"), "servicemonitor.yaml must be gated");
+            assertTrue(serviceMonitor.contains("targetLabel: job") && serviceMonitor.contains("replacement: eddi"),
+                    "the ServiceMonitor must rewrite the job label to eddi");
+            assertTrue(serviceMonitor.contains("path: /q/metrics") && serviceMonitor.contains("port: http"),
+                    "the ServiceMonitor must scrape /q/metrics on the Service's http port");
+
+            String rule = read(HELM_TEMPLATES.resolve("prometheusrule.yaml"));
+            assertTrue(rule.startsWith("{{- if .Values.prometheusRule.enabled }}"), "prometheusrule.yaml must be gated");
+            String rendered = stripGoComments(rule);
+            assertTrue(rendered.contains(".Files.Get \"files/eddi-alerts.yml\""), "the PrometheusRule must read the shipped rules");
+            assertFalse(rendered.contains("tpl "), "the rules must not go through tpl; Helm would expand {{ $labels }}");
+        }
+
+        /**
+         * The NetworkPolicy allowed DNS, the datastores and public HTTPS — and so
+         * dropped every span sent to an in-cluster OTLP collector, a private address.
+         * Tracing was not configurable in the chart either.
+         */
+        @Test
+        @DisplayName("helm: configuring tracing turns the SDK on and opens OTLP egress")
+        void tracingOpensOtlpEgress() throws IOException {
+            String configmap = read(HELM_TEMPLATES.resolve("configmap.yaml"));
+            assertTrue(configmap.contains("{{- with .Values.eddi.tracing.otlpEndpoint }}")
+                    && configmap.contains("QUARKUS_OTEL_SDK_DISABLED: \"false\"")
+                    && configmap.contains("QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT"),
+                    "eddi.tracing.otlpEndpoint must enable the OTel SDK and set the exporter endpoint");
+            String policy = read(HELM_TEMPLATES.resolve("networkpolicy.yaml"));
+            assertTrue(policy.contains("{{- if .Values.eddi.tracing.otlpEndpoint }}")
+                    && policy.contains("port: {{ .Values.eddi.tracing.otlpPort }}")
+                    && policy.contains(".Values.networkPolicy.otlpEgressTo"),
+                    "the EDDI NetworkPolicy must open eddi.tracing.otlpPort to networkPolicy.otlpEgressTo when tracing is on");
+        }
+
+        private static boolean mountsConfigMap(JsonNode podSpec, String configMap, String mountPath) {
+            String volume = null;
+            for (JsonNode v : podSpec.path("volumes")) {
+                if (configMap.equals(v.path("configMap").path("name").asText())) {
+                    volume = v.path("name").asText();
+                }
+            }
+            if (volume == null) {
+                return false;
+            }
+            for (JsonNode mount : podSpec.path("containers").get(0).path("volumeMounts")) {
+                if (volume.equals(mount.path("name").asText()) && mountPath.equals(mount.path("mountPath").asText())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static String lf(String text) {
+            return text.replace("\r\n", "\n");
         }
     }
 
@@ -4667,6 +4841,15 @@ class DeploymentManifestsTest {
             }
         }
         throw new AssertionError(manifest + " contains no " + kind);
+    }
+
+    private static JsonNode documentOfKind(Path manifest, String kind, String name) throws IOException {
+        for (JsonNode document : yamlDocuments(manifest)) {
+            if (kind.equals(document.path("kind").asText()) && name.equals(document.path("metadata").path("name").asText())) {
+                return document;
+            }
+        }
+        throw new AssertionError(manifest + " contains no " + kind + " named " + name);
     }
 
     /**

@@ -947,6 +947,7 @@ resolve_compose_files() {
     echo -e "  ${DIM}Downloading monitoring configuration...${RESET}"
     local monitoring_files=(
       "docs/monitoring/prometheus.yml"
+      "docs/monitoring/eddi-alerts.yml"
       "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml"
       "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
       "docs/monitoring/eddi-grafana-dashboard.json"

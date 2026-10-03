@@ -459,13 +459,19 @@ class SecretVaultIntegrationTest {
         }
 
         @Test
-        @DisplayName("failed resolve increments error counter")
+        @DisplayName("a missing secret is not a vault error; a store that fails is")
         void resolveErrorMetric() {
             setupDekMocking();
             setupSecretMocking();
 
+            // The store answered "no such key": the caller's problem, not the vault's.
+            // Agent signing probes for keys most agents never have, once per turn, so
+            // counting this made the error counter climb on every healthy deployment.
             assertThrows(ISecretProvider.SecretNotFoundException.class, () -> provider.resolve(new SecretReference(TENANT, "nonexistent")));
+            assertEquals(0.0, meterRegistry.counter("eddi.vault.errors.count").count());
 
+            when(persistence.findSecret(anyString(), anyString())).thenThrow(new PersistenceException("DB down"));
+            assertThrows(ISecretProvider.SecretProviderException.class, () -> provider.resolve(new SecretReference(TENANT, KEY_NAME)));
             assertEquals(1.0, meterRegistry.counter("eddi.vault.errors.count").count());
         }
 
