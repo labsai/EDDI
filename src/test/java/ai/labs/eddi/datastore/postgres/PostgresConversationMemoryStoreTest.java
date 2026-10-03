@@ -424,6 +424,34 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             assertEquals(1, store.findPendingApprovalSummaries(1).size(), "limit must bound the result");
         }
 
+        /**
+         * The limit used to apply to an arbitrary order, so past it the OLDEST pause
+         * could be the one dropped: the retention sweep never reached it and
+         * eddi_hitl_pending_oldest_age_seconds under-reported, keeping
+         * EddiApprovalWaitingLong quiet. Inserted newest first and undated in the
+         * middle, so insertion order cannot pass for the right answer.
+         */
+        @Test
+        @DisplayName("findPendingApprovalSummaries returns the oldest pauses first, undated ones last, before the limit")
+        void findPendingApprovalSummariesOldestFirst() throws Exception {
+            Instant now = Instant.now();
+            var newest = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            newest.setHitlPausedAt(now.minusSeconds(10));
+            String newestId = store.storeConversationMemorySnapshot(newest);
+            String undatedId = store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN));
+            var oldest = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            oldest.setHitlPausedAt(now.minusSeconds(7200));
+            String oldestId = store.storeConversationMemorySnapshot(oldest);
+
+            assertEquals(List.of(oldestId), store.findPendingApprovalSummaries(1).stream()
+                    .map(s -> s.getConversationId()).toList(), "the limit must keep the OLDEST pause");
+            assertEquals(List.of(oldestId, newestId, undatedId), store.findPendingApprovalSummaries(10).stream()
+                    .map(s -> s.getConversationId()).toList());
+            assertEquals(List.of(oldestId, newestId), store.findPendingApprovalSummaries("user1", 2).stream()
+                    .map(s -> s.getConversationId()).toList(), "the owner-filtered listing is ordered the same way");
+        }
+
         @Test
         @DisplayName("findPendingApprovalSummaries carries pauseType + toolNames (names only) for a TOOL_CALL pause")
         void findPendingApprovalSummariesCarriesPauseTypeAndToolNames() throws Exception {

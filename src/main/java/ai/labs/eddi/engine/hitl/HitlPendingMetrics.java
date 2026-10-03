@@ -34,9 +34,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * at most {@link #SCAN_LIMIT} rows, on a timer
  * ({@code eddi.hitl.metrics.refresh-interval}, default 60 s; {@code off}
  * disables it) — never on the scrape thread, so a slow store cannot stall
- * {@code /q/metrics}. Past {@link #SCAN_LIMIT} pending approvals both gauges
- * are lower bounds: the count saturates and the oldest age is the oldest among
- * the rows read.
+ * {@code /q/metrics}. Past {@link #SCAN_LIMIT} pending approvals the count
+ * saturates. The oldest age stays exact: the store returns the oldest pauses
+ * first, so the cap drops the newest, never the oldest.
  * <p>
  * <b>Replicas.</b> Every replica reports the same store-wide number. Aggregate
  * with {@code max}, not {@code sum}.

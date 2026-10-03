@@ -19,6 +19,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -669,8 +670,10 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      * (never {@code argumentsRaw}/{@code argumentsRedacted}) so this bulk listing
      * stays cheap and never risks exposing tool-call arguments.
      */
+    private static final String KEY_HITL_PAUSED_AT = "hitlPausedAt";
+
     private static final Bson PENDING_SUMMARY_PROJECTION = Projections.include(KEY_AGENT_ID, "userId",
-            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+            KEY_HITL_PAUSED_AT, "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
             "hitlPauseType", "hitlPendingToolCalls.calls.toolName");
 
     @Override
@@ -679,22 +682,39 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         // (potentially multi-MB) step/output data of paused conversations is
         // never deserialized, and there are no per-id point-reads (this listing
         // is polled and backs the crash-recovery sweep).
-        return collectPendingSummaries(
-                conversationCollectionObject.find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()))
-                        .projection(PENDING_SUMMARY_PROJECTION)
-                        .limit(limit));
+        return pendingOldestFirst(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()), limit);
     }
 
     @Override
     public List<PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
         // Owner filter INSIDE the query: the limit applies after the restriction,
         // so a user's inbox is complete even behind a large global backlog.
-        return collectPendingSummaries(
-                conversationCollectionObject.find(Filters.and(
-                        Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()),
-                        Filters.eq("userId", ownerUserId)))
+        return pendingOldestFirst(Filters.and(
+                Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()),
+                Filters.eq("userId", ownerUserId)), limit);
+    }
+
+    /**
+     * Oldest pause first, pauses without a {@code hitlPausedAt} last, then the
+     * limit. Unordered, the limit kept an arbitrary sample: past it, the oldest
+     * approval could be the one left out — and the oldest is exactly what the
+     * retention sweep and {@code eddi_hitl_pending_oldest_age_seconds} need.
+     * MongoDB sorts a missing field FIRST, so the dated and the undated pauses are
+     * two reads; the second runs only when the first left room under the limit.
+     */
+    private List<PendingApprovalSummary> pendingOldestFirst(Bson filter, int limit) {
+        List<PendingApprovalSummary> out = collectPendingSummaries(
+                conversationCollectionObject.find(Filters.and(filter, Filters.ne(KEY_HITL_PAUSED_AT, null)))
                         .projection(PENDING_SUMMARY_PROJECTION)
+                        .sort(Sorts.ascending(KEY_HITL_PAUSED_AT))
                         .limit(limit));
+        if (out.size() < limit) {
+            out.addAll(collectPendingSummaries(
+                    conversationCollectionObject.find(Filters.and(filter, Filters.eq(KEY_HITL_PAUSED_AT, null)))
+                            .projection(PENDING_SUMMARY_PROJECTION)
+                            .limit(limit - out.size())));
+        }
+        return out;
     }
 
     private List<PendingApprovalSummary> collectPendingSummaries(
