@@ -4,8 +4,11 @@
  */
 package ai.labs.eddi.engine.exception;
 
+import ai.labs.eddi.integrations.openai.OpenAiApiException;
+import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -34,6 +37,35 @@ public final class ErrorResponses {
                 .type(MediaType.APPLICATION_JSON_TYPE)
                 .entity(body(BAD_REQUEST, message))
                 .build();
+    }
+
+    /**
+     * A 400 for the request {@code uriInfo} describes. The OpenAI-compatible
+     * surface ({@code /v1/…}) keeps its own envelope, {@code {"error": {"message",
+     * "type", "code"}}}: SDKs read {@code error.message}, and a flat EDDI body
+     * would surface to them as an unexplained failure. Everything else, and a
+     * {@code null} {@code uriInfo}, gets the EDDI body.
+     */
+    public static Response badRequest(String message, UriInfo uriInfo) {
+        if (isOpenAiPath(uriInfo)) {
+            OpenAiApiException openAi = OpenAiApiException.badRequest(OpenAiErrorResponse.CODE_INVALID_REQUEST_BODY,
+                    message == null || message.isBlank() ? "The request is malformed." : message);
+            return Response.status(openAi.getStatus()).type(MediaType.APPLICATION_JSON_TYPE)
+                    .entity(openAi.toErrorResponse()).build();
+        }
+        return badRequest(message);
+    }
+
+    private static boolean isOpenAiPath(UriInfo uriInfo) {
+        if (uriInfo == null) {
+            return false;
+        }
+        String path = uriInfo.getPath();
+        if (path == null) {
+            return false;
+        }
+        path = path.startsWith("/") ? path.substring(1) : path;
+        return path.equals("v1") || path.startsWith("v1/");
     }
 
     /** The error body itself, for callers that build their own response. */

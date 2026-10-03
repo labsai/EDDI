@@ -6,7 +6,9 @@ package ai.labs.eddi.engine.exception;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
 
@@ -27,12 +29,15 @@ import jakarta.ws.rs.ext.Provider;
  */
 @Provider
 public class UnreadableBodyExceptionMapper implements ExceptionMapper<WebApplicationException> {
+    @Context
+    UriInfo uriInfo;
+
     @Override
     public Response toResponse(WebApplicationException exception) {
         Response original = exception.getResponse();
         if (original != null && original.getStatus() == Response.Status.BAD_REQUEST.getStatusCode()
                 && !original.hasEntity() && exception.getCause() instanceof JsonProcessingException cause) {
-            return ErrorResponses.badRequest(JsonBodyErrors.describe(cause));
+            return ErrorResponses.badRequest(JsonBodyErrors.describe(cause), uriInfo);
         }
         return original;
     }

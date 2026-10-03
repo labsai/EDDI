@@ -6,7 +6,9 @@ package ai.labs.eddi.engine.exception;
 
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
 
@@ -45,6 +47,9 @@ public class ParameterConversionExceptionMapper implements ExceptionMapper<NotFo
 
     private static final int MAX_VALUE_LENGTH = 100;
 
+    @Context
+    UriInfo uriInfo;
+
     private final ClientErrorExceptionMapper fallback = new ClientErrorExceptionMapper();
 
     @Override
@@ -52,7 +57,7 @@ public class ParameterConversionExceptionMapper implements ExceptionMapper<NotFo
         if (!isParameterConversionFailure(exception)) {
             return fallback.toResponse(exception);
         }
-        return ErrorResponses.badRequest(describe(exception.getCause()));
+        return ErrorResponses.badRequest(describe(exception.getCause()), uriInfo);
     }
 
     static boolean isParameterConversionFailure(NotFoundException exception) {
