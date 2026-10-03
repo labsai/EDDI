@@ -61,6 +61,7 @@ import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.runtime.ITurnAbandonment;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
@@ -100,7 +101,7 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
  * @author ginccc
  */
 @ApplicationScoped
-public class ConversationService implements IConversationService, UserErasureParticipant {
+public class ConversationService implements IConversationService, UserErasureParticipant, ITurnAbandonment {
 
     private static final String RESOURCE_URI = "eddi://ai.labs.conversation/conversationstore/conversations/";
 
@@ -335,6 +336,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                 conversationCoordinator, runtime, contextLogger, callerIdentityContext, auditLedgerService,
                 scheduleStore, agentStore, jsonSerialization, hitlResumeCompletedEvent, counterHitlPause,
                 counterHitlResume, meterRegistry, inFlightConversations);
+        meterRegistry.gauge("eddi_conversation_abandoned_running", Tags.empty(),
+                conversationStepRunner.abandonedTurnsRunning, AtomicInteger::doubleValue);
     }
 
     /**
@@ -539,6 +542,17 @@ public class ConversationService implements IConversationService, UserErasurePar
      * memory's user, not on a stored lookup, so a turn whose conversation the
      * cascade has not reached yet — or one started a moment ago — is caught too.
      */
+    @Override
+    public boolean abandonInFlightTurn(String conversationId) {
+        IConversationMemory memory = conversationId == null ? null : inFlightConversations.get(conversationId);
+        if (memory == null) {
+            return false;
+        }
+        ConversationStepRunner.abandonTurn(memory);
+        LOGGER.infof("Abandoned the in-flight turn of conversation %s", sanitize(conversationId));
+        return true;
+    }
+
     @Override
     public int stopInFlightWork(String userId) {
         if (userId == null) {

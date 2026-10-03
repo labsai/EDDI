@@ -30,6 +30,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
@@ -78,6 +79,15 @@ class ConversationStepRunner {
     private final ICache<String, ConversationState> conversationStateCache;
     private final ConcurrentHashMap<String, IConversationMemory> inFlightConversations;
     private final int agentTimeout;
+
+    /**
+     * Turns the dispatcher has given up on (watchdog timeout, interrupted wait)
+     * whose body is still running — "zombies". Exposed as the
+     * {@code eddi_conversation_abandoned_running} gauge. Normally 0: EDDI's own
+     * model path honours the interrupt. A value that stays up means some layer
+     * swallows it and threads are held by turns nobody will read.
+     */
+    final AtomicInteger abandonedTurnsRunning = new AtomicInteger();
 
     ConversationStepRunner(ConversationService conversationService,
             IConversationMemoryStore conversationMemoryStore,
@@ -354,6 +364,7 @@ class ConversationStepRunner {
         private final String conversationId;
         private final IConversationMemory memory;
         private final AtomicInteger bodyState = new AtomicInteger(PENDING);
+        private final AtomicBoolean settled = new AtomicBoolean();
         private volatile boolean dispatcherGaveUp;
 
         private InFlightRegistration(String conversationId, IConversationMemory memory) {
@@ -374,7 +385,7 @@ class ConversationStepRunner {
                 } finally {
                     bodyState.set(FINISHED);
                     if (dispatcherGaveUp) {
-                        unregister();
+                        settle();
                     }
                 }
             };
@@ -392,14 +403,25 @@ class ConversationStepRunner {
                 unregister();
                 return;
             }
+            // Counted before the flag is published, so settle() — reachable only once the
+            // flag is set — always has an increment to pair with.
+            abandonedTurnsRunning.incrementAndGet();
             // Order matters: publish the flag first, then read the body state. The body
             // does the reverse (state first, then the flag), so at least one side sees
             // the other's write and the entry is never stranded.
             dispatcherGaveUp = true;
             if (bodyState.compareAndSet(PENDING, FINISHED) || bodyState.get() == FINISHED) {
-                unregister();
+                settle();
             }
-            // Otherwise the body is still running and unregisters when it returns.
+            // Otherwise the body is still running and settles when it returns.
+        }
+
+        /** Once only, from whichever side sees the abandoned body finished last. */
+        private void settle() {
+            if (settled.compareAndSet(false, true)) {
+                unregister();
+                abandonedTurnsRunning.decrementAndGet();
+            }
         }
 
         private void unregister() {
@@ -434,16 +456,7 @@ class ConversationStepRunner {
                                 conversationService.contextLogger.setLoggingContext(loggingContext);
                                 LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
                                         + "discarding its outcome (no pause persisted/armed)", conversationId);
-                                ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);
-                                if ((runningState == ConversationState.READY || runningState == ConversationState.IN_PROGRESS)
-                                        && conversationMemoryStore.compareAndSetState(conversationId,
-                                                runningState, ConversationState.EXECUTION_INTERRUPTED)) {
-                                    cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
-                                } else {
-                                    // The completion callback already cached this discarded
-                                    // turn's own end state; replace it with the persisted one.
-                                    refreshCachedState(conversationId);
-                                }
+                                settleCancelledTurn(conversationId);
                                 return;
                             }
                             boolean awaitingHuman = conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN;
@@ -576,10 +589,10 @@ class ConversationStepRunner {
                         // A turn already flagged cancelled (the watchdog's abandonTurn, a
                         // /cancel, a GDPR stop) takes this branch whatever it failed with:
                         // its failure is the cancellation's own consequence — a model call
-                        // aborted by the interrupt surfaces as a plain LifecycleException —
-                        // and whoever cancelled it has already recorded the state. Writing
-                        // ERROR over EXECUTION_INTERRUPTED here was a race the zombie could
-                        // win.
+                        // aborted by the interrupt surfaces as a plain LifecycleException.
+                        // Writing ERROR here raced the watchdog's EXECUTION_INTERRUPTED and
+                        // could win. The state is recorded below by settleCancelledTurn,
+                        // exactly as for a cancelled turn that completed.
                         if (t instanceof ExecutionAbandonedException || t instanceof LifecycleException.LifecycleInterruptedException
                                 || conversationMemory.isCancelled()) {
                             String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
@@ -587,12 +600,11 @@ class ConversationStepRunner {
                             conversationService.contextLogger.setLoggingContext(loggingContext);
                             LOGGER.warn(errorMessage, t);
                             if (conversationMemory.isCancelled()) {
-                                // The pipeline's own failure handling set ERROR on the memory and
-                                // its completion callback cached it, so the state endpoint
-                                // reported ERROR for as long as the cache lives while the store
-                                // (the watchdog's EXECUTION_INTERRUPTED, a cancel's state) says
-                                // otherwise. Same repair the success path makes.
-                                refreshCachedState(conversationId);
+                                // Same settlement as a cancelled turn that completed: the
+                                // pipeline's own failure handling may have cached ERROR on its
+                                // way out, and for a /cancel or GDPR stop of a say turn nothing
+                                // else records a state (the say path never persists IN_PROGRESS).
+                                settleCancelledTurn(conversationId);
                             }
                         } else if (t instanceof IConversation.ConversationNotReadyException) {
                             String msg = "Conversation not ready! (conversationId=%s)";
@@ -608,6 +620,38 @@ class ConversationStepRunner {
                         }
                     }
                 }, null));
+    }
+
+    /**
+     * Records the state of a turn that ran to its end (completed or failed) after a
+     * cancel signal: {@code EXECUTION_INTERRUPTED}, by CAS from the running state
+     * so a terminal state another writer committed (ENDED, the watchdog's own
+     * EXECUTION_INTERRUPTED) stands, and the state cache is made to agree with the
+     * store either way.
+     * <p>
+     * The watchdog has written the state before this runs; {@code /cancel} and the
+     * GDPR stop have not — they only raise the flag of a running say turn, whose
+     * persisted state is still READY — so without this a cancelled turn that failed
+     * left the conversation READY, and one that completed was handled here already.
+     */
+    void settleCancelledTurn(String conversationId) {
+        try {
+            ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);
+            if ((runningState == ConversationState.READY || runningState == ConversationState.IN_PROGRESS)
+                    && conversationMemoryStore.compareAndSetState(conversationId,
+                            runningState, ConversationState.EXECUTION_INTERRUPTED)) {
+                cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+                return;
+            }
+        } catch (ResourceStoreException | RuntimeException e) {
+            // Not an ERROR for the conversation: the turn was cancelled, and whoever
+            // cancelled it got their answer. Leave the store as it is.
+            LOGGER.warnf("Could not record EXECUTION_INTERRUPTED for cancelled conversation %s: %s",
+                    sanitize(conversationId), e.getMessage());
+        }
+        // The completion callback may already have cached this turn's own end state;
+        // replace it with the persisted one.
+        refreshCachedState(conversationId);
     }
 
     /**

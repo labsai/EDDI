@@ -97,6 +97,7 @@ class ConversationWatchdogAbandonTest {
     private ExecutorService pool;
     private ConversationService conversationService;
     private ICache<String, ConversationState> stateCache;
+    private SimpleMeterRegistry meterRegistry;
 
     @SuppressWarnings("unchecked")
     @BeforeEach
@@ -122,13 +123,18 @@ class ConversationWatchdogAbandonTest {
         when(contextLogger.createLoggingContext(any(), any(), any(), any())).thenReturn(new HashMap<>());
         when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
         when(auditLedgerService.isEnabled()).thenReturn(false);
+        meterRegistry = new SimpleMeterRegistry();
 
         conversationService = new ConversationService(agentFactory, conversationMemoryStore,
                 mock(IConversationDescriptorStore.class), mock(IUserMemoryStore.class), conversationCoordinator,
                 mock(IConversationSetup.class), cacheFactory, runtime, contextLogger, auditLedgerService,
                 mock(GdprComplianceService.class), tenantQuotaService, mock(IScheduleStore.class), mock(IAgentStore.class),
-                mock(IJsonSerialization.class), new SimpleMeterRegistry(),
+                mock(IJsonSerialization.class), meterRegistry,
                 ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), AGENT_TIMEOUT);
+    }
+
+    private double abandonedRunning() {
+        return meterRegistry.get("eddi_conversation_abandoned_running").gauge().value();
     }
 
     @AfterEach
@@ -209,6 +215,9 @@ class ConversationWatchdogAbandonTest {
         // find it — it used to be unregistered the moment the watchdog returned.
         assertEquals(1, conversationService.stopInFlightWork(USER_ID),
                 "a timed-out turn that is still running must stay reachable for GDPR stop and /cancel");
+        // ...and for a coordinator that lost the turn, through the public seam.
+        assertTrue(conversationService.abandonInFlightTurn(CONVERSATION_ID));
+        assertEquals(1.0, abandonedRunning(), "the zombie is visible on the gauge while it runs");
 
         // The hung call returns at last.
         releaseFirstTask.countDown();
@@ -225,6 +234,50 @@ class ConversationWatchdogAbandonTest {
             Thread.sleep(20);
         }
         assertEquals(0, conversationService.stopInFlightWork(USER_ID), "the finished zombie must be unregistered");
+        assertFalse(conversationService.abandonInFlightTurn(CONVERSATION_ID));
+        assertEquals(0.0, abandonedRunning(), "the gauge returns to 0 once the zombie ended");
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("a turn cancelled while running (/cancel, GDPR stop) that then fails is recorded EXECUTION_INTERRUPTED")
+    void cancelledTurnThatFailsIsRecordedInterrupted() throws Exception {
+        IConversation conversation = mock(IConversation.class);
+        IAgent agent = mock(IAgent.class);
+        AtomicReference<IConversationMemory> turnMemory = new AtomicReference<>();
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot());
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenReturn(ConversationState.READY);
+        when(conversationMemoryStore.compareAndSetState(CONVERSATION_ID, ConversationState.READY,
+                ConversationState.EXECUTION_INTERRUPTED)).thenReturn(true);
+        when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(agent);
+        when(agent.continueConversation(any(), any(), any())).thenAnswer(inv -> {
+            turnMemory.set(inv.getArgument(0));
+            return conversation;
+        });
+        when(conversation.isEnded()).thenReturn(false);
+        // The turn is cancelled from outside while it runs (what /cancel and the GDPR
+        // sweep do: raise the flag of the in-flight memory), then fails on its way out.
+        doAnswer(inv -> {
+            // Through the public seam a coordinator's lost-lease hook uses; /cancel and
+            // the GDPR sweep raise the same flag.
+            assertTrue(conversationService.abandonInFlightTurn(CONVERSATION_ID));
+            throw new IllegalStateException("aborted after the cancel");
+        }).when(conversation).say(anyString(), anyMap());
+
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getValue().call();
+
+        assertTrue(turnMemory.get().isCancelled());
+        // Nothing else records a state for a cancelled say turn: its persisted state is
+        // still READY, so it is settled here, by CAS, as a cancelled completion is.
+        verify(conversationMemoryStore, timeout(5000)).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
+                ConversationState.EXECUTION_INTERRUPTED);
+        verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(stateCache, atLeastOnce()).put(CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
     }
 
     @Test
