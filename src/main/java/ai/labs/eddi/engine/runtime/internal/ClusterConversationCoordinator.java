@@ -91,6 +91,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
         this(runtime, meterRegistry, leases, deadLetterStore, connections, presence, maxActiveConversations, maxDeadLetters,
                 connections.config().leaseAcquireTimeout());
         presence.contribute(this::presenceNumbers);
+        connections.onConnected(this::forwardLocalDeadLetters);
     }
 
     /** For tests and the in-JVM cluster ITs. */
@@ -202,6 +203,33 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
                     e.getMessage());
             recordLocalDeadLetter(conversationId, failure, task);
         }
+    }
+
+    /**
+     * Moves the dead letters this node had to keep locally while NATS was
+     * unreachable into the shared stream, so every node lists them and they survive
+     * this node's restart. Runs on every (re)connect; stops at the first failure
+     * and tries the rest on the next one.
+     *
+     * @return how many entries were forwarded
+     */
+    int forwardLocalDeadLetters() {
+        int forwarded = 0;
+        for (DeadLetterEntry local : super.getDeadLetters()) {
+            try {
+                deadLetterStore.append(local.conversationId(), local.error(), local.timestamp(), local.turn());
+            } catch (ClusterUnavailableException e) {
+                LOGGER.debugf("Forwarding local dead letters paused: %s", e.getMessage());
+                break;
+            }
+            super.discardDeadLetter(local.id());
+            forwarded++;
+        }
+        if (forwarded > 0) {
+            deadLetterCountAt = 0;
+            LOGGER.infof("Forwarded %d dead letter(s) kept on this node while NATS was unreachable to the shared stream", forwarded);
+        }
+        return forwarded;
     }
 
     @Override

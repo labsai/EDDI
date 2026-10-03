@@ -58,14 +58,26 @@ letters) turned up eight defects. Each is fixed here with a test that fails with
 - It does not bump the revision, so the turn that is about to write on the revision it loaded
   does not conflict with it.
 
+### Fixed after the review
+
+- **A recreated leases bucket no longer locks conversations out.** The fence is the lease's KV
+  revision, and a recreated `<prefix>_LEASES` bucket (after NATS lost its data, or to change its
+  replica count — which the log line suggested) restarted at 1, below every `_fence` already
+  stored: every write to those conversations was refused for good. A new leases bucket is now
+  created with its first sequence at its creation time in microseconds
+  ([`NatsSharedStateFactory`](../../src/main/java/ai/labs/eddi/engine/cluster/NatsSharedStateFactory.java)),
+  so a later bucket starts above everything an earlier one handed out unless that one averaged
+  more than a million lease operations a second over its whole life. The replica-count log
+  line now says recreating it is safe, and how. `ClusterCoordinatorIT` deletes and recreates
+  the bucket against a real NATS server and checks the next fence is higher. A bucket created by
+  an earlier build still counts from 1 until it is recreated once.
+- **Dead letters kept on a node while NATS was down are forwarded on reconnect** to the shared
+  stream, so every node lists them and they survive that node's restart.
+
 ### Known and not fixed here
 
-- A fenced-out turn's caller still gets the reply it was rendered (HTTP 200): the output is
-  handed to the caller from inside the pipeline, before the write that the fence then refuses.
-  The turn is dead-lettered with its input and counted in `eddi.cluster.fence.rejected`, which
-  is the signal. While NATS is unreachable that dead letter stays in the node-local ring.
-
-- The fence is a KV revision. Recreating the `<prefix>_LEASES` bucket (the replica-count log
-  line suggests it) restarts the sequence below the `_fence` already stored in conversations;
-  every turn on those conversations is then refused as fenced. Until that is solved in the
-  token itself, remove `_fence` from the affected documents after recreating the bucket.
+- A fenced-out turn's caller still gets the reply it was rendered (HTTP 200), where the design
+  says 409: the output is handed to the caller from inside the pipeline, before the write the
+  fence then refuses — the same path the pre-existing concurrent-modification refusal takes, and
+  changing it means holding every reply until its write commits. The turn is dead-lettered with
+  its input and counted in `eddi.cluster.fence.rejected`, which is the signal.

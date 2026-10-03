@@ -474,4 +474,25 @@ class ClusterConversationCoordinatorTest {
         assertEquals(List.of("a", "b"), log);
         assertNull(a.lease.get().fence());
     }
+
+    @Test
+    @DisplayName("dead letters kept locally while NATS was down move to the shared stream on reconnect")
+    void localDeadLettersAreForwardedOnReconnect() throws Exception {
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-local", failing);
+        await(failing);
+        awaitIdle();
+        assertTrue(coordinator.getDeadLetters().get(0).id().startsWith("local-"), "kept node-locally while NATS is down");
+
+        assertEquals(0, coordinator.forwardLocalDeadLetters(), "nothing moves while the stream is still unreachable");
+        store.down = false;
+        assertEquals(1, coordinator.forwardLocalDeadLetters());
+
+        assertEquals(1, store.entries.size(), "now in the shared stream");
+        List<DeadLetterEntry> listed = coordinator.getDeadLetters();
+        assertEquals(1, listed.size(), "and no longer kept locally");
+        assertFalse(listed.get(0).id().startsWith("local-"));
+    }
 }
