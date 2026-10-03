@@ -103,6 +103,41 @@ class AgentGroupStoreTest {
     }
 
     @Test
+    void duplicateMember_isRejectedAtSaveTime() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("a", "Panelist 1", 1, null), new GroupMember("b", "B", 2, null),
+                new GroupMember(" a ", "Panelist 2", 3, null)));
+
+        String problems = String.join("; ", AgentGroupStore.memberAndLimitProblems(c));
+
+        assertTrue(problems.contains("members[2] repeats members[0] ('a')"), problems);
+        var e = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateMembersAndLimits(c));
+        assertTrue(e.getMessage().contains("one seat"), e.getMessage());
+    }
+
+    @Test
+    void sameIdOfDifferentMemberTypes_isNotADuplicate() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("x", "Agent", 1, null), new GroupMember("x", "Nested", 2, null, MemberType.GROUP)));
+        assertTrue(AgentGroupStore.memberAndLimitProblems(c).isEmpty());
+    }
+
+    @Test
+    void storedDuplicate_loadsWithTheFirstSeatOnly() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        var first = new GroupMember("a", "Panelist 1", 1, "PRO");
+        var other = new GroupMember("b", "B", 2, null);
+        var nameless = new GroupMember(null, "Human", 3, null, MemberType.HUMAN);
+        c.setMembers(new ArrayList<>(List.of(first, other, new GroupMember("a", "Panelist 2", 4, "CON"), nameless)));
+
+        AgentGroupStore.dropDuplicateSeats("g1", c);
+
+        assertEquals(List.of(first, other, nameless), c.getMembers());
+        // and the result now saves cleanly
+        assertTrue(AgentGroupStore.memberAndLimitProblems(c).isEmpty());
+    }
+
+    @Test
     void presetStylesNeedTheRolesTheyAreBuiltOn() {
         var debate = config(DiscussionStyle.DEBATE, null, "judge");
         debate.setMembers(List.of(new GroupMember("a", "A", 1, "PRO"), new GroupMember("b", "B", 2, null)));

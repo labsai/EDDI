@@ -57,6 +57,15 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
             return null;
         }
         try {
+            // The canonical document first: since workspaces are keyed physically by
+            // their group id (see readOrCreate), this is one primary-key read for every
+            // workspace created from this release on.
+            GroupWorkspace canonical = readCanonical(groupId);
+            if (canonical != null) {
+                return canonical;
+            }
+            // Legacy: workspaces created before that carry a generated storage id and
+            // are found by their groupId field.
             List<IResourceStore.IResourceId> ids = findWorkspaceIds(groupId);
             if (ids.isEmpty()) {
                 return null;
@@ -89,6 +98,31 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
         workspace.setGroupId(groupId);
         workspace.setCreated(Instant.now());
         workspace.setLastModified(Instant.now());
+
+        // Atomic path: the workspace's storage id IS its group id, and the insert is
+        // insert-only (createNew), so the database's primary key admits exactly one
+        // creator. Every other racer's insert fails and it adopts the winner's
+        // document. The old path below needed a re-query to converge, and that left a
+        // window: a racer whose re-query ran before a second insert landed returned
+        // its own document and wrote a backlog task to it — and the "smallest id"
+        // survivor rule could then elect the OTHER document, which every later read
+        // follows, so the task was gone (review finding). Smallest id is not first
+        // insert either: ObjectIds are minted client-side and UUIDs are random.
+        Boolean created = createCanonical(workspace);
+        if (Boolean.TRUE.equals(created)) {
+            return workspace;
+        }
+        if (Boolean.FALSE.equals(created)) {
+            GroupWorkspace winner = find(groupId);
+            if (winner != null) {
+                return winner;
+            }
+            // Deleted again between the failed insert and the read — vanishingly rare;
+            // fall through and create through the legacy path rather than fail.
+        }
+
+        // Fallback for a group id this backend cannot use as a storage id (a group
+        // migrated from the other backend keeps its foreign id format).
         try {
             IResourceStorage.IResource<GroupWorkspace> resource = storage.newResource(workspace);
             storage.store(resource);
@@ -115,6 +149,68 @@ public class GroupWorkspaceStore implements IGroupWorkspaceStore {
                 }
             }
         }
+        return workspace;
+    }
+
+    /**
+     * Inserts {@code workspace} under its group id as the storage id.
+     *
+     * @return {@code TRUE} when this call created it; {@code FALSE} when the insert
+     *         failed because another caller's document already holds the id (lost
+     *         the race — adopt theirs); {@code null} when the group id cannot be a
+     *         storage id on this backend, so the caller must use a generated one
+     */
+    private Boolean createCanonical(GroupWorkspace workspace) {
+        String groupId = workspace.getGroupId();
+        IResourceStorage.IResource<GroupWorkspace> resource;
+        try {
+            resource = storage.newResource(groupId, SINGLE_VERSION, workspace);
+        } catch (IOException | IllegalArgumentException e) {
+            return null;
+        }
+        try {
+            storage.createNew(resource);
+            workspace.setId(groupId);
+            return Boolean.TRUE;
+        } catch (RuntimeException e) {
+            // A duplicate-key violation on either backend: the primary key is the
+            // arbiter. Anything else means the id is unusable here — told apart by
+            // whether a document now exists under it, not by backend error text.
+            try {
+                if (readCanonical(groupId) != null) {
+                    LOGGER.debugf("readOrCreate raced for group %s — adopting the concurrently created workspace",
+                            LogSanitizer.sanitize(groupId));
+                    return Boolean.FALSE;
+                }
+            } catch (IOException readFailure) {
+                LOGGER.debugf("Could not re-read workspace %s after a failed insert: %s", LogSanitizer.sanitize(groupId),
+                        readFailure.getMessage());
+            }
+            LOGGER.debugf("Group id %s cannot key a workspace on this backend (%s); using a generated id",
+                    LogSanitizer.sanitize(groupId), e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    /**
+     * The workspace stored under the group id itself, or {@code null}. An id the
+     * backend cannot parse names nothing.
+     */
+    private GroupWorkspace readCanonical(String groupId) throws IOException {
+        IResourceStorage.IResource<GroupWorkspace> resource;
+        try {
+            resource = storage.read(groupId, SINGLE_VERSION);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (resource == null) {
+            return null;
+        }
+        GroupWorkspace workspace = resource.getData();
+        if (workspace == null || !groupId.equals(workspace.getGroupId())) {
+            return null;
+        }
+        workspace.setId(groupId);
         return workspace;
     }
 

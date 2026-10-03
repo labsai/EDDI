@@ -24,6 +24,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -122,6 +123,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                         : "agent") + " it stands for)");
             }
         }
+        problems.addAll(duplicateMemberProblems(members));
         if (config.getMaxRounds() < 0) {
             problems.add("maxRounds must not be negative");
         }
@@ -160,6 +162,86 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         }
         problems.addAll(presetRoleProblems(config));
         return problems;
+    }
+
+    /**
+     * A member stands for one seat, and the engine keys a seat by its
+     * {@code agentId}: one member conversation per agent, display names, vote
+     * weights, {@code participants} lists and the facilitator all address a member
+     * by that id. Listing the same agent twice therefore did not create two
+     * panelists — both seats spoke through ONE member conversation, so the
+     * "independent" second opinion read the first one's answer as its own history.
+     * Refused at save time; a second seat needs a second agent (duplicate it).
+     * Stored configs that already hold a duplicate keep loading — see
+     * {@link #read(String, Integer)}.
+     */
+    static List<String> duplicateMemberProblems(List<AgentGroupConfiguration.GroupMember> members) {
+        List<String> problems = new ArrayList<>();
+        Map<String, Integer> firstSeat = new HashMap<>();
+        for (int i = 0; i < members.size(); i++) {
+            String key = seatKey(members.get(i));
+            if (key == null) {
+                continue;
+            }
+            Integer first = firstSeat.putIfAbsent(key, i);
+            if (first != null) {
+                problems.add("members[" + i + "] repeats members[" + first + "] ('" + members.get(i).agentId().trim()
+                        + "') — a member can hold only one seat, because both seats would share one member conversation and "
+                        + "see each other's answers. Use a second agent for a second seat");
+            }
+        }
+        return problems;
+    }
+
+    /**
+     * The identity a seat is addressed by, or {@code null} for a member that names
+     * nothing (reported separately). Type is part of it: a nested GROUP, an AGENT
+     * and a HUMAN could in principle carry the same id string.
+     */
+    private static String seatKey(AgentGroupConfiguration.GroupMember member) {
+        if (member == null || member.agentId() == null || member.agentId().isBlank()) {
+            return null;
+        }
+        var type = member.memberType() != null ? member.memberType() : AgentGroupConfiguration.MemberType.AGENT;
+        return type.name() + ":" + member.agentId().trim();
+    }
+
+    /**
+     * Stored configs written before duplicate members were refused still load. Each
+     * repeated seat is dropped on read — the FIRST occurrence wins, with its
+     * display name, role and speaking order — so the discussion runs the agent once
+     * instead of twice through one shared conversation, and a GET → PUT round trip
+     * of such a group saves cleanly. Nothing is rewritten in the database until the
+     * group is next saved.
+     */
+    @Override
+    public AgentGroupConfiguration read(String id, Integer version)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        AgentGroupConfiguration config = super.read(id, version);
+        dropDuplicateSeats(id, config);
+        return config;
+    }
+
+    static void dropDuplicateSeats(String id, AgentGroupConfiguration config) {
+        if (config == null || config.getMembers() == null || config.getMembers().size() < 2) {
+            return;
+        }
+        Set<String> seen = new HashSet<>();
+        List<AgentGroupConfiguration.GroupMember> kept = new ArrayList<>(config.getMembers().size());
+        int dropped = 0;
+        for (var member : config.getMembers()) {
+            String key = seatKey(member);
+            if (key != null && !seen.add(key)) {
+                dropped++;
+                continue;
+            }
+            kept.add(member);
+        }
+        if (dropped > 0) {
+            LOGGER.warnf("Group %s lists %d member(s) more than once; running each agent once (first seat wins). "
+                    + "Save the group again to store the de-duplicated member list.", LogSanitizer.sanitize(id), dropped);
+            config.setMembers(kept);
+        }
     }
 
     /**

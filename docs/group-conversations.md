@@ -61,6 +61,19 @@ curl -X POST /groups/<groupId>/conversations \
   -d '{"question": "What is the best architecture for our new service?"}'
 ```
 
+**One agent, one seat.** A member is addressed everywhere by its `agentId` —
+its member conversation, display name, vote weight, `participants` lists and
+the facilitator all key on it — so listing the same agent twice does not give
+the group two panelists: both seats would speak through *one* member
+conversation, and the "independent" second answer would read the first as its
+own history. A group config that repeats a member (same `agentId`
+and member type) is **rejected with `400`**, naming both positions, on create,
+update and over MCP (`create_group`, `update_group`, `create_group_from_template`).
+For a second seat with the same behaviour, duplicate the agent and add the copy.
+A group **already stored** with a repeated member still loads: each repeat is
+dropped on read — the first seat wins, with its display name, role and speaking
+order — and a warning is logged; saving the group once stores the cleaned list.
+
 ## Member Roles
 
 Some styles require specific roles. A preset `DEBATE` group without at least one
@@ -510,7 +523,8 @@ knowledge that compounds run-over-run.
 ## Standing Teams (I13)
 
 A group *conversation* is an episode; a **team** persists. The `GroupWorkspace`
-(one document per group, own collection) holds what survives between episodes:
+(one document per group, own collection — stored under the group's own id, so
+two pods creating it at once end up with exactly one, see below) holds what survives between episodes:
 a **backlog** (a `SharedTaskList`, so pulled tasks flow straight into the
 task-force machinery), **cadences** that pull from it on a schedule, and the
 team's running **metrics** — deliberately thin glue over the existing
@@ -572,6 +586,17 @@ an operator who would rather wedge than risk abandoning a pause; the counter is
 combines `requiresApproval` phases with `WAIT_INDEFINITELY` logs a warning —
 that combination is what makes the backstop reachable — but is not rejected: it
 is legitimate for a team whose approver really is always available.
+
+**Creation is atomic.** The workspace is created on first use, and that first use
+can happen on several pods at once (two backlog adds, a cadence fire and a
+read). It is written with an insert-only write under the group's id, so the
+database's primary key admits one creator and every other caller adopts that
+document. Up to 6.5.0 each creator inserted its own document and they converged
+afterwards on the lexicographically smallest id — which is not the first insert
+(ObjectIds are minted client-side, UUIDs are random), so a caller could get back a
+document that later reads did not elect, and a backlog task it wrote there
+reported success and vanished. Workspaces created by earlier releases keep their
+generated id and are still found by their `groupId`.
 
 Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
