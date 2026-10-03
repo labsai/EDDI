@@ -397,11 +397,17 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * actually returned (an exception means "no information", never "undeploy
      * everything"), and only after the agent was missing in two consecutive sweeps.
      */
+    /**
+     * Every deployment this node has seen a record of — only those can lose one.
+     */
+    private final Set<String> everRecorded = ConcurrentHashMap.newKeySet();
+
     private void reconcileUndeployed(List<DeploymentInfo> meantToBeDeployed) {
         Set<String> wanted = new HashSet<>();
         for (DeploymentInfo info : meantToBeDeployed) {
             wanted.add(info.getEnvironment() + "/" + info.getAgentId() + "/" + info.getAgentVersion());
         }
+        everRecorded.addAll(wanted);
         Instant now = clock.instant();
         Set<String> seenMissing = new HashSet<>();
         for (Environment environment : Environment.values()) {
@@ -414,6 +420,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             for (IAgent agent : served) {
                 String key = environment + "/" + agent.getAgentId() + "/" + agent.getAgentVersion();
                 if (wanted.contains(key)) {
+                    continue;
+                }
+                if (!everRecorded.contains(key)) {
+                    // Never had a record: deployed with autoDeploy=false (here or, through
+                    // the cluster event, on another node). Its undeploy arrives as an event;
+                    // the sweep must not take it for a record that went away.
                     continue;
                 }
                 seenMissing.add(key);

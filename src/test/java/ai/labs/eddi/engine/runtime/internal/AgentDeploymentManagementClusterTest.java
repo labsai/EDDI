@@ -29,7 +29,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -147,6 +150,46 @@ class AgentDeploymentManagementClusterTest {
                 Map.of("env", "production", "agentId", "agent7", "version", 3, "status", DeploymentStore.TRANSIENT)));
 
         verify(agentFactory).deployAgent(Environment.production, "agent7", 3, null);
+    }
+
+    private void sweepAt(Instant at) {
+        management.clock = Clock.fixed(at, ZoneOffset.UTC);
+        management.checkDeployments();
+    }
+
+    @Test
+    @DisplayName("an agent whose record went away (undeployed elsewhere) is undeployed here after two sweeps 5 s apart")
+    void recordGoneIsUndeployed() throws Exception {
+        clustered(true);
+        IAgent served = mock(IAgent.class);
+        when(served.getAgentId()).thenReturn("agent1");
+        when(served.getAgentVersion()).thenReturn(1);
+        when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(List.of(served));
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(deployed("agent1")));
+        Instant t0 = Instant.parse("2026-10-03T10:00:00Z");
+        sweepAt(t0);
+
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+        sweepAt(t0.plusSeconds(10));
+        verify(agentFactory, never()).undeployAgent(Environment.production, "agent1", 1);
+        sweepAt(t0.plusSeconds(16));
+        verify(agentFactory).undeployAgent(Environment.production, "agent1", 1);
+    }
+
+    @Test
+    @DisplayName("an agent deployed without a record (autoDeploy=false) is never taken for one that lost it")
+    void unrecordedDeploymentSurvivesTheSweep() throws Exception {
+        clustered(true);
+        IAgent served = mock(IAgent.class);
+        when(served.getAgentId()).thenReturn("transient");
+        when(served.getAgentVersion()).thenReturn(1);
+        when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(List.of(served));
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+        Instant t0 = Instant.parse("2026-10-03T10:00:00Z");
+        sweepAt(t0);
+        sweepAt(t0.plusSeconds(10));
+        sweepAt(t0.plusSeconds(20));
+        verify(agentFactory, never()).undeployAgent(any(), any(), any());
     }
 
     @Test
