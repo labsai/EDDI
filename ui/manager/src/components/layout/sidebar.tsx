@@ -172,21 +172,31 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const userLabel = displayName || t("auth.signedIn", "Signed in");
 
   // ── Collapsible section state (persisted in localStorage) ──
+  // Keyed by the section's labelKey, not its position: the role filter above
+  // can drop sections, which shifts every later index, so a state saved under
+  // one role collapsed a different section under another. Positions stored by
+  // earlier builds are read back against the full, unfiltered section list.
   const STORAGE_KEY = "eddi-sidebar-sections";
-  const [collapsedSections, setCollapsedSections] = useState<Set<number>>(() => {
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? new Set(JSON.parse(stored) as number[]) : new Set();
+      if (!stored) return new Set();
+      const parsed = JSON.parse(stored) as unknown[];
+      return new Set(
+        parsed
+          .map((entry) => (typeof entry === "number" ? navSections[entry]?.labelKey : entry))
+          .filter((key): key is string => typeof key === "string"),
+      );
     } catch {
       return new Set();
     }
   });
 
-  const toggleSection = useCallback((idx: number) => {
+  const toggleSection = useCallback((sectionKey: string) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
+      if (next.has(sectionKey)) next.delete(sectionKey);
+      else next.add(sectionKey);
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...next])); } catch { /* noop */ }
       return next;
     });
@@ -249,15 +259,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             {!collapsed && (
               <button
                 type="button"
-                onClick={() => toggleSection(idx)}
+                onClick={() => toggleSection(section.labelKey)}
                 className="mb-1 flex w-full items-center gap-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 hover:text-sidebar-foreground/80 transition-colors"
-                aria-expanded={!collapsedSections.has(idx)}
+                aria-expanded={!collapsedSections.has(section.labelKey)}
                 aria-controls={`sidebar-section-${idx}`}
               >
                 <ChevronRight
                   className={cn(
                     "h-3 w-3 shrink-0 transition-transform duration-200",
-                    !collapsedSections.has(idx) && "rotate-90"
+                    !collapsedSections.has(section.labelKey) && "rotate-90"
                   )}
                   aria-hidden="true"
                 />
@@ -268,7 +278,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <div className="mx-3 mb-2 border-t border-sidebar-border" />
             )}
             {/* Section items — hidden when section is collapsed (only in expanded sidebar) */}
-            {(!collapsed ? !collapsedSections.has(idx) : true) && (
+            {(!collapsed ? !collapsedSections.has(section.labelKey) : true) && (
               <div id={`sidebar-section-${idx}`} className="space-y-0.5">
                 {section.items.map((item) => {
                   const label =

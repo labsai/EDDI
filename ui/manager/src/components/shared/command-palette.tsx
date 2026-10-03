@@ -61,6 +61,9 @@ export function CommandPalette() {
   ];
   // Not offered when the user's role cannot open it (the backend would 403).
   const PAGES = ALL_PAGES.filter((page) => mayOpen(page.path));
+  // Recents are stored per browser, not per role: one opened under an admin
+  // session must not be offered to the next user who signs in without it.
+  const recentOpenPages = recentPages.filter((page) => mayOpen(page.path));
 
   // Global Ctrl+K / ⌘+K handler
   useEffect(() => {
@@ -122,7 +125,7 @@ export function CommandPalette() {
             </Command.Empty>
 
             {/* Recent */}
-            {recentPages.length > 0 && (
+            {recentOpenPages.length > 0 && (
               <Command.Group
                 heading={
                   <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
@@ -131,7 +134,7 @@ export function CommandPalette() {
                   </span>
                 }
               >
-                {recentPages.map((page) => {
+                {recentOpenPages.map((page) => {
                   const nav = PAGES.find((p) => p.path === page.path);
                   const Icon = nav?.icon ?? Clock;
                   return (
