@@ -17,6 +17,11 @@ tests:
       - series: 'up{job="eddi", instance="b"}'
         values: '1 0 1 1 1'
     alert_rule_test:
+      # Down for one minute is a pending alert, not a page: one failed scrape (a GC
+      # pause, a rolling restart) must not wake anyone.
+      - eval_time: 2m
+        alertname: EddiDown
+        exp_alerts: []
       - eval_time: 4m
         alertname: EddiDown
         exp_alerts:
