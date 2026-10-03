@@ -1420,6 +1420,38 @@ class RestOrphanAdminSafetyTest {
             assertEquals(List.of(), dictionaryOrphans(scan), "v1's dictionary via the pin, v2's via the current document");
         }
 
+        /**
+         * A pin that names no version ({@code ?version=abc}) made extractResourceId
+         * throw, the scan count as incomplete, and every purge answer 409 until the
+         * workflow was edited. It is unresolvable, not unreadable: the purge goes on,
+         * and the parser's current dictionaries stay protected.
+         */
+        @Test
+        @DisplayName("a parser pin with an unparsable version does not block the purge, and protects what the parser names")
+        void malformedParserPinDoesNotBlockThePurge() throws Exception {
+            URI unused = URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/aabbccddeeff1122334455d4?version=1");
+            String workflowId = "aabbccddeeff1122334455b2";
+            URI workflowUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=1");
+            WorkflowConfiguration workflow = new WorkflowConfiguration();
+            WorkflowConfiguration.WorkflowStep parserStep = new WorkflowConfiguration.WorkflowStep();
+            parserStep.setType(URI.create("eddi://ai.labs.parser"));
+            parserStep.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.parser/parserstore/parsers/" + PARSER_ID + "?version=abc")));
+            workflow.setWorkflowSteps(List.of(parserStep));
+
+            givenOnly("ai.labs.workflow", descriptor(workflowUri, "workflow"));
+            givenOnly("ai.labs.parser", descriptor(PARSER_URI, "parser"));
+            givenOnly("ai.labs.dictionary", descriptor(DICTIONARY_URI, "named"), descriptor(unused, "unused"));
+            when(workflowStore.read(eq(workflowId), any())).thenReturn(workflow);
+            when(parserStore.getCurrentResourceId(PARSER_ID)).thenReturn(resourceId(PARSER_ID, 1));
+            when(parserStore.read(PARSER_ID, 1)).thenReturn(parserNaming(DICTIONARY_URI));
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertTrue(report.isScanComplete(), "an unparsable pin is not an unreadable document");
+            verify(resourceClientLibrary).deleteResource(unused, true);
+            verify(resourceClientLibrary, never()).deleteResource(eq(DICTIONARY_URI), anyBoolean());
+        }
+
         @Test
         @DisplayName("an unreadable parser document aborts the purge with 409 and deletes nothing")
         void unreadableParserDocumentAbortsPurge() throws Exception {

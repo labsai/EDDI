@@ -88,7 +88,9 @@ places where the two backends answered the same request differently:
   version each workflow step pins, and counts their `extensions.dictionaries[n].config.uri` as
   references. The pre-delete re-check asks parser documents too, and fails closed. An unreadable parser
   document makes the scan incomplete, so the purge refuses (409). A parser that is itself an orphan
-  keeps its dictionaries until it is gone; the next purge reaches them.
+  keeps its dictionaries until it is gone; the next purge reaches them. A step pinning a parser with an
+  unparsable version (`?version=abc`) names no readable version: it is skipped with a warning, not
+  counted as an unreadable document, so it cannot hold every purge at 409.
 - **Dead code removed** (no reference in `src/main`): `datastore/mongo/DescriptorStore` (legacy, with
   the `eq(deleted, includeDeleted)` bug), `datastore/mongo/ResourceFilter`,
   `datastore/mongo/HistorizedResourceStore`, `datastore/mongo/ModifiableHistorizedResourceStore`,

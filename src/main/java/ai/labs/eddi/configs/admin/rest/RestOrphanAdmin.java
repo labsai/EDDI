@@ -821,7 +821,21 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         if (!PARSER_TYPE.equals(uri.getHost())) {
             return;
         }
-        var resourceId = RestUtilities.extractResourceId(uri);
+        IResourceStore.IResourceId resourceId;
+        try {
+            resourceId = RestUtilities.extractResourceId(uri);
+        } catch (IllegalArgumentException e) {
+            // A pin such as "?version=abc" names no parser version, so there is no
+            // pinned document to read — the runtime cannot resolve it either. Letting
+            // the exception out made the whole scan incomplete, and every purge a 409,
+            // until someone edited the workflow. Nothing is lost by skipping it: the
+            // parser's identity is already recorded, and its current version's
+            // dictionaries are collected by collectParserDocumentReferences. A parser
+            // document that cannot be READ still fails the scan, below and there.
+            log.warnf("Workflow step pins parser '%s' with an unparsable version; it names no readable version: %s", uri,
+                    e.getMessage());
+            return;
+        }
         if (resourceId == null || isNullOrEmpty(resourceId.getId()) || resourceId.getVersion() == null || resourceId.getVersion() < 1) {
             return;
         }
