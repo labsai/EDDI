@@ -54,6 +54,13 @@ no meter is registered and nothing about NATS is logged.
   events. The unit tests call `startCluster()` themselves and could not see it;
   `ClusterStartableTypingTest` now checks every startable's bean types. Found by the live
   cross-node cancel demo.
+- **Replicas can boot together on PostgreSQL** — every PostgreSQL store creates its tables
+  with `CREATE TABLE IF NOT EXISTS`, which is not safe against a concurrent copy of itself:
+  three replicas starting against an empty database (a Deployment's first install) raced, and
+  the loser died on `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`.
+  [`PostgresStartupSchemaLock`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresStartupSchemaLock.java)
+  holds an advisory lock from the first to the last startup observer, bounded by
+  `eddi.datastore.postgres.startup-lock-timeout`. Found by the live PostgreSQL demo.
 - **Discarding a dead letter twice answers 404** — a replicated (R3) stream reports an
   already-deleted entry as 10043 ("sequence not found"), which surfaced as a 500.
 
