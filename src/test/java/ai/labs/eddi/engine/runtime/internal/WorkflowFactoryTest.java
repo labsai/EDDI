@@ -68,6 +68,23 @@ class WorkflowFactoryTest {
     }
 
     @Test
+    @DisplayName("an Error while building leaves no half-built entry behind: the next call builds again instead of blocking for ever")
+    void anErrorDuringTheBuildDoesNotPoisonTheKey() throws Exception {
+        var workflow = mock(IExecutableWorkflow.class);
+        when(clientLibrary.getExecutableWorkflow("wf-err", 1)).thenThrow(new NoClassDefFoundError("missing")).thenReturn(workflow);
+
+        assertThrows(NoClassDefFoundError.class, () -> factory.getExecutableWorkflow("wf-err", 1));
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<IExecutableWorkflow> second = executor.submit(() -> factory.getExecutableWorkflow("wf-err", 1));
+            assertSame(workflow, second.get(5, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     @DisplayName("should create separate entries for different workflow IDs")
     void separateWorkflows() throws Exception {
         var wf1 = mock(IExecutableWorkflow.class);

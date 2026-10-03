@@ -87,6 +87,13 @@ public class WorkflowFactory implements IWorkflowFactory {
                 } catch (ServiceException | RuntimeException e) {
                     executableWorkflows.remove(key, mine);
                     mine.completeExceptionally(e);
+                } catch (Error e) {
+                    // A LinkageError / StackOverflowError while building must not leave an
+                    // incomplete future in the map: every later caller of this key would
+                    // block on it for ever.
+                    executableWorkflows.remove(key, mine);
+                    mine.completeExceptionally(e);
+                    throw e;
                 }
                 existing = mine;
             }
