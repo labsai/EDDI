@@ -125,7 +125,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             <label className="mb-1 block text-xs text-muted-foreground">
               {t("agentDetail.agentDid", "Agent DID")}
             </label>
-            <DebouncedInput
+            <DebouncedInput commitKey={agentId}
               type="text"
               value={agent.identity?.agentDid ?? ""}
               onCommit={(v) =>
@@ -482,30 +482,18 @@ function DebouncedAttrRow({
   onRemove: () => void;
   disabled?: boolean;
 }) {
-  const [local, setLocal] = useState(attrValue);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Sync from parent on external changes (version bump etc.)
-  useEffect(() => setLocal(attrValue), [attrValue]);
-
-  // Cleanup timer on unmount
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  function handleChange(val: string) {
-    setLocal(val);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => onCommit(val), 600);
-  }
-
+  // The shared debounced input, not a private timer: this one cleared its timer
+  // on unmount, so an attribute edit made just before the section collapsed was
+  // dropped — the same lost edit DebouncedInput flushes instead.
   return (
     <div className="flex items-center gap-1.5">
       <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
         {attrKey}
       </span>
-      <input
+      <DebouncedInput
         type="text"
-        value={local}
-        onChange={(e) => handleChange(e.target.value)}
+        value={attrValue}
+        onCommit={onCommit}
         disabled={disabled}
         className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
@@ -750,7 +738,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("agentDetail.maxRecallEntries", "Max Recall")}
                 </label>
-                <DebouncedNumberInput
+                <DebouncedNumberInput commitKey={agentId}
                   value={cfg.maxRecallEntries ?? 50}
                   onCommit={(v) => patchConfig({ maxRecallEntries: v })}
                   fallback={50}
@@ -761,7 +749,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("agentDetail.maxEntriesPerUser", "Max per User")}
                 </label>
-                <DebouncedNumberInput
+                <DebouncedNumberInput commitKey={agentId}
                   value={cfg.maxEntriesPerUser ?? 500}
                   onCommit={(v) => patchConfig({ maxEntriesPerUser: v })}
                   fallback={500}
@@ -807,15 +795,15 @@ export const UserMemorySection = memo(function UserMemorySection({
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxKeyLength", "Max Key Length")}</label>
-                  <DebouncedNumberInput value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DebouncedNumberInput commitKey={agentId} value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxValueLength", "Max Value Length")}</label>
-                  <DebouncedNumberInput value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DebouncedNumberInput commitKey={agentId} value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxWritesPerTurn", "Max Writes/Turn")}</label>
-                  <DebouncedNumberInput value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DebouncedNumberInput commitKey={agentId} value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
               </div>
             </div>
@@ -842,29 +830,29 @@ export const UserMemorySection = memo(function UserMemorySection({
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamSchedule", "Schedule (cron)")}</label>
-                      <DebouncedInput type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput commitKey={agentId} type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmProvider", "LLM Provider")}</label>
-                      <DebouncedInput type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput commitKey={agentId} type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
-                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput commitKey={agentId} type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
-                      <DebouncedNumberInput value={dream.maxCostPerRun ?? 5.00} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedNumberInput commitKey={agentId} value={dream.maxCostPerRun ?? 5.00} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamPruneDays", "Prune After (days)")}</label>
-                      <DebouncedNumberInput value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedNumberInput commitKey={agentId} value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamBatchSize", "Batch Size")}</label>
-                      <DebouncedNumberInput value={dream.batchSize ?? 50} onCommit={(v) => patchDream({ batchSize: v })} fallback={50} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedNumberInput commitKey={agentId} value={dream.batchSize ?? 50} onCommit={(v) => patchDream({ batchSize: v })} fallback={50} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="flex gap-4">
@@ -1060,7 +1048,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
               <label className="mb-1 block text-[10px] text-muted-foreground">
                 {t("agentDetail.hitlPauseReason", "Approval reason (shown to approvers)")}
               </label>
-              <DebouncedInput
+              <DebouncedInput commitKey={agentId}
                 type="text"
                 value={hitl.pauseReason ?? ""}
                 onCommit={(v) => patchHitl({ pauseReason: v.trim() || null })}
@@ -1268,7 +1256,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
                 <label className="text-xs text-foreground whitespace-nowrap">
                   {t("agentDetail.maxCheckpoints", "Max Checkpoints")}
                 </label>
-                <DebouncedNumberInput
+                <DebouncedNumberInput commitKey={agentId}
                   value={sm.maxCheckpointsPerConversation ?? 10}
                   onCommit={(v) => patchSm({ maxCheckpointsPerConversation: v })}
                   min={1}

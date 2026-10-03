@@ -92,3 +92,53 @@ describe("DebouncedInput", () => {
     expect(onCommit).toHaveBeenCalledExactlyOnceWith("0 4 * * *");
   });
 });
+
+describe("debounced inputs — review follow-ups", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("commits a pending edit to the target it was typed for when the input is reused for another", () => {
+    const saveA = vi.fn();
+    const saveB = vi.fn();
+    const { rerender } = render(
+      <DebouncedInput value="a-name" onCommit={saveA} commitKey="agent-a" data-testid="txt" />,
+    );
+    fireEvent.change(screen.getByTestId("txt"), { target: { value: "typed for A" } });
+    // In-place navigation to agent B before the debounce fires.
+    rerender(<DebouncedInput value="b-name" onCommit={saveB} commitKey="agent-b" data-testid="txt" />);
+    act(() => vi.advanceTimersByTime(600));
+
+    expect(saveA).toHaveBeenCalledExactlyOnceWith("typed for A");
+    expect(saveB).not.toHaveBeenCalled();
+  });
+
+  it("still uses the newest callback for the same target (a save moved it to a new version)", () => {
+    const v1 = vi.fn();
+    const v2 = vi.fn();
+    const { rerender } = render(<DebouncedInput value="x" onCommit={v1} commitKey="agent-a" data-testid="txt" />);
+    fireEvent.change(screen.getByTestId("txt"), { target: { value: "y" } });
+    rerender(<DebouncedInput value="x" onCommit={v2} commitKey="agent-a" data-testid="txt" />);
+    act(() => vi.advanceTimersByTime(600));
+    expect(v1).not.toHaveBeenCalled();
+    expect(v2).toHaveBeenCalledExactlyOnceWith("y");
+  });
+
+  it("applies min to the fallback too: a cleared min=1 field never commits 0", () => {
+    const onCommit = vi.fn();
+    render(<DebouncedNumberInput value={5} min={1} onCommit={onCommit} data-testid="num" />);
+    fireEvent.change(screen.getByTestId("num"), { target: { value: "" } });
+    act(() => vi.advanceTimersByTime(600));
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it("shows the value it committed when clamping changed it", () => {
+    const onCommit = vi.fn();
+    // The parent keeps value at 1 — nothing from outside corrects the text.
+    render(<DebouncedNumberInput value={1} min={1} onCommit={onCommit} data-testid="num" />);
+    const input = screen.getByTestId("num") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "0" } });
+    act(() => vi.advanceTimersByTime(600));
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(1);
+    expect(input.value).toBe("1");
+  });
+});
