@@ -679,4 +679,21 @@ class CapabilityRegistryServiceTest {
         assertEquals(Set.of("support"), service.getSkills("visible"::equals));
         assertTrue(service.getSkills(id -> false).isEmpty());
     }
+
+    @Test
+    void filteredSearch_isCountedAndTimedLikeAnyOther() {
+        var registry = new SimpleMeterRegistry();
+        var metered = newService(registry);
+        var config = new AgentConfiguration();
+        config.setA2aEnabled(true);
+        config.setCapabilities(List.of(new Capability("support", Map.of(), "high")));
+        metered.register("agent-1", config);
+
+        metered.findBySkill("support", "all", id -> true);
+        metered.findA2aBySkill("support", "round_robin");
+
+        assertEquals(2.0, registry.counter("eddi.capability.query.count").count());
+        assertEquals(2L, registry.timer("eddi.capability.query.time").count());
+        assertEquals(1.0, registry.counter("eddi.capability.strategy.applied", "strategy", "round_robin").count());
+    }
 }

@@ -319,14 +319,20 @@ public class CapabilityRegistryService {
      * admitted agents rather than made first and then possibly dropped.
      */
     public List<CapabilityMatch> findBySkill(String skill, String strategy, Predicate<String> agentFilter) {
-        String resolvedStrategy = strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all";
-        List<CapabilityMatch> admitted = lookupBySkill(skill).stream()
-                .filter(match -> agentFilter.test(match.agentId()))
-                .collect(Collectors.toList());
-        if (admitted.isEmpty()) {
-            return admitted;
-        }
-        return applyStrategy(admitted, resolvedStrategy, skill.toLowerCase(Locale.ROOT).trim());
+        // Counted and timed like the unfiltered search: with workspaces enforced, and
+        // for public A2A discovery, this is the path every search takes.
+        return queryTimer.record(() -> {
+            queryCounter.increment();
+            String resolvedStrategy = strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all";
+            meterRegistry.counter("eddi.capability.strategy.applied", "strategy", knownStrategy(resolvedStrategy)).increment();
+            List<CapabilityMatch> admitted = lookupBySkill(skill).stream()
+                    .filter(match -> agentFilter.test(match.agentId()))
+                    .collect(Collectors.toList());
+            if (admitted.isEmpty()) {
+                return admitted;
+            }
+            return applyStrategy(admitted, resolvedStrategy, skill.toLowerCase(Locale.ROOT).trim());
+        });
     }
 
     /**
