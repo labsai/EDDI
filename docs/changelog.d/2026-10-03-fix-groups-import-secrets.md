@@ -20,6 +20,11 @@
 
 **`McpGroupTools` returned raw `e.getMessage()`.** New `McpToolUtils.toolFailure`: a failure the caller can fix (4xx, validation `IllegalArgumentException`, not-found/modified, an engine-authored `GroupDiscussionException`) is described; anything else is logged with its stack under an 8-hex reference and the client gets `{"errorCode":"INTERNAL_ERROR","details":{"reference":…}}`.
 
+**Review follow-ups.**
+- `McpToolUtils.isCallerFacing` passed every `IllegalArgumentException` through verbatim; a library's (Jackson naming model classes, `java.nio` quoting a server path, `NumberFormatException` quoting its input) could leak. Only an IAE constructed by EDDI's own code (top stack frame in `ai.labs.eddi`) is described now; the rest get the reference id.
+- Upgrade by ZIP or live sync with a `targetAgentId`: the guarded agent write was the *last* step, so a caller holding only VIEW/USE on the target had snippets, extensions and workflows written first, then a refused agent write — reported as `500`. `UpgradeExecutor` now requires EDIT on the target before reading or writing anything; a refusal (there, or VIEW in the preview) answers `403` instead of being wrapped into `500`.
+- The DEK-rotation `500` said "nothing is lost", which is untrue for a row that could not be opened at all. It now says which rows a re-run moves and what an operator does with an unopenable one (store the secret again; have the grant's user reconnect).
+
 ### Design decisions
 - Reject duplicates rather than give each seat its own conversation: every group structure is keyed by `agentId`, and a second seat for one agent would need a seat id threaded through votes, participants, the facilitator, stances and the transcript. A second agent is the supported way to get a second seat.
 - Legacy duplicate configs are de-duplicated on read rather than rewritten by a migration: nothing in the database changes until the group is next saved.

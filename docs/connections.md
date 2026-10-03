@@ -791,14 +791,17 @@ that requires knowing no row still names it.
 
 A partial sweep is **reported, not hidden**. The REST call answers **500** with a
 message saying that the new generation is active, that at least *N* sealed rows
-still name an older one, that nothing is lost, and that the operation is safe to
-**re-run** — a re-run picks up exactly the rows the previous one left. Each grant
+still name an older one, and that the operation is safe to **re-run** — a re-run
+picks up exactly the rows the previous one left, provided they can be opened (see
+below for one that cannot). Each grant
 gets two attempts against a concurrent writer; a row losing twice is a row being
 refreshed continuously, and leaving it costs nothing. A grant whose tokens cannot be
 opened at all is **skipped, not fatal**: it is logged by connection name, counted in
 `eddi_vault_reseal_failures_total{participant="connection-grants"}`, included in
 the *N*, and every other grant still moves — one corrupt row used to end the sweep
-for the whole tenant.
+for the whole tenant. Such a grant is already unusable and stays in the *N* on every
+re-run; its user has to reconnect the account (`DELETE /connections/{name}/grant`,
+then link it again), which replaces the row.
 
 Each token is **bound to its row**: sealed with AES-GCM associated data naming the
 connection, the principal and the field (access or refresh), so a token copied into

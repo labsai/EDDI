@@ -661,8 +661,12 @@ public class VaultSecretProvider implements ISecretProvider {
             errorCounter.increment();
             throw new SecretProviderException("DEK rotation for tenant '" + sanitize(tenantId) + "': generation " + nextGeneration
                     + " is now the active key and every new value is sealed with it, but at least " + outstanding
-                    + " sealed row(s) still name an older generation. Nothing is lost — those rows still decrypt with the generation they name,"
-                    + " which has not been deleted — and the operation is safe to re-run to finish the migration.");
+                    + " sealed row(s) still name an older generation. A row left behind by a concurrent write still decrypts with the"
+                    + " generation it names, which has not been deleted; the operation is safe to re-run, and a re-run moves it. A row that could not be"
+                    + " opened at all (logged at ERROR for a secret, at WARN with its connection name for an OAuth grant, and counted in"
+                    + " eddi_vault_reseal_failures_total) was already unreadable before this rotation and stays outstanding on every"
+                    + " re-run: store such a secret again with its value, and have the user of such a grant reconnect the account"
+                    + " (DELETE /connections/{name}/grant, then link it again).");
         }
 
         LOGGER.infof("DEK rotated for tenant '%s': generation %d is active, %d secret(s) migrated", sanitize(tenantId), nextGeneration, migrated);

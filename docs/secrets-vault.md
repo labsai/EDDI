@@ -635,11 +635,12 @@ sweeps existing rows onto it:
 ```
 
 If the sweep does not finish, the call answers **500** and says so — the new
-generation is still active, nothing is lost, and re-running finishes the migration:
+generation is still active, a row left behind by a concurrent write still opens and
+a re-run moves it, and a row that could not be opened at all needs an operator:
 
 ```json
 {
-  "error": "DEK rotation failed: DEK rotation for tenant 'default': generation 3 is now the active key and every new value is sealed with it, but at least 2 sealed row(s) still name an older generation. Nothing is lost — those rows still decrypt with the generation they name, which has not been deleted — and the operation is safe to re-run to finish the migration."
+  "error": "DEK rotation failed: DEK rotation for tenant 'default': generation 3 is now the active key and every new value is sealed with it, but at least 2 sealed row(s) still name an older generation. A row left behind by a concurrent write still decrypts with the generation it names, which has not been deleted; the operation is safe to re-run, and a re-run moves it. A row that could not be opened at all (logged at ERROR for a secret, at WARN with its connection name for an OAuth grant, and counted in eddi_vault_reseal_failures_total) was already unreadable before this rotation and stays outstanding on every re-run: store such a secret again with its value, and have the user of such a grant reconnect the account (DELETE /connections/{name}/grant, then link it again)."
 }
 ```
 
@@ -699,9 +700,15 @@ error one layer down.
 
 **A partial sweep is reported, and re-running finishes it.** The endpoint answers
 **500** with a message stating that the new generation is active and every new value
-seals with it, that at least *N* sealed rows still name an older generation, that
-nothing is lost, and that the operation is safe to re-run. Re-running picks up
-exactly the rows the previous run left. Rows are swept individually so that one
+seals with it, that at least *N* sealed rows still name an older generation, and
+that the operation is safe to re-run. Re-running picks up exactly the rows the
+previous run left **that can be opened**: a row the sweep merely did not win still
+decrypts with the generation it names. A row that cannot be opened at all — a
+secret whose ciphertext is corrupt, a grant sealed under a generation that no longer
+exists — was already lost before the rotation, and stays in the *N* on every re-run
+until an operator deals with it: store the secret again with its value, or have the
+grant's user reconnect the account (`DELETE /connections/{name}/grant`, then link
+it again). Rows are swept individually so that one
 secret nobody can open does not strand the rest of the tenant on an older
 generation for every future rotation as well. The same holds for OAuth grants:
 a grant whose tokens cannot be opened (corrupt, or sealed under a generation that
