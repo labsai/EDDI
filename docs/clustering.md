@@ -231,6 +231,12 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   from a record that was already being retired); the reconciliation sweep removes it after two
   passes. An agent that was deployed with `autoDeploy=false` and whose undeploy event is lost
   (NATS down at that moment) stays deployed on the other nodes until they restart.
+- **NATS holds some personal data for a short time, and the erasure does not purge all of
+  it.** A failed turn's dead letter is purged with the user's conversation, but audit entries
+  that could not be written to the database wait in the `eddi.dlq.audit` subject for the
+  dead-letter retention (7 days; they carry the entry's input and output), and paginated tool
+  responses (15 min) and A2A task mappings (24 h) expire on their own TTL. Erasure requests
+  that must also cover those windows should wait them out or purge the streams.
 - An audit entry written on another node by work that the erasure had not yet
   stopped is pseudonymised only if the `gdpr.user-erased` event reached that
   node first.
