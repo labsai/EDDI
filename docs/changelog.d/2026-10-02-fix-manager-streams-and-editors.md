@@ -33,6 +33,16 @@ mutation-checked.
   [`debounced-inputs.tsx`](../../ui/manager/src/components/editors/debounced-inputs.tsx), parse with
   `Number.isFinite`, respect `min`, and **flush** a pending edit on blur and unmount instead of
   dropping it when a section collapses. The test that re-implemented and asserted the bug is gone.
+- Review follow-ups on the inputs: `min` now clamps the fallback too (a cleared `min={1}` field
+  never commits `0`); the field shows the value it actually committed when clamping changed it;
+  and a `commitKey` (the agent id) binds a pending edit to the agent it was typed for — when an
+  in-app navigation reuses the input for another agent, the edit is flushed through the previous
+  agent's save first instead of being saved into the new one. The capability attribute rows now use
+  the same input, so their edits flush on collapse too.
+- Group detail: a failed current-version lookup shows a retryable error instead of loading
+  version 1. GDPR erasure removes the erased user's inactive cache entries (invalidation alone left
+  them to paint on the next mount) and refetches active ones. Operator Stop also drops stream
+  frames that were already buffered.
 - **Rules editor:** config keys rename through `RenamableKeyInput` (commit on blur, refuse a taken
   key) and "Add config" picks a free `keyN` — renaming on every keystroke merged two rows.
 - **Editor registry:** `EXTENSION_TO_SLUG` gained the snippet store's real extension, the singular

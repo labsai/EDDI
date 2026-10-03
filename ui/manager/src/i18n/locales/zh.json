@@ -2987,7 +2987,8 @@
       "humanNeedsName_other": "{{count}} 名人类成员需要显示名称。",
       "humanNeedsId_one": "{{count}} 名人类成员需要此人的用户 ID。",
       "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。"
-    }
+    },
+    "versionLookupFailed": "无法获取此群组的当前版本。"
   },
   "taskBoard": {
     "title": "任务看板",

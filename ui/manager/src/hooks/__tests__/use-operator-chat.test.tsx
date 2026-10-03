@@ -1214,6 +1214,32 @@ describe("stop keeps the trace of what the turn already did", () => {
     expect(result.current.events).toEqual([]);
     expect(result.current.isStreaming).toBe(false);
   });
+
+  it("ignores frames the stream had already buffered when Stop was pressed", async () => {
+    // The generator does not check the abort signal before each yield, so a
+    // token already buffered kept writing into the answer stop() had settled.
+    h.frames = [
+      { type: "token", data: "Partial" },
+      { type: "token", data: " and more after stop" },
+    ];
+    const { result } = renderHook(() => useOperatorChat(config()));
+    let stopped = false;
+    h.duringStream = () => {
+      const state = useOperatorChatStore.getState();
+      if (!stopped && state.messages.some((m) => m.content === "Partial")) {
+        stopped = true;
+        state.stop();
+      }
+    };
+
+    await act(async () => {
+      await result.current.send("which agents exist?");
+    });
+
+    expect(stopped).toBe(true);
+    const answer = result.current.messages.find((m) => m.role === "agent");
+    expect(answer?.content).toBe("Partial");
+  });
 });
 
 /**

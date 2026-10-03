@@ -1085,6 +1085,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       );
 
       for await (const event of stream) {
+        // A frame already buffered when Stop was pressed (or when a newer turn
+        // took over) must not write into the answer stop() just settled.
+        if (controller.signal.aborted || get().abortController !== controller) break;
         if (event.type === "token") {
           set((s) => ({
             ...s,

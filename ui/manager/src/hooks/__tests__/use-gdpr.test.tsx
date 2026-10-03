@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import {
   useDeleteUserData,
@@ -96,7 +96,7 @@ describe("useIsProcessingRestricted", () => {
 });
 
 describe("useDeleteUserData — cache invalidation", () => {
-  it("marks every cached read the erasure touched as stale", async () => {
+  it("evicts every cached read the erasure touched, so no later screen paints erased data", async () => {
     // Regression: erasure invalidated nothing, so memories, conversations,
     // schedules and the restriction badge kept showing the erased user's data.
     const queryClient = new QueryClient({
@@ -126,9 +126,33 @@ describe("useDeleteUserData — cache invalidation", () => {
     result.current.mutate("user-123");
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
+    // Removed, not merely marked stale: an invalidated inactive entry still
+    // holds the erased user's data and paints it on the next mount.
     for (const key of seeded) {
-      expect(queryClient.getQueryState(key)?.isInvalidated, JSON.stringify(key)).toBe(true);
+      expect(queryClient.getQueryData(key), JSON.stringify(key)).toBeUndefined();
     }
-    expect(queryClient.getQueryState(untouched)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryData(untouched)).toEqual([]);
+  });
+
+  it("refetches a screen that is showing the erased data right now", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    let served = "before erasure";
+    const { result } = renderHook(
+      () => ({
+        memories: useQuery({ queryKey: ["user-memories", "user-123"], queryFn: async () => served }),
+        erase: useDeleteUserData(),
+      }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+    await waitFor(() => expect(result.current.memories.data).toBe("before erasure"));
+    served = "after erasure";
+    result.current.erase.mutate("user-123");
+    await waitFor(() => expect(result.current.memories.data).toBe("after erasure"));
   });
 });

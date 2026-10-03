@@ -42,8 +42,14 @@ export function useDeleteUserData() {
     mutationFn: (userId) => deleteUserData(userId),
     // On success only: a 207 (partial) is a success here, and it erased
     // something too. A 4xx/5xx erased nothing the caches could be holding.
+    //
+    // Inactive entries are REMOVED, not merely invalidated: invalidation only
+    // marks them stale, so the next screen to mount them painted the erased
+    // user's data from cache before its refetch replaced it. Active queries (the
+    // screen on show) are refetched at once.
     onSuccess: (_data, userId) => {
       for (const queryKey of gdprErasureInvalidations(userId)) {
+        queryClient.removeQueries({ queryKey, type: "inactive" });
         void queryClient.invalidateQueries({ queryKey });
       }
     },

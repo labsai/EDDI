@@ -15,7 +15,7 @@ import {
   useGroupConversations,
   useGroupConversation,
   useDeleteGroupConversation,
-  useResolvedGroupVersion,
+  useGroupVersionLookup,
 } from "@/hooks/use-groups";
 import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
@@ -133,7 +133,13 @@ export function GroupDetailPage() {
   // used to open the group's FIRST version — its original name, members and
   // phases — and every save or delete from there 409'd against the current one.
   // `undefined` while the current version is being looked up.
-  const resolvedVersion = useResolvedGroupVersion(groupId, searchParams.get("version"));
+  // A failed lookup is shown with a retry (below), never read as version 1:
+  // that loaded a stale document whose next save or delete 409'd.
+  const {
+    version: resolvedVersion,
+    lookupFailed: versionLookupFailed,
+    retry: retryVersionLookup,
+  } = useGroupVersionLookup(groupId, searchParams.get("version"));
   const version = resolvedVersion ?? 1;
   /**
    * Move the page onto the version a config save created.
@@ -538,6 +544,19 @@ export function GroupDetailPage() {
     userClearedRef.current = false; // a deliberate pick re-arms the auto-select
     setSelectedConvId(convId);
     setHistoryOpen(false);
+  }
+
+  if (versionLookupFailed) {
+    return (
+      <div className="space-y-4">
+        <BackLink to="/manage/groups" label={t("groups.backToGroups", "Back to Groups")} />
+        <ErrorState
+          message={t("groups.versionLookupFailed", "Could not find this group's current version.")}
+          onRetry={retryVersionLookup}
+          retryLabel={t("common.retry")}
+        />
+      </div>
+    );
   }
 
   if (configLoading || resolvedVersion === undefined) {
