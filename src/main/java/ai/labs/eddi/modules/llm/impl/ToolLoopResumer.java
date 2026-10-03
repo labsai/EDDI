@@ -126,7 +126,15 @@ class ToolLoopResumer {
 
         String conversationId = memory.getConversationId();
         String pauseEpoch = batch.getPauseEpoch();
+        // Seeded with what the turn already did before the pause, so one list is the
+        // turn's trace for everything downstream: the per-turn tool-call cap counts
+        // the calls made before the pause (it used to restart from zero here), and a
+        // continuation that pauses again freezes the whole turn, not just its own
+        // part, into the next batch.
         List<Map<String, Object>> trace = new ArrayList<>();
+        if (batch.getTraceSoFar() != null) {
+            trace.addAll(batch.getTraceSoFar());
+        }
 
         // Tool-cost baseline, snapshotted BEFORE the verdict loop below — that loop
         // runs every human-approved gated call through executeToolWrapped, which
@@ -316,19 +324,12 @@ class ToolLoopResumer {
                 tokenHolder,
                 jsonPolicy, null, null);
 
-        // ── Step 5: merge the pre-pause trace with the resume trace ──
-        List<Map<String, Object>> mergedTrace = new ArrayList<>();
-        if (batch.getTraceSoFar() != null) {
-            mergedTrace.addAll(batch.getTraceSoFar());
-        }
-        mergedTrace.addAll(trace);
-
         Map<String, Object> responseMetadata = new HashMap<>();
         if (tokenHolder[0] != null) {
             responseMetadata.put("tokenUsage", ToolContextBudget.tokenUsageMap(tokenHolder[0]));
         }
         responseMetadata.put("toolCostUsd", toolLoopRunner.toolCostDelta(conversationId, toolCostBefore));
-        return new AgentOrchestrator.ExecutionResult(response, mergedTrace, responseMetadata);
+        return new AgentOrchestrator.ExecutionResult(response, trace, responseMetadata);
     }
 
     /**
