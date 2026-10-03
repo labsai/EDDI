@@ -141,6 +141,9 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   const attachBtnRef = useRef<HTMLButtonElement>(null);
   const chipsRef = useRef<HTMLDivElement>(null);
   const uploadSeq = useRef(0);
+  /** The conversation the composer belongs to right now, for upload continuations. */
+  const currentConversationRef = useRef(conversationId);
+  currentConversationRef.current = conversationId;
   const atCapacity =
     pendingAttachments.length + uploading.length >= MAX_ATTACHMENTS_PER_TURN;
 
@@ -250,6 +253,14 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         staged.map(async ({ file, id }) => {
           try {
             const result = await uploadAttachment(conversationId, file);
+            // New conversation while the upload was in flight: the file now
+            // belongs to the abandoned one. Staging it would attach another
+            // conversation's blob to the next message. Drop it and free the
+            // quota it took.
+            if (currentConversationRef.current !== conversationId) {
+              deleteAttachment(conversationId, result.storageRef).catch(() => {});
+              return;
+            }
             // Stage it. The ref reaches the agent as an attachment_N context
             // entry when the next message is sent — embedding it in the message
             // text was silently ignored by the backend.

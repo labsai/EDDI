@@ -133,6 +133,37 @@ describe("ChatInput — attachments", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("does not stage an upload that finishes after the conversation changed", async () => {
+    let finish!: (r: Awaited<ReturnType<typeof uploadAttachment>>) => void;
+    vi.mocked(uploadAttachment).mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    const onSend = vi.fn();
+    const ui = (conversationId: string) => (
+      <ChatProvider>
+        <ChatInput onSend={onSend} conversationId={conversationId} />
+        <Transcript />
+      </ChatProvider>
+    );
+    const { rerender } = render(ui("conv-old"));
+    fireEvent.change(screen.getByTestId("chat-file-input"), {
+      target: { files: [pdf("late.pdf")] },
+    });
+    rerender(ui("conv-new"));
+    finish({
+      storageRef: "ref-late",
+      fileName: "late.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 3,
+      forwardableInline: true,
+    });
+
+    await vi.waitFor(() =>
+      expect(deleteAttachment).toHaveBeenCalledWith("conv-old", "ref-late"),
+    );
+    expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument();
+  });
+
   it("shows the staged file name as a removable chip", async () => {
     await attach("invoice.pdf");
 
