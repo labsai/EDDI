@@ -48,8 +48,11 @@ public class ClusterConfig {
     @ConfigProperty(name = "eddi.nats.url", defaultValue = "nats://localhost:4222")
     String natsUrl = "nats://localhost:4222";
 
+    static final String DEFAULT_PREFIX = "EDDI";
+    static final String DEFAULT_DEAD_LETTER_STREAM = "EDDI_DEAD_LETTERS";
+
     @ConfigProperty(name = "eddi.nats.prefix", defaultValue = "EDDI")
-    String natsPrefix = "EDDI";
+    String natsPrefix = DEFAULT_PREFIX;
 
     @ConfigProperty(name = "eddi.nats.replicas", defaultValue = "1")
     int natsReplicas = 1;
@@ -271,8 +274,35 @@ public class ClusterConfig {
         return natsReconnectWait;
     }
 
+    /**
+     * The dead-letter stream. The default name follows {@code eddi.nats.prefix},
+     * like every other stream and bucket: two deployments with different prefixes
+     * on one NATS cluster otherwise shared one stream, and each one's provisioning
+     * rewrote the other's subjects. An explicitly configured name is used as given.
+     */
     public String deadLetterStreamName() {
+        if (DEFAULT_DEAD_LETTER_STREAM.equals(deadLetterStreamName) && !DEFAULT_PREFIX.equals(natsPrefix)) {
+            return natsPrefix + "_DEAD_LETTERS";
+        }
         return deadLetterStreamName;
+    }
+
+    /**
+     * The configured NATS servers with any {@code user:password@} part removed:
+     * safe to log.
+     */
+    public List<String> natsServersForLog() {
+        return natsServers().stream().map(ClusterConfig::redactUserInfo).toList();
+    }
+
+    /**
+     * {@code nats://user:secret@host:4222} becomes {@code nats://***@host:4222}.
+     */
+    public static String redactUserInfo(String url) {
+        if (url == null) {
+            return null;
+        }
+        return url.replaceAll("(?<=//)[^/@\s]*@", "***@");
     }
 
     public Duration leaseTtl() {

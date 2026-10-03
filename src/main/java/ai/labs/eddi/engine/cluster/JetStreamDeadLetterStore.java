@@ -168,7 +168,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         }
         try {
             MessageInfo info = connections.jetStreamManagement().getMessage(stream, seq);
-            if (info == null || !info.isMessage() || !info.getSubject().startsWith(subjects.deadLetterTurn(""))) {
+            if (info == null || !info.isMessage() || !isTurnSubject(info.getSubject())) {
                 return Optional.empty();
             }
             return Optional.of(toEntry(info));
@@ -189,7 +189,15 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             return false;
         }
         try {
-            return connections.jetStreamManagement().deleteMessage(stream, seq);
+            JetStreamManagement jsm = connections.jetStreamManagement();
+            // The stream also holds audit-ledger entries that could not be stored: an
+            // operator discarding a turn's dead letter by sequence must not be able to
+            // delete one of those. get() already hides them; delete() has to as well.
+            MessageInfo info = jsm.getMessage(stream, seq);
+            if (info == null || !info.isMessage() || !isTurnSubject(info.getSubject())) {
+                return false;
+            }
+            return jsm.deleteMessage(stream, seq);
         } catch (JetStreamApiException e) {
             if (notFound(e)) {
                 return false;
@@ -269,6 +277,11 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         } catch (IOException e) {
             return new DeadLetterEntry(String.valueOf(info.getSeq()), null, "unreadable entry", 0L, payload, null);
         }
+    }
+
+    /** Whether a stream subject is a conversation turn's dead letter. */
+    boolean isTurnSubject(String subject) {
+        return subject != null && subject.startsWith(subjects.deadLetterTurn(""));
     }
 
     private static long parseSeq(String id) {

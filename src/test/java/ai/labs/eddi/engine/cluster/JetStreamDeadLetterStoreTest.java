@@ -5,12 +5,25 @@
 package ai.labs.eddi.engine.cluster;
 
 import io.nats.client.JetStreamApiException;
+import io.nats.client.JetStreamManagement;
 import io.nats.client.api.ApiResponse;
+import io.nats.client.api.MessageInfo;
 import io.nats.client.support.JsonParser;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Which JetStream errors mean "that dead letter is gone". A single-server
@@ -25,6 +38,64 @@ class JetStreamDeadLetterStoreTest {
                 + ",\"description\":\"not found\"}}";
         return new JetStreamApiException(new ApiResponse<Object>(JsonParser.parse(json)) {
         });
+    }
+
+    private static MessageInfo message(String subject) {
+        MessageInfo info = mock(MessageInfo.class);
+        when(info.isMessage()).thenReturn(true);
+        when(info.getSubject()).thenReturn(subject);
+        return info;
+    }
+
+    private static JetStreamDeadLetterStore store(JetStreamManagement jsm) {
+        NatsConnectionManager connections = mock(NatsConnectionManager.class);
+        when(connections.config()).thenReturn(ClusterConfig.defaults());
+        when(connections.jetStreamManagement()).thenReturn(jsm);
+        return new JetStreamDeadLetterStore(connections);
+    }
+
+    @Test
+    void discardRemovesATurnsDeadLetter() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        MessageInfo entry = message("eddi.EDDI.dlq.turn.abc");
+        when(jsm.getMessage("EDDI_DEAD_LETTERS", 7L)).thenReturn(entry);
+        when(jsm.deleteMessage("EDDI_DEAD_LETTERS", 7L)).thenReturn(true);
+        assertTrue(store(jsm).delete("7"));
+    }
+
+    @Test
+    void discardCannotDeleteAnAuditDeadLetter() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        MessageInfo entry = message("eddi.EDDI.dlq.audit");
+        when(jsm.getMessage("EDDI_DEAD_LETTERS", 9L)).thenReturn(entry);
+        assertFalse(store(jsm).delete("9"));
+        verify(jsm, never()).deleteMessage(anyString(), anyLong());
+    }
+
+    @Test
+    void discardingTwiceIsNotFoundTheSecondTime() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        when(jsm.getMessage("EDDI_DEAD_LETTERS", 7L)).thenThrow(error(10043));
+        assertFalse(store(jsm).delete("7"));
+    }
+
+    @Test
+    void theDefaultStreamNameFollowsThePrefix() {
+        assertEquals("EDDI_DEAD_LETTERS", ClusterConfig.defaults().deadLetterStreamName());
+        assertEquals("PROD_DEAD_LETTERS", ClusterConfig.defaults().withNatsPrefix("PROD").deadLetterStreamName());
+        ClusterConfig explicit = ClusterConfig.defaults().withNatsPrefix("PROD");
+        explicit.deadLetterStreamName = "MY_DLQ";
+        assertEquals("MY_DLQ", explicit.deadLetterStreamName());
+    }
+
+    @Test
+    void serverUrlsAreLoggedWithoutCredentials() {
+        assertEquals("nats://***@nats-1:4222", ClusterConfig.redactUserInfo("nats://eddi:s3cret@nats-1:4222"));
+        assertEquals("nats://***@nats-1:4222", ClusterConfig.redactUserInfo("nats://token@nats-1:4222"));
+        assertEquals("nats://nats-1:4222", ClusterConfig.redactUserInfo("nats://nats-1:4222"));
+        assertEquals("nats://a:4222/x@y", ClusterConfig.redactUserInfo("nats://a:4222/x@y"));
+        ClusterConfig config = ClusterConfig.defaults().withNatsUrl("nats://u:p@a:4222, nats://b:4222");
+        assertEquals(List.of("nats://***@a:4222", "nats://b:4222"), config.natsServersForLog());
     }
 
     @ParameterizedTest(name = "err_code {0} -> not found: {1}")

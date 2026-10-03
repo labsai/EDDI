@@ -71,7 +71,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.nats.url` | `nats://localhost:4222` | NATS servers, comma-separated — list every member of the NATS cluster |
 | `eddi.nats.prefix` | `EDDI` | Prefix of every KV bucket, stream and subject (`eddi.<prefix>.…`), so two deployments can share one NATS cluster |
 | `eddi.nats.replicas` | `1` | JetStream replicas of every bucket and stream. `3` on a three-node NATS cluster. A bucket created with another value keeps it (logged as a warning) |
-| `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream holding the dead letters of failed turns, readable, discardable and replayable from every node |
+| `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream holding the dead letters of failed turns, readable, discardable and replayable from every node. While left at the default it follows `eddi.nats.prefix` (`<prefix>_DEAD_LETTERS` for any prefix other than `EDDI`), so deployments with different prefixes on one NATS cluster never share it |
 | `eddi.nats.username` / `eddi.nats.password` | — | NATS user credentials |
 | `eddi.nats.token` | — | NATS token authentication |
 | `eddi.nats.creds-file` | — | Path of a NATS `.creds` file (JWT + nkey) |

@@ -145,7 +145,7 @@ public class NatsConnectionManager {
         }
         try {
             LOGGER.infof("Cluster mode: node %s connecting to NATS %s (asynchronously; the node serves in degraded mode until connected)",
-                    node, config.natsServers());
+                    node, config.natsServersForLog());
             Nats.connectAsynchronously(options, true);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -258,7 +258,7 @@ public class NatsConnectionManager {
                         }
                     }
                     LOGGER.infof("NATS %s (node %s, server %s)", type == Events.CONNECTED ? "connected" : "reconnected", node,
-                            conn.getConnectedUrl());
+                            ClusterConfig.redactUserInfo(conn.getConnectedUrl()));
                     ScheduledExecutorService s = scheduler;
                     if (s != null) {
                         for (Runnable hook : connectedHooks) {
