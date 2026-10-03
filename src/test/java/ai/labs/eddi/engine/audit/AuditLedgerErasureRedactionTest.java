@@ -364,4 +364,28 @@ class AuditLedgerErasureRedactionTest {
                     .orElse(AuditEntry.UNSEQUENCED);
         }
     }
+
+    @Test
+    @DisplayName("a queued entry is verified before it is re-signed; one that fails keeps its HMAC and says so")
+    void queuedEntriesAreVerifiedBeforeTheyAreResealed() {
+        ledger.submit(turn(USER, 0));
+        ledger.flush();
+        AuditEntry signed = store.rows().getFirst();
+        ledger.markUserErased(USER);
+
+        AuditEntry good = ledger.pseudonymiseIfErased(signed, true);
+        AuditEntry forged = ledger.pseudonymiseIfErased(signed.withPayload(Map.of("input", "forged"), signed.output(), signed.llmDetail(),
+                signed.toolCalls()), true);
+
+        assertEquals("VALID", marker(good).get("integrityBeforeRedaction"));
+        assertEquals(AuditVerificationStatus.VALID, ledger.verifyEntry(good), "a verified queued entry is re-signed");
+        assertEquals("INVALID", marker(forged).get("integrityBeforeRedaction"), "never VALID on trust");
+        assertEquals(signed.hmac(), forged.hmac(), "an entry that failed verification is not re-signed");
+        assertEquals(AuditVerificationStatus.INVALID, ledger.verifyEntry(forged));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> marker(AuditEntry entry) {
+        return (Map<String, Object>) entry.input().get(AuditLedgerService.REDACTION_MARKER_KEY);
+    }
 }

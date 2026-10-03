@@ -1498,13 +1498,19 @@ public class AuditLedgerService {
         if (!redactContentOnErasure || isComplianceRecord(entry)) {
             return rewritten;
         }
-        AuditEntry redacted = rewritten.withPayload(redactionMarker(entry.hmac(), entry.hmac() != null ? AuditVerificationStatus.VALID : null),
-                null, null, null);
         if (!queued) {
-            return redacted; // the submit path: signed right after this
+            // The submit path: nothing is signed yet, and the entry is signed right after
+            // this.
+            return rewritten.withPayload(redactionMarker(null, null), null, null, null);
         }
+        // A queued entry was signed by this node, but it is still verified like a
+        // stored row before it is re-signed, and the marker records the verdict that
+        // was actually observed — never VALID on trust.
+        AuditVerificationStatus before = entry.hmac() != null ? verifyEntry(entry) : null;
+        AuditEntry redacted = rewritten.withPayload(redactionMarker(entry.hmac(), before), null, null, null);
         redactedOnDrain.computeIfAbsent(userId, k -> new AtomicLong()).incrementAndGet();
-        return entry.hmac() == null ? redacted : reseal(redacted);
+        boolean verified = before == AuditVerificationStatus.VALID || before == AuditVerificationStatus.VALID_RECOVERED;
+        return verified ? reseal(redacted) : redacted;
     }
 
     // ==================== GDPR Art. 17: content redaction ====================

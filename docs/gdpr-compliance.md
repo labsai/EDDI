@@ -119,7 +119,9 @@ curl https://your-eddi-instance/admin/gdpr/{userId}/export \
   -o user-data.json
 ```
 
-The export includes all user data in a structured, machine-readable JSON format:
+The export is a structured, machine-readable JSON bundle of these categories — not
+yet every category EDDI erases; what it leaves out is named in `omittedCategories`
+(see the note below):
 - All persistent user memories
 - All conversation transcripts (with full chat history)
 - All managed conversation mappings (intent→conversation bindings)

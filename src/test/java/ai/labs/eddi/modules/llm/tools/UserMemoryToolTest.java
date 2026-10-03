@@ -496,6 +496,7 @@ class UserMemoryToolTest {
         String result = tool.rememberFact("food", "pasta", "fact", "self");
 
         assertTrue(result.contains("NOT saved"), result);
+        assertTrue(result.contains("(6/5)"), "reports the observed count over the cap, like the other capacity messages: " + result);
         verify(store).deleteEntry("id-food");
         verify(store, never()).deleteEntry("id-drink");
     }

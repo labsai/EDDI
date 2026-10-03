@@ -94,7 +94,10 @@ endpoint for volume, and the dropped counter above for integrity.
 3. **Preserve evidence**:
    - Export audit trail for affected conversations
    - Snapshot database logs
-   - Do NOT delete audit entries (immutable by design)
+   - Do NOT delete audit entries. The ledger is append-only by design: rows are
+     never deleted, and the only in-place change is a GDPR erasure redacting the
+     erased user's content (re-signed when the row verified) — see
+     [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion)
 
 ## 4. Notification
 

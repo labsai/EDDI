@@ -29,6 +29,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Writes one audit-ledger record per <em>administrative</em> REST request:
  * every {@code POST}, {@code PUT}, {@code PATCH} and {@code DELETE} outside the
@@ -131,8 +133,10 @@ public class AdminActionAuditFilter implements ContainerResponseFilter {
                     resourceMethod.getDeclaringClass().getSimpleName() + "#" + resourceMethod.getName(), response.getStatus(), actor()));
         } catch (Exception e) {
             // Recording an action must never change its outcome.
-            LOGGER.warnf("Could not record administrative action %s %s in the audit ledger: %s", request.getMethod(),
-                    request.getUriInfo().getPath(), e.toString());
+            // The method and path are the caller's, and an exception message can echo
+            // them: strip line breaks so a request cannot forge log records (CWE-117).
+            LOGGER.warnf("Could not record administrative action %s %s in the audit ledger: %s", sanitize(request.getMethod()),
+                    sanitize(request.getUriInfo().getPath()), sanitize(e.toString()));
         }
     }
 

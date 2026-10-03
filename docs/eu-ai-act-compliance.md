@@ -80,7 +80,7 @@ risk management system.
 | Detailed description of system elements | Agent configuration (JSON) | ✅ Available |
 | Information about training data | N/A — EDDI uses pre-trained models | ℹ️ Provider responsibility |
 | Capabilities and limitations | Agent config + system prompt | ✅ Available |
-| Automatic logging / record-keeping | Immutable audit ledger | ✅ Available |
+| Automatic logging / record-keeping | Append-only audit ledger — no row is ever deleted; a GDPR erasure redacts the erased user's content in place and keeps the row | ✅ Available |
 
 **Deployer action**: Maintain technical documentation that references EDDI's
 architecture docs and your agent configuration.
@@ -117,7 +117,7 @@ submits the APPROVED/REJECTED decision through
 
 | Requirement | EDDI Feature | Status |
 |---|---|---|
-| Immutable decision traceability | HMAC-signed audit ledger | ✅ Available |
+| Decision traceability | HMAC-signed, append-only audit ledger (rows are never deleted; GDPR erasure redacts content in place) | ✅ Available |
 | What data was read by each task | Audit entry `input` field | ✅ Available |
 | What data was produced | Audit entry `output` field | ✅ Available |
 | LLM prompts and responses | Audit entry `llmDetail` field | ✅ Available |

@@ -526,7 +526,7 @@ public class UserMemoryTool {
         }
         store.deleteEntry(inserted.id());
         return ("⚠️ Memory capacity reached (%d/%d): another conversation of this user stored a memory at the same moment, and this "
-                + "fact was NOT saved. Tell the user; it can be saved once a memory is removed.").formatted(cap, cap);
+                + "fact was NOT saved. Tell the user; it can be saved once a memory is removed.").formatted(count, cap);
     }
 
     /**

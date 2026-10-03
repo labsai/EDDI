@@ -58,7 +58,8 @@ and linked accounts. Some categories are not exported yet and are named in
 
 For AI-orchestrated compliance workflows:
 - `delete_user_data` — full cascade erasure (requires `confirmation="CONFIRM"`)
-- `export_user_data` — complete user data bundle
+- `export_user_data` — the same bundle as the export endpoint; check `complete` and
+  `omittedCategories` before treating it as a full Art. 15 response
 
 ## Security Measures
 

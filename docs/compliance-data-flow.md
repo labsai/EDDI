@@ -50,8 +50,9 @@
 │      the userId pseudonymized (see "What an erasure does" below)          │
 └──────────────────────────────┬────────────────────────────────────────────┘
                                │
-                               │ HTTPS — conversation content LEAVES the
-                               │ deployment whenever an LLM call runs
+                               │ Configured transport (https:// or http://
+                               │ base URL) — conversation content LEAVES
+                               │ the deployment whenever an LLM call runs
                                ▼
                     ┌──────────────────────┐
                     │    LLM Provider      │
@@ -72,6 +73,13 @@ the provider configured on the agent — unless that provider is self-hosted
 and a processor (GDPR) or sub-Business Associate (HIPAA) that needs a contract.
 EDDI does not store what it sends beyond its own conversation memory and audit
 ledger, but the provider's retention is governed by the provider's terms.
+
+**Transport security is the configured endpoint's.** The hosted providers' SDK
+defaults are `https://`, but a `baseUrl` an agent configures (Ollama, an
+OpenAI-compatible server, a proxy) is used as given — EDDI blocks cloud-metadata
+addresses there, not plain HTTP. A remote `http://` base URL sends the prompt,
+the history and tool results unencrypted. Use `https://` for any endpoint
+reached over a network you do not control.
 
 **Always sent, on every LLM call:**
 

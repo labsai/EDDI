@@ -4,6 +4,12 @@
  */
 package ai.labs.eddi.engine.audit.rest;
 
+import java.util.logging.Logger;
+import java.util.logging.LogRecord;
+import java.util.logging.Level;
+import java.util.logging.Handler;
+import java.util.List;
+import java.util.ArrayList;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -222,5 +228,53 @@ class AdminActionAuditFilterTest {
         assertTrue(AdminActionAuditFilter.namesAPerson("userId"));
         assertTrue(AdminActionAuditFilter.namesAPerson("principalId"));
         assertFalse(AdminActionAuditFilter.namesAPerson("agentId"));
+    }
+
+    @Test
+    @DisplayName("the failure WARN cannot be used to forge log records (CWE-117)")
+    void failureLogLineIsSanitized() {
+        doThrow(new IllegalStateException("ledger down\r\nFORGED")).when(ledger).submit(any());
+        when(request.getMethod()).thenReturn("POST");
+        when(uriInfo.getPath()).thenReturn("/agentstore/agents\r\n2026-01-01 INFO forged admin login");
+        when(response.getStatus()).thenReturn(201);
+
+        List<String> captured = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                captured.add(String.valueOf(record.getMessage()));
+                if (record.getParameters() != null) {
+                    for (Object parameter : record.getParameters()) {
+                        captured.add(String.valueOf(parameter));
+                    }
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        // logging.properties turns ai.labs.eddi OFF for unit tests; open it, or this
+        // passes vacuously.
+        Logger julLogger = Logger.getLogger(AdminActionAuditFilter.class.getName());
+        Level previous = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            filter.filter(request, response);
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previous);
+        }
+
+        assertTrue(captured.stream().anyMatch(value -> value.contains("Could not record administrative action")),
+                "the line under test did not fire; captured: " + captured);
+        for (String value : captured) {
+            assertFalse(value.contains("\r") || value.contains("\n"), "a CR/LF reached the log: " + value);
+        }
     }
 }

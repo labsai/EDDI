@@ -153,7 +153,8 @@ All logging configuration lives in `application.properties`:
 ### Retention
 
 Persisted entries are kept until deleted unless `eddi.logs.db-retention-days`
-is set: a sweep then deletes, once a day, every entry whose timestamp is older
+is set: a sweep then deletes, every `eddi.logs.db-retention-interval` (default
+`24h`), every entry whose timestamp is older
 than that many days, on MongoDB (`logs` collection) and PostgreSQL
 (`database_logs` table) alike. The sweep is idempotent, so every replica can run
 it. Each run adds what it deleted to `eddi_logs_db_retention_deleted_total`.
