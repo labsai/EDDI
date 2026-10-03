@@ -3,7 +3,7 @@
 **Repo:** EDDI · **Branch:** `review/p11a` (on `feat/nats-cluster`)
 
 An adversarial review of the runtime-selectable cluster mode (leases, fencing, dead
-letters) turned up seven defects. Each is fixed here with a test that fails without the fix.
+letters) turned up eight defects. Each is fixed here with a test that fails without the fix.
 
 ### What changed
 
@@ -17,6 +17,11 @@ letters) turned up seven defects. Each is fixed here with a test that fails with
   could still write in the gap between its successor acquiring the lease and the successor's
   first write, persisting a turn that never saw the successor's. Found by pausing a node's
   container past the lease TTL.
+- **A turn that lost its lease no longer stamps a state on the conversation** — it was cancelled,
+  and the cancel path then moved the conversation to `EXECUTION_INTERRUPTED` by an unfenced state
+  write, so a conversation whose successor turn had just committed read as interrupted until its
+  next turn. The cancelled turn now leaves the state to whoever holds the lease. Found live by
+  pausing a node past the lease TTL.
 - **A holder is no longer robbed because its presence record could not be read** —
   [`KvLeaseManager`](../../src/main/java/ai/labs/eddi/engine/cluster/lease/KvLeaseManager.java)
   treated an unreadable presence bucket (a different bucket from the leases, so it can fail
@@ -54,6 +59,11 @@ letters) turned up seven defects. Each is fixed here with a test that fails with
   does not conflict with it.
 
 ### Known and not fixed here
+
+- A fenced-out turn's caller still gets the reply it was rendered (HTTP 200): the output is
+  handed to the caller from inside the pipeline, before the write that the fence then refuses.
+  The turn is dead-lettered with its input and counted in `eddi.cluster.fence.rejected`, which
+  is the signal. While NATS is unreachable that dead letter stays in the node-local ring.
 
 - The fence is a KV revision. Recreating the `<prefix>_LEASES` bucket (the replica-count log
   line suggests it) restarts the sequence below the `_fence` already stored in conversations;
