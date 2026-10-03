@@ -44,6 +44,9 @@ The 6.5.0 review evaluated all 360 panel queries of the three dashboards against
   - The cost-per-hour PromQL is fixed.
   - The new settings are in the [configuration reference](../configuration-reference.md#metrics--tracing).
 
+- **Eager counters for one-shot alerts.** A counter created by its first increment is first scraped at 1, so `increase()` never saw the first canary failure or the first quota-store outage. `OperatorMetricsService` is now `@Startup` and registers every canary outcome at 0, and `TenantQuotaService` registers `eddi.tenant.quota.unavailable` at 0 for the default tenant. The monitoring guide states the remaining limitation.
+- **Review fixes.** `EddiOperatorGateRegressed` no longer pages after a restart: it uses a 6h lookback and requires 6h of uptime. Ops "Top 10 Slowest Endpoints" divides summed rates. `BaseRuntime` releases the queued count when `submit` throws an `Error`. The Kubernetes docs and Helm values say to list a cross-namespace Prometheus in `networkPolicy.allowedIngressNamespaces`.
+
 ### Design decisions
 
 - **"Silently drops" a second tag shape is accurate and was kept.** The review said the registry throws. Registering `foo` and then `foo{tenant}` on `micrometer-registry-prometheus-simpleclient` 1.17.1, the registry in the 6.5.0 image, returns normally both directly and behind a `CompositeMeterRegistry`. Quarkus registers no `onMeterRegistrationFailed` listener. The page now says which registry was verified.

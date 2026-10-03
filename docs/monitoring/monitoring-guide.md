@@ -241,6 +241,15 @@ Conventions:
 - The rules over generic series (`up`, `http_*`, `jvm_*`, `process_*`) select on
   `job="eddi"`. The compose and Kubernetes scrape configs use that job name, and
   the Helm `ServiceMonitor` relabels to it. Keep it if you write your own.
+- **The first event of a new series is invisible to `increase()`.** A counter
+  Micrometer creates on its first increment is first scraped at 1, which Prometheus
+  cannot tell from "always 1". The counters the one-shot alerts read exist at 0
+  from boot: audit drops and collisions, vault errors, schedule and NATS dead
+  letters, coordinator dead letters, every operator canary outcome, and the
+  quota-store failure counter for the default tenant. A quota-store failure for any
+  other tenant, and the first error of a new tool, task type or LLM provider, start
+  a new series; the ratio alerts are unaffected once traffic continues, but a single
+  isolated first event goes unseen.
 - Every ratio alert also needs a minimum number of events, so one failure on an
   idle system pages nobody.
 - Thresholds are starting points for one replica with modest traffic. Edit the

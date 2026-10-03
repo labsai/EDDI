@@ -19,6 +19,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Tenant quota enforcement engine.
@@ -100,6 +101,7 @@ public class TenantQuotaService {
     @PostConstruct
     void init() {
         quotaAllowedCounter = meterRegistry.counter("eddi.tenant.quota.allowed");
+        registerUnavailableCounters();
         quotaCache = cacheFactory.getCache(QUOTA_CACHE_NAME, QUOTA_CACHE_TTL);
         LOGGER.info("Tenant quota service initialized");
     }
@@ -118,6 +120,7 @@ public class TenantQuotaService {
         this.meterRegistry = meterRegistry;
         this.defaultTenantId = defaultTenantId;
         this.quotaAllowedCounter = meterRegistry.counter("eddi.tenant.quota.allowed");
+        registerUnavailableCounters();
         this.cacheFactory = new CacheFactory();
         this.quotaCache = this.cacheFactory.getCache(QUOTA_CACHE_NAME, QUOTA_CACHE_TTL);
     }
@@ -427,6 +430,27 @@ public class TenantQuotaService {
         }
 
         return result;
+    }
+
+    /**
+     * The {@code type} tags {@link #recordDenial} uses for a store that cannot
+     * answer.
+     */
+    private static final List<String> UNAVAILABLE_TYPES = List.of("conversation", "api_call", "cost");
+
+    /**
+     * Registers {@code eddi.tenant.quota.unavailable} at 0 for the default tenant.
+     * <p>
+     * A counter created by its first increment is first scraped at 1, and
+     * Prometheus' {@code increase()} cannot see an increment it never saw the
+     * counter without — so the very first store outage, the one alert
+     * {@code EddiQuotaStoreUnavailable} exists for, never fired. Other tenants'
+     * series still appear on their first refusal; the docs say so.
+     */
+    private void registerUnavailableCounters() {
+        for (String type : UNAVAILABLE_TYPES) {
+            meterRegistry.counter("eddi.tenant.quota.unavailable", "tenant", defaultTenantId, "type", type);
+        }
     }
 
     /**

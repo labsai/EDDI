@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.api.model.OperatorCanaryReport;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,6 +32,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code eddi-admin} — the same tier that can provision the operator at all.
  */
 @ApplicationScoped
+// Eager, so the canary counters below exist at 0 from boot. Created lazily, by
+// the
+// first report, a counter's first sample is already 1: Prometheus' increase()
+// then
+// never sees that first failure and EddiOperatorCanaryFailing stays silent on
+// it.
+@Startup
 public class OperatorMetricsService {
 
     private static final List<String> VALID_OUTCOMES = List.of(OperatorCanaryReport.OUTCOME_PASS, OperatorCanaryReport.OUTCOME_FAIL,
@@ -66,6 +74,9 @@ public class OperatorMetricsService {
         // again on each report would keep re-registering the same meter id, which
         // most registries tolerate but is not the contract.
         meterRegistry.gauge("eddi.operator.gate.verified", gateVerified, AtomicInteger::get);
+        for (String outcome : VALID_OUTCOMES) {
+            Counter.builder("eddi.operator.canary").tag("outcome", outcome).register(meterRegistry);
+        }
     }
 
     /**

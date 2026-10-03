@@ -464,7 +464,9 @@ serviceMonitor:
   # Render a ServiceMonitor for the EDDI Service. It rewrites the scrape job to
   # "eddi", which the shipped alert rules and dashboards select on. If your
   # Prometheus ALSO honours the prometheus.io/* pod annotations, clear
-  # eddi.podAnnotations or EDDI is scraped twice.
+  # eddi.podAnnotations or EDDI is scraped twice. With networkPolicy.enabled, add
+  # the Prometheus namespace (kube-prometheus-stack: usually "monitoring") to
+  # networkPolicy.allowedIngressNamespaces, or every scrape times out.
   enabled: false
   interval: 30s
   scrapeTimeout: 10s

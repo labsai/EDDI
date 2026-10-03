@@ -52,6 +52,21 @@ class OperatorMetricsServiceTest {
         assertEquals(0.0, registry.counter("eddi.operator.canary", "outcome", "unknown").count());
     }
 
+    /**
+     * A counter created by its first increment is first scraped at 1, which
+     * {@code increase()} cannot tell from "was always 1": the first canary failure
+     * would never page. All outcomes therefore exist at 0 before any report.
+     */
+    @Test
+    @DisplayName("every canary outcome counter exists at zero before the first report")
+    void canaryCountersExistBeforeTheFirstReport() {
+        for (String outcome : new String[]{"pass", "fail", "unknown"}) {
+            var counter = registry.find("eddi.operator.canary").tag("outcome", outcome).counter();
+            assertTrue(counter != null, outcome + " is not registered until something reports it");
+            assertEquals(0.0, counter.count());
+        }
+    }
+
     @Test
     @DisplayName("recordCanaryResult records the duration as a timer sample")
     void recordCanaryResultRecordsDuration() {

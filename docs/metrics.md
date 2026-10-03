@@ -259,9 +259,10 @@ eddi_tool_costs_total{tool="weather"}       # Cost per tool
 > **The total-cost gauge was renamed to `eddi_tool_costs_accrued`.** It used to
 > be registered as `eddi.tool.costs.total`, which the exposition renders as
 > `eddi_tool_costs_total` — the same name as the `tool`-tagged counter above.
-> Prometheus refuses two meters under one name with different tag keys, so the
-> first priced tool call threw, and the tool returned that error instead of its
-> result. `eddi_tool_costs_total` now always means the per-tool counter; take the
+> The Prometheus registry keeps only the first meter registered under a name
+> (see [One name, one tag shape](#one-name-one-tag-shape)), so one of the two
+> never reached the scrape — the registration returns normally and nothing is
+> logged; re-verified on the 6.5.0 registry. `eddi_tool_costs_total` now always means the per-tool counter; take the
 > all-tools total from the gauge, or as `sum(eddi_tool_costs_total)`. A dashboard
 > or alert written against the old gauge must switch to `eddi_tool_costs_accrued`.
 
