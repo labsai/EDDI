@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
 import ai.labs.eddi.integrations.openai.model.TokenUsage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -284,6 +285,61 @@ class OpenAiSseWriterTest {
             assertTrue(frame.at("/usage").isMissingNode(), frame.toString());
             assertTrue(!frame.get("choices").isEmpty(), "no empty-choices frame should be emitted");
         }
+    }
+
+    // ─── one terminator, nothing after it ───
+
+    @Test
+    void nothingIsWrittenAfterTheTerminator() {
+        var writer = writer();
+        writer.content("answer");
+        writer.finish("stop");
+        String terminated = body();
+
+        writer.content("late token");
+        writer.role();
+        writer.finish("stop");
+        writer.error(OpenAiErrorResponse.of("late", OpenAiErrorResponse.TYPE_SERVER_ERROR, null));
+
+        assertEquals(terminated, body(), "a frame after [DONE] is a protocol violation");
+        assertTrue(writer.isFinished());
+    }
+
+    @Test
+    void errorEvent_isTheOpenAiEnvelope_followedByOneDone() throws Exception {
+        var writer = writer();
+        writer.content("partial");
+
+        writer.error(OpenAiErrorResponse.of("model down", OpenAiErrorResponse.TYPE_SERVER_ERROR, "agent_error"));
+        writer.error(OpenAiErrorResponse.of("again", OpenAiErrorResponse.TYPE_SERVER_ERROR, null));
+        writer.finish("stop");
+
+        List<JsonNode> frames = frames();
+        JsonNode last = frames.get(frames.size() - 1);
+        assertEquals("model down", last.path("error").path("message").asText());
+        assertEquals("agent_error", last.path("error").path("code").asText());
+        assertEquals(1, body().split("data: \\[DONE]", -1).length - 1);
+        assertFalse(body().contains("finish_reason"), "an error event replaces the finish chunk: " + body());
+        assertTrue(body().endsWith("data: [DONE]\n\n"));
+    }
+
+    @Test
+    void concurrentWriters_neverInterleaveFrames() throws Exception {
+        // The request thread (timeout) and the pipeline thread (tokens) share one
+        // writer; unsynchronized, their bytes could interleave mid-frame.
+        var writer = writer();
+        Thread tokens = new Thread(() -> {
+            for (int i = 0; i < 2000; i++) {
+                writer.content("t" + i);
+            }
+        });
+        tokens.start();
+        Thread.sleep(2);
+        writer.error(OpenAiErrorResponse.of("timeout", OpenAiErrorResponse.TYPE_SERVER_ERROR, "timeout"));
+        tokens.join();
+
+        assertDoesNotThrow(this::frames, "every frame must still parse");
+        assertTrue(body().endsWith("data: [DONE]\n\n"), "the terminator must be last");
     }
 
     /** Counts flushes so per-frame flushing can be asserted. */

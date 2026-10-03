@@ -47,8 +47,32 @@ public interface IAttachmentStore {
      *             if storage fails, MIME validation fails, the size limit is
      *             exceeded, or a per-conversation quota is exceeded
      */
+    default Attachment store(byte[] bytes, String declaredMime, String filename,
+                             String conversationId, String tenantId)
+            throws AttachmentStoreException {
+        return store(bytes, declaredMime, filename, conversationId, tenantId, null);
+    }
+
+    /**
+     * Store an attachment on behalf of a user.
+     * <p>
+     * <strong>Quotas are enforced atomically.</strong> The per-conversation quota
+     * ({@code eddi.attachments.max-per-conversation},
+     * {@code max-total-bytes-per-conversation}) and, when {@code userId} is known,
+     * the optional per-user quota ({@code eddi.attachments.max-per-user},
+     * {@code max-total-bytes-per-user}) are checked and the blob inserted under one
+     * lock per quota scope, so concurrent uploads cannot each pass the check and
+     * together exceed the limit.
+     *
+     * @param userId
+     *            the user the blob counts against — the owner of the conversation;
+     *            {@code null} when unknown, which exempts the blob from the
+     *            per-user quota
+     * @throws AttachmentQuotaExceededException
+     *             if a quota would be exceeded
+     */
     Attachment store(byte[] bytes, String declaredMime, String filename,
-                     String conversationId, String tenantId)
+                     String conversationId, String tenantId, String userId)
             throws AttachmentStoreException;
 
     /**
@@ -169,6 +193,26 @@ public interface IAttachmentStore {
 
         public AttachmentStoreException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * Thrown when storing a blob would exceed a quota. {@link #getScope()} says
+     * which: {@code "conversation"} or {@code "user"}.
+     */
+    class AttachmentQuotaExceededException extends AttachmentStoreException {
+        public static final String SCOPE_CONVERSATION = "conversation";
+        public static final String SCOPE_USER = "user";
+
+        private final String scope;
+
+        public AttachmentQuotaExceededException(String scope, String message) {
+            super(message);
+            this.scope = scope;
+        }
+
+        public String getScope() {
+            return scope;
         }
     }
 

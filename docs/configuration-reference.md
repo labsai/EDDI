@@ -278,6 +278,8 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-per-turn` | `5` | Attachments per turn — **per member turn** in a group conversation |
 | `eddi.attachments.max-per-conversation` | `50` | Attachments per conversation |
 | `eddi.attachments.max-total-bytes-per-conversation` | `104857600` (100 MB) | Aggregate bytes per conversation |
+| `eddi.attachments.max-per-user` | `0` (off) | Attachments per user across all of their conversations, counted against the conversation's owner. Quotas are checked and the blob stored under a lock per scope, so concurrent uploads cannot overshoot any of them |
+| `eddi.attachments.max-total-bytes-per-user` | `0` (off) | Aggregate bytes per user across all of their conversations |
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
@@ -374,7 +376,9 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
 | `eddi.openai-compat.model-cache-seconds` | `30` | How long `/v1/models` is cached |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | Concurrency ceiling for the adapter |
-| `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout |
+| `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout. A stream that runs out of it ends with an OpenAI error event (`code: timeout`) and one `[DONE]` |
+| `eddi.openai-compat.chat-key-fallback` | `history` | How a request that names no chat (`X-OpenWebUI-Chat-Id`, `X-EDDI-Chat-Id`, `metadata.chat_id` or `user`) is mapped: `history` keys it by a hash of its first system and first user message, so each client-side chat gets its own conversation; `shared` keeps one conversation per user and agent, as earlier releases did. See [open-webui-integration.md](open-webui-integration.md#session-mapping) |
+| `eddi.openai-compat.max-conversation-steps` | `0` (off) | Steps after which an idle mapped conversation is ended and the chat continues in a fresh one, bounding the size of one conversation document. The agent no longer sees the earlier history; the ended conversation stays readable |
 
 ### Connections
 

@@ -446,6 +446,34 @@ class ConversationMemoryUtilitiesTest {
         }
 
         @Test
+        @DisplayName("returnDetailed=true keeps audit:token_usage, the one audit entry /v1 builds its usage block from")
+        void detailedKeepsTokenUsage() {
+            Map<String, Object> usage = Map.of("inputTokens", 10, "outputTokens", 5, "totalTokens", 15);
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-usage");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            var output = new ConversationOutput();
+            output.put(MemoryKeys.AUDIT_TOKEN_USAGE, usage);
+            output.put("audit:compiled_prompt", "system prompt text");
+            snapshot.getConversationOutputs().add(output);
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot(MemoryKeys.AUDIT_TOKEN_USAGE, usage, null, new Date(), null, true));
+            workflow.getLifecycleTasks().add(new ResultSnapshot("audit:compiled_prompt", "system prompt text", null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, true, false);
+
+            var stepData = simple.getConversationSteps().getFirst().getConversationStep();
+            var kept = stepData.stream().filter(d -> MemoryKeys.AUDIT_TOKEN_USAGE.equals(d.getKey())).findFirst().orElseThrow();
+            assertEquals(usage, kept.getValue(), "the counts must arrive unmasked");
+            assertTrue(stepData.stream().noneMatch(d -> "audit:compiled_prompt".equals(d.getKey())), "the rest of audit:* stays withheld");
+            assertFalse(simple.getConversationOutputs().getFirst().containsKey("audit:compiled_prompt"));
+        }
+
+        @Test
         @DisplayName("returnDetailed=true must redact secrets nested inside a structured (Map/List) value")
         void detailedRedactsStructuredValues() {
             // A secret embedded in a deserialized httpCall response body (a Map/List under

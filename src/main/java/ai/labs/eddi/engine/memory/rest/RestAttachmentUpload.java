@@ -8,7 +8,9 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
@@ -73,6 +75,7 @@ public class RestAttachmentUpload {
     private final ManagedExecutor managedExecutor;
     private final long maxUploadBytes;
     private final long maxForwardBytes;
+    private final MeterRegistry meterRegistry;
 
     @Inject
     public RestAttachmentUpload(IAttachmentStore attachmentStore,
@@ -82,13 +85,15 @@ public class RestAttachmentUpload {
             @ConfigProperty(name = "eddi.attachments.max-size-bytes",
                             defaultValue = "20971520") long maxUploadBytes,
             @ConfigProperty(name = "eddi.attachments.max-forward-bytes",
-                            defaultValue = "10485760") long maxForwardBytes) {
+                            defaultValue = "10485760") long maxForwardBytes,
+            MeterRegistry meterRegistry) {
         this.attachmentStore = attachmentStore;
         this.conversationAccessGuard = conversationAccessGuard;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.managedExecutor = managedExecutor;
         this.maxUploadBytes = maxUploadBytes;
         this.maxForwardBytes = maxForwardBytes;
+        this.meterRegistry = meterRegistry;
     }
 
     /**
@@ -121,12 +126,14 @@ public class RestAttachmentUpload {
      * gate: it keeps the fail-closed behaviour anchored in this endpoint rather
      * than depending on which guard method a future edit happens to call.
      */
-    private void requireExistingConversationOwner(String conversationId) {
+    private ConversationDescriptor requireExistingConversationOwner(String conversationId) {
         conversationAccessGuard.requireExistingConversationOwner(conversationId);
         try {
-            if (conversationDescriptorStore.readDescriptor(conversationId, 0) == null) {
+            ConversationDescriptor descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+            if (descriptor == null) {
                 throw new NotFoundException("Conversation '" + sanitize(conversationId) + "' not found");
             }
+            return descriptor;
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Conversation '" + sanitize(conversationId) + "' not found");
         } catch (IResourceStore.ResourceStoreException e) {
@@ -164,7 +171,10 @@ public class RestAttachmentUpload {
 
         // On the request thread, before the async hop: the guard reads the caller's
         // SecurityIdentity, which is request-scoped.
-        requireExistingConversationOwner(conversationId);
+        ConversationDescriptor descriptor = requireExistingConversationOwner(conversationId);
+        // The per-user quota counts against the conversation's OWNER — an admin
+        // uploading into a user's conversation fills that user's quota, not their own.
+        String ownerUserId = descriptor.getUserId();
 
         CompletableFuture.runAsync(() -> {
             try {
@@ -197,7 +207,7 @@ public class RestAttachmentUpload {
                 byte[] bytes = Files.readAllBytes(file.uploadedFile());
 
                 Attachment attachment = attachmentStore.store(
-                        bytes, mimeType, fileName, conversationId, safeTenantId);
+                        bytes, mimeType, fileName, conversationId, safeTenantId, ownerUserId);
 
                 LOGGER.infof("Attachment uploaded for conversation '%s': %s (%s, %d bytes) → %s",
                         sanitize(conversationId), sanitize(fileName), attachment.mimeType(),
@@ -216,6 +226,16 @@ public class RestAttachmentUpload {
                                 "forwardableInline", attachment.sizeBytes() <= maxForwardBytes))
                         .build());
 
+            } catch (IAttachmentStore.AttachmentQuotaExceededException e) {
+                LOGGER.warnf("Attachment upload over the %s quota for conversation '%s': %s",
+                        e.getScope(), sanitize(conversationId), e.getMessage());
+                meterRegistry.counter("eddi.attachments.quota.rejected", "scope", e.getScope()).increment();
+                asyncResponse.resume(Response.status(Response.Status.BAD_REQUEST)
+                        .entity(Map.of(
+                                "error", e.getMessage(),
+                                "code", "ATTACHMENT_REJECTED",
+                                "quota", e.getScope()))
+                        .build());
             } catch (IAttachmentStore.AttachmentStoreException e) {
                 LOGGER.warnf("Attachment upload rejected for conversation '%s': %s",
                         sanitize(conversationId), e.getMessage());
