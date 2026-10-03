@@ -34,4 +34,17 @@ public interface IDatabaseLogs {
      * @return number of entries pseudonymized
      */
     long pseudonymizeByUserId(String userId, String pseudonym);
+
+    // === Retention ===
+
+    /**
+     * Delete persisted log entries older than {@code olderThanDays} days. Backs the
+     * {@code eddi.logs.db-retention-days} sweep in {@link DatabaseLogRetention}.
+     *
+     * @param olderThanDays
+     *            entries whose timestamp is before now minus this many days are
+     *            deleted; must be positive
+     * @return number of entries deleted
+     */
+    long deleteOlderThan(int olderThanDays);
 }

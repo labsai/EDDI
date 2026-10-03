@@ -249,11 +249,13 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.max-queue-size", defaultValue = "100000") int maxQueueSize,
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy", defaultValue = "true") boolean recoverLegacyTimestamps,
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy-max-rows", defaultValue = "500") int recoverLegacyMaxRows,
+            @ConfigProperty(name = "eddi.audit.erasure-mode", defaultValue = ERASURE_MODE_REDACT) String erasureMode,
             MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
             AgentSigningService agentSigningService, ObjectMapper objectMapper, AuditKeyring keyring) {
         this(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, deadLetterPath, agentSigningEnabled, defaultTenantId, maxQueueSize,
                 recoverLegacyTimestamps, recoverLegacyMaxRows, meterRegistry, natsConnectionInstance, agentSigningService, objectMapper);
         this.keyring = keyring;
+        setErasureMode(erasureMode);
     }
 
     /**
@@ -522,7 +524,7 @@ public class AuditLedgerService {
     public void submit(AuditEntry entry) {
         if (!enabled || entry == null)
             return;
-        entry = pseudonymiseIfErased(entry);
+        entry = pseudonymiseIfErased(entry, false);
 
         // Take the queue slot BEFORE a chain position is consumed. G18 puts the
         // sequence inside the signed payload so a deleted row leaves a gap that
@@ -646,7 +648,9 @@ public class AuditLedgerService {
      *
      * @return true if the entry was queued, false if it was dropped
      */
-    private boolean offerBounded(AuditEntry entry) {
+    // package-private: a test queues an already-signed entry through it, the way
+    // the retry path re-queues one
+    boolean offerBounded(AuditEntry entry) {
         if (!reserveQueueSlot(entry.conversationId())) {
             return false;
         }
@@ -891,7 +895,7 @@ public class AuditLedgerService {
                 queueSize.decrementAndGet();
                 // Again at drain time: an entry queued before the erasure and flushed
                 // after the store-side pseudonymisation would otherwise land raw.
-                batch.add(pseudonymiseIfErased(entry));
+                batch.add(pseudonymiseIfErased(entry, true));
             }
             inFlightBatch = batch;
         } finally {
@@ -1434,6 +1438,23 @@ public class AuditLedgerService {
     private final ConcurrentHashMap<String, Instant> recentlyErasedUsers = new ConcurrentHashMap<>();
 
     /**
+     * Per erased user, how many of their queued entries were redacted on their way
+     * out of the queue, split by whether they verified and were re-signed — so
+     * {@link #eraseUser} can report them exactly as it reports stored rows. Cleared
+     * with {@link #recentlyErasedUsers}.
+     */
+    private final ConcurrentHashMap<String, DrainCounts> redactedOnDrain = new ConcurrentHashMap<>();
+
+    /**
+     * Queued entries redacted on drain: re-signed, and kept with their old HMAC.
+     */
+    private record DrainCounts(AtomicLong resealed, AtomicLong keptUnverified) {
+        DrainCounts() {
+            this(new AtomicLong(), new AtomicLong());
+        }
+    }
+
+    /**
      * Tells the ledger a GDPR erasure of {@code userId} has started, so audit
      * entries for that user written from now on — by work the erasure cancelled but
      * which is still unwinding, or already queued — carry the pseudonym instead of
@@ -1456,11 +1477,32 @@ public class AuditLedgerService {
             return;
         }
         Instant now = Instant.now();
-        recentlyErasedUsers.values().removeIf(until -> until.isBefore(now));
+        recentlyErasedUsers.entrySet().removeIf(e -> {
+            boolean expired = e.getValue().isBefore(now);
+            if (expired) {
+                redactedOnDrain.remove(e.getKey());
+            }
+            return expired;
+        });
         recentlyErasedUsers.put(userId, now.plus(ERASED_USER_REWRITE_WINDOW));
+        // Counting starts at the mark, not at the erasure's own flush: the GDPR cascade
+        // marks the user first and only reaches the ledger step after every other
+        // store, and the scheduled flush drains (and redacts) the user's queued entries
+        // in between.
+        redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
     }
 
-    AuditEntry pseudonymiseIfErased(AuditEntry entry) {
+    /**
+     * Rewrites an entry of a user erased on this node within
+     * {@link #ERASED_USER_REWRITE_WINDOW}: the keyed pseudonym in place of the id
+     * and, unless the deployment runs {@code eddi.audit.erasure-mode=pseudonymize},
+     * the redaction marker in place of the content. Two call sites, two states:
+     * {@link #submit} calls it before the entry is signed, {@link #flush} on an
+     * entry this node signed moments ago and has held in memory ever since — so
+     * re-signing that one launders nothing, and an entry that was queued before the
+     * erasure does not reach the store with the erased user's content in it.
+     */
+    AuditEntry pseudonymiseIfErased(AuditEntry entry, boolean queued) {
         String userId = entry.userId();
         if (userId == null || recentlyErasedUsers.isEmpty()) {
             return entry;
@@ -1469,12 +1511,335 @@ public class AuditLedgerService {
         if (until == null || until.isBefore(Instant.now())) {
             return entry;
         }
+        AuditEntry rewritten = entry.withUserId(pseudonymForErasure(userId));
+        if (!redactContentOnErasure || isComplianceRecord(entry)) {
+            return rewritten;
+        }
+        if (!queued) {
+            // The submit path: nothing is signed yet, and the entry is signed right after
+            // this — so it lands redacted and the sweep never sees its content. Count it
+            // for the erasure that caused it.
+            DrainCounts counts = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+            (isSigningEnabled() ? counts.resealed() : counts.keptUnverified()).incrementAndGet();
+            return rewritten.withPayload(redactionMarker(null, null), null, null, null);
+        }
+        // A queued entry was signed by this node, but it is still verified like a
+        // stored row before it is re-signed, and the marker records the verdict that
+        // was actually observed — never VALID on trust.
+        AuditVerificationStatus before = entry.hmac() != null ? verifyEntry(entry) : null;
+        AuditEntry redacted = rewritten.withPayload(redactionMarker(entry.hmac(), before), null, null, null);
+        boolean verified = before == AuditVerificationStatus.VALID || before == AuditVerificationStatus.VALID_RECOVERED;
+        DrainCounts counts = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+        (verified ? counts.resealed() : counts.keptUnverified()).incrementAndGet();
+        return verified ? reseal(redacted) : redacted;
+    }
+
+    // ==================== GDPR Art. 17: content redaction ====================
+
+    /** {@code eddi.audit.erasure-mode} value: redact content and pseudonymise. */
+    public static final String ERASURE_MODE_REDACT = "redact";
+
+    /** {@code eddi.audit.erasure-mode} value: pseudonymise the user id only. */
+    public static final String ERASURE_MODE_PSEUDONYMIZE = "pseudonymize";
+
+    /**
+     * Key of the marker map that replaces a redacted entry's {@code input}. The
+     * marker is inside the signed payload of a resealed entry, so it cannot be
+     * stripped or edited without failing verification.
+     */
+    public static final String REDACTION_MARKER_KEY = "gdprRedaction";
+
+    /** Task id of the GDPR compliance events, which are kept as they are. */
+    static final String COMPLIANCE_TASK_ID = "ai.labs.compliance";
+
+    /**
+     * Task id of the administrative-action records written by
+     * {@code AdminActionAuditFilter}. Like the compliance events they hold no
+     * conversation content — method, path, status — and an erasure of the admin who
+     * acted pseudonymises them without destroying the accountability record.
+     */
+    public static final String ADMIN_ACTION_TASK_ID = "ai.labs.admin";
+
+    /** Page size of the redaction sweep. */
+    static final int REDACTION_PAGE_SIZE = 500;
+
+    /**
+     * Whether erasure replaces content as well as the user id — see
+     * {@code eddi.audit.erasure-mode}.
+     */
+    private volatile boolean redactContentOnErasure = true;
+
+    /**
+     * Sets {@code eddi.audit.erasure-mode}. An unknown value falls back to
+     * {@value #ERASURE_MODE_REDACT}: the setting exists to let an operator keep
+     * content under a legal hold, so a typo must not quietly do that.
+     */
+    void setErasureMode(String mode) {
+        boolean pseudonymizeOnly = mode != null && ERASURE_MODE_PSEUDONYMIZE.equalsIgnoreCase(mode.trim());
+        if (mode != null && !pseudonymizeOnly && !ERASURE_MODE_REDACT.equalsIgnoreCase(mode.trim())) {
+            LOGGER.warnv("eddi.audit.erasure-mode=''{0}'' is not one of ''{1}'' or ''{2}''; using ''{1}''.", sanitize(mode), ERASURE_MODE_REDACT,
+                    ERASURE_MODE_PSEUDONYMIZE);
+        }
+        this.redactContentOnErasure = !pseudonymizeOnly;
+        if (pseudonymizeOnly) {
+            LOGGER.warn("Audit Ledger: eddi.audit.erasure-mode=pseudonymize — a GDPR erasure replaces the user id only and KEEPS the "
+                    + "erased user's prompts, responses and tool calls in the ledger. Make sure a legal hold covers that.");
+        }
+    }
+
+    /** Whether erasure redacts content — false only under {@code pseudonymize}. */
+    public boolean isRedactingContentOnErasure() {
+        return redactContentOnErasure;
+    }
+
+    /**
+     * Outcome of {@link #eraseUser}.
+     *
+     * @param redacted
+     *            rows whose content was replaced by the redaction marker
+     * @param resealed
+     *            of those, rows that verified before redaction and were re-signed,
+     *            so they verify as {@code VALID} afterwards
+     * @param keptUnverified
+     *            of those, rows that did not verify before redaction (tampered,
+     *            signed with a key this deployment does not hold, or unsigned) and
+     *            were redacted without being re-signed — redaction never turns a
+     *            row that failed verification into one that passes
+     * @param pseudonymized
+     *            rows whose raw user id was replaced by a pseudonym in the process
+     * @param failed
+     *            rows that could not be redacted; non-zero means the erasure is not
+     *            complete
+     * @param contentRedaction
+     *            false when {@code eddi.audit.erasure-mode=pseudonymize}
+     */
+    public record ErasureResult(long redacted, long resealed, long keptUnverified, long pseudonymized, long failed, boolean contentRedaction) {
+        public boolean complete() {
+            return failed == 0;
+        }
+    }
+
+    /**
+     * Erase a user's personal data from the ledger (GDPR Art. 17) while keeping
+     * every row, its chain position and its verifiability.
+     * <ol>
+     * <li><b>Queue first.</b> Marks the user erased and flushes the write queue
+     * synchronously. Entries of the user that were still queued used to reach the
+     * store <em>after</em> the store-side pseudonymisation and were missed by it —
+     * the "{@code auditEntriesPseudonymized: 0}" seen live. Anything that cannot be
+     * stored now stays queued and is redacted when it is drained.</li>
+     * <li><b>Redact.</b> Every row of the user — under the raw id and under any
+     * pseudonym an earlier erasure gave it, so re-running an erasure after this
+     * release cleans up rows an older release only pseudonymised — is rewritten:
+     * the keyed pseudonym replaces the id, and a marker replaces {@code input}
+     * while {@code output}, {@code llmDetail} and {@code toolCalls} are removed.
+     * The GDPR compliance events themselves carry no content and are kept.</li>
+     * <li><b>Reseal, but only what verified.</b> A row is checked before it is
+     * touched. One that verified is re-signed over its redacted form with the
+     * current key and verifies as {@code VALID} afterwards; the marker, which names
+     * the original HMAC, is inside that signature. One that did not verify keeps
+     * its old HMAC and therefore keeps failing — re-signing it would launder
+     * whatever made it fail.</li>
+     * </ol>
+     * In {@code pseudonymize} mode only the queue flush runs here; the caller's
+     * {@link IAuditStore#pseudonymizeByUserId} does the rest.
+     *
+     * @return what was done; {@link ErasureResult#complete()} is false when any row
+     *         could not be redacted
+     */
+    public ErasureResult eraseUser(String userId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("userId must not be null");
+        }
+        markUserErased(userId);
+        DrainCounts drained = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+        if (enabled) {
+            flush();
+        }
+        if (!redactContentOnErasure) {
+            return new ErasureResult(0, 0, 0, 0, 0, false);
+        }
+
+        // Entries redacted in memory since the user was marked — drained from the queue
+        // by this flush or by a scheduled one that ran first, or submitted after the
+        // mark — count as redacted and pseudonymised by this erasure, as re-signed only
+        // when they verified. Taken, not read: an entry redacted after this point is
+        // reported by the next erasure (a re-run), never twice.
+        long resealed = drained.resealed().getAndSet(0);
+        long keptUnverified = drained.keptUnverified().getAndSet(0);
+        long redacted = resealed + keptUnverified;
+        long pseudonymized = redacted;
+        long failed = 0;
+        String target = pseudonymForErasure(userId);
+        var budget = newRecoveryBudget();
+        for (String identity : identitiesOf(userId)) {
+            int skip = 0;
+            while (true) {
+                List<AuditEntry> page = auditStore.getEntriesByUserId(identity, skip, REDACTION_PAGE_SIZE);
+                if (page.isEmpty()) {
+                    break;
+                }
+                // Rows of this page that still match `identity` once processed. A row
+                // that was redacted under its raw id moves to the pseudonym and leaves
+                // the filter, shifting the rows after it down — so only the rows that
+                // stay are skipped over on the next read.
+                int stayInFilter = 0;
+                for (AuditEntry entry : page) {
+                    if (isComplianceRecord(entry) || isRedacted(entry)) {
+                        stayInFilter++;
+                        continue;
+                    }
+                    AuditVerificationStatus before = verifyEntry(entry, budget);
+                    boolean verified = before == AuditVerificationStatus.VALID || before == AuditVerificationStatus.VALID_RECOVERED;
+                    AuditEntry rewritten = entry.withUserId(target).withPayload(redactionMarker(entry.hmac(), before), null, null, null);
+                    if (verified && isSigningEnabled()) {
+                        rewritten = reseal(rewritten);
+                    }
+                    boolean replaced;
+                    try {
+                        replaced = auditStore.redactEntry(rewritten, entry.hmac());
+                    } catch (UnsupportedOperationException e) {
+                        throw e;
+                    } catch (Exception e) {
+                        LOGGER.errorv("[GDPR] Could not redact audit entry {0}: {1}", sanitize(entry.id()), e.getMessage());
+                        replaced = false;
+                    }
+                    if (!replaced) {
+                        failed++;
+                        stayInFilter++;
+                        continue;
+                    }
+                    redacted++;
+                    if (verified && isSigningEnabled()) {
+                        resealed++;
+                    } else {
+                        keptUnverified++;
+                    }
+                    if (!Objects.equals(entry.userId(), target)) {
+                        pseudonymized++;
+                    }
+                    if (identity.equals(target)) {
+                        stayInFilter++;
+                    }
+                }
+                if (page.size() < REDACTION_PAGE_SIZE) {
+                    break; // a short page held every remaining row
+                }
+                skip += stayInFilter;
+            }
+        }
+        // The sweep pages by offset over a timestamp-sorted filter that its own writes
+        // shrink; rows with identical timestamps can swap places between two reads and
+        // be stepped over. Nothing may be reported complete on trust: whatever still
+        // carries the raw id and was not redacted is a failure.
+        if (failed == 0 && hasUnredactedRows(userId)) {
+            failed++;
+        }
+        if (failed > 0) {
+            LOGGER.errorv("[GDPR] Audit redaction INCOMPLETE: {0} entr(y/ies) could not be redacted ({1} redacted).", failed, redacted);
+        }
+        return new ErasureResult(redacted, resealed, keptUnverified, pseudonymized, failed, true);
+    }
+
+    /**
+     * Whether a row under the raw id is neither redacted nor a kept compliance
+     * record.
+     */
+    private boolean hasUnredactedRows(String userId) {
+        int skip = 0;
+        while (true) {
+            List<AuditEntry> page = auditStore.getEntriesByUserId(userId, skip, REDACTION_PAGE_SIZE);
+            for (AuditEntry entry : page) {
+                if (!isComplianceRecord(entry) && !isRedacted(entry)) {
+                    return true;
+                }
+            }
+            if (page.size() < REDACTION_PAGE_SIZE) {
+                return false;
+            }
+            skip += page.size();
+        }
+    }
+
+    /**
+     * Every user id a row of {@code userId} can carry: the keyed pseudonyms
+     * (current and retired keys), the unkeyed pseudonym of v1–v4 erasures, and the
+     * raw id — in that order, so the raw rows, which move into the current
+     * pseudonym when redacted, are read last and not twice.
+     */
+    private List<String> identitiesOf(String userId) {
+        var identities = new LinkedHashSet<String>();
+        if (keyring != null) {
+            identities.addAll(keyring.keyedPseudonymsFor(userId).values());
+        }
+        identities.add(AuditHmac.pseudonymFor(userId));
+        identities.add(pseudonymForErasure(userId));
+        identities.remove(userId);
+        var ordered = new ArrayList<>(identities);
+        ordered.add(userId);
+        return ordered;
+    }
+
+    /**
+     * The pseudonym this ledger writes for {@code userId} — for a record that has
+     * to name a person who is not its actor (the subject of an administrative
+     * action), so their raw id never enters the immutable ledger.
+     */
+    public String pseudonymOf(String userId) {
+        return pseudonymForErasure(userId);
+    }
+
+    /**
+     * The pseudonym an erased user's rows carry: keyed under the current signing
+     * key whenever the ledger signs (what the v5 signature covers), the unkeyed
+     * hash otherwise.
+     */
+    private String pseudonymForErasure(String userId) {
         AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
-        String pseudonym = signingKey != null ? AuditHmac.keyedPseudonymFor(userId, signingKey.pseudonymKey()) : AuditHmac.pseudonymFor(userId);
-        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(), pseudonym, entry.environment(),
-                entry.stepIndex(), entry.taskId(), entry.taskType(),
-                entry.taskIndex(), entry.durationMs(), entry.input(), entry.output(), entry.llmDetail(), entry.toolCalls(),
-                entry.actions(), entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
+        return signingKey != null ? AuditHmac.keyedPseudonymFor(userId, signingKey.pseudonymKey()) : AuditHmac.pseudonymFor(userId);
+    }
+
+    /** Re-sign an entry this service vouches for, with the current key. */
+    private AuditEntry reseal(AuditEntry entry) {
+        AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
+        if (signingKey == null) {
+            return entry;
+        }
+        AuditEntry resealed = entry.withHmac(AuditHmac.computeHmac(entry, signingKey)).withAgentSignature(null);
+        if (agentSigningEnabled && agentSigningService != null && resealed.agentId() != null) {
+            resealed = applyAgentSignature(resealed);
+        }
+        return resealed;
+    }
+
+    /**
+     * The map that replaces a redacted entry's {@code input}. It names the HMAC the
+     * row carried before, so an auditor holding an earlier copy of the row can
+     * match the two, and the verification result at the time of redaction.
+     */
+    private static Map<String, Object> redactionMarker(String originalHmac, AuditVerificationStatus before) {
+        var details = new LinkedHashMap<String, Object>();
+        details.put("reason", "GDPR Art. 17 erasure");
+        details.put("redactedAt", Instant.now().truncatedTo(AuditHmac.SIGNED_TIMESTAMP_PRECISION).toString());
+        details.put("redactedFields", List.of("input", "output", "llmDetail", "toolCalls"));
+        if (originalHmac != null) {
+            details.put("originalHmac", originalHmac);
+        }
+        if (before != null) {
+            details.put("integrityBeforeRedaction", before.name());
+        }
+        var marker = new LinkedHashMap<String, Object>();
+        marker.put(REDACTION_MARKER_KEY, details);
+        return marker;
+    }
+
+    /** Whether an entry already carries the redaction marker. */
+    public static boolean isRedacted(AuditEntry entry) {
+        return entry.input() != null && entry.input().get(REDACTION_MARKER_KEY) instanceof Map<?, ?>;
+    }
+
+    private static boolean isComplianceRecord(AuditEntry entry) {
+        return COMPLIANCE_TASK_ID.equals(entry.taskId()) || ADMIN_ACTION_TASK_ID.equals(entry.taskId());
     }
 
     private AuditEntry applyAgentSignature(AuditEntry entry) {

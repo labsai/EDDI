@@ -576,4 +576,58 @@ class MongoUserMemoryStoreTest {
                 store.insertIfAbsent(new UserMemoryEntry(null, TEST_USER, "lang", "de", "legacy", Visibility.global, null, List.of(), null,
                         false, 0, null, null)));
     }
+
+    // === Compare-and-set writes (Dream must not lose a concurrent update) ===
+
+    private static UserMemoryEntry consolidated() {
+        return new UserMemoryEntry(null, "user-1", "coffee", "black, no sugar", "preference", Visibility.self, "agent-1", List.of(),
+                "dream-consolidation", false, 0, Instant.now(), Instant.now());
+    }
+
+    @Test
+    @DisplayName("deleteEntryIfUnchanged — one conditional deleteOne on id AND the updatedAt that was read")
+    void deleteEntryIfUnchanged_isConditionalOnUpdatedAt() throws Exception {
+        String id = new ObjectId().toHexString();
+        Instant readAt = Instant.parse("2026-10-01T10:00:00.123456Z");
+        DeleteResult deleted = mock(DeleteResult.class);
+        when(deleted.getDeletedCount()).thenReturn(1L, 0L);
+        when(collection.deleteOne(any(Bson.class))).thenReturn(deleted);
+
+        assertTrue(store.deleteEntryIfUnchanged(id, readAt));
+        assertFalse(store.deleteEntryIfUnchanged(id, readAt), "a row written since is not deleted");
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(collection, times(2)).deleteOne(filter.capture());
+        String json = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(json.contains(id), json);
+        assertTrue(json.contains("\"updatedAt\": \"2026-10-01T10:00:00.123456Z\""), json);
+        verify(collection, never()).deleteOne(eq(new Document("_id", new ObjectId(id))));
+    }
+
+    @Test
+    @DisplayName("replaceIfUnchanged — overwrites the value only while updatedAt is the one that was read")
+    void replaceIfUnchanged_isConditionalOnUpdatedAt() throws Exception {
+        String id = new ObjectId().toHexString();
+        Instant readAt = Instant.parse("2026-10-01T10:00:00Z");
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getModifiedCount()).thenReturn(0L);
+        when(collection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertFalse(store.replaceIfUnchanged(id, consolidated(), readAt));
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(collection).updateOne(filter.capture(), any(Bson.class));
+        String json = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(json.contains("\"updatedAt\": \"2026-10-01T10:00:00Z\""), json);
+        verify(collection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("replaceIfUnchanged — refuses a reserved key like upsert")
+    void replaceIfUnchanged_refusesReservedKeys() {
+        var reserved = new UserMemoryEntry(null, "user-1", "_gdpr_processing_restricted", true, "gdpr", Visibility.global, null, List.of(),
+                null, false, 0, Instant.now(), Instant.now());
+        assertThrows(IUserMemoryStore.ReservedMemoryKeyException.class,
+                () -> store.replaceIfUnchanged(new ObjectId().toHexString(), reserved, Instant.now()));
+    }
 }

@@ -2000,4 +2000,56 @@ class GdprComplianceServiceTest {
             assertFalse(export.complete());
         }
     }
+
+    @Nested
+    @DisplayName("audit ledger erasure")
+    class AuditLedgerErasure {
+
+        @Test
+        @DisplayName("redacted audit entries are reported, and counted as pseudonymised too")
+        void redactionIsReported() {
+            when(auditLedgerService.eraseUser(USER_ID)).thenReturn(new AuditLedgerService.ErasureResult(6, 6, 0, 6, 0, true));
+            when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+            GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+            assertEquals(6, result.auditEntriesRedacted());
+            assertEquals(6, result.auditEntriesPseudonymized());
+            assertTrue(result.complete());
+        }
+
+        @Test
+        @DisplayName("an audit row that could not be redacted makes the erasure incomplete — never complete:true with PII left")
+        void unredactedRowsMakeTheErasureIncomplete() {
+            when(auditLedgerService.eraseUser(USER_ID)).thenReturn(new AuditLedgerService.ErasureResult(4, 4, 0, 4, 2, true));
+
+            GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+            assertFalse(result.complete());
+            assertTrue(result.failedSteps().contains("auditRedaction"), result.failedSteps().toString());
+        }
+
+        @Test
+        @DisplayName("a redaction that throws is a failed step, and the user id is still pseudonymised")
+        void throwingRedactionIsAFailedStep() {
+            when(auditLedgerService.eraseUser(USER_ID)).thenThrow(new UnsupportedOperationException("store cannot redact"));
+            when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(3L);
+
+            GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+            assertFalse(result.complete());
+            assertTrue(result.failedSteps().contains("auditRedaction"));
+            assertEquals(3, result.auditEntriesPseudonymized());
+        }
+
+        @Test
+        @DisplayName("a database-log pseudonymisation that fails is a failed step, not a silent zero")
+        void failedLogPseudonymisationIsAFailedStep() {
+            when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenThrow(new IllegalStateException("db down"));
+
+            GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+            assertTrue(result.failedSteps().contains("databaseLogs"));
+        }
+    }
 }

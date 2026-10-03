@@ -546,9 +546,10 @@ public class ScheduleFireExecutor {
             if (result.isSuccess()) {
                 status = ScheduleConfiguration.FireStatus.COMPLETED.name();
                 LOGGER.infof("[SCHEDULE] Dream consolidation for schedule '%s' (id=%s, agent=%s, user=%s): "
-                        + "pruned=%d, contradictions=%d, summarized=%d, estimatedCost=$%.4f", schedule.getName(), schedule.getId(),
+                        + "pruned=%d, contradictions=%d, summarized=%d, conflictsSkipped=%d, estimatedCost=$%.4f", schedule.getName(),
+                        schedule.getId(),
                         schedule.getAgentId(), schedule.getUserId(), result.entriesPruned(), result.contradictionsFound(),
-                        result.entriesSummarized(), cost);
+                        result.entriesSummarized(), result.conflictsSkipped(), cost);
             } else {
                 status = ScheduleConfiguration.FireStatus.FAILED.name();
                 errorMessage = result.error();
