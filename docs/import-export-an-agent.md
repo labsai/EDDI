@@ -277,6 +277,12 @@ instead of overwriting the other team's. Resources from before ownership stampin
 judged by the edit check alone. The preview applies the same rule, and so does a live sync
 looking for "the agent promoted from this source". With workspaces off nothing changes.
 
+**Administrators are scoped too.** An administrator may edit every resource, but the rule still asks where the
+import writes: with no `X-EDDI-Space` header that is the administrator's own personal space (or the
+deployment's default team), and the header only accepts a space the caller is a member of. An administrator who
+re-imports an archive to update a team's copy therefore has to be a member of that team and send its space in `X-EDDI-Space`;
+before this rule the merge reached into any workspace's copy, and now it creates a separate copy instead.
+
 ---
 
 ## API Reference

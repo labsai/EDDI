@@ -153,21 +153,6 @@ public class RemoteApiResourceSource implements IResourceSource {
         this.ownsHttpClient = true;
     }
 
-    /**
-     * The configuration every {@link HttpClient} this class owns is built with.
-     * <p>
-     * Redirects are stated rather than inherited. A redirect is never followed, so
-     * a remote instance answering 3xx can never bounce the caller's
-     * X-Source-Authorization bearer at an address of its choosing: the hop surfaces
-     * as a non-200 status and the read fails. This is the JDK's default too, and
-     * saying so is what stops a later edit from changing it without anyone
-     * noticing.
-     * <p>
-     * Both build sites go through here, and it is package-private, so that the
-     * policy can be asserted directly. Building a real client to read it back is
-     * not an option in a sandboxed build: {@code HttpClient.build()} opens a
-     * selector, which needs a loopback socket.
-     */
     /** Whether a failed read was the response-size cap, wherever in the chain. */
     static boolean isTooLarge(Throwable failure) {
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
@@ -202,6 +187,21 @@ public class RemoteApiResourceSource implements IResourceSource {
         }
     }
 
+    /**
+     * The configuration every {@link HttpClient} this class owns is built with.
+     * <p>
+     * Redirects are stated rather than inherited. A redirect is never followed, so
+     * a remote instance answering 3xx can never bounce the caller's
+     * X-Source-Authorization bearer at an address of its choosing: the hop surfaces
+     * as a non-200 status and the read fails. This is the JDK's default too, and
+     * saying so is what stops a later edit from changing it without anyone
+     * noticing.
+     * <p>
+     * Both build sites go through here, and it is package-private, so that the
+     * policy can be asserted directly. Building a real client to read it back is
+     * not an option in a sandboxed build: {@code HttpClient.build()} opens a
+     * selector, which needs a loopback socket.
+     */
     static HttpClient.Builder configure(HttpClient.Builder builder) {
         return builder
                 .connectTimeout(CONNECT_TIMEOUT)
