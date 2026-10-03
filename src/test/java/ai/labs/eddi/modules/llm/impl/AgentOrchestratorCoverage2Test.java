@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -335,7 +336,7 @@ class AgentOrchestratorCoverage2Test {
     // ═══════════════════════════════════════════════════════════════════
 
     private int maxPausesPerTurn(ToolApprovalsConfig cfg) throws Exception {
-        Method m = AgentOrchestrator.class.getDeclaredMethod("maxPausesPerTurn", ToolApprovalsConfig.class);
+        Method m = ToolApprovalGateSupport.class.getDeclaredMethod("maxPausesPerTurn", ToolApprovalsConfig.class);
         m.setAccessible(true);
         return (int) m.invoke(null, cfg);
     }
@@ -379,7 +380,7 @@ class AgentOrchestratorCoverage2Test {
 
     @SuppressWarnings("unchecked")
     private List<String> activatedToolNames(boolean isLazy, List<ToolSpecification> activeSpecs) throws Exception {
-        Method m = AgentOrchestrator.class.getDeclaredMethod("activatedToolNames", boolean.class, List.class);
+        Method m = ToolApprovalGateSupport.class.getDeclaredMethod("activatedToolNames", boolean.class, List.class);
         m.setAccessible(true);
         return (List<String>) m.invoke(null, isLazy, activeSpecs);
     }
@@ -471,7 +472,7 @@ class AgentOrchestratorCoverage2Test {
     // ═══════════════════════════════════════════════════════════════════
 
     private String fingerprint(List<ToolExecutionRequest> gated) throws Exception {
-        Method m = AgentOrchestrator.class.getDeclaredMethod("fingerprint", List.class);
+        Method m = ToolApprovalGateSupport.class.getDeclaredMethod("fingerprint", List.class);
         m.setAccessible(true);
         return (String) m.invoke(null, gated);
     }

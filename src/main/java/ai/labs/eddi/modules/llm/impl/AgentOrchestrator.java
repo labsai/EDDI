@@ -619,60 +619,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
     /** Journal-stored result cap (bytes) — matches the journal store's own cap. */
     static final int JOURNAL_RESULT_MAX_BYTES = 32_768;
 
-    /** @see ToolLoopResumer#restoreActiveSpecs */
-    private static List<ToolSpecification> restoreActiveSpecs(ToolSetup setup, boolean isLazy, List<String> activatedToolNames) {
-        return ToolLoopResumer.restoreActiveSpecs(setup, isLazy, activatedToolNames);
-    }
-
-    /** @see ToolLoopResumer#fallbackRebuildMessages */
-    private List<ChatMessage> fallbackRebuildMessages(LlmConfiguration.Task task, IConversationMemory memory,
-                                                      PendingToolCallBatch batch) {
-        return toolLoopResumer.fallbackRebuildMessages(task, memory, batch);
-    }
-
-    /**
-     * When the gate is active, assigns a stable synthetic id to any tool-call
-     * request the provider emitted WITHOUT one, so the id is identical across the
-     * frozen pause transcript, the pending batch, and the resume result messages. A
-     * null-id request in the transcript paired with an invented id on resume breaks
-     * providers that match tool results by {@code tool_call_id}; and the gate
-     * itself only records a reason per non-null id. Returns the message unchanged
-     * when the gate is inert (pre-HITL byte-identical) or no id is missing.
-     */
-    private static AiMessage normalizeToolCallIds(AiMessage aiMessage, ToolApprovalsConfig effectiveToolApprovals) {
-        return ToolApprovalGateSupport.normalizeToolCallIds(aiMessage, effectiveToolApprovals);
-    }
-
-    /** Rebuilds a provider-safe request from a pending call (original raw args). */
-    /** @see ToolLoopResumer#rebuiltRequest */
-    private static ToolExecutionRequest rebuiltRequest(PendingToolCallBatch.PendingToolCall c) {
-        return ToolLoopResumer.rebuiltRequest(c);
-    }
-
-    /** @see ToolLoopResumer#rebuiltRequest */
-    private static ToolExecutionRequest rebuiltRequest(PendingToolCallBatch.PendingToolCall c, String args) {
-        return ToolLoopResumer.rebuiltRequest(c, args);
-    }
-
-    /** @see ToolLoopResumer#rejectionEnvelope */
-    private String rejectionEnvelope(String toolName, String note) {
-        return toolLoopResumer.rejectionEnvelope(toolName, note);
-    }
-
-    /** @see ToolLoopResumer#amendedEnvelope */
-    private String amendedEnvelope(String result) {
-        return toolLoopResumer.amendedEnvelope(result);
-    }
-
-    /**
-     * Reusable Jackson mapper for approver/model-facing envelopes (escapes text).
-     */
-
-    /** @see ToolLoopResumer#toJson */
-    private static String toJson(Object value) {
-        return ToolLoopResumer.toJson(value);
-    }
-
     /** @see ToolLoopResumer#auditOutcomeUnknown */
     void auditOutcomeUnknown(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c) {
         toolLoopResumer.auditOutcomeUnknown(memory, c);
@@ -840,11 +786,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
         }
     }
 
-    /** @see ToolLoopRunner#computeInitialActiveSpecs */
-    private static List<ToolSpecification> computeInitialActiveSpecs(ToolSetup setup, boolean isLazy) {
-        return ToolLoopRunner.computeInitialActiveSpecs(setup, isLazy);
-    }
-
     /** @see ToolLoopRunner#executeWithTools */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
                                              LlmConfiguration.Task task, IConversationMemory memory,
@@ -859,22 +800,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
     @Override
     public double conversationToolCost(String conversationId) {
         return toolLoopRunner.conversationToolCost(conversationId);
-    }
-
-    /** @see ToolLoopRunner#toolCostDelta */
-    private double toolCostDelta(String conversationId, double costBefore) {
-        return toolLoopRunner.toolCostDelta(conversationId, costBefore);
-    }
-
-    /** @see ToolLoopRunner#runToolCallLoop */
-    private String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
-                                   List<Map<String, Object>> trace, int startIteration, ToolSetup setup, boolean isLazy,
-                                   LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
-                                   int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder,
-                                   JsonResponseFormatPolicy jsonPolicy)
-            throws LifecycleException {
-        return toolLoopRunner.runToolCallLoop(chatModel, initialMessages, activeSpecs, trace, startIteration, setup, isLazy,
-                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy, null, null);
     }
 
     // ─── In-turn tool-context budget (D6b) — extracted to ToolContextBudget (R2
@@ -896,20 +821,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     static Map<String, Object> tokenUsageMap(TokenUsage usage) {
         return ToolContextBudget.tokenUsageMap(usage);
-    }
-
-    /** @see ToolLoopRunner#executeSingleToolCall */
-    void executeSingleToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
-                               List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
-                               Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                               Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
-                               int defaultRateLimit, Double maxBudget, String conversationId,
-                               boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
-                               LlmConfiguration.Task task, boolean isLazy,
-                               List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
-        toolLoopRunner.executeSingleToolCall(toolRequest, memory, currentMessages, trace, toolExecutors, toolRateLimits,
-                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
     }
 
     /** @see ToolLoopRunner#executeSingleToolCallResult */
@@ -939,48 +850,11 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     // ─── Tool-approval gate helpers ───
     //
-    // Bodies moved to ToolApprovalGateSupport (R2 step 4). These stay as declared
-    // delegators with identical signatures and modifiers, because several
-    // characterization tests reach them via
-    // AgentOrchestrator.class.getDeclaredMethod(...), which resolves only methods
-    // declared on this exact class, and buildPendingBatch is called directly as an
-    // instance method in eight places.
-
-    /** Reads this turn's cumulative gated-pause count (0 when absent). */
-    private static int readToolPauseCount(IConversationMemory memory) {
-        return ToolApprovalGateSupport.readToolPauseCount(memory);
-    }
-
-    /** Writes the incremented gated-pause count for this turn. */
-    private static void incrementToolPauseCount(IConversationMemory memory, int pausesSoFar) {
-        ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
-    }
-
-    /** Effective max pauses per turn (default 3, clamped 1..10). */
-    private static int maxPausesPerTurn(ToolApprovalsConfig cfg) {
-        return ToolApprovalGateSupport.maxPausesPerTurn(cfg);
-    }
-
-    /** @see ToolApprovalGateSupport#recordRuleMatches */
-    private void recordRuleMatches(Collection<ToolApprovalsConfig.ApprovalRule> matched) {
-        gateSupport.recordRuleMatches(matched);
-    }
-
-    /** Names activated in LAZY mode (for resume reactivation); empty otherwise. */
-    private static List<String> activatedToolNames(boolean isLazy, List<ToolSpecification> activeSpecs) {
-        return ToolApprovalGateSupport.activatedToolNames(isLazy, activeSpecs);
-    }
-
-    /** First non-blank of the two, or null. */
-    private static String firstNonBlank(String preferred, String fallback) {
-        return ToolApprovalGateSupport.firstNonBlank(preferred, fallback);
-    }
-
-    /** @see ToolApprovalGateSupport#buildPauseReason */
-    private static String buildPauseReason(ToolApprovalsConfig cfg, ToolApprovalGate.GateResult gateResult,
-                                           ToolApprovalsConfig.ApprovalRule rule) {
-        return ToolApprovalGateSupport.buildPauseReason(cfg, gateResult, rule);
-    }
+    // Bodies live in ToolApprovalGateSupport (R2 step 4). Only the delegators a
+    // caller still uses remain: buildPendingBatch is called directly as an instance
+    // method by the gate's characterization tests. The private, uncalled copies of
+    // the other helpers — kept alive only by tests reflecting on this class — were
+    // removed; those tests now exercise ToolApprovalGateSupport itself.
 
     /**
      * Backward-compatible overload: transcript cap defaults to
@@ -1034,33 +908,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
     /** @see ToolApprovalGateSupport#recordWriteApprovalDecision */
     void recordWriteApprovalDecision(HitlDecision.HitlVerdict verdict, String decidedBy) {
         gateSupport.recordWriteApprovalDecision(verdict, decidedBy);
-    }
-
-    /** Caps a string to at most maxBytes UTF-8 bytes without splitting a char. */
-    private static String capUtf8(String s, int maxBytes) {
-        return ToolApprovalGateSupport.capUtf8(s, maxBytes);
-    }
-
-    /** Deep-copies the trace, capping each entry's "result" string. */
-    private static List<Map<String, Object>> capTrace(List<Map<String, Object>> trace) {
-        return ToolApprovalGateSupport.capTrace(trace);
-    }
-
-    /** sha256Hex of sorted gated (name + pipe + arguments) joined by newline. */
-    private static String fingerprint(List<ToolExecutionRequest> gated) {
-        return ToolApprovalGateSupport.fingerprint(gated);
-    }
-
-    /** @see ToolApprovalGateSupport#recordPauseCapGuard */
-    private void recordPauseCapGuard(IConversationMemory memory, String fingerprint) {
-        gateSupport.recordPauseCapGuard(memory, fingerprint);
-    }
-
-    /** @see ToolLoopRunner#activateDiscoveredTools */
-    private void activateDiscoveredTools(String discoverResult,
-                                         List<ToolSpecification> builtInSpecs,
-                                         List<ToolSpecification> activeSpecs) {
-        toolLoopRunner.activateDiscoveredTools(discoverResult, builtInSpecs, activeSpecs);
     }
 
     /**
@@ -1322,10 +1169,4 @@ class AgentOrchestrator implements IAgentOrchestrator {
         return mcpToolsProvider.discover(memory);
     }
 
-    // Kept as a declared delegator (not inlined) since it's reflected in tests.
-    // Logic + RESERVED_TEMPLATE_KEYS extracted to HttpCallToolsProvider (R2 step
-    // 2).
-    private static void safeTemplateMerge(Map<String, Object> templateData, Map<String, Object> args) {
-        HttpCallToolsProvider.safeTemplateMerge(templateData, args);
-    }
 }

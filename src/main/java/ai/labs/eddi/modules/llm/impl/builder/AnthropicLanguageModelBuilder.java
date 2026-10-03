@@ -53,6 +53,9 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = AnthropicChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
+        // One retry layer: the task's retry policy (RetryConfiguration) — see
+        // ModelParameterValues#PROVIDER_MAX_RETRIES.
+        builder.maxRetries(ModelParameterValues.PROVIDER_MAX_RETRIES);
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));

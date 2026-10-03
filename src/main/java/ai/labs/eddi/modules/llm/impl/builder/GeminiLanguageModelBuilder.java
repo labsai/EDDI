@@ -104,6 +104,9 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
      */
     ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
         var builder = GoogleAiGeminiChatModel.builder().httpClientBuilder(httpClientBuilder);
+        // One retry layer: the task's retry policy (RetryConfiguration) — see
+        // ModelParameterValues#PROVIDER_MAX_RETRIES.
+        builder.maxRetries(ModelParameterValues.PROVIDER_MAX_RETRIES);
 
         if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
             builder.apiKey(parameters.get(KEY_API_KEY));

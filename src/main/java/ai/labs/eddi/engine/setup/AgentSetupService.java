@@ -958,7 +958,9 @@ public class AgentSetupService {
             }
         }
 
-        // Wire httpcall URIs as EddiToolBridge tools (used by API agents)
+        // Record the API agent's httpcall URIs on the task. Setting them is what puts
+        // the task into agent (tool-calling) mode; the tools themselves are discovered
+        // from the workflow's httpcalls step by HttpCallToolsProvider
         if (toolUris != null && !toolUris.isEmpty()) {
             task.setTools(toolUris);
         }

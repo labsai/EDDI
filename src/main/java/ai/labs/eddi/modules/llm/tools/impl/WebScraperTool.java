@@ -6,8 +6,10 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
+import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -16,17 +18,56 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.jsoup.select.Selector;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Web content extraction tool for scraping and parsing HTML content.
+ *
+ * <p>
+ * <strong>Parsing is CPU-bound and runs contained.</strong> Fetching is I/O and
+ * stays on the calling thread, but turning up to {@code max-response-bytes} of
+ * model-chosen HTML into a DOM and evaluating a model-written CSS selector
+ * against it is pure CPU. On the virtual thread the tool call arrives on, that
+ * work occupies a carrier thread for its whole duration, and there are only as
+ * many carriers as cores: a few slow selectors starved every virtual thread in
+ * the JVM. Parsing and selection therefore run on a small bounded pool of
+ * platform threads ({@code eddi.tools.web-scraper.parse-threads}, default 2)
+ * with a hard deadline ({@code eddi.tools.web-scraper.parse-timeout-ms},
+ * default 10 s). When the pool is busy a call is refused immediately rather
+ * than queued.
+ * </p>
+ *
+ * <p>
+ * A worker that outlives its deadline is interrupted, but jsoup does not check
+ * the flag, so it keeps running until it finishes on its own. That is the
+ * honest limit of containment in Java — there is no safe way to kill a thread —
+ * and it is why the pool is bounded: a runaway can cost at most
+ * {@code parse-threads} cores, never the server. It is also why the selector is
+ * validated first: jsoup evaluates {@code :matches(…)} and friends as Java
+ * regular expressions over page text, and a catastrophic pattern there does not
+ * finish at all, so model-supplied regex selectors are refused outright.
+ * </p>
  */
 @ApplicationScoped
 public class WebScraperTool {
@@ -38,29 +79,71 @@ public class WebScraperTool {
     /** Backstop response cap used when no configuration is supplied (5 MiB). */
     static final long DEFAULT_MAX_RESPONSE_BYTES = 5L * 1024 * 1024;
 
+    /** Longest CSS selector a model may submit. */
+    static final int MAX_SELECTOR_LENGTH = 256;
+
+    /** Default deadline for parsing one page and evaluating one selector. */
+    static final long DEFAULT_PARSE_TIMEOUT_MS = 10_000L;
+
+    /** Default number of platform threads that may parse at the same time. */
+    static final int DEFAULT_PARSE_THREADS = 2;
+
+    /**
+     * jsoup pseudo-selectors that take a Java regular expression — or, for
+     * {@code :matchText}, rewrite the document — plus the {@code ~=} attribute
+     * operator, which jsoup also evaluates as a regex. Matched case-insensitively.
+     */
+    private static final Pattern REGEX_SELECTOR = Pattern.compile("(?i):match(es|esown|eswholetext|eswholeowntext|text)\\b|~=");
+
     private final SafeHttpClient httpClient;
     private final HtmlToMarkdownConverter htmlToMarkdownConverter;
     private final long maxResponseBytes;
+    private final long parseTimeoutMs;
+    private final ExecutorService parsePool;
 
     @Inject
     public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter,
             @ConfigProperty(name = "eddi.tools.web-scraper.max-response-bytes",
-                            defaultValue = "5242880") long maxResponseBytes) {
+                            defaultValue = "5242880") long maxResponseBytes,
+            @ConfigProperty(name = "eddi.tools.web-scraper.parse-timeout-ms", defaultValue = "10000") long parseTimeoutMs,
+            @ConfigProperty(name = "eddi.tools.web-scraper.parse-threads", defaultValue = "2") int parseThreads) {
         this.httpClient = httpClient;
         this.htmlToMarkdownConverter = htmlToMarkdownConverter;
         this.maxResponseBytes = maxResponseBytes > 0 ? maxResponseBytes : DEFAULT_MAX_RESPONSE_BYTES;
+        this.parseTimeoutMs = parseTimeoutMs > 0 ? parseTimeoutMs : DEFAULT_PARSE_TIMEOUT_MS;
+        this.parsePool = boundedParsePool(parseThreads > 0 ? parseThreads : DEFAULT_PARSE_THREADS);
     }
 
     /** Convenience constructor for tests and callers with no configured cap. */
     public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {
-        this(httpClient, htmlToMarkdownConverter, DEFAULT_MAX_RESPONSE_BYTES);
+        this(httpClient, htmlToMarkdownConverter, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_PARSE_TIMEOUT_MS, DEFAULT_PARSE_THREADS);
+    }
+
+    /**
+     * Platform threads, fixed in number, with no queue: a call that finds every
+     * worker busy is rejected at once instead of waiting behind a runaway.
+     */
+    private static ExecutorService boundedParsePool(int threads) {
+        AtomicInteger counter = new AtomicInteger();
+        ThreadFactory factory = runnable -> {
+            Thread thread = new Thread(runnable, "eddi-webscraper-parse-" + counter.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS, new SynchronousQueue<>(), factory,
+                new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    @PreDestroy
+    void shutdown() {
+        parsePool.shutdownNow();
     }
 
     @Tool("Extracts the readable content of a web page URL as Markdown, with navigation, scripts and other page chrome removed.")
-    public String extractWebPageText(@P("url") String url) {
+    public String extractWebPageText(@P("Absolute http(s) URL of the page to read") String url) {
 
         try {
-            LOGGER.info("Extracting text from URL: " + url);
+            LOGGER.debugf("Extracting text from URL: %s", sanitize(url));
 
             FetchedPage page = fetchUrl(url);
 
@@ -69,16 +152,19 @@ public class WebScraperTool {
             // dump, which dropped page titles living in <article><header><h1> and
             // merged adjacent blocks into single words. The converter keeps the
             // structure an LLM can actually use — headings, lists, tables, code.
-            return page.annotate(htmlToMarkdownConverter.convert(page.html(), url, MAX_EXTRACTED_CHARACTERS));
+            return page.annotate(parseBounded(() -> htmlToMarkdownConverter.convert(page.html(), url, MAX_EXTRACTED_CHARACTERS)));
 
+        } catch (ToolFailureException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.error("Web page extraction error for " + url + ": " + e.getMessage());
-            return "Error: Could not extract content from web page - " + e.getMessage();
+            LOGGER.warnf("Web page extraction failed for %s: %s", sanitize(url), sanitize(e.getMessage()));
+            throw new ToolFailureException("Error: Could not extract content from web page - " + e.getMessage());
         }
     }
 
     @Tool("Extracts all links (URLs) from a web page")
-    public String extractLinks(@P("url") String url, @P("maxLinks") Integer maxLinks) {
+    public String extractLinks(@P("Absolute http(s) URL of the page") String url,
+                               @P(value = "Maximum number of links to return, 1-50 (default 20)", required = false) Integer maxLinks) {
 
         try {
             if (maxLinks == null || maxLinks < 1) {
@@ -88,12 +174,10 @@ public class WebScraperTool {
                 maxLinks = 50;
             }
 
-            LOGGER.info("Extracting links from URL: " + url);
+            LOGGER.debugf("Extracting links from URL: %s", sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            Document doc = Jsoup.parse(page.html());
-
-            Elements links = doc.select("a[href]");
+            Elements links = parseBounded(() -> Jsoup.parse(page.html()).select("a[href]"));
 
             StringBuilder result = new StringBuilder();
             result.append("Links found on ").append(url).append(":\n\n");
@@ -119,25 +203,32 @@ public class WebScraperTool {
                 result.append("No links found.");
             }
 
-            LOGGER.debug("Extracted " + count + " links from " + url);
+            LOGGER.debugf("Extracted %d links from %s", count, sanitize(url));
             return page.annotate(result.toString());
 
+        } catch (ToolFailureException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.error("Link extraction error for " + url + ": " + e.getMessage());
-            return "Error: Could not extract links - " + e.getMessage();
+            LOGGER.warnf("Link extraction failed for %s: %s", sanitize(url), sanitize(e.getMessage()));
+            throw new ToolFailureException("Error: Could not extract links - " + e.getMessage());
         }
     }
 
     @Tool("Extracts structured data from a web page using CSS selectors")
-    public String extractWithSelector(@P("url") String url, @P("cssSelector") String cssSelector) {
+    public String extractWithSelector(@P("Absolute http(s) URL of the page") String url,
+                                      @P("CSS selector, e.g. 'h2.title' or 'table tr td:eq(1)'. Regex pseudo-selectors "
+                                              + "(:matches and friends) and the ~= operator are not supported; at most 256 characters") String cssSelector) {
+
+        String rejection = rejectSelector(cssSelector);
+        if (rejection != null) {
+            return rejection;
+        }
 
         try {
-            LOGGER.info("Extracting elements matching '" + cssSelector + "' from " + url);
+            LOGGER.debugf("Extracting elements matching '%s' from %s", sanitize(cssSelector), sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            Document doc = Jsoup.parse(page.html());
-
-            Elements elements = doc.select(cssSelector);
+            Elements elements = parseBounded(() -> Jsoup.parse(page.html()).select(cssSelector));
 
             if (elements.isEmpty()) {
                 return "No elements found matching selector: " + cssSelector;
@@ -156,23 +247,47 @@ public class WebScraperTool {
                 result.append(++count).append(". ").append(element.text()).append("\n");
             }
 
-            LOGGER.debug("Extracted " + count + " elements from " + url);
+            LOGGER.debugf("Extracted %d elements from %s", count, sanitize(url));
             return page.annotate(result.toString());
 
+        } catch (ToolFailureException e) {
+            throw e;
+        } catch (Selector.SelectorParseException e) {
+            // Deterministic: the same selector fails the same way every time, so it is
+            // an answer, not a transient failure.
+            return "Error: Invalid CSS selector - " + e.getMessage();
         } catch (Exception e) {
-            LOGGER.error("Selector extraction error: " + e.getMessage());
-            return "Error: Could not extract with selector - " + e.getMessage();
+            LOGGER.warnf("Selector extraction failed for %s: %s", sanitize(url), sanitize(e.getMessage()));
+            throw new ToolFailureException("Error: Could not extract with selector - " + e.getMessage());
         }
     }
 
+    /**
+     * Why a model-supplied selector is refused, or {@code null} when it may run.
+     * Package-private for tests.
+     */
+    static String rejectSelector(String cssSelector) {
+        if (cssSelector == null || cssSelector.isBlank()) {
+            return "Error: cssSelector must not be empty.";
+        }
+        if (cssSelector.length() > MAX_SELECTOR_LENGTH) {
+            return "Error: cssSelector is too long (max " + MAX_SELECTOR_LENGTH + " characters).";
+        }
+        if (REGEX_SELECTOR.matcher(cssSelector).find()) {
+            return "Error: regular-expression selectors (:matches, :matchesOwn, :matchText, :matchesWholeText, "
+                    + ":matchesWholeOwnText, [attr~=regex]) are not supported. Use :contains(text) or :containsOwn(text) instead.";
+        }
+        return null;
+    }
+
     @Tool("Gets metadata from a web page (title, description, keywords)")
-    public String extractMetadata(@P("url") String url) {
+    public String extractMetadata(@P("Absolute http(s) URL of the page") String url) {
 
         try {
-            LOGGER.info("Extracting metadata from URL: " + url);
+            LOGGER.debugf("Extracting metadata from URL: %s", sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            Document doc = Jsoup.parse(page.html());
+            Document doc = parseBounded(() -> Jsoup.parse(page.html()));
 
             StringBuilder result = new StringBuilder();
             result.append("Metadata for ").append(url).append(":\n\n");
@@ -213,12 +328,48 @@ public class WebScraperTool {
                 result.append("OG Description: ").append(ogDesc.attr("content")).append("\n");
             }
 
-            LOGGER.debug("Metadata extracted from " + url);
+            LOGGER.debugf("Metadata extracted from %s", sanitize(url));
             return page.annotate(result.toString());
 
+        } catch (ToolFailureException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.error("Metadata extraction error: " + e.getMessage());
-            return "Error: Could not extract metadata - " + e.getMessage();
+            LOGGER.warnf("Metadata extraction failed for %s: %s", sanitize(url), sanitize(e.getMessage()));
+            throw new ToolFailureException("Error: Could not extract metadata - " + e.getMessage());
+        }
+    }
+
+    /**
+     * Runs CPU-bound parsing on {@link #parsePool} under the parse deadline.
+     *
+     * @throws ToolFailureException
+     *             when every parse worker is busy, or the deadline passes
+     */
+    private <T> T parseBounded(Callable<T> parse) throws Exception {
+        Future<T> future;
+        try {
+            future = parsePool.submit(parse);
+        } catch (RejectedExecutionException busy) {
+            LOGGER.warn("Web scraper parse pool is saturated; refusing the call");
+            throw new ToolFailureException("Error: the web scraper is busy parsing other pages. Try again shortly.");
+        }
+        try {
+            return future.get(parseTimeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException expired) {
+            future.cancel(true);
+            LOGGER.warnf("Web scraper parse exceeded %dms and was abandoned", parseTimeoutMs);
+            throw new ToolFailureException("Error: parsing the page took longer than " + parseTimeoutMs
+                    + "ms and was stopped. Use a simpler selector or a smaller page.");
+        } catch (InterruptedException interrupted) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw interrupted;
+        } catch (ExecutionException failed) {
+            Throwable cause = failed.getCause();
+            if (cause instanceof Exception e) {
+                throw e;
+            }
+            throw failed;
         }
     }
 
@@ -252,7 +403,7 @@ public class WebScraperTool {
         // caller's output carries an explicit note instead of passing the fragment
         // off as the whole page, and a multi-byte character split by the cut is
         // dropped rather than decoded to a replacement character.
-        LOGGER.warnf("Response from %s was truncated (size cap of %d bytes or read deadline); returning partial content", url,
+        LOGGER.warnf("Response from %s was truncated (size cap of %d bytes or read deadline); returning partial content", sanitize(url),
                 maxResponseBytes);
         byte[] body = response.body();
         String html = new String(body, 0, completeUtf8Length(body), StandardCharsets.UTF_8);

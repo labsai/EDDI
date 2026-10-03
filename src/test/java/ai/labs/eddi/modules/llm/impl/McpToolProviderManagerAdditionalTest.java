@@ -79,7 +79,7 @@ class McpToolProviderManagerAdditionalTest {
         @DisplayName("closing cached client — removes and closes it")
         void closeCachedClient() throws Exception {
             McpClient mockClient = mock(McpClient.class);
-            getClientCache().put("http://test-server:8080|anonymous", mockClient);
+            getClientCache().put("http://test-server:8080|anonymous|t30000", mockClient);
             assertEquals(1, manager.getActiveConnectionCount());
 
             manager.closeClient("http://test-server:8080");
@@ -93,7 +93,7 @@ class McpToolProviderManagerAdditionalTest {
         void closeClientWithException() throws Exception {
             McpClient mockClient = mock(McpClient.class);
             doThrow(new RuntimeException("close error")).when(mockClient).close();
-            getClientCache().put("http://error-server:8080|anonymous", mockClient);
+            getClientCache().put("http://error-server:8080|anonymous|t30000", mockClient);
 
             assertDoesNotThrow(() -> manager.closeClient("http://error-server:8080"));
             assertEquals(0, manager.getActiveConnectionCount());
@@ -144,7 +144,24 @@ class McpToolProviderManagerAdditionalTest {
         @Test
         void aCredentiallessServerStillGetsAStableKey() throws Exception {
             assertEquals(keyFor(serverWith(null)), keyFor(serverWith(null)));
-            assertTrue(keyFor(serverWith(null)).endsWith("|anonymous"));
+            assertTrue(keyFor(serverWith(null)).contains("|anonymous"));
+        }
+
+        @Test
+        @DisplayName("two timeouts against one server do not share a client")
+        void differentTimeoutsGetDifferentKeys() throws Exception {
+            // The timeout is baked into the client's transport, so a shared client meant
+            // the first config's timeout won for everyone naming the same server.
+            var fast = serverWith("key-alpha");
+            fast.setTimeoutMs(5_000L);
+            var slow = serverWith("key-alpha");
+            slow.setTimeoutMs(120_000L);
+
+            assertNotEquals(keyFor(fast), keyFor(slow));
+            var unset = serverWith("key-alpha");
+            var explicitDefault = serverWith("key-alpha");
+            explicitDefault.setTimeoutMs(30_000L);
+            assertEquals(keyFor(unset), keyFor(explicitDefault), "an unset timeout is the 30 s default");
         }
 
         @Test

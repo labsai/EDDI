@@ -89,12 +89,6 @@ public class McpCallsTask implements ILifecycleTask {
      */
     private static final String RATE_LIMIT_ERROR_PREFIX = "Error: Rate limit exceeded for tool: ";
 
-    /**
-     * Sentinel {@link ToolExecutionService#executeToolWrapped} returns instead of
-     * propagating an exception raised inside the wrapper itself.
-     */
-    private static final String TOOL_ERROR_PREFIX = "Error executing tool: ";
-
     private final IResourceClientLibrary resourceClientLibrary;
     private final IMemoryItemConverter memoryItemConverter;
     private final IJsonSerialization jsonSerialization;
@@ -313,8 +307,8 @@ public class McpCallsTask implements ILifecycleTask {
      * cost tracking) <em>without</em> losing the failure signal.
      * <p>
      * {@code executeToolWrapped} catches every exception and <em>returns</em> an
-     * {@code "Error executing tool: …"} string. Trusting its return value would
-     * make {@link RetryConfiguration#executeWithRetry} never retry, the
+     * {@code "Error: …"} string. Trusting its return value would make
+     * {@link RetryConfiguration#executeWithRetry} never retry, the
      * {@code <name>Error} memory entry never appear and {@code continueOnError}
      * never be consulted — a failed MCP call would be stored as a successful
      * response and {@code postResponse} would run with HTTP 200. So the executor's
@@ -362,7 +356,8 @@ public class McpCallsTask implements ILifecycleTask {
      */
     private static boolean isMeteringFailure(String wrappedResult, String toolName) {
         return wrappedResult != null
-                && (wrappedResult.equals(RATE_LIMIT_ERROR_PREFIX + toolName) || wrappedResult.startsWith(TOOL_ERROR_PREFIX));
+                && (wrappedResult.equals(RATE_LIMIT_ERROR_PREFIX + toolName)
+                        || ToolExecutionService.isInternalFailure(wrappedResult, toolName));
     }
 
     /**

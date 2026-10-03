@@ -829,6 +829,9 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `tools`                    | string[] | Custom HTTP call tool URIs to enable             | (none)                 |
 | **Context Control**        |          |                                                  |                        |
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
+| `maxToolIterations`        | int      | Most model↔tool rounds in one turn before the turn answers with what it has. Values above the engine ceiling of 100 are clamped (WARN) | 10 |
+| `maxToolCallsPerIteration` | int      | Most tool calls executed from a **single model response**. Calls past the cap are not run: each gets a `NOT_EXECUTED` result naming the limit, so the model can answer with what it has. `-1`/`0` disables. See [Tool-call caps](#tool-call-caps) | 20 |
+| `maxToolCallsPerTurn`      | int      | Most tool calls executed across the whole turn (all iterations, including those a HITL resume continues). Refused the same way. `-1`/`0` disables | 100 |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Records cost; only refuses calls when `enforceBudget` is on | (unlimited) |
@@ -948,7 +951,7 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **Date/Time**       | Get current date, time, timezone info           | `datetime`       |
 | **Web Search**      | Search the web (includes Wikipedia & News)      | `websearch`      |
 | **Data Formatter**  | Format JSON, CSV, XML data                      | `dataformatter`  |
-| **Web Scraper**     | Extract content from web pages (SSRF-protected) | `webscraper`     |
+| **Web Scraper**     | Extract content from web pages (SSRF-protected). CSS selectors only — regex selectors are refused, see below | `webscraper`     |
 | **Text Summarizer** | Summarize long text                             | `textsummarizer` |
 | **PDF Reader**      | Extract text from PDF URLs (SSRF-protected)     | `pdfreader`      |
 | **Weather**         | Get weather information                         | `weather`        |
@@ -956,6 +959,18 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **Conversation Recall** | Drill back into turns the [rolling summary](#rolling-conversation-summary) has compressed. Only assembled when `conversationSummary.enabled` is true | `conversationRecall` |
 
 > Because a non-empty `builtInToolsWhitelist` enables **only** the tools it names, a whitelist that includes verbose tools should also include `fetch_page` — otherwise truncated tool responses cannot be paged through.
+
+Every built-in parameter carries a description in the tool schema the model receives (for example
+`calculate.expression`: *"Arithmetic expression to evaluate, e.g. 'sqrt(16) + 2^3 * PI'"*), and
+optional parameters — `searchWeb.maxResults`, `getCurrentWeather.units`,
+`getWeatherForecast.days`, `extractLinks.maxLinks`, `summarizeText.numSentences`, … — are not
+marked required. They used to be described by their own names and all marked required.
+
+**Failures.** A built-in that cannot reach its upstream (web search, scraper, weather, PDF
+download) reports the failure to the model as `Error: …` and the result is not cached. Any other
+unexpected exception inside a tool reaches the model only as
+`Error: tool '<name>' failed with an internal error (reference <id>)`; the full exception is in
+the server log under that reference, never in the transcript.
 
 ### Tool Configuration (Server-Side)
 
@@ -979,6 +994,29 @@ eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
 - `EDDI_TOOLS_WEBSEARCH_PROVIDER=google`
 - `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=...`
 - `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=...`
+
+#### Web Scraper Tool
+
+`extractWithSelector` evaluates a model-written CSS selector against a page of up to
+`eddi.tools.web-scraper.max-response-bytes`. Two defences keep that from pinning the server:
+
+- **Regex selectors are refused** before the page is fetched: `:matches`, `:matchesOwn`,
+  `:matchText`, `:matchesWholeText`, `:matchesWholeOwnText` and the `[attr~=regex]` operator. jsoup
+  evaluates them as Java regular expressions, and a catastrophic pattern there never finishes.
+  Selectors are also capped at 256 characters. Use `:contains(text)` / `:containsOwn(text)`.
+- **Parsing is contained.** Parsing the page and evaluating the selector run on a small pool of
+  platform threads with a hard deadline, instead of on the virtual thread the tool call arrived
+  on (where CPU-bound work holds a carrier thread, and there are only as many carriers as cores).
+  A call that finds every worker busy is refused at once; a parse past the deadline is abandoned
+  and reported as a failure.
+
+```properties
+eddi.tools.web-scraper.parse-threads=2          # concurrent parses
+eddi.tools.web-scraper.parse-timeout-ms=10000   # deadline per parse
+```
+
+A worker past its deadline cannot be killed (Java has no safe way to), so it keeps running until it
+finishes; the pool size is what bounds that cost to at most `parse-threads` cores.
 
 #### Weather Tool
 
@@ -1205,8 +1243,14 @@ This agent:
 
 #### Token Counting
 
-- **OpenAI / Azure OpenAI**: Uses tiktoken-based tokenizer (accurate, model-specific)
+- **OpenAI / Azure OpenAI**: Uses tiktoken-based tokenizer (accurate, model-specific) when the
+  model name is one jtokkit knows
 - **All other providers**: Uses an approximate tokenizer (characters ÷ 4)
+
+An OpenAI-family model name the tokenizer does not know — every Azure **deployment** name
+(`my-gpt4-prod`), a non-OpenAI model behind an OpenAI-compatible endpoint, a model newer than the
+bundled tokenizer — is counted with the approximate tokenizer as well, and an INFO line says so
+once per model. (It used to fail every turn of such an agent as soon as `maxContextTokens` was set.)
 
 When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit` step-count behavior applies. **Full backward compatibility is guaranteed.**
 
@@ -1237,6 +1281,36 @@ never a malformed request or an authentication failure.
 The engine clamps these so a config cannot pin a pipeline thread: at most 10 attempts, at most
 30 seconds for one backoff, and at most 60 seconds of backoff in total across the retry sequence.
 A clamped value is reported once in a WARN.
+
+**This is the only retry layer.** langchain4j's provider clients retry failed requests on their own
+(twice by default), and EDDI used to leave that on underneath its own policy, so one provider 500
+became 3 × 3 = 9 upstream requests before the turn failed. EDDI builds every non-streaming chat
+model with the provider's own retries switched off (`maxRetries = 0` for OpenAI and the
+OpenAI-compatible providers, Azure OpenAI, Anthropic, Gemini, Vertex Gemini, Mistral, Ollama and
+Bedrock), so `retry.maxAttempts` is exactly the number of upstream requests a failing call makes.
+Model calls EDDI makes outside a task's pipeline — the rolling-summary and tool-response
+summarizers, the cascade judge — therefore no longer retry at all; a failure there degrades to the
+fallback each of them already has.
+
+**When the call still fails**, the turn ends with `conversationState: "ERROR"`. The non-streaming
+response (`POST /agents/{conversationId}`) then carries a top-level `error` object with the same
+information the streaming endpoint sends as its `task_failed` event — the field is absent on every
+successful turn, so existing clients are unaffected:
+
+```json
+{
+  "conversationState": "ERROR",
+  "error": {
+    "taskId": "eddi://ai.labs.llm",
+    "taskType": "langchain",
+    "errorType": "LifecycleException",
+    "message": "Task 'eddi://ai.labs.llm' failed: Agent execution failed after 3 attempts: mock upstream failure"
+  }
+}
+```
+
+The message is sanitized before it leaves the server (URLs, stack frames and credentials are
+removed). The full per-task digest stays in the turn's `conversationOutputs[…].taskErrors`.
 
 **In a tool loop, the unit of retry is one model request.** A failure on the fifth model call of
 a tool-calling turn resends that one request — with every tool result gathered so far — rather
@@ -1428,6 +1502,27 @@ difference between a rule that binds and one that is silently ignored:
 > `searchWikipedia` 30 calls/minute **each**, not 30 between them. Pin a single
 > operation by using its dispatch name: `{"searchNews": 5}`.
 
+#### Tool-call caps
+
+`maxToolIterations` bounds **rounds**, and one model response can ask for any number of tool
+calls. Two caps bound the calls themselves:
+
+- `maxToolCallsPerIteration` (default 20) — calls executed from one model response. A response
+  that asks for 50 has its first 20 executed, in order.
+- `maxToolCallsPerTurn` (default 100) — calls executed across the whole turn, counted from the
+  turn's trace so a HITL resume continues the count.
+
+Every call past a cap still gets its own tool result, because providers reject a response whose
+tool calls are not all answered:
+
+```json
+{"status":"NOT_EXECUTED","reason":"at most 20 tool calls are executed per response (maxToolCallsPerIteration); this call was not run. Do not repeat it in this turn — answer with the results you have."}
+```
+
+A refused call never reaches the approval gate, so it cannot pause a turn for a call that was not
+going to run. Each one is traced as `tool_call_capped` and the turn logs one WARN.
+`maxToolIterations` itself is clamped to 100.
+
 #### Execution timeouts
 
 Every tool call — built-in, http, MCP, A2A, dynamic, memory and recall alike —
@@ -1514,8 +1609,17 @@ Negative `toolPricing` values are clamped to 0.0.
 
 #### Tool cache scoping
 
-**What is cached.** Built-in tools, except the stateful ones (artifacts, group
-tasks, dynamic agents, memory, recall), which are never cached. **HTTP-call, MCP and
+**What is cached.** Built-in tools, except those bound to one conversation, which
+are never cached: any tool object built per turn with that conversation's state
+rather than shared as one bean — attachments (`listAttachments`, `readAttachment`),
+artifacts, group tasks, dynamic agents, user memory, recall, `discover_tools`. The
+rule is derived from the tool class, not from a list, so a new per-conversation
+tool is covered without anyone remembering to add it. (`listAttachments` was the one
+nobody had added: under the default `user` scope, conversation B of the same user was
+answered with conversation A's files for five minutes.) **A failed call is never
+cached either** — a built-in that cannot reach its upstream reports a failure, not a
+result, so the next call runs again instead of replaying the error for the tool's
+TTL (up to an hour for the web scraper). **HTTP-call, MCP and
 A2A tools are not cached unless the task names the tool in `toolCacheScopes`.**
 Those tools reach systems EDDI does not control and can have side effects — a POST,
 an MCP write, a request to another agent — and a cache hit does not execute the

@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import dev.langchain4j.exception.ToolArgumentsException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.opentelemetry.context.Context;
 import jakarta.annotation.PostConstruct;
@@ -13,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -22,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Wrapper for tool execution with caching, rate limiting, per-call timeouts and
@@ -103,12 +107,21 @@ public class ToolExecutionService {
      * Where a time-bounded tool call runs.
      * <p>
      * One executor for the whole application, not one per call, and virtual threads
-     * rather than a pool so that the abandoned worker of a timed-out call costs
-     * (almost) nothing while it stays stuck: a parked virtual thread holds no
-     * platform thread and no megabyte-sized stack, which is the difference between
-     * a hung tool being an incident and being a log line. A field initializer
-     * rather than {@code @PostConstruct} because unit tests construct this service
-     * directly.
+     * rather than a pool so that the abandoned worker of a timed-out call that is
+     * <em>blocked</em> — waiting on a socket, a lock, a sleep — costs (almost)
+     * nothing while it stays stuck: a parked virtual thread holds no platform
+     * thread and no megabyte-sized stack.
+     * <p>
+     * That is true of blocked work only. A tool that is <em>computing</em> — a
+     * regex backtracking, a parser walking a huge document — keeps its carrier
+     * thread for as long as it runs, abandoned or not, and the virtual-thread
+     * scheduler has only as many carriers as there are cores. A handful of such
+     * runaways would starve every virtual thread in the JVM, the pipeline's
+     * included. So a tool that does unbounded CPU work on model-controlled input
+     * must contain it itself, on a bounded pool of platform threads with its own
+     * deadline — {@code WebScraperTool}'s parse pool is the example — rather than
+     * rely on this executor. A field initializer rather than {@code @PostConstruct}
+     * because unit tests construct this service directly.
      */
     private final ExecutorService timeoutExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -274,10 +287,10 @@ public class ToolExecutionService {
         // Caching additionally requires a scope tag to partition the entry by. When
         // one cannot be resolved the cache is skipped on both the read and the write
         // side, so an unattributable result is neither served nor stored.
-        // Stateful tools (artifacts, group tasks, dynamic agents, memory) are never
-        // cached: their result changes with what peers do, and a cache hit would skip a
-        // side effect. See ToolCacheService#isCacheable.
-        boolean cacheable = enableCaching && cacheScopeTag != null && ToolCacheService.isCacheable(invocation);
+        // Conversation-bound tools (attachments, artifacts, group tasks, dynamic
+        // agents, memory) never reach this point with caching on: the dispatch loop
+        // switches it off for them. See ToolCacheService#isConversationBound.
+        boolean cacheable = enableCaching && cacheScopeTag != null;
         if (enableCaching && cacheScopeTag == null) {
             meterRegistry.counter("eddi.tool.cache.bypassed", "tool", toolName).increment();
         }
@@ -354,14 +367,80 @@ public class ToolExecutionService {
             return "Error: Execution timed out after " + timedOut.timeoutMs + "ms for tool: " + toolName;
 
         } catch (Exception e) {
+            // Nothing below the execution step ran: a failure is neither cached nor
+            // charged, whatever kind it is.
             long executionTime = System.currentTimeMillis() - startTime;
-            String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-
             meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
-
-            LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), e);
-            return "Error executing tool: " + error;
+            return describeFailure(toolName, executionTime, e);
         }
+    }
+
+    /**
+     * What the model is told about a failed call.
+     *
+     * <ul>
+     * <li>A {@link ToolFailureException} carries text its tool wrote for the model,
+     * and that text is passed on unchanged.</li>
+     * <li>A {@link ToolArgumentsException} means the model's own arguments did not
+     * parse; it is told so (sanitized and capped), because that is the one thing it
+     * can fix by retrying.</li>
+     * <li>Anything else is reported generically with a reference the log line
+     * carries. The raw message used to go to the model verbatim — a driver's
+     * connection string, an internal host name, a stack-derived class name — which
+     * put deployment internals into the transcript, the trace and every provider
+     * the transcript is sent to.</li>
+     * </ul>
+     */
+    static String describeFailure(String toolName, long executionTime, Throwable failure) {
+        ToolFailureException toolFailure = causeOfType(failure, ToolFailureException.class);
+        if (toolFailure != null) {
+            LOGGER.debugf("Tool '%s' reported a failure (%dms): %s", sanitize(toolName), executionTime, sanitize(toolFailure.getMessage()));
+            String message = toolFailure.getMessage() != null ? toolFailure.getMessage() : "Error: the tool failed.";
+            return message.startsWith("Error") ? message : "Error: " + message;
+        }
+        ToolArgumentsException badArguments = causeOfType(failure, ToolArgumentsException.class);
+        if (badArguments != null) {
+            LOGGER.debugf("Tool '%s' rejected its arguments: %s", sanitize(toolName), sanitize(badArguments.getMessage()));
+            return "Error: invalid arguments for tool '" + toolName + "': " + capped(sanitize(badArguments.getMessage()));
+        }
+        String reference = UUID.randomUUID().toString().substring(0, 8);
+        LOGGER.errorf(failure, "Tool '%s' failed (%dms, reference %s)", sanitize(toolName), executionTime, reference);
+        return internalFailurePrefix(toolName) + " (reference " + reference + "). Do not retry it with the same arguments.";
+    }
+
+    private static String internalFailurePrefix(String toolName) {
+        return "Error: tool '" + toolName + "' failed with an internal error";
+    }
+
+    /**
+     * Whether {@code result} is the generic message {@link #describeFailure}
+     * returns for an unexpected exception — for callers (the {@code mcpcalls} task)
+     * that have to tell such a failure apart from a tool's own answer.
+     */
+    public static boolean isInternalFailure(String result, String toolName) {
+        return result != null && result.startsWith(internalFailurePrefix(toolName));
+    }
+
+    /** Longest argument-error detail handed back to the model. */
+    private static final int MAX_ARGUMENT_ERROR_CHARS = 300;
+
+    private static String capped(String text) {
+        if (text == null) {
+            return "unparseable arguments";
+        }
+        return text.length() > MAX_ARGUMENT_ERROR_CHARS ? text.substring(0, MAX_ARGUMENT_ERROR_CHARS) + "…" : text;
+    }
+
+    private static <T extends Throwable> T causeOfType(Throwable failure, Class<T> type) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return null;
     }
 
     /**
@@ -473,36 +552,19 @@ public class ToolExecutionService {
      * on the pipeline thread.
      *
      * <p>
-     * Three of them travel:
+     * Two of them travel:
      * </p>
      * <ul>
      * <li>the caller identity and the resolution principal, together, via
      * {@link CallerIdentityContext#propagate} — the single place that pairing is
      * maintained, so a {@code ${caller:token}} header and a {@code PER_USER}
      * connection resolve on the worker exactly as they would inline;</li>
-     * <li>{@code EddiToolBridge}'s conversation id, which that tool reads from a
-     * {@link ThreadLocal} rather than from its arguments;</li>
      * <li>the OpenTelemetry context, so spans a tool opens stay children of the
      * {@code eddi.pipeline.task} span instead of becoming roots.</li>
      * </ul>
      */
     private Callable<String> carryContext(Supplier<String> toolExecution) {
-        final String bridgeConversationId = EddiToolBridge.currentConversationId();
-
-        Callable<String> work = () -> {
-            final String previous = EddiToolBridge.currentConversationId();
-            EddiToolBridge.setCurrentConversationId(bridgeConversationId);
-            try {
-                return toolExecution.get();
-            } finally {
-                if (previous == null) {
-                    EddiToolBridge.clearCurrentConversationId();
-                } else {
-                    EddiToolBridge.setCurrentConversationId(previous);
-                }
-            }
-        };
-
+        Callable<String> work = toolExecution::get;
         if (callerIdentityContext != null) {
             work = callerIdentityContext.propagate(work);
         }

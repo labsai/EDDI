@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -24,6 +25,8 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Weather service tool for retrieving current weather information. Supports
@@ -63,7 +66,8 @@ public class WeatherTool {
     }
 
     @Tool("Gets current weather information for a city. Returns temperature, conditions, humidity, and wind speed.")
-    public String getCurrentWeather(@P("city") String city, @P("units") String units) {
+    public String getCurrentWeather(@P("City name, optionally with country code, e.g. 'Vienna,AT'") String city,
+                                    @P(value = "Unit system: metric (default), imperial or standard", required = false) String units) {
 
         if (openWeatherMapApiKey.isEmpty()) {
             return "Error: Weather API key not configured. Please set eddi.tools.weather.openweathermap.api-key in application.properties";
@@ -75,7 +79,7 @@ public class WeatherTool {
         }
 
         try {
-            LOGGER.info("Getting weather for: " + city);
+            LOGGER.debugf("Getting weather for: %s", sanitize(city));
 
             String url = String.format("https://api.openweathermap.org/data/2.5/weather?q=%s&appid=%s&units=%s", encode(city),
                     encode(openWeatherMapApiKey.get()), units);
@@ -94,13 +98,15 @@ public class WeatherTool {
             // No throwable in the log call: its message and stack trace are exactly
             // what quotes the request URL, key included.
             String reason = redact(e.getMessage());
-            LOGGER.errorf("Weather lookup error for %s: %s: %s", city, e.getClass().getSimpleName(), reason);
-            return "Error: Could not retrieve weather information - " + reason;
+            LOGGER.warnf("Weather lookup failed for %s: %s: %s", sanitize(city), e.getClass().getSimpleName(), sanitize(reason));
+            throw new ToolFailureException("Error: Could not retrieve weather information - " + reason);
         }
     }
 
     @Tool("Gets weather forecast for the next few days")
-    public String getWeatherForecast(@P("city") String city, @P("days") Integer days, @P("units") String units) {
+    public String getWeatherForecast(@P("City name, optionally with country code, e.g. 'Vienna,AT'") String city,
+                                     @P(value = "Number of days to forecast, 1-5 (default 3)", required = false) Integer days,
+                                     @P(value = "Unit system: metric (default), imperial or standard", required = false) String units) {
 
         if (openWeatherMapApiKey.isEmpty()) {
             return "Error: Weather API key not configured.";
@@ -119,7 +125,7 @@ public class WeatherTool {
         }
 
         try {
-            LOGGER.info("Getting " + days + "-day forecast for: " + city);
+            LOGGER.debugf("Getting %d-day forecast for: %s", days, sanitize(city));
 
             String url = String.format("https://api.openweathermap.org/data/2.5/forecast?q=%s&appid=%s&units=%s&cnt=%d", encode(city),
                     encode(openWeatherMapApiKey.get()), units, days * 8);
@@ -136,8 +142,8 @@ public class WeatherTool {
 
         } catch (Exception e) {
             String reason = redact(e.getMessage());
-            LOGGER.errorf("Weather forecast error: %s: %s", e.getClass().getSimpleName(), reason);
-            return "Error: Could not retrieve weather forecast - " + reason;
+            LOGGER.warnf("Weather forecast failed: %s: %s", e.getClass().getSimpleName(), sanitize(reason));
+            throw new ToolFailureException("Error: Could not retrieve weather forecast - " + reason);
         }
     }
 

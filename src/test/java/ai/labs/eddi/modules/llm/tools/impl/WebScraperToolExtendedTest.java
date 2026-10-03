@@ -16,6 +16,7 @@ import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
+import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -52,7 +53,7 @@ class WebScraperToolExtendedTest {
         void extractTitleAndBody() throws Exception {
             mockResponse(200, "<html><head><title>Test Page</title></head><body><p>Hello world</p></body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             // The tool now returns Markdown from HtmlToMarkdownConverter instead of a
             // flat text dump prefixed with "Title: ", so the page title arrives as a
@@ -68,7 +69,7 @@ class WebScraperToolExtendedTest {
             mockResponse(200, "<html><body><main><h2>Setup</h2><ul><li>First</li><li>Second</li></ul>"
                     + "<div>Alpha</div><div>Beta</div></main></body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("## Setup"), "heading should survive, was: " + result);
             assertTrue(result.contains("- First"), "list should survive, was: " + result);
@@ -84,7 +85,7 @@ class WebScraperToolExtendedTest {
                     + "<style>.hidden{display:none}</style>"
                     + "<p>Visible content</p></body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertFalse(result.contains("alert"));
             assertFalse(result.contains("display:none"));
@@ -102,7 +103,7 @@ class WebScraperToolExtendedTest {
                     + "<footer>Footer info</footer>"
                     + "</body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("Main content"));
             assertFalse(result.contains("Navigation links"));
@@ -117,7 +118,7 @@ class WebScraperToolExtendedTest {
                     + "<main><p>Important content in main</p></main>"
                     + "</body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("Important content in main"));
         }
@@ -127,7 +128,7 @@ class WebScraperToolExtendedTest {
         void fallsBackToBody() throws Exception {
             mockResponse(200, "<html><body><p>Body content only</p></body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("Body content only"));
         }
@@ -138,7 +139,7 @@ class WebScraperToolExtendedTest {
             String longContent = "A".repeat(6000);
             mockResponse(200, "<html><body><p>" + longContent + "</p></body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.length() < 6000);
             assertTrue(result.contains("[Content truncated"));
@@ -149,7 +150,7 @@ class WebScraperToolExtendedTest {
         void doesNotTruncateShortContent() throws Exception {
             mockResponse(200, "<html><body><p>Short content</p></body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertFalse(result.contains("[Content truncated"));
         }
@@ -159,7 +160,7 @@ class WebScraperToolExtendedTest {
         void handlesEmptyTitle() throws Exception {
             mockResponse(200, "<html><head><title></title></head><body><p>Content</p></body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertFalse(result.contains("Title:"));
             assertTrue(result.contains("Content"));
@@ -170,7 +171,7 @@ class WebScraperToolExtendedTest {
         void handlesHttpError() throws Exception {
             mockResponse(500, "Internal Server Error");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("Error"));
         }
@@ -181,7 +182,7 @@ class WebScraperToolExtendedTest {
             when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("Connection refused"));
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("Error"));
             assertTrue(result.contains("Connection refused"));
@@ -195,7 +196,7 @@ class WebScraperToolExtendedTest {
                     + "<article><h1>Article Title</h1><p>Article body text</p></article>"
                     + "</body></html>");
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("Article body text"));
         }
@@ -215,7 +216,7 @@ class WebScraperToolExtendedTest {
                     + "<a href='https://example.com/page2'>Page Two</a>"
                     + "</body></html>");
 
-            String result = webScraperTool.extractLinks("https://example.com", 10);
+            String result = textOf(() -> webScraperTool.extractLinks("https://example.com", 10));
 
             assertTrue(result.contains("Page One"));
             assertTrue(result.contains("Page Two"));
@@ -228,7 +229,7 @@ class WebScraperToolExtendedTest {
                     + "<a href='https://example.com/logo'></a>"
                     + "</body></html>");
 
-            String result = webScraperTool.extractLinks("https://example.com", 10);
+            String result = textOf(() -> webScraperTool.extractLinks("https://example.com", 10));
 
             // Link should be present without text prefix
             assertNotNull(result);
@@ -239,7 +240,7 @@ class WebScraperToolExtendedTest {
         void noLinksFound() throws Exception {
             mockResponse(200, "<html><body><p>No links here</p></body></html>");
 
-            String result = webScraperTool.extractLinks("https://example.com", 10);
+            String result = textOf(() -> webScraperTool.extractLinks("https://example.com", 10));
 
             assertTrue(result.contains("No links found"));
         }
@@ -254,7 +255,7 @@ class WebScraperToolExtendedTest {
             html.append("</body></html>");
             mockResponse(200, html.toString());
 
-            String result = webScraperTool.extractLinks("https://example.com", 100);
+            String result = textOf(() -> webScraperTool.extractLinks("https://example.com", 100));
 
             // Should not contain links beyond 50
             assertNotNull(result);
@@ -270,7 +271,7 @@ class WebScraperToolExtendedTest {
             html.append("</body></html>");
             mockResponse(200, html.toString());
 
-            String result = webScraperTool.extractLinks("https://example.com", null);
+            String result = textOf(() -> webScraperTool.extractLinks("https://example.com", null));
 
             assertNotNull(result);
         }
@@ -280,7 +281,7 @@ class WebScraperToolExtendedTest {
         void defaultForNegativeMaxLinks() throws Exception {
             mockResponse(200, "<html><body><a href='https://example.com/a'>A</a></body></html>");
 
-            String result = webScraperTool.extractLinks("https://example.com", -5);
+            String result = textOf(() -> webScraperTool.extractLinks("https://example.com", -5));
 
             assertNotNull(result);
         }
@@ -290,7 +291,7 @@ class WebScraperToolExtendedTest {
         void handlesHttpErrorInLinkExtraction() throws Exception {
             mockResponse(403, "Forbidden");
 
-            String result = webScraperTool.extractLinks("https://example.com", 10);
+            String result = textOf(() -> webScraperTool.extractLinks("https://example.com", 10));
 
             assertTrue(result.contains("Error"));
         }
@@ -311,7 +312,7 @@ class WebScraperToolExtendedTest {
                     + "<p>Paragraph</p>"
                     + "</body></html>");
 
-            String result = webScraperTool.extractWithSelector("https://example.com", "h1");
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "h1"));
 
             assertTrue(result.contains("Title 1"));
             assertTrue(result.contains("Title 2"));
@@ -323,7 +324,7 @@ class WebScraperToolExtendedTest {
         void noElementsFound() throws Exception {
             mockResponse(200, "<html><body><p>Content</p></body></html>");
 
-            String result = webScraperTool.extractWithSelector("https://example.com", ".nonexistent");
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", ".nonexistent"));
 
             assertTrue(result.contains("No elements found"));
         }
@@ -338,7 +339,7 @@ class WebScraperToolExtendedTest {
             html.append("</body></html>");
             mockResponse(200, html.toString());
 
-            String result = webScraperTool.extractWithSelector("https://example.com", "span.item");
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "span.item"));
 
             assertTrue(result.contains("[Additional elements truncated]"));
         }
@@ -348,7 +349,7 @@ class WebScraperToolExtendedTest {
         void handlesHttpError() throws Exception {
             mockResponse(404, "Not Found");
 
-            String result = webScraperTool.extractWithSelector("https://example.com", "div");
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "div"));
 
             assertTrue(result.contains("Error"));
         }
@@ -372,7 +373,7 @@ class WebScraperToolExtendedTest {
                     + "<meta property='og:description' content='OG Description'>"
                     + "</head><body></body></html>");
 
-            String result = webScraperTool.extractMetadata("https://example.com");
+            String result = textOf(() -> webScraperTool.extractMetadata("https://example.com"));
 
             assertTrue(result.contains("Title: My Page"));
             assertTrue(result.contains("Description: Page description"));
@@ -387,7 +388,7 @@ class WebScraperToolExtendedTest {
         void handlesMissingMetadata() throws Exception {
             mockResponse(200, "<html><head><title>Simple Page</title></head><body></body></html>");
 
-            String result = webScraperTool.extractMetadata("https://example.com");
+            String result = textOf(() -> webScraperTool.extractMetadata("https://example.com"));
 
             assertTrue(result.contains("Title: Simple Page"));
             assertFalse(result.contains("Description:"));
@@ -404,7 +405,7 @@ class WebScraperToolExtendedTest {
                     + "<meta name='description' content='Has description'>"
                     + "</head><body></body></html>");
 
-            String result = webScraperTool.extractMetadata("https://example.com");
+            String result = textOf(() -> webScraperTool.extractMetadata("https://example.com"));
 
             assertFalse(result.contains("Title:"));
             assertTrue(result.contains("Description: Has description"));
@@ -415,7 +416,7 @@ class WebScraperToolExtendedTest {
         void handlesHttpError() throws Exception {
             mockResponse(500, "Server Error");
 
-            String result = webScraperTool.extractMetadata("https://example.com");
+            String result = textOf(() -> webScraperTool.extractMetadata("https://example.com"));
 
             assertTrue(result.contains("Error"));
         }
@@ -426,7 +427,7 @@ class WebScraperToolExtendedTest {
             when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("Network error"));
 
-            String result = webScraperTool.extractMetadata("https://example.com");
+            String result = textOf(() -> webScraperTool.extractMetadata("https://example.com"));
 
             assertTrue(result.contains("Error"));
         }
@@ -451,7 +452,7 @@ class WebScraperToolExtendedTest {
         void pageTextCarriesTruncationNote() throws Exception {
             mockTruncated("<html><body><p>Partial page</p>".getBytes(StandardCharsets.UTF_8));
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("Partial page"), result);
             assertTrue(result.contains("[Note: the page response was truncated"), result);
@@ -463,9 +464,9 @@ class WebScraperToolExtendedTest {
             mockTruncated("<html><head><title>T</title></head><body><a href=\"https://a.example\">a</a><p>x</p>"
                     .getBytes(StandardCharsets.UTF_8));
 
-            assertTrue(webScraperTool.extractLinks("https://example.com", 5).contains("response was truncated"));
-            assertTrue(webScraperTool.extractWithSelector("https://example.com", "p").contains("response was truncated"));
-            assertTrue(webScraperTool.extractMetadata("https://example.com").contains("response was truncated"));
+            assertTrue(textOf(() -> webScraperTool.extractLinks("https://example.com", 5)).contains("response was truncated"));
+            assertTrue(textOf(() -> webScraperTool.extractWithSelector("https://example.com", "p")).contains("response was truncated"));
+            assertTrue(textOf(() -> webScraperTool.extractMetadata("https://example.com")).contains("response was truncated"));
         }
 
         @Test
@@ -473,7 +474,7 @@ class WebScraperToolExtendedTest {
         void completeResponseHasNoNote() throws Exception {
             mockResponse(200, "<html><body><p>Whole page</p></body></html>");
 
-            assertFalse(webScraperTool.extractWebPageText("https://example.com").contains("response was truncated"));
+            assertFalse(textOf(() -> webScraperTool.extractWebPageText("https://example.com")).contains("response was truncated"));
         }
 
         @Test
@@ -486,7 +487,7 @@ class WebScraperToolExtendedTest {
             System.arraycopy(euro, 0, body, prefix.length, 2); // cut mid-character
             mockTruncated(body);
 
-            String result = webScraperTool.extractWebPageText("https://example.com");
+            String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
 
             assertTrue(result.contains("Price 5"), result);
             assertFalse(result.indexOf(REPLACEMENT_CHAR) >= 0, "replacement character leaked: " + result);

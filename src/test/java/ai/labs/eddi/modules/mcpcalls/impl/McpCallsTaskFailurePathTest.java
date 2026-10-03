@@ -59,12 +59,12 @@ import static org.mockito.MockitoAnnotations.openMocks;
  * not cost them their failure signal.
  * <p>
  * {@code ToolExecutionService.executeToolWrapped} catches every exception and
- * <em>returns</em> {@code "Error executing tool: …"}. These tests stub it the
- * way the real service behaves (rather than as a rethrowing pass-through, which
- * is what the other {@code McpCallsTask} tests do) and assert that a failing
- * MCP tool still retries, still writes the {@code <name>Error} memory entry,
- * still runs {@code postResponse} with HTTP 500, still honours
- * {@code continueOnError} — and is never stored as a successful response.
+ * <em>returns</em> {@code "Error: …"}. These tests stub it the way the real
+ * service behaves (rather than as a rethrowing pass-through, which is what the
+ * other {@code McpCallsTask} tests do) and assert that a failing MCP tool still
+ * retries, still writes the {@code <name>Error} memory entry, still runs
+ * {@code postResponse} with HTTP 500, still honours {@code continueOnError} —
+ * and is never stored as a successful response.
  * <p>
  * The {@code configure()} tests cover the other half: a config already stored
  * in MongoDB that violates the newer transport/URL rules must still load,
@@ -158,7 +158,7 @@ class McpCallsTaskFailurePathTest {
                     try {
                         return supplier.get();
                     } catch (RuntimeException e) {
-                        return "Error executing tool: " + e.getMessage();
+                        return "Error: tool 'x' failed with an internal error (reference test).";
                     }
                 });
     }

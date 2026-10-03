@@ -1031,6 +1031,9 @@ public class LifecycleManager implements ILifecycleManager {
         errorOutput.put("type", "errorDigest");
         errorOutput.put("taskId", task.getId().name());
         errorOutput.put("taskType", task.getType());
+        // The classification the streaming task_failed event and the error metric
+        // carry, so the non-streaming response can report the same thing.
+        errorOutput.put("errorType", classifyError(exception));
         errorOutput.put("text", digestText);
         step.addConversationOutputList(TASK_ERRORS, List.of(errorOutput));
         return digestText;

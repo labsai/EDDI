@@ -36,6 +36,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.opentelemetry.context.Context;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -872,8 +873,11 @@ class CascadingModelExecutor {
         // A cascade step runs on a virtual thread, so the caller binding on the
         // pipeline thread does not reach the tools this step invokes — an apicall
         // tool using ${caller:token} would fail closed for no reason the agent
-        // designer could see, and only when a cascade is configured.
-        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(callerIdentityContext.propagate(() -> {
+        // designer could see, and only when a cascade is configured. The
+        // OpenTelemetry context is carried for the same reason: without it every
+        // model call and tool span of the step became a new root trace instead of a
+        // child of the eddi.pipeline.task span (ToolExecutionService does the same).
+        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(() -> {
             if (useAgentMode) {
                 return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
                         heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange, stepExchange);
@@ -881,7 +885,7 @@ class CascadingModelExecutor {
                 return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
                         heuristicConfig, jsonPolicy);
             }
-        }));
+        })));
 
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
