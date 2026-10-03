@@ -1509,6 +1509,10 @@ public class AuditLedgerService {
         return until != null && !until.isBefore(Instant.now());
     }
 
+    // TODO(fix/gdpr-audit-memory, #952): that PR turns this into "pseudonymise AND
+    // redact the content" (eddi.audit.erasure-mode). Keep erasedElsewhere(userId) in
+    // its condition when merging, so an entry of a user erased on ANOTHER node is
+    // redacted the same way as one erased on this node — not only pseudonymised.
     AuditEntry pseudonymiseIfErased(AuditEntry entry) {
         String userId = entry.userId();
         if (userId == null || (recentlyErasedUsers.isEmpty() && recentlyErasedUserHashes.isEmpty())) {
