@@ -533,14 +533,8 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /**
-     * GDPR erasure: signals every turn running on this node for {@code userId} to
-     * stop, through the same cooperative flag {@link #cancelConversation} sets. A
-     * cancelled turn skips its longTerm write-back to user memory
-     * ({@code Conversation.isTurnDiscarded}) and its snapshot is discarded. The
-     * audit entries it still flushes while unwinding are pseudonymised by the
-     * ledger ({@code AuditLedgerService.markUserErased}). Matched on the live
-     * memory's user, not on a stored lookup, so a turn whose conversation the
-     * cascade has not reached yet — or one started a moment ago — is caught too.
+     * {@inheritDoc} Signals the turn through
+     * {@link ConversationStepRunner#abandonTurn}.
      */
     @Override
     public boolean abandonInFlightTurn(String conversationId) {
@@ -553,6 +547,16 @@ public class ConversationService implements IConversationService, UserErasurePar
         return true;
     }
 
+    /**
+     * GDPR erasure: signals every turn running on this node for {@code userId} to
+     * stop, through the same cooperative flag {@link #cancelConversation} sets. A
+     * cancelled turn skips its longTerm write-back to user memory
+     * ({@code Conversation.isTurnDiscarded}) and its snapshot is discarded. The
+     * audit entries it still flushes while unwinding are pseudonymised by the
+     * ledger ({@code AuditLedgerService.markUserErased}). Matched on the live
+     * memory's user, not on a stored lookup, so a turn whose conversation the
+     * cascade has not reached yet — or one started a moment ago — is caught too.
+     */
     @Override
     public int stopInFlightWork(String userId) {
         if (userId == null) {

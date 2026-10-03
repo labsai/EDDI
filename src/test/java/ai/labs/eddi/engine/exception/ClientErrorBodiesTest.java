@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -53,6 +54,40 @@ class ClientErrorBodiesTest {
                 new StackTraceElement("org.jboss.resteasy.reactive.server.handlers.ParameterHandler", "handleResult",
                         "ParameterHandler.java", 120)});
         return exception;
+    }
+
+    @Nested
+    @DisplayName("IllegalArgumentExceptionMapper message policy (CWE-209)")
+    class IllegalArgumentMessages {
+
+        @Test
+        @DisplayName("an argument check written in EDDI reaches the client as written")
+        void eddiMessagePassesThrough() {
+            // Thrown here, in an ai.labs.eddi class, like every EDDI argument check.
+            var exception = new IllegalArgumentException("'limit' must be between 1 and 1000");
+            assertEquals("'limit' must be between 1 and 1000", message(IllegalArgumentExceptionMapper.responseOf(exception)));
+        }
+
+        @Test
+        @DisplayName("a JDK or library message is replaced by a fixed text with a reference id")
+        void libraryMessageIsWithheld() {
+            IllegalArgumentException jdk = assertThrows(IllegalArgumentException.class,
+                    () -> UUID.fromString("C:\\secret\\path-not-a-uuid"));
+            String message = message(IllegalArgumentExceptionMapper.responseOf(jdk));
+            assertTrue(message.startsWith("The request contains an invalid value (reference "), message);
+            assertFalse(message.contains("secret") || message.contains("UUID"), message);
+        }
+
+        @Test
+        @DisplayName("a library exception passed on unchanged by EDDI code is still the library's text")
+        void libraryFrameDecidesEvenWhenRethrown() {
+            var driver = new IllegalArgumentException("state should be: hexString has 24 characters");
+            driver.setStackTrace(new StackTraceElement[]{
+                    new StackTraceElement("org.bson.types.ObjectId", "<init>", "ObjectId.java", 210),
+                    new StackTraceElement("ai.labs.eddi.datastore.mongo.SomeStore", "load", "SomeStore.java", 1)});
+            assertFalse(IllegalArgumentExceptionMapper.isCallerFacing(driver));
+            assertFalse(message(new IllegalArgumentExceptionMapper().toResponse(driver)).contains("hexString"));
+        }
     }
 
     @Nested

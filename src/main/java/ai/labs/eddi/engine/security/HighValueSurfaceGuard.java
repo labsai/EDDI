@@ -67,16 +67,19 @@ public class HighValueSurfaceGuard {
         this.secretStoreAllowUnauthenticated = secretStoreAllowUnauthenticated;
     }
 
-    // Runs FIRST among the startup observers (PLATFORM_BEFORE): a misconfigured
-    // deployment must be refused on its configuration alone, before any observer
-    // touches the datastore. At the default priority the vault, migration and
-    // index-creating observers ran first, so a bare start with no reachable
-    // database
-    // spent its whole server-selection timeout (30 s per operation) failing on
-    // Mongo
-    // and never printed this guard's message at all.
-    // Right after AuthStartupGuard, so the broader refusal is the one reported.
-    // CDI requires the @Observes parameter for event discovery; not read directly
+    /**
+     * Runs first among the startup observers ({@code PLATFORM_BEFORE + 1}, right
+     * after {@code AuthStartupGuard}, so the broader refusal is the one reported):
+     * a misconfigured deployment must be refused on its configuration alone, before
+     * any observer touches the datastore. At the default priority the vault,
+     * migration and index-creating observers ran first, so a bare start with no
+     * reachable database spent its whole server-selection timeout (30 s per
+     * operation) failing on MongoDB and never printed this guard's message.
+     *
+     * @param event
+     *            unused, but required: the {@code @Observes} parameter is how CDI
+     *            discovers the observer and the priority it runs at
+     */
     void onStart(@Observes
     @Priority(Interceptor.Priority.PLATFORM_BEFORE + 1) StartupEvent event) {
         LaunchMode mode = getLaunchMode();

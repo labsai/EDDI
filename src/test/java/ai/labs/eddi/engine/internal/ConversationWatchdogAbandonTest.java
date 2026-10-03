@@ -156,7 +156,7 @@ class ConversationWatchdogAbandonTest {
 
         // Task 1: a hung model call whose client library swallows the watchdog's
         // interrupt — it clears the flag and keeps waiting.
-        ILifecycleTask hungTask = task("hung", memory -> {
+        ILifecycleTask hungTask = task("hung", () -> {
             firstTaskRunning.countDown();
             while (releaseFirstTask.getCount() > 0) {
                 try {
@@ -167,7 +167,7 @@ class ConversationWatchdogAbandonTest {
             }
         });
         // Task 2: anything with a side effect (a tool call, a user-memory write).
-        ILifecycleTask sideEffectTask = task("side-effect", memory -> laterTaskRuns.incrementAndGet());
+        ILifecycleTask sideEffectTask = task("side-effect", laterTaskRuns::incrementAndGet);
 
         IComponentCache componentCache = mock(IComponentCache.class);
         IResourceStore.IResourceId workflowId = mock(IResourceStore.IResourceId.class);
@@ -455,7 +455,7 @@ class ConversationWatchdogAbandonTest {
 
     @FunctionalInterface
     private interface TaskBody {
-        void run(IConversationMemory memory) throws Exception;
+        void run() throws Exception;
     }
 
     private static ILifecycleTask task(String id, TaskBody body) throws Exception {
@@ -463,7 +463,7 @@ class ConversationWatchdogAbandonTest {
         when(task.getId()).thenReturn(new TaskId(id));
         when(task.getType()).thenReturn(id);
         doAnswer(inv -> {
-            body.run(inv.getArgument(0));
+            body.run();
             return null;
         }).when(task).execute(any(), any());
         return task;
