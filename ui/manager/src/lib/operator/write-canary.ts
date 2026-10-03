@@ -8,10 +8,10 @@ import {
   readOperatorConfig,
   reportOperatorCanaryResult,
   resetOperator,
+  retireOperatorAgent,
   type OperatorConfig,
   type FetchedSpec,
 } from "@/lib/api/operator";
-import { undeployAgent, deleteAgent } from "@/lib/api/agents";
 import { buildOperationIdIndex, resolveToolNameForEndpoint } from "./reconstruct-endpoint";
 
 /**
@@ -545,14 +545,7 @@ async function tearDownBreachedOperator(
     }
     // Stale (or unverifiable): remove only THIS probe's agent.
     if (config.agentId && config.version != null) {
-      try {
-        await undeployAgent(config.environment, config.agentId, config.version, {
-          endAllActiveConversations: true,
-        });
-      } catch {
-        // Already undeployed, or the environment is gone — deletion is what matters.
-      }
-      await deleteAgent(config.agentId, config.version, { cascade: true, permanent: true });
+      await retireOperatorAgent(config.environment, config.agentId, config.version);
     }
     return {
       tornDown: true,
