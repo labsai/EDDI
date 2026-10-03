@@ -18,10 +18,13 @@ Review 2026-10-02 §4.6, the `/v1` and attachment findings.
 
 - **`/v1` `usage` now reports.** The adapter reads `audit:token_usage` from the detailed snapshot, but that snapshot withheld every `audit:` key, so `usage` was never sent (live, on 6.5.0 and on this branch before the fix). `audit:token_usage` — three counts, no prompt text — is now exempt from that denylist; the rest of `audit:*` stays withheld.
 - **No internal detail in an unclassified `/v1` failure.** The message of an unexpected exception is logged, not returned to the caller.
+- **`usage` without the audit ledger.** `LlmTask` wrote `audit:token_usage` only with an audit collector attached, so `eddi.audit.enabled=false` silently dropped `/v1` `usage`. The token counts are now recorded either way; the rest of the audit evidence stays behind the collector gate.
+- **Mapping rows are swept with their conversation.** The ended-conversation retention sweep (`RestConversationStore.permanentlyDeleteEndedConversationLogs`) now deletes the `(intent, userId)` channel mappings — `/v1` and Slack — that point at a conversation it deletes. A `/v1` client sending only its latest message leaves one mapping per distinct message, and nothing removed them.
 
 ### Next
 
-- Mapping rows for `/v1` conversations that nobody continues (a client that sends only its latest message opens a new conversation per distinct message) are not swept; the idle sweep ends and deletes the conversations, not the `(intent, userId)` rows.
+- Same-opening collision (one user, two chats with an identical first system + user message, including few-shot prompts) stays documented, not fixed: nothing in the request separates the chats until their histories diverge. Telling them apart would mean matching the client's resent history against stored transcripts.
+- `GroupAttachmentBinder` stores group attachments without an owner, so they do not count towards the per-user quota.
 
 ```decision-log
 | 2026-10-03 | /v1 requests without a chat id are keyed by a hash of their first system + first user message (`chat-key-fallback=history`), with `shared` as the opt-back | One `:default` conversation per user/agent shared context across unrelated chats and grew without bound | Always-new conversation per request (breaks history-less clients and memory); inferring restarts from message counts; honouring a caller-supplied EDDI conversation id (needs an ownership check, deferred) |
