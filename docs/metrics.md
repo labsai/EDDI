@@ -625,6 +625,11 @@ eddi_audit_entries_dropped_total            # Audit entries dropped (compliance-
 eddi_audit_sequence_collisions_total        # Chain positions allocated by another replica
 ```
 
+`eddi_audit_sequence_collisions_total` is non-zero only on a multi-replica deployment
+without conversation affinity, where two nodes allocate the same per-conversation chain
+positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
+[Chain sequences and multi-replica deployments](audit-ledger.md#chain-sequences-and-multi-replica-deployments).
+
 ### Database Log Retention Metrics
 
 ```text
@@ -633,11 +638,6 @@ eddi_logs_db_retention_deleted_total        # Persisted log entries the retentio
 
 Stays at zero while `eddi.logs.db-retention-days` is off (the default). See
 [log-administration.md](log-administration.md#retention).
-
-`eddi_audit_sequence_collisions_total` is non-zero only on a multi-replica deployment
-without conversation affinity, where two nodes allocate the same per-conversation chain
-positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
-[Chain sequences and multi-replica deployments](audit-ledger.md#chain-sequences-and-multi-replica-deployments).
 
 ### Dream (Background Memory Consolidation) Metrics
 
