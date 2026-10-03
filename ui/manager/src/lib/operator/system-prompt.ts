@@ -573,7 +573,9 @@ if the one you want is missing; this deployment may ship a subset):
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
-- memory: "conversation-memory", "user-memory", "properties"`;
+- memory: "conversation-memory", "user-memory", "properties"
+- embedding the chat widget in another site (iframe, frame-ancestors, token
+  hand-off with auth on, image CSP): "chat-ui-embedding"`;
 
 const BODY_HOW_TO_WORK = `How to work:
 - Prefer looking things up over asking. If the user names an agent, find it.

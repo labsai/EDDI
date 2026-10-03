@@ -144,6 +144,8 @@ Only `/chat` takes this setting; the Manager and the API always refuse to be fra
 ></iframe>
 ```
 
+With authentication on, the host page hands the widget its user's access token by `postMessage` — add `?tokenOrigin=<host origin>` to the iframe URL and answer the widget's `eddi-chat-ready` / `eddi-chat-token-request` messages with `{ type: "eddi-chat-token", token }`. The protocol, its origin rules and a host-page example are in [docs/chat-ui-embedding.md](../../docs/chat-ui-embedding.md), together with `eddi.chat.img-sources`, which decides which hosts the images in an agent's output may come from.
+
 Combine query parameters to create a minimal, focused chat experience:
 
 ```
