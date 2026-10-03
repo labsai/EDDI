@@ -368,6 +368,11 @@ class ConversationStepRunner {
             // meantime; and losing the lease stops the pipeline at the next task boundary.
             conversationMemory.setFenceToken(lease.fence());
             final IConversationMemory leasedMemory = conversationMemory;
+            // TODO(fix/engine-runtime-hardening): once
+            // ai.labs.eddi.engine.runtime.ITurnAbandonment
+            // lands, call abandonInFlightTurn(conversationId) here instead — it raises the
+            // same
+            // cancel flag through the one public seam for abandoning a running turn.
             lease.onLost(() -> leasedMemory.setCancelled(true));
         }
         try {

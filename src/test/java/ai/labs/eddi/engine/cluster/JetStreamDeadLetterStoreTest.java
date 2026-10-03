@@ -28,7 +28,7 @@ class JetStreamDeadLetterStoreTest {
     }
 
     @ParameterizedTest(name = "err_code {0} -> not found: {1}")
-    @CsvSource({"10037,true", "10057,true", "10043,true", "10077,false", "10008,false"})
+    @CsvSource({"10037,true", "10057,true", "10043,true", "10059,true", "10077,false", "10008,false"})
     void classifiesNotFound(int code, boolean expected) throws Exception {
         assertEquals(expected, JetStreamDeadLetterStore.notFound(error(code)));
     }

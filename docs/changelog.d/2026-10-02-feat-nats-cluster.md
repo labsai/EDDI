@@ -62,7 +62,10 @@ no meter is registered and nothing about NATS is logged.
   holds an advisory lock from the first to the last startup observer, bounded by
   `eddi.datastore.postgres.startup-lock-timeout`. Found by the live PostgreSQL demo.
 - **Discarding a dead letter twice answers 404** — a replicated (R3) stream reports an
-  already-deleted entry as 10043 ("sequence not found"), which surfaced as a 500.
+  already-deleted entry as 10043 ("sequence not found"), which surfaced as a 500. The stream
+  itself is provisioned asynchronously after connecting, so its first use can come first:
+  a missing stream now reads as empty (a GDPR erasure reported its dead-letter step failed),
+  and the first dead letter creates it instead of being lost.
 
 ### Design decisions
 

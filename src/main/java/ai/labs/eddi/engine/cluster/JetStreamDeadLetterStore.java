@@ -56,9 +56,20 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
      */
     private static final int SEQUENCE_NOT_FOUND = 10043;
 
+    /**
+     * JetStream "stream not found": the stream is provisioned asynchronously once
+     * the connection is up, so the first use can come before it exists — then there
+     * is simply nothing in it yet.
+     */
+    private static final int STREAM_NOT_FOUND = 10059;
+
     static boolean notFound(JetStreamApiException e) {
         int code = e.getApiErrorCode();
-        return code == NO_MESSAGE || code == NO_MESSAGE_TO_DELETE || code == SEQUENCE_NOT_FOUND;
+        return code == NO_MESSAGE || code == NO_MESSAGE_TO_DELETE || code == SEQUENCE_NOT_FOUND || code == STREAM_NOT_FOUND;
+    }
+
+    static boolean streamMissing(JetStreamApiException e) {
+        return e.getApiErrorCode() == STREAM_NOT_FOUND;
     }
 
     private final NatsConnectionManager connections;
@@ -104,7 +115,17 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             body.put("turn", turn);
         }
         try {
-            PublishAck ack = connections.jetStream().publish(subjects.deadLetterTurn(KvKeys.safe(conversationId)), JSON.writeValueAsBytes(body));
+            byte[] payload = JSON.writeValueAsBytes(body);
+            String subject = subjects.deadLetterTurn(KvKeys.safe(conversationId));
+            PublishAck ack;
+            try {
+                ack = connections.jetStream().publish(subject, payload);
+            } catch (IOException | JetStreamApiException noStreamYet) {
+                // The stream is provisioned asynchronously after connecting; a dead letter
+                // that arrives first creates it here rather than being lost.
+                provision();
+                ack = connections.jetStream().publish(subject, payload);
+            }
             return String.valueOf(ack.getSeqno());
         } catch (IOException | JetStreamApiException e) {
             throw new ClusterUnavailableException("dead-letter publish failed: " + e.getMessage(), e);
@@ -184,7 +205,12 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         try {
             return (int) connections.jetStreamManagement()
                     .purgeStream(stream, PurgeOptions.subject(subjects.deadLetterTurnWildcard())).getPurged();
-        } catch (IOException | JetStreamApiException e) {
+        } catch (JetStreamApiException e) {
+            if (streamMissing(e)) {
+                return 0;
+            }
+            throw new ClusterUnavailableException("dead-letter purge failed: " + e.getMessage(), e);
+        } catch (IOException e) {
             throw new ClusterUnavailableException("dead-letter purge failed: " + e.getMessage(), e);
         }
     }
@@ -194,7 +220,13 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         try {
             return (int) connections.jetStreamManagement()
                     .purgeStream(stream, PurgeOptions.subject(subjects.deadLetterTurn(KvKeys.safe(conversationId)))).getPurged();
-        } catch (IOException | JetStreamApiException e) {
+        } catch (JetStreamApiException e) {
+            if (streamMissing(e)) {
+                // No dead letter was ever written — nothing to erase.
+                return 0;
+            }
+            throw new ClusterUnavailableException("dead-letter purge failed: " + e.getMessage(), e);
+        } catch (IOException e) {
             throw new ClusterUnavailableException("dead-letter purge failed: " + e.getMessage(), e);
         }
     }
@@ -203,7 +235,12 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
     public long count() {
         try {
             return connections.jetStreamManagement().getStreamInfo(stream).getStreamState().getMsgCount();
-        } catch (IOException | JetStreamApiException e) {
+        } catch (JetStreamApiException e) {
+            if (streamMissing(e)) {
+                return 0;
+            }
+            throw new ClusterUnavailableException("dead-letter count failed: " + e.getMessage(), e);
+        } catch (IOException e) {
             throw new ClusterUnavailableException("dead-letter count failed: " + e.getMessage(), e);
         }
     }
