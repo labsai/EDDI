@@ -1,8 +1,18 @@
-{{- if .Values.autoscaling.enabled }}
-{{- fail "autoscaling.enabled=true is not supported: EDDI serialises the turns of a conversation with a JVM-local lock (InMemoryConversationCoordinator), and the NATS coordinator still executes each Callable in the JVM that published it. With more than one replica two turns of the same conversation race and one is silently lost, and in-memory replay nonces stop detecting replayed signed envelopes. Scale vertically via eddi.resources. This gate lifts when a distributed conversation coordinator ships." }}
+{{- $clustered := eq (include "eddi.messagingType" .) "nats" }}
+{{- if and .Values.autoscaling.enabled (not $clustered) }}
+{{- fail "autoscaling.enabled=true is not supported with eddi.messagingType=in-memory: the conversation lock is JVM-local, so a second replica would run two turns of one conversation at once. Set eddi.messagingType=nats (cluster mode, see docs/clustering.md), or scale vertically via eddi.resources." }}
 {{- end }}
-{{- if gt (int .Values.eddi.replicas) 1 }}
-{{- fail "eddi.replicas must be 1: EDDI is single-writer per conversation and the coordinator lock is JVM-local, so extra replicas silently drop conversation turns. Scale vertically via eddi.resources." }}
+{{- if and (gt (int .Values.eddi.replicas) 1) (not $clustered) }}
+{{- fail "eddi.replicas must be 1 with eddi.messagingType=in-memory: the conversation lock is JVM-local, so extra replicas would run two turns of one conversation at once. Set eddi.messagingType=nats (cluster mode, see docs/clustering.md), or scale vertically via eddi.resources." }}
+{{- end }}
+{{- $strategy := include "eddi.updateStrategy" . }}
+{{- if and (eq $strategy "RollingUpdate") (not $clustered) }}
+{{- fail "eddi.updateStrategy=RollingUpdate needs eddi.messagingType=nats: a rolling update runs the old and the new pod against one database at once, and single-node (in-memory) EDDI keeps its conversation lock, nonces and caches in the JVM. Use Recreate (the in-memory default)." }}
+{{- end }}
+{{- $grace := include "eddi.terminationGracePeriodSeconds" . | int }}
+{{- $drain := include "eddi.shutdownDrainTimeoutSeconds" . | int }}
+{{- if and $drain (le $grace (add $drain 3)) }}
+{{- fail (printf "eddi.terminationGracePeriodSeconds (%d) must exceed the shutdown drain (%d s) plus the readiness grace (3 s): Kubernetes kills the pod at the end of the grace period, so a longer drain is cut short and its turns are abandoned mid-write." $grace $drain) }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -12,14 +22,17 @@ metadata:
     {{- include "eddi.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
-  # Always rendered — autoscaling is gated off above, so there is never an HPA
-  # competing for ownership of this field.
+  # Omitted while an HPA owns the replica count (cluster mode only).
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.eddi.replicas }}
+  {{- end }}
   strategy:
-    type: RollingUpdate
+    type: {{ $strategy }}
+    {{- if eq $strategy "RollingUpdate" }}
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
+    {{- end }}
   selector:
     matchLabels:
       {{- include "eddi.selectorLabels" . | nindent 6 }}
@@ -73,7 +86,26 @@ spec:
         fsGroup: 185
         seccompProfile:
           type: RuntimeDefault
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: {{ $grace }}
+      {{- if $clustered }}
+      # Spread replicas over nodes and zones, so one node failure takes out at
+      # most one of them.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "eddi.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: server
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "eddi.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: server
+      {{- end }}
       volumes:
         # Secrets arrive as FILES, never as environment variables: environ is
         # readable through /proc/<pid>/environ by anything sharing the PID
@@ -133,6 +165,13 @@ spec:
               name: http
               protocol: TCP
           env:
+            {{- if $clustered }}
+            # Cluster mode: each replica's node id is its pod name (unique, stable).
+            - name: EDDI_CLUSTER_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- end }}
             - name: QUARKUS_CONFIG_LOCATIONS
               value: "/etc/eddi/secrets/application-secrets.properties{{ if .Values.postgres.enabled }},/etc/eddi/secrets/postgres-secrets.properties{{ end }}"
           envFrom:

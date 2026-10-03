@@ -2329,19 +2329,6 @@ class DeploymentManifestsTest {
         private static final Pattern VALUE_REFERENCE = Pattern.compile("\\.Values\\.([A-Za-z0-9_.]+)");
 
         /**
-         * Sub-keys of a toggle whose "on" state makes the chart FAIL to render. They
-         * are unreachable rather than dead — no configuration gets far enough to read
-         * them — and values.yaml documents them as the shape a distributed conversation
-         * coordinator will need. The {@code fail} gate that justifies the exemption is
-         * asserted below, so lifting it re-opens the check on them.
-         */
-        private static final Set<String> UNREACHABLE_BEHIND_A_FAIL_GATE = Set.of(
-                "autoscaling.minReplicas",
-                "autoscaling.maxReplicas",
-                "autoscaling.targetCPUUtilizationPercentage",
-                "autoscaling.targetMemoryUtilizationPercentage");
-
-        /**
          * A value no template reads is worse than a missing one: {@code --set
          * monitoring.prometheus.enabled=true} rendered nothing, exited 0 and reported
          * success, so the operator believed metrics collection was deployed.
@@ -2373,18 +2360,12 @@ class DeploymentManifestsTest {
                 }
             }
 
-            assertTrue(read(HELM_TEMPLATES.resolve("deployment.yaml"))
-                    .contains("{{- fail \"autoscaling.enabled=true is not supported"),
-                    "the autoscaling sub-keys are exempted from this check ONLY because enabling autoscaling "
-                            + "fails rendering outright. That gate is gone, so they are settable and dead again "
-                            + "— implement or delete them, and drop " + UNREACHABLE_BEHIND_A_FAIL_GATE);
-
             Set<String> dead = new TreeSet<>();
             for (String leaf : leafPaths(YAML.readTree(HELM.resolve("values.yaml").toFile()), "")) {
                 boolean consumed = referenced.stream().anyMatch(reference -> reference.equals(leaf)
                         || leaf.startsWith(reference + ".")
                         || reference.startsWith(leaf + "."));
-                if (!consumed && !UNREACHABLE_BEHIND_A_FAIL_GATE.contains(leaf)) {
+                if (!consumed) {
                     dead.add(leaf);
                 }
             }
@@ -2763,45 +2744,61 @@ class DeploymentManifestsTest {
         }
 
         /**
-         * {@code eddi.messaging.type} is read by no Java code, and the NATS coordinator
-         * is gated on a BUILD-time profile the published image is not built with.
-         * Setting it provisioned a JetStream StatefulSet and a PVC that EDDI could
-         * never connect to, while the install notes reported success.
+         * The published image selects cluster mode at runtime, so more than one
+         * replica, the HPA and a rolling update are safe exactly when
+         * {@code eddi.messagingType} is {@code nats} — and unsafe otherwise: with
+         * in-memory messaging the conversation lock is JVM-local, so a second pod (a
+         * replica, an HPA scale-up or the surge pod of a RollingUpdate) runs two turns
+         * of one conversation at once. Each of the three is refused outside cluster
+         * mode, and the HPA template carries its own copy of the gate, because it
+         * renders independently of the Deployment.
          */
         @Test
-        @DisplayName("nats messaging is gated on a build-profile image")
-        void natsRequiresABuildProfileImage() throws IOException {
-            String configmap = read(HELM_TEMPLATES.resolve("configmap.yaml"));
-            assertTrue(configmap.contains("nats.buildProfileImage"),
-                    "the chart must refuse eddi.messagingType=nats unless the operator confirms a "
-                            + "-Dquarkus.profile=nats image");
-            assertTrue(configmap.contains("-Dquarkus.profile=nats"),
-                    "the failure message must name the build-profile requirement, which is the part an "
-                            + "operator cannot discover from the manifests");
+        @DisplayName("replicas, autoscaling and rolling updates need cluster mode")
+        void scalingRequiresClusterMode() throws IOException {
+            String deployment = read(HELM_TEMPLATES.resolve("deployment.yaml"));
+            assertTrue(deployment.contains("{{- $clustered := eq (include \"eddi.messagingType\" .) \"nats\" }}"),
+                    "deployment.yaml must decide cluster mode from the coalesced messaging type");
+            for (String gate : List.of(
+                    "{{- if and .Values.autoscaling.enabled (not $clustered) }}",
+                    "{{- if and (gt (int .Values.eddi.replicas) 1) (not $clustered) }}",
+                    "{{- if and (eq $strategy \"RollingUpdate\") (not $clustered) }}")) {
+                assertTrue(deployment.contains(gate),
+                        "deployment.yaml lost the gate `" + gate + "`: with in-memory messaging a second pod "
+                                + "runs two turns of one conversation at once");
+            }
+            assertTrue(read(HELM_TEMPLATES.resolve("hpa.yaml"))
+                    .contains("{{- if ne (include \"eddi.messagingType\" .) \"nats\" }}"),
+                    "hpa.yaml must refuse an HPA outside cluster mode on its own");
+            String helpers = read(HELM_TEMPLATES.resolve("_helpers.tpl"));
+            assertTrue(helpers.contains("{{- define \"eddi.updateStrategy\" -}}"),
+                    "the update strategy must default per messaging type: Recreate for in-memory, "
+                            + "RollingUpdate for nats");
+            assertTrue(deployment.contains("must exceed the shutdown drain"),
+                    "a termination grace shorter than the drain must be refused: Kubernetes kills the pod at "
+                            + "the end of the grace period and the drain's turns are abandoned mid-write");
+            assertTrue(deployment.contains("name: EDDI_CLUSTER_NODE_ID"),
+                    "every cluster replica needs its own node id (the pod name)");
         }
 
         /**
-         * {@code nats.buildProfileImage} says the IMAGE can speak NATS;
-         * {@code nats.enabled} is what actually deploys the broker. The guard checked
-         * only the first, so
-         * {@code eddi.messagingType=nats,nats.buildProfileImage=true} rendered a
-         * NATS-profile EDDI with no StatefulSet, no Service and no EDDI_NATS_URL — and
-         * the coordinator then falls back to {@code nats://localhost:4222}, inside the
-         * EDDI pod, where nothing listens. The inverse wastes a StatefulSet and a PVC
-         * on a broker nothing publishes to.
+         * {@code eddi.messagingType=nats} selects cluster mode; {@code nats.enabled}
+         * (or {@code nats.externalUrl}) is what provides the broker. Without either the
+         * chart rendered no EDDI_NATS_URL, and every replica would run degraded
+         * forever, connecting to {@code nats://localhost:4222} inside its own pod. The
+         * inverse wastes a StatefulSet and a PVC on a broker nothing publishes to.
          */
         @Test
         @DisplayName("messaging type and the deployed broker must agree")
         void natsMessagingRequiresADeployedBroker() throws IOException {
             String configmap = read(HELM_TEMPLATES.resolve("configmap.yaml"));
-            assertTrue(configmap.contains("{{- fail \"eddi.messagingType is not \\\"in-memory\\\" but nats.enabled=false"),
-                    "a non-in-memory messagingType must also require nats.enabled=true: without the broker "
-                            + "there is no EDDI_NATS_URL and the coordinator connects to nats://localhost:4222 "
+            assertTrue(configmap.contains("{{- fail \"eddi.messagingType is \\\"nats\\\" but nats.enabled=false and nats.externalUrl is empty"),
+                    "messagingType=nats must also require a broker (nats.enabled or nats.externalUrl): without "
+                            + "one there is no EDDI_NATS_URL and every replica connects to nats://localhost:4222 "
                             + "in its own pod");
             assertTrue(configmap.contains("{{- fail \"nats.enabled=true while eddi.messagingType is"),
                     "the inverse must be refused too: nats.enabled=true with in-memory messaging provisions a "
-                            + "JetStream StatefulSet and a PVC that EDDI never connects to, which is the same "
-                            + "silent-waste failure the buildProfileImage gate was written for");
+                            + "JetStream StatefulSet and a PVC that EDDI never connects to");
         }
 
         /**
@@ -2832,7 +2829,7 @@ class DeploymentManifestsTest {
                             + "`messagingType:` with a message about a NATS broker it never asked for");
 
             String configmap = stripGoComments(read(HELM_TEMPLATES.resolve("configmap.yaml")));
-            assertTrue(configmap.contains("{{- if ne (include \"eddi.messagingType\" .) \"in-memory\" }}"),
+            assertTrue(configmap.contains("{{- if eq (include \"eddi.messagingType\" .) \"nats\" }}"),
                     "the NATS guard must read the helper, not its own inline coalescing");
             assertTrue(configmap.contains("EDDI_MESSAGING_TYPE: {{ include \"eddi.messagingType\" . | quote }}"),
                     "EDDI_MESSAGING_TYPE must render the same coalesced value the guard checked. Rendering "
@@ -2895,7 +2892,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.3.0";
+        private static final String EXPECTED_CHART_VERSION = "2.5.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
@@ -2936,8 +2933,8 @@ class DeploymentManifestsTest {
                             + "apart — and the last time nothing enforced it, the version sat still across three "
                             + "releases. If you changed anything under helm/, bump Chart.yaml AND this constant "
                             + "together: major for a values file that no longer renders (this release dropped "
-                            + "manager.*, monitoring.* and namespace, and made eddi.oidc.publicUrl / "
-                            + "nats.buildProfileImage render-time requirements), minor or patch otherwise");
+                            + "manager.*, monitoring.* and namespace, and made eddi.oidc.publicUrl a "
+                            + "render-time requirement), minor or patch otherwise");
 
             JsonNode values = YAML.readTree(HELM.resolve("values.yaml").toFile());
             for (String removed : List.of("manager", "monitoring", "namespace")) {
@@ -3434,8 +3431,8 @@ class DeploymentManifestsTest {
      * The four {@code expect_failure} cases are the load-bearing part. A guard that
      * no longer fires produces no output at all, so each of the chart's fail-loud
      * branches is asserted to still be refused; the guards' own presence is checked
-     * by silentBranchesFailLoudly and natsRequiresABuildProfileImage above, and
-     * this is what proves they still bite when Helm actually renders.
+     * by silentBranchesFailLoudly and scalingRequiresClusterMode above, and this is
+     * what proves they still bite when Helm actually renders.
      * <p>
      * manifest-lint deliberately gates on detect-changes and nothing else — it is
      * not in the {@code docker} job's {@code needs:}, exactly like shell-lint. A
@@ -3478,7 +3475,12 @@ class DeploymentManifestsTest {
 
         for (String guarded : List.of(
                 "no datastore configured at all",
-                "messagingType=nats on a stock image",
+                "more than one replica with in-memory messaging",
+                "autoscaling with in-memory messaging",
+                "a RollingUpdate with in-memory messaging",
+                "in-chart NATS without a password",
+                "in-chart and external NATS at once",
+                "a drain longer than the termination grace",
                 "OIDC enabled without a browser-facing publicUrl",
                 "OIDC with neither an in-chart Keycloak nor an authServerUrl",
                 "external PostgreSQL with no credentials",

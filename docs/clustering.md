@@ -131,8 +131,9 @@ The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `NONCES`,
 `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_*`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`;
 streams: `EVENTS` and `DEAD_LETTERS`. Subjects live
-under `eddi.<prefix>.>`, so a NATS account restricted to `eddi.>`, `$JS.API.>`,
-`$KV.EDDI_>` and `_INBOX.>` is sufficient.
+under `eddi.<prefix>.>`, so a NATS user restricted to `eddi.>`, `$JS.API.>`,
+`$JS.ACK.>`, `$JS.FC.>`, `$KV.<prefix>_*.>` and `_INBOX.>` is sufficient — the Helm
+chart's in-chart NATS grants exactly that.
 
 ### Upgrading from the build-profile NATS coordinator
 
@@ -147,15 +148,25 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
 
 ## Deployment
 
-- **Helm**: `eddi.messagingType=nats` with `nats.enabled=true` (a 3-node
-  JetStream StatefulSet with auth and optional TLS) or `nats.externalUrl`;
-  then `replicaCount > 1`, `autoscaling.enabled` and a PodDisruptionBudget are
-  allowed. See [Kubernetes](kubernetes.md#horizontal-scaling).
-- **Kustomize**: the `nats` and `cluster` overlays.
-- **Docker Compose**: `docker-compose.cluster.yml` (three EDDI replicas, a
-  three-node NATS cluster and an nginx load balancer).
-- **Demo**: `scripts/cluster-demo/` runs every failure scenario above against
-  three local jars and records the results.
+- **Helm** (chart 2.5.0+): `eddi.messagingType=nats` with `nats.enabled=true`
+  (a three-node JetStream StatefulSet with authentication and optional TLS) or
+  `nats.externalUrl`; then `eddi.replicas > 1`, `autoscaling.enabled` and a
+  `RollingUpdate` are allowed, and the chart sets the drain, the termination
+  grace, the node ids and a topology spread. See
+  [Kubernetes](kubernetes.md#cluster-mode-horizontal-scaling).
+- **Kustomize**: the `k8s/overlays/nats` component (three NATS nodes, three EDDI
+  replicas), composed in `k8s/examples/postgres-ha`.
+- **Docker Compose**: `docker-compose.cluster.yml` — three EDDI replicas, a
+  three-node NATS cluster with a password, MongoDB and an nginx load balancer
+  (`docker/cluster/nginx.conf`). `docker-compose.nats.yml` is a one-replica
+  overlay for trying cluster mode next to the base file.
+- **Alerts**: [`monitoring/eddi-cluster-alerts.yml`](monitoring/eddi-cluster-alerts.yml)
+  holds Prometheus rules for the runbook above; the
+  [cluster dashboard](monitoring/eddi-cluster-dashboard.json) charts the same series.
+- **Demo**: [`scripts/cluster-demo/`](../scripts/cluster-demo/README.md) builds
+  this topology in Docker — three nodes of one build, three NATS nodes, MongoDB
+  or PostgreSQL, nginx and a mock LLM — and runs every failure scenario on this
+  page against it, each with a pass/fail verdict.
 
 ## Residual limitations
 

@@ -196,6 +196,15 @@ spec:
       ports:
         - protocol: TCP
           port: 4222
+    # Cluster routes (6222): the other NATS pods of this release only.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "eddi.fullname" . }}-nats
+              app.kubernetes.io/component: messaging
+      ports:
+        - protocol: TCP
+          port: 6222
     # Monitoring/health (8222): same-namespace callers (kubelet httpGet probe,
     # Prometheus), so the strict client rule above does not stop the pod becoming
     # Ready.
