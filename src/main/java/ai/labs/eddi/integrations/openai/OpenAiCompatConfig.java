@@ -32,6 +32,19 @@ public class OpenAiCompatConfig {
      */
     public static final String POLICY_AUTHENTICATED = "authenticated";
 
+    /**
+     * {@code chat-key-fallback} value: a request with no explicit chat key is keyed
+     * by a hash of its opening messages, so each client-side chat gets its own
+     * conversation. The default.
+     */
+    public static final String CHAT_KEY_FALLBACK_HISTORY = "history";
+
+    /**
+     * {@code chat-key-fallback} value: a request with no explicit chat key shares
+     * one conversation per user and agent — the behaviour of earlier releases.
+     */
+    public static final String CHAT_KEY_FALLBACK_SHARED = "shared";
+
     private final boolean enabled;
     private final String apiKey;
     private final String httpPolicy;
@@ -44,6 +57,8 @@ public class OpenAiCompatConfig {
     private final int modelCacheSeconds;
     private final boolean exposeStatelessVariants;
     private final boolean adoptLegacyHeaderMappings;
+    private final String chatKeyFallback;
+    private final int maxConversationSteps;
 
     @Inject
     @SuppressWarnings("java:S107") // configuration carrier — one parameter per knob is the point
@@ -59,7 +74,9 @@ public class OpenAiCompatConfig {
             @ConfigProperty(name = "eddi.openai-compat.max-concurrent-requests", defaultValue = "64") int maxConcurrentRequests,
             @ConfigProperty(name = "eddi.openai-compat.model-cache-seconds", defaultValue = "30") int modelCacheSeconds,
             @ConfigProperty(name = "eddi.openai-compat.expose-stateless-variants", defaultValue = "true") boolean exposeStatelessVariants,
-            @ConfigProperty(name = "eddi.openai-compat.adopt-legacy-header-mappings", defaultValue = "false") boolean adoptLegacyHeaderMappings) {
+            @ConfigProperty(name = "eddi.openai-compat.adopt-legacy-header-mappings", defaultValue = "false") boolean adoptLegacyHeaderMappings,
+            @ConfigProperty(name = "eddi.openai-compat.chat-key-fallback", defaultValue = CHAT_KEY_FALLBACK_HISTORY) String chatKeyFallback,
+            @ConfigProperty(name = "eddi.openai-compat.max-conversation-steps", defaultValue = "0") int maxConversationSteps) {
 
         this.enabled = enabled;
         this.apiKey = apiKey.map(String::trim).filter(s -> !s.isEmpty()).orElse(null);
@@ -73,6 +90,10 @@ public class OpenAiCompatConfig {
         this.modelCacheSeconds = modelCacheSeconds;
         this.exposeStatelessVariants = exposeStatelessVariants;
         this.adoptLegacyHeaderMappings = adoptLegacyHeaderMappings;
+        this.chatKeyFallback = CHAT_KEY_FALLBACK_SHARED.equalsIgnoreCase(chatKeyFallback == null ? "" : chatKeyFallback.trim())
+                ? CHAT_KEY_FALLBACK_SHARED
+                : CHAT_KEY_FALLBACK_HISTORY;
+        this.maxConversationSteps = maxConversationSteps;
     }
 
     public boolean isEnabled() {
@@ -153,5 +174,31 @@ public class OpenAiCompatConfig {
      */
     public boolean isAdoptLegacyHeaderMappings() {
         return adoptLegacyHeaderMappings;
+    }
+
+    /**
+     * How a request that names no chat ({@code X-OpenWebUI-Chat-Id},
+     * {@code X-EDDI-Chat-Id}, {@code metadata.chat_id} or {@code user}) is mapped
+     * to a conversation: {@link #CHAT_KEY_FALLBACK_HISTORY} (the default) keys it
+     * by its opening messages, {@link #CHAT_KEY_FALLBACK_SHARED} keeps the old
+     * single conversation per user and agent. An unknown value falls back to the
+     * default.
+     */
+    public String getChatKeyFallback() {
+        return chatKeyFallback;
+    }
+
+    /** Whether unkeyed requests are keyed by their message history. */
+    public boolean isDeriveChatKeyFromHistory() {
+        return CHAT_KEY_FALLBACK_HISTORY.equals(chatKeyFallback);
+    }
+
+    /**
+     * Steps after which an idle mapped conversation is ended and the chat moves to
+     * a fresh one, so one long chat cannot grow a conversation document without
+     * bound. {@code 0} (the default) disables the rollover.
+     */
+    public int getMaxConversationSteps() {
+        return maxConversationSteps;
     }
 }

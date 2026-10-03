@@ -659,6 +659,7 @@ public class LlmTask implements ILifecycleTask {
 
         // === Response Validation (Phase D) ===
         responseContent = applyResponseValidation(responseContent, responseMetadata, task, currentStep);
+        recordAbnormalFinish(currentStep, responseMetadata);
 
         // Store metadata if configured
         var responseMetadataObjectName = task.getResponseMetadataObjectName();
@@ -815,6 +816,41 @@ public class LlmTask implements ILifecycleTask {
             accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
         }
         accumulateToolCalls(currentStep, toolTrace, task.getId());
+    }
+
+    /**
+     * Leaves {@link MemoryKeys#LLM_FINISH_REASON} on the step when the model's
+     * answer was cut off at its token limit ({@code length}) or filtered by the
+     * provider ({@code content_filter}), so a caller can report it — the
+     * OpenAI-compatible {@code /v1} adapter turns it into {@code finish_reason}. A
+     * normal finish writes nothing, so a later sub-task of the same turn cannot
+     * overwrite an earlier truncation with "stop".
+     */
+    private void recordAbnormalFinish(IWritableConversationStep currentStep, Map<String, Object> responseMetadata) {
+        String reason = abnormalFinishReason(responseMetadata);
+        if (reason != null) {
+            currentStep.storeData(dataFactory.createData(MemoryKeys.LLM_FINISH_REASON, reason));
+        }
+    }
+
+    /**
+     * {@code "length"} or {@code "content_filter"} when the response metadata says
+     * the model stopped for that reason — as the executors' {@code warning} or as
+     * the provider's raw {@code finishReason} — otherwise {@code null}.
+     */
+    static String abnormalFinishReason(Map<String, Object> responseMetadata) {
+        if (responseMetadata == null) {
+            return null;
+        }
+        Object warning = responseMetadata.get("warning");
+        String finishReason = String.valueOf(responseMetadata.get("finishReason"));
+        if ("truncated".equals(warning) || "LENGTH".equalsIgnoreCase(finishReason)) {
+            return "length";
+        }
+        if ("content_filter".equals(warning) || "CONTENT_FILTER".equalsIgnoreCase(finishReason)) {
+            return "content_filter";
+        }
+        return null;
     }
 
     private void accumulateTokenUsage(IWritableConversationStep currentStep, Map<?, ?> delta) {

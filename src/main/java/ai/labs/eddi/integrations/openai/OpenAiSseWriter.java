@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.integrations.openai.model.ChatCompletionChunk;
 import ai.labs.eddi.integrations.openai.model.ChunkChoice;
+import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
 import ai.labs.eddi.integrations.openai.model.TokenUsage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
@@ -24,6 +25,14 @@ import java.nio.charset.StandardCharsets;
  * Every frame is flushed immediately. A buffered SSE stream is
  * indistinguishable from a hung one at the client, so batching here would look
  * like a bug in the agent.
+ * <p>
+ * <b>Exactly one terminal frame, and nothing after it.</b> The writer is shared
+ * by the request thread (which gives up on a timeout) and the pipeline's
+ * callback thread (which may still be emitting tokens when it does). Every
+ * method is therefore synchronized, and once {@link #finish} or {@link #error}
+ * has written its terminator every later call is a no-op — a token that arrives
+ * after {@code [DONE]} is dropped rather than written past the end of the
+ * stream.
  *
  * @since 6.1.0
  */
@@ -61,8 +70,8 @@ public class OpenAiSseWriter {
      * Emit the opening {@code {"role":"assistant"}} delta. Idempotent, so content
      * emitters can call it defensively without tracking whether it has run.
      */
-    public void role() {
-        if (roleSent) {
+    public synchronized void role() {
+        if (roleSent || finished) {
             return;
         }
         roleSent = true;
@@ -72,8 +81,8 @@ public class OpenAiSseWriter {
     /**
      * Emit one content delta. Empty text is skipped — an empty delta means nothing.
      */
-    public void content(String text) {
-        if (text == null || text.isEmpty()) {
+    public synchronized void content(String text) {
+        if (finished || text == null || text.isEmpty()) {
             return;
         }
         role();
@@ -89,7 +98,7 @@ public class OpenAiSseWriter {
      * protocol deviation, and some clients treat the empty {@code choices} array as
      * malformed.
      */
-    public void usage(TokenUsage tokenUsage) {
+    public synchronized void usage(TokenUsage tokenUsage) {
         this.usage = tokenUsage;
     }
 
@@ -99,12 +108,12 @@ public class OpenAiSseWriter {
      * (complete, error, skipped) and a double terminator would confuse strict
      * clients.
      */
-    public void finish(String finishReason) {
+    public synchronized void finish(String finishReason) {
         if (finished) {
             return;
         }
-        finished = true;
         role();
+        finished = true;
         emit(ChunkChoice.finish(finishReason));
         if (includeUsage && usage != null) {
             emitChunk(ChatCompletionChunk.usageOnly(id, model, created, usage));
@@ -113,11 +122,39 @@ public class OpenAiSseWriter {
     }
 
     /**
+     * Terminate the stream with an OpenAI error event instead of a
+     * {@code finish_reason} chunk: {@code data: {"error":{…}}}, then
+     * {@code [DONE]}.
+     * <p>
+     * Once the 200 status is committed an HTTP error is no longer possible, and an
+     * in-band error event is what OpenAI itself sends mid-stream — the
+     * {@code openai} SDKs raise {@code APIError} on it, where a warning written as
+     * content would be read as the model's answer and closed with
+     * {@code finish_reason: "stop"}. No-op after the stream has terminated.
+     */
+    public synchronized void error(OpenAiErrorResponse errorResponse) {
+        if (finished) {
+            return;
+        }
+        finished = true;
+        writeJsonFrame(errorResponse);
+        write(DONE_FRAME);
+        flush();
+    }
+
+    /**
+     * Whether the terminator ({@code finish} or {@code error}) has been written.
+     */
+    public synchronized boolean isFinished() {
+        return finished;
+    }
+
+    /**
      * Whether anything has been written yet — i.e. whether the opening role frame
      * has gone out. Note this becomes true on {@link #finish} as well, so it means
      * "the stream has started", not "content was sent".
      */
-    public boolean hasStarted() {
+    public synchronized boolean hasStarted() {
         return roleSent;
     }
 
@@ -126,11 +163,15 @@ public class OpenAiSseWriter {
     }
 
     private void emitChunk(ChatCompletionChunk chunk) {
+        writeJsonFrame(chunk);
+    }
+
+    private void writeJsonFrame(Object frame) {
         if (broken) {
             return;
         }
         try {
-            byte[] json = objectMapper.writeValueAsBytes(chunk);
+            byte[] json = objectMapper.writeValueAsBytes(frame);
             write(DATA_PREFIX);
             write(json);
             write(FRAME_SUFFIX);
