@@ -41,6 +41,18 @@ intent inside). Create on an existing intent was already refused by both stores 
 primary key); a test now pins that it is not a takeover. The trigger cache is untouched (the NATS PR
 owns it).
 
+Review follow-ups (PR #942):
+- A trigger written through the API must route to at least one agent, with no blank `agentId`
+  (otherwise `400`). A stored targetless trigger — nothing to derive an EDIT right from — is an
+  administrator's to change while workspaces are enforced.
+- Update and delete are bound to the version they were authorized against: the new
+  `IAgentTriggerStore.updateAgentTriggerIfUnchanged` / `deleteAgentTriggerIfUnchanged` write only if
+  the trigger still routes the same way. MongoDB filters on the stored document itself; PostgreSQL
+  uses `AND data = ?::jsonb`. A re-point that lands between the check and the write turns the request
+  into a `409` instead of being overwritten.
+- Filtered capability searches (workspaces enforced, public A2A discovery) are now counted and timed
+  like unfiltered ones.
+
 ### F3 — `/v1` had no role gate in OIDC mode
 
 `OpenAiAuthFilter` requires `eddi-admin`, `eddi-editor` or `eddi-user` in `http-policy=authenticated`

@@ -14,7 +14,10 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.List;
@@ -116,30 +119,54 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
      * editor may then do too.
      */
     private void requireEditOnReferencedAgents(AgentTriggerConfiguration configuration) {
+        for (String agentId : targets(configuration)) {
+            resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
+        }
+    }
+
+    /** The non-blank agent ids a trigger routes to. */
+    private static List<String> targets(AgentTriggerConfiguration configuration) {
         if (configuration == null || configuration.getAgentDeployments() == null) {
-            return;
+            return List.of();
+        }
+        return configuration.getAgentDeployments().stream()
+                .filter(deployment -> deployment != null && deployment.getAgentId() != null && !deployment.getAgentId().isBlank())
+                .map(deployment -> deployment.getAgentId().trim())
+                .toList();
+    }
+
+    /**
+     * A trigger written through this API must route somewhere, and every deployment
+     * must name its agent. Who may change a trigger is decided by the agents it
+     * routes to, so a trigger that routes to none — or carries an entry that names
+     * no agent — would be changeable by anybody: there would be nothing to check
+     * against.
+     */
+    private static void requireTargets(AgentTriggerConfiguration configuration) {
+        if (configuration == null || configuration.getAgentDeployments() == null || configuration.getAgentDeployments().isEmpty()) {
+            throw new BadRequestException("A trigger must route to at least one agent ('agentDeployments').");
         }
         for (var deployment : configuration.getAgentDeployments()) {
-            if (deployment != null && deployment.getAgentId() != null && !deployment.getAgentId().isBlank()) {
-                resourceAccessGuard.requireAccess(deployment.getAgentId(), AccessLevel.EDIT, "agent");
+            if (deployment == null || deployment.getAgentId() == null || deployment.getAgentId().isBlank()) {
+                throw new BadRequestException("Every entry of 'agentDeployments' must name an 'agentId'.");
             }
         }
     }
 
     /**
-     * {@link #requireEditOnReferencedAgents} on the <em>currently stored</em>
-     * trigger, before it may be re-pointed or removed. A trigger that is genuinely
-     * absent imposes no constraint here — the store's own not-found handling
-     * answers that.
+     * Whether the caller may change or remove the stored trigger: {@code EDIT} on
+     * every agent it routes to. A stored trigger that routes to no agent — written
+     * before {@link #requireTargets} existed, or straight into the store — has
+     * nothing to derive a right from, so only an administrator may change it while
+     * workspaces are enforced (with them off, every editor holds every right
+     * anyway).
      */
-    private void requireEditOnStoredReferencedAgents(String intent) {
-        AgentTriggerConfiguration stored;
-        try {
-            stored = agentTriggerStore.readAgentTrigger(intent);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            return; // nothing stored to protect — downstream op surfaces the 404
-        } catch (IResourceStore.ResourceStoreException e) {
-            throw sneakyThrow(e);
+    private void requireMayChange(AgentTriggerConfiguration stored) {
+        if (targets(stored).isEmpty()) {
+            if (!resourceAccessGuard.seesEverything()) {
+                throw new ForbiddenException("Access denied: this trigger routes to no agent, so only an administrator may change it");
+            }
+            return;
         }
         requireEditOnReferencedAgents(stored);
     }
@@ -164,18 +191,35 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
         }
     }
 
+    /**
+     * The write is conditional on the trigger still routing as the version the
+     * decision was made against
+     * ({@code IAgentTriggerStore#updateAgentTriggerIfUnchanged}), so a re-point
+     * that lands between the check and the write fails this request instead of
+     * being silently overwritten — or deleted — by someone who was never checked
+     * against it.
+     */
+    private static WebApplicationException changedMeanwhile(String intent) {
+        String message = "The trigger '" + intent + "' changed while this request was being checked; re-read it and try again.";
+        return new WebApplicationException(message, Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build());
+    }
+
     @Override
     public Response updateAgentTrigger(String intent, AgentTriggerConfiguration agentTriggerConfiguration) {
         try {
             requireIntentMatchesPath(intent, agentTriggerConfiguration);
+            requireTargets(agentTriggerConfiguration);
             // Guard BOTH the agents the trigger currently routes to (may I edit this
             // trigger at all?) and the agents the new config would route to (may I
             // aim it there?). Guarding only the new config let any editor re-point
             // another team's trigger; guarding with USE let anybody the agents were
             // shared with for chatting do it.
-            requireEditOnStoredReferencedAgents(intent);
+            AgentTriggerConfiguration stored = agentTriggerStore.readAgentTrigger(intent);
+            requireMayChange(stored);
             requireEditOnReferencedAgents(agentTriggerConfiguration);
-            agentTriggerStore.updateAgentTrigger(intent, agentTriggerConfiguration);
+            if (!agentTriggerStore.updateAgentTriggerIfUnchanged(intent, stored, agentTriggerConfiguration)) {
+                throw changedMeanwhile(intent);
+            }
             agentTriggersCache.put(intent, agentTriggerConfiguration);
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
@@ -186,6 +230,7 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     @Override
     public Response createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration) {
         try {
+            requireTargets(agentTriggerConfiguration);
             // EDIT, as for update and delete: whoever may create a trigger must be able
             // to change and remove it again, and routing an intent at an agent is a
             // change to how that agent is reached. Creating an intent that already
@@ -206,8 +251,11 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
             // Deleting a trigger stops routing for everyone it serves — gate it on EDIT
             // of the agents it currently commands, so neither a foreign editor nor a
             // mere user of those agents can remove another team's trigger.
-            requireEditOnStoredReferencedAgents(intent);
-            agentTriggerStore.deleteAgentTrigger(intent);
+            AgentTriggerConfiguration stored = agentTriggerStore.readAgentTrigger(intent);
+            requireMayChange(stored);
+            if (!agentTriggerStore.deleteAgentTriggerIfUnchanged(intent, stored)) {
+                throw changedMeanwhile(intent);
+            }
             agentTriggersCache.remove(intent);
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
