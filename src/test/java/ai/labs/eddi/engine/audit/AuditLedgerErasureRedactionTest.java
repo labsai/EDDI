@@ -415,4 +415,22 @@ class AuditLedgerErasureRedactionTest {
         assertEquals(AuditVerificationStatus.INVALID, ledger.verifyEntry(stored));
         assertFalse(containsSsn(stored));
     }
+
+    @Test
+    @DisplayName("entries redacted between the GDPR cascade's mark and its ledger step are counted, once")
+    void entriesRedactedBeforeTheErasureFlushAreCounted() {
+        ledger.submit(turn(USER, 0)); // queued before the erasure starts
+        ledger.markUserErased(USER); // the cascade's first step
+        ledger.flush(); // the scheduled flush gets there first and redacts it on drain
+        ledger.submit(turn(USER, 1)); // cancelled work unwinding: redacted at submit
+        ledger.flush();
+
+        var result = ledger.eraseUser(USER);
+
+        assertEquals(2, result.redacted(), "both entries were redacted by this erasure");
+        assertEquals(2, result.resealed());
+        assertEquals(2, result.pseudonymized());
+        assertTrue(store.rows().stream().noneMatch(AuditLedgerErasureRedactionTest::containsSsn));
+        assertEquals(0, ledger.eraseUser(USER).redacted(), "a re-run reports nothing twice");
+    }
 }

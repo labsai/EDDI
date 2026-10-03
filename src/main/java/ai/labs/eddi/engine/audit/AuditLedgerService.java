@@ -1485,6 +1485,11 @@ public class AuditLedgerService {
             return expired;
         });
         recentlyErasedUsers.put(userId, now.plus(ERASED_USER_REWRITE_WINDOW));
+        // Counting starts at the mark, not at the erasure's own flush: the GDPR cascade
+        // marks the user first and only reaches the ledger step after every other
+        // store, and the scheduled flush drains (and redacts) the user's queued entries
+        // in between.
+        redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
     }
 
     /**
@@ -1512,7 +1517,10 @@ public class AuditLedgerService {
         }
         if (!queued) {
             // The submit path: nothing is signed yet, and the entry is signed right after
-            // this.
+            // this — so it lands redacted and the sweep never sees its content. Count it
+            // for the erasure that caused it.
+            DrainCounts counts = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+            (isSigningEnabled() ? counts.resealed() : counts.keptUnverified()).incrementAndGet();
             return rewritten.withPayload(redactionMarker(null, null), null, null, null);
         }
         // A queued entry was signed by this node, but it is still verified like a
@@ -1645,8 +1653,6 @@ public class AuditLedgerService {
         }
         markUserErased(userId);
         DrainCounts drained = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
-        long resealedBefore = drained.resealed().get();
-        long keptBefore = drained.keptUnverified().get();
         if (enabled) {
             flush();
         }
@@ -1654,10 +1660,13 @@ public class AuditLedgerService {
             return new ErasureResult(0, 0, 0, 0, 0, false);
         }
 
-        // Queued entries this flush redacted as they left the queue count as redacted
-        // and pseudonymised by this erasure — as re-signed only when they verified.
-        long resealed = drained.resealed().get() - resealedBefore;
-        long keptUnverified = drained.keptUnverified().get() - keptBefore;
+        // Entries redacted in memory since the user was marked — drained from the queue
+        // by this flush or by a scheduled one that ran first, or submitted after the
+        // mark — count as redacted and pseudonymised by this erasure, as re-signed only
+        // when they verified. Taken, not read: an entry redacted after this point is
+        // reported by the next erasure (a re-run), never twice.
+        long resealed = drained.resealed().getAndSet(0);
+        long keptUnverified = drained.keptUnverified().getAndSet(0);
         long redacted = resealed + keptUnverified;
         long pseudonymized = redacted;
         long failed = 0;
