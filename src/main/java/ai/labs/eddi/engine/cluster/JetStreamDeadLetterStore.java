@@ -50,9 +50,15 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
     private static final int NO_MESSAGE = 10037;
     /** JetStream "no message found" (message delete). */
     private static final int NO_MESSAGE_TO_DELETE = 10057;
+    /**
+     * JetStream "sequence not found" — what a replicated (R3) stream answers when
+     * the entry was already deleted, e.g. discarded through another node.
+     */
+    private static final int SEQUENCE_NOT_FOUND = 10043;
 
-    private static boolean notFound(JetStreamApiException e) {
-        return e.getApiErrorCode() == NO_MESSAGE || e.getApiErrorCode() == NO_MESSAGE_TO_DELETE;
+    static boolean notFound(JetStreamApiException e) {
+        int code = e.getApiErrorCode();
+        return code == NO_MESSAGE || code == NO_MESSAGE_TO_DELETE || code == SEQUENCE_NOT_FOUND;
     }
 
     private final NatsConnectionManager connections;

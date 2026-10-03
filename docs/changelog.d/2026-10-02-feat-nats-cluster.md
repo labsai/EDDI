@@ -54,6 +54,8 @@ no meter is registered and nothing about NATS is logged.
   events. The unit tests call `startCluster()` themselves and could not see it;
   `ClusterStartableTypingTest` now checks every startable's bean types. Found by the live
   cross-node cancel demo.
+- **Discarding a dead letter twice answers 404** — a replicated (R3) stream reports an
+  already-deleted entry as 10043 ("sequence not found"), which surfaced as a 500.
 
 ### Design decisions
 
