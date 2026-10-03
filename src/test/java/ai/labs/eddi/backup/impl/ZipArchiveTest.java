@@ -201,6 +201,50 @@ class ZipArchiveTest {
     }
 
     @Test
+    void unzip_streamThatKeepsSendingAfterTheEntries_isCutOffAtTheRawLimit(@TempDir Path tempDir) throws IOException {
+        // The drain after the last entry copies whatever follows to disk. A source
+        // that is not behind the HTTP body limit could keep sending (here 4 MiB, far
+        // past the ~74 KiB raw limit of this configuration); the raw copy is bounded
+        // by the content limit plus a per-entry allowance.
+        var limited = new ZipArchive(10, 1024 * 1024, 64 * 1024);
+        long rawLimit = limited.maxRawArchiveBytes();
+        long trailing = 4L * 1024 * 1024;
+        long[] served = {0};
+        InputStream junk = new InputStream() {
+            @Override
+            public int read() {
+                if (served[0] >= trailing) {
+                    return -1;
+                }
+                served[0]++;
+                return 0;
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) {
+                if (served[0] >= trailing) {
+                    return -1;
+                }
+                int n = (int) Math.min(len, trailing - served[0]);
+                Arrays.fill(b, off, off + n, (byte) 0);
+                served[0] += n;
+                return n;
+            }
+        };
+        InputStream upload = new SequenceInputStream(new ByteArrayInputStream(zipOf(1, 100)), junk);
+
+        var thrown = assertThrows(ZipArchive.ZipLimitExceededException.class,
+                () -> limited.unzip(upload, tempDir.resolve("extracted").toFile()));
+
+        assertTrue(thrown.getMessage().contains(ZipArchive.MAX_TOTAL_BYTES_PROPERTY), thrown.getMessage());
+        assertTrue(served[0] <= rawLimit + 64 * 1024, "stopped reading near the limit, read " + served[0]);
+        try (var siblings = Files.list(tempDir)) {
+            assertEquals(List.of("extracted"), siblings.map(p -> p.getFileName().toString()).toList(),
+                    "the raw copy must be removed after a refusal too");
+        }
+    }
+
+    @Test
     void unzip_completeArchive_leavesNoCopyBehind(@TempDir Path tempDir) throws IOException {
         File targetDir = tempDir.resolve("extracted").toFile();
 

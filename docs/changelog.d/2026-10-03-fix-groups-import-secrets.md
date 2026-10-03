@@ -32,6 +32,7 @@
 - MCP `create_group`: invalid `tasks` JSON returns a curated message instead of Jackson's text (CWE-209).
 - Sealed-data AAD prefixes the context with its UTF-8 byte length (was UTF-16 code units); nothing has been released in this format yet.
 - Dashboard: the reseal-failures query uses `rate()` to match the panel's per-second unit.
+- Round 2: the raw-archive copy (and the drain after the last entry) is bounded at `max-uncompressed-bytes` plus 1 KiB per allowed entry, so a stream that keeps sending — not every caller is behind the HTTP body limit — is refused with 413 instead of being copied to disk without end. A packaged group template that will not convert is now an internal failure without the mapper's text, and `create_group_from_template` routes every failure through `toolFailure`. The duplicate-member docs separate REST's 400 from the MCP tools' JSON error payload.
 
 ### Design decisions
 - Reject duplicates rather than give each seat its own conversation: every group structure is keyed by `agentId`, and a second seat for one agent would need a seat id threaded through votes, participants, the facilitator, stances and the transcript. A second agent is the supported way to get a second seat.

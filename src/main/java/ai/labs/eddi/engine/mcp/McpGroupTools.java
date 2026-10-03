@@ -720,9 +720,10 @@ public class McpGroupTools {
             String location = response.getLocation() != null ? response.getLocation().toString() : "";
             return "Created group '" + config.getName() + "' from template '" + templateId + "'"
                     + (location.isEmpty() ? "" : " at " + location);
-        } catch (IllegalArgumentException e) {
-            return errorJson(e.getMessage());
         } catch (Exception e) {
+            // toolFailure, not errorJson(e.getMessage()): it still describes the
+            // validation refusals EDDI raises (unknown template, missing roles, a
+            // repeated member) but not an IllegalArgumentException a library raised.
             return toolFailure(LOGGER, "create_group_from_template", e);
         }
     }

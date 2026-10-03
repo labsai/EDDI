@@ -168,7 +168,7 @@ public class ZipArchive implements IZipArchive {
         // can be checked once the entries are out (see requireCompleteArchive).
         Path rawCopy = Files.createTempFile(targetDir.getCanonicalFile().getParentFile().toPath(), "upload-", ".zip");
         try (OutputStream rawOut = new BufferedOutputStream(Files.newOutputStream(rawCopy));
-                InputStream teed = new TeeInputStream(zipFile, rawOut)) {
+                InputStream teed = new TeeInputStream(zipFile, rawOut, maxRawArchiveBytes())) {
             extractEntries(teed, targetDir, targetDirPath);
             // Whatever ZipInputStream did not consume — the central directory and the
             // end record — still has to reach the copy.
@@ -284,19 +284,46 @@ public class ZipArchive implements IZipArchive {
         }
     }
 
-    /** Copies every byte read through it to a side stream. */
+    /**
+     * Allowance per entry, on top of the inflated-bytes limit, for what an archive
+     * holds besides content: local headers, data descriptors, the central directory
+     * record and the entry name, twice. Generous — a real header set is well under
+     * 1 KiB.
+     */
+    static final long RAW_OVERHEAD_PER_ENTRY = 1024;
+
+    /**
+     * The most raw (compressed) bytes one archive may carry. Stored entries make an
+     * archive about as large as its content, so the content limit plus the
+     * per-entry overhead bounds every legitimate one. It is what bounds the raw
+     * copy, and the drain that follows the entries: without it, a stream that does
+     * not end — a caller that is not behind the HTTP body limit, a sync source —
+     * would be copied to disk for as long as it kept sending after its last entry.
+     */
+    long maxRawArchiveBytes() {
+        return maxTotalInflatedBytes + (long) maxEntries * RAW_OVERHEAD_PER_ENTRY;
+    }
+
+    /**
+     * Copies every byte read through it to a side stream, refusing to read past a
+     * ceiling.
+     */
     private static final class TeeInputStream extends FilterInputStream {
         private final OutputStream copy;
+        private final long maxBytes;
+        private long copied;
 
-        TeeInputStream(InputStream in, OutputStream copy) {
+        TeeInputStream(InputStream in, OutputStream copy, long maxBytes) {
             super(in);
             this.copy = copy;
+            this.maxBytes = maxBytes;
         }
 
         @Override
         public int read() throws IOException {
             int b = super.read();
             if (b != -1) {
+                count(1);
                 copy.write(b);
             }
             return b;
@@ -306,9 +333,18 @@ public class ZipArchive implements IZipArchive {
         public int read(byte[] buffer, int offset, int length) throws IOException {
             int n = super.read(buffer, offset, length);
             if (n > 0) {
+                count(n);
                 copy.write(buffer, offset, n);
             }
             return n;
+        }
+
+        private void count(int n) throws ZipLimitExceededException {
+            copied += n;
+            if (copied > maxBytes) {
+                throw new ZipLimitExceededException("Zip archive is larger than " + maxBytes + " bytes (" + MAX_TOTAL_BYTES_PROPERTY
+                        + " plus " + RAW_OVERHEAD_PER_ENTRY + " bytes per allowed entry, " + MAX_ENTRIES_PROPERTY + ")");
+            }
         }
 
         @Override

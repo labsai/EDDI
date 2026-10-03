@@ -67,8 +67,11 @@ the facilitator all key on it — so listing the same agent twice does not give
 the group two panelists: both seats would speak through *one* member
 conversation, and the "independent" second answer would read the first as its
 own history. A group config that repeats a member (same `agentId`, whatever
-the member type — the runtime keys every seat by the id alone) is **rejected with `400`**, naming both positions, on create,
-update and over MCP (`create_group`, `update_group`, `create_group_from_template`).
+the member type — the runtime keys every seat by the id alone) is rejected, naming
+both positions: REST `POST`/`PUT /groupstore/groups` answer **`400`**, and the MCP
+tools `create_group`, `update_group` and `create_group_from_template` return the
+same message as a JSON error payload (`{"error": "<tool> failed: members[1] repeats
+members[0] …"}`) — MCP tool calls have no HTTP status of their own.
 For a second seat with the same behaviour, duplicate the agent and add the copy.
 A group **already stored** with a repeated member still loads: each repeat is
 dropped on read — the first seat wins, with its display name, role and speaking
