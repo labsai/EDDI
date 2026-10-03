@@ -5,9 +5,14 @@
 > health-related chatbots. Under HIPAA, EDDI acts as infrastructure used by a
 > **Business Associate**.
 
-This guide helps deployers configure EDDI for HIPAA-compliant operation. For
-general data processing documentation, see [PRIVACY.md](../PRIVACY.md). For
-GDPR/CCPA operations, see [gdpr-compliance.md](gdpr-compliance.md).
+This guide helps deployers configure EDDI for HIPAA-compliant operation. What
+EDDI stores and what it sends to LLM providers is inventoried in
+[compliance-data-flow.md](compliance-data-flow.md); for general data
+processing documentation, see [PRIVACY.md](../PRIVACY.md). For GDPR/CCPA
+operations, see [gdpr-compliance.md](gdpr-compliance.md).
+
+"Built-in" below means EDDI ships the mechanism. Several of them are **off
+until you configure them** — the column says which.
 
 ---
 
@@ -15,13 +20,13 @@ GDPR/CCPA operations, see [gdpr-compliance.md](gdpr-compliance.md).
 
 | HIPAA Safeguard | EDDI Feature | Status |
 |---|---|---|
-| **Access Control** (§164.312(a)) | Keycloak OIDC + RBAC roles (`eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`, `eddi-approver`) — enumerated per endpoint, no hierarchy | ✅ Built-in |
-| **Audit Controls** (§164.312(b)) | HMAC-signed immutable audit ledger | ✅ Built-in |
-| **Integrity Controls** (§164.312(c)) | HMAC tamper detection on all audit entries | ✅ Built-in |
-| **Person Authentication** (§164.312(d)) | Keycloak with JWT/OIDC, MFA-capable | ✅ Built-in |
+| **Access Control** (§164.312(a)) | Keycloak OIDC + RBAC roles (`eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`, `eddi-approver`) — enumerated per endpoint, no hierarchy | ⚙️ Built-in, **off by default** — `QUARKUS_OIDC_TENANT_ENABLED=true` |
+| **Audit Controls** (§164.312(b)) | Audit ledger: every pipeline task of every conversation turn, every administrative REST action with its caller, HITL decisions and GDPR operations. **Reads are not recorded** — use your reverse proxy's access log for who read what ([details](audit-ledger.md#administrative-actions)) | ✅ Built-in, on by default |
+| **Integrity Controls** (§164.312(c)) | HMAC-SHA256 tamper detection on audit entries | ⚙️ Built-in, **off until a key is set** — `EDDI_VAULT_MASTER_KEY` or `EDDI_AUDIT_HMAC_KEY`; `eddi.compliance.audit-signing-required=true` refuses to start without one |
+| **Person Authentication** (§164.312(d)) | Keycloak with JWT/OIDC, MFA-capable | ⚙️ Built-in, **off by default** — see Access Control |
 | **Transmission Security** (§164.312(e)) | TLS — deployer configures | ⚠️ Deployer responsibility |
 | **Encryption at Rest** (§164.312(a)(2)(iv)) | Database-level TDE — deployer configures | ⚠️ Deployer responsibility |
-| **Data Disposal** (§164.310(d)(2)(i)) | GDPR cascade delete (`DELETE /admin/gdpr/{userId}`) | ✅ Built-in |
+| **Data Disposal** (§164.310(d)(2)(i)) | GDPR cascade delete (`DELETE /admin/gdpr/{userId}`) — deletes the user's data and redacts their audit-ledger content; database logs keep a pseudonymized id and expire only with `eddi.logs.db-retention-days` | ✅ Built-in |
 | **Incident Response** (§164.308(a)(6)) | Documented runbook ([incident-response.md](incident-response.md)) | ✅ Built-in |
 | **Secret Management** | AES-256-GCM Secrets Vault with envelope encryption | ✅ Built-in |
 
@@ -64,15 +69,14 @@ End User (patient / healthcare worker)
        └───────────────┘
 ```
 
-**What is sent to LLM providers:**
-- Current user message (may contain PHI)
-- Recent conversation history (windowed — may contain PHI)
-- Agent system prompt (configured by deployer, should NOT contain PHI)
-
-**What is NOT sent:**
-- User IDs or account metadata
-- Data from other conversations or agents
-- API keys (except the provider's own authentication key)
+**PHI leaves the deployment on every LLM call.** The current message and the
+conversation history window may contain PHI; so may the templated system
+prompt (if it inserts properties), the user's persistent memories — including
+`global` memories other agents wrote about the same patient — retrieved
+documents and tool results. The full inventory, and how to keep one agent's
+memories away from another's prompts, is in
+[What reaches the LLM provider](compliance-data-flow.md#what-reaches-the-llm-provider).
+Every cloud provider an agent uses therefore needs a BAA (below).
 
 ---
 
@@ -205,7 +209,10 @@ HIPAA requires emergency access procedures (§164.312(a)(2)(ii)). Document a
 1. **Emergency admin account**: Create a dedicated Keycloak account with
    `eddi-admin` role, stored in a sealed envelope or hardware security module
 2. **Activation**: Two-person authorization to unseal the emergency credentials
-3. **Audit**: All emergency access is logged in the immutable audit ledger
+3. **Audit**: Every administrative action taken with the emergency account is
+   recorded in the audit ledger with that account as the actor; reads are not —
+   use Keycloak's event log for the logins and your reverse proxy's access log
+   for what was read
 4. **Deactivation**: Rotate emergency credentials after each use
 
 ---
@@ -239,13 +246,17 @@ As the HIPAA-covered entity or business associate deploying EDDI:
 - [ ] **TLS**: Enable TLS for all EDDI endpoints (direct or via reverse proxy)
 - [ ] **Database Encryption**: Enable encryption at rest on MongoDB/PostgreSQL
 - [ ] **Vault Master Key**: Set `EDDI_VAULT_MASTER_KEY` (enables AES-256-GCM
-      encryption for API keys and HMAC audit signing)
+      encryption for API keys and HMAC audit signing) and
+      `eddi.compliance.audit-signing-required=true`, so an instance that would
+      write unsigned audit entries refuses to start
 - [ ] **Keycloak**: Enable authentication
       (`QUARKUS_OIDC_TENANT_ENABLED=true`)
 - [ ] **Session Timeouts**: Configure 15-minute idle timeout in Keycloak
 - [ ] **RBAC**: Assign minimum necessary roles to each operator
 - [ ] **Data Retention**: Review `eddi.conversations.deleteEndedConversationsOnceOlderThanDays`
       — reduce from 365 to minimum necessary
+- [ ] **Log Retention**: Set `eddi.logs.db-retention-days` — persisted log
+      entries name the user and are kept until deleted by default
 - [ ] **User Memory Purge**: Configure `eddi.usermemories.deleteOlderThanDays`
       if PHI is stored in user memories. It ships as `-1`, which disables the
       sweep entirely — persistent user memories are kept forever until you set a

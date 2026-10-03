@@ -8,7 +8,10 @@ to a data breach involving the EDDI platform.
 ### Indicators
 
 - Unexpected audit ledger HMAC validation failures (tamper detection)
-- Unusual API access patterns in `/admin/` endpoints
+- Unusual administrative actions — every `POST`/`PUT`/`PATCH`/`DELETE` outside
+  the chat APIs is in the audit ledger with its caller and status
+  (`taskId: ai.labs.admin`, see [audit-ledger.md](audit-ledger.md#administrative-actions)),
+  so a burst of `403`s or an unexpected `/secretstore` or `/backup` call is visible there
 - Failed authentication spikes in Keycloak logs
 - Anomalous conversation volume or data export requests
 - Alerts from infrastructure monitoring (Grafana/Prometheus)
@@ -133,7 +136,9 @@ Contact: [DPO / PRIVACY CONTACT]
 ## 5. Recovery
 
 1. Deploy patched version of EDDI with vulnerability remediated
-2. Re-validate audit ledger integrity (HMAC chain verification)
+2. Re-validate audit ledger integrity (`/auditstore/verify/…` — HMAC and chain
+   verification). It proves nothing for entries written while no signing key was
+   configured: those report `UNSIGNED`
 3. Conduct post-incident review
 4. Update this runbook with lessons learned
 
@@ -156,8 +161,11 @@ For healthcare deployments, maintain a documented "break glass" procedure:
    module (HSM)
 2. **Activation**: Require two-person authorization to unseal the
    emergency credentials
-3. **Audit**: All emergency access is logged in the immutable audit ledger
-   — EDDI records every API call, tool invocation, and data access
+3. **Audit**: Every administrative action taken with the emergency account
+   is recorded in the audit ledger with that account as the actor, as are the
+   conversation turns and tool invocations it causes. Reads are **not**
+   recorded — use Keycloak's event log for the logins and your reverse proxy's
+   access log for what was read
 4. **Deactivation**: Rotate emergency credentials immediately after each
    use via Keycloak admin console
 5. **Documentation**: Log the reason for emergency access, duration, and

@@ -625,6 +625,15 @@ eddi_audit_entries_dropped_total            # Audit entries dropped (compliance-
 eddi_audit_sequence_collisions_total        # Chain positions allocated by another replica
 ```
 
+### Database Log Retention Metrics
+
+```text
+eddi_logs_db_retention_deleted_total        # Persisted log entries the retention sweep deleted
+```
+
+Stays at zero while `eddi.logs.db-retention-days` is off (the default). See
+[log-administration.md](log-administration.md#retention).
+
 `eddi_audit_sequence_collisions_total` is non-zero only on a multi-replica deployment
 without conversation affinity, where two nodes allocate the same per-conversation chain
 positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
@@ -639,6 +648,7 @@ eddi_dream_entries_summarized_total         # Entries folded into a consolidatio
 eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
 eddi_dream_cycles_failed_total              # Dream cycles that aborted
 eddi_dream_summarization_failed_total       # LLM summarization steps that failed
+eddi_dream_conflicts_skipped_total          # Writes skipped because the memory changed during the cycle
 eddi_dream_duration_seconds                 # Dream cycle duration (timer)
 ```
 
@@ -655,6 +665,12 @@ a provider outage that does not present as a timeout. Confirm from the ERROR lin
 logs: it names the provider, the model and the configured parameter *keys*, which is enough to
 tell a missing `apiKey` from a wrong `llmModel` without exposing the value. If credentials are
 the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
+
+`eddi_dream_conflicts_skipped_total` counts the prunes, in-place overwrites and deletes a cycle
+did **not** make because the memory was written after the cycle read it — every Dream write is a
+compare-and-set on `updatedAt`, so the user's newer fact wins. Occasional increments are normal
+on active users; a steady rise means cycles keep racing live conversations, and scheduling them at
+a quieter hour helps.
 
 ### Conversation Summarization Metrics
 

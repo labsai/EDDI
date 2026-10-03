@@ -1,9 +1,11 @@
 # Audit Ledger
 
 > **Status:** Available since v6.0.0
-> **EU AI Act:** Articles 17/19 — Immutable Decision Traceability
+> **EU AI Act:** Articles 12/19 — record-keeping and automatically generated logs
 
-The Audit Ledger provides a **write-once, append-only** trail of every lifecycle task execution. It captures what data each task read, what it produced, LLM-specific details (compiled prompts, model responses, token usage), tool calls, actions, costs, and timing — signed with HMAC-SHA256 for tamper detection.
+The Audit Ledger provides a **write-once, append-only** trail of every lifecycle task execution. It captures what data each task read, what it produced, LLM-specific details (compiled prompts, model responses, token usage), tool calls, actions, costs, and timing — signed with HMAC-SHA256 for tamper detection. It also records every administrative REST action (see [Administrative actions](#administrative-actions)) and the GDPR operations.
+
+**What is not in it.** Reads are not recorded — neither REST `GET`s nor MCP reads. The MCP user-memory tools are not recorded. Conversation traffic is recorded per pipeline task, not per HTTP request.
 
 ## Overview
 
@@ -12,7 +14,7 @@ Every time a conversation turn is processed, each lifecycle task (parser, behavi
 1. **Scrubbed** — secrets are redacted (API keys, bearer tokens); vault references are left legible
 2. **Signed** — HMAC-SHA256 computed over all fields for tamper detection
 3. **Batched** — queued in-memory and flushed to the database every few seconds
-4. **Immutable** — stored in a write-once collection with no update or delete operations
+4. **Immutable** — stored in a write-once collection with no delete operation and no update except the two a GDPR erasure performs (see [GDPR erasure](#gdpr-erasure-redaction-not-deletion))
 
 ## Configuration
 
@@ -22,6 +24,8 @@ Every time a conversation turn is processed, each lifecycle task (parser, behavi
 | `eddi.audit.flush-interval-seconds` | `3`     | How often to flush queued entries to the database           |
 | `eddi.audit.max-queue-size`         | `100000` | Bound on the in-memory queue. Entries arriving past the bound are **dropped** and counted on `eddi_audit_entries_dropped_total` — only the flush-retry path dead-letters |
 | `eddi.audit.dead-letter-path`       | `/opt/eddi/data/eddi-audit-deadletter.jsonl` | File-based dead-letter log, used when NATS is unavailable |
+| `eddi.audit.erasure-mode`           | `redact` | What a GDPR erasure does to the user's rows: `redact` (pseudonymise the user id **and** replace the recorded content) or `pseudonymize` (the user id only — prompts, responses and tool calls are kept; only for a legal hold that requires the content). An unknown value means `redact` |
+| `eddi.audit.admin-actions.enabled`  | `true`  | Record administrative REST actions — see [Administrative actions](#administrative-actions) |
 | `EDDI_VAULT_MASTER_KEY`             | (none)  | Vault master key — also used to derive the HMAC signing key |
 
 > **Note:** If `EDDI_VAULT_MASTER_KEY` is not set, audit entries are stored without HMAC integrity hashes. A warning is logged at startup.
@@ -72,6 +76,14 @@ GET /auditstore/agent/{agentId}?agentVersion=1&skip=0&limit=100
 
 Returns audit entries for an agent. The `agentVersion` parameter is optional.
 
+### List Administrative Actions
+
+```
+GET /auditstore/admin-actions?actor=admin-ann&skip=0&limit=100
+```
+
+Returns the [administrative-action records](#administrative-actions), newest first — who changed, deployed, imported, erased or refused what. `actor` (optional) narrows the list to one principal. `limit` defaults to `100`, at most `1000`.
+
 ### Get Entry Count
 
 ```
@@ -119,6 +131,58 @@ Every v5 entry names its key (a truncated HMAC of a fixed label — it identifie
 A failed pin at startup is retried with backoff (starting at 30 seconds, up to 10 minutes) while entries are signed, so a transient database error does not leave a node on the master-derived key until its next restart. If an operator adopts a new master key after losing the old one (see the Secrets Vault guide, *Lost master key*), the pinned key and the key records are discarded with the rest of the lost key's system values: the ledger pins a new key, and entries signed with the old one report `INVALID` unless the old audit key is listed in `eddi.audit.hmac-previous-keys`.
 
 To rotate `eddi.audit.hmac-key`, set the new value and move the old one into `eddi.audit.hmac-previous-keys`.
+
+### GDPR erasure: redaction, not deletion
+
+`DELETE /admin/gdpr/{userId}` keeps every one of the user's ledger rows — the record that a task ran, when, for which agent version, at what cost, emitting which actions — but removes the user's data from it. Up to 6.5.0 an erasure only replaced the user id, so the verbatim prompt, response, LLM detail and tool calls (a social-security number the user typed, say) stayed in the ledger while the erasure answered `complete: true`.
+
+For each row of the user — found under the raw id and under any pseudonym an earlier erasure gave it, so re-running an erasure after upgrading cleans up rows an older release only pseudonymised:
+
+1. **The queue is flushed first.** Entries still waiting in the write queue are written before anything is redacted. They used to reach the store after the store-side pseudonymisation and were missed by it (the response reported `auditEntriesPseudonymized: 0`). An entry that cannot be stored right now stays queued and is redacted as it leaves the queue; entries produced afterwards by work the erasure cancelled are redacted before they are signed.
+2. **The row is verified.** Its HMAC is checked as `/auditstore/verify` would.
+3. **The content is replaced.** `userId` becomes the keyed pseudonym; `input` becomes a marker; `output`, `llmDetail` and `toolCalls` are removed. `id`, `conversationId`, `agentId`/`agentVersion`, `taskId`/`taskType`, `stepIndex`/`taskIndex`, `durationMs`, `cost`, `actions`, `timestamp` and `sequence` are kept.
+
+   ```json
+   "input": {
+     "gdprRedaction": {
+       "reason": "GDPR Art. 17 erasure",
+       "redactedAt": "2026-10-03T09:12:44.512Z",
+       "redactedFields": ["input", "output", "llmDetail", "toolCalls"],
+       "originalHmac": "v5:3f0c…:9a1e…",
+       "integrityBeforeRedaction": "VALID"
+     }
+   }
+   ```
+
+4. **Only a row that verified is re-signed.** It gets a new v5 HMAC over its redacted form, so it verifies as `VALID` afterwards; the marker — with the original HMAC, which lets an auditor holding an earlier copy of the row match the two — is inside that signature and cannot be edited or stripped. A row that did **not** verify (tampered, signed with a key this deployment no longer holds, or unsigned) is redacted but keeps its old HMAC, so it keeps failing verification: redaction never turns a failing row into a passing one. Its marker records the verdict at the time.
+
+The **chain survives**: no row is deleted and no `sequence` changes, so `/auditstore/verify` still reports `INTACT` for the conversation. The GDPR compliance events and the administrative-action records carry no conversation content; they are pseudonymised, not redacted.
+
+The write is conditional on the row's stored HMAC, and the erasure is reported as **incomplete** (`complete: false`, failed step `auditRedaction`) when any row could not be redacted. `auditEntriesRedacted` in the response counts the rows redacted, including queued entries redacted on their way out of the queue.
+
+**Not reached by an erasure:** the [dead-letter sink](#failure-handling), and copies outside EDDI (database backups, log shippers). The [GDPR guide](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it) covers both.
+
+**`eddi.audit.erasure-mode=pseudonymize`** keeps the behaviour of earlier releases — the user id only — for a deployment under a legal hold that requires the content itself. It logs a WARN at startup, and the erasure response then reports `auditEntriesRedacted: 0`.
+
+### Administrative actions
+
+Every **mutating** REST request — `POST`, `PUT`, `PATCH`, `DELETE` — outside the conversational data plane writes one ledger record, whether it succeeded or not, so a refused attempt (`401`, `403`, `409`) is on record as well:
+
+| Field | Value |
+| ----- | ----- |
+| `userId` | the caller's principal, or `anonymous` when authentication is off |
+| `taskId` / `taskType` | `ai.labs.admin` / `admin` |
+| `input` | `method`, `path`, `resource` (the endpoint class and method) |
+| `output` | `status` — the HTTP status of the response |
+| `actions` | `ADMIN_<method>` |
+
+That covers configuration changes (every `…store` resource), deployments (`/administration`), the vault (`/secretstore`), backup import/export and sync (`/backup`), GDPR and other administrative endpoints (`/admin`), conversation deletion (`/conversationstore`), schedules, groups and channel integrations. **Not recorded** here: reads; the conversation and chat APIs (`/agents`, `/userconversationstore`, `/chat` — audited per pipeline task instead); `/v1`, `/a2a`, OAuth and channel callbacks (`/connections`, `/integrations`); the MCP transport and the UI shells. What is excluded is listed, so a new administrative endpoint is covered by default.
+
+A record never holds the request body or the query string. A path parameter that names a person (`userId` and the like) is replaced by that person's keyed pseudonym, so erasing a user does not leave their id in a `DELETE /admin/gdpr/…` record. The records have no conversation, so they take no chain position; they are HMAC-signed like every other entry.
+
+**MCP:** tools that act through the REST API — agent, resource, group, schedule and channel administration — reach this filter on the loopback call with the MCP caller's identity. `delete_user_data` and `export_user_data` call the GDPR service directly and are recorded by its compliance event (`GDPR_ERASURE`, `GDPR_EXPORT`), which names the subject's pseudonym but not the caller. The MCP user-memory tools are not recorded.
+
+List them with [`GET /auditstore/admin-actions`](#list-administrative-actions). Switch the records off with `eddi.audit.admin-actions.enabled=false`.
 
 ### Keyed GDPR pseudonyms
 
@@ -221,7 +285,7 @@ The asymmetry is deliberate. A re-queued entry has already consumed its chain po
 
 > **The dead-letter record is the whole entry, and that makes the sink a personal-data location.** It carries the `userId`, the verbatim input and output, the LLM detail and tool calls, plus the entry's own timestamp, sequence, HMAC and agent signature — anything less is not replayable, and without the `sequence` an operator cannot prove which chain positions the ledger itself abandoned, so every self-inflicted gap reads as `BROKEN` rather than `INCOMPLETE`. Secret redaction has already been applied, but user content has not.
 >
-> The GDPR erasure cascade pseudonymizes the ledger and the database logs; it does **not** touch `eddi.audit.dead-letter-path` or the `eddi.deadletter.audit` subject. Give the sink the same access controls, encryption at rest and retention handling as the ledger, and include it in your Art. 17 procedure — see [The audit dead-letter sink holds personal data](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it).
+> The GDPR erasure cascade redacts the ledger and pseudonymizes the database logs; it does **not** touch `eddi.audit.dead-letter-path` or the `eddi.deadletter.audit` subject. Give the sink the same access controls, encryption at rest and retention handling as the ledger, and include it in your Art. 17 procedure — see [The audit dead-letter sink holds personal data](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it).
 >
 > The image creates the default directory (`/opt/eddi/data`) and hands it to the runtime user, and the ledger reports at startup if the configured location is not writable — the sink's unavailability should be discovered before the incident that needs it, not from an error line nested inside the error line reporting the drop.
 
@@ -230,14 +294,14 @@ The asymmetry is deliberate. A re-queued entry has already consumed its chain po
 ### MongoDB (default)
 
 - Collection: `audit_ledger`
-- Indexes: `conversationId`, `(agentId, agentVersion)`, `timestamp` (descending), `userId`, `(conversationId asc, timestamp desc)`, `(conversationId asc, sequence desc)`
-- Operations: `insertOne` and `insertMany`, plus one exception — `pseudonymizeByUserId` issues an `updateMany` that overwrites `userId` under GDPR Art. 17(3)(e). Nothing else mutates a stored entry, and nothing ever deletes one. The mutation is HMAC-preserving for v3 rows (the signature covers the identity *token*, which is the same for an identifier and its pseudonym)
+- Indexes: `conversationId`, `(agentId, agentVersion)`, `timestamp` (descending), `userId`, `(conversationId asc, timestamp desc)`, `(conversationId asc, sequence desc)`, `(taskId asc, timestamp desc)` — the last one backs the administrative-action listing
+- Operations: `insertOne` and `insertMany`, plus the two GDPR erasure mutations — `pseudonymizeByUserId` (an `updateMany` that overwrites `userId`) and `redactEntry` (an `updateOne` per row, conditional on its stored `hmac`, that rewrites `userId`, `input`, `output`, `llmDetail`, `toolCalls`, `hmac` and `agentSignature` — see [GDPR erasure](#gdpr-erasure-redaction-not-deletion)). Nothing else mutates a stored entry, and nothing ever deletes one. Pseudonymisation alone is HMAC-preserving for v3+ rows (the signature covers the identity *token*, which is the same for an identifier and its pseudonym)
 
 #### Building the MongoDB indexes ahead of a deploy
 
-The last three of those indexes are new in this release: `userId` backs the GDPR export and erasure scans, and the two compound ones serve the per-conversation read's filter and sort together (which is what stops large conversations hitting MongoDB's in-memory sort limit) and back `maxSequence`.
+`userId` backs the GDPR export and erasure scans, the two `conversationId` compound indexes serve the per-conversation read's filter and sort together (which is what stops large conversations hitting MongoDB's in-memory sort limit) and back `maxSequence`, and `(taskId, timestamp)` — the newest — backs the administrative-action listing.
 
-`AuditStore`'s constructor issues all six `createIndex` calls synchronously, so on an existing multi-million-document `audit_ledger` the thread that first builds the bean blocks until the new ones are built. The collection stays readable and writable while they build — MongoDB 4.2+ takes the exclusive lock only briefly at the start and end — but the first request that touches the ledger after a deploy waits it out.
+`AuditStore`'s constructor issues all seven `createIndex` calls synchronously, so on an existing multi-million-document `audit_ledger` the thread that first builds the bean blocks until the new ones are built. The collection stays readable and writable while they build — MongoDB 4.2+ takes the exclusive lock only briefly at the start and end — but the first request that touches the ledger after a deploy waits it out.
 
 To take that wait out of the deploy, build them first:
 
@@ -245,6 +309,7 @@ To take that wait out of the deploy, build them first:
 db.audit_ledger.createIndex({ userId: 1 });
 db.audit_ledger.createIndex({ conversationId: 1, timestamp: -1 });
 db.audit_ledger.createIndex({ conversationId: 1, sequence: -1 });
+db.audit_ledger.createIndex({ taskId: 1, timestamp: -1 });
 ```
 
 `createIndex` is idempotent for an identical key pattern, so the startup calls then find the indexes already present and return immediately.
@@ -254,11 +319,11 @@ db.audit_ledger.createIndex({ conversationId: 1, sequence: -1 });
 - Table: `audit_ledger` (auto-created on first use)
 - Hybrid storage: indexed columns (conversation_id, agent_id, agent_version, timestamp) + JSONB for variable data
 - Selected at runtime with `eddi.datastore.type=postgres` (default `mongodb`), resolved by `DataStoreProducers.auditStore(...)` — both backends ship in the same image
-- Same insert-only contract as MongoDB
+- Same insert-only contract as MongoDB, with the same two erasure mutations (`UPDATE … WHERE user_id = ?`, and `UPDATE … WHERE id = ? AND hmac IS NOT DISTINCT FROM ?` for a redaction)
 
 #### Upgrading an existing PostgreSQL ledger
 
-This release adds `idx_audit_user` on `audit_ledger (user_id)` — without it the GDPR export and erasure scans are sequential scans over the largest never-pruned table in the system.
+`idx_audit_user` on `audit_ledger (user_id)` backs the GDPR export and erasure scans — without it they are sequential scans over the largest never-pruned table in the system — and `idx_audit_task` on `(task_id, created_at DESC)` backs the administrative-action listing. Both are built the same way.
 
 The index is created by `ensureSchema()`, which runs lazily on the **first audit write after the deploy**, on the audit-ledger writer thread. A plain `CREATE INDEX` takes a `SHARE` lock, so while it builds:
 
@@ -269,6 +334,7 @@ On a multi-million-row ledger that pause is measured in minutes. If you cannot t
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_user ON audit_ledger (user_id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_task ON audit_ledger (task_id, created_at DESC);
 -- CONCURRENTLY leaves an INVALID index behind if it fails; verify:
 SELECT indisvalid FROM pg_index WHERE indexrelid = 'idx_audit_user'::regclass;
 ```

@@ -146,6 +146,23 @@ All logging configuration lives in `application.properties`:
 | `eddi.logs.db-enabled` | `true` | Enable/disable database persistence |
 | `eddi.logs.db-flush-interval-seconds` | `5` | How often the async writer flushes to the database |
 | `eddi.logs.db-persist-min-level` | `WARN` | Minimum level to persist to the database (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`) |
+| `eddi.logs.db-retention-days` | `-1` | Delete persisted entries older than this many days; `-1` keeps them |
+| `eddi.logs.db-retention-interval` | `24h` | How often the retention sweep runs |
+| `eddi.logs.db-retention-initial-delay` | `4m` | Delay before the first sweep after startup |
+
+### Retention
+
+Persisted entries are kept until deleted unless `eddi.logs.db-retention-days`
+is set: a sweep then deletes, once a day, every entry whose timestamp is older
+than that many days, on MongoDB (`logs` collection) and PostgreSQL
+(`database_logs` table) alike. The sweep is idempotent, so every replica can run
+it. Each run adds what it deleted to `eddi_logs_db_retention_deleted_total`.
+
+Persisted entries carry the user id of the turn that produced them, and a GDPR
+erasure only pseudonymizes that id — the message text stays. If a retention
+policy applies to your deployment, this is the setting that enforces it for the
+logs. (Earlier releases described this retention as configurable without any
+code that applied it.)
 
 ---
 

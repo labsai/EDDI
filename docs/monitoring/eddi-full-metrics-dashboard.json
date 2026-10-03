@@ -7213,12 +7213,12 @@
         {
           "id": 158,
           "type": "timeseries",
-          "title": "Fire logs pruned",
+          "title": "Retention sweeps — rows removed",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_schedule_firelog_pruned_total` — rows the retention sweep removed from the fire log. Flat while the table keeps growing means retention is off (`eddi.schedule.fire-log-retention=0`) or the sweep is failing — the poller logs that at ERROR.",
+          "description": "`eddi_schedule_firelog_pruned_total` — rows the retention sweep removed from the schedule fire log; flat while the table keeps growing means retention is off (`eddi.schedule.fire-log-retention=0`) or the sweep is failing — the poller logs that at ERROR. `eddi_logs_db_retention_deleted_total` — persisted log entries the daily sweep deleted; flat means `eddi.logs.db-retention-days` is off (the default) or the sweep is failing (logged at ERROR).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7234,7 +7234,19 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "range": true
+              "range": true,
+              "legendFormat": "schedule fire logs"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_logs_db_retention_deleted_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "database log entries"
             }
           ],
           "fieldConfig": {
@@ -7307,7 +7319,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_dream_*_total` — the DreamService consolidation pass.",
+          "description": "`eddi_dream_*_total` — the DreamService consolidation pass. `conflicts skipped` counts prunes, overwrites and deletes Dream did not make because the memory was written after the cycle read it.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7347,6 +7359,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "entries pruned"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(eddi_dream_conflicts_skipped_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "conflicts skipped (newer write kept)"
             }
           ],
           "fieldConfig": {

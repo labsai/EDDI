@@ -1,8 +1,10 @@
 # GDPR Compliance Guide
 
 This guide helps EDDI operators handle data subject requests and meet
-GDPR/CCPA requirements. For an overview of data processing, see
-[PRIVACY.md](../PRIVACY.md).
+GDPR/CCPA requirements. What EDDI stores, what leaves the deployment and what
+an erasure does to each store is inventoried once, in
+[compliance-data-flow.md](compliance-data-flow.md); for an overview of data
+processing, see [PRIVACY.md](../PRIVACY.md).
 
 ## Handling Data Subject Requests
 
@@ -26,6 +28,7 @@ the cascade actually finished:
   "conversationMappingsDeleted": 3,
   "logsPseudonymized": 42,
   "auditEntriesPseudonymized": 156,
+  "auditEntriesRedacted": 156,
   "attachmentsDeleted": 4,
   "journalEntriesDeleted": 2,
   "checkpointsDeleted": 9,
@@ -54,7 +57,7 @@ the cascade actually finished:
 > `conversationCheckpoints`, `conversations`, `conversationMappingIntents`,
 > `conversationMappings`, `conversationMappingCache`, `groupConversations`,
 > `sharedArtifacts`, `schedules`, `oauthStates`, `connectionGrants`, `userMemoriesResweep`,
-> `databaseLogs` and `auditLedger`, and they name the stores in the list below
+> `databaseLogs`, `auditRedaction` and `auditLedger`, and they name the stores in the list below
 > plus the two cache evictions, the two lookups the cascade needs to reach them,
 > and the two signals that stop in-flight work first. `conversationIdLookup` is the worst one to
 > see: the id resolution the per-conversation sweeps depend on failed, so those
@@ -78,9 +81,10 @@ principal, not a user: erasing or exporting it is refused with 400.
    another replica is not reachable from here; it is stopped by the stores
    refusing to recreate a deleted conversation or group discussion, and step 12
    removes any memory it managed to write in the meantime. From this point the
-   node's audit ledger also writes the user's pseudonym instead of their id for an
-   hour (the keyed pseudonym v5 rows carry, whenever the ledger signs), so audit entries that cancelled work still flushes while it unwinds — or
-   that were already queued — do not land raw after step 14.
+   node's audit ledger also writes the user's pseudonym instead of their id, and
+   the redaction marker instead of their content, for an hour, so audit entries
+   that cancelled work still flushes while it unwinds — or that were already
+   queued — do not land raw after step 14.
 1. User memories — **permanently deleted**
 2. Binary attachments of the user's conversations — **permanently deleted**
 3. HITL tool execution journal entries — **permanently deleted**
@@ -94,8 +98,18 @@ principal, not a user: erasing or exporting it is refused with 400.
 11. Pending OAuth authorization flows the user started are invalidated first (a
     callback completing afterwards would otherwise mint a new grant), then the OAuth connection grants (linked accounts) of the user, in every tenant — **permanently deleted**. Each holds a live refresh token for the user's account at the provider; the provider-side consent is not revoked by EDDI and may be revoked by the user there
 12. User memories — **re-swept**, for writes that landed while the cascade ran
-13. Database logs — userId **pseudonymized** (SHA-256 hash)
-14. Audit ledger — userId **pseudonymized** (a keyed HMAC in v5 rows, SHA-256 hash in older ones — see [audit-ledger.md](audit-ledger.md))
+13. Database logs — userId **pseudonymized** (SHA-256 hash). The log message text is
+    not rewritten; bound its lifetime with `eddi.logs.db-retention-days`
+14. Audit ledger — rows **kept, content redacted, userId pseudonymized**. The write
+    queue is flushed first, so entries still queued are caught. Each row's prompt,
+    response, LLM detail and tool calls are replaced by a redaction marker and its
+    userId by a keyed pseudonym; a row that verified is re-signed and still
+    verifies, a row that did not keeps failing; no row is deleted, so the
+    conversation's chain stays intact. `auditEntriesRedacted` counts the rows;
+    a row that could not be redacted fails the step (`auditRedaction`) and the
+    erasure is not `complete`. Details: [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion).
+    Under `eddi.audit.erasure-mode=pseudonymize` only the userId is replaced and
+    the content is **kept** — choose that only when a legal hold requires it
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -231,6 +245,9 @@ eddi.conversations.maximumLifeTimeOfIdleConversationsInDays=90
 
 # User memories — delete entries older than N days (default: -1, disabled)
 eddi.usermemories.deleteOlderThanDays=-1
+
+# Persisted database logs — delete entries older than N days (default: -1, kept)
+eddi.logs.db-retention-days=-1
 ```
 
 **Deleted conversations follow the same clock.** Deleting a conversation without
@@ -246,12 +263,15 @@ already ended, and never if it was still open.)
 **Per-category retention** allows different retention periods for:
 - **Conversations** — 365 days (default)
 - **User memories** — disabled by default (configure per-deployment)
+- **Database logs** — disabled by default; a daily sweep deletes persisted log
+  entries older than `eddi.logs.db-retention-days`. Earlier releases documented
+  this retention as configurable without any code that applied it
 
 **The audit ledger has no retention property — by design.** `IAuditStore` is an
 append-only contract that deliberately exposes no update or delete operation, so
 EDDI never time-expires audit entries. Erasure requests are satisfied by
-**pseudonymizing** the `userId` (`IAuditStore.pseudonymizeByUserId`), which the
-cascading-erasure path invokes — not by deleting entries. See
+**redacting** the erased user's rows — their content replaced by a marker, their
+`userId` by a pseudonym — not by deleting them. See
 [Audit Ledger Legal Basis](#audit-ledger-legal-basis) below for the legal basis.
 If your jurisdiction requires time-limited audit retention, implement it at the
 operational or database layer (archival job, partition drop, storage-level TTL);
@@ -275,8 +295,8 @@ is neither replayable nor usable as evidence of what the ledger itself lost.
 
 The consequence for Art. 17 is that the sink is a **second location holding
 personal data that the erasure cascade does not touch**. `DELETE
-/admin/gdpr/{userId}` pseudonymizes the ledger and the database logs; nothing
-rewrites the JSONL file or the JetStream subject. Secret *redaction* has already
+/admin/gdpr/{userId}` redacts the ledger and pseudonymizes the database logs;
+nothing rewrites the JSONL file or the JetStream subject. Secret *redaction* has already
 been applied to the entry (see
 [Secret Redaction](audit-ledger.md#secret-redaction)), but user content has not,
 because preserving the entry is the whole point of the sink.
@@ -302,14 +322,21 @@ and reduce them to the minimum necessary for your use case.
 
 ## Audit Ledger Legal Basis
 
-The EDDI audit ledger is retained indefinitely under two legal bases:
+The EDDI audit ledger is retained indefinitely — check the legal basis for
+your deployment; the usual candidates are:
 
-1. **GDPR Art. 17(3)(e)** — Compliance with a legal obligation
-2. **EU AI Act Articles 17/19** — Immutable decision traceability for AI systems
+1. **GDPR Art. 17(3)(b)/(e)** — compliance with a legal obligation, or the
+   establishment, exercise or defence of legal claims
+2. **EU AI Act Arts. 12/19 (and 26(6) for deployers)** — record-keeping and
+   automatically generated logs of high-risk AI systems
 
-Upon erasure requests, userId fields in audit entries are pseudonymized
-(replaced with a SHA-256 hash). The audit data structure, timestamps, and
-decision records remain intact for regulatory compliance.
+What those bases cover is the record that processing happened — which task ran,
+when, for which agent version, at what cost, emitting which actions — not the
+erased person's words. An erasure therefore keeps every row and its chain
+position but removes the person from it: the `userId` is pseudonymized and the
+recorded content (prompt, response, LLM detail, tool calls) is replaced by a
+redaction marker. If your legal hold requires the content itself, set
+`eddi.audit.erasure-mode=pseudonymize` and document why.
 
 ## Controller Checklist
 
@@ -324,7 +351,9 @@ As the data controller, you must:
   - Your EDDI hosting provider (if not self-hosted)
   - Each cloud LLM provider configured in your agents
 - [ ] **User Notice**: Inform users that conversations are processed by AI
-- [ ] **Retention**: Review default 365-day retention — adjust if needed
+- [ ] **Retention**: Review default 365-day retention — adjust if needed, and
+      set `eddi.logs.db-retention-days` (database logs are kept until deleted
+      by default)
 - [ ] **Memory Disclosure**: If using `enableMemoryTools`, inform users their
       interactions are remembered across sessions
 - [ ] **Provider Selection**: Choose LLM providers that meet your data
@@ -340,35 +369,22 @@ As the data controller, you must:
 
 ## LLM Provider Data Flow
 
-EDDI sends conversation content to the LLM provider configured per agent.
-You choose the provider via the Manager UI or configuration files.
-
-| Provider | Data Location | Self-Hosted? |
-|---|---|---|
-| Ollama | Your infrastructure | ✅ Yes |
-| jlama | Your infrastructure | ✅ Yes |
-| Anthropic | US/EU (varies) | ❌ No |
-| OpenAI | US | ❌ No |
-| Google Gemini | US/EU (varies) | ❌ No |
-| Mistral | EU (France) | ❌ No |
-| Azure OpenAI | Your Azure region | Partially |
-| AWS Bedrock | Your AWS region | Partially |
-| Oracle GenAI | Your OCI region | Partially |
-| Hugging Face | Varies by model host | Partially |
+**Conversation content leaves your deployment** on every LLM call, to the
+provider configured on the agent — a third party and a processor unless you
+self-host the model (Ollama, jlama). What is sent is inventoried in
+[What reaches the LLM provider](compliance-data-flow.md#what-reaches-the-llm-provider):
+besides the user message, the history window and the templated system prompt,
+it can include the user's persistent memories — among them `global` memories
+**other agents** wrote about the same user — retrieved documents and tool
+results. Provider data locations and DPAs are listed in
+[PRIVACY.md](../PRIVACY.md#supported-llm-providers-and-data-locations).
 
 **For maximum data sovereignty**, use Ollama or jlama with self-hosted models.
 
-**What is sent to LLM providers:**
-- The current user message
-- Recent conversation history (windowed)
-- Agent system prompt
-
-**What is NOT sent:**
-- User IDs or account metadata
-- Data from other conversations or agents
-- API keys (except the provider's own authentication key)
-
 ## CCPA-Specific Requirements
+
+The CCPA requests use the same two endpoints as GDPR, with the same results and
+the same limits — read the sections above, not a shorter version of them.
 
 ### Do Not Sell (§1798.120)
 
@@ -377,14 +393,21 @@ Document this in your CCPA privacy notice.
 
 ### Right to Know (§1798.100)
 
-Use the export endpoint (`GET /admin/gdpr/{userId}/export`) to fulfill
-"right to know" requests. The response includes all categories of personal
-information collected.
+Use the export endpoint (`GET /admin/gdpr/{userId}/export`). It does **not**
+yet cover every category: group transcripts, shared artifacts, schedules and
+HITL journal entries are listed in `omittedCategories`, so today the response is
+always `207` with `complete: false` — see
+[Right of Access](#2-right-of-access-gdpr-art-15--data-portability-art-20--right-to-know-ccpa-1798100).
+Supplement those categories by hand before answering the consumer.
 
 ### Right to Delete (§1798.105)
 
-Use the erasure endpoint (`DELETE /admin/gdpr/{userId}`) to fulfill
-"right to delete" requests. The cascade covers all data stores.
+Use the erasure endpoint (`DELETE /admin/gdpr/{userId}`) and check `complete`.
+It deletes every store except two, which it keeps under §1798.105(d)
+(legal obligation): the audit ledger (content redacted, identifier
+pseudonymized) and the database logs (identifier pseudonymized). The audit
+dead-letter sink and backups are not reached — see
+[Right to Erasure](#1-right-to-erasure-gdpr-art-17--ccpa-1798105).
 
 ## International Privacy Regulations
 
