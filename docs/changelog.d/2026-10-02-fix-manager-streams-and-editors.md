@@ -37,8 +37,11 @@ mutation-checked.
   never commits `0`); the field shows the value it actually committed when clamping changed it;
   and a `commitKey` (the agent id) binds a pending edit to the agent it was typed for — when an
   in-app navigation reuses the input for another agent, the edit is flushed through the previous
-  agent's save first instead of being saved into the new one. The capability attribute rows now use
-  the same input, so their edits flush on collapse too.
+  agent's save first instead of being saved into the new one, and the field then shows the new
+  agent's value even when both agents hold the same one. The capability attribute rows now use
+  the same input and apply its (already debounced) edit directly — a second timer in the editor
+  lost an edit flushed on collapse and could write back an attribute removed mid-edit; an edit for
+  a key that is no longer there is dropped.
 - Group detail: a failed current-version lookup shows a retryable error instead of loading
   version 1. GDPR erasure removes the erased user's inactive cache entries (invalidation alone left
   them to paint on the next mount) and refetches active ones. Operator Stop also drops stream

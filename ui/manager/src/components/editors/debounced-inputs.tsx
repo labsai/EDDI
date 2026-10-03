@@ -80,8 +80,11 @@ export function DebouncedInput({
   const [local, setLocal] = useState(value);
   const { schedule, flush } = useDebouncedCommit(onCommit, delay, commitKey);
 
-  // Sync from parent if the external value changes (version bump etc.)
-  useEffect(() => setLocal(value), [value]);
+  // Sync from parent if the external value changes (version bump etc.) — or
+  // the target does: two agents can hold the same value, and then only the key
+  // says the draft on screen belongs to the previous one. Runs after the hook's
+  // key-change flush, so the old draft is saved to its own agent first.
+  useEffect(() => setLocal(value), [value, commitKey]);
 
   return (
     <input
@@ -149,7 +152,8 @@ export function DebouncedNumberInput({
   );
   const { schedule, flush } = useDebouncedCommit<number>(commitAndShow, delay, commitKey);
 
-  useEffect(() => setLocal(String(value)), [value]);
+  // As DebouncedInput: a new target resets the draft even when the value matches.
+  useEffect(() => setLocal(String(value)), [value, commitKey]);
 
   return (
     <input

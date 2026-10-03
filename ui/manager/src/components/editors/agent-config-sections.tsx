@@ -391,10 +391,6 @@ function CapabilityAttributesEditor({
   const attrsRef = useRef(attributes);
   useEffect(() => { attrsRef.current = attributes; }, [attributes]);
 
-  // Debounce timer for value edits
-  const valueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (valueTimer.current) clearTimeout(valueTimer.current); }, []);
-
   function addAttribute() {
     if (!newKey.trim()) return;
     onChange({ ...attrsRef.current, [newKey.trim()]: newValue.trim() });
@@ -403,22 +399,29 @@ function CapabilityAttributesEditor({
   }
 
   function removeAttribute(key: string) {
-    // Cancel any pending debounced edit for this (or any) key to prevent
-    // a stale commitValue callback from resurrecting the deleted attribute
-    if (valueTimer.current) {
-      clearTimeout(valueTimer.current);
-      valueTimer.current = null;
-    }
     const next = { ...attrsRef.current };
     delete next[key];
+    // Updated synchronously, before the row unmounts: the row flushes its
+    // pending edit on unmount, and commitValue must already see the key gone.
+    attrsRef.current = next;
     onChange(next);
   }
 
+  /**
+   * Apply a row's edit at once — the row's own input already debounced it.
+   *
+   * This used to start a SECOND 600 ms timer: a row removed mid-edit flushed
+   * into it and the timer then wrote the deleted attribute back, and a section
+   * collapsed mid-edit flushed into a timer the unmount cleanup then cleared,
+   * losing the edit. An edit for a key that is no longer there (removed while
+   * the row was flushing) is dropped rather than resurrecting it.
+   */
   function commitValue(key: string, val: string) {
-    if (valueTimer.current) clearTimeout(valueTimer.current);
-    valueTimer.current = setTimeout(() => {
-      onChange({ ...attrsRef.current, [key]: val });
-    }, 600);
+    if (!Object.prototype.hasOwnProperty.call(attrsRef.current, key)) return;
+    if (attrsRef.current[key] === val) return;
+    const next = { ...attrsRef.current, [key]: val };
+    attrsRef.current = next;
+    onChange(next);
   }
 
   return (
@@ -495,12 +498,14 @@ function DebouncedAttrRow({
         value={attrValue}
         onCommit={onCommit}
         disabled={disabled}
+        data-testid={`attribute-value-${attrKey}`}
         className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
       <button
         type="button"
         onClick={onRemove}
         disabled={disabled}
+        data-testid={`attribute-remove-${attrKey}`}
         className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
       >
         <X className="h-3 w-3" />
@@ -601,6 +606,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                     <button
                       type="button"
                       onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+                      data-testid={`capability-attributes-toggle-${i}`}
                       className="rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-medium text-violet-600 dark:text-violet-400 hover:bg-violet-500/20 transition-colors"
                     >
                       {Object.keys(cap.attributes).length} {t("agentDetail.attrs", "attrs")}

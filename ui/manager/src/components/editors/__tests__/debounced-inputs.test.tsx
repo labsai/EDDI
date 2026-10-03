@@ -112,6 +112,28 @@ describe("debounced inputs — review follow-ups", () => {
     expect(saveB).not.toHaveBeenCalled();
   });
 
+  it("shows the new target's value after a switch even when both targets hold the same value", () => {
+    const saveA = vi.fn();
+    const { rerender } = render(
+      <DebouncedInput value="did:same" onCommit={saveA} commitKey="agent-a" data-testid="txt" />,
+    );
+    const input = screen.getByTestId("txt") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "did:draft-for-a" } });
+    rerender(<DebouncedInput value="did:same" onCommit={vi.fn()} commitKey="agent-b" data-testid="txt" />);
+    expect(saveA).toHaveBeenCalledExactlyOnceWith("did:draft-for-a");
+    expect(input.value).toBe("did:same");
+  });
+
+  it("resets a number draft on a target switch too", () => {
+    const { rerender } = render(
+      <DebouncedNumberInput value={10} onCommit={vi.fn()} commitKey="agent-a" data-testid="num" />,
+    );
+    const input = screen.getByTestId("num") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "42" } });
+    rerender(<DebouncedNumberInput value={10} onCommit={vi.fn()} commitKey="agent-b" data-testid="num" />);
+    expect(input.value).toBe("10");
+  });
+
   it("still uses the newest callback for the same target (a save moved it to a new version)", () => {
     const v1 = vi.fn();
     const v2 = vi.fn();

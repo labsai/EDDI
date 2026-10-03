@@ -346,6 +346,53 @@ describe("CapabilitiesSection", () => {
     expect(screen.getByTestId("capability-entry-0")).toBeInTheDocument();
     expect(screen.getByText("translation")).toBeInTheDocument();
   });
+
+  describe("attribute edits (review: one debounce, never resurrect a removed key)", () => {
+    const withAttrs = (attributes: Record<string, string>): Agent => ({
+      ...baseAgent,
+      capabilities: [{ skill: "translation", confidence: "high", attributes }],
+    });
+    const sentAttributes = () =>
+      mockMutate.mock.calls.map(
+        ([arg]) => (arg as { agent: Agent }).agent.capabilities?.[0]?.attributes,
+      );
+
+    beforeEach(() => vi.clearAllMocks());
+
+    it("saves an edit flushed by collapsing the editor — it used to be lost in a second timer", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(
+        <CapabilitiesSection agent={withAttrs({ lang: "en" })} agentId={agentId} version={version} />,
+      );
+      await user.click(screen.getByTestId("capability-attributes-toggle-0"));
+      const input = screen.getByTestId("attribute-value-lang");
+      await user.clear(input);
+      await user.type(input, "de");
+      // Collapse before the input's debounce fires: the row unmounts and flushes.
+      await user.click(screen.getByTestId("capability-attributes-toggle-0"));
+      await new Promise((r) => setTimeout(r, 700));
+      expect(sentAttributes()).toContainEqual({ lang: "de" });
+    });
+
+    it("does not write back an attribute removed while its edit was pending", async () => {
+      const user = userEvent.setup();
+      const { rerender } = renderWithProviders(
+        <CapabilitiesSection agent={withAttrs({ lang: "en", tone: "dry" })} agentId={agentId} version={version} />,
+      );
+      await user.click(screen.getByTestId("capability-attributes-toggle-0"));
+      await user.type(screen.getByTestId("attribute-value-lang"), "x");
+      await user.click(screen.getByTestId("attribute-remove-lang"));
+      // The save lands: the row for `lang` unmounts and flushes its pending edit.
+      rerender(
+        <CapabilitiesSection agent={withAttrs({ tone: "dry" })} agentId={agentId} version={version} />,
+      );
+      await new Promise((r) => setTimeout(r, 1400));
+      const sent = sentAttributes();
+      // Clicking Remove blurs the field first, which may save the edit; what
+      // must never happen is a save AFTER the removal that brings `lang` back.
+      expect(sent[sent.length - 1]).toEqual({ tone: "dry" });
+    });
+  });
 });
 
 describe("UserMemorySection", () => {
