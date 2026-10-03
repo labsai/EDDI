@@ -99,8 +99,8 @@ services:
       OPENAI_API_BASE_URL: http://eddi:7070/v1
       OPENAI_API_KEY: "sk-eddi-change-me"
       ENABLE_OLLAMA_API: "false"
-      # REQUIRED — see §5. Without it, every chat window a user opens against
-      # one agent shares a single EDDI conversation, and its memory.
+      # REQUIRED — see §5. Without it EDDI cannot tell Open WebUI's users apart,
+      # and maps its chats only by their opening messages.
       ENABLE_FORWARD_USER_INFO_HEADERS: "true"
 ```
 
@@ -195,11 +195,30 @@ intent = channel:openai:<agentId>:<chatKey>
 userId = the authenticated caller
 ```
 
-`chatKey` comes from the `X-OpenWebUI-Chat-Id` header, falling back to the OpenAI `user` field. `(intent, userId)` is the primary key in EDDI's managed-conversation store, so:
+`chatKey` is the first of these the request carries:
+
+| Source | Sent by |
+|---|---|
+| `X-OpenWebUI-Chat-Id` header | Open WebUI, with `ENABLE_FORWARD_USER_INFO_HEADERS` (§5) |
+| `X-EDDI-Chat-Id` header | any client that can set a header — the generic form |
+| `metadata.chat_id` body field | the OpenAI SDKs: `metadata={"chat_id": "…"}` (or `extra_body`) |
+| `user` body field | clients that set the OpenAI `user` field; it then names the *chat*, so all of that user's requests share one conversation |
+| *derived:* `h:` + a hash of the first `system` and first `user` message | everything else — the OpenAI SDKs, LangChain, LiteLLM by default |
+
+`(intent, userId)` is the primary key in EDDI's managed-conversation store, so:
 
 - **the same chat** → the same EDDI conversation, turn after turn;
 - **a different chat window** → a different conversation, with no shared memory;
 - **a different user** → a different conversation.
+
+**Clients that name no chat.** An OpenAI client resends the whole history every turn, so a chat's first system and first user message are the same on every one of its turns and differ between chats that open differently. Hashing them gives each client-side chat its own conversation with no client changes. Two rules keep this honest:
+
+- **An opening turn always starts fresh.** A derived-key request that carries no history (no assistant message, one user message) is the first turn of a chat, so it never continues an earlier chat that happened to open with the same words ("Hi"). The earlier conversation is abandoned, not ended.
+- **Editing the first message starts a new conversation**, because the chat's identity changed. For a stable key across edits, send `X-EDDI-Chat-Id` or `metadata.chat_id`.
+
+Two chats that open identically *and run at the same time* can still collide — name them with an explicit key if that matters. Before this, every request without a chat id went to one `:default` conversation per user and agent, so unrelated chats shared context and one document grew without bound; `eddi.openai-compat.chat-key-fallback=shared` restores that behaviour for clients that rely on it (for example one that sends only its latest message and relies on EDDI's memory — such a client gets a fresh conversation every turn under `history`). A key longer than 128 characters is stored as its SHA-256.
+
+**Bounding a long chat.** The LLM sees only the window the agent's memory settings allow (see [Conversation memory](conversation-memory.md)), but the stored conversation keeps every step, and a MongoDB document cannot exceed 16 MB. `eddi.openai-compat.max-conversation-steps` (off by default) ends an idle mapped conversation once it has that many steps and continues the chat in a fresh one; the ended conversation stays readable, but the agent no longer sees its history and conversation-scoped properties do not carry over (long-term properties live in user memory and do).
 
 Only the **last user message** is sent to the agent. The rest of `messages[]` is discarded: EDDI has its own memory, so replaying the client's history would double every turn.
 
@@ -243,10 +262,12 @@ Because every message goes through `IConversationService`, the whole pipeline ap
 | `eddi.openai-compat.model-cache-seconds` | `30` | Model catalogue TTL. |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Enable stateless requests — lists the `:stateless` ids and accepts the `stateless` body field. Disabling blocks both. |
 | `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let a chat mapped under the raw `X-OpenWebUI-User-Id` (before ids were namespaced) keep its conversation. Enable only if `/v1` never ran with `http-policy=authenticated` — see §4. |
+| `eddi.openai-compat.chat-key-fallback` | `history` | How a request that names no chat is mapped: `history` keys it by its opening messages (one conversation per client-side chat); `shared` keeps one conversation per user and agent, as earlier releases did. See §2. |
+| `eddi.openai-compat.max-conversation-steps` | `0` | Steps after which an idle mapped conversation is ended and the chat continues in a fresh one. `0` disables it. See §2. |
 
 Every property has an environment-variable form: `eddi.openai-compat.api-key` → `EDDI_OPENAI_COMPAT_API_KEY`.
 
-> **Note on CORS.** Open WebUI calls EDDI from its *backend*, so CORS does not apply to it. If you build a browser client that calls `/v1` directly, add its origin to `quarkus.http.cors.origins` and add `x-openwebui-chat-id`/`x-openwebui-user-id` to `quarkus.http.cors.headers`.
+> **Note on CORS.** Open WebUI calls EDDI from its *backend*, so CORS does not apply to it. If you build a browser client that calls `/v1` directly, add its origin to `quarkus.http.cors.origins` and add `x-openwebui-chat-id`/`x-openwebui-user-id` (and `x-eddi-chat-id`, if it sends one) to `quarkus.http.cors.headers`.
 
 ---
 
@@ -305,7 +326,7 @@ EDDI **refuses to start** when the adapter is enabled, `http-policy=permit`, no 
 
 | Setting | Value | Why |
 |---|---|---|
-| `ENABLE_FORWARD_USER_INFO_HEADERS` | `true` | **Load-bearing.** Supplies `X-OpenWebUI-Chat-Id` (per-chat isolation) and `X-OpenWebUI-User-Id` (per-user memory). Without it, all of a user's chats against one agent collapse into one conversation. |
+| `ENABLE_FORWARD_USER_INFO_HEADERS` | `true` | **Load-bearing.** Supplies `X-OpenWebUI-Chat-Id` (per-chat isolation that survives editing the first message) and `X-OpenWebUI-User-Id` (per-user memory). Without it no user id arrives, so requests are refused unless `allow-anonymous` is on — and chats are then told apart only by their opening messages (§2). |
 | Title / Tag generation model | a `…:stateless` model, or a separate connection | Otherwise Open WebUI's "write a title for this chat" prompt is injected into the user's real conversation. |
 | System Prompt (per model) | *leave empty* | The agent owns its prompt. A value here arrives as `openai_system_message` context and is ignored unless the agent references it. |
 | Tools / Functions (per model) | *assign none* | EDDI executes tools inside its own pipeline; the adapter never returns `tool_calls`. |
@@ -314,7 +335,7 @@ EDDI **refuses to start** when the adapter is enabled, `http-policy=permit`, no 
 
 ### Title generation
 
-Open WebUI generates chat titles and tags by sending an extra completion request to a configured model. Pointed at a normal EDDI model, that prompt becomes a real turn in the user's conversation.
+Open WebUI generates chat titles and tags by sending an extra completion request to a configured model. Pointed at a normal EDDI model, that prompt becomes a real turn in the user's conversation: the request carries the chat's `X-OpenWebUI-Chat-Id`, so it lands in the same EDDI conversation as the chat. (Without header forwarding it is a single user message of its own, so it would open a separate conversation per title instead.)
 
 Two ways to avoid it, in order of preference:
 
@@ -439,8 +460,19 @@ This is safe because the adapter has no message-count heuristic — truncating h
 | `content` as array | Text extracted; `image_url`, `file` and `input_audio` parts mapped to attachments. |
 | `stream` | Selects JSON vs SSE. The only dispatch signal. |
 | `stateless` | **EDDI extension.** Run this turn in a throwaway conversation — same as the `:stateless` model suffix. See §2. |
-| `user` | Fallback chat key when `X-OpenWebUI-Chat-Id` is absent. Accepts both the string form and Open WebUI's object form. |
-| `temperature`, `max_tokens`, `top_p`, `stream_options`, `tools`, `tool_choice`, `metadata`, `files`, … | **Accepted and ignored.** Model parameters belong to the agent's `langchain.json`. |
+| `metadata.chat_id` | Explicit chat key (after the `X-OpenWebUI-Chat-Id` and `X-EDDI-Chat-Id` headers). Other `metadata` entries are ignored. |
+| `user` | Chat key when no header or `metadata.chat_id` names one. Accepts both the string form and Open WebUI's object form. |
+| `temperature`, `max_tokens`, `top_p`, `stream_options`, `tools`, `tool_choice`, `files`, … | **Accepted and ignored.** Model parameters belong to the agent's `langchain.json`. |
+
+Request headers: `X-OpenWebUI-Chat-Id` and `X-EDDI-Chat-Id` name the chat (§2); `X-OpenWebUI-User-Id` names the user (§4).
+
+### Response fields
+
+| Field | Value |
+|---|---|
+| `finish_reason` | `stop`; `length` when the model's answer was cut off at its output-token limit; `content_filter` when the provider filtered it. Both come from the model's own finish reason, which EDDI records for plain (non-tool) model calls |
+| `usage` | See §7.1 |
+| `X-EDDI-Conversation-Id` header | The EDDI conversation the turn ran in |
 
 ### Attachments — images, documents, audio
 
@@ -482,6 +514,8 @@ The conversation id is also on every response as `X-EDDI-Conversation-Id`.
 | **Edit and resend** | Same: a new turn, not a rewrite of history. |
 | **Deleting a chat in Open WebUI** | Does not end the EDDI conversation. It is abandoned and reaped by normal conversation lifecycle policy. |
 | **Documents dropped into chat** | Handled entirely by Open WebUI's own RAG (upload → chunk → embed → inject into the prompt). **By default it injects into the *user* message, not the system message** — set `RAG_SYSTEM_CONTEXT=true` (§5) or your agent receives the whole `<source>` blob as its input. For production document RAG, use EDDI's own pipeline. |
+| **Two SDK chats without a chat id** | Two conversations, one per chat (§2) — unless both open with the same system and first user message *at the same time*. |
+| **A failing agent** | An OpenAI error (`500`, `code: agent_error`, the failing task's sanitized reason as `message`) — on a stream, an error event. Never a reply with `finish_reason: "stop"`. |
 | **Token counts** | Reported as `usage` for agents that call a model, summed across cascade steps and tool round-trips. Rule-based agents spend no tokens, so the field is omitted rather than zero-filled. On streams it needs `stream_options.include_usage` (§7.1). |
 | **Two requests in one chat at once** | The second is dropped by `ConversationCoordinator` and returns `429`; clients retry. |
 
@@ -559,9 +593,12 @@ Every failure uses the OpenAI envelope:
 | Agent not deployed | 503 | `agent_not_ready` |
 | Conversation busy / concurrency cap | 429 | — |
 | Turn timed out | 504 | `timeout` |
+| The agent's pipeline failed the turn (an LLM, HTTP or MCP task error) | 500 | `agent_error` |
 | Adapter disabled | 404 | `unknown_endpoint` |
 
-> **On streams:** once SSE headers are flushed the status is fixed at `200`. Failures during a stream therefore arrive as a content delta prefixed with ⚠️, followed by `finish_reason: "stop"` and `[DONE]`. This is a protocol constraint, not a shortcut — a stream that simply stopped would look like a hang. The concurrency cap applies the same way: a stream that cannot get a slot delivers a ⚠️ busy notice in-band instead of a `429`, because the `200` was already committed when the body started.
+A failed turn (conversation state `ERROR`) carries the failing task's digest as `message` — the same sanitized text EDDI's own REST and streaming endpoints report, with URLs, stack frames and credentials stripped. It used to come back as `200` with `_The agent produced no text output._` and `finish_reason: "stop"`, indistinguishable from a real answer.
+
+> **On streams:** once SSE headers are flushed the status is fixed at `200`. A failure during a stream — a failed turn, a busy conversation, the concurrency cap, the request timeout — therefore ends the stream with an OpenAI **error event**, `data: {"error":{"message":…,"type":…,"code":…}}`, followed by `[DONE]`. The `openai` SDKs raise this as `APIError`; Open WebUI shows it as an error. Every stream ends with exactly one terminator — a `finish_reason` chunk or an error event — and one `[DONE]`, and nothing is written after it: a turn that is still producing tokens when the request times out has its late tokens dropped. A paused (HITL) turn is not a failure and still arrives as chat text with `finish_reason: "stop"` (§6).
 
 ---
 
@@ -569,7 +606,9 @@ Every failure uses the OpenAI envelope:
 
 **No models in the dropdown.** Check `eddi.openai-compat.enabled=true`, that at least one agent is deployed to the configured environment with status `READY`, and that the API key matches. `curl -H "Authorization: Bearer <key>" http://eddi:7070/v1/models` shows the raw answer.
 
-**All my chats share one conversation.** `ENABLE_FORWARD_USER_INFO_HEADERS` is not set on Open WebUI, so no `X-OpenWebUI-Chat-Id` reaches EDDI and every chat falls into the `:default` slot.
+**All my chats share one conversation.** Either `chat-key-fallback=shared` is set, or the client sends the same `user` (or `X-EDDI-Chat-Id`/`metadata.chat_id`) on every request — an explicit key always wins. With Open WebUI, check that `ENABLE_FORWARD_USER_INFO_HEADERS` is set, so each chat arrives with its own `X-OpenWebUI-Chat-Id`.
+
+**My client gets a new conversation every turn.** It sends only its latest message instead of the history, so every request looks like the opening turn of a new chat. Send an explicit `X-EDDI-Chat-Id` or `metadata.chat_id`, or set `chat-key-fallback=shared`.
 
 **Every user sees everyone else's memory.** `allow-anonymous=true` with `trust-user-headers=false`, or with the header absent. Set `trust-user-headers=true` and enable header forwarding.
 
@@ -588,7 +627,7 @@ Every failure uses the OpenAI envelope:
 1. **Agent groups are not exposed as models.** Only individual agents appear in `/v1/models`; EDDI's multi-agent group discussions are unreachable over this API. Nothing blocks it — groups are listable, `discuss()` returns a `synthesizedAnswer`, `continueDiscussion()` gives multi-turn, and `GroupDiscussionEventListener` gives streaming — but it needs a second bridge with its own conversation mapping, streaming path and approval surface, so it belongs in its own change rather than bolted onto this one.
 2. **Structured outputs are flattened to Markdown, not interactive.** Quick replies, buttons and input fields are rendered as text (§7.2), so the user reads and retypes them rather than clicking. `agentFace` and `other` items are dropped entirely.
 3. **Regenerate is a real new turn**, not an idempotent replay.
-4. **Stream-path errors must return 200** (see §8).
+4. **Stream-path errors must return 200** — they arrive as an OpenAI error event (see §8).
 5. **One worker thread per in-flight completion**, bounded by `max-concurrent-requests`.
 6. **`http-policy=authenticated` is impractical with Open WebUI**, which cannot mint per-user upstream OIDC tokens.
 7. **`tool_calls` are never returned.** EDDI runs tools inside its pipeline; echoing them would make Open WebUI try to execute EDDI's HTTP/MCP/memory tools locally, where they do not exist. Tool activity remains visible in the audit ledger and `toolTrace`.

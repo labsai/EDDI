@@ -8583,12 +8583,12 @@
         {
           "id": 96,
           "type": "timeseries",
-          "title": "Conversations created via /v1",
+          "title": "Conversations and chat keys via /v1",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_openai_conversations_created_total` — each new Open WebUI chat maps to a fresh EDDI conversation.",
+          "description": "`eddi_openai_conversations_created_total` — each new chat maps to a fresh EDDI conversation; `eddi_openai_conversations_rolled_over_total` — conversations ended at `max-conversation-steps`; `eddi_openai_chat_keys_total` by `source` — where each stateful request's chat key came from (`history` = derived from the opening messages, `shared` = the single per-user conversation).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -8604,7 +8604,30 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "range": true
+              "range": true,
+              "legendFormat": "created"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_openai_conversations_rolled_over_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rolled over (max-conversation-steps)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (source) (rate(eddi_openai_chat_keys_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "chat key: {{source}}"
             }
           ],
           "fieldConfig": {
@@ -8644,9 +8667,9 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
@@ -8703,6 +8726,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "errors"
+            },
+            {
+              "refId": "D",
+              "expr": "sum by (scope) (rate(eddi_attachments_quota_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "quota rejected: {{scope}}"
             }
           ],
           "fieldConfig": {
