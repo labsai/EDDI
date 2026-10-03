@@ -121,6 +121,18 @@ class A2aEndpointPermissionsTest {
         }
 
         @Test
+        @DisplayName("GET /.well-known/agent-card.json — the A2A 0.3+/1.0 discovery path")
+        void defaultAgentCardCurrentPath() {
+            assertPolicies("/.well-known/agent-card.json", "GET", PERMIT);
+        }
+
+        @Test
+        @DisplayName("GET /a2a/agents/{agentId}/.well-known/agent-card.json — where an SDK given the agent URL looks")
+        void perAgentWellKnownCard() {
+            assertPolicies("/a2a/agents/" + SAMPLE_AGENT_ID + "/.well-known/agent-card.json", "GET", PERMIT);
+        }
+
+        @Test
         @DisplayName("GET /.well-known/capabilities — eddi.a2a.capabilities.public is the gate, not the HTTP layer")
         void capabilities() {
             assertPolicies("/.well-known/capabilities", "GET", PERMIT);
@@ -244,9 +256,10 @@ class A2aEndpointPermissionsTest {
                 checked++;
             }
         }
-        assertEquals(6, checked,
-                "Expected the four @PermitAll cards/capabilities, the @Authenticated agent listing and the"
-                        + " @RolesAllowed JSON-RPC endpoint; if an endpoint was added or removed, say so here deliberately");
+        assertEquals(8, checked,
+                "Expected the six @PermitAll cards/capabilities (four card paths, two capability paths), the"
+                        + " @Authenticated agent listing and the @RolesAllowed JSON-RPC endpoint; if an endpoint was added or"
+                        + " removed, say so here deliberately");
     }
 
     // ==================== Helpers ====================

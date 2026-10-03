@@ -573,6 +573,9 @@ eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; t
 eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
 eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
+eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method, dialect (1.0|0.3|legacy), outcome (ok|error|invalid|busy)
+eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
+eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 ```

@@ -6,14 +6,45 @@ package ai.labs.eddi.engine.a2a;
 
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
-import ai.labs.eddi.engine.a2a.A2AModels.*;
+import ai.labs.eddi.engine.a2a.A2AModels.A2ABusyException;
+import ai.labs.eddi.engine.a2a.A2AModels.A2ATask;
+import ai.labs.eddi.engine.a2a.A2AModels.AgentAuthentication;
+import ai.labs.eddi.engine.a2a.A2AModels.AgentCapabilities;
+import ai.labs.eddi.engine.a2a.A2AModels.AgentCard;
+import ai.labs.eddi.engine.a2a.A2AModels.AgentSkill;
+import ai.labs.eddi.engine.a2a.A2AModels.Artifact;
+import ai.labs.eddi.engine.a2a.A2AModels.Dialect;
+import ai.labs.eddi.engine.a2a.A2AModels.InvalidA2ARequestException;
+import ai.labs.eddi.engine.a2a.A2AModels.JsonRpcRequest;
+import ai.labs.eddi.engine.a2a.A2AModels.JsonRpcResponse;
+import ai.labs.eddi.engine.a2a.A2AModels.Part;
+import ai.labs.eddi.engine.a2a.A2AModels.TaskState;
+import ai.labs.eddi.engine.a2a.A2AModels.TaskStatus;
+import ai.labs.eddi.engine.a2a.A2ATaskHandler.CancelOutcomeAndTask;
+import ai.labs.eddi.engine.a2a.A2ATaskHandler.CancelResult;
+import ai.labs.eddi.engine.a2a.A2ATaskHandler.ChunkEvent;
+import ai.labs.eddi.engine.a2a.A2ATaskHandler.FinalEvent;
+import ai.labs.eddi.engine.a2a.A2ATaskHandler.StreamEvent;
+import ai.labs.eddi.engine.a2a.A2ATaskHandler.TaskEvent;
+import ai.labs.eddi.engine.a2a.A2AWireFormat.SendRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -30,17 +61,26 @@ class RestA2AEndpointTest {
     private A2ATaskHandler taskHandler;
     private CapabilityRegistryService capabilityRegistryService;
     private RestA2AEndpoint endpoint;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
         agentCardService = mock(AgentCardService.class);
         taskHandler = mock(A2ATaskHandler.class);
         capabilityRegistryService = mock(CapabilityRegistryService.class);
+        meterRegistry = new SimpleMeterRegistry();
     }
 
     private RestA2AEndpoint createEndpoint(boolean a2aEnabled, boolean capabilitiesPublic) {
         return new RestA2AEndpoint(agentCardService, taskHandler, capabilityRegistryService,
-                a2aEnabled, capabilitiesPublic);
+                a2aEnabled, capabilitiesPublic, new ObjectMapper(), meterRegistry);
+    }
+
+    /** A card in the old eight-field shape these tests were written against. */
+    private static AgentCard card(String name, String description, String url, String provider, String version,
+                                  AgentCapabilities capabilities, List<AgentSkill> skills, AgentAuthentication authentication) {
+        return new AgentCard(name, description, url, "0.3.0", "JSONRPC", null, null, version, capabilities, null, null,
+                null, null, skills, authentication);
     }
 
     // ==================== getDefaultAgentCard ====================
@@ -69,7 +109,7 @@ class RestA2AEndpointTest {
     @Test
     void getDefaultAgentCard_success_returnsFirstCard() {
         endpoint = createEndpoint(true, false);
-        var card1 = new AgentCard("Agent1", "First agent", "http://localhost/a2a/agents/1",
+        var card1 = card("Agent1", "First agent", "http://localhost/a2a/agents/1",
                 "EDDI", "1.0", null, null, null);
         when(agentCardService.getDefaultAgentCard()).thenReturn(card1);
 
@@ -88,7 +128,7 @@ class RestA2AEndpointTest {
     void getDefaultAgentCard_doesNotEnumerateTheRoster() {
         endpoint = createEndpoint(true, false);
         when(agentCardService.getDefaultAgentCard()).thenReturn(
-                new AgentCard("Agent1", "First agent", "http://localhost/a2a/agents/1",
+                card("Agent1", "First agent", "http://localhost/a2a/agents/1",
                         "EDDI", "1.0", null, null, null));
 
         endpoint.getDefaultAgentCard();
@@ -121,7 +161,7 @@ class RestA2AEndpointTest {
     @Test
     void getAgentCard_success_returnsCard() {
         endpoint = createEndpoint(true, false);
-        var card = new AgentCard("TestAgent", "A test agent",
+        var card = card("TestAgent", "A test agent",
                 "http://localhost/a2a/agents/" + AGENT_ID,
                 "EDDI", "1.0",
                 new AgentCapabilities(true, false, true),
@@ -150,7 +190,7 @@ class RestA2AEndpointTest {
     @Test
     void listA2AAgents_enabled_returnsCards() {
         endpoint = createEndpoint(true, false);
-        var card = new AgentCard("Agent", "desc", "http://localhost", "EDDI", "1.0", null, null, null);
+        var card = card("Agent", "desc", "http://localhost", "EDDI", "1.0", null, null, null);
         when(agentCardService.listA2AAgents()).thenReturn(List.of(card));
 
         Response response = endpoint.listA2AAgents();
@@ -264,30 +304,48 @@ class RestA2AEndpointTest {
 
     // ==================== handleJsonRpc ====================
 
-    @Test
-    void handleJsonRpc_disabled_returnsError() {
-        endpoint = createEndpoint(false, false);
-        var request = new JsonRpcRequest("2.0", "tasks/send", Map.of(), "req-1");
+    private static A2ATask completedTask(String id) {
+        return new A2ATask(id, "ctx-1", new TaskStatus(TaskState.completed, null, Instant.parse("2026-10-03T10:00:00Z")),
+                null, List.of(new Artifact("response", "response", List.of(Part.textPart("hi")))));
+    }
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> result(Response response) {
+        return (Map<String, Object>) ((JsonRpcResponse) response.getEntity()).result();
+    }
 
-        assertEquals(200, response.getStatus()); // JSON-RPC errors are 200 OK
+    private static int errorCode(Response response) {
         var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_METHOD_NOT_FOUND, body.error().code());
+        assertNotNull(body.error(), "expected a JSON-RPC error");
+        return body.error().code();
     }
 
     @Test
-    void handleJsonRpc_nullMethod_returnsInvalidParams() {
+    void handleJsonRpc_disabled_returnsMethodNotFound() {
+        endpoint = createEndpoint(false, false);
+        var request = new JsonRpcRequest("2.0", "SendMessage", Map.of(), "req-1");
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, request);
+
+        assertEquals(200, response.getStatus()); // JSON-RPC errors are 200 OK
+        assertEquals(A2AModels.ERROR_METHOD_NOT_FOUND, errorCode(response));
+    }
+
+    @Test
+    void handleJsonRpc_nullRequest_isInvalidRequest_evenWhenDisabled() {
+        endpoint = createEndpoint(false, false);
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, null);
+
+        assertEquals(A2AModels.ERROR_INVALID_REQUEST, errorCode(response));
+    }
+
+    @Test
+    void handleJsonRpc_nullMethod_returnsInvalidRequest() {
         endpoint = createEndpoint(true, false);
         var request = new JsonRpcRequest("2.0", null, Map.of(), "req-1");
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
-
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_INVALID_PARAMS, body.error().code());
+        assertEquals(A2AModels.ERROR_INVALID_REQUEST, errorCode(endpoint.handleJsonRpc(AGENT_ID, null, request)));
     }
 
     @Test
@@ -295,244 +353,307 @@ class RestA2AEndpointTest {
         endpoint = createEndpoint(true, false);
         var request = new JsonRpcRequest("2.0", "tasks/unknown", Map.of(), "req-1");
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, request);
 
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_METHOD_NOT_FOUND, body.error().code());
-        assertTrue(body.error().message().contains("Unknown method"));
-    }
-
-    // ==================== handleJsonRpc — tasks/send ====================
-
-    @Test
-    void handleJsonRpc_tasksSend_success() throws Exception {
-        endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("message", "Hello");
-        var request = new JsonRpcRequest("2.0", "tasks/send", params, "req-1");
-        var task = new A2ATask("task-1", null, TaskState.completed, List.of(), List.of(), null);
-        when(taskHandler.handleTaskSend(AGENT_ID, params)).thenReturn(task);
-
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
-
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNull(body.error());
-        assertEquals(task, body.result());
+        assertEquals(A2AModels.ERROR_METHOD_NOT_FOUND, errorCode(response));
+        assertTrue(((JsonRpcResponse) response.getEntity()).error().message().contains("Unknown method"));
     }
 
     @Test
-    void handleJsonRpc_tasksSend_nullParams_returnsError() throws Exception {
+    void handleJsonRpc_unsupportedVersionHeader_isVersionNotSupported() {
         endpoint = createEndpoint(true, false);
-        var request = new JsonRpcRequest("2.0", "tasks/send", null, "req-1");
+        var request = new JsonRpcRequest("2.0", "SendMessage", Map.of(), "req-1");
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
-
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_INVALID_PARAMS, body.error().code());
+        assertEquals(A2AModels.ERROR_VERSION_NOT_SUPPORTED, errorCode(endpoint.handleJsonRpc(AGENT_ID, "2.0", request)));
+        verifyNoInteractions(taskHandler);
     }
 
     @Test
-    void handleJsonRpc_tasksSend_handlerThrows_returnsInternalError() throws Exception {
-        endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("message", "Hello");
-        var request = new JsonRpcRequest("2.0", "tasks/send", params, "req-1");
-        when(taskHandler.handleTaskSend(AGENT_ID, params)).thenThrow(new RuntimeException("Agent error"));
-
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
-
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_INTERNAL, body.error().code());
+    void isSupportedVersion_acceptsAbsentAnd0xAnd1x() {
+        assertTrue(RestA2AEndpoint.isSupportedVersion(null));
+        assertTrue(RestA2AEndpoint.isSupportedVersion(" "));
+        assertTrue(RestA2AEndpoint.isSupportedVersion("0.3"));
+        assertTrue(RestA2AEndpoint.isSupportedVersion("1.0"));
+        assertFalse(RestA2AEndpoint.isSupportedVersion("2.0"));
     }
 
     @Test
-    void handleJsonRpc_tasksSend_internalFailure_doesNotLeakExceptionDetail() throws Exception {
+    void handleJsonRpc_recognisedButUnimplementedMethods_getTheirSpecErrors() {
         endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("message", "Hello");
-        var request = new JsonRpcRequest("2.0", "tasks/send", params, "req-1");
-        when(taskHandler.handleTaskSend(AGENT_ID, params))
+
+        assertEquals(A2AModels.ERROR_UNSUPPORTED_OPERATION,
+                errorCode(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "ListTasks", Map.of(), 1))));
+        assertEquals(A2AModels.ERROR_PUSH_NOTIFICATION_NOT_SUPPORTED, errorCode(endpoint.handleJsonRpc(AGENT_ID, null,
+                new JsonRpcRequest("2.0", "tasks/pushNotificationConfig/set", Map.of(), 2))));
+        assertEquals(A2AModels.ERROR_EXTENDED_CARD_NOT_CONFIGURED,
+                errorCode(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "GetExtendedAgentCard", Map.of(), 3))));
+    }
+
+    // ==================== send, per dialect ====================
+
+    @Test
+    void sendMessage_v10_wrapsTheTask_andUses10Names() throws Exception {
+        endpoint = createEndpoint(true, false);
+        Map<String, Object> params = Map.of("message", Map.of("messageId", "m1", "role", "ROLE_USER", "parts", List.of(Map.of("text", "Hello"))));
+        when(taskHandler.send(eq(AGENT_ID), any())).thenReturn(completedTask("task-1"));
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, "1.0", new JsonRpcRequest("2.0", "SendMessage", params, "req-1"));
+
+        @SuppressWarnings("unchecked")
+        var task = (Map<String, Object>) result(response).get("task");
+        assertEquals("task-1", task.get("id"));
+        assertEquals("TASK_STATE_COMPLETED", ((Map<?, ?>) task.get("status")).get("state"));
+        assertFalse(task.containsKey("kind"), "a 1.0 client parses strictly; a kind field would fail it");
+        var captor = ArgumentCaptor.forClass(SendRequest.class);
+        verify(taskHandler).send(eq(AGENT_ID), captor.capture());
+        assertEquals("Hello", captor.getValue().text());
+        assertEquals(Dialect.V1_0, captor.getValue().dialect());
+    }
+
+    @Test
+    void messageSend_v03_returnsTheTaskWithKind() throws Exception {
+        endpoint = createEndpoint(true, false);
+        Map<String, Object> params = Map.of("message",
+                Map.of("kind", "message", "messageId", "m1", "role", "user", "parts", List.of(Map.of("kind", "text", "text", "Hello"))));
+        when(taskHandler.send(eq(AGENT_ID), any())).thenReturn(completedTask("task-1"));
+
+        var task = result(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "message/send", params, "req-1")));
+
+        assertEquals("task", task.get("kind"));
+        assertEquals("completed", ((Map<?, ?>) task.get("status")).get("state"));
+    }
+
+    @Test
+    void tasksSend_legacy_isStillAccepted() throws Exception {
+        endpoint = createEndpoint(true, false);
+        Map<String, Object> params = Map.of("id", "legacy-1", "message",
+                Map.of("role", "user", "parts", List.of(Map.of("type", "text", "text", "Hello"))));
+        when(taskHandler.send(eq(AGENT_ID), any())).thenReturn(completedTask("legacy-1"));
+
+        var task = result(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/send", params, "req-1")));
+
+        assertEquals("legacy-1", task.get("id"));
+        var captor = ArgumentCaptor.forClass(SendRequest.class);
+        verify(taskHandler).send(eq(AGENT_ID), captor.capture());
+        assertEquals("legacy-1", captor.getValue().legacyTaskId());
+        assertEquals(Dialect.LEGACY, captor.getValue().dialect());
+    }
+
+    @Test
+    void send_nullParams_returnsInvalidParams() {
+        endpoint = createEndpoint(true, false);
+
+        assertEquals(A2AModels.ERROR_INVALID_PARAMS,
+                errorCode(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/send", null, "req-1"))));
+    }
+
+    @Test
+    void send_handlerThrows_returnsInternalError_withoutDetail() throws Exception {
+        endpoint = createEndpoint(true, false);
+        Map<String, Object> params = Map.of("message", Map.of("parts", List.of(Map.of("text", "Hello"))));
+        when(taskHandler.send(eq(AGENT_ID), any()))
                 .thenThrow(new IllegalStateException("mongodb://admin:s3cr3t@internal-db.corp:27017 connection refused"));
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "SendMessage", params, "req-1"));
 
         var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
         assertEquals(A2AModels.ERROR_INTERNAL, body.error().code());
         assertEquals(RestA2AEndpoint.INTERNAL_ERROR_MESSAGE, body.error().message());
-        assertFalse(body.error().message().contains("internal-db.corp"));
         assertFalse(body.error().message().contains("s3cr3t"));
     }
 
     @Test
-    void handleJsonRpc_tasksSend_invalidRequest_returnsAuthoredMessage() throws Exception {
+    void send_invalidRequest_returnsAuthoredMessageAndCode() throws Exception {
         endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("message", "Hello");
-        var request = new JsonRpcRequest("2.0", "tasks/send", params, "req-1");
-        when(taskHandler.handleTaskSend(AGENT_ID, params))
-                .thenThrow(new InvalidA2ARequestException("No text content found in message parts"));
+        Map<String, Object> params = Map.of("message", Map.of("parts", List.of(Map.of("text", "Hello"))));
+        when(taskHandler.send(eq(AGENT_ID), any()))
+                .thenThrow(new InvalidA2ARequestException(A2AModels.ERROR_TASK_NOT_FOUND, "Task not found"));
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "SendMessage", params, "req-1"));
 
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_INVALID_PARAMS, body.error().code());
-        assertEquals("No text content found in message parts", body.error().message());
-    }
-
-    // ==================== handleJsonRpc — tasks/get ====================
-
-    @Test
-    void handleJsonRpc_tasksGet_success() {
-        endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("id", "task-1");
-        var request = new JsonRpcRequest("2.0", "tasks/get", params, "req-2");
-        var task = new A2ATask("task-1", null, TaskState.completed, List.of(), List.of(), null);
-        when(taskHandler.handleTaskGet("task-1")).thenReturn(task);
-
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
-
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNull(body.error());
-        assertEquals(task, body.result());
+        assertEquals(A2AModels.ERROR_TASK_NOT_FOUND, errorCode(response));
+        assertEquals("Task not found", ((JsonRpcResponse) response.getEntity()).error().message());
     }
 
     @Test
-    void handleJsonRpc_tasksGet_nullParams_returnsError() {
+    void send_whenEverySlotIsTaken_is503WithRetryAfter_andCounted() throws Exception {
         endpoint = createEndpoint(true, false);
-        var request = new JsonRpcRequest("2.0", "tasks/get", null, "req-2");
+        Map<String, Object> params = Map.of("message", Map.of("parts", List.of(Map.of("text", "Hello"))));
+        when(taskHandler.send(eq(AGENT_ID), any())).thenThrow(new A2ABusyException("busy"));
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "SendMessage", params, "req-9"));
 
-        assertEquals(200, response.getStatus());
+        assertEquals(503, response.getStatus());
+        assertEquals("1", response.getHeaderString("Retry-After"));
         var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_INVALID_PARAMS, body.error().code());
+        assertEquals("req-9", body.id());
+        assertEquals(A2AModels.ERROR_INTERNAL, body.error().code());
+        assertEquals(RestA2AEndpoint.BUSY_MESSAGE, body.error().message());
+        assertEquals(1.0, meterRegistry.counter("eddi.a2a.requests", "method", "send", "dialect", "1.0", "outcome", "busy").count());
     }
 
     @Test
-    void handleJsonRpc_tasksGet_missingId_returnsError() {
+    void send_success_isCountedAsOk() throws Exception {
         endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("other", "value");
-        var request = new JsonRpcRequest("2.0", "tasks/get", params, "req-2");
+        Map<String, Object> params = Map.of("message", Map.of("parts", List.of(Map.of("kind", "text", "text", "Hello"))));
+        when(taskHandler.send(eq(AGENT_ID), any())).thenReturn(completedTask("t"));
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "message/send", params, "req-1"));
 
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_INVALID_PARAMS, body.error().code());
+        assertEquals(1.0, meterRegistry.counter("eddi.a2a.requests", "method", "send", "dialect", "0.3", "outcome", "ok").count());
+    }
+
+    // ==================== get / cancel ====================
+
+    @Test
+    void getTask_success_rendersInTheCallersDialect() {
+        endpoint = createEndpoint(true, false);
+        when(taskHandler.get("task-1", null)).thenReturn(completedTask("task-1"));
+
+        var v10 = result(endpoint.handleJsonRpc(AGENT_ID, "1.0", new JsonRpcRequest("2.0", "GetTask", Map.of("id", "task-1"), 1)));
+        var v03 = result(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/get", Map.of("id", "task-1"), 2)));
+
+        assertEquals("TASK_STATE_COMPLETED", ((Map<?, ?>) v10.get("status")).get("state"));
+        assertEquals("completed", ((Map<?, ?>) v03.get("status")).get("state"));
     }
 
     @Test
-    void handleJsonRpc_tasksGet_notFound_returnsError() {
+    void getTask_passesHistoryLength() {
         endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("id", "nonexistent");
-        var request = new JsonRpcRequest("2.0", "tasks/get", params, "req-2");
-        when(taskHandler.handleTaskGet("nonexistent")).thenReturn(null);
+        when(taskHandler.get("task-1", 0)).thenReturn(completedTask("task-1"));
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "GetTask", Map.of("id", "task-1", "historyLength", 0), 1));
 
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_TASK_NOT_FOUND, body.error().code());
+        verify(taskHandler).get("task-1", 0);
     }
 
     @Test
-    void handleJsonRpc_tasksGet_notFound_doesNotEchoCallerSuppliedTaskId() {
+    void getTask_missingId_returnsInvalidParams() {
+        endpoint = createEndpoint(true, false);
+
+        assertEquals(A2AModels.ERROR_INVALID_PARAMS,
+                errorCode(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/get", Map.of("other", "x"), 1))));
+        assertEquals(A2AModels.ERROR_INVALID_PARAMS,
+                errorCode(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/get", null, 1))));
+    }
+
+    @Test
+    void getTask_notFound_doesNotEchoCallerSuppliedTaskId() {
         endpoint = createEndpoint(true, false);
         String probedTaskId = "task-of-another-peer-42";
-        var params = Map.<String, Object>of("id", probedTaskId);
-        var request = new JsonRpcRequest("2.0", "tasks/get", params, "req-2");
-        when(taskHandler.handleTaskGet(probedTaskId)).thenReturn(null);
+        when(taskHandler.get(probedTaskId, null)).thenReturn(null);
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/get", Map.of("id", probedTaskId), 1));
 
-        var body = (JsonRpcResponse) response.getEntity();
-        assertEquals(A2AModels.ERROR_TASK_NOT_FOUND, body.error().code());
-        assertFalse(body.error().message().contains(probedTaskId));
-    }
-
-    // ==================== handleJsonRpc — tasks/cancel ====================
-
-    @Test
-    void handleJsonRpc_tasksCancel_success() {
-        endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("id", "task-1");
-        var request = new JsonRpcRequest("2.0", "tasks/cancel", params, "req-3");
-        when(taskHandler.handleTaskCancel("task-1")).thenReturn(true);
-
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
-
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNull(body.error());
-        @SuppressWarnings("unchecked")
-        var result = (Map<String, Object>) body.result();
-        assertEquals("task-1", result.get("id"));
-        assertEquals("canceled", result.get("status"));
+        assertEquals(A2AModels.ERROR_TASK_NOT_FOUND, errorCode(response));
+        assertFalse(((JsonRpcResponse) response.getEntity()).error().message().contains(probedTaskId));
     }
 
     @Test
-    void handleJsonRpc_tasksCancel_nullParams_returnsError() {
+    void cancelTask_success_returnsTheCanceledTask() {
         endpoint = createEndpoint(true, false);
-        var request = new JsonRpcRequest("2.0", "tasks/cancel", null, "req-3");
+        var canceled = new A2ATask("task-1", "ctx", new TaskStatus(TaskState.canceled, null, Instant.now()), null, null);
+        when(taskHandler.cancel("task-1")).thenReturn(new CancelOutcomeAndTask(CancelResult.CANCELED, canceled));
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        var task = result(endpoint.handleJsonRpc(AGENT_ID, "1.0", new JsonRpcRequest("2.0", "CancelTask", Map.of("id", "task-1"), 1)));
 
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_INVALID_PARAMS, body.error().code());
+        assertEquals("TASK_STATE_CANCELED", ((Map<?, ?>) task.get("status")).get("state"));
     }
 
     @Test
-    void handleJsonRpc_tasksCancel_missingId_returnsError() {
+    void cancelTask_notFoundAndNotCancelable_haveDistinctCodes() {
         endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("other", "value");
-        var request = new JsonRpcRequest("2.0", "tasks/cancel", params, "req-3");
+        when(taskHandler.cancel("gone")).thenReturn(new CancelOutcomeAndTask(CancelResult.NOT_FOUND, null));
+        when(taskHandler.cancel("done")).thenReturn(new CancelOutcomeAndTask(CancelResult.NOT_CANCELABLE, completedTask("done")));
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        assertEquals(A2AModels.ERROR_TASK_NOT_FOUND,
+                errorCode(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/cancel", Map.of("id", "gone"), 1))));
+        assertEquals(A2AModels.ERROR_TASK_NOT_CANCELABLE,
+                errorCode(endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/cancel", Map.of("id", "done"), 2))));
+    }
 
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_INVALID_PARAMS, body.error().code());
+    // ==================== streaming ====================
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void stream_v10_writesJsonRpcEventsUntilTheFinalStatus() throws Exception {
+        endpoint = createEndpoint(true, false);
+        when(taskHandler.taskTimeoutSeconds()).thenReturn(5);
+        var working = new A2ATask("t1", "c1", new TaskStatus(TaskState.working, null, Instant.now()), null, null);
+        doAnswer(invocation -> {
+            Consumer<StreamEvent> sink = invocation.getArgument(2);
+            sink.accept(new TaskEvent(working));
+            sink.accept(new ChunkEvent(working, "Hel", false));
+            sink.accept(new ChunkEvent(working, "lo", true));
+            sink.accept(new FinalEvent(completedTask("t1")));
+            return null;
+        }).when(taskHandler).stream(eq(AGENT_ID), any(), any());
+        Map<String, Object> params = Map.of("message", Map.of("parts", List.of(Map.of("text", "Hello"))));
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, "1.0", new JsonRpcRequest("2.0", "SendStreamingMessage", params, "s-1"));
+
+        assertEquals(MediaType.SERVER_SENT_EVENTS_TYPE, response.getMediaType());
+        var out = new ByteArrayOutputStream();
+        ((StreamingOutput) response.getEntity()).write(out);
+        var mapper = new ObjectMapper();
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (String line : out.toString(StandardCharsets.UTF_8).split("\n")) {
+            if (line.startsWith("data: ")) {
+                Map<String, Object> event = mapper.readValue(line.substring(6), Map.class);
+                assertEquals("s-1", event.get("id"));
+                results.add((Map<String, Object>) event.get("result"));
+            }
+        }
+        assertEquals(List.of("task", "artifactUpdate", "artifactUpdate", "artifactUpdate", "statusUpdate"),
+                results.stream().map(r -> r.keySet().iterator().next()).toList());
+        var finalArtifact = (Map<String, Object>) results.get(3).get("artifactUpdate");
+        assertEquals(false, finalArtifact.get("append"), "the settled answer replaces the streamed preview");
+        assertEquals(true, finalArtifact.get("lastChunk"));
+        var status = (Map<String, Object>) ((Map<String, Object>) results.get(4).get("statusUpdate")).get("status");
+        assertEquals("TASK_STATE_COMPLETED", status.get("state"));
     }
 
     @Test
-    void handleJsonRpc_tasksCancel_notCancelable_returnsError() {
+    @SuppressWarnings("unchecked")
+    void stream_endsOnTheLastKnownState_whenTheTurnOutlivesIt() throws Exception {
         endpoint = createEndpoint(true, false);
-        var params = Map.<String, Object>of("id", "task-1");
-        var request = new JsonRpcRequest("2.0", "tasks/cancel", params, "req-3");
-        when(taskHandler.handleTaskCancel("task-1")).thenReturn(false);
+        var queue = new LinkedBlockingQueue<StreamEvent>();
+        var working = new A2ATask("t1", "c1", new TaskStatus(TaskState.working, null, Instant.now()), null, null);
+        queue.add(new TaskEvent(working));
+        var out = new ByteArrayOutputStream();
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        endpoint.drain(out, queue, "s-2", Dialect.V0_3, 200);
 
-        assertEquals(200, response.getStatus());
-        var body = (JsonRpcResponse) response.getEntity();
-        assertNotNull(body.error());
-        assertEquals(A2AModels.ERROR_TASK_NOT_CANCELABLE, body.error().code());
+        String[] lines = out.toString(StandardCharsets.UTF_8).split("\n\n");
+        assertEquals(2, lines.length);
+        Map<String, Object> last = new ObjectMapper().readValue(lines[1].substring(6), Map.class);
+        var result = (Map<String, Object>) last.get("result");
+        assertEquals("status-update", result.get("kind"));
+        assertEquals(true, result.get("final"));
+        assertEquals("working", ((Map<String, Object>) result.get("status")).get("state"));
+    }
+
+    @Test
+    void stream_refusalBeforeTheStream_isAnOrdinaryJsonRpcError() throws Exception {
+        endpoint = createEndpoint(true, false);
+        doThrow(new A2ABusyException("busy")).when(taskHandler).stream(eq(AGENT_ID), any(), any());
+        Map<String, Object> params = Map.of("message", Map.of("parts", List.of(Map.of("kind", "text", "text", "Hello"))));
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "message/stream", params, "s-3"));
+
+        assertEquals(503, response.getStatus());
     }
 
     // ==================== JSON-RPC response structure ====================
 
     @Test
-    void handleJsonRpc_responseContainsJsonRpcVersion() {
+    void handleJsonRpc_responseContainsJsonRpcVersionAndId() {
         endpoint = createEndpoint(true, false);
-        var request = new JsonRpcRequest("2.0", "tasks/get", Map.of("id", "t1"), "req-id");
-        var task = new A2ATask("t1", null, TaskState.completed, List.of(), List.of(), null);
-        when(taskHandler.handleTaskGet("t1")).thenReturn(task);
+        when(taskHandler.get("t1", null)).thenReturn(completedTask("t1"));
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        var body = (JsonRpcResponse) endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/get", Map.of("id", "t1"), "req-id"))
+                .getEntity();
 
-        var body = (JsonRpcResponse) response.getEntity();
         assertEquals("2.0", body.jsonrpc());
         assertEquals("req-id", body.id());
     }
@@ -540,14 +661,26 @@ class RestA2AEndpointTest {
     @Test
     void handleJsonRpc_errorResponsePreservesId() {
         endpoint = createEndpoint(true, false);
-        var request = new JsonRpcRequest("2.0", "unknown_method", Map.of(), 42);
 
-        Response response = endpoint.handleJsonRpc(AGENT_ID, request);
+        var body = (JsonRpcResponse) endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "unknown_method", Map.of(), 42))
+                .getEntity();
 
-        var body = (JsonRpcResponse) response.getEntity();
-        assertEquals("2.0", body.jsonrpc());
         assertEquals(42, body.id());
         assertNotNull(body.error());
         assertNull(body.result());
+    }
+
+    // ==================== card paths ====================
+
+    @Test
+    void wellKnownCardPaths_serveTheSameCards() {
+        endpoint = createEndpoint(true, false);
+        var defaultCard = card("A", "d", "u", "EDDI", "1", null, null, null);
+        var agentCard = card("B", "d", "u", "EDDI", "1", null, null, null);
+        when(agentCardService.getDefaultAgentCard()).thenReturn(defaultCard);
+        when(agentCardService.getAgentCard(AGENT_ID)).thenReturn(agentCard);
+
+        assertEquals(defaultCard, endpoint.getDefaultAgentCardLegacyPath().getEntity());
+        assertEquals(agentCard, endpoint.getAgentCardWellKnown(AGENT_ID).getEntity());
     }
 }

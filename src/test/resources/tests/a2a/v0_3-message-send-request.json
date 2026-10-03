@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": "req-03",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "kind": "message",
+      "messageId": "msg-03",
+      "role": "user",
+      "parts": [{"kind": "text", "text": "Track order #12345"}],
+      "taskId": "task-continued"
+    },
+    "configuration": {
+      "blocking": false,
+      "acceptedOutputModes": ["text/plain"]
+    }
+  }
+}

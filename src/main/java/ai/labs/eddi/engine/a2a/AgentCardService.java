@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentAuthentication;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentCapabilities;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentCard;
+import ai.labs.eddi.engine.a2a.A2AModels.AgentInterface;
+import ai.labs.eddi.engine.a2a.A2AModels.AgentProvider;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentSkill;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -22,7 +24,9 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -70,6 +74,18 @@ public class AgentCardService {
     private final String oidcAuthServerUrl;
     private final String publicTokenEndpoint;
     private final String keycloakPublicUrl;
+    private final String applicationVersion;
+
+    /**
+     * Input modes every EDDI agent accepts: text parts, and data parts read as
+     * JSON.
+     */
+    static final List<String> INPUT_MODES = List.of("text/plain", "application/json");
+    static final List<String> OUTPUT_MODES = List.of("text/plain");
+
+    /** The name under which the card declares its Bearer scheme. */
+    static final String BEARER_SCHEME = "bearer";
+    static final String OIDC_SCHEME = "oidc";
 
     @Inject
     public AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -77,7 +93,9 @@ public class AgentCardService {
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled,
             @ConfigProperty(name = "quarkus.oidc.auth-server-url") Optional<String> oidcAuthServerUrl,
             @ConfigProperty(name = "eddi.a2a.public-token-endpoint") Optional<String> publicTokenEndpoint,
-            @ConfigProperty(name = "eddi.keycloak.public.url") Optional<String> keycloakPublicUrl) {
+            @ConfigProperty(name = "eddi.keycloak.public.url") Optional<String> keycloakPublicUrl,
+            @ConfigProperty(name = "quarkus.application.version", defaultValue = "unknown") String applicationVersion) {
+        this.applicationVersion = isNullOrEmpty(applicationVersion) ? "unknown" : applicationVersion;
         this.agentStore = agentStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.baseUrl = baseUrl;
@@ -85,6 +103,13 @@ public class AgentCardService {
         this.oidcAuthServerUrl = oidcAuthServerUrl.orElse(null);
         this.publicTokenEndpoint = publicTokenEndpoint.filter(url -> !url.isBlank()).orElse(null);
         this.keycloakPublicUrl = keycloakPublicUrl.filter(url -> !url.isBlank()).orElse(null);
+    }
+
+    /** Without an application version — for tests. */
+    AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore, String baseUrl, boolean authEnabled,
+            Optional<String> oidcAuthServerUrl, Optional<String> publicTokenEndpoint, Optional<String> keycloakPublicUrl) {
+        this(agentStore, documentDescriptorStore, baseUrl, authEnabled, oidcAuthServerUrl, publicTokenEndpoint, keycloakPublicUrl,
+                "unknown");
     }
 
     /**
@@ -302,6 +327,14 @@ public class AgentCardService {
         return "EDDI Agent " + agentId;
     }
 
+    /**
+     * Builds the card. One document serves both protocol versions: the 1.0 fields
+     * ({@code supportedInterfaces}, {@code securitySchemes} in the 1.0 shape,
+     * {@code securityRequirements}) and the 0.3 connection fields ({@code url},
+     * {@code protocolVersion}, {@code preferredTransport}), which a 1.0 client
+     * ignores. Both interfaces name the same URL: the JSON-RPC endpoint tells the
+     * dialects apart by method name.
+     */
     AgentCard buildAgentCard(String agentId, AgentConfiguration config, Integer version) {
         String name = agentDisplayName(agentId, version);
 
@@ -309,25 +342,47 @@ public class AgentCardService {
 
         String agentUrl = baseUrl + "/a2a/agents/" + agentId;
 
-        // Build skills
+        // Build skills. A2A 1.0 requires every skill to carry tags.
         List<AgentSkill> skills = new ArrayList<>();
         if (config.getA2aSkills() != null && !config.getA2aSkills().isEmpty()) {
             for (String skillName : config.getA2aSkills()) {
-                skills.add(new AgentSkill(skillName.toLowerCase().replace(' ', '-'), skillName, "Skill: " + skillName, null, null));
+                String skillId = skillName.toLowerCase().replace(' ', '-');
+                skills.add(new AgentSkill(skillId, skillName, "Skill: " + skillName, List.of(skillId), null));
             }
         } else {
             // Default skill
             skills.add(new AgentSkill("chat", "Conversational AI", "General conversational AI agent powered by EDDI", List.of("chat", "ai"), null));
         }
 
-        var capabilities = new AgentCapabilities(false, false, true);
+        var capabilities = new AgentCapabilities(true, false, false);
+        var interfaces = List.of(new AgentInterface(agentUrl, A2AModels.TRANSPORT_JSONRPC, A2AModels.PROTOCOL_VERSION),
+                new AgentInterface(agentUrl, A2AModels.TRANSPORT_JSONRPC, A2AModels.LEGACY_PROTOCOL_VERSION));
 
-        // Build authentication info if auth is enabled
+        // Security is declared only when the JSON-RPC endpoint actually asks for it.
         AgentAuthentication authentication = null;
+        Map<String, Object> securitySchemes = null;
+        List<Map<String, Object>> securityRequirements = null;
         if (authEnabled) {
-            authentication = new AgentAuthentication(List.of("Bearer"), advertisedTokenEndpoint());
+            String tokenEndpoint = advertisedTokenEndpoint();
+            authentication = new AgentAuthentication(List.of("Bearer"), tokenEndpoint);
+            securitySchemes = new LinkedHashMap<>();
+            Map<String, Object> bearer = new LinkedHashMap<>();
+            bearer.put("scheme", "Bearer");
+            bearer.put("bearerFormat", "JWT");
+            bearer.put("description", tokenEndpoint == null
+                    ? "An OIDC access token for this EDDI deployment"
+                    : "An OIDC access token for this EDDI deployment, issued by " + tokenEndpoint);
+            securitySchemes.put(BEARER_SCHEME, Map.of("httpAuthSecurityScheme", bearer));
+            String issuer = publicTokenEndpoint == null ? publicIssuerUrl() : null;
+            if (issuer != null) {
+                securitySchemes.put(OIDC_SCHEME,
+                        Map.of("openIdConnectSecurityScheme", Map.of("openIdConnectUrl", issuer + "/.well-known/openid-configuration")));
+            }
+            securityRequirements = List.of(Map.of("schemes", Map.of(BEARER_SCHEME, Map.of("list", List.of()))));
         }
 
-        return new AgentCard(name, description, agentUrl, "EDDI", "6.0.0", capabilities, skills, authentication);
+        return new AgentCard(name, description, agentUrl, A2AModels.LEGACY_CARD_PROTOCOL_VERSION, A2AModels.TRANSPORT_JSONRPC, interfaces,
+                new AgentProvider("EDDI", baseUrl), applicationVersion, capabilities, securitySchemes, securityRequirements, INPUT_MODES,
+                OUTPUT_MODES, skills, authentication);
     }
 }

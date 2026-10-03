@@ -1,0 +1,17 @@
+{
+  "task": {
+    "id": "task-uuid",
+    "contextId": "ctx-1",
+    "status": {
+      "state": "TASK_STATE_COMPLETED",
+      "timestamp": "2026-10-03T10:00:00Z"
+    },
+    "artifacts": [
+      {"artifactId": "response", "name": "response", "parts": [{"text": "Sunny, 75°F"}]}
+    ],
+    "history": [
+      {"messageId": "task-uuid-user", "role": "ROLE_USER", "parts": [{"text": "What is the weather?"}], "taskId": "task-uuid", "contextId": "ctx-1"},
+      {"messageId": "task-uuid-agent", "role": "ROLE_AGENT", "parts": [{"text": "Sunny, 75°F"}], "taskId": "task-uuid", "contextId": "ctx-1"}
+    ]
+  }
+}
