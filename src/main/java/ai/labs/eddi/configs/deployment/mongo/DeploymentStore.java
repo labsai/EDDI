@@ -64,6 +64,20 @@ public class DeploymentStore implements IDeploymentStore {
         announce(environment, agentId, agentVersion, deploymentStatus == null ? null : deploymentStatus.toString());
     }
 
+    /**
+     * Status {@value #TRANSIENT} — the receiving nodes deploy it without a record.
+     */
+    @Override
+    public void announceTransientDeployment(String environment, String agentId, Integer agentVersion) {
+        announce(environment, agentId, agentVersion, TRANSIENT);
+    }
+
+    /**
+     * The {@code status} of a {@code deployment.changed} event for an unrecorded
+     * deploy.
+     */
+    public static final String TRANSIENT = "deployed-transient";
+
     @Override
     public List<DeploymentInfo> readDeploymentInfos() throws IResourceStore.ResourceStoreException {
         return storage.readDeploymentInfos();

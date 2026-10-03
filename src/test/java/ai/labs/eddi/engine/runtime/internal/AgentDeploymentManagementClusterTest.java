@@ -15,7 +15,9 @@ import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.deployment.mongo.DeploymentStore;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -29,6 +31,8 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -118,6 +122,31 @@ class AgentDeploymentManagementClusterTest {
         long start = System.nanoTime();
         assertNull(management.awaitClusterDeployment(Environment.production, "agent1", () -> null, Duration.ofMillis(300)));
         assertTrue(System.nanoTime() - start < Duration.ofSeconds(3).toNanos());
+    }
+
+    @Test
+    @DisplayName("an unrecorded (autoDeploy=false) deploy on another node is deployed here too")
+    void transientDeployFromAnotherNode() throws Exception {
+        clustered(true);
+        IRuntime runtime = mock(IRuntime.class);
+        ExecutorService inline = mock(ExecutorService.class);
+        when(inline.submit(any(Runnable.class))).thenAnswer(inv -> {
+            ((Runnable) inv.getArgument(0)).run();
+            return null;
+        });
+        when(runtime.getExecutorService()).thenReturn(inline);
+        when(runtime.getScheduledExecutorService()).thenReturn(mock(ScheduledExecutorService.class));
+        management = new AgentDeploymentManagement(deploymentStore, agentFactory, mock(IAgentStore.class), mock(IAgentsReadiness.class),
+                mock(IConversationMemoryStore.class), mock(IDocumentDescriptorStore.class), mock(IMigrationManager.class),
+                mock(V6RenameMigration.class), mock(V6QuteMigration.class), mock(ChannelConnectorMigration.class),
+                mock(WorkspaceAccessIndexMigration.class), runtime, mock(IWorkflowStore.class), mock(IRuleSetStore.class), 30);
+        clustered(true);
+        when(agentFactory.getAgent(Environment.production, "agent7", 3)).thenReturn(null);
+
+        management.onRemoteDeploymentChange(new ClusterEvent(1, "e1", ClusterEvent.DEPLOYMENT_CHANGED, "n2", "b2", 0L, null,
+                Map.of("env", "production", "agentId", "agent7", "version", 3, "status", DeploymentStore.TRANSIENT)));
+
+        verify(agentFactory).deployAgent(Environment.production, "agent7", 3, null);
     }
 
     @Test

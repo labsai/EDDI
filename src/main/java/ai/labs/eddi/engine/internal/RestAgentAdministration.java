@@ -335,6 +335,10 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                     agentFactory.deployAgent(environment, agentId, version, status -> {
                         if (status == READY && autoDeploy) {
                             deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.deployed);
+                        } else if (status == READY) {
+                            // Not recorded on purpose; in cluster mode the other nodes still
+                            // have to serve it.
+                            deploymentStore.announceTransientDeployment(environment.toString(), agentId, version);
                         }
                     });
                 }

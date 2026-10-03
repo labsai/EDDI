@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.mongo.DeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
@@ -325,6 +326,10 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             runtime.getExecutorService().submit(this::checkDeployments);
             return;
         }
+        if (DeploymentStore.TRANSIENT.equals(status)) {
+            deployTransient(event.getString("env"), agentId, event.get("version"));
+            return;
+        }
         Object version = event.get("version");
         String env = event.getString("env");
         for (Environment environment : Environment.values()) {
@@ -341,6 +346,34 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             } catch (ServiceException e) {
                 LOGGER.warnf("Could not apply a remote undeploy of %s: %s", agentId, e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Another node deployed {@code agentId} with {@code autoDeploy=false}: deploy
+     * it here as well, equally unrecorded, so every node serves it.
+     */
+    private void deployTransient(String env, String agentId, Object version) {
+        if (env == null || version == null) {
+            return;
+        }
+        try {
+            Environment environment = Environment.valueOf(env);
+            Integer agentVersion = Integer.valueOf(String.valueOf(version));
+            runtime.getExecutorService().submit(() -> {
+                try {
+                    IAgent existing = agentFactory.getAgent(environment, agentId, agentVersion);
+                    if (existing == null) {
+                        agentFactory.deployAgent(environment, agentId, agentVersion, null);
+                        LOGGER.infof("Deployed agent %s version %d in %s on this node (deployed on another node, not recorded)",
+                                agentId, agentVersion, environment);
+                    }
+                } catch (Exception e) {
+                    LOGGER.warnf("Could not deploy agent %s version %s locally: %s", agentId, agentVersion, e.getMessage());
+                }
+            });
+        } catch (IllegalArgumentException e) {
+            LOGGER.debugf("Ignoring a transient deployment event with env=%s version=%s", env, version);
         }
     }
 

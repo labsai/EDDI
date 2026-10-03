@@ -25,7 +25,11 @@ to the single-node behaviour it had before.
   against the store as the safety net for a missed event. A request that reaches a node
   for an agent another node has only just deployed no longer answers 404: the node deploys
   it on demand and waits, bounded, for it to become ready (found by the shared live
-  harness through a round-robin load balancer).
+  harness through a round-robin load balancer). A deploy with `autoDeploy=false` — which
+  is deliberately not recorded — is announced too, so every node serves it, and an exported
+  agent archive is copied to a JetStream object store
+  ([`ClusterArchiveStore`](../../src/main/java/ai/labs/eddi/engine/cluster/ClusterArchiveStore.java)),
+  so its download works through any node.
 - **Rate limits and costs** — `ToolRateLimiter` keeps its global and per-tool buckets in KV
   ([`KvRateLimitBackend`](../../src/main/java/ai/labs/eddi/modules/llm/tools/KvRateLimitBackend.java),
   CAS token bucket); `ToolCostTracker` sums budgets cluster-wide. While NATS is down both
