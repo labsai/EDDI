@@ -257,6 +257,10 @@ class ConversationServiceHitlTest {
 
             assertThrows(ResourceStoreException.class,
                     () -> conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL));
+            // The pause is still there, so its timeout must be too: a timeout ABORT
+            // that failed here is re-armed onto this row, and a row deleted up front
+            // turned a finite policy into wait-forever.
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
         }
     }
 

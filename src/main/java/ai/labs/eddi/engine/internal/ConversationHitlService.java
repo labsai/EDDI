@@ -148,9 +148,6 @@ class ConversationHitlService {
             return IConversationService.CancelOutcome.NOT_FOUND;
         }
 
-        // MAJOR-3: Delete stale HITL timeout schedule before cancel
-        deleteHitlTimeoutSchedule(conversationId);
-
         // #2: signal an in-flight execution on this pod. The pipeline checks the
         // flag at task boundaries and stops before the next lifecycle task.
         // CANCEL_IMMEDIATE currently degrades to graceful semantics on the
@@ -168,6 +165,12 @@ class ConversationHitlService {
             changed = conversationMemoryStore.compareAndSetState(conversationId,
                     ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
         }
+        // MAJOR-3: drop the stale HITL timeout schedule — but only once the state
+        // write has gone through. Deleting it first meant a cancel whose CAS failed
+        // (a store error) left the pause in place with no timeout at all: a timeout
+        // ABORT that could not be applied was re-armed onto a row that no longer
+        // existed, and a finite policy became wait-forever.
+        deleteHitlTimeoutSchedule(conversationId);
         if (changed) {
             conversationService.cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             if (pauseCancelled) {
