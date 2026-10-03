@@ -21,6 +21,7 @@ import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
@@ -58,6 +59,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -137,6 +139,14 @@ public class UpgradeExecutor {
         var outcome = new Outcome();
         metrics.upgradeAttempted();
         try {
+            // 0. The caller must be able to EDIT the target before anything is written.
+            // The writes below each go through a guarded REST store, but the agent —
+            // the one write that would refuse a caller holding only VIEW or USE — comes
+            // LAST, after snippets, extensions and workflows have already been created
+            // or versioned. Refusing up front leaves nothing half-applied.
+            if (resourceAccessGuard != null) {
+                resourceAccessGuard.requireAccess(targetAgentId, AccessLevel.EDIT, "agent");
+            }
             // 1. Build the preview to get the match map. Content is requested because
             // the target's current JSON is needed to put back values the export's
             // secret scrubber replaced with ${vault:REDACTED} — see
@@ -331,6 +341,11 @@ public class UpgradeExecutor {
             // Wrapping it turned the one actionable failure of a sync into a 500.
             metrics.upgradeFailed();
             LOGGER.errorf(e, "Upgrade failed for target agent %s", LogSanitizer.sanitize(targetAgentId));
+            throw e;
+        } catch (ForbiddenException e) {
+            // The caller's refusal, not a server fault: re-thrown as is so the
+            // endpoint answers 403 rather than wrapping it into a 500.
+            metrics.upgradeFailed();
             throw e;
         } catch (Exception e) {
             metrics.upgradeFailed();

@@ -312,6 +312,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * uploader can fix it), 500 for everything else.
      */
     static WebApplicationException archiveReadFailure(String prefix, Exception e) {
+        if (deniedAccess(e)) {
+            // The guard's own message ("Access denied: you do not have edit access to
+            // this agent") is authored for the caller and names no id or internal.
+            String message = prefix + accessDenialMessage(e);
+            return new WebApplicationException(message, Response.status(Response.Status.FORBIDDEN)
+                    .entity(Map.of("error", message))
+                    .type(MediaType.APPLICATION_JSON)
+                    .build());
+        }
         for (Throwable cause = e; cause != null; cause = cause.getCause()) {
             if (cause instanceof JsonProcessingException json) {
                 String detail = json.getOriginalMessage();
@@ -3434,7 +3443,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 : cause.getMessage();
         Response.Status status = causedByRemoteRead(cause)
                 ? Response.Status.BAD_GATEWAY
-                : Response.Status.INTERNAL_SERVER_ERROR;
+                : (deniedAccess(cause) ? Response.Status.FORBIDDEN : Response.Status.INTERNAL_SERVER_ERROR);
         // The message is set explicitly as well as the entity: a batch records
         // getMessage() per row, and the Response-only constructor derives that from
         // the status ("HTTP 502 Bad Gateway"), which is exactly the row where the
@@ -3444,6 +3453,35 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         .entity(Map.of("error", what + ": " + reason))
                         .type(MediaType.APPLICATION_JSON)
                         .build());
+    }
+
+    /**
+     * Whether this failure, or anything that caused it, was the access guard
+     * refusing the caller. The upgrade executor and the structural matcher wrap
+     * whatever they catch, so a refusal arrived here as a 500 "Upgrade failed".
+     */
+    static boolean deniedAccess(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof ForbiddenException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static String accessDenialMessage(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof ForbiddenException && current.getMessage() != null) {
+                return current.getMessage();
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return "Access denied";
     }
 
     /**

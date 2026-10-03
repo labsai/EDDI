@@ -198,6 +198,7 @@ fault and the operator can act on both:
 | Status | Meaning |
 |--------|---------|
 | `400 Bad Request` | The source URL is malformed, or this deployment's policy refuses it — the body names the setting that would allow it, see [Reaching the source instance](#reaching-the-source-instance). Also answered when `selectedResources` is present but names nothing |
+| `403 Forbidden` | The caller may not change the target agent. An upgrade (sync, or `strategy=upgrade` from a ZIP) needs **EDIT** on `targetAgentId` and is refused before anything is written; a preview needs VIEW. Until this was checked up front, a caller without EDIT had snippets, extensions and workflows written before the final agent write refused, and saw a `500` |
 | `404 Not Found` | The named `targetAgentId` does not exist here |
 | `409 Conflict` | No `targetAgentId` was named and more than one local agent was promoted from this source agent. The body lists them; name one, or pass `createNew=true` |
 | `502 Bad Gateway` | The source instance could not be read: down, addressed wrongly, or refusing the token. The body carries the underlying reason |

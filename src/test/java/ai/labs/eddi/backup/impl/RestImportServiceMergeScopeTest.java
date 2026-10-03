@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
 import com.fasterxml.jackson.core.JsonParseException;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -139,6 +140,22 @@ class RestImportServiceMergeScopeTest {
 
         assertEquals(400, refused.getResponse().getStatus());
         assertTrue(String.valueOf(refused.getResponse().getEntity()).contains("escapes target directory"));
+    }
+
+    @Test
+    @DisplayName("an upgrade preview the guard refuses on the target agent answers 403, not 500")
+    void upgradePreviewWithoutAccessIsForbidden() throws Exception {
+        StructuralMatcher matcher = mock(StructuralMatcher.class);
+        when(matcher.buildPreview(any(), eq("target-agent"), eq(true)))
+                .thenThrow(new ForbiddenException("Access denied: you do not have view access to this agent"));
+        var importer = new RestImportService(mock(IZipArchive.class), null, null, descriptorStore, null, matcher, null, null, null, guard,
+                spaceContext, null, true, false, Optional.empty());
+
+        var refused = assertThrows(WebApplicationException.class,
+                () -> importer.previewImport(new ByteArrayInputStream(new byte[]{1}), "target-agent"));
+
+        assertEquals(403, refused.getResponse().getStatus());
+        assertTrue(String.valueOf(refused.getResponse().getEntity()).contains("view access"));
     }
 
     @Test
