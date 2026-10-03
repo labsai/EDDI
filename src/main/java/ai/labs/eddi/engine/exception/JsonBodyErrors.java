@@ -77,6 +77,12 @@ final class JsonBodyErrors {
     private static String firstLine(String text) {
         int newline = text.indexOf('\n');
         String line = newline >= 0 ? text.substring(0, newline) : text;
+        // Jackson appends where an enclosing array or object started, as a source
+        // description naming its own configuration features: noise for the sender.
+        int source = line.indexOf(" (for ");
+        if (source > 0) {
+            line = line.substring(0, source);
+        }
         return line.length() > 200 ? line.substring(0, 200) + "…" : line;
     }
 }

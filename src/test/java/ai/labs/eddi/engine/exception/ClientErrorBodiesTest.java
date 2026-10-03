@@ -118,6 +118,7 @@ class ClientErrorBodiesTest {
                     .toResponse(new WebApplicationException(cause, Response.Status.BAD_REQUEST));
             String message = message(response);
             assertTrue(message.startsWith("The request body is not valid JSON at line 1"), message);
+            assertFalse(message.contains("Source") || message.contains("StreamReadFeature"), message);
         }
 
         @Test
