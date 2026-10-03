@@ -249,7 +249,7 @@ class RestAgentAdministrationVersionFollowingTest {
 
             assertEquals(202, admin.undeployAgent(ENV, AGENT, 1, false, false).getStatus());
 
-            verify(scheduleStore, never()).setScheduleEnabled(any(), eq(false), any());
+            verify(scheduleStore, never()).setScheduleEnabled(any(), eq(false), any(), any());
         }
 
         @Test
@@ -264,7 +264,7 @@ class RestAgentAdministrationVersionFollowingTest {
 
             assertEquals(202, admin.undeployAgent(ENV, AGENT, 1, false, false).getStatus());
 
-            verify(scheduleStore).setScheduleEnabled("sched-1", false, null);
+            verify(scheduleStore).setScheduleEnabled("sched-1", false, null, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
         }
     }
 

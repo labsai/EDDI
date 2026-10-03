@@ -20,6 +20,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import org.jboss.logging.Logger;
 
+import java.util.LinkedHashSet;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashSet;
@@ -366,6 +367,66 @@ public class ResourceAccessGuard {
         }
         AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, CallerSpaces.of(principal, Set.of()), settings.admitsLegacy());
         return granted != null && granted.includes(AccessLevel.USE);
+    }
+
+    /**
+     * {@link #principalMayUse(String, String, boolean)}, additionally honouring
+     * shares with the teams in {@code teamSubjects} — a snapshot of the principal's
+     * team subjects taken earlier from their own authenticated request
+     * ({@link #currentTeamSubjects()}).
+     * <p>
+     * For engine work done later on a principal's behalf, a scheduled fire being
+     * the case it exists for: the plain form refuses everything shared with a team,
+     * so re-checking USE with it would disable every schedule on a team-shared
+     * agent. The snapshot cannot notice the principal leaving a team — nothing
+     * server-side knows that without their token — but it does notice the share
+     * itself being withdrawn, which is the revocation that matters here.
+     */
+    public boolean principalMayUse(String resourceId, String principal, Collection<String> teamSubjects, boolean principalIsAdmin) {
+        if (!settings.isEnforcing() || principalIsAdmin) {
+            return true;
+        }
+        if (resourceId == null || resourceId.isBlank() || principal == null || principal.isBlank()) {
+            return false;
+        }
+        DocumentDescriptor descriptor;
+        try {
+            descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+        } catch (ResourceNotFoundException e) {
+            return settings.admitsLegacy();
+        } catch (ResourceStoreException e) {
+            LOGGER.warnf("Could not load descriptor for use check on %s: %s", sanitize(resourceId), e.getMessage());
+            return false;
+        }
+        String personal = Subjects.personalSpace(principal.trim());
+        Set<String> subjects = new LinkedHashSet<>();
+        subjects.add(personal);
+        if (teamSubjects != null) {
+            teamSubjects.stream().filter(t -> t != null && !t.isBlank()).forEach(subjects::add);
+        }
+        CallerSpaces caller = new CallerSpaces(Set.of(principal.trim()), subjects, subjects);
+        AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, caller, settings.admitsLegacy());
+        return granted != null && granted.includes(AccessLevel.USE);
+    }
+
+    /**
+     * The current caller's team subjects (their personal space excluded), for
+     * {@link #principalMayUse(String, String, Collection, boolean)} to be asked
+     * later on their behalf. Empty for an anonymous caller.
+     */
+    public List<String> currentTeamSubjects() {
+        CallerSpaces caller = spaceContext.current();
+        if (caller == null) {
+            return List.of();
+        }
+        Set<String> personal = new LinkedHashSet<>();
+        caller.selfPrincipals().forEach(p -> personal.add(Subjects.personalSpace(p)));
+        return caller.subjects().stream().filter(subject -> !personal.contains(subject)).toList();
+    }
+
+    /** Whether the current caller is an administrator. */
+    public boolean callerIsAdmin() {
+        return ownershipValidator.isAdmin(identity);
     }
 
     /**

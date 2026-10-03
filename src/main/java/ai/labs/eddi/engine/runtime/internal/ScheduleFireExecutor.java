@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -94,13 +96,20 @@ public class ScheduleFireExecutor {
     ToolCostTracker toolCostTracker;
 
     /**
+     * Re-checks, on every agent fire, that the schedule's creator may still use the
+     * agent. Null only in unit tests that do not exercise the check.
+     */
+    @Inject
+    ResourceAccessGuard resourceAccessGuard;
+
+    /**
      * How long a single conversation fire may take before it is abandoned as
      * failed.
      * <p>
-     * Defaults to the same 5 minutes the hard-coded constant used, and to the same
-     * value as {@code eddi.schedule.lease-timeout} — the window after which another
-     * instance may reclaim the schedule anyway, so waiting longer than the lease
-     * serves no purpose. A deployment that raises the lease can now raise this too.
+     * Defaults to the same 5 minutes the hard-coded constant used. The poller
+     * bounds every fire (Dream, ingestion and cadence included) by the same
+     * property, and keeps {@code eddi.schedule.lease-timeout} strictly longer so a
+     * running fire's claim cannot be stolen.
      */
     @ConfigProperty(name = "eddi.schedule.fire-timeout", defaultValue = "5m")
     Duration fireTimeout = DEFAULT_FIRE_TIMEOUT;
@@ -184,6 +193,11 @@ public class ScheduleFireExecutor {
                 LOGGER.errorf(e, "[SCHEDULE] Failed to log HITL timeout fire for schedule %s", schedule.getId());
             }
             return hitlFireLog;
+        }
+
+        String revoked = creatorAccessRevoked(schedule);
+        if (revoked != null) {
+            return refuseRevokedFire(schedule, instanceId, attemptNumber, revoked);
         }
 
         if (DreamService.isDreamSchedule(md)) {
@@ -334,7 +348,7 @@ public class ScheduleFireExecutor {
                 interrupted = true;
             }
             status = ScheduleConfiguration.FireStatus.FAILED.name();
-            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            errorMessage = failureMessage(e);
             LOGGER.warnf(e, "[SCHEDULE] Fire failed for schedule '%s' (id=%s): %s", schedule.getName(), schedule.getId(), errorMessage);
         }
 
@@ -361,6 +375,67 @@ public class ScheduleFireExecutor {
             restoreInterrupt(interrupted);
         }
 
+        return fireLog;
+    }
+
+    /**
+     * Whether the person who created this schedule has lost the right to use its
+     * agent since — the grant was revoked, the agent was unshared from their team,
+     * or it stopped being published.
+     * <p>
+     * The USE gate runs at create time, where the human is; the fire runs with
+     * server identity, so without this a schedule kept talking to an agent its
+     * creator could no longer open. The check uses the creator's access snapshot
+     * ({@code creatorTeams}, {@code creatorAdmin}) so a share with one of their
+     * teams still counts — asking about the bare principal, as
+     * {@code principalMayUse(id, principal)} does, would disable every schedule on
+     * a team-shared agent. Team cadences, ingestion and HITL timeouts are governed
+     * by their group, knowledge base and conversation instead and never reach here;
+     * a schedule with no recorded creator (older rows, internally minted ones) is
+     * left alone, as there is nobody to re-check. With workspaces off, everything
+     * is admitted, as everywhere else.
+     *
+     * @return null when the fire may run, otherwise why it may not
+     */
+    String creatorAccessRevoked(ScheduleConfiguration schedule) {
+        if (resourceAccessGuard == null || RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata())
+                || TeamCadenceService.isTeamCadenceSchedule(schedule.getMetadata())) {
+            return null;
+        }
+        String creator = schedule.getCreatedBy();
+        String agentId = schedule.getAgentId();
+        if (ScheduleOwnerScope.isShared(creator) || agentId == null || agentId.isBlank()) {
+            return null;
+        }
+        if (resourceAccessGuard.principalMayUse(agentId, creator, schedule.getCreatorTeams(), schedule.isCreatorAdmin())) {
+            return null;
+        }
+        return "The schedule's creator can no longer use agent " + agentId
+                + " (access was revoked or unshared) — the schedule was disabled; re-enable it once access is restored";
+    }
+
+    /**
+     * Records a fire refused by {@link #creatorAccessRevoked} as FAILED and
+     * disables the schedule with {@code disabledReason=access-revoked}, so it
+     * neither retries into the same refusal nor comes back on the agent's next
+     * redeploy. Re-enabling it is a deliberate act, and the next fire checks again.
+     */
+    private ScheduleFireLog refuseRevokedFire(ScheduleConfiguration schedule, String instanceId, int attemptNumber, String reason) {
+        Instant now = Instant.now();
+        LOGGER.warnf("[SCHEDULE] Fire of schedule '%s' (id=%s) refused: %s", sanitize(schedule.getName()), sanitize(schedule.getId()),
+                reason);
+        try {
+            scheduleStore.setScheduleEnabled(schedule.getId(), false, null, ScheduleConfiguration.DISABLED_ACCESS_REVOKED);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Could not disable schedule %s after its creator lost access", sanitize(schedule.getId()));
+        }
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), now,
+                Instant.now(), ScheduleConfiguration.FireStatus.FAILED.name(), instanceId, null, reason, attemptNumber, 0.0);
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log refused fire for schedule %s", sanitize(schedule.getId()));
+        }
         return fireLog;
     }
 
@@ -394,6 +469,19 @@ public class ScheduleFireExecutor {
      * exists to write — leaving the attempt invisible on exactly the path where it
      * matters most.
      */
+    /**
+     * The fire log's error text. An interrupt is named for what it almost always is
+     * — the poller cutting the fire off at {@code eddi.schedule.fire-timeout} — so
+     * a run that was too long is not mistaken for one that broke.
+     */
+    String failureMessage(Exception e) {
+        if (e instanceof InterruptedException) {
+            return "Interrupted: the fire exceeded eddi.schedule.fire-timeout (" + (fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT)
+                    + ") and was cancelled";
+        }
+        return e.getClass().getSimpleName() + ": " + e.getMessage();
+    }
+
     private static void restoreInterrupt(boolean interrupted) {
         if (interrupted) {
             Thread.currentThread().interrupt();
@@ -479,7 +567,7 @@ public class ScheduleFireExecutor {
                 interrupted = true;
             }
             status = ScheduleConfiguration.FireStatus.FAILED.name();
-            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            errorMessage = failureMessage(e);
             LOGGER.errorf(e, "[SCHEDULE] Ingestion threw for schedule '%s' (id=%s)", schedule.getName(),
                     schedule.getId());
         }
@@ -565,7 +653,7 @@ public class ScheduleFireExecutor {
                 interrupted = true;
             }
             status = ScheduleConfiguration.FireStatus.FAILED.name();
-            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            errorMessage = failureMessage(e);
             LOGGER.errorf(e, "[SCHEDULE] Dream consolidation threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
         }
 
@@ -619,7 +707,7 @@ public class ScheduleFireExecutor {
                 interrupted = true;
             }
             status = ScheduleConfiguration.FireStatus.FAILED.name();
-            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            errorMessage = failureMessage(e);
             LOGGER.errorf(e, "[SCHEDULE] Team cadence threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
         }
 

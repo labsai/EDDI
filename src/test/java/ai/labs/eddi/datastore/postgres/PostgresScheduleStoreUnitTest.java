@@ -940,9 +940,20 @@ class PostgresScheduleStoreUnitTest {
         // when
         sut.setScheduleEnabled("sched-1", false, null);
 
-        // then — should use the shorter SQL
+        // then — should use the shorter SQL, recording no system reason
         verify(preparedStatement).setBoolean(1, false);
-        verify(preparedStatement).setString(3, "sched-1");
+        verify(preparedStatement).setString(2, null);
+        verify(preparedStatement).setString(4, "sched-1");
+    }
+
+    @Test
+    void setScheduleEnabled_disableWithReason_recordsIt() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.setScheduleEnabled("sched-1", false, null, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+
+        verify(preparedStatement).setString(2, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+        verify(preparedStatement).setString(4, "sched-1");
     }
 
     @Test

@@ -265,6 +265,21 @@ class ResourceAccessGuardTest {
         }
 
         @Test
+        @DisplayName("a share with one of the principal's teams counts when their team snapshot is passed")
+        void teamShareCountsWithSnapshot() throws Exception {
+            var shared = ownedBy("alice");
+            shared.setGrants(List.of(new ResourceGrant(Subjects.team("support"), AccessLevel.USE.name(), "alice", new Date(0))));
+            DescriptorAccess.rebuildIndex(shared);
+            var guard = guardReturning(shared);
+
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "bob"), "the bare principal form refuses team shares");
+            assertTrue(guard.principalMayUse(RESOURCE_ID, "bob", List.of(Subjects.team("support")), false));
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "bob", List.of(Subjects.team("sales")), false));
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "bob", null, false));
+            assertTrue(guard.principalMayUse(RESOURCE_ID, "bob", List.of(), true), "an admin creator is admitted");
+        }
+
+        @Test
         @DisplayName("with workspaces off everything is admitted, as everywhere else")
         void disabledAdmitsEverything() {
             var off = settings(false, true, WorkspaceSettings.LEGACY_SHARED);

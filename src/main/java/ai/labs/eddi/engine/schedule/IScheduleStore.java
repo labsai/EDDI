@@ -60,7 +60,18 @@ public interface IScheduleStore {
      * @param nextFire
      *            recomputed nextFire (only applied when enabling), may be null
      */
-    void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire)
+    default void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        setScheduleEnabled(scheduleId, enabled, nextFire, null);
+    }
+
+    /**
+     * {@link #setScheduleEnabled(String, boolean, Instant)}, recording why the
+     * system disabled the schedule ({@code ScheduleConfiguration#disabledReason}).
+     * Enabling always clears the reason; disabling stores {@code disabledReason},
+     * where {@code null} means a person switched it off.
+     */
+    void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire, String disabledReason)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
     /**

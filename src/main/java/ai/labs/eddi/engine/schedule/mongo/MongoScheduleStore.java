@@ -85,6 +85,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String STATUS = "status";
     private static final String METADATA = "metadata";
     private static final String PERSISTENT_CONVERSATION_ID = "persistentConversationId";
+    private static final String DISABLED_REASON = "disabledReason";
 
     private final MongoCollection<Document> scheduleCollection;
     /**
@@ -297,13 +298,14 @@ public class MongoScheduleStore implements IScheduleStore {
     // Fix #3: Atomic field-level updates instead of replaceOne() for targeted
     // changes
     @Override
-    public void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire)
+    public void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire, String disabledReason)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         try {
             Instant now = Instant.now();
             var updates = new ArrayList<Bson>();
             updates.add(set(ENABLED, enabled));
             updates.add(set(UPDATED_AT, epochMillis(now)));
+            updates.add(set(DISABLED_REASON, enabled ? null : disabledReason));
 
             if (enabled) {
                 // Clearing the failure state is what "enable" MEANS, and it must not

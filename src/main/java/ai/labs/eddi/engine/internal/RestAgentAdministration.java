@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
@@ -36,9 +38,9 @@ import ai.labs.eddi.utils.RuntimeUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.util.concurrent.atomic.AtomicReference;
 import java.time.Instant;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -331,18 +333,33 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
 
         Callable<Void> deployAgentCallable = () -> {
             try {
-                if (EnumSet.of(NOT_FOUND, ERROR).contains(checkDeploymentStatus(environment, agentId, version))) {
+                Status outcome = checkDeploymentStatus(environment, agentId, version);
+                if (EnumSet.of(NOT_FOUND, ERROR).contains(outcome)) {
+                    var reported = new AtomicReference<Status>();
                     agentFactory.deployAgent(environment, agentId, version, status -> {
+                        reported.set(status);
                         if (status == READY && autoDeploy) {
                             deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.deployed);
                         }
                     });
+                    // AgentFactory.deployAgent does not throw on a failed deployment: a
+                    // store/workflow error or a vault-grant refusal marks the agent ERROR,
+                    // reports it to the callback and returns normally. Announcing READY
+                    // regardless told every waiter the agent was up and re-enabled its
+                    // schedules, which then failed on every fire.
+                    outcome = reported.get() != null ? reported.get() : checkDeploymentStatus(environment, agentId, version);
                 }
 
-                deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, READY));
-
-                // Lifecycle hook: auto-enable schedules for this agent
-                enableSchedulesForAgent(agentId);
+                if (outcome == READY) {
+                    deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, READY));
+                    // Lifecycle hook: re-enable the schedules the undeploy switched off.
+                    enableSchedulesForAgent(agentId);
+                } else if (outcome != IN_PROGRESS) {
+                    log.warnf("Deployment of agent %s v%s finished %s — not announcing READY and leaving its schedules as they are",
+                            sanitize(agentId), version, outcome);
+                    deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, ERROR));
+                }
+                // IN_PROGRESS: another caller's deployment owns the outcome and fires it.
 
             } catch (Exception e) {
                 handleDeploymentException(e, agentId, version, environment);
@@ -359,8 +376,6 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
 
         if (e instanceof ServiceException) {
             throwError(agentId, version, (ServiceException) e, "Error while deploying agent! (agentId=%s , version=%s)");
-        } else if (e instanceof IllegalAccessException) {
-            throwErrorForbidden(agentId, version, (IllegalAccessException) e);
         } else {
             throw sneakyThrow(e);
         }
@@ -557,10 +572,6 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 if (disableSchedules) {
                     disableSchedulesForAgent(agentId);
                 }
-            } catch (ServiceException e) {
-                throwError(agentId, version, e, "Error while undeploying agent! (agentId=%s , version=%s)");
-            } catch (IllegalAccessException e) {
-                return throwErrorForbidden(agentId, version, e);
             } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
                 throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -660,20 +671,20 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         throw sneakyThrow(e);
     }
 
-    private Void throwErrorForbidden(String agentId, Integer version, IllegalAccessException e) {
-        String message = "Agent deployment is currently in progress! (agentId=%s , version=%s)";
-        message = String.format(message, sanitize(agentId), version);
-        log.error(message, e);
-        throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
-    }
-
     // --- Schedule Lifecycle Hooks ---
 
+    /**
+     * Re-enables the schedules {@link #disableSchedulesForAgent} switched off —
+     * those marked {@code disabledReason=agent-undeployed} — and nothing else. It
+     * used to re-enable every disabled schedule of the agent on every deploy,
+     * including a no-op redeploy, so a schedule a user had deliberately switched
+     * off (or one disabled because its creator lost access) came back on its own.
+     */
     private void enableSchedulesForAgent(String agentId) {
         try {
             var schedules = scheduleStore.readSchedulesByAgentId(agentId);
             for (var schedule : schedules) {
-                if (!schedule.isEnabled()) {
+                if (!schedule.isEnabled() && ScheduleConfiguration.DISABLED_BY_UNDEPLOY.equals(schedule.getDisabledReason())) {
                     var nextFire = schedule.getNextFire() != null ? schedule.getNextFire() : Instant.now();
                     scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
                     log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy", sanitize(schedule.getName()),
@@ -685,12 +696,21 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         }
     }
 
+    /**
+     * Switches the agent's schedules off while it is undeployed, marking each
+     * {@code disabledReason=agent-undeployed} so the next deploy restores exactly
+     * these. HITL approval timeouts are left armed: they belong to a waiting
+     * conversation, not to the agent's cadence, and a timeout that falls due while
+     * the agent is away is re-armed until it is back (SchedulePollerService).
+     * Disabling one here and re-enabling it on redeploy used to fire it at once,
+     * ahead of its due time.
+     */
     private void disableSchedulesForAgent(String agentId) {
         try {
             var schedules = scheduleStore.readSchedulesByAgentId(agentId);
             for (var schedule : schedules) {
-                if (schedule.isEnabled()) {
-                    scheduleStore.setScheduleEnabled(schedule.getId(), false, null);
+                if (schedule.isEnabled() && !HitlSchedules.isHitlTimeout(schedule.getMetadata())) {
+                    scheduleStore.setScheduleEnabled(schedule.getId(), false, null, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
                     log.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", sanitize(schedule.getName()),
                             sanitize(schedule.getId()), sanitize(agentId));
                 }

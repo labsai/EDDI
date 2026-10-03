@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -815,8 +816,8 @@ class ScheduleFireExecutorTest {
             // The attempt still has to be recorded — restoring the flag must not
             // short-circuit the fire log.
             assertEquals(FireStatus.FAILED.name(), result.status());
-            assertTrue(result.errorMessage().startsWith("InterruptedException"),
-                    "expected the interrupt to be recorded, got: " + result.errorMessage());
+            assertTrue(result.errorMessage().startsWith("Interrupted: the fire exceeded eddi.schedule.fire-timeout"),
+                    "expected the interrupt to be recorded as a fire-timeout cancellation, got: " + result.errorMessage());
             verify(scheduleStore).logFire(argThat(log -> log.status().equals(FireStatus.FAILED.name())));
         } finally {
             // Never let the flag leak into the next test on this thread.
@@ -997,6 +998,47 @@ class ScheduleFireExecutorTest {
         verify(hitlTimeoutHandler).handleTimeout(any());
     }
 
+    // --- USE re-check at fire time (workspaces) ---
+
+    @Test
+    void fire_creatorLostAccess_isRefusedAndDisabled_withoutTalkingToTheAgent() throws Exception {
+        var guard = mock(ResourceAccessGuard.class);
+        setField(executor, "resourceAccessGuard", guard);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("sched-revoked");
+        schedule.setName("nightly");
+        schedule.setAgentId("agent-1");
+        schedule.setCreatedBy("alice");
+        schedule.setCreatorTeams(List.of("team:support"));
+        when(guard.principalMayUse("agent-1", "alice", List.of("team:support"), false)).thenReturn(false);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertTrue(result.errorMessage().contains("can no longer use agent agent-1"), result.errorMessage());
+        verify(scheduleStore).setScheduleEnabled("sched-revoked", false, null, ScheduleConfiguration.DISABLED_ACCESS_REVOKED);
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(conversationService, never()).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void fire_creatorAccessCheck_passesTheTeamSnapshot_soTeamSharedAgentsKeepFiring() {
+        var guard = mock(ResourceAccessGuard.class);
+        setField(executor, "resourceAccessGuard", guard);
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setCreatedBy("alice");
+        schedule.setCreatorTeams(List.of("team:support"));
+        when(guard.principalMayUse("agent-1", "alice", List.of("team:support"), false)).thenReturn(true);
+
+        assertNull(executor.creatorAccessRevoked(schedule));
+
+        // No recorded creator → nobody to re-check (older rows, internal schedules).
+        schedule.setCreatedBy(null);
+        assertNull(executor.creatorAccessRevoked(schedule));
+        verify(guard).principalMayUse("agent-1", "alice", List.of("team:support"), false);
+    }
+
     // --- Dream consolidation dispatch (finding I1) ---
 
     /**
@@ -1121,8 +1163,8 @@ class ScheduleFireExecutorTest {
                     "the Dream fast-path must re-assert the interrupt flag its catch consumed, or the poller "
                             + "keeps firing schedules through shutdown");
             assertEquals(FireStatus.FAILED.name(), result.status());
-            assertTrue(result.errorMessage().startsWith("InterruptedException"),
-                    "expected the interrupt to be recorded, got: " + result.errorMessage());
+            assertTrue(result.errorMessage().startsWith("Interrupted: the fire exceeded eddi.schedule.fire-timeout"),
+                    "expected the interrupt to be recorded as a fire-timeout cancellation, got: " + result.errorMessage());
             verify(scheduleStore).logFire(argThat(log -> log.status().equals(FireStatus.FAILED.name())));
         } finally {
             Thread.interrupted();
