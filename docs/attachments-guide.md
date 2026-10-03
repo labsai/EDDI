@@ -179,7 +179,7 @@ The declared type is checked against the file's content. Images and PDFs must ca
 
 The per-user quotas count every blob owned by the conversation's **owner**, across all of their conversations — an admin uploading into a user's conversation fills that user's quota. Blobs stored before the owner was recorded on them (earlier releases) do not count towards it.
 
-Quotas are enforced atomically: the usage is counted and the blob stored under one lock per scope — a transaction-scoped advisory lock on PostgreSQL, a lease document in `attachments.quota_locks` on MongoDB — so concurrent uploads cannot each see room and together overshoot the limit. A refusal is a `400` with `"code": "ATTACHMENT_REJECTED"` and `"quota": "conversation"` or `"user"`, counted on `eddi_attachments_quota_rejected_total{scope}`.
+Quotas are enforced atomically: the usage is counted and the blob stored under one lock per scope — a transaction-scoped advisory lock on PostgreSQL (`hashtextextended`, so PostgreSQL 11 or newer), a lease document in `attachments.quota_locks` on MongoDB — so concurrent uploads cannot each see room and together overshoot the limit. A refusal is a `400` with `"code": "ATTACHMENT_REJECTED"` and `"quota": "conversation"` or `"user"`, counted on `eddi_attachments_quota_rejected_total{scope}`.
 
 | Response Code | Meaning |
 |---|---|

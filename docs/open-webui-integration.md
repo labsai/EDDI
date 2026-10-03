@@ -608,7 +608,7 @@ A failed turn (conversation state `ERROR`) carries the failing task's digest as 
 
 **All my chats share one conversation.** Either `chat-key-fallback=shared` is set, or the client sends the same `user` (or `X-EDDI-Chat-Id`/`metadata.chat_id`) on every request — an explicit key always wins. With Open WebUI, check that `ENABLE_FORWARD_USER_INFO_HEADERS` is set, so each chat arrives with its own `X-OpenWebUI-Chat-Id`.
 
-**My client gets a new conversation every turn.** It sends only its latest message instead of the history, so every request looks like the opening turn of a new chat. Send an explicit `X-EDDI-Chat-Id` or `metadata.chat_id`, or set `chat-key-fallback=shared`.
+**My client gets a new conversation every turn.** It sends only its latest message instead of the history, so every request looks like the opening turn of a new chat. Send an explicit `X-EDDI-Chat-Id` or `metadata.chat_id`, or set `chat-key-fallback=shared`. Each distinct opening message leaves a conversation and a mapping behind: the idle sweep ends and deletes the conversations after the periods in `eddi.conversations.*`, but the mapping rows are not swept, so a high-volume client of this kind should send an explicit key.
 
 **Every user sees everyone else's memory.** `allow-anonymous=true` with `trust-user-headers=false`, or with the header absent. Set `trust-user-headers=true` and enable header forwarding.
 
