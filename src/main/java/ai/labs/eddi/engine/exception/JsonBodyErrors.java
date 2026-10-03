@@ -9,6 +9,7 @@ import com.fasterxml.jackson.core.JsonLocation;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.exc.StreamConstraintsException;
 import com.fasterxml.jackson.core.exc.StreamReadException;
+import com.fasterxml.jackson.databind.DatabindException;
 import com.fasterxml.jackson.databind.exc.InvalidTypeIdException;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
@@ -30,6 +31,12 @@ final class JsonBodyErrors {
     }
 
     static String describe(JsonProcessingException e) {
+        // The databind layer wraps a parser failure (a syntax error, a parser limit) in
+        // a plain DatabindException; the cause is the one that says what went wrong.
+        if (e instanceof DatabindException && !(e instanceof MismatchedInputException)
+                && e.getCause() instanceof JsonProcessingException cause && cause != e) {
+            return describe(cause);
+        }
         if (e instanceof StreamConstraintsException) {
             // Its message names StreamReadConstraints' getter; the limits themselves are
             // what the sender needs to know about.

@@ -6,8 +6,10 @@ package ai.labs.eddi.engine.exception;
 
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.InputData;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -115,6 +117,17 @@ class ClientErrorBodiesTest {
             Response response = new UnreadableBodyExceptionMapper()
                     .toResponse(new WebApplicationException(cause, Response.Status.BAD_REQUEST));
             String message = message(response);
+            assertTrue(message.startsWith("The request body is not valid JSON at line 1"), message);
+        }
+
+        @Test
+        @DisplayName("a parser failure wrapped by the databind layer is explained by its cause")
+        void wrappedParserFailure() {
+            JsonProcessingException parse = assertThrows(JsonProcessingException.class,
+                    () -> MAPPER.readTree("{\"behaviorGroups\": [}"));
+            var wrapped = JsonMappingException.from((JsonParser) null, "wrapped", parse);
+            String message = message(new UnreadableBodyExceptionMapper()
+                    .toResponse(new WebApplicationException(wrapped, Response.Status.BAD_REQUEST)));
             assertTrue(message.startsWith("The request body is not valid JSON at line 1"), message);
         }
 
