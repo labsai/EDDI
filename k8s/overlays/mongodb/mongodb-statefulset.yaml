@@ -34,7 +34,7 @@ spec:
         fsGroup: 999
       containers:
         - name: mongodb
-          image: mongo:7.0
+          image: mongo:7.0.43
           ports:
             - containerPort: 27017
               name: mongo
