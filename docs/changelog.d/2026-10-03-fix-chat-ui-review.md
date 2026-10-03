@@ -22,6 +22,7 @@ A `?token=` or `ChatConfig` token no longer clears a token that arrived by `post
 **Low items.**
 
 - **Generation guard.** A send's 409/401/403 branches now bail when the user started a new conversation while the request was in flight. Before, they withdrew a bubble, restored a draft and posted a warning into the replacement. Item 4 of the review brief found the same gap in undo, redo, retry, cancel and stop, so those are guarded too, including their `finally` that lowered `isProcessing` under a newer turn.
+- **Attachment uploads across New conversation.** Found in review. An attachment upload that finished after New conversation was staged into the new conversation, so its next message carried a `storageRef` from the abandoned one. [`ChatInput.tsx`](../../ui/chat/src/components/ChatInput.tsx) now drops such an upload and deletes it from the old conversation, which frees its quota. The current conversation id is synced to a ref after commit, as in `ChatWidget`.
 - **URL parameters.** `?theme=` accepts only `dark`, `light` or `system`. An unknown value used to be written into `data-theme` and left the widget unstyled. Each colour parameter must now be a plain colour, and `fontFamily` a plain font list. Before, any token sequence went into a CSS custom property, so a link could carry `url(...)`.
 - **Vite dev proxy.** It now proxies `/conversations`, so attachments work under `npm run dev`. A test checks that every path prefix the API layer calls is proxied.
 - **SSE parser.** It now yields a final frame that has no trailing blank line instead of dropping it. That frame is usually `done` or `error`.
@@ -30,7 +31,7 @@ A `?token=` or `ChatConfig` token no longer clears a token that arrived by `post
 
 ### Verification
 
-- **Chat UI checks:** `npm run typecheck`, `npm run lint` and `vitest` (409 tests, 37 of them new) all pass. 13 mutants were applied to the new behaviour and all 13 were killed.
+- **Chat UI checks:** `npm run typecheck`, `npm run lint` and `vitest` (411 tests, 39 of them new) all pass. 16 mutants were applied to the new behaviour and all 16 were killed.
 - **Backend:** `CspPolicyTest` and the repo guards pass. Removing the `img-src` append fails the new test.
 - **Live:** stock `labsai/eddi:6.5.0` compared with this branch's jar, both with Keycloak on, using a host page on another origin. Evidence is attached to the PR.
 

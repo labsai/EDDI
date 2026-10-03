@@ -142,8 +142,14 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   const chipsRef = useRef<HTMLDivElement>(null);
   const uploadSeq = useRef(0);
   /** The conversation the composer belongs to right now, for upload continuations. */
+  // Synced after commit, not during render (as in ChatWidget): a render React
+  // discards would otherwise leave an id the user never saw here, and an
+  // upload finishing then would be deleted from a conversation that is still
+  // open. Readers are upload continuations, which cannot run before a commit.
   const currentConversationRef = useRef(conversationId);
-  currentConversationRef.current = conversationId;
+  useEffect(() => {
+    currentConversationRef.current = conversationId;
+  }, [conversationId]);
   const atCapacity =
     pendingAttachments.length + uploading.length >= MAX_ATTACHMENTS_PER_TURN;
 
