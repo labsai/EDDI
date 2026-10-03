@@ -155,9 +155,12 @@ describe("generic resource-store handlers answer in the backend's shapes", () =>
       expect(descriptors.length).toBeGreaterThan(0);
       for (const d of descriptors) {
         // parseResourceUri / version pickers read the id and version off this URI.
-        expect(d.resource).toMatch(
-          new RegExp(`^eddi://${rt.extension.replace(/\./g, "\\.")}/${rt.store}/${rt.plural}/[^/?]+\\?version=\\d+$`),
-        );
+        // Compared as a literal prefix rather than spliced into a RegExp, so no
+        // character of the extension, store or plural can act as a metacharacter.
+        const prefix = `eddi://${rt.extension}/${rt.store}/${rt.plural}/`;
+        const resource = d.resource ?? "";
+        expect(resource.startsWith(prefix), `${resource} should start with ${prefix}`).toBe(true);
+        expect(resource.slice(prefix.length)).toMatch(/^[^/?]+\?version=\d+$/);
         expect(d.deleted).toBe(false);
       }
     },
