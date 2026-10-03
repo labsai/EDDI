@@ -145,6 +145,28 @@ class McpGroupToolsTest {
         assertTrue(result.contains("error"));
     }
 
+    @Test
+    void internalFailure_isNotEchoedToTheClient_butGetsAReference() {
+        when(groupStore.readGroupDescriptors(any(), anyInt(), anyInt()))
+                .thenThrow(new RuntimeException("Timed out connecting to mongodb://eddi:hunter2@db-internal:27017 collection descriptors"));
+
+        String result = tools.list_groups(null, null, null);
+
+        assertFalse(result.contains("db-internal"), result);
+        assertFalse(result.contains("hunter2"), result);
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL_ERROR\""), result);
+        assertTrue(result.matches(".*\"reference\":\"[0-9a-f]{8}\".*"), result);
+    }
+
+    @Test
+    void callerError_isStillDescribed() {
+        when(groupStore.createGroup(any())).thenThrow(new IllegalArgumentException("members[1] repeats members[0] ('a')"));
+
+        String result = tools.create_group("G", null, "a,a", null, null, null, null, null, null, null, null);
+
+        assertTrue(result.contains("members[1] repeats members[0]"), result);
+    }
+
     // --- read_group ---
 
     @Test
@@ -423,12 +445,12 @@ class McpGroupToolsTest {
     @Test
     void startGroupDiscussion_handlesException() throws Exception {
         when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any()))
-                .thenThrow(new RuntimeException("Group not found"));
+                .thenThrow(new IResourceStore.ResourceNotFoundException("Group not found."));
 
         String result = tools.start_group_discussion("g1", "Q?", null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Group not found"));
+        assertTrue(result.contains("Group not found"), "a caller's own mistake is still described: " + result);
     }
 
     // --- delete_group_conversation ---
@@ -464,12 +486,13 @@ class McpGroupToolsTest {
     @Test
     void deleteGroupConversation_handlesException() throws Exception {
         stubConversation("gc-bad");
-        doThrow(new RuntimeException("Not found")).when(groupConversationService).deleteGroupConversation("gc-bad");
+        doThrow(new RuntimeException("E11000 at db-internal:27017")).when(groupConversationService).deleteGroupConversation("gc-bad");
 
         String result = tools.delete_group_conversation("gc-bad");
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Not found"));
+        assertFalse(result.contains("db-internal"), "an internal failure's text stays in the server log: " + result);
+        assertTrue(result.contains("reference"), result);
     }
 
     // --- execution model (must stay off the Vert.x event loop) ---

@@ -4,14 +4,18 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import org.jboss.logging.Logger;
 
 import java.util.Collection;
 import java.util.Map;
+import java.util.UUID;
 import jakarta.ws.rs.ClientErrorException;
 
 /**
@@ -172,6 +176,43 @@ final class McpToolUtils {
      */
     static String errorJson(String prefix, Throwable cause) {
         return errorJson(prefix + ": " + describe(cause));
+    }
+
+    /**
+     * The error a tool answers when its body throws, without leaking internals.
+     * <p>
+     * A failure the caller caused and can fix — a 4xx from an in-process REST
+     * store, a validation {@link IllegalArgumentException}, an unknown or stale
+     * resource — is described to them, as {@link #describe} does. Anything else is
+     * this server's problem: its raw message can name datastore hosts, collection
+     * and class names, file paths or a driver's error text, none of which an MCP
+     * client should see. That is logged in full (with the stack) under a short
+     * reference id, and the client gets the reference to quote instead.
+     *
+     * @param log
+     *            the tool class's logger
+     * @param tool
+     *            the tool name, as the client called it
+     */
+    static String toolFailure(Logger log, String tool, Throwable e) {
+        if (isCallerFacing(e)) {
+            log.debugf("%s rejected: %s", tool, describe(e));
+            return errorJson(tool + " failed: " + describe(e));
+        }
+        String reference = UUID.randomUUID().toString().substring(0, 8);
+        log.errorf(e, "%s failed [reference %s]", tool, reference);
+        return errorJson(tool + " failed with an internal error (reference " + reference
+                + "). The details are in the server log under that reference.", "INTERNAL_ERROR", Map.of("reference", reference));
+    }
+
+    /** Whether a failure is one the caller made and may be told about verbatim. */
+    static boolean isCallerFacing(Throwable e) {
+        return e instanceof ClientErrorException || e instanceof IllegalArgumentException
+                || e instanceof IResourceStore.ResourceNotFoundException || e instanceof IResourceStore.ResourceModifiedException
+                // A discussion refusal the engine authored ("no phases are defined", the
+                // depth limit) — but not one that wraps an underlying failure, whose
+                // message is that failure's text.
+                || (e instanceof IGroupConversationService.GroupDiscussionException && e.getCause() == null);
     }
 
     /**
