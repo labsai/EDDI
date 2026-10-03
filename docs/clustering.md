@@ -47,7 +47,8 @@ one node. NATS adds:
 | A node that lost its lease cannot overwrite newer turns | The lease revision is a **fencing token**; both conversation stores refuse a write older than the `_fence` the document carries. The refused turn is dead-lettered with its input. |
 | A crashed node does not block a conversation | Its lease expires (≤ `lease.ttl`), or is taken over at once when the node's presence record is gone or shows a new boot. |
 | Caches stay coherent | Cluster events on the `<prefix>_EVENTS` stream: secrets, global variables, connections, deployments, deleted workflows, agent triggers, user conversations, conversation states, GDPR restriction verdicts. A node that missed events (gap, long disconnect, outbox overflow) flushes everything. |
-| Undeploy reaches every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. |
+| Deploy and undeploy reach every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. A deploy with `autoDeploy=false` (deliberately not recorded) is announced the same way and deployed, unrecorded, on every node. A request that reaches a node before its sweep has caught up deploys the agent there on demand and waits for it (at most 15 s) instead of answering 404. |
+| Exported agent archives download through any node | The archive is also copied to the `<prefix>_ARCHIVES` object store for the export retention; a node without the file fetches it from there. |
 | Cancel/end/GDPR stop reach the running turn | Node-addressed RPC to the lease holder; GDPR stop is a scatter to every node (the user travels as a hash). Group-discussion cancel is forwarded to the node holding the discussion's `g.<id>` lease. |
 | Security and tool state is cluster-wide | KV buckets: replay nonces (`NONCES`), tool rate limits (`RATELIMIT`), per-conversation cost totals (`COSTS`), A2A task mappings (`A2A_*`), paginated tool responses (`TOOL_PAGES`), Slack event de-duplication (`DEDUP`), channel thread locks (`CHANNEL`), audit chain positions (`AUDIT_SEQ`). |
 | Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. |
@@ -169,6 +170,14 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
   page against it, each with a pass/fail verdict.
 
 ## Residual limitations
+
+- **`/mcp` needs client affinity.** An MCP (Streamable HTTP) session lives on
+  the node that answered `initialize`; any other node answers a request with
+  that `Mcp-Session-Id` 404, which makes a compliant client start over. Route
+  `/mcp` so a client stays on one node: by client address
+  (`docker/cluster/nginx.conf` does `hash $remote_addr consistent`), with
+  `sessionAffinity: ClientIP` on a Kubernetes Service that only serves `/mcp`,
+  or with your ingress's cookie affinity. Every other path needs none.
 
 - A Slack follow-up in the thread of a group discussion is routed only by the
   node that ran the discussion (the listener holds live state); on another

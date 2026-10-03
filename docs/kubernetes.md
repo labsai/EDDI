@@ -623,7 +623,9 @@ helm install eddi ./helm/eddi \
 | `nats.tls.*` | off | Client and route TLS from a `kubernetes.io/tls` Secret you provide |
 
 Each replica's node id is its pod name (`EDDI_CLUSTER_NODE_ID`), and the pods are
-spread over nodes and zones. `nats.buildProfileImage` from charts before 2.5.0 is no
+spread over nodes and zones. Every path balances freely except `/mcp`: an MCP session
+lives on the replica that opened it, so route `/mcp` with client or cookie affinity on
+your ingress (see [Clustering → Residual limitations](clustering.md#residual-limitations)). `nats.buildProfileImage` from charts before 2.5.0 is no
 longer read — the published image selects cluster mode at runtime.
 
 ## Monitoring
