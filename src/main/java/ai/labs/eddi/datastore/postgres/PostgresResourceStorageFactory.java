@@ -65,7 +65,7 @@ public class PostgresResourceStorageFactory implements IResourceStorageFactory {
     @Override
     public <T> IResourceStorage<T> create(String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType, String... indexes) {
         return new PostgresResourceStorage<>(dataSourceInstance.get(), collectionName, jsonSerialization, documentType, indexes)
-                .withSubstringSearchIndex(substringSearchIndex);
+                .withSubstringSearchIndex(substringSearchIndex).startFieldIndexSwaps();
     }
 
     /**

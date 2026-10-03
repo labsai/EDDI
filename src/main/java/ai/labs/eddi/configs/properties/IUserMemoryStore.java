@@ -292,7 +292,21 @@ public interface IUserMemoryStore {
     String TEAM_OWNER_PREFIX = "group:";
 
     /**
-     * Text filter across keys and values (v1: regex, v2: semantic search).
+     * Most entries {@link #filterEntries} returns for a non-blank query. The search
+     * is reachable by an LLM tool and by MCP, and a one-letter query matches almost
+     * every entry of a user who has many.
+     */
+    int MAX_FILTER_RESULTS = 200;
+
+    /**
+     * Text filter across keys and values: every term of {@code query} (see
+     * {@code MemorySearchTerms}) must appear, case-insensitively, in the entry's
+     * key, in its value when that is a string, or in a string element of its value
+     * when that is an array. Numbers, booleans and the keys or values of an object
+     * value are not searched — the same on both datastores (PostgreSQL used to
+     * match against the value's JSON text, so {@code "true"} found every boolean
+     * and a key name inside an object value matched). Newest first, at most
+     * {@link #MAX_FILTER_RESULTS} entries. A blank query returns every entry.
      */
     List<UserMemoryEntry> filterEntries(String userId, String query) throws IResourceStore.ResourceStoreException;
 

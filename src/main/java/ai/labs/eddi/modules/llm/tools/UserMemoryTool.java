@@ -279,7 +279,11 @@ public class UserMemoryTool {
             // instead of deleting someone else's memory.
             UserMemoryEntry target = store.getByKey(userId, key).filter(this::isVisibleToThisAgent).orElse(null);
             if (target == null) {
-                target = store.filterEntries(userId, key).stream().filter(entry -> key.equals(entry.key()))
+                // Every entry of the user, not filterEntries: that is a capped substring
+                // search (IUserMemoryStore.MAX_FILTER_RESULTS, newest first), so for a
+                // key whose terms many entries share, this agent's own older entry fell
+                // outside the page and forgetting it answered "not found".
+                target = store.getAllEntries(userId).stream().filter(entry -> key.equals(entry.key()))
                         .filter(this::isVisibleToThisAgent).findFirst().orElse(null);
             }
             if (target == null) {

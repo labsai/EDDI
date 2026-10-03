@@ -181,4 +181,25 @@ class RestUtilitiesTest {
         // Trailing slash is stripped, last segment is the ID
         assertEquals("5262b802dc6c4008b54c7c0b58100f97", resourceId.getId());
     }
+
+    /**
+     * An id is hex (an ObjectId, or the 18+ hex the fixtures use) or a canonical
+     * UUID. Dashes used to be accepted anywhere, so eighteen of them made an "id"
+     * that travelled on to the store.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"------------------", "--------------------------------------", "5262b802-dc6c-4008-b54c-7c0b58100f9",
+            "5262b802dc6c-4008-b54c-7c0b58100f97", "5262b802-dc6c-4008-b54c7c0b58100f97-", "zzzzzzzzzzzzzzzzzzzzzzzz", "abcdef",
+            "5262b802-dc6c-4008-b54c-7c0b58100f9g"})
+    void isValidId_rejectsWhatNoBackendMints(String id) {
+        assertFalse(RestUtilities.isValidId(id), id);
+        assertNull(RestUtilities.extractResourceId(URI.create("eddi://ai.labs.rules/rulestore/rulesets/" + id + "?version=1")).getId());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"5262b802-dc6c-4008-b54c-7c0b58100f97", "5262B802-DC6C-4008-B54C-7C0B58100F97", "507f1f77bcf86cd799439011",
+            "aabbccddeeff112233", "5262b802dc6c4008b54c7c0b58100f97"})
+    void isValidId_acceptsObjectIdsUuidsAndHex(String id) {
+        assertTrue(RestUtilities.isValidId(id), id);
+    }
 }
