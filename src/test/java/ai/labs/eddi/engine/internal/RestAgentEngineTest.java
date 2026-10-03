@@ -673,6 +673,26 @@ class RestAgentEngineTest {
         }
 
         @Test
+        @DisplayName("should resume with 400 + JSON body, not 500, for a malformed conversation id")
+        void malformedConversationIdIsBadRequest() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            // What the Mongo store throws for an id that is not a 24-char hex string.
+            doThrow(new IllegalArgumentException("state should be: hexString has 24 characters"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("not-an-id", false, false, List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(400, resumed.getStatus());
+            assertEquals(Map.of("error", "bad_request", "message", "state should be: hexString has 24 characters"),
+                    resumed.getEntity());
+        }
+
+        @Test
         @DisplayName("should throw ISE for generic exception")
         void genericException() throws Exception {
             var asyncResponse = mock(AsyncResponse.class);
