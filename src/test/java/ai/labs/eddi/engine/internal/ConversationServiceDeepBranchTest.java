@@ -301,8 +301,9 @@ class ConversationServiceDeepBranchTest {
             when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
                     .thenReturn(snapshot);
 
+            // A blank type is an empty one (it used to fall through to JSON).
             var result = conversationService.readConversationLog(CONVERSATION_ID, " ", null);
-            assertEquals("application/json", result.mediaType());
+            assertEquals("text/plain", result.mediaType());
         }
 
         @Test
