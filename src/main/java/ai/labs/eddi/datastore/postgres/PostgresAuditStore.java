@@ -24,7 +24,8 @@ import java.util.*;
  * PostgreSQL implementation of {@link IAuditStore}.
  * <p>
  * Uses a dedicated {@code audit_ledger} table with INSERT-only semantics. No
- * UPDATE or DELETE operations — enforces the write-once contract.
+ * DELETE at all, and UPDATE only for the two GDPR Art. 17 mutations the
+ * contract permits: {@link #pseudonymizeByUserId} and {@link #redactEntry}.
  * <p>
  * Activated via {@code @DefaultBean}.
  *
@@ -400,6 +401,42 @@ public class PostgresAuditStore implements IAuditStore {
     }
 
     // === GDPR ===
+
+    /**
+     * Rewrites {@code user_id}, the {@code data} payload (which carries input,
+     * output, LLM detail, tool calls and actions), {@code hmac} and
+     * {@code agent_signature} of one row — see {@link IAuditStore#redactEntry}.
+     * {@code IS NOT DISTINCT FROM} makes the HMAC condition match an unsigned row
+     * (SQL NULL) as well as a signed one.
+     */
+    @Override
+    public boolean redactEntry(AuditEntry redacted, String expectedHmac) {
+        ensureSchema();
+        var data = new LinkedHashMap<String, Object>();
+        if (redacted.input() != null)
+            data.put("input", redacted.input());
+        if (redacted.output() != null)
+            data.put("output", redacted.output());
+        if (redacted.llmDetail() != null)
+            data.put("llmDetail", redacted.llmDetail());
+        if (redacted.toolCalls() != null)
+            data.put("toolCalls", redacted.toolCalls());
+        if (redacted.actions() != null)
+            data.put("actions", redacted.actions());
+        String sql = "UPDATE audit_ledger SET user_id = ?, data = ?::jsonb, hmac = ?, agent_signature = ?"
+                + " WHERE id = ?::uuid AND hmac IS NOT DISTINCT FROM ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, redacted.userId());
+            ps.setString(2, jsonSerialization.serialize(data));
+            ps.setString(3, redacted.hmac());
+            ps.setString(4, redacted.agentSignature());
+            ps.setString(5, redacted.id());
+            ps.setString(6, expectedHmac);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException | IOException e) {
+            throw new RuntimeException("Failed to redact audit entry", e);
+        }
+    }
 
     /**
      * v5 rows sign a <em>keyed</em> pseudonym, so each key's rows get the pseudonym

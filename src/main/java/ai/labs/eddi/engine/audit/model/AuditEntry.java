@@ -17,9 +17,11 @@ import java.util.Map;
  * calls, actions emitted, cost, and timing.
  * <p>
  * Entries are <strong>write-once</strong>: once persisted to the audit ledger,
- * they must never be modified or deleted. The {@code hmac} field provides
- * tamper detection — if any field is altered after storage, the HMAC will no
- * longer verify.
+ * they are never deleted, and modified only by a GDPR Art. 17 erasure
+ * ({@code IAuditStore.pseudonymizeByUserId} and
+ * {@code IAuditStore.redactEntry}). The {@code hmac} field provides tamper
+ * detection — if any field is altered after storage, the HMAC will no longer
+ * verify; an erasure re-signs only the rows that verified before it.
  * <p>
  * This record implements Tier 3 ("Telemetry Ledger") of the EDDI 3-Tier CQRS
  * architecture and satisfies EU AI Act Articles 17/19 requirements for
@@ -118,7 +120,8 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
     /**
      * Return a copy of this entry with its recorded payload replaced. Used by
      * {@code TurnAuditBuffer} to redact a secret user input BEFORE the entry is
-     * submitted — never after: once signed, an entry's payload is immutable.
+     * submitted, and by {@code AuditLedgerService} to build the GDPR-redacted form
+     * of a stored entry — which it re-signs only when the original verified.
      */
     public AuditEntry withPayload(Map<String, Object> newInput, Map<String, Object> newOutput, Map<String, Object> newLlmDetail,
                                   Map<String, Object> newToolCalls) {
@@ -175,14 +178,13 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
 
     /**
      * Return a copy of this entry with the user identifier replaced — the in-memory
-     * mirror of the single mutation GDPR Art. 17(3)(e) permits on the ledger.
+     * mirror of the pseudonymisation GDPR Art. 17 erasure applies to the ledger.
      * <p>
-     * <strong>Not the production erasure path.</strong> Real pseudonymisation is a
-     * server-side bulk update ({@code IAuditStore.pseudonymizeByUserId}); nothing
-     * in {@code src/main} calls this. It exists so tests can reproduce a
-     * pseudonymised row and assert that it still verifies — which is the property
-     * that stops every routine erasure from manufacturing rows indistinguishable
-     * from tampered ones. Keep it aligned with what the store's {@code updateMany}
+     * Used by {@code AuditLedgerService} to build the redacted form of an erased
+     * user's rows (and of their entries still queued), and by tests to reproduce a
+     * pseudonymised row and assert that it still verifies — the property that stops
+     * every routine erasure from manufacturing rows indistinguishable from tampered
+     * ones. Keep it aligned with what the stores' {@code pseudonymizeByUserId}
      * does, or those tests stop proving anything about production.
      */
     public AuditEntry withUserId(String newUserId) {

@@ -438,4 +438,48 @@ class AuditStoreTest {
 
         assertEquals(11L, result.getFirst().sequence());
     }
+
+    // ==================== GDPR: redactEntry ====================
+
+    private static AuditEntry redactedEntry(String hmac) {
+        return new AuditEntry("entry-1", "conv-1", "agent-1", 1, "gdpr-erased:k1:abc", "production", 0, "ai.labs.llm", "llm", 0, 5L,
+                Map.of("gdprRedaction", Map.of("reason", "GDPR Art. 17 erasure")), null, null, null, List.of("reply"), 0.0, Instant.now(), hmac,
+                null, 3L);
+    }
+
+    @Test
+    @DisplayName("redactEntry — sets the redacted fields, unsets the removed ones, conditional on id and HMAC")
+    void redactEntry_rewritesOnlyTheErasureFields() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getModifiedCount()).thenReturn(1L);
+        when(collection.updateOne(any(Bson.class), any(Document.class))).thenReturn(result);
+
+        assertTrue(store.redactEntry(redactedEntry("v5:new"), "v5:old"));
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        ArgumentCaptor<Document> update = ArgumentCaptor.forClass(Document.class);
+        verify(collection).updateOne(filter.capture(), update.capture());
+        BsonDocument rendered = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertTrue(rendered.toJson().contains("\"_id\": \"entry-1\""), rendered.toJson());
+        assertTrue(rendered.toJson().contains("\"hmac\": \"v5:old\""), "conditional on the HMAC that was read: " + rendered.toJson());
+
+        Document set = update.getValue().get("$set", Document.class);
+        assertEquals("gdpr-erased:k1:abc", set.getString("userId"));
+        assertEquals("v5:new", set.getString("hmac"));
+        assertTrue(set.containsKey("input"));
+        Document unset = update.getValue().get("$unset", Document.class);
+        assertTrue(unset.keySet().containsAll(List.of("output", "llmDetail", "toolCalls", "agentSignature")), unset.toJson());
+        assertFalse(set.containsKey("sequence"), "the chain position is never rewritten");
+        assertFalse(set.containsKey("timestamp"));
+    }
+
+    @Test
+    @DisplayName("redactEntry — a row whose HMAC changed since it was read is not overwritten")
+    void redactEntry_reportsAStaleRow() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getModifiedCount()).thenReturn(0L);
+        when(collection.updateOne(any(Bson.class), any(Document.class))).thenReturn(result);
+
+        assertFalse(store.redactEntry(redactedEntry("v5:new"), "v5:old"));
+    }
 }

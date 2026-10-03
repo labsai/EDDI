@@ -21,6 +21,7 @@ import java.sql.*;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -518,6 +519,42 @@ class PostgresAuditStoreUnitTest {
         verify(preparedStatement).setString(1, AuditHmac.keyedPseudonymFor("user-1", key.pseudonymKey()));
         verify(preparedStatement).setString(3, "v5:" + key.id() + ":%");
         verify(preparedStatement).setString(1, "anon-123");
+    }
+
+    // ─── GDPR: redactEntry ───
+
+    @Test
+    void redactEntry_rewritesOnlyTheErasureColumns_conditionalOnTheHmac() throws Exception {
+        when(jsonSerialization.serialize(any())).thenReturn("{\"input\":{}}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        AuditEntry redacted = new AuditEntry("6f1c1a52-58f2-4b3c-9a9f-2f7bb0a7f1d1", "conv-1", "agent-1", 1, "gdpr-erased:k1:abc", "production",
+                0, "ai.labs.llm", "llm", 0, 5L, Map.of("gdprRedaction", Map.of("reason", "x")), null, null, null, List.of("reply"), 0.0,
+                Instant.now(), "v5:new", null, 2L);
+
+        assertTrue(store.redactEntry(redacted, "v5:old"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String update = sql.getAllValues().getLast();
+        assertTrue(update.startsWith("UPDATE audit_ledger SET user_id = ?, data = ?::jsonb, hmac = ?, agent_signature = ?"), update);
+        assertTrue(update.contains("WHERE id = ?::uuid AND hmac IS NOT DISTINCT FROM ?"), update);
+        assertFalse(update.contains("sequence"), "the chain position is never rewritten");
+        verify(preparedStatement).setString(1, "gdpr-erased:k1:abc");
+        verify(preparedStatement).setString(3, "v5:new");
+        verify(preparedStatement).setString(6, "v5:old");
+        ArgumentCaptor<Object> data = ArgumentCaptor.forClass(Object.class);
+        verify(jsonSerialization, atLeastOnce()).serialize(data.capture());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) data.getValue();
+        assertEquals(Set.of("input", "actions"), payload.keySet(), "output, llmDetail and toolCalls are gone");
+    }
+
+    @Test
+    void redactEntry_staleRow_returnsFalse() throws Exception {
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(store.redactEntry(createEntry(), "v5:old"));
     }
 
     @Test

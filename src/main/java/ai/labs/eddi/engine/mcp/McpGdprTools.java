@@ -100,6 +100,7 @@ public class McpGdprTools {
             map.put("logsPseudonymized", result.logsPseudonymized());
             map.put("auditEntriesPseudonymized",
                     result.auditEntriesPseudonymized());
+            map.put("auditEntriesRedacted", result.auditEntriesRedacted());
             // The six counters the cascade has always computed and written to the
             // ledger but never returned to the caller.
             map.put("attachmentsDeleted", result.attachmentsDeleted());

@@ -15,14 +15,17 @@ import java.util.List;
  * operations. This is a deliberate design constraint for EU AI Act compliance:
  * once an audit entry is persisted, it must remain unmodifiable.
  * <p>
- * <strong>GDPR Art. 17(3)(e) exception:</strong> Audit entries are retained
- * under the legal obligation to maintain immutable decision traceability (EU AI
- * Act Articles 17/19). Upon GDPR erasure requests, user identifiers are
- * pseudonymized (replaced with a SHA-256 hash), not deleted. The
- * {@link #pseudonymizeByUserId} method is the sole permitted mutation.
+ * <strong>GDPR Art. 17 exception:</strong> Audit entries are retained under the
+ * legal obligation to maintain decision traceability (EU AI Act Articles
+ * 12/19), but not with the erased person's data in them. Upon an erasure the
+ * user identifier is pseudonymized ({@link #pseudonymizeByUserId}) and the
+ * recorded content — prompt, response, LLM detail, tool calls — is replaced by
+ * a redaction marker ({@link #redactEntry}). Rows are never deleted, so the
+ * per-conversation chain stays gap-free. Those two are the only permitted
+ * mutations.
  * <p>
- * both MongoDB and PostgreSQL implementations enforce insert-only semantics
- * apart from that one mutation.
+ * Both MongoDB and PostgreSQL implementations enforce insert-only semantics
+ * apart from those two mutations.
  *
  * @author ginccc
  * @since 6.0.0
@@ -112,6 +115,38 @@ public interface IAuditStore {
      * @return number of entries pseudonymized
      */
     long pseudonymizeByUserId(String userId, String pseudonym);
+
+    /**
+     * Replace one stored entry with its GDPR-redacted form (Art. 17) — the second,
+     * and last, permitted mutation of the ledger.
+     * <p>
+     * Pseudonymising {@code userId} alone left the verbatim prompt, response, LLM
+     * detail and tool calls of an erased user in the ledger. Erasure therefore
+     * rewrites exactly these fields of each of the user's rows, and nothing else:
+     * {@code userId}, {@code input}, {@code output}, {@code llmDetail},
+     * {@code toolCalls}, {@code hmac} and {@code agentSignature}. The id,
+     * conversation, agent, task, timing, cost, actions, timestamp and — the chain
+     * position — {@code sequence} are kept, so the conversation's chain stays
+     * gap-free and the record of <em>what ran when</em> survives. The redacted form
+     * itself is built and, when the original verified, re-signed by
+     * {@code AuditLedgerService.eraseUser}; a store only persists it.
+     * <p>
+     * The write is conditional on the stored HMAC still being {@code expectedHmac}
+     * (null matches a row stored without one), so a row that changed after it was
+     * read is never overwritten blindly.
+     *
+     * @param redacted
+     *            the redacted entry, carrying the id of the row to replace
+     * @param expectedHmac
+     *            the HMAC the row carried when it was read
+     * @return true if the row was replaced, false if it no longer matched
+     * @throws UnsupportedOperationException
+     *             from a store that cannot redact; erasure then reports the audit
+     *             step as failed instead of claiming a complete erasure
+     */
+    default boolean redactEntry(AuditEntry redacted, String expectedHmac) {
+        throw new UnsupportedOperationException(getClass().getSimpleName() + " cannot redact audit entries");
+    }
 
     // === Tamper detection ===
 

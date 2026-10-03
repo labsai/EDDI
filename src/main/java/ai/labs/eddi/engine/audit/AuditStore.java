@@ -26,10 +26,12 @@ import java.util.regex.Pattern;
  * MongoDB implementation of {@link IAuditStore}.
  * <p>
  * Uses a dedicated {@code audit_ledger} collection with insert-only semantics,
- * with exactly one exception: {@link #pseudonymizeByUserId} issues an
- * {@code updateMany} to overwrite {@code userId} under GDPR Art. 17(3)(e).
- * Nothing else mutates or removes a stored entry — no {@code deleteOne()},
- * {@code deleteMany()}, {@code replaceOne()}, and no update of any other field.
+ * with exactly two exceptions, both GDPR Art. 17 erasure:
+ * {@link #pseudonymizeByUserId} issues an {@code updateMany} to overwrite
+ * {@code userId}, and {@link #redactEntry} replaces one row's content fields
+ * with the redacted form the ledger service built. Nothing else mutates or
+ * removes a stored entry — no {@code deleteOne()}, {@code deleteMany()},
+ * {@code replaceOne()}, and no update of any other field.
  * <p>
  * That mutation does <em>not</em> invalidate the entry's HMAC: since the v3
  * canonical form the signature covers
@@ -306,6 +308,37 @@ public class AuditStore implements IAuditStore {
         return modified + collection.updateMany(
                 new Document(F_USER_ID, userId),
                 new Document("$set", new Document(F_USER_ID, pseudonym))).getModifiedCount();
+    }
+
+    /**
+     * Rewrites only the fields {@link IAuditStore#redactEntry} names, conditional
+     * on the stored HMAC — {@code Filters.eq(hmac, null)} also matches a document
+     * without the field, which is how an unsigned entry is stored.
+     */
+    @Override
+    public boolean redactEntry(AuditEntry redacted, String expectedHmac) {
+        Document set = new Document(F_USER_ID, redacted.userId());
+        Document unset = new Document();
+        putOrUnset(set, unset, F_INPUT, redacted.input() != null ? new Document(redacted.input()) : null);
+        putOrUnset(set, unset, F_OUTPUT, redacted.output() != null ? new Document(redacted.output()) : null);
+        putOrUnset(set, unset, F_LLM_DETAIL, redacted.llmDetail() != null ? new Document(redacted.llmDetail()) : null);
+        putOrUnset(set, unset, F_TOOL_CALLS, redacted.toolCalls() != null ? new Document(redacted.toolCalls()) : null);
+        putOrUnset(set, unset, F_HMAC, redacted.hmac());
+        putOrUnset(set, unset, F_AGENT_SIGNATURE, redacted.agentSignature());
+        Document update = new Document("$set", set);
+        if (!unset.isEmpty()) {
+            update.append("$unset", unset);
+        }
+        return collection.updateOne(Filters.and(Filters.eq(F_ID, redacted.id()), Filters.eq(F_HMAC, expectedHmac)), update)
+                .getModifiedCount() == 1;
+    }
+
+    private static void putOrUnset(Document set, Document unset, String field, Object value) {
+        if (value != null) {
+            set.put(field, value);
+        } else {
+            unset.put(field, "");
+        }
     }
 
     private Map<String, String> keyedPseudonymsFor(String userId) {
