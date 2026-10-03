@@ -388,4 +388,31 @@ class AuditLedgerErasureRedactionTest {
     private static Map<String, Object> marker(AuditEntry entry) {
         return (Map<String, Object>) entry.input().get(AuditLedgerService.REDACTION_MARKER_KEY);
     }
+
+    @Test
+    @DisplayName("a queued entry that fails verification is counted as kept-unverified, not re-signed, and keeps its HMAC")
+    void invalidQueuedEntryIsCountedAsUnverified() {
+        ledger.submit(turn(USER, 0));
+        ledger.flush();
+        AuditEntry signed = store.rows().getFirst();
+        // A copy under a new id: its HMAC no longer matches, as if the entry had been
+        // altered while it waited in the queue.
+        AuditEntry forged = new AuditEntry(UUID.randomUUID().toString(), signed.conversationId(), signed.agentId(), signed.agentVersion(),
+                signed.userId(), signed.environment(), signed.stepIndex(), signed.taskId(), signed.taskType(), signed.taskIndex(),
+                signed.durationMs(), signed.input(), signed.output(), signed.llmDetail(), signed.toolCalls(), signed.actions(), signed.cost(),
+                signed.timestamp(), signed.hmac(), signed.agentSignature(), signed.sequence());
+        assertTrue(ledger.offerBounded(forged));
+        ledger.submit(turn(USER, 1));
+
+        var result = ledger.eraseUser(USER);
+
+        assertTrue(result.complete());
+        assertEquals(3, result.redacted(), "one stored row and two queued entries");
+        assertEquals(2, result.resealed(), "the stored row and the valid queued entry");
+        assertEquals(1, result.keptUnverified(), "the forged queued entry is not counted as re-signed");
+        AuditEntry stored = store.byId(forged.id());
+        assertEquals(signed.hmac(), stored.hmac(), "it keeps the HMAC it arrived with");
+        assertEquals(AuditVerificationStatus.INVALID, ledger.verifyEntry(stored));
+        assertFalse(containsSsn(stored));
+    }
 }

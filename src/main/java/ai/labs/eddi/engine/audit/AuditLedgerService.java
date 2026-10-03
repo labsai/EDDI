@@ -648,7 +648,9 @@ public class AuditLedgerService {
      *
      * @return true if the entry was queued, false if it was dropped
      */
-    private boolean offerBounded(AuditEntry entry) {
+    // package-private: a test queues an already-signed entry through it, the way
+    // the retry path re-queues one
+    boolean offerBounded(AuditEntry entry) {
         if (!reserveQueueSlot(entry.conversationId())) {
             return false;
         }
@@ -1437,10 +1439,20 @@ public class AuditLedgerService {
 
     /**
      * Per erased user, how many of their queued entries were redacted on their way
-     * out of the queue — so {@link #eraseUser} can report them. Cleared with
-     * {@link #recentlyErasedUsers}.
+     * out of the queue, split by whether they verified and were re-signed — so
+     * {@link #eraseUser} can report them exactly as it reports stored rows. Cleared
+     * with {@link #recentlyErasedUsers}.
      */
-    private final ConcurrentHashMap<String, AtomicLong> redactedOnDrain = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, DrainCounts> redactedOnDrain = new ConcurrentHashMap<>();
+
+    /**
+     * Queued entries redacted on drain: re-signed, and kept with their old HMAC.
+     */
+    private record DrainCounts(AtomicLong resealed, AtomicLong keptUnverified) {
+        DrainCounts() {
+            this(new AtomicLong(), new AtomicLong());
+        }
+    }
 
     /**
      * Tells the ledger a GDPR erasure of {@code userId} has started, so audit
@@ -1508,8 +1520,9 @@ public class AuditLedgerService {
         // was actually observed — never VALID on trust.
         AuditVerificationStatus before = entry.hmac() != null ? verifyEntry(entry) : null;
         AuditEntry redacted = rewritten.withPayload(redactionMarker(entry.hmac(), before), null, null, null);
-        redactedOnDrain.computeIfAbsent(userId, k -> new AtomicLong()).incrementAndGet();
         boolean verified = before == AuditVerificationStatus.VALID || before == AuditVerificationStatus.VALID_RECOVERED;
+        DrainCounts counts = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+        (verified ? counts.resealed() : counts.keptUnverified()).incrementAndGet();
         return verified ? reseal(redacted) : redacted;
     }
 
@@ -1631,8 +1644,9 @@ public class AuditLedgerService {
             throw new IllegalArgumentException("userId must not be null");
         }
         markUserErased(userId);
-        AtomicLong drained = redactedOnDrain.computeIfAbsent(userId, k -> new AtomicLong());
-        long drainedBefore = drained.get();
+        DrainCounts drained = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+        long resealedBefore = drained.resealed().get();
+        long keptBefore = drained.keptUnverified().get();
         if (enabled) {
             flush();
         }
@@ -1641,12 +1655,11 @@ public class AuditLedgerService {
         }
 
         // Queued entries this flush redacted as they left the queue count as redacted
-        // (and re-signed, and pseudonymised) by this erasure.
-        long fromQueue = drained.get() - drainedBefore;
-        long redacted = fromQueue;
-        long resealed = isSigningEnabled() ? fromQueue : 0;
-        long keptUnverified = isSigningEnabled() ? 0 : fromQueue;
-        long pseudonymized = fromQueue;
+        // and pseudonymised by this erasure — as re-signed only when they verified.
+        long resealed = drained.resealed().get() - resealedBefore;
+        long keptUnverified = drained.keptUnverified().get() - keptBefore;
+        long redacted = resealed + keptUnverified;
+        long pseudonymized = redacted;
         long failed = 0;
         String target = pseudonymForErasure(userId);
         var budget = newRecoveryBudget();
