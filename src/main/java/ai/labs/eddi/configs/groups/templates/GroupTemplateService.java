@@ -158,7 +158,10 @@ public class GroupTemplateService {
      * @param name
      *            the new group's name; {@code null}/blank keeps the template's
      * @throws IllegalArgumentException
-     *             naming the missing/unknown roles, or an unreadable config
+     *             naming the missing/unknown roles
+     * @throws IllegalStateException
+     *             if the packaged template's config cannot be read (a server-side
+     *             defect, reported without the parser's message)
      */
     public AgentGroupConfiguration instantiate(String templateId, String name, Map<String, String> roleAssignments) {
         GroupTemplate template = find(templateId);
@@ -188,8 +191,10 @@ public class GroupTemplateService {
         try {
             config = objectMapper.treeToValue(template.configNode(), AgentGroupConfiguration.class);
         } catch (Exception e) {
-            throw new IllegalArgumentException("Template '" + templateId + "' carries an unreadable config: "
-                    + e.getMessage(), e);
+            // A packaged template that does not convert is this server's defect, not
+            // the caller's: an internal failure without the mapper's text, which names
+            // model classes and field paths. The cause keeps the detail for the log.
+            throw new IllegalStateException("Template '" + templateId + "' carries an unreadable config", e);
         }
 
         if (config.getMembers() != null) {

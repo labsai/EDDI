@@ -299,6 +299,59 @@ public interface ISecretProvider {
     String unseal(String tenantId, SealedValue sealed) throws SecretProviderException;
 
     /**
+     * {@link #seal(String, String)}, with the ciphertext bound to {@code context}
+     * as GCM additional authenticated data (AAD).
+     * <p>
+     * The two-argument form binds nothing, so a sealed value copied from one row
+     * into another — one user's refresh token into another user's grant, an access
+     * token into the refresh-token field — opened there without complaint. Bound to
+     * a context that names the row and the field, the copy fails authentication
+     * instead. The tenant and the DEK generation are bound as well, so the caller
+     * only names what is specific to its own row.
+     *
+     * @param context
+     *            a stable description of where the value lives (e.g. the
+     *            connection, principal and token kind of a grant). It must be
+     *            reconstructable from the row at read time and must not change
+     *            without a re-seal
+     */
+    default SealedValue seal(String tenantId, String plaintext, String context) throws SecretProviderException {
+        throw new SecretProviderException("This secret provider cannot seal values bound to a context");
+    }
+
+    /**
+     * Reverse of {@link #seal(String, String, String)}. A value sealed by the
+     * two-argument {@link #seal(String, String)} (every value written before
+     * context binding existed) still opens: the bound form is tried first and the
+     * unbound one only if that fails, the same coexistence rule named secrets use.
+     * A DEK rotation re-seals every such value in its bound form.
+     */
+    default String unseal(String tenantId, SealedValue sealed, String context) throws SecretProviderException {
+        throw new SecretProviderException("This secret provider cannot open values bound to a context");
+    }
+
+    /**
+     * Seals several values of ONE row under one and the same DEK generation.
+     * <p>
+     * A row records a single {@code dekId} for all its sealed fields. Sealing them
+     * one call at a time picks the active generation once per call, so a rotation
+     * committing between the calls sealed the fields under two generations while
+     * the row named only the first — the second field then never opened again (an
+     * OAuth grant whose refresh token was lost that way had to be reconnected).
+     *
+     * @param plaintexts
+     *            the values; a {@code null} element yields a {@code null} result at
+     *            that position
+     * @param contexts
+     *            one AAD context per value, as for
+     *            {@link #seal(String, String, String)}
+     * @return the sealed values, in order, all naming the same {@code dekId}
+     */
+    default List<SealedValue> sealAll(String tenantId, List<String> plaintexts, List<String> contexts) throws SecretProviderException {
+        throw new SecretProviderException("This secret provider cannot seal values bound to a context");
+    }
+
+    /**
      * Stores a deployment-level value, sealed, unless one is already stored under
      * {@code name}, and returns whichever value is stored afterwards.
      * <p>

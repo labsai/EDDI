@@ -260,4 +260,28 @@ public class ConnectionGrant {
         return "ConnectionGrant[tenant=" + tenantId + ", connection=" + connectionName + ", principal=" + principal + ", status=" + status
                 + ", expiresAt=" + expiresAt + ", version=" + version + "]";
     }
+
+    /**
+     * The AAD context the access token of the grant for {@code connectionName} and
+     * {@code principal} is sealed with. Binds the ciphertext to its row and its
+     * field, so a token copied into another user's grant — or into the
+     * refresh-token field — fails authentication instead of opening. Both parts are
+     * the row's key and never change without a re-seal. Static, not a getter: an
+     * instance getter would be persisted as a field.
+     */
+    public static String accessTokenContext(String connectionName, String principal) {
+        return tokenContext("access", connectionName, principal);
+    }
+
+    /** As {@link #accessTokenContext}, for the refresh token. */
+    public static String refreshTokenContext(String connectionName, String principal) {
+        return tokenContext("refresh", connectionName, principal);
+    }
+
+    private static String tokenContext(String field, String connectionName, String principal) {
+        String connection = connectionName == null ? "" : connectionName;
+        String who = principal == null ? "" : principal;
+        // Length-prefixed: a principal may itself contain the separator.
+        return "connection-grant|" + field + "|" + connection.length() + ":" + connection + "|" + who.length() + ":" + who;
+    }
 }

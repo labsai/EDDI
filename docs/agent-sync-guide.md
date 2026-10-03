@@ -58,6 +58,16 @@ internal network, or name this origin in eddi.backup.sync.allowed-sources.
 > containerised instance never counts as dev mode — the decision reads the
 > launch mode, not `quarkus.profile` — so a container needs the settings above.
 
+**Every response from the source is size-capped.** The JSON a sync reads — descriptor
+listings, agent, workflow and extension configs — is limited by
+`eddi.backup.sync.max-response-bytes` (default `16777216`, 16 MiB, far above any real
+config or listing). A declared `Content-Length` over it is refused before anything is
+read, and an undeclared body is cut off the moment it crosses it, so a compromised or
+misbehaving source cannot decide how much heap one sync takes; the sync then fails with
+`502` saying the response was too large. The exported archive a first-time sync downloads
+has its own fixed 256 MiB cap, and is then unpacked under the
+[archive limits](import-export-an-agent.md#archive-limits).
+
 ## Workflow
 
 ### 1. List Remote Agents
@@ -188,6 +198,7 @@ fault and the operator can act on both:
 | Status | Meaning |
 |--------|---------|
 | `400 Bad Request` | The source URL is malformed, or this deployment's policy refuses it — the body names the setting that would allow it, see [Reaching the source instance](#reaching-the-source-instance). Also answered when `selectedResources` is present but names nothing |
+| `403 Forbidden` | The caller may not change the target agent. An upgrade (sync, or `strategy=upgrade` from a ZIP) needs **EDIT** on `targetAgentId` and is refused before anything is written; a preview needs VIEW. Until this was checked up front, a caller without EDIT had snippets, extensions and workflows written before the final agent write refused, and saw a `500` |
 | `404 Not Found` | The named `targetAgentId` does not exist here |
 | `409 Conflict` | No `targetAgentId` was named and more than one local agent was promoted from this source agent. The body lists them; name one, or pass `createNew=true` |
 | `502 Bad Gateway` | The source instance could not be read: down, addressed wrongly, or refusing the token. The body carries the underlying reason |

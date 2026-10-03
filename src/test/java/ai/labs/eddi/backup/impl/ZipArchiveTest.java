@@ -12,6 +12,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -163,8 +165,108 @@ class ZipArchiveTest {
 
         File targetDir = tempDir.resolve("extracted").toFile();
         try (InputStream is = new FileInputStream(zipFile.toFile())) {
-            assertThrows(IOException.class, () -> zipArchive.unzip(is, targetDir));
+            // The archive's shape, not a server fault: the importer answers 400 for it.
+            var thrown = assertThrows(ZipArchive.MalformedArchiveException.class, () -> zipArchive.unzip(is, targetDir));
+            assertTrue(thrown.getMessage().contains("escapes"), thrown.getMessage());
         }
+        assertFalse(tempDir.resolve("evil.txt").toFile().exists());
+    }
+
+    @Test
+    void unzip_truncatedArchive_isMalformedNotAServerFault(@TempDir Path tempDir) throws IOException {
+        byte[] zip = zipOf(1, 64 * 1024);
+        byte[] truncated = Arrays.copyOf(zip, zip.length / 3);
+
+        assertThrows(ZipArchive.MalformedArchiveException.class,
+                () -> zipArchive.unzip(new ByteArrayInputStream(truncated), tempDir.resolve("extracted").toFile()));
+    }
+
+    @Test
+    void unzip_cutOffAfterTheLastCompleteEntry_isMalformed(@TempDir Path tempDir) throws IOException {
+        // Every local entry intact, the central directory and end record missing:
+        // ZipInputStream alone reads this as a complete two-entry archive.
+        byte[] zip = zipOf(2, 1024);
+        int centralDirectory = -1;
+        for (int i = zip.length - 4; i >= 0; i--) {
+            if (readIntLe(zip, i) == 0x02014b50 && (centralDirectory < 0 || i < centralDirectory)) {
+                centralDirectory = i;
+            }
+        }
+        assertTrue(centralDirectory > 0, "fixture: the archive has a central directory");
+        byte[] truncated = Arrays.copyOf(zip, centralDirectory);
+
+        var thrown = assertThrows(ZipArchive.MalformedArchiveException.class,
+                () -> zipArchive.unzip(new ByteArrayInputStream(truncated), tempDir.resolve("extracted").toFile()));
+        assertTrue(thrown.getMessage().contains("truncated"), thrown.getMessage());
+    }
+
+    @Test
+    void unzip_streamThatKeepsSendingAfterTheEntries_isCutOffAtTheRawLimit(@TempDir Path tempDir) throws IOException {
+        // The drain after the last entry copies whatever follows to disk. A source
+        // that is not behind the HTTP body limit could keep sending (here 4 MiB, far
+        // past the ~74 KiB raw limit of this configuration); the raw copy is bounded
+        // by the content limit plus a per-entry allowance.
+        var limited = new ZipArchive(10, 1024 * 1024, 64 * 1024);
+        long rawLimit = limited.maxRawArchiveBytes();
+        long trailing = 4L * 1024 * 1024;
+        long[] served = {0};
+        InputStream junk = new InputStream() {
+            @Override
+            public int read() {
+                if (served[0] >= trailing) {
+                    return -1;
+                }
+                served[0]++;
+                return 0;
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) {
+                if (served[0] >= trailing) {
+                    return -1;
+                }
+                int n = (int) Math.min(len, trailing - served[0]);
+                Arrays.fill(b, off, off + n, (byte) 0);
+                served[0] += n;
+                return n;
+            }
+        };
+        InputStream upload = new SequenceInputStream(new ByteArrayInputStream(zipOf(1, 100)), junk);
+
+        var thrown = assertThrows(ZipArchive.ZipLimitExceededException.class,
+                () -> limited.unzip(upload, tempDir.resolve("extracted").toFile()));
+
+        assertTrue(thrown.getMessage().contains(ZipArchive.MAX_TOTAL_BYTES_PROPERTY), thrown.getMessage());
+        assertTrue(served[0] <= rawLimit + 64 * 1024, "stopped reading near the limit, read " + served[0]);
+        try (var siblings = Files.list(tempDir)) {
+            assertEquals(List.of("extracted"), siblings.map(p -> p.getFileName().toString()).toList(),
+                    "the raw copy must be removed after a refusal too");
+        }
+    }
+
+    @Test
+    void unzip_completeArchive_leavesNoCopyBehind(@TempDir Path tempDir) throws IOException {
+        File targetDir = tempDir.resolve("extracted").toFile();
+
+        zipArchive.unzip(new ByteArrayInputStream(zipOf(3, 100)), targetDir);
+
+        try (var siblings = Files.list(tempDir)) {
+            assertEquals(List.of("extracted"), siblings.map(p -> p.getFileName().toString()).toList(),
+                    "the raw copy kept for the completeness check must be removed");
+        }
+    }
+
+    @Test
+    void unzip_corruptCompressedData_isMalformedNotAServerFault(@TempDir Path tempDir) throws IOException {
+        byte[] zip = zipOf(1, 64 * 1024);
+        // Scribble over the deflate stream that follows the 30-byte local header and
+        // the entry name.
+        for (int i = 60; i < 120; i++) {
+            zip[i] = (byte) 0xFF;
+        }
+
+        assertThrows(ZipArchive.MalformedArchiveException.class,
+                () -> zipArchive.unzip(new ByteArrayInputStream(zip), tempDir.resolve("extracted").toFile()));
     }
 
     @Test

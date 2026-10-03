@@ -120,6 +120,15 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
 
+**Errors.** A failure the caller can fix — a validation refusal (for example a member
+listed twice), an unknown group, a stale version, a 4xx from the store — comes back as
+`{"error": "<tool> failed: <reason>"}`. Anything else is this server's problem, and its
+raw message (datastore hosts, driver text, class names) is **not** returned: the tool
+answers `{"error": "<tool> failed with an internal error (reference 1a2b3c4d)…",
+"errorCode": "INTERNAL_ERROR", "details": {"reference": "1a2b3c4d"}}` and the full
+exception is logged at `ERROR` under `[reference 1a2b3c4d]` — quote that to an
+operator.
+
 ### Docs Tools (2)
 
 Read EDDI's own documentation over MCP **tools** — the counterpart to the `eddi://docs/*` **resources** below, and the pair the `toolsWhitelist: ["read_docs", "list_docs"]` example further down consumes. Tools and resources serve different clients: agentic MCP clients (EDDI's own included) consume `tools/list` and never call `resources/read`, so before these existed EDDI's docs were readable by a desktop client and not by any agent consuming EDDI's MCP server. Role set mirrors the REST docs endpoints exactly (any of the five roles). Both delegate to `DocsService`, so `eddi.docs.enabled=false` switches this surface off together with REST and the resources.
