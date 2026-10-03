@@ -49,6 +49,11 @@ next to the script and prints one line per scenario: `PASS`, `FAIL`, or `N/A` wi
 when a scenario cannot be driven through the public API. `--app` defaults to `$EDDI_APP`, then to
 this checkout's `target/quarkus-app`.
 
+On Docker Desktop the nodes reach the mock LLM through `host.docker.internal`, and that path
+occasionally stalls for a while around container restarts; a turn that hits it fails with 408 and
+the node log shows `HTTP connect timed out`. Scenario 4 counts such a 408 as a failure — read the
+node logs before blaming the cluster.
+
 `/mcp` is routed by client address in `nginx-demo.conf`: an MCP session lives on the node that
 opened it (see [Clustering](../../docs/clustering.md#residual-limitations)).
 
