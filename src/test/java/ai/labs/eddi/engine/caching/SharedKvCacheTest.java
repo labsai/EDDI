@@ -67,6 +67,25 @@ class SharedKvCacheTest {
         assertEquals(Boolean.TRUE, dedup.putIfAbsent("evt", Boolean.TRUE), "node-local de-duplication still works");
     }
 
+    @Test
+    @DisplayName("a value the bucket refuses (larger than the NATS payload limit) is still read back on the node that stored it, and only there")
+    void refusedValueStaysReadableLocally() {
+        ISharedKv refusing = mock(ISharedKv.class);
+        when(refusing.bucket()).thenReturn("TOOL_PAGES");
+        when(refusing.get(any())).thenReturn(java.util.Optional.empty());
+        when(refusing.put(any(), any())).thenThrow(new ClusterUnavailableException("payload exceeds the server limit (test)"));
+        ICache<String, String> node = new SharedKvCache<>(local("big"), refusing, false);
+
+        node.put("response-1", "x".repeat(10));
+
+        assertEquals("x".repeat(10), node.get("response-1"), "paginated tool responses over 1 MiB must still page on this node");
+        assertNull(node.get("never-stored"), "a key nobody stored stays absent");
+        node.remove("response-1");
+        assertNull(node.get("response-1"), "a removed value is gone, not resurrected from the local copy");
+        ICache<String, String> other = new SharedKvCache<>(local("other"), refusing, false);
+        assertNull(other.get("response-1"), "another node has no copy: the page fetch fails there, as documented");
+    }
+
     @SuppressWarnings("unchecked")
     private static CacheFactory clusteredFactory(RecordingEventBus bus, ISharedKv kv) {
         var factory = new CacheFactory();

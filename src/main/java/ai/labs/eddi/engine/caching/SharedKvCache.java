@@ -17,6 +17,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -47,9 +48,23 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     /** Value classes a shared entry may name; anything else is ignored on read. */
     private static final String[] ALLOWED_PACKAGES = {"ai.labs.eddi.", "java.lang.", "java.util."};
 
+    /**
+     * Most keys remembered as node-local only; beyond it a refused value is simply
+     * not found again.
+     */
+    private static final int MAX_LOCAL_ONLY = 10_000;
+
     private final ICache<K, V> local;
     private final ISharedKv shared;
     private final boolean failClosed;
+    /**
+     * Hashes of the keys whose latest value the shared bucket did not take (NATS
+     * was unreachable, or the value is larger than its payload limit) and which
+     * therefore exist on this node only. A read that finds nothing in the bucket
+     * answers from the node-local copy for exactly these keys — never for a key
+     * another node removed.
+     */
+    private final Set<String> localOnly = ConcurrentHashMap.newKeySet();
 
     public SharedKvCache(ICache<K, V> local, ISharedKv shared, boolean failClosed) {
         this.local = local;
@@ -98,6 +113,14 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         LOGGER.debugf("Shared cache %s unavailable, using the node-local copy: %s", shared.bucket(), e.getMessage());
     }
 
+    /** The shared write failed: the value now lives on this node only. */
+    private void degradedWrite(Object key, ClusterUnavailableException e) {
+        degraded(e);
+        if (localOnly.size() < MAX_LOCAL_ONLY) {
+            localOnly.add(key(key));
+        }
+    }
+
     @Override
     public String getCacheName() {
         return local.getCacheName();
@@ -108,6 +131,16 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     public V get(Object key) {
         try {
             Optional<ISharedKv.Versioned> v = shared.get(key(key));
+            if (v.isEmpty() && !localOnly.isEmpty() && localOnly.contains(key(key))) {
+                // Written while the bucket was unreachable or refused it (a paginated tool
+                // response larger than the NATS payload limit): this node's copy is the only
+                // one.
+                V mine = local.get(key);
+                if (mine == null) {
+                    localOnly.remove(key(key));
+                }
+                return mine;
+            }
             return v.map(versioned -> decode(versioned.value())).orElse(null);
         } catch (ClusterUnavailableException e) {
             degraded(e);
@@ -125,8 +158,9 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         local.put(key, value);
         try {
             shared.put(key(key), encode(value));
+            localOnly.remove(key(key));
         } catch (ClusterUnavailableException e) {
-            degraded(e);
+            degradedWrite(key, e);
         }
         return null;
     }
@@ -149,6 +183,7 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     @Override
     public V remove(Object key) {
         V previous = local.remove(key);
+        localOnly.remove(key(key));
         try {
             shared.delete(key(key));
         } catch (ClusterUnavailableException e) {
@@ -163,8 +198,9 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         local.put(key, value, lifespan, unit);
         try {
             shared.put(key(key), encode(value));
+            localOnly.remove(key(key));
         } catch (ClusterUnavailableException e) {
-            degraded(e);
+            degradedWrite(key, e);
         }
         return null;
     }
