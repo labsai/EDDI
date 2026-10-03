@@ -11,7 +11,9 @@ to a data breach involving the EDDI platform.
 - Unusual administrative actions — every `POST`/`PUT`/`PATCH`/`DELETE` outside
   the chat APIs is in the audit ledger with its caller and status
   (`taskId: ai.labs.admin`, see [audit-ledger.md](audit-ledger.md#administrative-actions)),
-  so a burst of `403`s or an unexpected `/secretstore` or `/backup` call is visible there
+  so a burst of endpoint `403`s or an unexpected `/secretstore` or `/backup` call is visible
+  there. A request rejected by authentication before it reaches an endpoint is not — check
+  Keycloak's event log and your reverse proxy's access log for those
 - Failed authentication spikes in Keycloak logs
 - Anomalous conversation volume or data export requests
 - Alerts from infrastructure monitoring (Grafana/Prometheus)

@@ -166,7 +166,7 @@ The write is conditional on the row's stored HMAC, and the erasure is reported a
 
 ### Administrative actions
 
-Every **mutating** REST request — `POST`, `PUT`, `PATCH`, `DELETE` — outside the conversational data plane writes one ledger record, whether it succeeded or not, so a refused attempt (`401`, `403`, `409`) is on record as well:
+Every **mutating** REST request — `POST`, `PUT`, `PATCH`, `DELETE` — outside the conversational data plane that reaches an endpoint writes one ledger record, whatever the endpoint answered — so a call the endpoint refused (a `403` from its `@RolesAllowed` check, a `404`, a `409`) is on record as well. A request turned away **before** it reaches an endpoint is not: a `401`/`403` from an HTTP path policy (the authentication layer runs before resource matching) and a path no endpoint serves. Your reverse proxy's access log or Keycloak's event log covers those:
 
 | Field | Value |
 | ----- | ----- |
@@ -323,23 +323,18 @@ db.audit_ledger.createIndex({ taskId: 1, timestamp: -1 });
 
 #### Upgrading an existing PostgreSQL ledger
 
-`idx_audit_user` on `audit_ledger (user_id)` backs the GDPR export and erasure scans — without it they are sequential scans over the largest never-pruned table in the system — and `idx_audit_task` on `(task_id, created_at DESC)` backs the administrative-action listing. Both are built the same way.
+`idx_audit_user` on `audit_ledger (user_id)` backs the GDPR export and erasure scans — without it they are sequential scans over the largest never-pruned table in the system — and `idx_audit_task` on `(task_id, created_at DESC)` backs the administrative-action listing.
 
-The index is created by `ensureSchema()`, which runs lazily on the **first audit write after the deploy**, on the audit-ledger writer thread. A plain `CREATE INDEX` takes a `SHARE` lock, so while it builds:
+Both are built **in the background with `CREATE INDEX CONCURRENTLY`**, started once the table exists (on the first audit read or write after the deploy). Audit inserts and reads carry on while they build; until they exist, export, erasure and the listing are slower, not broken. Each build holds a PostgreSQL advisory lock, so replicas starting together do not build the same index twice. An index an interrupted build left `INVALID` is dropped and rebuilt, and a build that ends `INVALID` is retried (after 30 s, 2 min and 10 min); if it still fails, a WARN names the indexes and the next restart tries again. The database role needs `CREATE` on the table, which it already has to create it.
 
-- audit inserts block and the ledger's queue fills toward `eddi.audit.max-queue-size` (entries refused past the bound are counted on `eddi_audit_entries_dropped_total`, not dead-lettered),
-- REST audit reads wait on the same monitor.
-
-On a multi-million-row ledger that pause is measured in minutes. If you cannot take it, build the index out of band **before** deploying:
+Earlier releases built `idx_audit_user` with a plain `CREATE INDEX` on the audit-writer thread, which blocked audit inserts for the length of the build. To check the result, or to build them yourself ahead of a deploy (the startup build then finds them and does nothing):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_user ON audit_ledger (user_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_task ON audit_ledger (task_id, created_at DESC);
--- CONCURRENTLY leaves an INVALID index behind if it fails; verify:
-SELECT indisvalid FROM pg_index WHERE indexrelid = 'idx_audit_user'::regclass;
+SELECT indexrelid::regclass, indisvalid FROM pg_index
+ WHERE indexrelid IN ('idx_audit_user'::regclass, 'idx_audit_task'::regclass);
 ```
-
-`IF NOT EXISTS` then makes the startup statement a no-op. EDDI does not issue `CONCURRENTLY` itself: it would be legal (`ensureSchema` runs on an autocommit statement, not inside a transaction block), but a failed run leaves an INVALID index that nothing in the adapter would notice or repair.
 
 ## Architecture
 

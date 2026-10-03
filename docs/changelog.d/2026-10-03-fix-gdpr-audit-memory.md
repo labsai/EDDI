@@ -43,9 +43,14 @@ replaced a vault secret, imported a backup or erased a user was on record (the G
 had no actor). The new `AdminActionAuditFilter` writes one HMAC-signed record per
 `POST`/`PUT`/`PATCH`/`DELETE` outside the conversational data plane (excluded by list, so a
 new admin endpoint is covered by default): caller, method, path, endpoint, status — never
-the body or query string, and a person's id in the path is pseudonymised. Refused attempts
-are recorded too. `GET /auditstore/admin-actions?actor=` lists them (new task-id index on
-both backends). `eddi.audit.admin-actions.enabled` switches it off. The docs now say
+the body or query string, and a person's id in the path is pseudonymised. Calls an endpoint
+refused (`@RolesAllowed` 403, 404, 409) are recorded too; requests turned away by an HTTP path
+policy before resource matching are not. `GET /auditstore/admin-actions?actor=` lists them (new task-id index on
+both backends). `eddi.audit.admin-actions.enabled` switches it off. On PostgreSQL the two
+whole-ledger indexes, `idx_audit_user` and the new `idx_audit_task`, are no longer built with a
+plain `CREATE INDEX` on the audit-writer thread (which blocked audit inserts for the length of
+the build on a large ledger): they are built `CONCURRENTLY` in the background under an advisory
+lock, an index an interrupted build left INVALID is dropped and rebuilt, and failures retry. The docs now say
 exactly what is and is not recorded (reads are not; MCP memory tools are not).
 
 **Database-log retention was documented as configurable and was not.** New

@@ -48,9 +48,11 @@ import java.util.UUID;
  * <p>
  * <b>What a record holds</b>: the caller's principal (or {@code anonymous}),
  * the HTTP method, the request path, the resource method that served it, and
- * the response status — so a refused attempt (401/403/409) is on record as well
- * as a successful one. Never the request body, which carries prompts, secrets
- * and configuration, and never the query string. A path parameter that names a
+ * the response status — so a call the endpoint refused (a {@code @RolesAllowed}
+ * 403, a 404, a 409) is on record as well as a successful one. A request an
+ * HTTP path policy rejects (401/403) never reaches resource matching, so it is
+ * not recorded here. Never the request body, which carries prompts, secrets and
+ * configuration, and never the query string. A path parameter that names a
  * person ({@code userId} and the like) is replaced by the ledger's pseudonym
  * for them, so erasing user X does not leave "DELETE /admin/gdpr/X" in an
  * immutable record. Records carry no conversation, so they take no chain
