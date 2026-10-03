@@ -227,6 +227,43 @@ class ConversationWatchdogAbandonTest {
 
     @Test
     @Timeout(60)
+    @DisplayName("a timed-out turn that then fails does not overwrite EXECUTION_INTERRUPTED with ERROR")
+    void abandonedTurnFailingAfterwardsLeavesTheWatchdogState() throws Exception {
+        IConversation conversation = mock(IConversation.class);
+        IAgent agent = mock(IAgent.class);
+        CountDownLatch failed = new CountDownLatch(1);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot());
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenReturn(ConversationState.READY);
+        when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(agent);
+        when(agent.continueConversation(any(), any(), any())).thenReturn(conversation);
+        when(conversation.isEnded()).thenReturn(false);
+        // What happened live: the interrupt aborted the model call, and the next store
+        // access on the interrupted thread threw (MongoInterruptedException).
+        doAnswer(inv -> {
+            try {
+                Thread.sleep(30_000);
+            } catch (InterruptedException e) {
+                failed.countDown();
+                throw new IllegalStateException("Interrupted waiting for lock");
+            }
+            return null;
+        }).when(conversation).say(anyString(), anyMap());
+
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getValue().call();
+
+        assertTrue(failed.await(10, TimeUnit.SECONDS), "the interrupted pipeline should have failed");
+        Thread.sleep(500); // let the failure callback run
+        verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
+        verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+    }
+
+    @Test
+    @Timeout(60)
     @DisplayName("a turn that finishes in time is unregistered as before")
     void turnThatFinishesInTimeIsUnregistered() throws Exception {
         IConversation conversation = mock(IConversation.class);

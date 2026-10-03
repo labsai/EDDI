@@ -566,7 +566,16 @@ class ConversationStepRunner {
                         // watchdog recorded anything, so it must take the error path
                         // below and leave an ERROR record — swallowing it at WARN left
                         // the conversation looking untouched after a real failure.
-                        if (t instanceof ExecutionAbandonedException || t instanceof LifecycleException.LifecycleInterruptedException) {
+                        //
+                        // A turn already flagged cancelled (the watchdog's abandonTurn, a
+                        // /cancel, a GDPR stop) takes this branch whatever it failed with:
+                        // its failure is the cancellation's own consequence — a model call
+                        // aborted by the interrupt surfaces as a plain LifecycleException —
+                        // and whoever cancelled it has already recorded the state. Writing
+                        // ERROR over EXECUTION_INTERRUPTED here was a race the zombie could
+                        // win.
+                        if (t instanceof ExecutionAbandonedException || t instanceof LifecycleException.LifecycleInterruptedException
+                                || conversationMemory.isCancelled()) {
                             String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
                             errorMessage = String.format(errorMessage, conversationId);
                             conversationService.contextLogger.setLoggingContext(loggingContext);
