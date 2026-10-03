@@ -565,6 +565,11 @@ class ConversationHitlService {
                         // another node took the conversation over, and losing the lease
                         // cancels it at the next task boundary.
                         memory.setFenceToken(held.fence());
+                        try {
+                            conversationMemoryStore.raiseFence(conversationId, held.fence());
+                        } catch (Exception e) {
+                            LOGGER.warnf("Could not raise the fence of conversation %s: %s", conversationId, e.getMessage());
+                        }
                         held.onLost(() -> memory.setCancelled(true));
                     }
                     try {

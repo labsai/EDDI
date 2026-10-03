@@ -391,6 +391,30 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("a fence raised when the successor starts refuses a predecessor that has not written yet")
+        void raisedFenceRefusesThePredecessor() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var zombie = loadForTurn(id);
+            var successor = loadForTurn(id);
+            store.raiseFence(id, 9L); // the successor's lease started; nothing has been written yet
+            assertEquals(9L, store.loadConversationMemorySnapshot(id).getFence());
+
+            addTurn(zombie);
+            zombie.setFenceToken(5L);
+            assertThrows(ConversationFencedException.class, () -> store.storeConversationMemorySnapshot(zombie));
+            assertEquals(0, store.loadConversationMemorySnapshot(id).getConversationSteps().size());
+
+            // the raise moved no revision: the successor writes on the one it loaded
+            addTurn(successor);
+            successor.setFenceToken(9L);
+            store.storeConversationMemorySnapshot(successor);
+            assertEquals(1, store.loadConversationMemorySnapshot(id).getConversationSteps().size());
+
+            store.raiseFence(id, 3L); // never lowers
+            assertEquals(9L, store.loadConversationMemorySnapshot(id).getFence());
+        }
+
+        @Test
         @DisplayName("without fencing the same race merges both appends (today's behaviour)")
         void unfencedRaceStillMerges() throws IResourceStore.ResourceStoreException {
             String id = newConversation();

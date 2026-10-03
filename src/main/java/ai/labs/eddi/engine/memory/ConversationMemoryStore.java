@@ -764,6 +764,16 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public void raiseFence(String conversationId, long fence) {
+        // $max: never lowers; the revision is deliberately not touched, so the turn
+        // that is about to write on the revision it loaded does not conflict with it.
+        conversationCollectionDocument.updateOne(
+                Filters.and(Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                        Filters.or(Filters.exists(KEY_FENCE, false), Filters.lt(KEY_FENCE, fence))),
+                Updates.max(KEY_FENCE, fence));
+    }
+
+    @Override
     public void clearHitlBookmark(String conversationId) {
         var unset = new Document();
         // Terminal cleanup (end/cancel) must remove ALL pause state, including the

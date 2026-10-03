@@ -29,6 +29,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import org.jboss.logging.Logger;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -271,6 +272,15 @@ class ConversationStepRunner {
     private final Map<String, ConversationFencedException> fencedTurns = new ConcurrentHashMap<>();
 
     /**
+     * Conversations whose running turn was cancelled because its lease was lost:
+     * the conversation belongs to whoever holds the lease now, so the cancelled
+     * turn must not stamp a state on it (see the cancel branch of the completion
+     * callback). Keyed by conversation — a node runs at most one turn of one at a
+     * time — and cleared when the next turn of it starts.
+     */
+    private final Set<String> leaseLostConversations = ConcurrentHashMap.newKeySet();
+
+    /**
      * @param lease
      *            the cluster lease this turn runs under (cluster mode), or
      *            {@code null} on a single node
@@ -366,14 +376,19 @@ class ConversationStepRunner {
             // Cluster mode: every write of this turn carries the lease's fencing token,
             // so the store refuses it if another node took the conversation over in the
             // meantime; and losing the lease stops the pipeline at the next task boundary.
+            leaseLostConversations.remove(conversationId);
             conversationMemory.setFenceToken(lease.fence());
+            raiseFence(conversationId, lease.fence());
             final IConversationMemory leasedMemory = conversationMemory;
             // TODO(fix/engine-runtime-hardening): once
             // ai.labs.eddi.engine.runtime.ITurnAbandonment
             // lands, call abandonInFlightTurn(conversationId) here instead — it raises the
             // same
             // cancel flag through the one public seam for abandoning a running turn.
-            lease.onLost(() -> leasedMemory.setCancelled(true));
+            lease.onLost(() -> {
+                leaseLostConversations.add(conversationId);
+                leasedMemory.setCancelled(true);
+            });
         }
         try {
             // Carry the agent-level tool-approval config onto memory BEFORE the
@@ -392,6 +407,22 @@ class ConversationStepRunner {
             inFlightConversations.remove(conversationId, conversationMemory);
         }
         return null;
+    }
+
+    /**
+     * Cluster mode: tell the document this turn's lease has started, so a holder
+     * whose lease expired earlier (a stalled node, an abandoned pipeline thread)
+     * can no longer write — see {@link IConversationMemoryStore#raiseFence}. A
+     * failure is logged and the turn goes on: the fence still guards every write
+     * this turn makes, and a database that cannot take this update cannot take the
+     * turn's own writes either.
+     */
+    void raiseFence(String conversationId, long fence) {
+        try {
+            conversationMemoryStore.raiseFence(conversationId, fence);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not raise the fence of conversation %s to %d: %s", sanitize(conversationId), fence, e.getMessage());
+        }
     }
 
     void runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
@@ -417,6 +448,16 @@ class ConversationStepRunner {
                                 conversationService.contextLogger.setLoggingContext(loggingContext);
                                 LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
                                         + "discarding its outcome (no pause persisted/armed)", conversationId);
+                                if (leaseLostConversations.remove(conversationId)) {
+                                    // Cancelled because the lease was lost: another node holds the
+                                    // conversation now (or the next turn will), and a state written
+                                    // from here would overwrite the one its turn committed — the
+                                    // conversation reported EXECUTION_INTERRUPTED after a good turn.
+                                    LOGGER.warnf("Turn of conversation %s lost its lease — its outcome is discarded and the "
+                                            + "conversation state is left to the turn that holds it now", sanitize(conversationId));
+                                    refreshCachedState(conversationId);
+                                    return;
+                                }
                                 ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);
                                 if ((runningState == ConversationState.READY || runningState == ConversationState.IN_PROGRESS)
                                         && conversationMemoryStore.compareAndSetState(conversationId,

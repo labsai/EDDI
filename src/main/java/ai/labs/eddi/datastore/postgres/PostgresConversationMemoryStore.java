@@ -759,6 +759,23 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public void raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // GREATEST: never lowers; `_rev` is deliberately not touched — see
+        // IConversationMemoryStore#raiseFence.
+        String sql = "UPDATE conversation_memories SET data = jsonb_set(data, '{_fence}', to_jsonb(?::bigint)) "
+                + "WHERE id = ?::uuid AND COALESCE((data->>'_fence')::bigint, 0) < ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, fence);
+            ps.setString(2, conversationId);
+            ps.setLong(3, fence);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to raise the fence of conversation " + conversationId, e);
+        }
+    }
+
+    @Override
     public void clearHitlBookmark(String conversationId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         // Terminal cleanup must also drop the tool-level HITL fields so no stale
