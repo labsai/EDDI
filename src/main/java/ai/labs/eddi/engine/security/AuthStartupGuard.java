@@ -6,8 +6,10 @@ package ai.labs.eddi.engine.security;
 
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.StartupEvent;
+import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.interceptor.Interceptor;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import io.quarkus.scheduler.Scheduled;
@@ -45,6 +47,9 @@ public class AuthStartupGuard {
      */
     static final String QUARKUS_OIDC_DEFAULT_ROLES_CLAIM = "groups";
 
+    /** Observer priority: before every other startup observer. */
+    static final int STARTUP_PRIORITY = Interceptor.Priority.PLATFORM_BEFORE;
+
     @ConfigProperty(name = "quarkus.oidc.tenant-enabled", defaultValue = "false")
     boolean oidcEnabled;
 
@@ -64,8 +69,17 @@ public class AuthStartupGuard {
 
     private volatile boolean warnMode = false;
 
+    // Runs FIRST among the startup observers (PLATFORM_BEFORE): a misconfigured
+    // deployment must be refused on its configuration alone, before any observer
+    // touches the datastore. At the default priority the vault, migration and
+    // index-creating observers ran first, so a bare start with no reachable
+    // database
+    // spent its whole server-selection timeout (30 s per operation) failing on
+    // Mongo
+    // and never printed this guard's message at all.
     // CDI requires the @Observes parameter for event discovery; not read directly
-    void onStart(@Observes StartupEvent event) {
+    void onStart(@Observes
+    @Priority(STARTUP_PRIORITY) StartupEvent event) {
         LaunchMode mode = getLaunchMode();
 
         // Runs before the launch-mode branch below: this one matters in every mode

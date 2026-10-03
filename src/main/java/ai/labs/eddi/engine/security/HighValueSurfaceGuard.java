@@ -6,8 +6,10 @@ package ai.labs.eddi.engine.security;
 
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.StartupEvent;
+import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.interceptor.Interceptor;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -65,8 +67,18 @@ public class HighValueSurfaceGuard {
         this.secretStoreAllowUnauthenticated = secretStoreAllowUnauthenticated;
     }
 
+    // Runs FIRST among the startup observers (PLATFORM_BEFORE): a misconfigured
+    // deployment must be refused on its configuration alone, before any observer
+    // touches the datastore. At the default priority the vault, migration and
+    // index-creating observers ran first, so a bare start with no reachable
+    // database
+    // spent its whole server-selection timeout (30 s per operation) failing on
+    // Mongo
+    // and never printed this guard's message at all.
+    // Right after AuthStartupGuard, so the broader refusal is the one reported.
     // CDI requires the @Observes parameter for event discovery; not read directly
-    void onStart(@Observes StartupEvent event) {
+    void onStart(@Observes
+    @Priority(Interceptor.Priority.PLATFORM_BEFORE + 1) StartupEvent event) {
         LaunchMode mode = getLaunchMode();
         if (mode == LaunchMode.DEVELOPMENT || mode == LaunchMode.TEST) {
             return;

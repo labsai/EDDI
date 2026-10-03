@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.utils.LogBanner;
 import org.jboss.logging.Logger;
 
 /**
@@ -39,7 +40,7 @@ public final class VaultStartupBanner {
      * Print the vault-enabled banner (master key is configured).
      */
     public static void printEnabled() {
-        LOGGER.warn("""
+        LogBanner.warn(LOGGER, """
 
                 +------------------------------------------------------------------+
                 |  SECRETS VAULT: ENABLED                                          |
@@ -57,7 +58,7 @@ public final class VaultStartupBanner {
      * the implications and how to fix it.
      */
     public static void printDisabled() {
-        LOGGER.warn("""
+        LogBanner.warn(LOGGER, """
 
                 +------------------------------------------------------------------+
                 |  WARNING: SECRETS VAULT DISABLED -- Master key not configured    |
