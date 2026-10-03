@@ -4,8 +4,6 @@
  */
 package ai.labs.eddi.secrets;
 
-import java.util.function.UnaryOperator;
-
 /**
  * Implemented by anything that stores data sealed with a tenant's DEK, so DEK
  * rotation re-seals it instead of destroying it.
@@ -39,7 +37,10 @@ import java.util.function.UnaryOperator;
  * Rotation catches it, counts the tenant as incompletely migrated, and reports
  * that the operation is safe to re-run. Reporting outstanding rows through the
  * return value is preferred, because a count survives where an exception ends
- * the sweep.
+ * the sweep. In particular, one row the resealer cannot open (corrupt, or
+ * sealed under a generation that no longer exists) must be counted as
+ * outstanding and skipped, never allowed to end the sweep for every row after
+ * it.
  */
 public interface SealedDataRotationParticipant {
 
@@ -68,7 +69,30 @@ public interface SealedDataRotationParticipant {
      * @return how many rows are still NOT on the active generation when this
      *         returns — zero means the tenant is fully migrated
      */
-    int resealAll(String tenantId, String activeDekId, UnaryOperator<ISecretProvider.SealedValue> resealer);
+    int resealAll(String tenantId, String activeDekId, Resealer resealer);
+
+    /**
+     * Re-seals one value under the active generation.
+     */
+    @FunctionalInterface
+    interface Resealer {
+
+        /**
+         * @param sealed
+         *            the stored value, naming the generation it was sealed under
+         * @param context
+         *            the AAD context the value is bound to — the same one the owner
+         *            passes to {@link ISecretProvider#seal(String, String, String)} —
+         *            or {@code null} for a value that is not bound. A value sealed
+         *            before binding existed opens with its context too, and comes back
+         *            bound
+         * @return the value sealed under the active generation
+         * @throws IllegalStateException
+         *             when the value cannot be opened (corrupt, or its generation is
+         *             gone). Never quotes the value
+         */
+        ISecretProvider.SealedValue reseal(ISecretProvider.SealedValue sealed, String context);
+    }
 
     /**
      * Discards every value this participant sealed for a tenant whose vault is

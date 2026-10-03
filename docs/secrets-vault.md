@@ -284,8 +284,29 @@ with write access to the database fails authentication instead of decrypting as 
 row's value. Rows written before this keep decrypting through a no-AAD fallback, so
 nothing has to be migrated; a DEK rotation re-seals a tenant's secrets in the bound
 form. System values (such as the pinned audit key) are bound to their name and have
-no unbound form. Wrapped DEKs and OAuth connection grants, sealed through `seal()`,
-are not bound.
+no unbound form. Wrapped DEKs are not bound.
+
+**Sealed runtime data is bound too.** OAuth connection grants are sealed through the
+generic `seal()` API, which used to bind nothing: one user's refresh token copied
+into another user's grant row — or an access token copied into the refresh-token
+field — opened there. The API now takes a *context* naming the row and the field
+(`ISecretProvider.seal(tenantId, plaintext, context)`), and the AAD is
+`eddi-sealed-data|v1|tenantId|dekId|<length>:context`, a prefix distinct from a
+secret's and a system value's so no sealed value of one kind passes as another. A
+grant's context is its connection name, its principal and `access`/`refresh`.
+
+*Migration — nothing to run.* Grants sealed before this keep opening: the bound
+form is tried first and the unbound one only if it fails, exactly as for secrets.
+Every grant **written** from this release on (a new link, every token refresh) is
+bound, and the next `POST /{tenantId}/rotate-dek` re-seals every remaining one in the
+bound form. Until a grant has been rewritten or swept, it can still be opened
+unbound — run a DEK rotation if you want that window closed now.
+
+**One generation per row.** A grant stores both tokens under a single `dekId`. They
+are now sealed in one call (`sealAll`), against one active-DEK lookup. Sealed one
+at a time, a rotation committing between the two calls could leave the refresh
+token under a generation the row did not name — and that grant could never refresh
+again.
 
 **The per-deployment salt is created once, by whichever replica gets there first.**
 It is written with an insert-if-absent and every other replica adopts the winner, so
@@ -682,7 +703,13 @@ seals with it, that at least *N* sealed rows still name an older generation, tha
 nothing is lost, and that the operation is safe to re-run. Re-running picks up
 exactly the rows the previous run left. Rows are swept individually so that one
 secret nobody can open does not strand the rest of the tenant on an older
-generation for every future rotation as well.
+generation for every future rotation as well. The same holds for OAuth grants:
+a grant whose tokens cannot be opened (corrupt, or sealed under a generation that
+no longer exists) used to end the grant sweep, leaving every grant after it on the
+old generation; it is now skipped, logged as a `WARN` naming the connection, counted
+in `eddi_vault_reseal_failures_total{participant="connection-grants"}` and included
+in the "at least *N* rows" of the 500. Every other grant still moves. A grant that
+keeps failing there cannot be opened at all — its user has to reconnect the account.
 
 - Does NOT require a restart
 - Recommended: rotate periodically or after personnel changes

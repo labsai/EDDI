@@ -33,7 +33,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
-import java.util.function.UnaryOperator;
 
 import java.security.SecureRandom;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -728,14 +727,15 @@ public class VaultSecretProvider implements ISecretProvider {
         if (rotationParticipants == null || rotationParticipants.isUnsatisfied()) {
             return 0;
         }
-        UnaryOperator<SealedValue> resealer = sealed -> {
+        SealedDataRotationParticipant.Resealer resealer = (sealed, context) -> {
             if (sealed == null || sealed.ciphertext() == null) {
                 return sealed;
             }
             try {
-                String plaintext = EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dekFor(tenantId, sealed.dekId()));
-                EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, activeDek);
-                return new SealedValue(enc.ciphertext(), enc.iv(), activeDekId);
+                // Opened bound-or-legacy, re-sealed bound: a rotation is what moves every
+                // value written before context binding onto the bound form.
+                String plaintext = openSealedData(tenantId, sealed, context);
+                return sealUnder(tenantId, activeDekId, activeDek, plaintext, context);
             } catch (SecretProviderException | EnvelopeCrypto.CryptoException e) {
                 // Never quotes the ciphertext or the participant's row: this runs over
                 // refresh tokens.
@@ -1206,6 +1206,98 @@ public class VaultSecretProvider implements ISecretProvider {
             errorCounter.increment();
             throw new SecretProviderException("Encryption failure while sealing data for tenant " + sanitize(tenantId), e);
         }
+    }
+
+    @Override
+    public SealedValue seal(String tenantId, String plaintext, String context) throws SecretProviderException {
+        return sealAll(tenantId, Collections.singletonList(plaintext), Collections.singletonList(context)).getFirst();
+    }
+
+    @Override
+    public List<SealedValue> sealAll(String tenantId, List<String> plaintexts, List<String> contexts) throws SecretProviderException {
+        ensureAvailable();
+        if (plaintexts.size() != contexts.size()) {
+            throw new IllegalArgumentException("sealAll needs one context per value");
+        }
+        try {
+            // ONE active-DEK lookup for every field of the row: see
+            // ISecretProvider.sealAll.
+            ActiveDek dek = activeDek(tenantId);
+            List<SealedValue> sealed = new ArrayList<>(plaintexts.size());
+            for (int i = 0; i < plaintexts.size(); i++) {
+                String plaintext = plaintexts.get(i);
+                if (plaintext == null) {
+                    sealed.add(null);
+                    continue;
+                }
+                EnvelopeCrypto.EncryptionResult result = EnvelopeCrypto.encrypt(plaintext, dek.key(),
+                        sealedDataAad(tenantId, dek.dekId(), contexts.get(i)));
+                sealed.add(new SealedValue(result.ciphertext(), result.iv(), dek.dekId()));
+            }
+            return sealed;
+        } catch (EnvelopeCrypto.CryptoException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Encryption failure while sealing data for tenant " + sanitize(tenantId), e);
+        }
+    }
+
+    @Override
+    public String unseal(String tenantId, SealedValue sealed, String context) throws SecretProviderException {
+        ensureAvailable();
+        if (sealed == null || sealed.ciphertext() == null) {
+            return null;
+        }
+        try {
+            return openSealedData(tenantId, sealed, context);
+        } catch (EnvelopeCrypto.CryptoException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Decryption failure while unsealing data for tenant " + sanitize(tenantId), e);
+        }
+    }
+
+    /**
+     * Opens a value sealed through the generic {@code seal} API: bound form first,
+     * then — for a value sealed before context binding existed — the unbound form.
+     * A {@code null} context means the caller has none to give, so only the unbound
+     * form is tried.
+     */
+    private String openSealedData(String tenantId, SealedValue sealed, String context) throws SecretProviderException {
+        byte[] dek = dekFor(tenantId, sealed.dekId());
+        if (context == null) {
+            return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek);
+        }
+        try {
+            return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek, sealedDataAad(tenantId, sealed.dekId(), context));
+        } catch (EnvelopeCrypto.CryptoException boundFailed) {
+            try {
+                return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek);
+            } catch (EnvelopeCrypto.CryptoException legacyFailed) {
+                throw boundFailed;
+            }
+        }
+    }
+
+    /**
+     * Seals {@code plaintext} under the given generation, bound to {@code context}
+     * when there is one.
+     */
+    private static SealedValue sealUnder(String tenantId, String dekId, byte[] dek, String plaintext, String context) {
+        EnvelopeCrypto.EncryptionResult result = context == null
+                ? EnvelopeCrypto.encrypt(plaintext, dek)
+                : EnvelopeCrypto.encrypt(plaintext, dek, sealedDataAad(tenantId, dekId, context));
+        return new SealedValue(result.ciphertext(), result.iv(), dekId);
+    }
+
+    /**
+     * The AAD of a value sealed through the generic API. A distinct prefix from a
+     * named secret's ({@link #secretAad}) and a system value's
+     * ({@link #systemValueAad}), so no sealed value of one kind can be presented as
+     * another. The context is length-prefixed: it is caller-supplied and may itself
+     * contain the separator.
+     */
+    static byte[] sealedDataAad(String tenantId, String dekId, String context) {
+        return ("eddi-sealed-data|v1|" + tenantId + "|" + dekId + "|" + context.length() + ":" + context)
+                .getBytes(StandardCharsets.UTF_8);
     }
 
     /**

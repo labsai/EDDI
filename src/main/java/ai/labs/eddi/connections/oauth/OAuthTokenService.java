@@ -22,6 +22,8 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -170,7 +172,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
                     + "' is REFRESH_FAILED. The user must reconnect the account.");
         }
         if (grant.isAccessTokenUsable(Instant.now(), effectiveMargin(connection, grant))) {
-            return unseal(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), grant.getDekId(), connection);
+            return unsealAccessToken(tenantId, grant, connection);
         }
         return refreshSingleFlight(connection, tenantId, principal, grant);
     }
@@ -360,7 +362,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             if (current.getRefreshInProgress() == null) {
                 if (current.isAccessTokenUsable(Instant.now(), effectiveMargin(connection, current))) {
                     return AwaitOutcome
-                            .adopted(unseal(tenantId, current.getEncryptedAccessToken(), current.getAccessTokenIv(), current.getDekId(), connection));
+                            .adopted(unsealAccessToken(tenantId, current, connection));
                 }
                 return AwaitOutcome.leaseReleased();
             }
@@ -385,7 +387,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             grant = grantStore.find(tenantId, connection.getName(), principal).orElseThrow(() -> new ConnectionException(
                     ConnectionException.Reason.NOT_CONNECTED, "The grant for connection '" + connection.getName() + "' disappeared mid-refresh."));
             if (grant.isAccessTokenUsable(Instant.now(), effectiveMargin(connection, grant))) {
-                return unseal(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), grant.getDekId(), connection);
+                return unsealAccessToken(tenantId, grant, connection);
             }
             RefreshResult refreshed = requestNewToken(connection, tenantId, grant);
             persist(connection, tenantId, principal, refreshed.token(), refreshed.refreshToken(), grant.getVersion());
@@ -487,7 +489,8 @@ public class OAuthTokenService implements AccessTokenSupplier {
         if (grant.getEncryptedRefreshToken() == null) {
             return null;
         }
-        String plaintext = unsealOrNull(tenantId, grant.getEncryptedRefreshToken(), grant.getRefreshTokenIv(), grant.getDekId());
+        String plaintext = unsealOrNull(tenantId, grant.getEncryptedRefreshToken(), grant.getRefreshTokenIv(), grant.getDekId(),
+                ConnectionGrant.refreshTokenContext(grant.getConnectionName(), grant.getPrincipal()));
         if (plaintext == null) {
             throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "The stored refresh token for connection '"
                     + connection.getName() + "' could not be decrypted. The grant is unchanged; the next request will retry.");
@@ -581,11 +584,17 @@ public class OAuthTokenService implements AccessTokenSupplier {
         grant.setTenantId(tenantId);
         grant.setConnectionName(connection.getName());
         grant.setPrincipal(principal);
-        ISecretProvider.SealedValue access = seal(tenantId, token.accessToken(), connection);
+        // Both tokens in ONE call, so both are sealed under one DEK generation: the row
+        // records a single dekId. Two separate seals straddling a rotation used to
+        // leave the refresh token under a generation the row did not name, and that
+        // grant could never refresh again. Each token is bound (AAD) to this row and
+        // its field.
+        List<ISecretProvider.SealedValue> sealed = sealTokens(tenantId, token.accessToken(), refreshToken, connection, principal);
+        ISecretProvider.SealedValue access = sealed.get(0);
         grant.setEncryptedAccessToken(access.ciphertext());
         grant.setAccessTokenIv(access.iv());
-        if (refreshToken != null) {
-            ISecretProvider.SealedValue refresh = seal(tenantId, refreshToken, connection);
+        ISecretProvider.SealedValue refresh = sealed.get(1);
+        if (refresh != null) {
             grant.setEncryptedRefreshToken(refresh.ciphertext());
             grant.setRefreshTokenIv(refresh.iv());
         }
@@ -604,9 +613,16 @@ public class OAuthTokenService implements AccessTokenSupplier {
         return credentialReferenceResolver.resolveRequired(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
     }
 
-    private ISecretProvider.SealedValue seal(String tenantId, String plaintext, ConnectionConfiguration connection) {
+    private List<ISecretProvider.SealedValue> sealTokens(String tenantId, String accessToken, String refreshToken,
+                                                         ConnectionConfiguration connection, String principal) {
         try {
-            return secretProvider.seal(tenantId, plaintext);
+            List<ISecretProvider.SealedValue> sealed = secretProvider.sealAll(tenantId, Arrays.asList(accessToken, refreshToken),
+                    List.of(ConnectionGrant.accessTokenContext(connection.getName(), principal),
+                            ConnectionGrant.refreshTokenContext(connection.getName(), principal)));
+            if (sealed == null || sealed.size() != 2 || sealed.get(0) == null) {
+                throw new ISecretProvider.SecretProviderException("The vault returned no sealed access token");
+            }
+            return sealed;
         } catch (ISecretProvider.SecretProviderException e) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "Cannot store the grant for connection '"
                     + connection.getName() + "': the vault is unavailable. Tokens are never stored in plaintext.", e);
@@ -625,8 +641,9 @@ public class OAuthTokenService implements AccessTokenSupplier {
      * distinction ({@link #storedRefreshToken}); the access-token path now does
      * too.
      */
-    private String unseal(String tenantId, String ciphertext, String iv, String dekId, ConnectionConfiguration connection) {
-        String plaintext = unsealOrNull(tenantId, ciphertext, iv, dekId);
+    private String unsealAccessToken(String tenantId, ConnectionGrant grant, ConnectionConfiguration connection) {
+        String plaintext = unsealOrNull(tenantId, grant.getEncryptedAccessToken(), grant.getAccessTokenIv(), grant.getDekId(),
+                ConnectionGrant.accessTokenContext(grant.getConnectionName(), grant.getPrincipal()));
         if (plaintext == null) {
             throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "The stored access token for connection '"
                     + connection.getName() + "' could not be decrypted. The grant is unchanged; the next request will retry.");
@@ -641,13 +658,17 @@ public class OAuthTokenService implements AccessTokenSupplier {
      *            rotation the tenant's newest generation is not the one a grant
      *            still waiting to be swept was sealed with, and opening it with the
      *            wrong key looks exactly like a revoked grant.
+     * @param context
+     *            the AAD context the token was sealed with; a grant written before
+     *            binding existed still opens (see
+     *            {@link ISecretProvider#unseal(String, ISecretProvider.SealedValue, String)})
      */
-    private String unsealOrNull(String tenantId, String ciphertext, String iv, String dekId) {
+    private String unsealOrNull(String tenantId, String ciphertext, String iv, String dekId, String context) {
         if (ciphertext == null) {
             return null;
         }
         try {
-            return secretProvider.unseal(tenantId, new ISecretProvider.SealedValue(ciphertext, iv, dekId));
+            return secretProvider.unseal(tenantId, new ISecretProvider.SealedValue(ciphertext, iv, dekId), context);
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.warnf("Failed to unseal a stored grant token for tenant '%s'", tenantId);
             return null;
