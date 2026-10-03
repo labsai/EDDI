@@ -179,3 +179,13 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
 - An audit entry written on another node by work that the erasure had not yet
   stopped is pseudonymised only if the `gdpr.user-erased` event reached that
   node first.
+- A turn whose write the fence refuses has usually already answered its
+  caller: the reply is rendered inside the pipeline, before the write. The
+  conversation history does not contain that turn and it is dead-lettered —
+  replay it if the answer should count.
+- A paginated tool response is not bound to its conversation: anyone who
+  knows the random response id can fetch its pages from any node, exactly as on
+  a single node (the tool has no conversation context to check against).
+- On PostgreSQL, replicas that boot together run their startup one after
+  another (an advisory lock around table creation and migrations), so the
+  last of N replicas of a first install becomes ready later than the first.
