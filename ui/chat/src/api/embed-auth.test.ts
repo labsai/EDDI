@@ -71,6 +71,17 @@ describe("parseAllowedTokenOrigins", () => {
     expect(parse("file:///etc")).toEqual([]);
   });
 
+  it("refuses anything that is not byte-for-byte an origin", () => {
+    // The browser compares event.origin as a string, so each of these would
+    // either never match or, worse, imply a looser allow-list than written.
+    expect(parse("https://portal.example/")).toEqual([]);
+    expect(parse("https://portal.example/path")).toEqual([]);
+    expect(parse("https://portal.example:443")).toEqual([]);
+    expect(parse("https://user@portal.example")).toEqual([]);
+    expect(parse("HTTPS://PORTAL.EXAMPLE")).toEqual([]);
+    expect(parse("https://portal.example?x=1")).toEqual([]);
+  });
+
   it("keeps exact origins", () => {
     expect(parse(`${HOST}, http://localhost:5173`)).toEqual([HOST, "http://localhost:5173"]);
   });
