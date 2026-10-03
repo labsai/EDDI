@@ -360,6 +360,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         try {
             Environment environment = Environment.valueOf(env);
             Integer agentVersion = Integer.valueOf(String.valueOf(version));
+            noteUnrecordedDeployment(environment, agentId, agentVersion);
             runtime.getExecutorService().submit(() -> {
                 try {
                     IAgent existing = agentFactory.getAgent(environment, agentId, agentVersion);
@@ -380,6 +381,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private void undeployLocally(Environment environment, String agentId, Integer agentVersion, String why) {
         try {
             agentFactory.undeployAgent(environment, agentId, agentVersion);
+            unrecorded.remove(keyOf(environment, agentId, agentVersion));
             synchronized (sweepLock) {
                 deploymentInfos.removeIf(info -> info.getEnvironment() == environment && agentId.equals(info.getAgentId())
                         && agentVersion.equals(info.getAgentVersion()));
@@ -402,12 +404,31 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      */
     private final Set<String> everRecorded = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Deployments made without a record (autoDeploy=false), here or announced by
+     * another node. Exempt from the reconciliation even if the same version was
+     * recorded once, then undeployed, before this unrecorded deploy.
+     */
+    private final Set<String> unrecorded = ConcurrentHashMap.newKeySet();
+
+    private static String keyOf(Environment environment, String agentId, Object version) {
+        return environment + "/" + agentId + "/" + version;
+    }
+
+    @Override
+    public void noteUnrecordedDeployment(Environment environment, String agentId, Integer agentVersion) {
+        if (clustered() && environment != null && agentId != null && agentVersion != null) {
+            unrecorded.add(keyOf(environment, agentId, agentVersion));
+        }
+    }
+
     private void reconcileUndeployed(List<DeploymentInfo> meantToBeDeployed) {
         Set<String> wanted = new HashSet<>();
         for (DeploymentInfo info : meantToBeDeployed) {
             wanted.add(info.getEnvironment() + "/" + info.getAgentId() + "/" + info.getAgentVersion());
         }
         everRecorded.addAll(wanted);
+        unrecorded.removeAll(wanted); // a record exists now: the sweep owns it again
         Instant now = clock.instant();
         Set<String> seenMissing = new HashSet<>();
         for (Environment environment : Environment.values()) {
@@ -422,7 +443,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 if (wanted.contains(key)) {
                     continue;
                 }
-                if (!everRecorded.contains(key)) {
+                if (unrecorded.contains(key) || !everRecorded.contains(key)) {
                     // Never had a record: deployed with autoDeploy=false (here or, through
                     // the cluster event, on another node). Its undeploy arrives as an event;
                     // the sweep must not take it for a record that went away.

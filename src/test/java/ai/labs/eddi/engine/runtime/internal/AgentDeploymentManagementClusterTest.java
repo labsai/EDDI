@@ -193,6 +193,29 @@ class AgentDeploymentManagementClusterTest {
     }
 
     @Test
+    @DisplayName("an unrecorded redeploy of a version that was recorded once, then undeployed, is not taken for a lost record")
+    void unrecordedRedeployOfAPreviouslyRecordedVersionSurvives() throws Exception {
+        clustered(true);
+        IAgent served = mock(IAgent.class);
+        when(served.getAgentId()).thenReturn("agent1");
+        when(served.getAgentVersion()).thenReturn(1);
+        when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(List.of(served));
+        // Recorded and deployed once ...
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(deployed("agent1")));
+        Instant t0 = Instant.parse("2026-10-03T10:00:00Z");
+        sweepAt(t0);
+        // ... undeployed (the record flips), then deployed again with autoDeploy=false.
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+        management.noteUnrecordedDeployment(Environment.production, "agent1", 1);
+
+        sweepAt(t0.plusSeconds(10));
+        sweepAt(t0.plusSeconds(20));
+        sweepAt(t0.plusSeconds(30));
+
+        verify(agentFactory, never()).undeployAgent(any(), any(), any());
+    }
+
+    @Test
     @DisplayName("single node: nothing to wait for")
     void singleNode() throws Exception {
         clustered(false);

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 
 import java.time.Duration;
 import java.util.function.Supplier;
@@ -29,6 +30,15 @@ public interface IAgentDeploymentManagement {
      */
     default <T> T awaitClusterDeployment(Deployment.Environment environment, String agentId, Supplier<T> resolve, Duration maxWait) {
         return null;
+    }
+
+    /**
+     * Cluster mode: this node deployed an agent with {@code autoDeploy=false} — no
+     * deployment record exists for it, on purpose. The two-way reconciliation sweep
+     * must not take it for a deployment whose record went away, even when an
+     * earlier recorded deployment of the same version once existed.
+     */
+    default void noteUnrecordedDeployment(Environment environment, String agentId, Integer agentVersion) {
     }
 
     class AutoDeploymentException extends Exception {
