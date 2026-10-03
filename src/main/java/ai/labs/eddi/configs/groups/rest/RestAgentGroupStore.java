@@ -42,7 +42,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  */
 @ApplicationScoped
 public class RestAgentGroupStore implements IRestAgentGroupStore {
-    private static final Logger LOG = Logger.getLogger(RestAgentGroupStore.class);
+    private static final Logger LOGGER = Logger.getLogger(RestAgentGroupStore.class);
 
     private final IAgentGroupStore groupStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -150,7 +150,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 var resourceId = RestUtilities.extractResourceId(location);
                 syncDescriptor(resourceId.getId(), groupConfiguration);
             } catch (Exception e) {
-                LOG.warn("Failed to sync group descriptor name/description on create", e);
+                LOGGER.warn("Failed to sync group descriptor name/description on create", e);
             }
         }
         return response;
@@ -168,7 +168,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 var resourceId = RestUtilities.extractResourceId(location);
                 syncDescriptor(resourceId.getId(), config);
             } catch (Exception e) {
-                LOG.warn("Failed to sync group descriptor name/description on duplicate", e);
+                LOGGER.warn("Failed to sync group descriptor name/description on duplicate", e);
             }
         }
         return response;
@@ -195,14 +195,14 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                         try {
                             scheduleStore.deleteSchedule(cadence.scheduleRef());
                         } catch (Exception e) {
-                            LOG.warnf("Could not delete schedule %s of cadence %s while deleting group %s: %s",
+                            LOGGER.warnf("Could not delete schedule %s of cadence %s while deleting group %s: %s",
                                     cadence.scheduleRef(), cadence.cadenceId(), sanitize(id), e.getMessage());
                         }
                     }
                 }
                 workspaceStore.deleteByGroupId(id);
             } catch (Exception e) {
-                LOG.errorf(e, "Failed to cascade workspace deletion for group %s", sanitize(id));
+                LOGGER.errorf(e, "Failed to cascade workspace deletion for group %s", sanitize(id));
             }
         }
         return response;
@@ -294,7 +294,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 documentDescriptorStore.setDescriptor(resourceId, descriptorVersion, descriptor);
             }
         } catch (Exception e) {
-            LOG.warnf(e, "Failed to sync group descriptor name/description for id=%s", sanitize(resourceId));
+            LOGGER.warnf(e, "Failed to sync group descriptor name/description for id=%s", sanitize(resourceId));
         }
     }
 
