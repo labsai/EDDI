@@ -396,6 +396,31 @@ class PostgresScheduleStoreUnitTest {
     }
 
     @Test
+    void readSchedule_jsonNullCreatorTeams_failsClosedAsNoTeams_notAsNoSnapshot() throws Exception {
+        // The JSON literal null is valid JSON and parses to a Java null, which the
+        // fire path reads as "no snapshot" and skips the USE re-check.
+        setupResultSetForSchedule();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("created_by")).thenReturn("alice");
+        when(resultSet.getString("creator_teams")).thenReturn("null");
+
+        ScheduleConfiguration result = sut.readSchedule("sched-1");
+
+        assertNotNull(result.getCreatorTeams());
+        assertTrue(result.getCreatorTeams().isEmpty());
+    }
+
+    @Test
+    void readSchedule_sqlNullCreatorTeams_staysNoSnapshot() throws Exception {
+        // Rows written before the snapshot existed: SQL NULL means "no snapshot".
+        setupResultSetForSchedule();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("creator_teams")).thenReturn(null);
+
+        assertNull(sut.readSchedule("sched-1").getCreatorTeams());
+    }
+
+    @Test
     void readSchedule_unreadableCreatorTeams_failsClosedAsNoTeams_notAsNoSnapshot() throws Exception {
         // null would mean "no snapshot" and skip the fire-time USE re-check (fail
         // open). A corrupt value must keep the check, judged without team shares.

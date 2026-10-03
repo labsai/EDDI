@@ -1193,8 +1193,13 @@ public class PostgresScheduleStore implements IScheduleStore {
             return null;
         }
         try {
-            return TEAMS_MAPPER.readValue(json, new TypeReference<List<String>>() {
+            List<String> teams = TEAMS_MAPPER.readValue(json, new TypeReference<List<String>>() {
             });
+            // The JSON literal null parses successfully — to a Java null, which reads as
+            // "no snapshot" and would skip the USE re-check. serializeTeams never writes
+            // it (no snapshot is SQL NULL), so it can only come from outside; treat it
+            // like any other unusable value.
+            return teams == null ? List.of() : teams;
         } catch (JsonProcessingException e) {
             // Fail closed, but for this row only. null would mean "no snapshot" and
             // skip the fire-time USE re-check entirely (fail open); throwing, as
