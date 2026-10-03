@@ -1003,8 +1003,11 @@ public class OpenAiConversationBridge {
         if (e.getCause() instanceof OpenAiApiException causeException) {
             return causeException;
         }
-        LOGGER.errorf("OpenAI adapter turn failed: %s", e.getMessage());
-        return OpenAiApiException.serverError(null, "The agent could not process the message: " + e.getMessage());
+        // Logged, not returned: an unclassified exception's message can carry hosts,
+        // connection strings or paths, and this one reaches a caller holding only the
+        // shared API key.
+        LOGGER.errorf(e, "OpenAI adapter turn failed: %s", e.getMessage());
+        return OpenAiApiException.serverError(null, "The agent could not process the message.");
     }
 
     // ─── store helpers ───

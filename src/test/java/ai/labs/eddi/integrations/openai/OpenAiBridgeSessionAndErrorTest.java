@@ -416,6 +416,14 @@ class OpenAiBridgeSessionAndErrorTest {
         }
 
         @Test
+        void anUnclassifiedException_isNotEchoedToTheCaller() {
+            var failure = bridge().asApiException(new IllegalStateException("connect to mongodb://admin:hunter2@db.internal:27017 failed"));
+
+            assertEquals(500, failure.getStatus());
+            assertFalse(failure.getMessage().contains("hunter2") || failure.getMessage().contains("db.internal"), failure.getMessage());
+        }
+
+        @Test
         void aFailedTurnWithoutDigest_stillFails() {
             var failure = assertThrows(OpenAiApiException.class,
                     () -> bridge().render(snapshot(ConversationState.ERROR, "partial")));
