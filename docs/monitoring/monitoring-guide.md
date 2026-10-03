@@ -377,9 +377,10 @@ agent that needs it fails its LLM or HTTP calls with the same error.
 
 ### EddiOperatorGateRegressed
 
-The Platform Operator's write-approval gate read back as sound within the last 6 hours
-and does not now (an EDDI restart within that window silences the alert: the gauge
-starts at 0 on every boot). Until it is re-verified the operator's write tools may run without
+The Platform Operator's write-approval gate read back as sound earlier in this EDDI
+process's life and does not now. A restart alone does not fire it: the gate gauge
+and `eddi_operator_gate_last_verified_timestamp_seconds` both start at 0 on every
+boot, and the rule needs a verification by the running process. Until it is re-verified the operator's write tools may run without
 human approval. Treat it as a security incident: open the Manager's Platform
 Operator page, which re-reads the gate from the live agent document and says why
 it is unverified, and re-provision the operator.

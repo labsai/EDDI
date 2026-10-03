@@ -16,6 +16,7 @@ import jakarta.inject.Inject;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Backs the three write-canary and gate-verification meters the Manager cannot
@@ -56,6 +57,16 @@ public class OperatorMetricsService {
      */
     private final AtomicInteger gateVerified = new AtomicInteger(0);
 
+    /**
+     * Backing store for {@code eddi.operator.gate.last_verified_timestamp_seconds}:
+     * when THIS process last received a verified gate report, in epoch seconds; 0
+     * until it has. It lives and dies with the process, so it is what lets the
+     * {@code EddiOperatorGateRegressed} rule tell "verified here, and now not" (a
+     * regression) from "restarted, and the Manager has not reported yet" (the gauge
+     * above is back at 0 either way).
+     */
+    private final AtomicLong lastVerifiedEpochSeconds = new AtomicLong(0);
+
     @Inject
     public OperatorMetricsService(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -74,6 +85,7 @@ public class OperatorMetricsService {
         // again on each report would keep re-registering the same meter id, which
         // most registries tolerate but is not the contract.
         meterRegistry.gauge("eddi.operator.gate.verified", gateVerified, AtomicInteger::get);
+        meterRegistry.gauge("eddi.operator.gate.last_verified_timestamp_seconds", lastVerifiedEpochSeconds, AtomicLong::get);
         for (String outcome : VALID_OUTCOMES) {
             Counter.builder("eddi.operator.canary").tag("outcome", outcome).register(meterRegistry);
         }
@@ -102,6 +114,9 @@ public class OperatorMetricsService {
     }
 
     public void recordGateStatus(boolean verified) {
+        if (verified) {
+            lastVerifiedEpochSeconds.set(System.currentTimeMillis() / 1000);
+        }
         gateVerified.set(verified ? 1 : 0);
     }
 }

@@ -53,6 +53,32 @@ class OperatorMetricsServiceTest {
     }
 
     /**
+     * EddiOperatorGateRegressed fires on "verified by this process, unverified
+     * now". The timestamp is what says "by this process": 0 after boot, set by a
+     * verified report, and kept by an unverified one, so a regression stays visible
+     * as a regression instead of looking like a fresh start.
+     */
+    @Test
+    @DisplayName("the last-verified timestamp starts at 0, is set by a verified report and survives a regression")
+    void lastVerifiedTimestampTracksVerifiedReportsOnly() {
+        var stamp = registry.find("eddi.operator.gate.last_verified_timestamp_seconds").gauge();
+        assertTrue(stamp != null, "the timestamp gauge must exist from startup");
+        assertEquals(0.0, stamp.value());
+
+        service.recordGateStatus(false);
+        assertEquals(0.0, stamp.value(), "an unverified report is not a verification");
+
+        long before = System.currentTimeMillis() / 1000;
+        service.recordGateStatus(true);
+        double verifiedAt = stamp.value();
+        assertTrue(verifiedAt >= before, "a verified report records when it arrived");
+
+        service.recordGateStatus(false);
+        assertEquals(verifiedAt, stamp.value(), "a regression must not erase the evidence of the earlier verification");
+        assertEquals(0.0, registry.find("eddi.operator.gate.verified").gauge().value());
+    }
+
+    /**
      * A counter created by its first increment is first scraped at 1, which
      * {@code increase()} cannot tell from "was always 1": the first canary failure
      * would never page. All outcomes therefore exist at 0 before any report.

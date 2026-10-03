@@ -437,8 +437,13 @@ networkPolicy:
   #       matchLabels: { kubernetes.io/metadata.name: observability }
   #     podSelector:
   #       matchLabels: { app.kubernetes.io/name: opentelemetry-collector }
-  # An empty list allows the port to EVERY destination. A collector outside the
-  # cluster on 443 needs nothing here: external HTTPS is already allowed.
+  # A collector OUTSIDE the cluster on 443 needs nothing here: external HTTPS is
+  # already allowed. On any other port (4317, 4318, …) it needs an ipBlock for
+  # its address — the default namespaceSelector matches cluster pods only, so
+  # without one every span is dropped:
+  #   - ipBlock: { cidr: 203.0.113.10/32 }
+  # An empty list allows otlpPort to EVERY destination; use it only where that
+  # breadth is acceptable.
   otlpEgressTo:
     - namespaceSelector: {}
 

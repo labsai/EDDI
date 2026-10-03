@@ -11786,6 +11786,61 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 189,
+          "type": "stat",
+          "title": "Gate last verified (this process)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "How long ago this EDDI process last received a verified gate report (eddi_operator_gate_last_verified_timestamp_seconds). Empty until one arrives after boot; EddiOperatorGateRegressed needs one before it can fire.",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 28
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "refId": "A",
+              "expr": "time() - max(eddi_operator_gate_last_verified_timestamp_seconds{job=~\"$job\"} > 0)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "noValue": "not verified since boot",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none",
+            "textMode": "auto"
+          }
         }
       ]
     },

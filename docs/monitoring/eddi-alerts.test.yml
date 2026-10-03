@@ -80,28 +80,38 @@ tests:
     input_series:
       - series: 'eddi_operator_gate_verified{job="eddi", instance="regressed"}'
         values: '1 1 1 0 0'
+      - series: 'eddi_operator_gate_last_verified_timestamp_seconds{job="eddi", instance="regressed"}'
+        values: '1000 1000 1000 1000 1000'
       - series: 'eddi_operator_gate_verified{job="eddi", instance="never-activated"}'
         values: '0 0 0 0 0'
-      # Up for 9 hours: the whole lookback belongs to this process.
-      - series: 'process_uptime_seconds{job="eddi", instance="regressed"}'
-        values: '32400+60x4'
-      - series: 'process_uptime_seconds{job="eddi", instance="never-activated"}'
-        values: '32400+60x4'
-      # Verified, then the process restarted and the gauge came back at its boot
-      # value of 0, before the Manager has reported: forgetting is not a regression.
+      - series: 'eddi_operator_gate_last_verified_timestamp_seconds{job="eddi", instance="never-activated"}'
+        values: '0 0 0 0 0'
+      # Verified, then the process restarted: both gauges are back at their boot
+      # value of 0 before the Manager has reported. Forgetting is not a regression.
       - series: 'eddi_operator_gate_verified{job="eddi", instance="restarted"}'
         values: '1 1 1 0 0'
-      - series: 'process_uptime_seconds{job="eddi", instance="restarted"}'
-        values: '30000 30060 30120 5 65'
+      - series: 'eddi_operator_gate_last_verified_timestamp_seconds{job="eddi", instance="restarted"}'
+        values: '1000 1000 1000 0 0'
+      # Restarted, verified a minute after boot, then regressed: a regression inside
+      # the first minutes of a process is still a regression and pages.
+      - series: 'eddi_operator_gate_verified{job="eddi", instance="regressed-after-restart"}'
+        values: '1 0 1 0 0'
+      - series: 'eddi_operator_gate_last_verified_timestamp_seconds{job="eddi", instance="regressed-after-restart"}'
+        values: '1000 0 1120 1120 1120'
     alert_rule_test:
       - eval_time: 4m
         alertname: EddiOperatorGateRegressed
         exp_alerts:
           - exp_labels: { severity: critical, job: eddi, instance: regressed }
             exp_annotations:
-              description: "The gate read back as sound within the last 6 hours and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
+              description: "The gate read back as sound earlier in this process's life and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
               runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddioperatorgateregressed"
               summary: "The Platform Operator's write-approval gate is no longer verified on regressed"
+          - exp_labels: { severity: critical, job: eddi, instance: regressed-after-restart }
+            exp_annotations:
+              description: "The gate read back as sound earlier in this process's life and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddioperatorgateregressed"
+              summary: "The Platform Operator's write-approval gate is no longer verified on regressed-after-restart"
 
   - name: a dropped audit entry pages; a quiet counter does not
     interval: 1m

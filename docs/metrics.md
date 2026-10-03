@@ -542,7 +542,8 @@ The two gauges read the backlog from the conversation store every
 `eddi.hitl.metrics.refresh-interval` (default 60 s) — a bounded, projected read
 of at most 1000 rows, never on the scrape thread. Every replica reports the
 store-wide number, so aggregate with `max`, not `sum`; past 1000 pending
-approvals both are lower bounds. They read `NaN` until the first refresh and
+approvals the count saturates, while the oldest age stays exact (the store
+lists the oldest pauses first, so the cap drops the newest). They read `NaN` until the first refresh and
 after a failed one. Pauses minus resumes, the old way of estimating the backlog,
 reset with every restart and never saw pauses taken before it; alert on
 `eddi_hitl_pending_oldest_age_seconds` instead (`EddiApprovalWaitingLong`).
@@ -552,6 +553,7 @@ reset with every restart and never saw pauses taken before it; alert on
 ```text
 eddi_operator_write_approval_total          # Gated operator writes; tag: decision
 eddi_operator_gate_verified                 # Write gate is verified and active (gauge, 1|0)
+eddi_operator_gate_last_verified_timestamp_seconds # When this process last received a verified report (epoch s; 0 = never)
 eddi_operator_canary_total                  # Canary probes of the write gate
 eddi_operator_canary_duration_seconds       # Canary probe latency
 ```
@@ -560,12 +562,11 @@ eddi_operator_canary_duration_seconds       # Canary probe latency
 human-approval gate is no longer proven — treat it as a security alert. It also
 reads `0` before any report has arrived (a deployment that never activated the
 operator), so the shipped rule `EddiOperatorGateRegressed` fires on the
-transition — verified within the last 6 hours, unverified now, and the process
-has been up for longer than that — not on the value. The uptime condition matters:
-the gauge restarts at `0` on every boot and reads `1` only after the Manager has
-reported a verified gate, so without it each restart would page as a regression.
-The gauge is created with the service, on first use, so the dashboards fall back
-to `0` until then.
+transition — verified by the running process, unverified now — not on the value.
+`eddi_operator_gate_last_verified_timestamp_seconds` records when this process last
+received a verified report (0 until it has). Both gauges restart at `0` on every
+boot, so a restart alone is not a regression, while a regression minutes after a
+restart still pages. Both gauges exist from startup.
 
 ### Prompt & Guardrail Metrics
 

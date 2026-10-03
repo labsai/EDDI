@@ -676,8 +676,14 @@ usually runs in `monitoring`) must be listed there, or every scrape times out an
 OpenTelemetry SDK on. With `networkPolicy.enabled=true` the chart then also allows
 egress to `eddi.tracing.otlpPort` (default 4317) for the peers in
 `networkPolicy.otlpEgressTo` (default: any pod in the cluster) — without it the
-default-deny policy drops every span bound for an in-cluster collector. The
-Kustomize production NetworkPolicy carries the same rule commented out.
+default-deny policy drops every span bound for an in-cluster collector. A
+collector **outside** the cluster on 443 is covered by the external-HTTPS rule. On
+any other port it needs an `ipBlock` for its address in
+`networkPolicy.otlpEgressTo`, e.g. `--set-json 'networkPolicy.otlpEgressTo=[{"ipBlock":{"cidr":"203.0.113.10/32"}}]'`,
+because the default peer matches cluster pods only. An empty list
+(`otlpEgressTo: []`) opens the OTLP port to every destination; use it only where
+that breadth is acceptable. The Kustomize production NetworkPolicy carries the
+same rule commented out.
 
 ## Health Checks
 
