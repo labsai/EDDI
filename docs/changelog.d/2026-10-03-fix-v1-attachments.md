@@ -16,9 +16,12 @@ Review 2026-10-02 §4.6, the `/v1` and attachment findings.
 
 **Files:** [`OpenAiConversationBridge.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiConversationBridge.java), [`OpenAiSseWriter.java`](../../src/main/java/ai/labs/eddi/integrations/openai/OpenAiSseWriter.java), [`MimeValidator.java`](../../src/main/java/ai/labs/eddi/engine/attachments/MimeValidator.java), [`GridFsAttachmentStore.java`](../../src/main/java/ai/labs/eddi/datastore/mongo/GridFsAttachmentStore.java), [`PostgresAttachmentStore.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresAttachmentStore.java); docs [`open-webui-integration.md`](../open-webui-integration.md), [`attachments-guide.md`](../attachments-guide.md), [`configuration-reference.md`](../configuration-reference.md), [`metrics.md`](../metrics.md).
 
+- **`/v1` `usage` now reports.** The adapter reads `audit:token_usage` from the detailed snapshot, but that snapshot withheld every `audit:` key, so `usage` was never sent (live, on 6.5.0 and on this branch before the fix). `audit:token_usage` — three counts, no prompt text — is now exempt from that denylist; the rest of `audit:*` stays withheld.
+- **No internal detail in an unclassified `/v1` failure.** The message of an unexpected exception is logged, not returned to the caller.
+
 ### Next
 
-- `/v1` `usage` is never reported: `LlmTask` writes `audit:token_usage` only with an audit collector, and the detailed snapshot the adapter reads withholds every `audit:` key.
+- Mapping rows for `/v1` conversations that nobody continues (a client that sends only its latest message opens a new conversation per distinct message) are not swept; the idle sweep ends and deletes the conversations, not the `(intent, userId)` rows.
 
 ```decision-log
 | 2026-10-03 | /v1 requests without a chat id are keyed by a hash of their first system + first user message (`chat-key-fallback=history`), with `shared` as the opt-back | One `:default` conversation per user/agent shared context across unrelated chats and grew without bound | Always-new conversation per request (breaks history-less clients and memory); inferring restarts from message counts; honouring a caller-supplied EDDI conversation id (needs an ownership check, deferred) |

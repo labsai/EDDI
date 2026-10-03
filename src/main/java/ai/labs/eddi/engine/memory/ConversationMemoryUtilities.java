@@ -233,8 +233,22 @@ public class ConversationMemoryUtilities {
      * prompts), raw model traces and raw error bodies — none of which are meant for
      * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
      */
+    /**
+     * Whether everything under {@code key} is masked as a credential. The token
+     * counts are exempt: the name contains "token", which would mask three numbers.
+     */
+    private static boolean isCredentialValueKey(String key) {
+        return !MemoryKeys.AUDIT_TOKEN_USAGE.equals(key) && SecretRedactionFilter.isCredentialFieldName(key);
+    }
+
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
+            return false;
+        }
+        // The token counts are the one audit entry meant for the caller: the /v1
+        // adapter builds its `usage` block from them. They hold three numbers, no
+        // prompt text — unlike the rest of audit:*.
+        if (MemoryKeys.AUDIT_TOKEN_USAGE.equals(key)) {
             return false;
         }
         return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error");
@@ -350,7 +364,7 @@ public class ConversationMemoryUtilities {
                     if (isSensitiveDetailedKey(key)) {
                         continue;
                     }
-                    newConversationOutput.put(key, redactDetailedValue(source.get(key), SecretRedactionFilter.isCredentialFieldName(key)));
+                    newConversationOutput.put(key, redactDetailedValue(source.get(key), isCredentialValueKey(key)));
                 }
                 newConversationOutputs.add(newConversationOutput);
                 continue;
@@ -406,7 +420,7 @@ public class ConversationMemoryUtilities {
 
                     var result = secretTurn ? maskedSecretTurnValue(key, resultSnapshot.getResult(), needles) : resultSnapshot.getResult();
                     if (returnDetailed) {
-                        result = redactDetailedValue(result, SecretRedactionFilter.isCredentialFieldName(key));
+                        result = redactDetailedValue(result, isCredentialValueKey(key));
                     }
                     simpleConversationStep.getConversationStep()
                             .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));
