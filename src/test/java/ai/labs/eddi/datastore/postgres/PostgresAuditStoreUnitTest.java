@@ -595,4 +595,35 @@ class PostgresAuditStoreUnitTest {
         when(resultSet.getString("data")).thenReturn("{}");
         when(jsonSerialization.deserialize(eq("{}"), eq(Map.class))).thenReturn(Map.of());
     }
+
+    // ─── getEntriesByTask ───
+
+    @Test
+    void getEntriesByTask_withActor_filtersByTaskAndUser() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        store.getEntriesByTask("ai.labs.admin", "admin-ann", 5, 20);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().getLast().contains("WHERE task_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"),
+                sql.getAllValues().getLast());
+        verify(preparedStatement).setString(1, "ai.labs.admin");
+        verify(preparedStatement).setString(2, "admin-ann");
+        verify(preparedStatement).setInt(3, 20);
+        verify(preparedStatement).setInt(4, 5);
+    }
+
+    @Test
+    void getEntriesByTask_withoutActor_filtersByTaskOnly() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        store.getEntriesByTask("ai.labs.admin", null, 0, 10);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().getLast().contains("WHERE task_id = ? ORDER BY created_at DESC"), sql.getAllValues().getLast());
+    }
 }

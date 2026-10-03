@@ -482,4 +482,25 @@ class AuditStoreTest {
 
         assertFalse(store.redactEntry(redactedEntry("v5:new"), "v5:old"));
     }
+
+    @Test
+    @DisplayName("getEntriesByTask — filters by taskId and, when given, the actor")
+    void getEntriesByTask_filtersByTaskAndActor() {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        when(collection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.sort(any(Bson.class))).thenReturn(iterable);
+        when(iterable.skip(anyInt())).thenReturn(iterable);
+        when(iterable.limit(anyInt())).thenReturn(iterable);
+        when(iterable.iterator()).thenReturn(cursor);
+        when(cursor.hasNext()).thenReturn(false);
+
+        store.getEntriesByTask("ai.labs.admin", "admin-ann", 0, 10);
+        store.getEntriesByTask("ai.labs.admin", null, 0, 10);
+
+        ArgumentCaptor<Bson> filters = ArgumentCaptor.forClass(Bson.class);
+        verify(collection, times(2)).find(filters.capture());
+        assertEquals(new Document("taskId", "ai.labs.admin").append("userId", "admin-ann"), filters.getAllValues().get(0));
+        assertEquals(new Document("taskId", "ai.labs.admin"), filters.getAllValues().get(1));
+    }
 }

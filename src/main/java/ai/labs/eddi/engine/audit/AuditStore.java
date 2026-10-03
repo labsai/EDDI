@@ -111,6 +111,10 @@ public class AuditStore implements IAuditStore {
         // hitting MongoDB's in-memory sort limit. It also backs maxSequence.
         collection.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION_ID), Indexes.descending(F_TIMESTAMP)));
         collection.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION_ID), Indexes.descending(F_SEQUENCE)));
+        // The administrative-action listing selects one taskId (ai.labs.admin) among
+        // every pipeline task's entries; without this it walks the timestamp index
+        // across the whole ledger.
+        collection.createIndex(Indexes.compoundIndex(Indexes.ascending(F_TASK_ID), Indexes.descending(F_TIMESTAMP)));
     }
 
     /**
@@ -203,6 +207,15 @@ public class AuditStore implements IAuditStore {
     @Override
     public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
         Document filter = new Document(F_USER_ID, userId);
+        return query(filter, skip, limit);
+    }
+
+    @Override
+    public List<AuditEntry> getEntriesByTask(String taskId, String userId, int skip, int limit) {
+        Document filter = new Document(F_TASK_ID, taskId);
+        if (userId != null) {
+            filter.append(F_USER_ID, userId);
+        }
         return query(filter, skip, limit);
     }
 

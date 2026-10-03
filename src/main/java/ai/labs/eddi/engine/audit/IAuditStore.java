@@ -100,6 +100,28 @@ public interface IAuditStore {
      */
     List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit);
 
+    /**
+     * Retrieve the entries one kind of task wrote, ordered by timestamp descending
+     * — optionally only those of one user. Backs the administrative-action listing
+     * ({@code taskId} {@code ai.labs.admin}, {@code userId} the actor): those
+     * records have no conversation and no agent, so neither of the other queries
+     * reaches them.
+     *
+     * @param taskId
+     *            the task id to select
+     * @param userId
+     *            the user (for an admin action, the actor) to narrow to, or null
+     *            for all
+     * @param skip
+     *            number of entries to skip
+     * @param limit
+     *            maximum entries to return
+     * @return list of audit entries, newest first
+     */
+    default List<AuditEntry> getEntriesByTask(String taskId, String userId, int skip, int limit) {
+        throw new UnsupportedOperationException(getClass().getSimpleName() + " cannot list entries by task");
+    }
+
     // === GDPR ===
 
     /**

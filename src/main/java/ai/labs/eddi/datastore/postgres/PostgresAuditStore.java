@@ -114,6 +114,12 @@ public class PostgresAuditStore implements IAuditStore {
     private static final String CREATE_INDEX_TS = "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_ledger (created_at DESC)";
 
     /**
+     * The administrative-action listing selects one {@code task_id} among every
+     * pipeline task's rows. Same upgrade caveat as {@link #CREATE_INDEX_USER}.
+     */
+    private static final String CREATE_INDEX_TASK = "CREATE INDEX IF NOT EXISTS idx_audit_task ON audit_ledger (task_id, created_at DESC)";
+
+    /**
      * GDPR export and erasure both scan the ledger by {@code user_id} — it is the
      * largest, append-only, never-pruned table in the system, and both operations
      * are legally deadline-bound. Without this index they are sequential scans.
@@ -210,6 +216,7 @@ public class PostgresAuditStore implements IAuditStore {
             stmt.execute(CREATE_INDEX_AGENT);
             stmt.execute(CREATE_INDEX_TS);
             stmt.execute(CREATE_INDEX_USER);
+            stmt.execute(CREATE_INDEX_TASK);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize audit_ledger table", e);
@@ -312,6 +319,25 @@ public class PostgresAuditStore implements IAuditStore {
         String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger"
                 + " WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
         return queryEntries(sql, userId, limit, skip);
+    }
+
+    @Override
+    public List<AuditEntry> getEntriesByTask(String taskId, String userId, int skip, int limit) {
+        ensureSchema();
+        if (userId == null) {
+            String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger WHERE task_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+            return queryEntries(sql, taskId, limit, skip);
+        }
+        String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger WHERE task_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, taskId);
+            ps.setString(2, userId);
+            ps.setInt(3, limit);
+            ps.setInt(4, skip);
+            return readEntries(ps);
+        } catch (SQLException | IOException e) {
+            throw new RuntimeException("Failed to query audit entries by task", e);
+        }
     }
 
     // -- Internal helpers --
