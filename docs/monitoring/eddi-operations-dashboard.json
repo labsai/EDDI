@@ -924,7 +924,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (uri, method) (rate(http_server_requests_seconds_sum{job=~\"$job\"}[5m]) / rate(http_server_requests_seconds_count{job=~\"$job\"}[5m])))",
+          "expr": "topk(10, sum by (uri, method) (rate(http_server_requests_seconds_sum{job=~\"$job\"}[5m])) / sum by (uri, method) (rate(http_server_requests_seconds_count{job=~\"$job\"}[5m])))",
           "format": "table",
           "instant": true,
           "refId": "A",
