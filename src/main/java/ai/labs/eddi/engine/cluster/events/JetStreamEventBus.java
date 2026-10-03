@@ -72,7 +72,11 @@ import java.util.function.Consumer;
  * before publishing), and handlers run in arrival order on one thread.
  */
 @ApplicationScoped
-@Typed(JetStreamEventBus.class)
+// ClusterStartable as well: ClusterBootstrap finds what to start through
+// Instance<ClusterStartable>, and a bean typed to its own class only is
+// invisible
+// there — this one would never subscribe.
+@Typed({JetStreamEventBus.class, ClusterStartable.class})
 public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
 
     private static final Logger LOGGER = Logger.getLogger(JetStreamEventBus.class);

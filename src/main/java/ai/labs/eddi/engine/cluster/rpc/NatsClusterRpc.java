@@ -38,7 +38,11 @@ import java.util.function.Function;
  * threads, never on the NATS dispatcher.
  */
 @ApplicationScoped
-@Typed(NatsClusterRpc.class)
+// ClusterStartable as well: ClusterBootstrap finds what to start through
+// Instance<ClusterStartable>, and a bean typed to its own class only is
+// invisible
+// there — this one would never subscribe.
+@Typed({NatsClusterRpc.class, ClusterStartable.class})
 public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
 
     private static final Logger LOGGER = Logger.getLogger(NatsClusterRpc.class);

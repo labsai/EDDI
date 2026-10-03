@@ -48,6 +48,12 @@ no meter is registered and nothing about NATS is logged.
   waiting for a conversation lease with 409 + `Retry-After` at once, and `completeShutdown`
   releases the leases still held so those conversations move on without waiting out the TTL.
   Found by the live rolling-restart demo.
+- **The node RPC and the event bus actually start** — both were `@Typed` to their own class,
+  which hid them from `ClusterBootstrap`'s `Instance<ClusterStartable>`, so neither ever
+  subscribed: cross-node calls answered "no responders" and no node consumed another's
+  events. The unit tests call `startCluster()` themselves and could not see it;
+  `ClusterStartableTypingTest` now checks every startable's bean types. Found by the live
+  cross-node cancel demo.
 
 ### Design decisions
 
