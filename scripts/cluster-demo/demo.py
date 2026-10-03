@@ -693,7 +693,7 @@ def fenced_turn(infra, conv, text):
     th = threading.Thread(target=lambda: holder.setdefault("r", say(NODES[0], conv, text, timeout=90)))
     th.start()
     time.sleep(3)
-    raised = set_fence(infra, conv, 1 << 40)
+    raised = set_fence(infra, conv, 1 << 62)  # above any lease revision (they start at the bucket creation time in us)
     th.join(80)
     set_fence(infra, conv, None)
     return holder.get("r", (None,))[0], raised
