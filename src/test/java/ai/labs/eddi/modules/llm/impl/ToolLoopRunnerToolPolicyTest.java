@@ -144,9 +144,11 @@ class ToolLoopRunnerToolPolicyTest {
         @DisplayName("a typed failure is executed again on the next call, not served from the cache")
         void failureIsNotCached() throws Exception {
             FlakyTool tool = new FlakyTool();
-            var request = ToolExecutionRequest.builder().id("c1").name("fetch").arguments("{\"url\":\"https://example.com\"}").build();
+            // Identical arguments on every call: they are what the cache key is built
+            // from, so a cached failure would be served back for all three.
+            var request = ToolExecutionRequest.builder().id("c1").name("fetch").arguments("{\"page\":\"https://example.com\"}").build();
             Map<String, ToolExecutor> executors = Map.of("fetch", ToolObjectReflector.executorFor(tool,
-                    FlakyTool.class.getMethod("fetch", String.class)));
+                    FlakyTool.class.getMethod("fetch")));
 
             String first = run(request, executors, memory("conv-1"), false, List.of(), new ArrayList<>());
             String second = run(request, executors, memory("conv-1"), false, List.of(), new ArrayList<>());
@@ -299,7 +301,7 @@ class ToolLoopRunnerToolPolicyTest {
         final AtomicInteger calls = new AtomicInteger();
 
         @Tool("fetch a page")
-        public String fetch(String url) {
+        public String fetch() {
             if (calls.incrementAndGet() == 1) {
                 throw new ToolFailureException("Error: upstream unavailable");
             }
