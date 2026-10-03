@@ -466,8 +466,6 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             this.deploymentInfos.add(deploymentInfo);
 
                             lintInertHitlConfig(deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion());
-                        } catch (ServiceException | IllegalAccessException e) {
-                            recordFailure(deploymentInfo, e.getLocalizedMessage(), e);
                         } catch (Exception e) {
                             // Catch any other exception (e.g. IllegalStateException wrapping
                             // ResourceNotFoundException) so one broken Agent doesn't block all others

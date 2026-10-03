@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -1287,5 +1288,68 @@ class ApiCallExecutorTest {
 
         assertThrows(LifecycleException.class,
                 () -> executor.execute(call, memory, new HashMap<>(), "http://example.com"));
+    }
+
+    // ==================== Approved-call dispatch check (self-ungating)
+    // ====================
+
+    /**
+     * The resumer checks a preview resolved WITHOUT preRequest property
+     * instructions; execute() runs them and may build a different request. During
+     * an approved execution the request as actually built must be refused when it
+     * targets the acting agent — and must never be sent.
+     */
+    @Test
+    void approvedExecution_refusesTheBuiltRequestWhenItTargetsTheActingAgent() throws Exception {
+        ApiCall call = createSimpleApiCall("test-call", false);
+        Map<String, Object> built = new HashMap<>();
+        built.put(IRequest.KEY_METHOD, "PUT");
+        built.put(IRequest.KEY_URI, "http://example.com/agentstore/agents/68f1c0ffee0000000000a9e7/updateResourceUri");
+        when(mockRequest.toMap()).thenReturn(built);
+
+        assertThrows(IllegalStateException.class, () -> ApprovedCallScope.run("68f1c0ffee0000000000a9e7", () -> {
+            try {
+                return executor.execute(call, memory, new HashMap<>(), "http://example.com");
+            } catch (LifecycleException e) {
+                throw new IllegalStateException(e);
+            }
+        }));
+        verify(mockRequest, never()).send();
+    }
+
+    @Test
+    void approvedExecution_refusesAToolApprovalsWriteToTheLegacyLlmStorePath() throws Exception {
+        ApiCall call = createSimpleApiCall("test-call", false);
+        Map<String, Object> built = new HashMap<>();
+        built.put(IRequest.KEY_METHOD, "PUT");
+        built.put(IRequest.KEY_URI, "http://example.com/langchainstore/langchains/abc");
+        built.put(IRequest.KEY_BODY, "{\"tasks\":[{\"toolApprovals\":{\"requireApproval\":[]}}]}");
+        when(mockRequest.toMap()).thenReturn(built);
+
+        var thrown = assertThrows(IllegalStateException.class, () -> ApprovedCallScope.run("someone-else", () -> {
+            try {
+                return executor.execute(call, memory, new HashMap<>(), "http://example.com");
+            } catch (LifecycleException e) {
+                throw new IllegalStateException(e);
+            }
+        }));
+        assertTrue(
+                String.valueOf(thrown.getCause()).contains("NOT_EXECUTED") || String.valueOf(thrown.getCause().getCause()).contains("NOT_EXECUTED"),
+                String.valueOf(thrown.getCause()));
+        verify(mockRequest, never()).send();
+    }
+
+    @Test
+    void outsideAnApprovedExecution_theSameRequestIsSent() throws Exception {
+        ApiCall call = createSimpleApiCall("test-call", false);
+        Map<String, Object> built = new HashMap<>();
+        built.put(IRequest.KEY_METHOD, "PUT");
+        built.put(IRequest.KEY_URI, "http://example.com/agentstore/agents/68f1c0ffee0000000000a9e7/updateResourceUri");
+        when(mockRequest.toMap()).thenReturn(built);
+        setupSuccessResponse(200, "{}", "application/json");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).send();
     }
 }
