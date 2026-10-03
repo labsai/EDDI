@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -52,7 +53,12 @@ public final class SelfUngatingGuard {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Set<String> READ_METHODS = Set.of("GET", "HEAD", "OPTIONS");
-    private static final String LLM_STORE_PATH = "/llmstore/llms";
+    /**
+     * The LLM-configuration store and the v5 name it is still reachable under —
+     * {@code LegacyPathRewriteFilter} rewrites the old one onto the new one before
+     * routing, so a test on only the current path is bypassed by spelling the old.
+     */
+    private static final List<String> LLM_STORE_PATHS = List.of("/llmstore/llms", "/langchainstore/langchains");
     private static final String TOOL_APPROVALS_KEY = "toolApprovals";
 
     public static final String OWN_AGENT_REASON = "an agent may not modify, deploy or start itself";
@@ -75,7 +81,7 @@ public final class SelfUngatingGuard {
         if (containsId(decodedUri, actingAgentId)) {
             return OWN_AGENT_REASON;
         }
-        if (decodedUri.contains(LLM_STORE_PATH)) {
+        if (LLM_STORE_PATHS.stream().anyMatch(decodedUri::contains)) {
             if (body == null || body.isBlank()) {
                 return null;
             }
@@ -100,7 +106,10 @@ public final class SelfUngatingGuard {
         if (containsId(decoded, actingAgentId)) {
             return OWN_AGENT_REASON;
         }
-        if (decoded.contains("llmstore") && decoded.contains(TOOL_APPROVALS_KEY.toLowerCase(Locale.ROOT))) {
+        // Without a resolved request there is no path to test, and the call may be an
+        // MCP tool aimed at this very server (update_resource on an LLM document), so
+        // the key alone is enough: no legitimate argument list needs to carry it.
+        if (decoded.contains(TOOL_APPROVALS_KEY.toLowerCase(Locale.ROOT))) {
             return GATE_WRITE_REASON;
         }
         return null;

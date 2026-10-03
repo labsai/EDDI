@@ -108,6 +108,21 @@ class ToolLoopResumerSelfUngatingTest {
     }
 
     @Test
+    @DisplayName("the v5 LLM-store path, which LegacyPathRewriteFilter maps onto the current one, is guarded too")
+    void refusesGateCarryingWriteThroughLegacyPath() {
+        String body = "{\"tasks\":[{\"toolApprovals\":{}}]}";
+        assertEquals(SelfUngatingGuard.GATE_WRITE_REASON, resumer.selfUngating(call("{}"), null,
+                resolving("PUT", "http://eddi/langchainstore/langchains/abc?version=1", body), AGENT_ID));
+    }
+
+    @Test
+    @DisplayName("an unresolved call carrying toolApprovals is refused whatever its path (an MCP tool aimed at this server)")
+    void unresolvedCallWithToolApprovalsRefused() {
+        assertEquals(SelfUngatingGuard.GATE_WRITE_REASON, resumer.selfUngating(
+                call("{\"resourceType\":\"langchain\",\"body\":\"{\\\"toolApprovals\\\":{}}\"}"), null, Map.of(), AGENT_ID));
+    }
+
+    @Test
     @DisplayName("a missing acting agent id refuses nothing on that rule")
     void blankAgentIdRefusesNothing() {
         assertNull(resumer.selfUngating(call("{}"), null,
