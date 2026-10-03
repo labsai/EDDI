@@ -207,12 +207,26 @@ final class McpToolUtils {
 
     /** Whether a failure is one the caller made and may be told about verbatim. */
     static boolean isCallerFacing(Throwable e) {
-        return e instanceof ClientErrorException || e instanceof IllegalArgumentException
+        return e instanceof ClientErrorException || (e instanceof IllegalArgumentException && thrownByEddi(e))
                 || e instanceof IResourceStore.ResourceNotFoundException || e instanceof IResourceStore.ResourceModifiedException
                 // A discussion refusal the engine authored ("no phases are defined", the
                 // depth limit) — but not one that wraps an underlying failure, whose
                 // message is that failure's text.
                 || (e instanceof IGroupConversationService.GroupDiscussionException && e.getCause() == null);
+    }
+
+    /**
+     * Whether an exception was raised by EDDI's own code rather than by a library
+     * it called. EDDI's validation refusals ("members[1] repeats members[0]…") are
+     * written for the caller; an {@link IllegalArgumentException} a library raises
+     * is not — Jackson's names model classes and field paths, a
+     * {@code java.nio.file.InvalidPathException} quotes a server path, a
+     * {@code NumberFormatException} quotes whatever it failed to parse. Decided by
+     * the frame that constructed the exception: the top of its stack trace.
+     */
+    static boolean thrownByEddi(Throwable e) {
+        StackTraceElement[] trace = e.getStackTrace();
+        return trace != null && trace.length > 0 && trace[0].getClassName().startsWith("ai.labs.eddi.");
     }
 
     /**
