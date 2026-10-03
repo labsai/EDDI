@@ -469,7 +469,7 @@ def s4_rolling(infra, ctx):
     lost = []
     for k, c in enumerate(convs):
         sent_ok = {f"[s4-{kk}] turn {n}" for kk, n, s, _ in log if kk == k and s == 200}
-        lost += sorted(sent_ok - set(stored_inputs(c)))
+        lost += sorted(sent_ok - set(stored_after(c, sent_ok)))
     recovery_fired = sum(l.count("Recovered stuck IN_PROGRESS") for l in [infra.logs(i) for i in range(3)])
     record("4", "rolling restart of all nodes under load: no failed or lost turns beyond 409 Retry-After",
            not failed and not lost and not no_retry_after and recovery_fired == 0,
