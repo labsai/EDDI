@@ -326,7 +326,11 @@ public class McpGroupTools {
                     TaskDefinition[] taskArray = jsonSerialization.deserialize(tasks, TaskDefinition[].class);
                     config.setTasks(List.of(taskArray));
                 } catch (Exception ex) {
-                    return errorJson("Invalid tasks JSON", ex);
+                    // Curated: the parser's own message names model classes and field
+                    // paths (CWE-209), which is not the caller's business.
+                    LOGGER.debugf("create_group: tasks JSON rejected: %s", ex.getMessage());
+                    return errorJson("Invalid tasks JSON: expected a JSON array of task definitions "
+                            + "(subject, description, assignToRole, dependsOn, priority, assignmentMode)");
                 }
             }
 

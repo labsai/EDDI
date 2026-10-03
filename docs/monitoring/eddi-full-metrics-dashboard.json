@@ -10131,14 +10131,14 @@
             },
             {
               "refId": "C",
-              "expr": "sum by (participant) (increase(eddi_vault_reseal_failures_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (participant) (rate(eddi_vault_reseal_failures_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
               "editorMode": "code",
               "range": true,
-              "legendFormat": "rows a DEK rotation skipped ({{participant}})"
+              "legendFormat": "rows a DEK rotation skipped/s ({{participant}})"
             }
           ],
           "fieldConfig": {

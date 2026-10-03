@@ -35,6 +35,7 @@ import java.util.Map;
 import java.security.Principal;
 import io.smallrye.common.annotation.NonBlocking;
 import io.smallrye.common.annotation.Blocking;
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -156,6 +157,18 @@ class McpGroupToolsTest {
         assertFalse(result.contains("hunter2"), result);
         assertTrue(result.contains("\"errorCode\":\"INTERNAL_ERROR\""), result);
         assertTrue(result.matches(".*\"reference\":\"[0-9a-f]{8}\".*"), result);
+    }
+
+    @Test
+    void invalidTasksJson_getsACuratedMessage_notTheParserText() throws Exception {
+        when(jsonSerialization.deserialize(eq("{not json"), eq(AgentGroupConfiguration.TaskDefinition[].class)))
+                .thenThrow(new JsonParseException(null, "Unexpected character at [Source: ai.labs.eddi.configs.groups.model.TaskDefinition]"));
+
+        String result = tools.create_group("G", null, "a,b", null, null, null, null, null, null, null, "{not json");
+
+        assertTrue(result.contains("Invalid tasks JSON"), result);
+        assertFalse(result.contains("ai.labs.eddi"), result);
+        assertFalse(result.contains("Unexpected character"), result);
     }
 
     @Test

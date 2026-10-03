@@ -291,7 +291,7 @@ generic `seal()` API, which used to bind nothing: one user's refresh token copie
 into another user's grant row — or an access token copied into the refresh-token
 field — opened there. The API now takes a *context* naming the row and the field
 (`ISecretProvider.seal(tenantId, plaintext, context)`), and the AAD is
-`eddi-sealed-data|v1|tenantId|dekId|<length>:context`, a prefix distinct from a
+`eddi-sealed-data|v1|tenantId|dekId|<UTF-8 byte length>:context`, a prefix distinct from a
 secret's and a system value's so no sealed value of one kind passes as another. A
 grant's context is its connection name, its principal and `access`/`refresh`.
 

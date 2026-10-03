@@ -25,6 +25,14 @@
 - Upgrade by ZIP or live sync with a `targetAgentId`: the guarded agent write was the *last* step, so a caller holding only VIEW/USE on the target had snippets, extensions and workflows written first, then a refused agent write — reported as `500`. `UpgradeExecutor` now requires EDIT on the target before reading or writing anything; a refusal (there, or VIEW in the preview) answers `403` instead of being wrapped into `500`.
 - The DEK-rotation `500` said "nothing is lost", which is untrue for a row that could not be opened at all. It now says which rows a re-run moves and what an operator does with an unopenable one (store the secret again; have the grant's user reconnect).
 
+**PR #950 review.**
+- Duplicate detection keys a seat by its trimmed `agentId` alone, not `memberType:agentId`: the runtime keys member conversations, speakers and weights by the id only, so an AGENT and a GROUP seat sharing an id collide too. A legacy DEBATE with one agent as PRO and CON loses its CON seat on read; the save then names the missing role, and the read-time warning names the dropped role, so the required roster change is explicit.
+- Live sync: a response refused by the size cap is no longer swallowed by the catch blocks that tolerate one unreadable workflow, extension, snippet or descriptor listing — the sync fails (502) instead of upgrading from incomplete source data, where a missing workflow reads as removed.
+- Import: an upload cut off after its last complete entry (no central directory) unpacked "successfully" because `ZipInputStream` reads local headers only. The raw archive is now copied aside while streaming and opened with `ZipFile`, which requires the central directory and end record; refused with 400. Docs narrowed: archive-level errors write nothing, an invalid agent/workflow/extension file rolls the import back, an invalid snippet or connection file is skipped with a warning.
+- MCP `create_group`: invalid `tasks` JSON returns a curated message instead of Jackson's text (CWE-209).
+- Sealed-data AAD prefixes the context with its UTF-8 byte length (was UTF-16 code units); nothing has been released in this format yet.
+- Dashboard: the reseal-failures query uses `rate()` to match the panel's per-second unit.
+
 ### Design decisions
 - Reject duplicates rather than give each seat its own conversation: every group structure is keyed by `agentId`, and a second seat for one agent would need a seat id threaded through votes, participants, the facilitator, stances and the transcript. A second agent is the supported way to get a second seat.
 - Legacy duplicate configs are de-duplicated on read rather than rewritten by a migration: nothing in the database changes until the group is next saved.

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -75,6 +77,17 @@ class VaultSealedDataBindingTest {
         assertThrows(SecretProviderException.class, () -> vault.unseal(TENANT, sealed, CONTEXT_B));
         // Nor through the unbound API.
         assertThrows(SecretProviderException.class, () -> vault.unseal(TENANT, sealed));
+    }
+
+    @Test
+    @DisplayName("the context's length prefix counts UTF-8 bytes, the unit the AAD is encoded in")
+    void contextLengthPrefixIsInBytes() throws Exception {
+        String aad = new String(VaultSecretProvider.sealedDataAad(TENANT, "acme#g1", "jürgen"), StandardCharsets.UTF_8);
+        assertTrue(aad.endsWith("|7:jürgen"), aad);
+
+        var vault = provider(null);
+        SealedValue sealed = vault.seal(TENANT, "token", "connection-grant|access|4:jira|6:jürgen");
+        assertEquals("token", vault.unseal(TENANT, sealed, "connection-grant|access|4:jira|6:jürgen"));
     }
 
     @Test

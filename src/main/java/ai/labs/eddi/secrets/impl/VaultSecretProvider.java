@@ -1296,11 +1296,13 @@ public class VaultSecretProvider implements ISecretProvider {
      * The AAD of a value sealed through the generic API. A distinct prefix from a
      * named secret's ({@link #secretAad}) and a system value's
      * ({@link #systemValueAad}), so no sealed value of one kind can be presented as
-     * another. The context is length-prefixed: it is caller-supplied and may itself
-     * contain the separator.
+     * another. The context is length-prefixed with its UTF-8 <em>byte</em> length —
+     * the unit the AAD is encoded in — because it is caller-supplied and may itself
+     * contain the separator or non-ASCII characters.
      */
     static byte[] sealedDataAad(String tenantId, String dekId, String context) {
-        return ("eddi-sealed-data|v1|" + tenantId + "|" + dekId + "|" + context.length() + ":" + context)
+        int contextBytes = context.getBytes(StandardCharsets.UTF_8).length;
+        return ("eddi-sealed-data|v1|" + tenantId + "|" + dekId + "|" + contextBytes + ":" + context)
                 .getBytes(StandardCharsets.UTF_8);
     }
 

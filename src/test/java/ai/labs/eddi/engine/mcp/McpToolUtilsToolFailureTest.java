@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -66,7 +67,14 @@ class McpToolUtilsToolFailureTest {
     @Test
     @DisplayName("a NumberFormatException from the JDK is not echoed either")
     void numberFormatIsHidden() {
-        NumberFormatException nfe = assertThrows(NumberFormatException.class, () -> Integer.parseInt("hunter2"));
+        NumberFormatException nfe = null;
+        try {
+            Integer.parseInt("hunter2");
+        } catch (NumberFormatException expected) {
+            // Caught on purpose: the JDK's own exception is the fixture.
+            nfe = expected;
+        }
+        assertNotNull(nfe, "fixture: parseInt must refuse the input");
 
         String result = McpToolUtils.toolFailure(LOG, "list_groups", nfe);
 
