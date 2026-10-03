@@ -94,7 +94,7 @@ public class ClusterArchiveStore {
         if (!enabled()) {
             return false;
         }
-        Path partial = target.resolveSibling(target.getFileName() + ".part");
+        Path partial = null;
         try {
             ObjectStore store = store(retention);
             ObjectInfo info = store.getInfo(name);
@@ -102,10 +102,21 @@ public class ClusterArchiveStore {
                 return false;
             }
             Files.createDirectories(target.getParent());
+            // A name of its own: two downloads of one archive that both miss the local
+            // file would otherwise write the same ".part" file and corrupt each other.
+            partial = Files.createTempFile(target.getParent(), target.getFileName() + ".", ".part");
             try (OutputStream out = Files.newOutputStream(partial)) {
                 store.get(name, out);
             }
-            Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            try {
+                Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException e) {
+                // Another download of the same archive finished first (an atomic replace of
+                // a file that is being read fails on some file systems): its copy is whole.
+                if (!Files.exists(target)) {
+                    throw e;
+                }
+            }
             return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -113,7 +124,9 @@ public class ClusterArchiveStore {
         } catch (Exception e) {
             LOGGER.debugf("Archive %s not fetched from the shared store: %s", name, e.getMessage());
             try {
-                Files.deleteIfExists(partial);
+                if (partial != null) {
+                    Files.deleteIfExists(partial);
+                }
             } catch (IOException ignored) {
                 // a leftover .part is swept with the archive directory
             }

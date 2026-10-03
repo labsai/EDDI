@@ -11,9 +11,22 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.OutputStream;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import io.nats.client.Connection;
+import io.nats.client.ObjectStore;
+import io.nats.client.ObjectStoreManagement;
+import io.nats.client.api.ObjectInfo;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -59,6 +72,58 @@ class ClusterArchiveStoreTest {
 
         assertDoesNotThrow(() -> store.publish("a.zip", file, Duration.ofMinutes(5)));
         assertFalse(store.fetch("a.zip", dir.resolve("b.zip"), Duration.ofMinutes(5)));
-        assertFalse(Files.exists(dir.resolve("b.zip.part")));
+        try (var files = Files.list(dir)) {
+            assertEquals(List.of("a.zip"), files.map(f -> f.getFileName().toString()).toList(), "no partial download is left behind");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("two downloads of one archive that both miss the local file do not write the same partial file")
+    void concurrentFetchesDoNotCorruptEachOther(@TempDir Path dir) throws Exception {
+        ClusterConfig config = mock(ClusterConfig.class);
+        when(config.isNats()).thenReturn(true);
+        when(config.natsPrefix()).thenReturn("EDDI");
+        Connection connection = mock(Connection.class);
+        when(connection.objectStoreManagement()).thenReturn(mock(ObjectStoreManagement.class));
+        ObjectStore objects = mock(ObjectStore.class);
+        when(connection.objectStore("EDDI_ARCHIVES")).thenReturn(objects);
+        ObjectInfo info = mock(ObjectInfo.class);
+        when(objects.getInfo("a.zip")).thenReturn(info);
+        NatsConnectionManager manager = mock(NatsConnectionManager.class);
+        when(manager.requireConnected()).thenReturn(connection);
+        Instance<NatsConnectionManager> connections = mock(Instance.class);
+        when(connections.get()).thenReturn(manager);
+
+        // own, then writes the second half: with one shared ".part" file they
+        // interleave.
+        CyclicBarrier bothHaveStarted = new CyclicBarrier(2);
+        AtomicInteger downloads = new AtomicInteger();
+        when(objects.get(org.mockito.ArgumentMatchers.eq("a.zip"), org.mockito.ArgumentMatchers.any(OutputStream.class)))
+                .thenAnswer(invocation -> {
+                    OutputStream out = invocation.getArgument(1);
+                    byte[] mine = String.valueOf((char) ('a' + downloads.getAndIncrement())).repeat(8).getBytes();
+                    out.write(mine);
+                    out.flush();
+                    bothHaveStarted.await(5, TimeUnit.SECONDS);
+                    out.write(mine);
+                    return null;
+                });
+        var store = new ClusterArchiveStore(config, connections);
+        Path target = dir.resolve("a.zip");
+
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Boolean> first = executor.submit(() -> store.fetch("a.zip", target, Duration.ofMinutes(5)));
+            Future<Boolean> second = executor.submit(() -> store.fetch("a.zip", target, Duration.ofMinutes(5)));
+            assertTrue(first.get(10, TimeUnit.SECONDS));
+            assertTrue(second.get(10, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+
+        String content = Files.readString(target);
+        assertEquals(16, content.length());
+        assertEquals(1, content.chars().distinct().count(), "the archive is one download's bytes, not a mix of two: " + content);
     }
 }
