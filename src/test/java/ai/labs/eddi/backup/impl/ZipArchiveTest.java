@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -163,8 +164,33 @@ class ZipArchiveTest {
 
         File targetDir = tempDir.resolve("extracted").toFile();
         try (InputStream is = new FileInputStream(zipFile.toFile())) {
-            assertThrows(IOException.class, () -> zipArchive.unzip(is, targetDir));
+            // The archive's shape, not a server fault: the importer answers 400 for it.
+            var thrown = assertThrows(ZipArchive.MalformedArchiveException.class, () -> zipArchive.unzip(is, targetDir));
+            assertTrue(thrown.getMessage().contains("escapes"), thrown.getMessage());
         }
+        assertFalse(tempDir.resolve("evil.txt").toFile().exists());
+    }
+
+    @Test
+    void unzip_truncatedArchive_isMalformedNotAServerFault(@TempDir Path tempDir) throws IOException {
+        byte[] zip = zipOf(1, 64 * 1024);
+        byte[] truncated = Arrays.copyOf(zip, zip.length / 3);
+
+        assertThrows(ZipArchive.MalformedArchiveException.class,
+                () -> zipArchive.unzip(new ByteArrayInputStream(truncated), tempDir.resolve("extracted").toFile()));
+    }
+
+    @Test
+    void unzip_corruptCompressedData_isMalformedNotAServerFault(@TempDir Path tempDir) throws IOException {
+        byte[] zip = zipOf(1, 64 * 1024);
+        // Scribble over the deflate stream that follows the 30-byte local header and
+        // the entry name.
+        for (int i = 60; i < 120; i++) {
+            zip[i] = (byte) 0xFF;
+        }
+
+        assertThrows(ZipArchive.MalformedArchiveException.class,
+                () -> zipArchive.unzip(new ByteArrayInputStream(zip), tempDir.resolve("extracted").toFile()));
     }
 
     @Test

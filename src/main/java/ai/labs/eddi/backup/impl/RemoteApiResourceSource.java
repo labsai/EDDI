@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import java.io.ByteArrayOutputStream;
@@ -91,6 +92,14 @@ public class RemoteApiResourceSource implements IResourceSource {
     private static final long MAX_ARCHIVE_BYTES = 256L * 1024 * 1024;
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
+    /**
+     * Cap on every JSON document a live sync reads from the source (descriptor
+     * listings, agent/workflow/extension configs). See
+     * {@link CappedStringBodyHandler}.
+     */
+    static final String MAX_RESPONSE_BYTES_PROPERTY = "eddi.backup.sync.max-response-bytes";
+    static final long DEFAULT_MAX_RESPONSE_BYTES = 16L * 1024 * 1024;
+
     /** The {@code "resource": "eddi://…"} field of a descriptor listing entry. */
     private static final Pattern RESOURCE_FIELD = Pattern.compile("\"resource\"\s*:\s*\"([^\"]+)\"");
 
@@ -159,6 +168,40 @@ public class RemoteApiResourceSource implements IResourceSource {
      * not an option in a sandboxed build: {@code HttpClient.build()} opens a
      * selector, which needs a loopback socket.
      */
+    /** Whether a failed read was the response-size cap, wherever in the chain. */
+    static boolean isTooLarge(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof CappedStringBodyHandler.ResponseTooLargeException) {
+                return true;
+            }
+            if (cause.getCause() == cause) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /** The body handler for every JSON document read from the source. */
+    static HttpResponse.BodyHandler<String> jsonBodyHandler() {
+        return new CappedStringBodyHandler(maxResponseBytes());
+    }
+
+    /**
+     * {@value #MAX_RESPONSE_BYTES_PROPERTY}, read per sync: this class is
+     * constructed per request, not injected. Falls back to the default outside a
+     * configured runtime (plain unit tests) or on a value that is not a positive
+     * number.
+     */
+    static long maxResponseBytes() {
+        try {
+            long configured = ConfigProvider.getConfig().getOptionalValue(MAX_RESPONSE_BYTES_PROPERTY, Long.class)
+                    .orElse(DEFAULT_MAX_RESPONSE_BYTES);
+            return configured > 0 ? configured : DEFAULT_MAX_RESPONSE_BYTES;
+        } catch (RuntimeException e) {
+            return DEFAULT_MAX_RESPONSE_BYTES;
+        }
+    }
+
     static HttpClient.Builder configure(HttpClient.Builder builder) {
         return builder
                 .connectTimeout(CONNECT_TIMEOUT)
@@ -430,7 +473,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
             HttpRequest request = builder.GET().build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = client.send(request, jsonBodyHandler());
             if (response.statusCode() != 200) {
                 throw new RemoteReadException("Remote instance returned status " + response.statusCode());
             }
@@ -572,7 +615,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                             .uri(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"))
                             .timeout(REQUEST_TIMEOUT)
                             .header("Accept", "application/json"), authToken).GET().build(),
-                    HttpResponse.BodyHandlers.ofString());
+                    jsonBodyHandler());
             if (response.statusCode() != 200) {
                 throw new RemoteReadException("Could not list agents on " + baseUri
                         + " to find the latest version of " + agentId + " (status " + response.statusCode() + ")");
@@ -864,7 +907,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
 
             HttpRequest request = builder.GET().build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient.send(request, jsonBodyHandler());
 
             if (response.statusCode() != 200) {
                 throw new RemoteReadException("Remote " + baseUrl + path + " returned status " + response.statusCode());
@@ -878,6 +921,9 @@ public class RemoteApiResourceSource implements IResourceSource {
             Thread.currentThread().interrupt();
             throw new RemoteReadException("Interrupted while reading " + baseUrl + path, e);
         } catch (IOException e) {
+            if (isTooLarge(e)) {
+                throw new RemoteReadException("Remote " + baseUrl + path + " was refused: " + e.getMessage(), e);
+            }
             throw new RemoteReadException("Failed to connect to remote " + baseUrl + path + ": " + e.getMessage(), e);
         }
     }

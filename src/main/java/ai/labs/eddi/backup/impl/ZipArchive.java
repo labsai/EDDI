@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipException;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
@@ -174,11 +175,18 @@ public class ZipArchive implements IZipArchive {
                             + MAX_ENTRIES_PROPERTY + ")");
                 }
                 File destFile = new File(targetDir, entry.getName());
-                String destFilePath = destFile.getCanonicalPath();
+                String destFilePath;
+                try {
+                    destFilePath = destFile.getCanonicalPath();
+                } catch (IOException e) {
+                    // A name the file system cannot even resolve (a NUL byte, a reserved
+                    // device name on Windows) is the archive's fault, not this server's.
+                    throw new MalformedArchiveException("Zip entry has a name that is not a valid file path");
+                }
 
                 // Ensure the resolved destination path starts with the target directory path
                 if (!destFilePath.startsWith(targetDirPath + File.separator)) {
-                    throw new IOException("Zip entry escapes target directory");
+                    throw new MalformedArchiveException("Zip entry escapes target directory");
                 }
 
                 if (entry.isDirectory()) {
@@ -194,6 +202,10 @@ public class ZipArchive implements IZipArchive {
                 }
                 zipIn.closeEntry();
             }
+        } catch (ZipException | EOFException e) {
+            // Corrupt or truncated archive data (bad compression stream, CRC
+            // mismatch, cut-off upload). Never quotes the entry contents.
+            throw new MalformedArchiveException("Zip archive is corrupt or truncated: " + e.getMessage());
         }
     }
 
@@ -226,6 +238,18 @@ public class ZipArchive implements IZipArchive {
      */
     public static class ZipLimitExceededException extends IOException {
         public ZipLimitExceededException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * An archive this deployment refuses because of its shape — an entry that would
+     * land outside the extraction directory (zip-slip), a name that is not a path,
+     * corrupt or truncated data — so a caller can answer 400 with the reason rather
+     * than 500. The refusal itself always worked; only the status was wrong.
+     */
+    public static class MalformedArchiveException extends IOException {
+        public MalformedArchiveException(String message) {
             super(message);
         }
     }

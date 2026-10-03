@@ -58,6 +58,16 @@ internal network, or name this origin in eddi.backup.sync.allowed-sources.
 > containerised instance never counts as dev mode — the decision reads the
 > launch mode, not `quarkus.profile` — so a container needs the settings above.
 
+**Every response from the source is size-capped.** The JSON a sync reads — descriptor
+listings, agent, workflow and extension configs — is limited by
+`eddi.backup.sync.max-response-bytes` (default `16777216`, 16 MiB, far above any real
+config or listing). A declared `Content-Length` over it is refused before anything is
+read, and an undeclared body is cut off the moment it crosses it, so a compromised or
+misbehaving source cannot decide how much heap one sync takes; the sync then fails with
+`502` saying the response was too large. The exported archive a first-time sync downloads
+has its own fixed 256 MiB cap, and is then unpacked under the
+[archive limits](import-export-an-agent.md#archive-limits).
+
 ## Workflow
 
 ### 1. List Remote Agents
