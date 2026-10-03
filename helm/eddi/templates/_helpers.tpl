@@ -91,12 +91,17 @@ Service account name
 {{- end }}
 
 {{/*
-Deployment update strategy: eddi.updateStrategy, or by messaging type when it
-is empty or null — Recreate for in-memory (one JVM against the database at a
-time), RollingUpdate for nats (replicas coordinate through NATS).
+Deployment update strategy type: eddi.updateStrategy, or by messaging type when
+it is empty or null — Recreate for in-memory (one JVM against the database at a
+time), RollingUpdate for nats (replicas coordinate through NATS). The value is
+either a plain string ("Recreate" / "RollingUpdate") or the Deployment's own
+strategy object ({type: ..., rollingUpdate: {...}}), so a values file written
+for either shape renders.
 */}}
 {{- define "eddi.updateStrategy" -}}
-{{- $configured := toString (default "" .Values.eddi.updateStrategy) }}
+{{- $value := .Values.eddi.updateStrategy }}
+{{- $configured := "" }}
+{{- if kindIs "map" $value }}{{ $configured = toString (default "" $value.type) }}{{ else }}{{ $configured = toString (default "" $value) }}{{ end }}
 {{- if $configured }}{{ $configured }}{{ else if eq (include "eddi.messagingType" .) "nats" }}RollingUpdate{{ else }}Recreate{{ end }}
 {{- end }}
 

@@ -2782,6 +2782,76 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * The in-chart NATS user is restricted to EDDI's subjects, and one of EDDI's
+         * features publishes outside {@code eddi.>}, {@code $JS.*} and {@code $KV.*}:
+         * the exported-archive object store ({@code $O.<bucket>.C.*} and {@code .M.*}).
+         * Without the grant the archive is silently kept on one node and a download
+         * through another answers 404 — a permission violation nothing but the NATS
+         * server log shows.
+         */
+        @Test
+        @DisplayName("the in-chart NATS user may publish to the object store EDDI exports archives to")
+        void natsUserMayUseTheObjectStore() throws IOException {
+            String nats = read(HELM_TEMPLATES.resolve("nats.yaml"));
+            assertTrue(nats.contains("\"$O.*.>\""),
+                    "nats.yaml's authorization block must let the eddi user publish to $O.*.> — ClusterArchiveStore "
+                            + "writes exported archives to <prefix>_ARCHIVES, an object store");
+        }
+
+        /**
+         * A rolling update restarts NATS nodes one at a time and must not touch the
+         * next until the restarted one has caught up its R3 streams. Readiness that
+         * only asks "is JetStream enabled" (js-enabled-only) releases the rollout while
+         * the node is still behind; the strict check belongs to the startup probe.
+         */
+        @Test
+        @DisplayName("NATS readiness waits for the node's JetStream to catch up, liveness never kills it for that")
+        void natsProbesAreOrderedForRollingUpdates() throws IOException {
+            for (String file : List.of(HELM_TEMPLATES.resolve("nats.yaml").toString(),
+                    K8S.resolve("overlays/nats/nats-statefulset.yaml").toString())) {
+                String text = read(Path.of(file));
+                int startup = text.indexOf("startupProbe:");
+                int liveness = text.indexOf("livenessProbe:");
+                int readiness = text.indexOf("readinessProbe:");
+                assertTrue(startup > 0 && startup < liveness && liveness < readiness, file + " needs startup, liveness and readiness probes");
+                assertTrue(!text.substring(startup, liveness).contains("js-"), file + ": the startup probe is the strict /healthz");
+                assertTrue(text.substring(liveness, readiness).contains("js-enabled-only=true"),
+                        file + ": liveness must not restart a node that is still catching up");
+                assertTrue(text.substring(readiness).contains("js-server-only=true"),
+                        file + ": readiness must wait for the node to be caught up before the rollout moves on");
+            }
+        }
+
+        /**
+         * An external NATS is outside the release and, as a rule, on a private address,
+         * which the HTTPS egress rule excludes. Without a rule of its own every replica
+         * is cut off from NATS the moment {@code networkPolicy.enabled} is set.
+         */
+        @Test
+        @DisplayName("the NetworkPolicy lets EDDI reach an external NATS")
+        void networkPolicyOpensEgressToAnExternalNats() throws IOException {
+            String policy = read(HELM_TEMPLATES.resolve("networkpolicy.yaml"));
+            assertTrue(policy.contains("{{- else if .Values.nats.externalUrl }}"),
+                    "networkpolicy.yaml must open egress to nats.externalUrl, or every replica runs degraded");
+            assertTrue(policy.contains("networkPolicy.natsEgressTo"), "the destination must be narrowable");
+        }
+
+        /**
+         * {@code eddi.updateStrategy} is a plain string in this chart and the
+         * Deployment's own strategy object in the chart's other branch; a values file
+         * written for either must render a valid strategy, never
+         * {@code type: map[type:Recreate]}.
+         */
+        @Test
+        @DisplayName("eddi.updateStrategy accepts a string or the strategy object")
+        void updateStrategyAcceptsBothShapes() throws IOException {
+            String helpers = read(HELM_TEMPLATES.resolve("_helpers.tpl"));
+            assertTrue(helpers.contains("kindIs \"map\" $value"), "the helper must take .type from a map value");
+            assertTrue(read(HELM_TEMPLATES.resolve("deployment.yaml")).contains("kindIs \"map\" .Values.eddi.updateStrategy"),
+                    "a rollingUpdate block in the value must be rendered");
+        }
+
+        /**
          * {@code eddi.messagingType=nats} selects cluster mode; {@code nats.enabled}
          * (or {@code nats.externalUrl}) is what provides the broker. Without either the
          * chart rendered no EDDI_NATS_URL, and every replica would run degraded

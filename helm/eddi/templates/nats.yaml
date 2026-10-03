@@ -35,7 +35,7 @@ stringData:
           user: {{ .Values.nats.auth.username | quote }}
           password: {{ required "nats.auth.password is required when nats.enabled=true and nats.auth.enabled=true. Generate one: openssl rand -base64 24" .Values.nats.auth.password | quote }}
           permissions: {
-            publish: ["eddi.>", "$JS.API.>", "$KV.*.>", "$JS.ACK.>", "$JS.FC.>", "_INBOX.>"]
+            publish: ["eddi.>", "$JS.API.>", "$KV.*.>", "$O.*.>", "$JS.ACK.>", "$JS.FC.>", "_INBOX.>"]
             subscribe: ["eddi.>", "$JS.API.>", "$KV.*.>", "_INBOX.>"]
           }
         }
@@ -145,17 +145,26 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.nats.resources | nindent 12 }}
-          livenessProbe:
+          # Strict at start-up only. A rolling update restarts one NATS node at a time
+          # and must not touch the next until the restarted one has caught up its R3
+          # streams: readiness waits for that (js-server-only), and liveness only
+          # checks that JetStream is enabled, so a node that is still catching up is
+          # never killed for it.
+          startupProbe:
             httpGet:
               path: /healthz
               port: monitoring
-            initialDelaySeconds: 5
-            periodSeconds: 15
-          readinessProbe:
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
             httpGet:
               path: /healthz?js-enabled-only=true
               port: monitoring
-            initialDelaySeconds: 3
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz?js-server-only=true
+              port: monitoring
             periodSeconds: 10
       volumes:
         - name: nats-config

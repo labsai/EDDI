@@ -85,17 +85,26 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
-          livenessProbe:
+          # Strict at start-up only. A rolling update restarts one NATS node at a time
+          # and must not touch the next until the restarted one has caught up its R3
+          # streams: readiness waits for that (js-server-only), and liveness only
+          # checks that JetStream is enabled, so a node that is still catching up is
+          # never killed for it.
+          startupProbe:
             httpGet:
               path: /healthz
               port: monitoring
-            initialDelaySeconds: 5
-            periodSeconds: 15
-          readinessProbe:
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
             httpGet:
               path: /healthz?js-enabled-only=true
               port: monitoring
-            initialDelaySeconds: 3
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz?js-server-only=true
+              port: monitoring
             periodSeconds: 10
   volumeClaimTemplates:
     - metadata:

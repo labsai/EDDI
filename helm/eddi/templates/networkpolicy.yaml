@@ -72,6 +72,21 @@ spec:
       ports:
         - protocol: TCP
           port: 4222
+    {{- else if .Values.nats.externalUrl }}
+    # An external NATS (nats.externalUrl) is outside this release, usually on a
+    # private address — which the HTTPS rule below deliberately excludes — so
+    # without this every replica would be cut off from NATS and run degraded.
+    # The ports come from the URL(s); narrow the destination with
+    # networkPolicy.natsEgressTo (NetworkPolicyPeer list).
+    - ports:
+        {{- range (splitList "," .Values.nats.externalUrl) }}
+        - protocol: TCP
+          port: {{ regexFind ":[0-9]+$" (trim .) | trimPrefix ":" | default "4222" }}
+        {{- end }}
+      {{- with .Values.networkPolicy.natsEgressTo }}
+      to:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     {{- end }}
     {{- if .Values.keycloak.enabled }}
     - to:

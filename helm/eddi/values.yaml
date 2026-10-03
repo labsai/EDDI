@@ -40,7 +40,9 @@ eddi:
   # would let two turns of one conversation run at once. See docs/clustering.md.
   replicas: 1
 
-  # Deployment update strategy: "", "Recreate" or "RollingUpdate".
+  # Deployment update strategy: "", "Recreate" or "RollingUpdate" — or the
+  # Deployment's own strategy object ({type: RollingUpdate, rollingUpdate:
+  # {maxSurge: 1, maxUnavailable: 0}}); both shapes are accepted.
   # Empty (the default) picks per messaging type: Recreate for in-memory — a
   # rollout must not run two single-node JVMs against one database — and
   # RollingUpdate (maxSurge 1, maxUnavailable 0) for nats, where a rolling update
@@ -325,7 +327,7 @@ nats:
     tag: "2.11-alpine"
   auth:
     # User/password authentication for EDDI. The user may publish and subscribe
-    # only to eddi.>, $JS.API.>, $KV.<prefix>_*.> and _INBOX.>.
+    # only to eddi.>, $JS.*, $KV.*, $O.* (the archive object store) and _INBOX.>.
     enabled: true
     username: eddi
     # REQUIRED when nats.enabled=true and auth.enabled=true — no default is
@@ -449,6 +451,12 @@ networkPolicy:
   # Extra destination ports opened for egress (DNS/443 and the in-chart
   # datastores are handled automatically).
   extraEgressPorts: []
+  # Where an external NATS (nats.externalUrl) lives, as NetworkPolicyPeers, e.g.
+  #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: nats}}
+  #   - ipBlock: {cidr: 10.20.0.0/24}
+  # Empty allows the URL's port to any destination. The chart opens egress to an
+  # external NATS automatically; without it the replicas could not reach NATS.
+  natsEgressTo: []
 
 # ── Monitoring ─────────────────────────────────────────────
 #
