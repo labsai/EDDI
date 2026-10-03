@@ -1252,7 +1252,7 @@ public class LlmTask implements ILifecycleTask {
             // calls (see the comment above) — the pre-pause segment is not recoverable
             // here, so a paused turn's ledger entry under-reports by that segment.
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
-        } else if (responseMetadata != null && responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+        } else if (responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
             // The turn's token counts are also the caller's: the OpenAI-compatible /v1
             // adapter reports them as `usage`. Recorded without the rest of the audit
             // evidence when the ledger is off (eddi.audit.enabled=false).

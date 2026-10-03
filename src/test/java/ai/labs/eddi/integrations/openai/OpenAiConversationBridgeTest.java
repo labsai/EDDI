@@ -618,7 +618,8 @@ class OpenAiConversationBridgeTest {
 
         String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertFalse(body.contains("null"), "got: " + body);
-        assertTrue(body.contains("NullPointerException"));
+        assertTrue(body.contains(OpenAiConversationBridge.AGENT_FAILED_MESSAGE), body);
+        assertFalse(body.contains("NullPointerException"), body);
     }
 
     @Test

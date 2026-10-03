@@ -134,6 +134,11 @@ public class OpenAiConversationBridge {
     static final String PAUSE_NOTICE_PREFIX = "⏸️ Awaiting human approval.";
     static final String STILL_AWAITING_NOTICE = "⏸️ Still awaiting approval — a reviewer must decide before I can continue.";
     static final String NO_OUTPUT_NOTICE = "_The agent produced no text output._";
+    /**
+     * The client-facing message for a failure whose reason must not leave the
+     * server.
+     */
+    static final String AGENT_FAILED_MESSAGE = "The agent failed to process the message.";
     static final String BUSY_NOTICE = "The conversation is busy with another turn or is no longer active. Please retry.";
 
     private final IConversationService conversationService;
@@ -504,9 +509,10 @@ public class OpenAiConversationBridge {
             throw OpenAiApiException.unavailable(OpenAiErrorResponse.CODE_AGENT_NOT_READY,
                     "Agent '" + model.displayName() + "' is not ready: " + e.getMessage());
         } catch (Exception e) {
-            LOGGER.errorf("Could not start an OpenAI-adapter conversation for agent %s: %s",
-                    sanitize(model.agentId()), e.getMessage());
-            throw OpenAiApiException.serverError(null, "Could not start a conversation: " + e.getMessage());
+            // The cause stays in the log: its message can name hosts or connection
+            // strings, and this reaches a caller holding only the shared key.
+            LOGGER.errorf(e, "Could not start an OpenAI-adapter conversation for agent %s", sanitize(model.agentId()));
+            throw OpenAiApiException.serverError(null, "Could not start a conversation.");
         }
     }
 
@@ -912,11 +918,16 @@ public class OpenAiConversationBridge {
                         @Override
                         public void onError(Throwable error) {
                             try {
-                                LOGGER.errorf("OpenAI adapter stream failed for conversation %s: %s",
-                                        sanitize(turn.conversationId()), error == null ? null : error.getMessage());
+                                // Logged, not sent: a raw exception message can carry hosts,
+                                // URLs or paths, and this reaches a caller holding only the
+                                // shared key. A failed turn's sanitized reason still reaches the
+                                // client through the ERROR snapshot onComplete delivers first
+                                // (agentFailure); this is the fallback for everything else.
+                                LOGGER.errorf(error, "OpenAI adapter stream failed for conversation %s",
+                                        sanitize(turn.conversationId()));
                                 outcomeTag.compareAndSet("ok", "error");
                                 writer.error(OpenAiApiException.serverError(OpenAiErrorResponse.CODE_AGENT_ERROR,
-                                        "The agent failed to process the message. " + describe(error)).toErrorResponse());
+                                        AGENT_FAILED_MESSAGE).toErrorResponse());
                             } finally {
                                 finished.complete(null);
                             }
@@ -958,20 +969,6 @@ public class OpenAiConversationBridge {
             turnTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
             countTurn("stream", outcomeTag.get());
         }
-    }
-
-    /**
-     * A human-readable description of a failure. NPEs and similar carry a null
-     * message, which would otherwise reach the user as the literal text "null".
-     */
-    private static String describe(Throwable error) {
-        if (error == null) {
-            return "The agent failed for an unknown reason.";
-        }
-        String message = error.getMessage();
-        return message == null || message.isBlank()
-                ? error.getClass().getSimpleName()
-                : message;
     }
 
     /** Error code for input over {@code eddi.conversations.max-input-chars}. */

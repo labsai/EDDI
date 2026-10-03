@@ -481,8 +481,21 @@ class OpenAiBridgeSessionAndErrorTest {
             String body = stream(bridge());
 
             assertTrue(body.contains("\"error\":{"), body);
-            assertTrue(body.contains("model down"), body);
+            assertTrue(body.contains(OpenAiConversationBridge.AGENT_FAILED_MESSAGE), body);
+            assertFalse(body.contains("model down"), "a raw exception message must not reach the caller: " + body);
             assertFalse(body.contains("\"content\""), "a failure is not the model's answer: " + body);
+        }
+
+        @Test
+        void aStartFailure_doesNotEchoTheCause() throws Exception {
+            when(conversationService.startConversation(any(), any(), any(), any()))
+                    .thenThrow(new IllegalStateException("connect to mongodb://admin:pw@10.0.0.7:27017 failed"));
+
+            var failure = assertThrows(OpenAiApiException.class,
+                    () -> bridge().prepare(statefulModel, firstTurn("s", "hi"), noHeaders(), USER_ID));
+
+            assertEquals(500, failure.getStatus());
+            assertFalse(failure.getMessage().contains("mongodb"), failure.getMessage());
         }
 
         @Test
