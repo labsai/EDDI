@@ -349,7 +349,7 @@ def s1_ordering(infra, ctx):
     conv2 = start_conv(NODES[0], agent)
     tag2 = f"[s1f-{conv2[-6:]}]"
     jobs2 = [(NODES[i % 3], f"{tag2} fast {i}") for i in range(120)]
-    with cf.ThreadPoolExecutor(30) as ex:
+    with cf.ThreadPoolExecutor(12) as ex:  # 12 queued turns at most: each waits for the ones ahead of it
         res2 = list(ex.map(lambda j: (j[1], say(j[0], conv2, j[1], timeout=180)), jobs2))
     entries2 = sorted(mock_entries(tag2, since=t0), key=lambda e: e["start"])
     overlaps2 = sum(1 for a, b in zip(entries2, entries2[1:]) if b["start"] < a["end"] - 0.01)
