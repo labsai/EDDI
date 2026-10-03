@@ -448,11 +448,13 @@ class ToolLoopRunner {
                 if (aiMessage.hasToolExecutionRequests()) {
                     // === Call caps ===
                     // Admit at most the per-response cap, and no more than what is left of
-                    // the per-turn cap. The rest are answered here, before the gate, so a
-                    // refused call can never pause the turn for an approval of a call that
-                    // was not going to run.
-                    List<ToolExecutionRequest> admitted = admitWithinCallCaps(aiMessage, perResponseCap, perTurnCap,
-                            toolCallsThisTurn, currentMessages, trace, exchangeRecorder);
+                    // the per-turn cap. The rest never reach the gate, so a refused call
+                    // can never pause the turn for an approval of a call that was not going
+                    // to run. They are answered after the admitted calls, which keeps the
+                    // results in the order the model listed the calls (the refused ones are
+                    // always the tail).
+                    CallAdmission admission = admitWithinCallCaps(aiMessage, perResponseCap, perTurnCap, toolCallsThisTurn);
+                    List<ToolExecutionRequest> admitted = admission.admitted();
                     toolCallsThisTurn += admitted.size();
 
                     // === Tool-approval gate (tool-level HITL) ===
@@ -539,7 +541,10 @@ class ToolLoopRunner {
                                     setup.toolEndpoints(), effectiveToolApprovals);
                             var governingRule = ToolApprovalRules.governing(ruleByCallId.values());
                             gateSupport.recordRuleMatches(ruleByCallId.values());
-                            // 3) snapshot + persist the pending batch, then abort the loop
+                            // 3) answer the refused calls, so the frozen transcript has a result
+                            // for every call the resume will not answer
+                            admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
+                            // 4) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = gateSupport.buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, ToolApprovalGateSupport.activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
                                     toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
@@ -577,6 +582,7 @@ class ToolLoopRunner {
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs),
                                 exchangeRecorder);
                     }
+                    admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
                 } else {
                     return finish(currentMessages, transcriptOut, aiMessage.text());
                 }
@@ -693,19 +699,44 @@ class ToolLoopRunner {
     }
 
     /**
-     * The calls of one model response that fall within the call caps, in the order
-     * the model listed them. Every call past either cap is answered at once with a
-     * {@code NOT_EXECUTED} result naming the limit, and traced as
-     * {@code tool_call_capped}; it never reaches the approval gate or an executor.
+     * The outcome of applying the call caps to one model response: the calls to
+     * run, in the order the model listed them, and the tail that is refused.
+     *
+     * @param admitted
+     *            calls within both caps
+     * @param refused
+     *            calls past a cap, never shown to the gate or an executor
+     * @param refusal
+     *            the {@code NOT_EXECUTED} result each refused call receives
+     * @param limit
+     *            the setting that refused them, for the trace
      */
-    static List<ToolExecutionRequest> admitWithinCallCaps(AiMessage aiMessage, int perResponseCap, int perTurnCap,
-                                                          int toolCallsThisTurn, List<ChatMessage> currentMessages,
-                                                          List<Map<String, Object>> trace, ToolExchangeRecorder exchangeRecorder) {
+    record CallAdmission(List<ToolExecutionRequest> admitted, List<ToolExecutionRequest> refused, String refusal, String limit) {
+
+        /**
+         * Answers every refused call and traces it as {@code tool_call_capped}. Called
+         * once the admitted calls have their results, so the results stay in call
+         * order.
+         */
+        void answerRefused(AiMessage call, List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
+                           ToolExchangeRecorder exchangeRecorder) {
+            for (ToolExecutionRequest skipped : refused) {
+                addResult(currentMessages, call, skipped, refusal, exchangeRecorder);
+                trace.add(Map.of("type", "tool_call_capped", "tool", skipped.name(), "limit", limit));
+            }
+        }
+    }
+
+    /**
+     * Splits one model response at the call caps. Nothing is appended here — see
+     * {@link CallAdmission#answerRefused}.
+     */
+    static CallAdmission admitWithinCallCaps(AiMessage aiMessage, int perResponseCap, int perTurnCap, int toolCallsThisTurn) {
         List<ToolExecutionRequest> requested = aiMessage.toolExecutionRequests();
         long turnRoom = perTurnCap == Integer.MAX_VALUE ? Integer.MAX_VALUE : Math.max(0L, (long) perTurnCap - toolCallsThisTurn);
         int room = (int) Math.min(perResponseCap, turnRoom);
         if (requested.size() <= room) {
-            return requested;
+            return new CallAdmission(requested, List.of(), null, null);
         }
         boolean turnBound = turnRoom < perResponseCap;
         String limit = turnBound
@@ -715,12 +746,8 @@ class ToolLoopRunner {
                 + "; this call was not run. Do not repeat it in this turn — answer with the results you have.\"}";
         LOGGER.warnf("Model requested %d tool calls in one response; executing %d, refusing the rest: %s", requested.size(), room,
                 limit);
-        for (ToolExecutionRequest skipped : requested.subList(room, requested.size())) {
-            addResult(currentMessages, aiMessage, skipped, refusal, exchangeRecorder);
-            trace.add(Map.of("type", "tool_call_capped", "tool", skipped.name(), "limit",
-                    turnBound ? "maxToolCallsPerTurn" : "maxToolCallsPerIteration"));
-        }
-        return requested.subList(0, room);
+        return new CallAdmission(requested.subList(0, room), requested.subList(room, requested.size()), refusal,
+                turnBound ? "maxToolCallsPerTurn" : "maxToolCallsPerIteration");
     }
 
     /**

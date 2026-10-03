@@ -109,6 +109,52 @@ class WebScraperToolContainmentTest {
     }
 
     @Test
+    @DisplayName("back-to-back calls on a one-worker pool are never refused as busy")
+    void sequentialCallsAreNeverBusy() throws Exception {
+        servePage();
+        var tool = new WebScraperTool(httpClient, new HtmlToMarkdownConverter(), WebScraperTool.DEFAULT_MAX_RESPONSE_BYTES, 10_000, 1);
+
+        for (int i = 0; i < 300; i++) {
+            String result = tool.extractWithSelector("https://example.com", "p");
+            assertTrue(result.contains("alpha"), "call " + i + ": " + result);
+        }
+    }
+
+    @Test
+    @DisplayName("a runaway keeps its worker until it really ends, then the worker is available again")
+    void permitReturnsWhenTheRunawayEnds() throws Exception {
+        servePage();
+        CountDownLatch finished = new CountDownLatch(1);
+        HtmlToMarkdownConverter slowOnce = mock(HtmlToMarkdownConverter.class);
+        when(slowOnce.convert(anyString(), anyString(), anyInt())).thenAnswer(invocation -> {
+            // Ignores the interrupt, like jsoup evaluating a selector does.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (release.getCount() > 0 && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
+            finished.countDown();
+            return "late";
+        }).thenReturn("fast");
+        var tool = new WebScraperTool(httpClient, slowOnce, WebScraperTool.DEFAULT_MAX_RESPONSE_BYTES, 100, 1);
+
+        assertThrows(ToolFailureException.class, () -> tool.extractWebPageText("https://example.com"));
+        var busy = assertThrows(ToolFailureException.class, () -> tool.extractWebPageText("https://example.com"));
+        assertTrue(busy.getMessage().contains("busy"), "the abandoned runaway still holds the only worker: " + busy.getMessage());
+
+        release.countDown();
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        String after = null;
+        for (int attempt = 0; attempt < 50 && after == null; attempt++) {
+            try {
+                after = tool.extractWebPageText("https://example.com");
+            } catch (ToolFailureException stillReleasing) {
+                Thread.sleep(20);
+            }
+        }
+        assertEquals("fast", after);
+    }
+
+    @Test
     @DisplayName("a saturated parse pool refuses at once instead of queueing behind a runaway")
     void saturatedPoolRefuses() throws Exception {
         servePage();

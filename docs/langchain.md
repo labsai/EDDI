@@ -1523,8 +1523,10 @@ tool calls are not all answered:
 ```
 
 A refused call never reaches the approval gate, so it cannot pause a turn for a call that was not
-going to run. Each one is traced as `tool_call_capped` and the turn logs one WARN.
-`maxToolIterations` itself is clamped to 100.
+going to run. Refused calls are always the tail of the response and are answered after the executed
+ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
+`maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
+runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
 
 #### Execution timeouts
 

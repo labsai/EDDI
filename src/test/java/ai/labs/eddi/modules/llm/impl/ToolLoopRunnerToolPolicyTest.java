@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
@@ -22,6 +23,10 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -83,7 +88,8 @@ class ToolLoopRunnerToolPolicyTest {
         truncator = mock(ToolResponseTruncator.class);
         lenient().when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(1));
 
-        runner = new ToolLoopRunner(service, truncator, null, null, null, null, null, new ToolResultGuardrail(new SimpleMeterRegistry()));
+        runner = new ToolLoopRunner(service, truncator, null, null, new ToolApprovalGate(), null, null,
+                new ToolResultGuardrail(new SimpleMeterRegistry()));
         task = new LlmConfiguration.Task();
         task.setId("tool-policy");
     }
@@ -190,7 +196,11 @@ class ToolLoopRunnerToolPolicyTest {
             List<ChatMessage> messages = new ArrayList<>();
             List<Map<String, Object>> trace = new ArrayList<>();
 
-            var admitted = ToolLoopRunner.admitWithinCallCaps(response(50), 20, 100, 0, messages, trace, null);
+            var call = response(50);
+            var admission = ToolLoopRunner.admitWithinCallCaps(call, 20, 100, 0);
+            assertTrue(messages.isEmpty(), "nothing is answered before the admitted calls ran");
+            admission.answerRefused(call, messages, trace, null);
+            var admitted = admission.admitted();
 
             assertEquals(20, admitted.size());
             assertEquals(30, messages.size(), "every refused call still gets its one result");
@@ -201,11 +211,46 @@ class ToolLoopRunnerToolPolicyTest {
         }
 
         @Test
+        @DisplayName("through the loop: refused results follow the executed ones, so every result is in call order")
+        void resultsStayInCallOrder() throws Exception {
+            task.setMaxToolCallsPerIteration(2);
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            AtomicInteger executed = new AtomicInteger();
+            ToolExecutor calc = (request, memoryId) -> "result " + executed.incrementAndGet();
+            var spec = ToolSpecification.builder().name("calculate").description("d").build();
+            var setup = new AgentOrchestrator.ToolSetup(List.of(spec), Map.of("calculate", calc), Map.of("calculate", "builtin"), List.of(spec),
+                    Map.of(), Map.of(), Map.of());
+            ChatModel model = mock(ChatModel.class);
+            List<ChatRequest> requests = new ArrayList<>();
+            when(model.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+                requests.add(invocation.getArgument(0));
+                return requests.size() == 1
+                        ? ChatResponse.builder().aiMessage(response(3)).build()
+                        : ChatResponse.builder().aiMessage(AiMessage.from("done")).build();
+            });
+
+            var result = runner.executeWithTools(model, null, List.of(UserMessage.from("go")), setup, task, memory("conv-1"), null, -1, 0,
+                    null);
+
+            assertEquals("done", result.response());
+            assertEquals(2, executed.get());
+            List<String> resultIds = requests.get(1).messages().stream().filter(m -> m instanceof ToolExecutionResultMessage)
+                    .map(m -> ((ToolExecutionResultMessage) m).id()).toList();
+            assertEquals(List.of("call_0", "call_1", "call_2"), resultIds);
+            var last = (ToolExecutionResultMessage) requests.get(1).messages().getLast();
+            assertTrue(last.text().contains("NOT_EXECUTED"), last.text());
+        }
+
+        @Test
         @DisplayName("the per-turn cap counts the calls already made this turn")
         void perTurnCap() {
             List<ChatMessage> messages = new ArrayList<>();
 
-            var admitted = ToolLoopRunner.admitWithinCallCaps(response(10), 20, 100, 95, messages, new ArrayList<>(), null);
+            var call = response(10);
+            var admission = ToolLoopRunner.admitWithinCallCaps(call, 20, 100, 95);
+            admission.answerRefused(call, messages, new ArrayList<>(), null);
+            var admitted = admission.admitted();
 
             assertEquals(5, admitted.size());
             assertTrue(((ToolExecutionResultMessage) messages.getFirst()).text().contains("maxToolCallsPerTurn"));
@@ -215,7 +260,9 @@ class ToolLoopRunnerToolPolicyTest {
         @DisplayName("within the caps nothing is refused")
         void withinCaps() {
             List<ChatMessage> messages = new ArrayList<>();
-            assertEquals(3, ToolLoopRunner.admitWithinCallCaps(response(3), 20, 100, 0, messages, new ArrayList<>(), null).size());
+            var admission = ToolLoopRunner.admitWithinCallCaps(response(3), 20, 100, 0);
+            admission.answerRefused(response(3), messages, new ArrayList<>(), null);
+            assertEquals(3, admission.admitted().size());
             assertTrue(messages.isEmpty());
         }
 
@@ -226,8 +273,8 @@ class ToolLoopRunnerToolPolicyTest {
             assertEquals(Integer.MAX_VALUE, ToolLoopRunner.effectiveCallCap(-1, 20));
             assertEquals(Integer.MAX_VALUE, ToolLoopRunner.effectiveCallCap(0, 20));
             assertEquals(7, ToolLoopRunner.effectiveCallCap(7, 20));
-            assertEquals(2, ToolLoopRunner.admitWithinCallCaps(response(2), Integer.MAX_VALUE, Integer.MAX_VALUE, 500, new ArrayList<>(),
-                    new ArrayList<>(), null).size(), "uncapped admits everything");
+            assertEquals(2, ToolLoopRunner.admitWithinCallCaps(response(2), Integer.MAX_VALUE, Integer.MAX_VALUE, 500).admitted().size(),
+                    "uncapped admits everything");
 
             var task = new LlmConfiguration.Task();
             assertEquals(10, ToolLoopRunner.effectiveMaxToolIterations(task));

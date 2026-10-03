@@ -26,15 +26,18 @@ import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
@@ -101,6 +104,15 @@ public class WebScraperTool {
     private final long parseTimeoutMs;
     private final ExecutorService parsePool;
 
+    /**
+     * Admission to {@link #parsePool}: one permit per worker, released by the task
+     * itself when its parse actually ends — not when the caller stops waiting. A
+     * {@code SynchronousQueue} hand-off alone also refused a call in the instant
+     * between a worker finishing and returning to its queue, so a pool with a free
+     * worker could answer "busy".
+     */
+    private final Semaphore parsePermits;
+
     @Inject
     public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter,
             @ConfigProperty(name = "eddi.tools.web-scraper.max-response-bytes",
@@ -111,7 +123,9 @@ public class WebScraperTool {
         this.htmlToMarkdownConverter = htmlToMarkdownConverter;
         this.maxResponseBytes = maxResponseBytes > 0 ? maxResponseBytes : DEFAULT_MAX_RESPONSE_BYTES;
         this.parseTimeoutMs = parseTimeoutMs > 0 ? parseTimeoutMs : DEFAULT_PARSE_TIMEOUT_MS;
-        this.parsePool = boundedParsePool(parseThreads > 0 ? parseThreads : DEFAULT_PARSE_THREADS);
+        int threads = parseThreads > 0 ? parseThreads : DEFAULT_PARSE_THREADS;
+        this.parsePool = boundedParsePool(threads);
+        this.parsePermits = new Semaphore(threads);
     }
 
     /** Convenience constructor for tests and callers with no configured cap. */
@@ -120,8 +134,11 @@ public class WebScraperTool {
     }
 
     /**
-     * Platform threads, fixed in number, with no queue: a call that finds every
-     * worker busy is rejected at once instead of waiting behind a runaway.
+     * Platform threads, fixed in number. Admission is decided by
+     * {@link #parsePermits}, which never admits more tasks than there are workers,
+     * so the queue only ever bridges the moment a finished worker takes a moment to
+     * pick up the next task; a call that finds every worker busy is refused at once
+     * instead of waiting behind a runaway.
      */
     private static ExecutorService boundedParsePool(int threads) {
         AtomicInteger counter = new AtomicInteger();
@@ -130,7 +147,7 @@ public class WebScraperTool {
             thread.setDaemon(true);
             return thread;
         };
-        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS, new SynchronousQueue<>(), factory,
+        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>(), factory,
                 new ThreadPoolExecutor.AbortPolicy());
     }
 
@@ -346,22 +363,40 @@ public class WebScraperTool {
      *             when every parse worker is busy, or the deadline passes
      */
     private <T> T parseBounded(Callable<T> parse) throws Exception {
-        Future<T> future;
-        try {
-            future = parsePool.submit(parse);
-        } catch (RejectedExecutionException busy) {
+        if (!parsePermits.tryAcquire()) {
             LOGGER.warn("Web scraper parse pool is saturated; refusing the call");
             throw new ToolFailureException("Error: the web scraper is busy parsing other pages. Try again shortly.");
+        }
+        // Exactly one side returns the permit: the task when it ran (in its finally,
+        // so a runaway keeps its permit for as long as it really occupies a worker),
+        // or the caller when it gave up on a task that never started.
+        AtomicBoolean claimed = new AtomicBoolean();
+        Callable<T> admitted = () -> {
+            if (!claimed.compareAndSet(false, true)) {
+                throw new CancellationException("abandoned before it started");
+            }
+            try {
+                return parse.call();
+            } finally {
+                parsePermits.release();
+            }
+        };
+        Future<T> future;
+        try {
+            future = parsePool.submit(admitted);
+        } catch (RejectedExecutionException shutDown) {
+            parsePermits.release();
+            throw new ToolFailureException("Error: the web scraper is not available.");
         }
         try {
             return future.get(parseTimeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException expired) {
-            future.cancel(true);
+            abandon(future, claimed);
             LOGGER.warnf("Web scraper parse exceeded %dms and was abandoned", parseTimeoutMs);
             throw new ToolFailureException("Error: parsing the page took longer than " + parseTimeoutMs
                     + "ms and was stopped. Use a simpler selector or a smaller page.");
         } catch (InterruptedException interrupted) {
-            future.cancel(true);
+            abandon(future, claimed);
             Thread.currentThread().interrupt();
             throw interrupted;
         } catch (ExecutionException failed) {
@@ -370,6 +405,14 @@ public class WebScraperTool {
                 throw e;
             }
             throw failed;
+        }
+    }
+
+    /** Stops waiting for a parse; returns its permit if it never started. */
+    private void abandon(Future<?> future, AtomicBoolean claimed) {
+        future.cancel(true);
+        if (claimed.compareAndSet(false, true)) {
+            parsePermits.release();
         }
     }
 
