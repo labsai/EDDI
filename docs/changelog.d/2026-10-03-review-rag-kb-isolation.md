@@ -58,9 +58,11 @@ after the save-time checks had passed on the reference text.
 
 - `KnowledgeBaseStorageGuard` refuses a `${...}` reference as `table` / `collectionName` / `indexName` on
   create or change, so every location rule is judged on the literal value.
-- `EmbeddingStoreFactory` validates what a stored location resolves to when the store is built: a pgvector
-  table must be a plain identifier, and a reference may not resolve into the `eddi_kb` namespace. A literal
-  reserved name stored before the rule existed keeps working.
+- `EmbeddingStoreFactory` refuses a stored `${...}` location when the store is built, whatever it
+  currently resolves to (round 3 of the review: judging the resolved value still let an editor re-point
+  the variable at another knowledge base's ordinary table, which a 6.5.0-layout knowledge base reads
+  unfiltered). Such a knowledge base works again once it is saved with the literal name. A pgvector table
+  must be a plain identifier; a literal reserved name stored before the rule existed keeps working.
 - The Vertex embedding `endpoint` is trimmed once, and that value is both checked and used.
 
 **Files:** [`KnowledgeBaseStorageGuard.java`](../../src/main/java/ai/labs/eddi/configs/rag/rest/KnowledgeBaseStorageGuard.java),

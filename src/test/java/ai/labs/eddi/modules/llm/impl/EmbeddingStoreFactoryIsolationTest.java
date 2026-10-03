@@ -69,24 +69,33 @@ class EmbeddingStoreFactoryIsolationTest {
         return config;
     }
 
-    /**
-     * PR #945 review: what a stored ${vars:...} table resolves to is checked when
-     * the store is built, because a global variable can be changed by an editor
-     * after the knowledge base was saved.
-     */
     @Test
-    @DisplayName("a pgvector table that resolves to anything but a plain identifier is refused before it reaches SQL")
-    void resolvedTableMustBeAPlainIdentifier() {
-        var config = pg("${vars:t}");
-        var e = assertThrows(IllegalArgumentException.class,
-                () -> EmbeddingStoreFactory.physicalName(Map.of("table", "t; DROP TABLE y --"), "table", ALPHA_ID, config));
+    @DisplayName("a pgvector table that is anything but a plain identifier is refused before it reaches SQL")
+    void tableMustBeAPlainIdentifier() {
+        var e = assertThrows(IllegalArgumentException.class, () -> EmbeddingStoreFactory.physicalName(
+                Map.of("table", "t; DROP TABLE y --"), "table", ALPHA_ID, pg("t; DROP TABLE y --")));
         assertTrue(e.getMessage().contains("plain table name"), e.getMessage());
-        assertEquals("team_docs", EmbeddingStoreFactory.physicalName(Map.of("table", "team_docs"), "table", ALPHA_ID, config));
+        assertEquals("team_docs", EmbeddingStoreFactory.physicalName(Map.of("table", "team_docs"), "table", ALPHA_ID, pg("team_docs")));
     }
 
+    /**
+     * PR #945 review, round 3: a stored ${vars:...} location is refused when the
+     * store is built, whatever it currently resolves to. Global variables are
+     * editable by any editor, so judging the resolved value was not enough: the
+     * variable could be re-pointed at another knowledge base's ordinary table, and
+     * a 6.5.0-layout knowledge base retrieves from its table unfiltered.
+     */
     @Test
-    @DisplayName("a reference may not resolve onto another knowledge base's default store")
-    void referenceMayNotResolveIntoTheReservedNamespace() {
+    @DisplayName("a stored reference is refused even when it resolves to an ordinary, unreserved name")
+    void storedReferencesAreRefusedWhateverTheyResolveTo() {
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> EmbeddingStoreFactory.physicalName(Map.of("table", "other_teams_docs"), "table", ALPHA_ID, pg("${vars:t}")));
+        assertTrue(e.getMessage().contains("reference"), e.getMessage());
+        var qdrant = kb("alpha", null);
+        qdrant.setStoreType("qdrant");
+        qdrant.setStoreParameters(Map.of("collectionName", "${vars:c}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> EmbeddingStoreFactory.physicalName(Map.of("collectionName", "docs"), "collectionName", ALPHA_ID, qdrant));
         assertThrows(IllegalArgumentException.class,
                 () -> EmbeddingStoreFactory.physicalName(Map.of("table", "eddi_kb_alpha"), "table", ALPHA_ID, pg("${vars:t}")));
         // A literal reserved table stored before the save-time rule keeps working,

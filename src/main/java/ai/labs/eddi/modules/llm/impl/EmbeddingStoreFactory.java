@@ -513,25 +513,29 @@ public class EmbeddingStoreFactory {
      * vault resolution) when there is one, otherwise the knowledge base's default
      * from {@link KnowledgeBaseStorage#defaultPhysicalName}.
      * <p>
-     * What it resolves to is validated here, because a stored value can still be a
-     * {@code ${vars:...}} reference (the save-time guard refuses new ones) and
-     * global variables are editable by any editor: a pgvector table must be a plain
-     * identifier — the store puts it into SQL unquoted — and a reference may not
-     * resolve into EDDI's reserved {@code eddi_kb} namespace, i.e. onto another
-     * knowledge base's default store. A literal reserved name stored before the
+     * The location must be literal here too, not only when it is saved. A
+     * configuration stored before the save-time rule can still carry a
+     * {@code ${vars:...}} reference, and global variables are editable by any
+     * editor, without EDIT on the knowledge bases that use them: re-pointing one at
+     * another knowledge base's table — reserved name or not — would make this
+     * knowledge base read (and, unfiltered in the 6.5.0 layout, answer from) that
+     * one's chunks. So a reference is refused outright rather than judged by what
+     * it currently resolves to, and the knowledge base has to be saved once with
+     * the name written out. A pgvector table must also be a plain identifier: the
+     * store puts it into SQL unquoted. A literal reserved name stored before the
      * save-time rule existed is left alone.
      */
     static String physicalName(Map<String, String> resolvedParams, String key, String ragConfigId, RagConfiguration config) {
+        String raw = config.getStoreParameters() == null ? null : config.getStoreParameters().get(key);
+        if (raw != null && raw.contains("${")) {
+            throw new IllegalArgumentException("storeParameters." + key + " is a ${...} reference. The location decides whose documents "
+                    + "this knowledge base reads, so it must be written out: save the knowledge base with the literal name");
+        }
         String explicit = resolvedParams.get(key);
         String name = explicit != null && !explicit.isBlank() ? explicit : KnowledgeBaseStorage.defaultPhysicalName(ragConfigId, config);
         if ("pgvector".equals(config.getStoreType()) && !KnowledgeBaseStorage.isPlainPgIdentifier(name)) {
-            throw new IllegalArgumentException("pgvector storeParameters." + key + " must resolve to a plain table name, optionally "
+            throw new IllegalArgumentException("pgvector storeParameters." + key + " must be a plain table name, optionally "
                     + "qualified with a schema; it is put into SQL as it is");
-        }
-        String raw = config.getStoreParameters() == null ? null : config.getStoreParameters().get(key);
-        if (raw != null && raw.contains("${") && KnowledgeBaseStorage.isReservedName(name)) {
-            throw new IllegalArgumentException("storeParameters." + key + " is a reference that resolves into EDDI's reserved '"
-                    + KnowledgeBaseStorage.RESERVED_PREFIX + "' namespace, which belongs to other knowledge bases' stores");
         }
         return name;
     }
