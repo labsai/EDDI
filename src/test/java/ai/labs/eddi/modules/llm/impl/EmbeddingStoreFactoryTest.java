@@ -127,9 +127,10 @@ class EmbeddingStoreFactoryTest {
         @DisplayName("in-memory store type succeeds")
         void inMemoryStore() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store = factory.getOrCreate(config, "testKb");
+            var store = factory.getOrCreate("testKb", config);
             assertNotNull(store);
         }
 
@@ -137,29 +138,32 @@ class EmbeddingStoreFactoryTest {
         @DisplayName("unsupported store type throws IllegalArgumentException")
         void unsupportedStore() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("neo4j");
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "testKb"));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
         }
 
         @Test
         @DisplayName("pgvector without password throws IllegalArgumentException")
         void pgvectorMissingPassword() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of("host", "localhost"));
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "testKb"));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
         }
 
         @Test
         @DisplayName("mongodb-atlas without connectionString throws IllegalArgumentException")
         void mongodbMissingConnectionString() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("mongodb-atlas");
             config.setStoreParameters(Map.of());
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "testKb"));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
         }
     }
 
@@ -173,16 +177,18 @@ class EmbeddingStoreFactoryTest {
         @DisplayName("invalid integer value throws IllegalArgumentException")
         void invalidInteger() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of("password", "secret", "port", "not-a-number"));
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "testKb"));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
         }
 
         @Test
         @DisplayName("blank port uses default")
         void blankPort() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             var params = new HashMap<String, String>();
             params.put("password", "secret");
@@ -191,7 +197,7 @@ class EmbeddingStoreFactoryTest {
 
             // This will fail trying to connect, but should not fail parameter parsing
             try {
-                factory.getOrCreate(config, "testKb");
+                factory.getOrCreate("testKb", config);
             } catch (Exception e) {
                 // Expected — can't connect to real PostgreSQL, but parsing succeeded
                 assertFalse(e instanceof IllegalArgumentException, "Should not be IllegalArgumentException for blank port");
@@ -209,10 +215,11 @@ class EmbeddingStoreFactoryTest {
         @DisplayName("invalid Chroma API version throws IllegalArgumentException")
         void invalidApiVersion() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("chroma");
             config.setStoreParameters(Map.of("apiVersion", "INVALID_VERSION"));
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "testKb"));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
         }
     }
 
@@ -227,8 +234,9 @@ class EmbeddingStoreFactoryTest {
         void clearCacheDoesNotThrow() {
             // First add something to cache
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
-            factory.getOrCreate(config, "kb1");
+            factory.getOrCreate("kb1", config);
 
             assertDoesNotThrow(() -> factory.clearCache());
         }
@@ -244,12 +252,13 @@ class EmbeddingStoreFactoryTest {
         @DisplayName("blank value treated as missing")
         void blankValueTreatedAsMissing() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             var params = new HashMap<String, String>();
             params.put("password", "   ");
             config.setStoreParameters(params);
 
-            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "testKb"));
+            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
             assertTrue(ex.getMessage().contains("password"));
         }
     }
@@ -264,10 +273,11 @@ class EmbeddingStoreFactoryTest {
         @DisplayName("null storeParameters on in-memory store succeeds")
         void nullParamsInMemory() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
             config.setStoreParameters(null);
 
-            var store = factory.getOrCreate(config, "kb1");
+            var store = factory.getOrCreate("kb1", config);
             assertNotNull(store);
         }
     }
@@ -282,10 +292,11 @@ class EmbeddingStoreFactoryTest {
         @DisplayName("same config returns cached store")
         void cachedStore() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store1 = factory.getOrCreate(config, "kb1");
-            var store2 = factory.getOrCreate(config, "kb1");
+            var store1 = factory.getOrCreate("kb1", config);
+            var store2 = factory.getOrCreate("kb1", config);
             assertSame(store1, store2);
         }
 
@@ -293,10 +304,11 @@ class EmbeddingStoreFactoryTest {
         @DisplayName("different kbId returns different store")
         void differentKbId() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store1 = factory.getOrCreate(config, "kb1");
-            var store2 = factory.getOrCreate(config, "kb2");
+            var store1 = factory.getOrCreate("kb1", config);
+            var store2 = factory.getOrCreate("kb2", config);
             assertNotSame(store1, store2);
         }
     }
@@ -321,14 +333,15 @@ class EmbeddingStoreFactoryTest {
             verify(secretResolver).registerInvalidationListener(secretListener.capture());
 
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
-            var before = factory.getOrCreate(config, "kb1");
+            var before = factory.getOrCreate("kb1", config);
 
             @SuppressWarnings("unchecked")
             Consumer<SecretReference> listener = secretListener.getValue();
             listener.accept(new SecretReference("default", "pgvector-password"));
 
-            assertNotSame(before, factory.getOrCreate(config, "kb1"),
+            assertNotSame(before, factory.getOrCreate("kb1", config),
                     "a rotated credential must produce a rebuilt store, not the cached one");
         }
 
@@ -340,12 +353,13 @@ class EmbeddingStoreFactoryTest {
             verify(globalVariableResolver).registerInvalidationListener(variableListener.capture());
 
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
-            var before = factory.getOrCreate(config, "kb1");
+            var before = factory.getOrCreate("kb1", config);
 
             variableListener.getValue().run();
 
-            assertNotSame(before, factory.getOrCreate(config, "kb1"));
+            assertNotSame(before, factory.getOrCreate("kb1", config));
         }
     }
 
