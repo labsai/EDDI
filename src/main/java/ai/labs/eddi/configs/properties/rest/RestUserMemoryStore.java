@@ -9,8 +9,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.jboss.logging.Logger;
 
@@ -34,7 +34,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     private final IUserMemoryStore userMemoryStore;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
-    private final ResourceAccessGuard resourceAccessGuard;
+    private final GroupMemoryAccessGuard groupMemoryAccessGuard;
 
     private static final Logger LOGGER = Logger.getLogger(RestUserMemoryStore.class);
 
@@ -42,11 +42,11 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     public RestUserMemoryStore(IUserMemoryStore userMemoryStore,
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
-            ResourceAccessGuard resourceAccessGuard) {
+            GroupMemoryAccessGuard groupMemoryAccessGuard) {
         this.userMemoryStore = userMemoryStore;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
-        this.resourceAccessGuard = resourceAccessGuard;
+        this.groupMemoryAccessGuard = groupMemoryAccessGuard;
     }
 
     @Override
@@ -63,14 +63,12 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     @Override
     public List<UserMemoryEntry> getVisibleMemories(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries) {
         ownershipValidator.validateUserAccess(identity, userId);
-        // Every group a recall names must be one the caller may use. A group id does
-        // two things here: it admits the user's own group-visible entries tagged with
-        // it and, additively, the team-owned "group:<id>" lessons a RETRO writes. The
-        // first is the caller's own data, the second is the team's, and taking the ids
-        // verbatim let anybody read any team's lessons by naming its group id. USE is
-        // the bar because it is what convening the group takes. A no-op while
-        // workspaces are not enforced, when there is no membership to check against.
-        resourceAccessGuard.requireUseAccessToEach(groupIds, "group");
+        // Every group a recall names must be one the caller is entitled to: a group id
+        // also admits the team-owned "group:<id>" lessons a RETRO writes, so taking the
+        // ids verbatim let anybody read any team's lessons by naming its group id. USE
+        // on the group under workspaces; taking part in it (a discussion of their own,
+        // or HUMAN membership) without — see GroupMemoryAccessGuard.
+        groupMemoryAccessGuard.requireEntitledToEach(groupIds);
         try {
             return userMemoryStore.getVisibleEntries(userId, agentId, groupIds != null ? groupIds : List.of(), recallOrder, maxEntries);
         } catch (IResourceStore.ResourceStoreException e) {

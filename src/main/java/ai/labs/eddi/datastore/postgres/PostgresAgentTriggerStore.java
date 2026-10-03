@@ -141,6 +141,66 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
         }
     }
 
+    /**
+     * Conditional on the stored {@code data} being the exact value just compared
+     * (JSONB equality), so a write that lands in between makes this one match no
+     * row.
+     */
+    @Override
+    public boolean updateAgentTriggerIfUnchanged(String intent, AgentTriggerConfiguration expected, AgentTriggerConfiguration update)
+            throws IResourceStore.ResourceStoreException {
+        String current = currentIfRoutingAs(intent, expected);
+        if (current == null) {
+            return false;
+        }
+        String sql = "UPDATE agent_triggers SET data = ?::jsonb WHERE intent = ? AND data = ?::jsonb";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, jsonSerialization.serialize(update));
+            ps.setString(2, intent);
+            ps.setString(3, current);
+            return ps.executeUpdate() == 1;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public boolean deleteAgentTriggerIfUnchanged(String intent, AgentTriggerConfiguration expected) throws IResourceStore.ResourceStoreException {
+        String current = currentIfRoutingAs(intent, expected);
+        if (current == null) {
+            return false;
+        }
+        String sql = "DELETE FROM agent_triggers WHERE intent = ? AND data = ?::jsonb";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, intent);
+            ps.setString(2, current);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * The stored JSON, or {@code null} when the row is gone or routes differently.
+     */
+    private String currentIfRoutingAs(String intent, AgentTriggerConfiguration expected) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "SELECT data FROM agent_triggers WHERE intent = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, intent);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                String data = rs.getString("data");
+                AgentTriggerConfiguration stored = jsonSerialization.deserialize(data, AgentTriggerConfiguration.class);
+                return IAgentTriggerStore.routesIdentically(expected, stored) ? data : null;
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
     @Override
     public void deleteAgentTrigger(String intent) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         ensureSchema();

@@ -138,7 +138,13 @@ class ConfigurationReferenceCoverageTest {
             // their filters, MetricsHttpPolicyConfigTest the third to its rule.
             "eddi.chat.frame-ancestors",
             "eddi.csp.extra-connect-sources",
-            "eddi.metrics.http-policy");
+            "eddi.metrics.http-policy",
+            // Read the same way, by the roles-allowed of the named policies the
+            // metrics and API-description rules use, and by the api-docs rule's
+            // policy. MetricsHttpPolicyConfigTest pins each to its rule.
+            "eddi.metrics.roles-allowed",
+            "eddi.api-docs.http-policy",
+            "eddi.api-docs.roles-allowed");
 
     @Test
     @DisplayName("every eddi.* property the code reads is in the configuration reference")

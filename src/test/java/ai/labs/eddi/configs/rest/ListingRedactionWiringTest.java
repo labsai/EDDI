@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rest;
 
+import ai.labs.eddi.configs.descriptors.ConfigResourceTypes;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -185,7 +186,7 @@ class ListingRedactionWiringTest {
     @DisplayName("the descriptor endpoint redacts a versioned read through the real guard too")
     void versionedReadRedacts() throws Exception {
         var guard = realGuardFor("carol", store);
-        var restStore = new RestDocumentDescriptorStore(store, guard);
+        var restStore = new RestDocumentDescriptorStore(store, guard, ConfigResourceTypes.of("agent", "ai.labs.agent", "ai.labs.workflow"));
         var current = publishedByAliceWithGrants();
         when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(current);
         when(store.readDescriptor(RESOURCE_ID, 1)).thenReturn(publishedByAliceWithGrants());

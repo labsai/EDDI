@@ -42,11 +42,19 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
  * undeploy-with-end already gives an editor. They used to carry no role at all,
  * which let any authenticated principal list every user's open conversation ids
  * and end any of them.
+ * <p>
+ * The per-conversation operations require some EDDI role (class level) on top
+ * of the owner check: whose conversation it is stays the owner check's
+ * question, but a token the realm issued with no EDDI role at all has no
+ * business here, and with
+ * {@code quarkus.security.jaxrs.deny-unannotated-endpoints} an unannotated
+ * method would be refused to everybody.
  *
  * @author ginccc
  */
 @Path("/conversationstore/conversations")
 @Tag(name = "Conversations / Store", description = "Query, delete, and manage conversation history")
+@RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver", "eddi-viewer"})
 public interface IRestConversationStore {
     /**
      * Lists conversations, newest first. {@code index} is a page of results: page

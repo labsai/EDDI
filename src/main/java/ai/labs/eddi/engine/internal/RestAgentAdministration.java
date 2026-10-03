@@ -577,6 +577,11 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
+        // The single-agent twin of getDeploymentStatuses, which lists only agents the
+        // caller may USE. It had no check at all, so with workspaces enforced any
+        // editor could probe whether — and which versions of — another team's agents
+        // are deployed.
+        resourceAccessGuard.requireUseAccess(agentId, "agent");
 
         String status = checkDeploymentStatus(environment, agentId, version).toString();
 

@@ -12,10 +12,12 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.List;
 
 /**
  * Authenticates callers of the {@code /v1} OpenAI-compatible surface and
@@ -29,7 +31,9 @@ import java.security.MessageDigest;
  * mechanism would reject as a malformed JWT long before any application code
  * ran.</li>
  * <li><b>{@code authenticated}</b> — Quarkus OIDC has already validated a real
- * bearer token; this filter only reads the resulting identity.</li>
+ * bearer token; this filter requires it to hold one of
+ * {@link #CONVERSING_ROLES} (with {@code authorization.enabled=true}) and reads
+ * the resulting identity.</li>
  * </ul>
  * <p>
  * <b>On trusting {@code X-OpenWebUI-User-Id}:</b> the header is believed only
@@ -66,13 +70,22 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
     /** Request property under which the resolved EDDI userId is published. */
     public static final String PROP_USER_ID = "eddi.openai.userId";
 
+    /**
+     * The EDDI roles that may converse through {@code /v1} in OIDC mode — the tier
+     * {@code POST /agents/{id}/start} and the A2A JSON-RPC endpoint require.
+     */
+    static final List<String> CONVERSING_ROLES = List.of("eddi-admin", "eddi-editor", "eddi-user");
+
     private final OpenAiCompatConfig config;
     private final SecurityIdentity securityIdentity;
+    private final boolean authorizationEnabled;
 
     @Inject
-    public OpenAiAuthFilter(OpenAiCompatConfig config, SecurityIdentity securityIdentity) {
+    public OpenAiAuthFilter(OpenAiCompatConfig config, SecurityIdentity securityIdentity,
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authorizationEnabled) {
         this.config = config;
         this.securityIdentity = securityIdentity;
+        this.authorizationEnabled = authorizationEnabled;
     }
 
     @Override
@@ -92,6 +105,21 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
             return;
         }
 
+        if (config.isOidcMode() && authorizationEnabled && !holdsConversingRole()) {
+            // OIDC mode had no role gate at all: any token the realm issues — a
+            // service account, a user stripped of every EDDI role — could list the
+            // deployed agents and converse with them, which /agents/{id}/start and A2A
+            // refuse to the same token. The shared-key mode is unaffected: that caller
+            // is Open WebUI acting for its own users, and holds no EDDI identity.
+            LOGGER.debugf("Rejected /v1 request: the caller holds none of %s", CONVERSING_ROLES);
+            requestContext.abortWith(Response.status(Response.Status.FORBIDDEN)
+                    .entity(OpenAiApiException.forbidden("This token holds no EDDI role that may converse with agents (one of "
+                            + String.join(", ", CONVERSING_ROLES) + ").").toErrorResponse())
+                    .type(MediaType.APPLICATION_JSON)
+                    .build());
+            return;
+        }
+
         String userId = resolveUserId(requestContext);
         if (userId == null) {
             abort(requestContext, Response.Status.UNAUTHORIZED.getStatusCode(),
@@ -101,6 +129,20 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
             return;
         }
         requestContext.setProperty(PROP_USER_ID, userId);
+    }
+
+    private boolean holdsConversingRole() {
+        if (securityIdentity == null || securityIdentity.isAnonymous()) {
+            // Anonymous reaches here only if the HTTP policy let it through; the
+            // userId resolution below refuses it with a 401.
+            return true;
+        }
+        for (String role : CONVERSING_ROLES) {
+            if (securityIdentity.hasRole(role)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

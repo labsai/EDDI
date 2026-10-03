@@ -189,14 +189,15 @@ class RestConversationStoreOwnershipTest {
     }
 
     @Test
-    @DisplayName("an unowned (legacy) conversation stays visible — matching requireOwnerOrAdmin")
-    void unownedLegacyConversationRemainsVisible() throws Exception {
+    @DisplayName("F1: a conversation with no owner anywhere is listed to administrators only — matching the read gate")
+    void unownedConversationListedToAdminOnly() throws Exception {
+        // The fixture's snapshot records no userId either, so this conversation has no
+        // owner anywhere — the state a descriptor PATCH used to produce.
         firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a03", null));
 
-        List<ConversationDescriptor> result = asIntruder().readConversationDescriptors(
-                0, 20, null, null, null, null, null, null);
-
-        assertEquals(1, result.size());
+        assertTrue(asIntruder().readConversationDescriptors(0, 20, null, null, null, null, null, null).isEmpty(),
+                "an ownerless conversation must not be listed to just anyone");
+        assertEquals(1, asAdmin().readConversationDescriptors(0, 20, null, null, null, null, null, null).size());
     }
 
     @Test

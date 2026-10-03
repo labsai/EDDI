@@ -13,6 +13,7 @@ import ai.labs.eddi.integrations.openai.model.ModelsResponse;
 import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.common.annotation.Blocking;
+import jakarta.annotation.security.PermitAll;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -55,6 +56,12 @@ import java.util.concurrent.Semaphore;
 @ApplicationScoped
 @Path("/v1")
 @Tag(name = "OpenAI Compatibility", description = "OpenAI-protocol adapter for Open WebUI and OpenAI SDK clients")
+// @PermitAll at the JAX-RS layer on purpose: who may call /v1 is decided by the
+// HTTP policy (eddi.openai-compat.http-policy) and by OpenAiAuthFilter — the
+// shared key in permit mode, a token with a conversing role in OIDC mode. With
+// quarkus.security.jaxrs.deny-unannotated-endpoints an unannotated adapter
+// would be refused to every caller.
+@PermitAll
 public class RestOpenAiAdapter {
 
     /** Response header correlating an OpenAI request with an EDDI conversation. */

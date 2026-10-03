@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.descriptors.rest;
 
+import ai.labs.eddi.configs.descriptors.ConfigResourceTypes;
 import ai.labs.eddi.engine.security.spaces.AccessScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -38,7 +39,8 @@ class RestDocumentDescriptorStoreTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        restStore = new RestDocumentDescriptorStore(documentDescriptorStore, listingGuard());
+        restStore = new RestDocumentDescriptorStore(documentDescriptorStore, listingGuard(),
+                ConfigResourceTypes.of("agent", "ai.labs.agent", "ai.labs.workflow"));
     }
 
     @Test
@@ -352,6 +354,68 @@ class RestDocumentDescriptorStoreTest {
 
         assertThrows(NotFoundException.class,
                 () -> restStore.patchDescriptor("id1", 1, instruction));
+    }
+
+    // --- F1: the generic descriptor API answers for configuration only. A
+    // conversation descriptor shares the collection; renaming one through this API
+    // wrote it back without its owner, after which every caller could read it. ---
+
+    private static final String CONVERSATION_ID = "0a0a0a0a0a0a0a0a0a0a0a0c";
+
+    private void conversationDescriptorStored() throws Exception {
+        var conversation = new DocumentDescriptor();
+        conversation.setResource(URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + CONVERSATION_ID + "?version=0"));
+        lenient().when(documentDescriptorStore.readCurrentDescriptor(CONVERSATION_ID)).thenReturn(conversation);
+        lenient().when(documentDescriptorStore.readDescriptor(eq(CONVERSATION_ID), anyInt())).thenReturn(conversation);
+        lenient().when(documentDescriptorStore.getCurrentResourceId(CONVERSATION_ID)).thenReturn(resourceId(CONVERSATION_ID, 0));
+    }
+
+    @Test
+    @DisplayName("F1: listing conversation descriptors through the generic API is refused")
+    void listingConversationsIsRefused() throws Exception {
+        assertThrows(BadRequestException.class, () -> restStore.readDescriptors("ai.labs.conversation", "user-c", 0, 20, ""));
+        // A blank type is a prefix of every descriptor, conversations included.
+        assertThrows(BadRequestException.class, () -> restStore.readDescriptors("", "", 0, 20, ""));
+        // So is a truncated type.
+        assertThrows(BadRequestException.class, () -> restStore.readDescriptors("ai.labs.", "", 0, 20, ""));
+        verify(documentDescriptorStore, never()).readDescriptors(any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    @DisplayName("F1: patching a conversation descriptor is refused as not found, and nothing is written")
+    void patchingAConversationDescriptorIsRefused() throws Exception {
+        conversationDescriptorStored();
+
+        assertThrows(NotFoundException.class, () -> restStore.patchDescriptor(CONVERSATION_ID, 0, rename("x")));
+        verify(documentDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("F1: reading a conversation descriptor through the generic API is refused as not found")
+    void readingAConversationDescriptorIsRefused() throws Exception {
+        conversationDescriptorStored();
+
+        assertThrows(NotFoundException.class, () -> restStore.readDescriptor(CONVERSATION_ID, 0));
+        assertThrows(NotFoundException.class, () -> restStore.readSimpleDescriptor(CONVERSATION_ID, 0));
+        verify(documentDescriptorStore, never()).readDescriptor(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("a configuration descriptor is still patched, name only — nothing else it carries changes")
+    void patchingAConfigurationDescriptorStillWorks() throws Exception {
+        var agent = new DocumentDescriptor();
+        agent.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/0a0a0a0a0a0a0a0a0a0a0a0a?version=1"));
+        agent.setOwnerId("alice");
+        agent.setDescription("keep me");
+        when(documentDescriptorStore.readCurrentDescriptor("0a0a0a0a0a0a0a0a0a0a0a0a")).thenReturn(agent);
+        when(documentDescriptorStore.readDescriptor("0a0a0a0a0a0a0a0a0a0a0a0a", 1)).thenReturn(agent);
+
+        restStore.patchDescriptor("0a0a0a0a0a0a0a0a0a0a0a0a", 1, rename("renamed"));
+
+        verify(documentDescriptorStore).setDescriptor("0a0a0a0a0a0a0a0a0a0a0a0a", 1, agent);
+        assertEquals("renamed", agent.getName());
+        assertEquals("keep me", agent.getDescription());
+        assertEquals("alice", agent.getOwnerId());
     }
 
     /**

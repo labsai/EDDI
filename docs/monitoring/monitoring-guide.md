@@ -20,12 +20,14 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 
 ## Scraping with authentication on
 
-`/q/metrics` requires authentication (`eddi.metrics.http-policy`, default
-`authenticated`), because the exposition describes the deployment — agent ids,
-traffic, error rates, providers. So once OIDC is on
+`/q/metrics` requires a token carrying the **`eddi-admin` or `eddi-metrics`
+realm role** (`eddi.metrics.http-policy`, default `eddi-metrics-reader`; the
+roles are `eddi.metrics.roles-allowed`), because the exposition describes the
+deployment — agent ids, traffic, error rates, providers. So once OIDC is on
 (`quarkus.oidc.tenant-enabled=true` — `install.sh --full`, the compose auth
 overlay, the Kubernetes auth component, `eddi.oidc.enabled` in Helm) an anonymous
-Prometheus scrape gets **401** and the `eddi` target shows DOWN. Pick one:
+Prometheus scrape gets **401**, a token without the role **403**, and the `eddi`
+target shows DOWN. Pick one:
 
 **1. Give Prometheus a token (recommended).** Prometheus can run the OAuth2
 client-credentials flow itself and refresh the token as it expires. Create a
@@ -38,8 +40,14 @@ confidential client for it in the `eddi` realm:
 - the `openid` client scope (a default scope in the shipped realm) — EDDI calls
   userinfo on every request, and Keycloak answers it only for `openid` tokens.
 
-No realm role is needed: `/q/metrics` asks for an authenticated caller, nothing
-more. Then add to the `eddi` job in `prometheus.yml`:
+and the **`eddi-metrics` realm role** on its service account: create the realm
+role once (*Realm roles → Create role*, name `eddi-metrics`; the shipped realm
+does not define it), then *Clients → your client → Service accounts roles →
+Assign role*. Nothing else in EDDI grants that role anything. Up to 6.5 any
+authenticated token could read `/q/metrics`; a scrape set up that way answers
+**403** after the upgrade until its account has the role — or set
+`EDDI_METRICS_HTTP_POLICY=authenticated` to keep the old rule. Then add to the
+`eddi` job in `prometheus.yml`:
 
 ```yaml
     oauth2:

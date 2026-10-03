@@ -9,6 +9,7 @@ import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import java.util.List;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -55,6 +57,9 @@ class OpenAiAuthFilterTest {
         requestContext = mock(ContainerRequestContext.class);
         identity = mock(SecurityIdentity.class);
         when(identity.isAnonymous()).thenReturn(true);
+        // The conversing tier, so the OIDC-mode tests below are about identity
+        // resolution; the role gate has its own tests.
+        when(identity.hasRole("eddi-user")).thenReturn(true);
 
         UriInfo uriInfo = mock(UriInfo.class);
         when(uriInfo.getPath()).thenReturn("v1/chat/completions");
@@ -74,7 +79,11 @@ class OpenAiAuthFilterTest {
     }
 
     private void run(OpenAiCompatConfig config) {
-        new OpenAiAuthFilter(config, identity).filter(requestContext);
+        run(config, true);
+    }
+
+    private void run(OpenAiCompatConfig config, boolean authorizationEnabled) {
+        new OpenAiAuthFilter(config, identity, authorizationEnabled).filter(requestContext);
     }
 
     private Response abortedResponse() {
@@ -314,6 +323,74 @@ class OpenAiAuthFilterTest {
         run(OpenAiTestFixtures.config(b -> b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED));
 
         assertEquals(401, abortedResponse().getStatus());
+    }
+
+    // ─── OIDC mode: role gate (F3) ───
+
+    private void namedCaller(String name) {
+        Principal principal = mock(Principal.class);
+        when(principal.getName()).thenReturn(name);
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.getPrincipal()).thenReturn(principal);
+    }
+
+    @Test
+    void oidcMode_refusesATokenWithNoEddiRole() {
+        namedCaller("service-account-x");
+        when(identity.hasRole(anyString())).thenReturn(false);
+
+        run(OpenAiTestFixtures.config(b -> b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED));
+
+        Response response = abortedResponse();
+        assertEquals(403, response.getStatus(), "a role-less token must not converse — /agents/{id}/start refuses it too");
+        assertNull(resolvedUserId());
+    }
+
+    @Test
+    void oidcMode_admitsEachConversingRole() {
+        for (String role : List.of("eddi-admin", "eddi-editor", "eddi-user")) {
+            properties.clear();
+            namedCaller("alice");
+            when(identity.hasRole(anyString())).thenAnswer(i -> role.equals(i.getArgument(0)));
+
+            run(OpenAiTestFixtures.config(b -> b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED));
+
+            assertEquals("alice", resolvedUserId(), role + " must be admitted");
+        }
+        verify(requestContext, never()).abortWith(any());
+    }
+
+    @Test
+    void oidcMode_viewerAloneIsNotAConversingRole() {
+        namedCaller("vic");
+        when(identity.hasRole(anyString())).thenAnswer(i -> "eddi-viewer".equals(i.getArgument(0)));
+
+        run(OpenAiTestFixtures.config(b -> b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED));
+
+        assertEquals(403, abortedResponse().getStatus());
+    }
+
+    @Test
+    void oidcMode_noRoleGate_whileAuthorizationIsDisabled() {
+        namedCaller("anyone");
+        when(identity.hasRole(anyString())).thenReturn(false);
+
+        run(OpenAiTestFixtures.config(b -> b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED), false);
+
+        verify(requestContext, never()).abortWith(any());
+        assertEquals("anyone", resolvedUserId());
+    }
+
+    @Test
+    void permitMode_isNotRoleGated_theSharedKeyIsTheCredential() {
+        when(identity.hasRole(anyString())).thenReturn(false);
+        headers.put(HttpHeaders.AUTHORIZATION, "Bearer " + KEY);
+        headers.put(OpenAiAuthFilter.HEADER_USER_ID, "bob");
+
+        run(OpenAiTestFixtures.config(b -> b.apiKey = KEY));
+
+        verify(requestContext, never()).abortWith(any());
+        assertEquals("openwebui:bob", resolvedUserId());
     }
 
     @Test

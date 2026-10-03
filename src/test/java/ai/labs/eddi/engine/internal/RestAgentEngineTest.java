@@ -940,7 +940,7 @@ class RestAgentEngineTest {
             when(descriptor.getUserId()).thenReturn("other-user");
             doReturn(descriptor).when(descriptorStore).readDescriptor("conv-1", 0);
             doThrow(new ForbiddenException("Access denied"))
-                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "conversation");
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(identity, "other-user", "conversation");
 
             assertThrows(ForbiddenException.class,
                     () -> restAgentEngine.readConversation("conv-1", false, false, List.of()));
@@ -953,7 +953,7 @@ class RestAgentEngineTest {
             when(descriptor.getUserId()).thenReturn("other-user");
             doReturn(descriptor).when(descriptorStore).readDescriptor("conv-1", 0);
             doThrow(new ForbiddenException("Access denied"))
-                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "conversation");
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(identity, "other-user", "conversation");
 
             assertThrows(ForbiddenException.class,
                     () -> restAgentEngine.endConversation("conv-1"));
@@ -980,7 +980,7 @@ class RestAgentEngineTest {
             doThrow(new ResourceNotFoundException("archived")).when(descriptorStore).readDescriptor("conv-1", 0);
             doReturn(archived).when(descriptorStore).readDescriptorWithHistory("conv-1", 0);
             doThrow(new ForbiddenException("Access denied"))
-                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "conversation");
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(identity, "other-user", "conversation");
 
             assertThrows(ForbiddenException.class,
                     () -> restAgentEngine.readConversation("conv-1", false, false, List.of()));
