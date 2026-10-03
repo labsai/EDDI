@@ -68,6 +68,7 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -317,6 +318,22 @@ class A2ATaskHandlerTest {
 
             assertEquals(TaskState.failed, task.state());
             assertFalse(String.valueOf(task).contains("s3cr3t"));
+        }
+
+        @Test
+        @DisplayName("a store failure while settling still answers the waiting peer, instead of leaving it to time out")
+        void storeFailureWhileSettlingStillAnswers() throws Exception {
+            sayCompletes(ConversationState.READY, "ok");
+            taskStore = spy(taskStore);
+            doThrow(new IllegalStateException("store down")).when(taskStore).findTask(anyString(), anyString());
+            handler = handlerFor(PEER_A, 60, Optional.of(5));
+
+            long started = System.currentTimeMillis();
+            A2ATask task = handler.send(AGENT, send("Hi"));
+
+            assertEquals(TaskState.failed, task.state());
+            assertTrue(System.currentTimeMillis() - started < 4000, "must not wait out the task timeout");
+            assertEquals(0, limiter.inFlight());
         }
 
         @Test

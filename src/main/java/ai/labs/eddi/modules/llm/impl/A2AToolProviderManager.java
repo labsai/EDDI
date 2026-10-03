@@ -485,8 +485,37 @@ public class A2AToolProviderManager {
             dialect = RemoteDialect.LEGACY;
             cardUrl = card.get("url") instanceof String url ? url : null;
         }
-        String endpointUrl = agentUrl.endsWith(".json") && !isNullOrEmpty(cardUrl) ? cardUrl : agentUrl;
+        String endpointUrl = agentUrl;
+        if (agentUrl.endsWith(".json") && !isNullOrEmpty(cardUrl)) {
+            // The configured URL names a card document, so the card is the only thing
+            // that can say where to call. It may say a path on the same origin, never
+            // another host: the operator's credential is sent to the endpoint, and a
+            // card the peer authors must not be able to route it elsewhere.
+            if (!sameOrigin(agentUrl, cardUrl)) {
+                throw new IllegalArgumentException("The Agent Card at " + agentUrl + " names an endpoint on a different origin; refusing to call it");
+            }
+            endpointUrl = cardUrl;
+        }
         return new RemoteEndpoint(endpointUrl, dialect);
+    }
+
+    /** Same scheme, host and port (default ports resolved). */
+    static boolean sameOrigin(String a, String b) {
+        try {
+            URI left = URI.create(a);
+            URI right = URI.create(b);
+            return left.getScheme() != null && left.getHost() != null && left.getScheme().equalsIgnoreCase(right.getScheme())
+                    && left.getHost().equalsIgnoreCase(right.getHost()) && effectivePort(left) == effectivePort(right);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static int effectivePort(URI uri) {
+        if (uri.getPort() != -1) {
+            return uri.getPort();
+        }
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
     private ToolExecutor createA2AToolExecutor(RemoteEndpoint endpoint, A2AAgentConfig config) {

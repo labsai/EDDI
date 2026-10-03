@@ -610,6 +610,13 @@ public class A2ATaskHandler {
                 onSettled.accept(settledRecord);
             } catch (RuntimeException e) {
                 LOGGER.warnf("Failed to record the outcome of A2A task %s: %s", sanitize(prepared.record().taskId()), e.getMessage());
+                // The waiting peer (a blocking send, a stream) must still be answered, not
+                // left to run out its timeout on a store failure.
+                try {
+                    onSettled.accept(prepared.record().withOutcome(TaskState.failed, STATUS_FAILED, null));
+                } catch (RuntimeException ignored) {
+                    // nothing more can be done for this task
+                }
             } finally {
                 permit.release();
             }

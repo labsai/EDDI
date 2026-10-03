@@ -29,6 +29,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
@@ -137,6 +138,13 @@ class A2AToolProviderManagerDialectTest {
             assertEquals("https://georoute-agent.example.com/a2a/v1",
                     A2AToolProviderManager.resolveEndpoint("https://georoute-agent.example.com/.well-known/agent-card.json", fixture("card-v1_0"))
                             .url());
+        }
+
+        @Test
+        @DisplayName("a card document on one origin cannot route the call (and the credential) to another")
+        void cardUrlConfigured_refusesAForeignOrigin() throws Exception {
+            assertThrows(IllegalArgumentException.class,
+                    () -> A2AToolProviderManager.resolveEndpoint("https://trusted.example.com/.well-known/agent-card.json", fixture("card-v1_0")));
         }
 
         @Test
