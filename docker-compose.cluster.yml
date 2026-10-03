@@ -23,7 +23,6 @@
 # combine it with docker-compose.yml.
 
 x-nats: &nats
-  image: nats:2.11-alpine
   restart: unless-stopped
   healthcheck:
     test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz?js-enabled-only=true"]
@@ -48,6 +47,7 @@ services:
 
   nats-1:
     <<: *nats
+    image: nats:2.11-alpine
     command: ["--name", "nats-1", "--jetstream", "--store_dir=/data", "-m", "8222",
               "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
               "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
@@ -57,6 +57,7 @@ services:
 
   nats-2:
     <<: *nats
+    image: nats:2.11-alpine
     command: ["--name", "nats-2", "--jetstream", "--store_dir=/data", "-m", "8222",
               "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
               "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
@@ -66,6 +67,7 @@ services:
 
   nats-3:
     <<: *nats
+    image: nats:2.11-alpine
     command: ["--name", "nats-3", "--jetstream", "--store_dir=/data", "-m", "8222",
               "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
               "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
