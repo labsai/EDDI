@@ -160,7 +160,7 @@ The **chain survives**: no row is deleted and no `sequence` changes, so `/audits
 
 The write is conditional on the row's stored HMAC, and the erasure is reported as **incomplete** (`complete: false`, failed step `auditRedaction`) when any row could not be redacted. `auditEntriesRedacted` in the response counts the rows redacted, including queued entries redacted on their way out of the queue.
 
-**Not reached by an erasure:** the [dead-letter sink](#failure-handling), and copies outside EDDI (database backups, log shippers). The [GDPR guide](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it) covers both.
+**Not reached by an erasure:** the write queue of any *other* replica — only the node serving the request flushes its own queue and rewrites its own late entries, so an entry of the user still queued on another node (up to one flush interval, 3 s by default) lands raw after the sweep; re-run the erasure to redact it (the response then counts it under `auditEntriesRedacted`); the [dead-letter sink](#failure-handling); and copies outside EDDI (database backups, log shippers). The [GDPR guide](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it) covers both.
 
 **`eddi.audit.erasure-mode=pseudonymize`** keeps the behaviour of earlier releases — the user id only — for a deployment under a legal hold that requires the content itself. It logs a WARN at startup, and the erasure response then reports `auditEntriesRedacted: 0`.
 

@@ -1700,10 +1700,37 @@ public class AuditLedgerService {
                 skip += stayInFilter;
             }
         }
+        // The sweep pages by offset over a timestamp-sorted filter that its own writes
+        // shrink; rows with identical timestamps can swap places between two reads and
+        // be stepped over. Nothing may be reported complete on trust: whatever still
+        // carries the raw id and was not redacted is a failure.
+        if (failed == 0 && hasUnredactedRows(userId)) {
+            failed++;
+        }
         if (failed > 0) {
             LOGGER.errorv("[GDPR] Audit redaction INCOMPLETE: {0} entr(y/ies) could not be redacted ({1} redacted).", failed, redacted);
         }
         return new ErasureResult(redacted, resealed, keptUnverified, pseudonymized, failed, true);
+    }
+
+    /**
+     * Whether a row under the raw id is neither redacted nor a kept compliance
+     * record.
+     */
+    private boolean hasUnredactedRows(String userId) {
+        int skip = 0;
+        while (true) {
+            List<AuditEntry> page = auditStore.getEntriesByUserId(userId, skip, REDACTION_PAGE_SIZE);
+            for (AuditEntry entry : page) {
+                if (!isComplianceRecord(entry) && !isRedacted(entry)) {
+                    return true;
+                }
+            }
+            if (page.size() < REDACTION_PAGE_SIZE) {
+                return false;
+            }
+            skip += page.size();
+        }
     }
 
     /**

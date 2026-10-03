@@ -179,6 +179,18 @@ class AuditLedgerErasureRedactionTest {
     }
 
     @Test
+    @DisplayName("a row the sweep stepped over is caught by the final check — complete is never reported on trust")
+    void rowLeftUnredactedIsReportedIncomplete() {
+        submitAndStore(3);
+        store.ignoreRedactionButAcknowledge = true;
+
+        var result = ledger.eraseUser(USER);
+
+        assertFalse(result.complete());
+        assertEquals(1, result.failed());
+    }
+
+    @Test
     @DisplayName("pseudonymize mode keeps the content — the operator's explicit legal-hold choice")
     void pseudonymizeModeKeepsContent() {
         submitAndStore(2);
@@ -255,6 +267,7 @@ class AuditLedgerErasureRedactionTest {
         private final Map<String, AuditEntry> rows = new LinkedHashMap<>();
         volatile boolean failAppends;
         volatile boolean refuseRedaction;
+        volatile boolean ignoreRedactionButAcknowledge;
 
         synchronized List<AuditEntry> rows() {
             return new ArrayList<>(rows.values());
@@ -326,6 +339,9 @@ class AuditLedgerErasureRedactionTest {
         public synchronized boolean redactEntry(AuditEntry redacted, String expectedHmac) {
             if (refuseRedaction) {
                 throw new IllegalStateException("redaction refused");
+            }
+            if (ignoreRedactionButAcknowledge) {
+                return true; // a store that says yes and writes nothing
             }
             AuditEntry current = rows.get(redacted.id());
             if (current == null || !Objects.equals(current.hmac(), expectedHmac)) {
