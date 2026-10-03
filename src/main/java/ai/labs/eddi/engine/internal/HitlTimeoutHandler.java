@@ -138,7 +138,14 @@ public class HitlTimeoutHandler {
             }
             groupConversationService.skipHumanTurnOnTimeout(gcId);
         } catch (Exception e) {
-            LOGGER.errorf(e, "Failed to resolve timed-out human turn for group conversation %s", gcId);
+            if (!groupPauseStillWaiting(gcId, GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT)) {
+                LOGGER.infof("Human-turn timeout for group conversation %s skipped — it is no longer awaiting input (%s)", gcId,
+                        e.getMessage());
+                return;
+            }
+            LOGGER.warnf("Human-turn timeout (%s) for group conversation %s could not be applied yet (%s) — "
+                    + "the pause is kept and the timeout stays armed", policyStr, gcId, e.getMessage());
+            throw new RetryLaterException("Human-turn timeout could not be applied yet: " + e.getMessage(), e);
         }
     }
 
@@ -194,7 +201,7 @@ public class HitlTimeoutHandler {
         } catch (IGroupConversationService.GroupPauseMismatchException e) {
             LOGGER.infof("HITL timeout for group conversation %s skipped — it was armed for an earlier pause", gcId);
         } catch (Exception e) {
-            if (!groupPauseStillWaiting(gcId)) {
+            if (!groupPauseStillWaiting(gcId, GroupConversation.GroupConversationState.AWAITING_APPROVAL)) {
                 LOGGER.infof("HITL timeout for group conversation %s skipped — it is no longer awaiting approval (%s)", gcId,
                         e.getMessage());
                 return;
@@ -205,10 +212,10 @@ public class HitlTimeoutHandler {
         }
     }
 
-    private boolean groupPauseStillWaiting(String groupConversationId) {
+    private boolean groupPauseStillWaiting(String groupConversationId, GroupConversation.GroupConversationState waitingState) {
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
-            return gc != null && gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
+            return gc != null && gc.getState() == waitingState;
         } catch (IResourceStore.ResourceNotFoundException notFound) {
             return false;
         } catch (Exception stateFailure) {
@@ -223,7 +230,14 @@ public class HitlTimeoutHandler {
                     ControlSignal.CANCEL_GRACEFUL, "system:timeout");
             LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
         } catch (Exception e) {
-            LOGGER.errorf(e, "Failed to abort conversation %s on HITL timeout", conversationId);
+            if (!regularPauseStillWaiting(conversationId)) {
+                LOGGER.infof("HITL timeout ABORT for conversation %s skipped — it is no longer awaiting a decision (%s)",
+                        conversationId, e.getMessage());
+                return;
+            }
+            LOGGER.warnf("HITL timeout ABORT for conversation %s could not be applied yet (%s) — "
+                    + "the pause is kept and the timeout stays armed", conversationId, e.getMessage());
+            throw new RetryLaterException("HITL timeout abort could not be applied yet: " + e.getMessage(), e);
         }
     }
 
@@ -238,7 +252,14 @@ public class HitlTimeoutHandler {
                 LOGGER.infof("HITL timeout ABORT for group conversation %s skipped — already terminal", gcId);
             }
         } catch (Exception e) {
-            LOGGER.errorf(e, "Failed to abort group conversation %s on HITL timeout", gcId);
+            if (!groupPauseStillWaiting(gcId, GroupConversation.GroupConversationState.AWAITING_APPROVAL)) {
+                LOGGER.infof("HITL timeout ABORT for group conversation %s skipped — it is no longer awaiting approval (%s)", gcId,
+                        e.getMessage());
+                return;
+            }
+            LOGGER.warnf("HITL timeout ABORT for group conversation %s could not be applied yet (%s) — "
+                    + "the pause is kept and the timeout stays armed", gcId, e.getMessage());
+            throw new RetryLaterException("HITL timeout abort could not be applied yet: " + e.getMessage(), e);
         }
     }
 }

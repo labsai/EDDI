@@ -359,5 +359,36 @@ class HitlTimeoutHandlerTest {
                     .when(groupConversationService).resumeDiscussion(eq("gc-1"), any(), isNull());
             assertDoesNotThrow(() -> handler.handleTimeout(md));
         }
+
+        @Test
+        @DisplayName("ABORT whose cancel fails while still paused is retried, not dropped")
+        void abortRegular_isRetried() throws Exception {
+            doThrow(new IllegalStateException("store blip"))
+                    .when(conversationService).cancelConversation(eq("conv-1"), any(), anyString());
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("ABORT")));
+
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.ENDED);
+            assertDoesNotThrow(() -> handler.handleTimeout(regular("ABORT")));
+        }
+
+        @Test
+        @DisplayName("group ABORT and an expired human turn are retried while their pause is still waiting")
+        void abortGroupAndHumanTurn_areRetried() throws Exception {
+            var abort = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_GROUP, "gc-1", "42");
+            doThrow(new IllegalStateException("store blip")).when(groupConversationService).cancelDiscussion(eq("gc-1"), any());
+            var gc = new GroupConversation();
+            gc.setState(GroupConversation.GroupConversationState.AWAITING_APPROVAL);
+            when(groupConversationService.readGroupConversation("gc-1")).thenReturn(gc);
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(abort));
+
+            var human = HitlSchedules.timeoutMetadata("SKIP_TURN", HitlSchedules.SURFACE_GROUP_HUMAN, "gc-1", "42");
+            doThrow(new IllegalStateException("store blip")).when(groupConversationService).skipHumanTurnOnTimeout("gc-1");
+            gc.setState(GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT);
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(human));
+
+            gc.setState(GroupConversation.GroupConversationState.COMPLETED);
+            assertDoesNotThrow(() -> handler.handleTimeout(human));
+        }
     }
 }

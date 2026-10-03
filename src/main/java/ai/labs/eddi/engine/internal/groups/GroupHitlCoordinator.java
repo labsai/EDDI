@@ -1183,6 +1183,10 @@ public class GroupHitlCoordinator {
                     groupConversationId, pending.memberId());
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to skip timed-out human turn for %s", groupConversationId);
+            // Not swallowed: HitlTimeoutHandler decides whether the pause is still
+            // waiting (re-arm the timeout) or was decided meanwhile (done). Returning
+            // normally here made the fire COMPLETED and dropped the timeout.
+            throw new IllegalStateException("Failed to skip timed-out human turn for " + groupConversationId, e);
         }
     }
 
