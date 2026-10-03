@@ -39,6 +39,16 @@ no meter is registered and nothing about NATS is logged.
   stream every node can read, with the turn's input captured for replay. Both coordinators
   now register `eddi.coordinator.total_dead_lettered` and `eddi.coordinator.dead_letters`.
 
+- **Rolling updates without failed turns** — the MongoDB client was closed by a JVM
+  shutdown hook, which runs concurrently with Quarkus' shutdown: SIGTERM closed it the moment
+  the graceful drain began, so every turn still running failed with "state should be: open"
+  and the drain waited out its timeout for turns that could no longer finish (a single node
+  was affected exactly the same way). It is now closed by the bean's `@PreDestroy`, after the
+  drain. The drain also brackets the coordinator: `beginShutdown` answers the turns still
+  waiting for a conversation lease with 409 + `Retry-After` at once, and `completeShutdown`
+  releases the leases still held so those conversations move on without waiting out the TTL.
+  Found by the live rolling-restart demo.
+
 ### Design decisions
 
 - Execution stays on the receiving node (SSE, caller identity, live group discussions and

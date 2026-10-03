@@ -67,7 +67,21 @@ public interface IConversationLeaseManager {
     /** Leases this node currently holds. */
     int heldCount();
 
-    /** Releases every lease this node holds — part of a clean shutdown. */
+    /**
+     * First step of a clean shutdown: refuses every new acquisition and fails the
+     * pending ones with {@link LeaseUnavailableException.Reason#SHUTTING_DOWN}, so
+     * a turn still waiting for its lease is answered (409 + Retry-After, retried on
+     * another node) instead of holding the drain until its acquire timeout. Leases
+     * already held stay held until their turns finish.
+     */
+    default void stopAcquiring() {
+    }
+
+    /**
+     * Last step of a clean shutdown: refuses new acquisitions and releases every
+     * lease this node still holds, so the next turn of those conversations runs
+     * elsewhere at once instead of after the lease TTL.
+     */
     default void releaseAll() {
     }
 

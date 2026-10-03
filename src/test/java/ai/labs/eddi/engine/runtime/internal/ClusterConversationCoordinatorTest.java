@@ -87,10 +87,28 @@ class ClusterConversationCoordinatorTest {
             };
         }
 
+        volatile boolean stopped;
+        volatile boolean releasedAll;
+
+        @Override
+        public void stopAcquiring() {
+            stopped = true;
+            for (CompletableFuture<LeaseHandle> f : pending) {
+                f.completeExceptionally(new LeaseUnavailableException(LeaseUnavailableException.Reason.SHUTTING_DOWN, null, "stopping"));
+            }
+        }
+
+        @Override
+        public void releaseAll() {
+            releasedAll = true;
+        }
+
         @Override
         public CompletionStage<LeaseHandle> acquireKey(String key, Duration maxWait) {
             CompletableFuture<LeaseHandle> f = new CompletableFuture<>();
-            if (grantImmediately) {
+            if (stopped) {
+                f.completeExceptionally(new LeaseUnavailableException(LeaseUnavailableException.Reason.SHUTTING_DOWN, null, "stopping"));
+            } else if (grantImmediately) {
                 f.complete(handle(key));
             } else {
                 pending.add(f);
@@ -346,6 +364,30 @@ class ClusterConversationCoordinatorTest {
         leases.pending.get(1).complete(leases.handle("c.conv1"));
         await(second);
         assertEquals(List.of("second"), log);
+    }
+
+    @Test
+    @DisplayName("shutdown: turns waiting for their lease are discarded at once (409, no dead letter); leases go back after the drain")
+    void shutdownAnswersWaitersAndReleasesLeases() throws Exception {
+        leases.grantImmediately = false;
+        Turn first = new Turn("first", log);
+        Turn second = new Turn("second", log);
+        coordinator.submitInOrder("conv1", first);
+        coordinator.submitInOrder("conv1", second);
+
+        coordinator.beginShutdown();
+
+        await(first);
+        await(second);
+        assertInstanceOf(LeaseUnavailableException.class, first.discarded.get());
+        assertInstanceOf(LeaseUnavailableException.class, second.discarded.get(),
+                "the turn queued behind it must not wait for a lease either");
+        assertTrue(log.isEmpty(), "neither turn ran");
+        assertTrue(store.entries.isEmpty(), "their input was never consumed — no dead letters");
+        assertFalse(leases.releasedAll, "held leases stay held while the drain runs");
+
+        coordinator.completeShutdown();
+        assertTrue(leases.releasedAll);
     }
 
     @Test

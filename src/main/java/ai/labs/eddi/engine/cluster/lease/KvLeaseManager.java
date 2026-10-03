@@ -408,16 +408,21 @@ public class KvLeaseManager implements IConversationLeaseManager {
     }
 
     @Override
-    public void releaseAll() {
+    public void stopAcquiring() {
         shuttingDown = true;
-        for (Held h : new ArrayList<>(held.values())) {
-            release(h);
-        }
         for (Set<Waiter> set : new ArrayList<>(waiters.values())) {
             for (Waiter w : new ArrayList<>(set)) {
                 w.future.completeExceptionally(
                         new LeaseUnavailableException(LeaseUnavailableException.Reason.SHUTTING_DOWN, null, "node is shutting down"));
             }
+        }
+    }
+
+    @Override
+    public void releaseAll() {
+        stopAcquiring();
+        for (Held h : new ArrayList<>(held.values())) {
+            release(h);
         }
         if (heartbeat != null) {
             heartbeat.cancel(false);

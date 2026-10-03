@@ -302,6 +302,26 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
         return purged;
     }
 
+    // ==================== Shutdown ====================
+
+    /**
+     * Turns still waiting for their lease are failed with SHUTTING_DOWN, which
+     * answers their callers 409 + Retry-After at once: without it a waiter held the
+     * drain until its acquire timeout and then failed after the container had gone.
+     */
+    @Override
+    public void beginShutdown() {
+        leases.stopAcquiring();
+    }
+
+    /**
+     * Leases still held after the drain go back at once instead of after the TTL.
+     */
+    @Override
+    public void completeShutdown() {
+        leases.releaseAll();
+    }
+
     // ==================== Status ====================
 
     @Override

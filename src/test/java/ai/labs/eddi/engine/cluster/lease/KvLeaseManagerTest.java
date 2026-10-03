@@ -345,6 +345,29 @@ class KvLeaseManagerTest {
     }
 
     @Test
+    @DisplayName("stopAcquiring at the start of a drain fails waiters at once but keeps the leases of running turns")
+    void stopAcquiringKeepsHeldLeases() throws Exception {
+        KvLeaseManager a = manager("a", "a1");
+        KvLeaseManager b = manager("b", "b1");
+        get(b.acquire("conv1", Duration.ofSeconds(1)));
+        LeaseHandle running = get(a.acquire("conv2", Duration.ofSeconds(1)));
+        var waiting = a.acquire("conv1", Duration.ofSeconds(30)).toCompletableFuture();
+
+        a.stopAcquiring();
+
+        ExecutionException e = assertThrows(ExecutionException.class, () -> waiting.get(3, TimeUnit.SECONDS),
+                "a turn waiting for its lease must be answered now, not after its 30 s acquire timeout");
+        assertEquals(LeaseUnavailableException.Reason.SHUTTING_DOWN, ((LeaseUnavailableException) e.getCause()).reason());
+        assertEquals(1, a.heldCount(), "the running turn keeps its lease until it finishes");
+        assertTrue(kv.get("c.conv2").isPresent());
+        assertThrows(ExecutionException.class,
+                () -> a.acquire("conv3", Duration.ofSeconds(1)).toCompletableFuture().get(1, TimeUnit.SECONDS));
+
+        a.release(running);
+        assertEquals(0, a.heldCount());
+    }
+
+    @Test
     @DisplayName("tryAcquireKey is a single non-waiting attempt (leader election)")
     void tryAcquireForLeaders() {
         KvLeaseManager a = manager("a", "a1");

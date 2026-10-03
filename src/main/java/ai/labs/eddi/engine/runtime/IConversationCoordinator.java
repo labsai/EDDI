@@ -129,4 +129,22 @@ public interface IConversationCoordinator extends IEventBus {
     default int purgeDeadLetters() {
         return 0;
     }
+
+    /**
+     * Called by the graceful shutdown as soon as it starts, before the drain: a
+     * coordinator stops admitting work it has not started yet. The cluster
+     * coordinator fails the turns still waiting for a conversation lease, which
+     * answers them 409 + Retry-After so the client retries on another node. A no-op
+     * in memory, where every queued turn runs during the drain.
+     */
+    default void beginShutdown() {
+    }
+
+    /**
+     * Called by the graceful shutdown after the drain, whether it completed or
+     * timed out. The cluster coordinator releases the leases this node still holds,
+     * so those conversations continue on other nodes at once.
+     */
+    default void completeShutdown() {
+    }
 }
