@@ -134,6 +134,13 @@ public class KnowledgeBaseStorageGuard {
             return;
         }
         String parameter = KnowledgeBaseStorage.physicalNameParameter(config.getStoreType());
+        // A ${vars:...} / ${vault:...} reference is resolved later and set by an
+        // administrator, not by a knowledge base editor, so it cannot be judged here.
+        if ("pgvector".equals(config.getStoreType()) && !explicit.contains("${") && !KnowledgeBaseStorage.isPlainPgIdentifier(explicit)) {
+            throw new BadRequestException("storeParameters." + parameter + " must be a plain table name, optionally qualified "
+                    + "with a schema (letters, digits, '_' and '$'): the pgvector store puts it into SQL as it is, so quotes, "
+                    + "whitespace and punctuation are refused.");
+        }
         if (KnowledgeBaseStorage.isReservedName(explicit)) {
             throw new BadRequestException("storeParameters." + parameter + " may not start with '" + KnowledgeBaseStorage.RESERVED_PREFIX
                     + "': EDDI derives every knowledge base's default location from that prefix, so the name could address "

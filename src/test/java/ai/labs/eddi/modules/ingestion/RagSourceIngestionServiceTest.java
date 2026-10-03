@@ -1182,6 +1182,49 @@ class RagSourceIngestionServiceTest {
         }
 
         @Test
+        @DisplayName("a run across a switch to the id layout is purged too, although the name did not change")
+        void aRunAcrossALayoutSwitchIsPurgedAfterwards() throws Exception {
+            var source = uploadSource("src-files");
+            String key = keyOf(source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "late.md", "hash", null, null, runId);
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(runId, key,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
+                    0, 0, 0, 0, 0, 0, 0.0, null));
+            var switched = knowledgeBase(uploadSource("src-files"));
+            switched.setStoreNamespace("id");
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(switched);
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+
+            assertTrue(stateStore.lookup(key, "late.md").isEmpty());
+        }
+
+        @Test
+        @DisplayName("renaming a knowledge base in the id layout does not touch what a run wrote")
+        void aRunAcrossAnIdLayoutRenameKeepsItsState() throws Exception {
+            var source = uploadSource("src-files");
+            String key = keyOf(source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "kept.md", "hash", null, null, runId);
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(runId, key,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
+                    0, 0, 0, 0, 0, 0, 0.0, null));
+            var ranWith = knowledgeBase(source);
+            ranWith.setStoreNamespace("id");
+            var renamed = knowledgeBase(uploadSource("src-files"));
+            renamed.setStoreNamespace("id");
+            renamed.setName("new-name");
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
+
+            service.cleanUpAfterRun(KB_ID, ranWith, source);
+
+            assertTrue(stateStore.lookup(key, "kept.md").isPresent());
+        }
+
+        @Test
         @DisplayName("a run across a rename leaves nothing another run can call unchanged, even when that run holds the source")
         void aRunAcrossARenameIsSettledWhenANewerRunHoldsTheSource() throws Exception {
             // The rename's purge took the running row with it, so the source was free:

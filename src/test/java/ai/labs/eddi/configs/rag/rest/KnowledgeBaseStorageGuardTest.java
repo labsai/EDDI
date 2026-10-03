@@ -109,6 +109,30 @@ class KnowledgeBaseStorageGuardTest {
         }
 
         @Test
+        @DisplayName("a quoted, schema-qualified or padded spelling of a reserved table is refused too")
+        void refusesDisguisedReservedNames() {
+            for (String table : new String[]{"\"eddi_kb_alpha\"", "public.eddi_kb_alpha", "PUBLIC.EDDI_KB_alpha", "  eddi_kb_alpha ",
+                    "x; DROP TABLE y", "/**/eddi_kb_alpha"}) {
+                assertThrows(BadRequestException.class, () -> guard.prepareNew(kb("beta", null, Map.of("table", table)), true), table);
+            }
+        }
+
+        @Test
+        @DisplayName("a vault or variable reference is not judged as a table name")
+        void leavesReferencesAlone() {
+            assertDoesNotThrow(() -> guard.prepareNew(kb("beta", null, Map.of("table", "${vars:team-table}")), true));
+        }
+
+        @Test
+        @DisplayName("the public schema does not hide a collision with another knowledge base's table")
+        void refusesACollisionBehindTheDefaultSchema() throws Exception {
+            otherKnowledgeBaseUsesTable("team_docs");
+            when(accessGuard.hasAccess(OTHER, AccessLevel.EDIT)).thenReturn(false);
+
+            assertThrows(BadRequestException.class, () -> guard.prepareNew(kb("beta", null, Map.of("table", "public.Team_Docs")), true));
+        }
+
+        @Test
         @DisplayName("may not name another knowledge base's location without EDIT on it")
         void refusesACollisionWithoutEditOnTheOther() throws Exception {
             otherKnowledgeBaseUsesTable("team_docs");

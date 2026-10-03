@@ -1629,11 +1629,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // An imported knowledge base is a new one, addressed by its new id: an
             // archive's knowledge base named like a local one must not land in the
             // local one's store.
-            if (knowledgeBaseStorageGuard != null) {
-                knowledgeBaseStorageGuard.prepareNew(config, false);
-            } else if (config != null) {
-                config.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
-            }
+            applyStorageRulesToNewRag(config);
             URI created = createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
             syncImportedRagSchedules(created, config);
             return created;
@@ -1680,8 +1676,32 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateRag(RagConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRagStore store = getRestResourceStore(IRestRagStore.class);
+        // Which layout the local knowledge base stores its vectors in is a fact about
+        // this deployment, not about the archive: an archive exported from another
+        // instance must not move the local one to a new, empty store (or ask for the
+        // refused switch back to "name"). Absent, the update keeps the stored value.
+        if (config != null) {
+            config.setStoreNamespace(null);
+        }
         URI updated = updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, store::updateRag, transaction);
-        return updated != null ? updated : createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+        if (updated != null) {
+            return updated;
+        }
+        // The local knowledge base is gone, so this is a create like any other.
+        applyStorageRulesToNewRag(config);
+        return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+    }
+
+    /**
+     * A created knowledge base is addressed by its own id — see
+     * {@link KnowledgeBaseStorageGuard}.
+     */
+    void applyStorageRulesToNewRag(RagConfiguration config) {
+        if (knowledgeBaseStorageGuard != null) {
+            knowledgeBaseStorageGuard.prepareNew(config, false);
+        } else if (config != null) {
+            config.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
+        }
     }
 
     // ==================== Connection Import ====================

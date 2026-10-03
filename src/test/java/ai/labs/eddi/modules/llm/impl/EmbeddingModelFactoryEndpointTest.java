@@ -103,6 +103,14 @@ class EmbeddingModelFactoryEndpointTest {
     }
 
     @Test
+    @DisplayName("vertex: an endpoint that is the cloud metadata service is refused, as for every other endpoint")
+    void vertexEndpointIsHeldToTheMetadataGuard() {
+        var params = Map.of("project", "p", "endpoint", "169.254.169.254:443");
+        var e = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config("vertex", params), EmbeddingInputType.DOCUMENT));
+        assertTrue(e.getMessage().contains("metadata"), e.getMessage());
+    }
+
+    @Test
     @DisplayName("openai: baseUrl receives the embedding request, with the vault-resolved key and the modelName alias")
     void openAiSendsToTheConfiguredBaseUrl() {
         var model = factory.getOrCreate(config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "${vault:private-key}",

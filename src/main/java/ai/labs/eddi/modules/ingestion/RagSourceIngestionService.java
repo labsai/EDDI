@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.ingestion;
 
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
@@ -30,6 +31,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -278,7 +280,10 @@ public class RagSourceIngestionService {
             discardSourceContent(ragConfigId, ranWith, source);
             return;
         }
-        if (ranWith.getName() != null && !ranWith.getName().equals(current.getName())
+        // Compared by where the vectors live, the same test the save used to clear
+        // the state (RestRagStore): a name-layout knowledge base switched to
+        // storeNamespace "id" keeps its name and still moved.
+        if (!Objects.equals(KnowledgeBaseStorage.locationKey(ragConfigId, ranWith), KnowledgeBaseStorage.locationKey(ragConfigId, current))
                 && !purge(ragConfigId, source)) {
             // Refused: another run holds the source — the rename's purge freed it while
             // this one was still going. That run can already have read a row this one

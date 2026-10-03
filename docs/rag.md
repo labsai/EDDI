@@ -298,7 +298,7 @@ request carries can point them at another knowledge base's store.
 | --- | --- | --- |
 | Default location | `eddi_kbid_<id>` (table, collection or index) | Derived from the `name`, exactly as 6.5.0 did: pgvector `eddi_kb_<name, sanitised>`, Atlas `eddi_kb_<name>`, Elasticsearch/Qdrant/Chroma `eddi_kb_<name, sanitised>` |
 | Chunks are tagged | `kbId=<id>` | `kbId=<name>` (what 6.5.0 wrote) |
-| Retrieval | Filtered to `kbId=<id>`: the KB sees only its own chunks, even in a table it shares | Not filtered — chunks written by 6.5.0 carry no id |
+| Retrieval | Filtered to `kbId=<id>`: the KB sees only its own chunks, even in a table it shares (not on an Atlas default collection — see the note below) | Not filtered — chunks written by 6.5.0 carry no id |
 | Renaming | Changes nothing about the store | Moves the KB to `"id"` (see below) |
 | Same name as another KB | Harmless | Two such KBs share one store — as they always did. Migrate them |
 
@@ -311,7 +311,12 @@ knowledge base with the same name, which in 6.5.0 shared its store. To migrate o
 everything, and documents ingested through `/ingest` have to be ingested again. The old location is
 left in place — drop the table or collection by hand once nothing uses it. Renaming a 6.5.0 knowledge
 base does the same migration automatically: in 6.5.0 a rename already moved it to a new, empty store —
-the one named after its new name, which could be another knowledge base's.
+the one named after its new name, which could be another knowledge base's. A knowledge base with an
+explicit `table`/`collectionName`/`indexName` stays in the same table when it is switched: its old
+chunks are no longer tagged with the id retrieval filters on, so they stop being returned (and stay
+in the table); sources re-ingest and re-tag everything, `/ingest` documents have to be ingested again.
+Importing an archive over a knowledge base you already have never changes its layout — the archive's
+`storeNamespace` is ignored for an update.
 
 Rules enforced when a knowledge base is saved:
 
@@ -322,15 +327,20 @@ Rules enforced when a knowledge base is saved:
   field cannot move a store by saving. Switching from `"id"` back to `"name"` is refused.
 - An explicit location (`storeParameters.table`, `collectionName` for Atlas/Qdrant/Chroma, `indexName`
   for Elasticsearch) may not start with `eddi_kb` — that prefix is where EDDI's own default locations
-  live — and may name a location another knowledge base already uses only if you may edit that
-  knowledge base too. Two knowledge bases in the `"id"` layout that share a table still see only their
+  live; a schema-qualified `public.eddi_kb_x` or a differently-cased spelling counts too — and may name a
+  location another knowledge base already uses only if you may edit that knowledge base too (`public.t`
+  and `t` are the same pgvector table). A pgvector `table` must be a plain identifier, optionally
+  qualified with a schema (letters, digits, `_`, `$`; no quotes, spaces or punctuation), because the
+  store puts it into SQL as it is; a `${vars:...}` or `${vault:...}` reference is not judged. Two knowledge bases in the `"id"` layout that share a table still see only their
   own chunks. These checks run when the value is new or changed; a stored value is never refused on a
   save that leaves it alone. The comparison is by store type and name only (not host), so it can ask for
   edit rights on a knowledge base that is actually on another server.
 
 > **MongoDB Atlas.** Atlas Vector Search can only filter on fields its search index declares. For a
-> knowledge base in the `"id"` layout, declare `metadata.kbId` as a `filter` field in the collection's
-> vector index, or retrieval fails with an index error (reported in the `rag:trace` entry).
+> knowledge base in the `"id"` layout **that sets an explicit `collectionName`** (a collection it may
+> share), declare `metadata.kbId` as a `filter` field in the collection's vector index, or retrieval
+> fails with an index error (reported in the `rag:trace` entry). On the default `eddi_kbid_<id>`
+> collection nothing is filtered, because nothing else can be in it.
 
 ## Ingestion Sources
 

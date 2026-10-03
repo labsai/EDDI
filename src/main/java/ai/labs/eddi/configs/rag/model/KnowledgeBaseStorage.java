@@ -63,6 +63,8 @@ public final class KnowledgeBaseStorage {
 
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
     private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
+    private static final Pattern PG_QUALIFIED_IDENTIFIER = Pattern
+            .compile("[A-Za-z_][A-Za-z0-9_$]{0,62}(?:\\.[A-Za-z_][A-Za-z0-9_$]{0,62})?");
 
     private KnowledgeBaseStorage() {
     }
@@ -161,7 +163,15 @@ public final class KnowledgeBaseStorage {
      * id tag, and filtering on it would hide every one of them.
      */
     public static boolean filtersRetrieval(RagConfiguration config) {
-        return usesIdNamespace(config);
+        if (!usesIdNamespace(config)) {
+            return false;
+        }
+        // Atlas Vector Search rejects a filter on a field its index does not declare,
+        // and the index is the operator's to create, per collection. A knowledge base
+        // on its own default collection (eddi_kbid_<id>, a name no explicit location
+        // may use) has nothing to be isolated from, so it is not made to declare
+        // one; the filter is for an explicit, possibly shared, collection.
+        return !("mongodb-atlas".equals(config.getStoreType()) && explicitPhysicalName(config) == null);
     }
 
     /**
@@ -196,12 +206,51 @@ public final class KnowledgeBaseStorage {
      * bases.
      */
     public static String collisionKey(RagConfiguration config, String physicalName) {
-        return config.getStoreType() + "|" + physicalName.toLowerCase(Locale.ROOT);
+        return config.getStoreType() + "|" + canonicalLocation(config.getStoreType(), physicalName);
     }
 
-    /** Whether an explicitly configured name falls inside EDDI's own namespace. */
+    /**
+     * The spelling two names are compared in: trimmed and lower-cased (PostgreSQL
+     * folds an unquoted identifier, and a false positive only asks for EDIT), and
+     * for pgvector without the default {@code public.} schema, which names the same
+     * table as the bare form.
+     */
+    static String canonicalLocation(String storeType, String physicalName) {
+        String canonical = physicalName.trim().toLowerCase(Locale.ROOT);
+        if ("pgvector".equals(storeType) && canonical.startsWith("public.")) {
+            canonical = canonical.substring("public.".length());
+        }
+        return canonical;
+    }
+
+    /**
+     * Whether an explicitly configured name falls inside EDDI's own namespace: it,
+     * or any dot-separated part of it (a schema-qualified {@code public.eddi_kb_x}
+     * is the same table as {@code eddi_kb_x}), starts with
+     * {@link #RESERVED_PREFIX}. Case and surrounding whitespace do not matter.
+     */
     public static boolean isReservedName(String physicalName) {
-        return physicalName != null && physicalName.trim().toLowerCase(Locale.ROOT).startsWith(RESERVED_PREFIX);
+        if (physicalName == null) {
+            return false;
+        }
+        for (String part : physicalName.trim().toLowerCase(Locale.ROOT).split("\\.")) {
+            if (part.trim().startsWith(RESERVED_PREFIX)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a pgvector table name is a plain, optionally schema-qualified
+     * identifier. langchain4j's pgvector store puts the name into its SQL unquoted
+     * and unescaped, so anything else — a quoted identifier (which escapes both the
+     * case folding and the reserved-prefix check), whitespace, a comment, a
+     * statement separator — is either a way round {@link #isReservedName} or SQL a
+     * knowledge base editor could run.
+     */
+    public static boolean isPlainPgIdentifier(String table) {
+        return table != null && PG_QUALIFIED_IDENTIFIER.matcher(table.trim()).matches();
     }
 
     /** The pgvector table name 6.5.0 derived from a knowledge base name. */

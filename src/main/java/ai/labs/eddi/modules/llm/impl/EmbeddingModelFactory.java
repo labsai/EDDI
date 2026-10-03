@@ -460,7 +460,13 @@ public class EmbeddingModelFactory {
             throw new IllegalArgumentException("Vertex AI embedding requires 'project' parameter");
         }
         var builder = VertexAiEmbeddingModel.builder().project(project).location(location).modelName(model);
-        applyString(params, "endpoint", builder::endpoint);
+        String endpoint = params.get("endpoint");
+        if (!isBlank(endpoint)) {
+            // A bare host[:port], not a URL: wrapped so the same metadata guard applies
+            // as for every other endpoint this factory accepts.
+            UrlValidationUtils.rejectCloudMetadataTarget(endpoint.contains("://") ? endpoint : "https://" + endpoint.trim());
+            builder.endpoint(endpoint);
+        }
         applyInt(params, "maxRetries", builder::maxRetries);
         return builder.build();
     }

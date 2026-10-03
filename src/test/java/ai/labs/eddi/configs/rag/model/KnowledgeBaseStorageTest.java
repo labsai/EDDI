@@ -148,5 +148,46 @@ class KnowledgeBaseStorageTest {
             assertTrue(KnowledgeBaseStorage.isReservedName(" EDDI_KBID_x"));
             assertFalse(KnowledgeBaseStorage.isReservedName("team_docs"));
         }
+
+        @Test
+        @DisplayName("a schema-qualified or mixed-case spelling of a reserved name is reserved too")
+        void reservedNameSpellings() {
+            assertTrue(KnowledgeBaseStorage.isReservedName("public.eddi_kb_alpha"));
+            assertTrue(KnowledgeBaseStorage.isReservedName("PUBLIC.Eddi_KB_alpha"));
+            assertTrue(KnowledgeBaseStorage.isReservedName("other_schema.eddi_kbid_" + ID_A));
+            assertFalse(KnowledgeBaseStorage.isReservedName("my_eddi_kb"));
+        }
+
+        @Test
+        @DisplayName("only a plain, optionally schema-qualified identifier is a pgvector table")
+        void plainPgIdentifier() {
+            assertTrue(KnowledgeBaseStorage.isPlainPgIdentifier("team_docs"));
+            assertTrue(KnowledgeBaseStorage.isPlainPgIdentifier("rag.team_docs"));
+            assertFalse(KnowledgeBaseStorage.isPlainPgIdentifier("\"eddi_kb_alpha\""));
+            assertFalse(KnowledgeBaseStorage.isPlainPgIdentifier("team docs"));
+            assertFalse(KnowledgeBaseStorage.isPlainPgIdentifier("t; DROP TABLE x"));
+            assertFalse(KnowledgeBaseStorage.isPlainPgIdentifier("/**/eddi_kb_alpha"));
+            assertFalse(KnowledgeBaseStorage.isPlainPgIdentifier("a.b.c"));
+        }
+
+        @Test
+        @DisplayName("the public schema and the bare table name collide; other schemas and stores do not")
+        void collisionKeyIgnoresTheDefaultSchemaAndCase() {
+            var pg = kb("a", "pgvector", "id");
+            assertEquals(KnowledgeBaseStorage.collisionKey(pg, "team_docs"), KnowledgeBaseStorage.collisionKey(pg, "PUBLIC.Team_Docs"));
+            assertNotEquals(KnowledgeBaseStorage.collisionKey(pg, "team_docs"), KnowledgeBaseStorage.collisionKey(pg, "other.team_docs"));
+            assertNotEquals(KnowledgeBaseStorage.collisionKey(pg, "team_docs"),
+                    KnowledgeBaseStorage.collisionKey(kb("a", "qdrant", "id"), "team_docs"));
+        }
+
+        @Test
+        @DisplayName("Atlas needs a declared filter field, so a default collection is not filtered; an explicit one is")
+        void atlasFiltersOnlyAnExplicitCollection() {
+            var atlas = kb("alpha", "mongodb-atlas", "id");
+            assertFalse(KnowledgeBaseStorage.filtersRetrieval(atlas));
+            atlas.setStoreParameters(Map.of("collectionName", "shared"));
+            assertTrue(KnowledgeBaseStorage.filtersRetrieval(atlas));
+            assertTrue(KnowledgeBaseStorage.filtersRetrieval(kb("alpha", "qdrant", "id")));
+        }
     }
 }
