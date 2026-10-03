@@ -4,41 +4,86 @@
  */
 package ai.labs.eddi.engine.a2a;
 
-import ai.labs.eddi.engine.a2a.A2AModels.*;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.engine.a2a.A2AInFlightLimiter.Permit;
+import ai.labs.eddi.engine.a2a.A2AModels.A2ABusyException;
+import ai.labs.eddi.engine.a2a.A2AModels.A2AMessage;
+import ai.labs.eddi.engine.a2a.A2AModels.A2ATask;
+import ai.labs.eddi.engine.a2a.A2AModels.A2ATaskRecord;
+import ai.labs.eddi.engine.a2a.A2AModels.Artifact;
+import ai.labs.eddi.engine.a2a.A2AModels.Dialect;
+import ai.labs.eddi.engine.a2a.A2AModels.InvalidA2ARequestException;
+import ai.labs.eddi.engine.a2a.A2AModels.Part;
+import ai.labs.eddi.engine.a2a.A2AModels.TaskState;
+import ai.labs.eddi.engine.a2a.A2AModels.TaskStatus;
+import ai.labs.eddi.engine.a2a.A2AWireFormat.SendRequest;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.CancelOutcome;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler;
+import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
-import ai.labs.eddi.engine.caching.ICache;
-import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.util.*;
+import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
+import static ai.labs.eddi.engine.a2a.A2AModels.ERROR_TASK_NOT_FOUND;
+import static ai.labs.eddi.engine.a2a.A2AModels.ERROR_UNSUPPORTED_OPERATION;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Handles incoming A2A JSON-RPC requests by bridging them to EDDI's
- * {@link IConversationService}. Each A2A task maps to a conversation.
- *
+ * Runs A2A tasks as EDDI conversation turns.
+ * <p>
+ * <strong>Tasks and conversations.</strong> A context is one conversation; a
+ * task is one turn in it. A task a peer opens without naming a context gets a
+ * fresh conversation, and that conversation's id is the context id it is handed
+ * back. Server-issued task ids are {@code <conversationId>_<random>}, and every
+ * turn carries its task id in the input context ({@value #CONTEXT_TASK_ID}), so
+ * a task can be found again in the conversation store when the
+ * {@link IA2ATaskStore} has forgotten it — after a restart, or on another node.
+ * <p>
+ * <strong>States.</strong> The answer to a task is decided by how its own turn
+ * ended, never by what the conversation last said: an ERROR turn is
+ * {@code failed}, a HITL pause is {@code input-required}, a turn dropped
+ * because the conversation was paused or busy is {@code input-required} or
+ * {@code rejected}, and a cancelled one is {@code canceled}. A turn's output is
+ * returned only when it carries this task's id, so a skipped turn can no longer
+ * hand back the previous answer.
  * <p>
  * <strong>Peer scoping.</strong> {@code taskId} and {@code contextId} are
- * chosen by the calling peer, so they are request payload — never proof of
- * ownership. Both caches are therefore keyed on the authenticated peer
- * <em>plus</em> the supplied id, and every conversation this handler creates is
- * stamped with that same principal as its owner. A peer can only ever resolve
- * tasks and contexts it created itself, and the resulting conversation is
- * reachable through the regular ownership model
- * ({@link ai.labs.eddi.engine.security.OwnershipValidator}) rather than being
- * owned by nobody.
- * </p>
+ * payload, never proof of ownership. The store is keyed on the authenticated
+ * peer plus the id, every conversation this handler creates is owned by that
+ * peer, and a task or context re-derived from the conversation store resolves
+ * only when the conversation's owner is the caller. A peer can only ever reach
+ * tasks and contexts it created itself.
  *
  * @author ginccc
  */
@@ -46,278 +91,801 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class A2ATaskHandler {
 
     private static final Logger LOGGER = Logger.getLogger(A2ATaskHandler.class);
-    private static final String CACHE_NAME = "a2aTaskMapping";
 
     /** Last-resort turn budget when neither configured value is positive. */
     static final int DEFAULT_TASK_TIMEOUT_SECONDS = 60;
 
     /**
+     * How long past the task timeout an in-flight slot is held at most — room for
+     * the turn's own watchdog to settle it first.
+     */
+    static final int SLOT_LEASE_GRACE_SECONDS = 30;
+
+    /**
      * Owner recorded for peers that arrive without an authenticated identity — the
      * case when {@code authorization.enabled=false}, where the JSON-RPC endpoint's
-     * {@code @Authenticated} gate is a no-op and there is a single trust domain
-     * anyway. Deliberately a value no OIDC principal can ever equal: switching
-     * authorization on later must not hand these conversations to a real user.
+     * role gate is a no-op and there is a single trust domain anyway. Deliberately
+     * a value no OIDC principal can ever equal: switching authorization on later
+     * must not hand these conversations to a real user.
      */
     static final String ANONYMOUS_PEER = "a2a:anonymous";
 
-    private final IConversationService conversationService;
-    private final AgentCardService agentCardService;
+    /** Input-context key naming the task a turn belongs to. */
+    static final String CONTEXT_TASK_ID = "a2aTaskId";
+
+    /** Input-context key naming the context a turn belongs to. */
+    static final String CONTEXT_CONTEXT_ID = "a2aContextId";
+
+    static final String RESPONSE_ARTIFACT_ID = "response";
 
     /**
-     * The calling peer's identity. The JSON-RPC endpoint is {@code @Authenticated},
-     * so for a remote agent this is the principal of the Bearer token it presented
-     * (typically the OIDC subject / client id of the peer agent) — the only
-     * caller-independent identity available on this surface.
+     * Snapshots are read detailed: the default projection keeps only input, actions
+     * and output keys, and drops the {@code context} map a turn's task id is read
+     * from. The detailed projection is still redacted (no audit, trace or error
+     * keys), and nothing but the extracted text leaves this class.
+     */
+    private static final boolean DETAILED = true;
+
+    private static final char TASK_ID_SEPARATOR = '_';
+
+    static final String STATUS_AWAITING_APPROVAL = "The conversation is waiting for a human to approve the agent's next step. "
+            + "Poll the task until the approval is resolved.";
+    static final String STATUS_SKIPPED_AWAITING_APPROVAL = "The conversation is waiting for a human approval, so this message was "
+            + "not processed. Send it again once the approval is resolved.";
+    static final String STATUS_BUSY = "The agent was busy with another turn of this conversation, so this message was not "
+            + "processed. Send it again.";
+    static final String STATUS_INACTIVE = "The conversation is no longer active, so this message was not processed.";
+    static final String STATUS_FAILED = "The agent failed while processing the message.";
+    static final String STATUS_CANCELED = "The task was canceled before it finished.";
+
+    private final IConversationService conversationService;
+    private final IA2ATaskStore taskStore;
+    private final AgentCardService agentCardService;
+    private final A2AInFlightLimiter limiter;
+    private final MeterRegistry meterRegistry;
+
+    /**
+     * The unsettled tasks of each conversation, oldest first, as submitted from
+     * this node. A conversation runs one turn at a time, so the head is the turn
+     * that is running (or next to run) and the rest are queued behind it.
+     * {@code cancelConversation} stops whatever turn the conversation is running,
+     * so a cancel of a queued task would stop its sibling's turn instead; this is
+     * how {@link #cancel} tells the two apart. Transport bookkeeping, not
+     * conversation state: entries live only until their turn settles.
+     */
+    private final Map<String, Deque<String>> unsettledByConversation = new ConcurrentHashMap<>();
+
+    /**
+     * The calling peer's identity. For a remote agent this is the principal of the
+     * Bearer token it presented — the only caller-independent identity available on
+     * this surface.
      */
     private final SecurityIdentity identity;
 
     /**
-     * How long a peer's {@code tasks/send} may wait for the turn.
+     * How long a blocking send waits for its turn before answering with the task
+     * still {@code working}.
      * <p>
      * Defaults to {@code systemRuntime.agentTimeoutInSeconds}, the same budget the
-     * REST surface gives a turn, because an operator who raised that has already
-     * decided how long a turn may legitimately take. This was a hard-coded 60
-     * seconds, so an agent with a tool loop or a model cascade timed out on the A2A
-     * surface only: the peer got "Internal error" while the conversation carried on
-     * running server-side. {@code eddi.a2a.task-timeout-seconds} overrides it for a
-     * deployment whose peers cannot wait that long.
+     * REST surface gives a turn; {@code eddi.a2a.task-timeout-seconds} overrides it
+     * for a deployment whose peers cannot wait that long.
      */
     private final int taskTimeoutSeconds;
 
-    /**
-     * Reads an optional string parameter, treating a missing key, an explicit JSON
-     * null and a blank string alike as "not supplied".
-     */
-    private static String optionalStringParam(Map<String, Object> params, String key) {
-        Object raw = params.get(key);
-        if (raw == null) {
-            return null;
-        }
-        String value = raw.toString().trim();
-        return value.isEmpty() ? null : value;
-    }
-
-    /**
-     * Maps (peer, A2A taskId) → conversationId for multi-turn conversations. A task
-     * that uses the same contextId should reuse the same conversation.
-     */
-    private final ICache<String, String> taskConversationCache;
-
-    /**
-     * Maps (peer, A2A contextId) → conversationId so multi-turn requests on the
-     * same context reuse the same conversation.
-     */
-    private final ICache<String, String> contextConversationCache;
-
-    /**
-     * Maps (peer, A2A taskId) → the task's own {@link TaskState} name.
-     * <p>
-     * A task's state cannot be read off its conversation: a finished turn leaves
-     * the conversation {@code READY} for the next one, and one conversation serves
-     * every task of a context. Inferring it did both wrong things — a completed
-     * task read back as {@code submitted}, and {@code tasks/cancel} on it ended the
-     * reusable conversation and reported success.
-     */
-    private final ICache<String, String> taskStateCache;
-
     @Inject
-    public A2ATaskHandler(IConversationService conversationService, ICacheFactory cacheFactory, SecurityIdentity identity,
-            AgentCardService agentCardService,
+    public A2ATaskHandler(IConversationService conversationService, IA2ATaskStore taskStore, SecurityIdentity identity,
+            AgentCardService agentCardService, A2AInFlightLimiter limiter, MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds", defaultValue = "60") int agentTimeoutSeconds,
             @ConfigProperty(name = "eddi.a2a.task-timeout-seconds") Optional<Integer> a2aTaskTimeoutSeconds) {
-        this.agentCardService = agentCardService;
         this.conversationService = conversationService;
-        this.taskConversationCache = cacheFactory.getCache(CACHE_NAME);
-        this.contextConversationCache = cacheFactory.getCache(CACHE_NAME + ":context");
-        this.taskStateCache = cacheFactory.getCache(CACHE_NAME + ":state");
+        this.taskStore = taskStore;
         this.identity = identity;
-        // A non-positive budget makes Future.get return immediately and fails every
-        // peer
-        // request, so neither source may supply one.
-        // systemRuntime.agentTimeoutInSeconds
-        // carries no positive-value validation of its own, so falling back to it is not
-        // enough — a deployment that sets it to 0 would still land here.
-        int resolved = a2aTaskTimeoutSeconds.filter(seconds -> seconds > 0)
+        this.agentCardService = agentCardService;
+        this.limiter = limiter;
+        this.meterRegistry = meterRegistry;
+        // A non-positive budget makes Future.get return immediately, so neither
+        // source may supply one. systemRuntime.agentTimeoutInSeconds carries no
+        // positive-value validation of its own, so falling back to it is not enough.
+        this.taskTimeoutSeconds = a2aTaskTimeoutSeconds.filter(seconds -> seconds > 0)
                 .orElseGet(() -> agentTimeoutSeconds > 0 ? agentTimeoutSeconds : DEFAULT_TASK_TIMEOUT_SECONDS);
-        this.taskTimeoutSeconds = resolved;
+    }
+
+    int taskTimeoutSeconds() {
+        return taskTimeoutSeconds;
+    }
+
+    // ==================== send ====================
+
+    /**
+     * Sends a message — {@code SendMessage}, {@code message/send} or the legacy
+     * {@code tasks/send}.
+     * <p>
+     * Waits for the turn unless the peer asked to return immediately. A turn that
+     * outlives the wait is answered as {@code working}; the peer polls
+     * {@code tasks/get} for the outcome.
+     *
+     * @throws InvalidA2ARequestException
+     *             for a request the peer has to fix
+     * @throws A2ABusyException
+     *             when every in-flight slot is taken
+     */
+    public A2ATask send(String agentId, SendRequest request) throws Exception {
+        Permit permit = acquireSlot();
+        Prepared prepared;
+        try {
+            prepared = prepare(agentId, request);
+        } catch (Exception | Error e) {
+            permit.release();
+            throw e;
+        }
+
+        CompletableFuture<A2ATaskRecord> settled = new CompletableFuture<>();
+        submit(prepared, permit, settled::complete, null);
+
+        A2ATaskRecord result;
+        if (request.returnImmediately()) {
+            result = settled.getNow(currentRecord(prepared));
+        } else {
+            try {
+                result = settled.get(taskTimeoutSeconds, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                LOGGER.infof("A2A task %s is still running after %ds — answering 'working'", sanitize(prepared.record().taskId()),
+                        taskTimeoutSeconds);
+                result = currentRecord(prepared);
+            }
+        }
+        return toTask(result, request.historyLength());
+    }
+
+    // ==================== stream ====================
+
+    /** An event of a streamed task, in the order a peer receives them. */
+    public sealed interface StreamEvent permits TaskEvent, ChunkEvent, FinalEvent {
+    }
+
+    /** The task as accepted — the first event of every stream. */
+    public record TaskEvent(A2ATask task) implements StreamEvent {
+    }
+
+    /** A streamed piece of the answer, appended to the response artifact. */
+    public record ChunkEvent(A2ATask task, String text, boolean append) implements StreamEvent {
+    }
+
+    /** The settled task — the last event of every stream. */
+    public record FinalEvent(A2ATask task) implements StreamEvent {
     }
 
     /**
-     * Handle a {@code tasks/send} request — the core A2A operation.
+     * Sends a message and reports the turn as a stream of events —
+     * {@code SendStreamingMessage} / {@code message/stream}.
+     * <p>
+     * Everything that can refuse the request happens before this returns, so a
+     * refusal is still an ordinary JSON-RPC error. The events are delivered to
+     * {@code sink} from the turn's own thread; the first is a {@link TaskEvent}
+     * delivered before this method returns, the last is always a
+     * {@link FinalEvent}.
      */
-    public A2ATask handleTaskSend(String agentId, Map<String, Object> params) throws Exception {
-        // Extract message from params
-        @SuppressWarnings("unchecked")
-        Map<String, Object> message = (Map<String, Object>) params.get("message");
-        if (message == null) {
-            throw new InvalidA2ARequestException("Missing 'message' in params");
+    public void stream(String agentId, SendRequest request, Consumer<StreamEvent> sink) throws Exception {
+        Permit permit = acquireSlot();
+        Prepared prepared;
+        try {
+            prepared = prepare(agentId, request);
+        } catch (Exception | Error e) {
+            permit.release();
+            throw e;
         }
+        sink.accept(new TaskEvent(toTask(prepared.record(), 0)));
+        submit(prepared, permit, record -> sink.accept(new FinalEvent(toTask(record, request.historyLength()))), sink);
+    }
 
-        // containsKey is true for an explicit JSON null, so a malformed peer sending
-        // {"id": null} used to NPE on toString() and surface as a generic internal
-        // error instead of the invalid-request path this method already has.
-        // A null or blank id is treated as absent, which is what a peer omitting it
-        // gets anyway.
-        String taskId = optionalStringParam(params, "id");
-        if (taskId == null) {
-            taskId = UUID.randomUUID().toString();
+    // ==================== get / cancel ====================
+
+    /**
+     * {@code GetTask} / {@code tasks/get}.
+     * <p>
+     * Only tasks created by the <em>calling</em> peer resolve: a taskId belonging
+     * to another peer is indistinguishable from an unknown one.
+     *
+     * @return the task, or null when the caller has no such task
+     */
+    public A2ATask get(String taskId, Integer historyLength) {
+        return resolve(callerPrincipal(), taskId).map(record -> toTask(record, historyLength)).orElse(null);
+    }
+
+    /** What {@link #cancel} did. */
+    public enum CancelResult {
+        CANCELED, NOT_FOUND, NOT_CANCELABLE
+    }
+
+    /** A cancel's result and, when it found the task, the task as it now stands. */
+    public record CancelOutcomeAndTask(CancelResult result, A2ATask task) {
+    }
+
+    /**
+     * {@code CancelTask} / {@code tasks/cancel}.
+     * <p>
+     * Stops the task's turn — a running one at its next task boundary, a HITL pause
+     * by cancelling the pending approval — without ending the conversation, so the
+     * context stays usable for the next task. A task that already reached a
+     * terminal state is not cancelable.
+     */
+    public CancelOutcomeAndTask cancel(String taskId) {
+        String principal = callerPrincipal();
+        Optional<A2ATaskRecord> found = resolve(principal, taskId);
+        if (found.isEmpty()) {
+            return new CancelOutcomeAndTask(CancelResult.NOT_FOUND, null);
         }
-        String contextId = optionalStringParam(params, "contextId");
+        A2ATaskRecord record = found.get();
+        if (record.state().isTerminal()) {
+            return new CancelOutcomeAndTask(CancelResult.NOT_CANCELABLE, toTask(record, null));
+        }
+        if (queuedBehindAnotherTask(record.conversationId(), taskId)) {
+            // Cancelling the conversation would stop the sibling task's running turn,
+            // not this one. Refused rather than mis-aimed; the peer can retry once the
+            // turn ahead of it has settled.
+            LOGGER.debugf("A2A task %s is queued behind another turn of its conversation — not cancelable now", sanitize(taskId));
+            return new CancelOutcomeAndTask(CancelResult.NOT_CANCELABLE, toTask(record, null));
+        }
+        try {
+            CancelOutcome outcome = conversationService.cancelConversation(record.conversationId(), ControlSignal.CANCEL_GRACEFUL,
+                    "a2a:" + principal);
+            if (outcome == CancelOutcome.CANCELLED) {
+                A2ATaskRecord canceled = record.withOutcome(TaskState.canceled, STATUS_CANCELED, null);
+                taskStore.saveTask(principal, canceled);
+                countTask(TaskState.canceled);
+                return new CancelOutcomeAndTask(CancelResult.CANCELED, toTask(canceled, null));
+            }
+            if (outcome == CancelOutcome.NOT_FOUND) {
+                return new CancelOutcomeAndTask(CancelResult.NOT_FOUND, null);
+            }
+            // Nothing was running: the turn settled between the read and the cancel.
+            A2ATaskRecord current = resolve(principal, taskId).orElse(record);
+            return new CancelOutcomeAndTask(CancelResult.NOT_CANCELABLE, toTask(current, null));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to cancel A2A task %s: %s", sanitize(taskId), e.getMessage());
+            return new CancelOutcomeAndTask(CancelResult.NOT_CANCELABLE, toTask(record, null));
+        }
+    }
 
-        // Extract text from message parts
-        String userInput = extractTextFromMessage(message);
-        if (userInput == null || userInput.isBlank()) {
+    // ==================== preparing a task ====================
+
+    /**
+     * A task about to run: its record, the peer, and how its conversation was
+     * found.
+     */
+    record Prepared(String principal, String agentId, A2ATaskRecord record, String messageText, boolean conversationFromContext) {
+
+        Prepared withConversation(String conversationId) {
+            A2ATaskRecord moved = new A2ATaskRecord(record.taskId(), record.contextId(), conversationId, record.agentId(), record.state(),
+                    record.statusText(), record.responseText(), record.userText(), record.updatedAt(), record.generation());
+            return new Prepared(principal, agentId, moved, messageText, false);
+        }
+    }
+
+    private Permit acquireSlot() {
+        Permit permit = limiter.tryAcquire((long) taskTimeoutSeconds + SLOT_LEASE_GRACE_SECONDS);
+        if (permit == null) {
+            throw new A2ABusyException("Too many concurrent A2A requests (limit " + limiter.capacity() + "). Retry shortly.");
+        }
+        return permit;
+    }
+
+    private Prepared prepare(String agentId, SendRequest request) throws Exception {
+        String text = request.text();
+        if (text == null || text.isBlank()) {
             throw new InvalidA2ARequestException("No text content found in message parts");
         }
 
         // A2A sits outside the workspace model on purpose — a peer is a remote system,
-        // not an EDDI user, so it has no space to scope to. But the gate this surface
-        // does claim is `isA2aEnabled()` on the target, and discovery was enforcing it
-        // while conversing was not: a peer that knew an id could talk to an agent
-        // nobody had opted into A2A, private ones included. getAgentCard returns null
-        // for both "no such agent" and "not A2A-enabled", which is the same refusal a
-        // peer gets from discovery.
+        // not an EDDI user. The gate this surface claims is isA2aEnabled() on the
+        // target; getAgentCard returns null for "no such agent" and "not A2A-enabled"
+        // alike, the same refusal a peer gets from discovery.
         if (agentCardService.getAgentCard(agentId) == null) {
             throw new InvalidA2ARequestException("Agent is not available over A2A: " + agentId);
         }
 
-        // Build InputData
-        InputData inputData = new InputData();
-        inputData.setInput(userInput);
-
-        // The same input cap the conversationId entry points enforce: A2A drives the
-        // agent-id overload on behalf of an external peer, so it applies the check
-        // itself — before resolving the task, so a refused message does not leave a
-        // started conversation behind. Reported as invalid params, not an internal
-        // error.
+        // The input cap the conversationId entry points enforce, applied before a
+        // conversation is resolved so a refused message leaves none behind.
+        InputData probe = new InputData();
+        probe.setInput(text);
         try {
-            conversationService.requireInputWithinLimit(inputData);
+            conversationService.requireInputWithinLimit(probe);
         } catch (IConversationService.InputTooLargeException e) {
             throw new InvalidA2ARequestException(e.getMessage());
         }
 
-        // Resolve or create conversation — scoped to the calling peer
         String principal = callerPrincipal();
-        String conversationId = resolveConversation(agentId, taskId, contextId, principal);
-        String taskKey = scopedKey(principal, taskId);
-        taskStateCache.put(taskKey, TaskState.working.name());
 
-        // Execute synchronously via ConversationService
-        CompletableFuture<String> responseFuture = new CompletableFuture<>();
-
-        try {
-            conversationService.say(Environment.production, agentId, conversationId, false, true, null, inputData, false, snapshot -> {
-                // Return only the human-readable text output. ConversationOutput.toString()
-                // serialized the whole output map — pipeline metadata, actions and any
-                // internal keys included — onto the wire to a remote peer. The shared
-                // extractor pulls out just the text (and returns null for a
-                // metadata-only turn, which we normalise to an empty response).
-                String response = ConversationOutputExtractor.extractResponse(snapshot);
-                if (response == null) {
-                    response = "";
-                }
-                // Recorded when the turn completes rather than after the wait below, so a
-                // turn that outlives the peer's timeout still reads back as completed.
-                taskStateCache.put(taskKey, TaskState.completed.name());
-                responseFuture.complete(response);
-            });
-        } catch (Exception e) {
-            taskStateCache.put(taskKey, TaskState.failed.name());
-            throw e;
-        }
-
-        String response = responseFuture.get(taskTimeoutSeconds, TimeUnit.SECONDS);
-
-        // Build A2A response
-        List<Part> responseParts = List.of(Part.textPart(response));
-        A2AMessage responseMessage = new A2AMessage("agent", responseParts, null);
-        Artifact artifact = new Artifact("response", null, responseParts, 0, null);
-
-        return new A2ATask(taskId, contextId, TaskState.completed,
-                List.of(new A2AMessage("user", List.of(Part.textPart(userInput)), null), responseMessage), List.of(artifact), null);
-    }
-
-    /**
-     * Handle a {@code tasks/get} request — retrieve task status.
-     * <p>
-     * Only tasks created by the <em>calling</em> peer resolve: a taskId belonging
-     * to another peer is indistinguishable from an unknown one.
-     */
-    public A2ATask handleTaskGet(String taskId) {
-        String taskKey = scopedKey(callerPrincipal(), taskId);
-        String conversationId = taskConversationCache.get(taskKey);
-        if (conversationId == null) {
-            return null; // Task not found (or not this peer's task)
-        }
-
-        // A finished task answers from its own record: its conversation is READY
-        // again, which would read as submitted.
-        TaskState terminal = terminalStateOf(taskKey);
-        if (terminal != null) {
-            return new A2ATask(taskId, null, terminal, null, null, null);
-        }
-
-        try {
-            var state = conversationService.getConversationState(conversationId);
-            TaskState taskState = switch (state) {
-                case READY -> TaskState.submitted;
-                case IN_PROGRESS -> TaskState.working;
-                case ENDED -> TaskState.completed;
-                case ERROR -> TaskState.failed;
-                default -> TaskState.unknown;
-            };
-
-            return new A2ATask(taskId, null, taskState, null, null, null);
-        } catch (Exception e) {
-            LOGGER.warnf("Failed to get task state for taskId=%s: %s", sanitize(taskId), e.getMessage());
-            return new A2ATask(taskId, null, TaskState.unknown, null, null, null);
-        }
-    }
-
-    /**
-     * Handle a {@code tasks/cancel} request — end the conversation.
-     * <p>
-     * Cancelling is scoped the same way {@link #handleTaskGet} is: a peer can only
-     * cancel a task it created itself.
-     */
-    public boolean handleTaskCancel(String taskId) {
-        String taskKey = scopedKey(callerPrincipal(), taskId);
-        String conversationId = taskConversationCache.get(taskKey);
-        if (conversationId == null) {
-            return false;
-        }
-
-        // A task that already reached a terminal state cannot be cancelled (A2A
-        // TaskNotCancelableError). Ending it again reported success for a no-op and
-        // told the peer its cancel had stopped work that was long finished. The
-        // task's own record decides first: after a completed turn the conversation is
-        // READY, and ending it would also end the context's later tasks.
-        if (terminalStateOf(taskKey) != null) {
-            return false;
-        }
-
-        try {
-            ConversationState state = conversationService.getConversationState(conversationId);
-            if (state == ConversationState.ENDED || state == ConversationState.ERROR) {
-                return false;
+        // A message naming a task continues it — in its conversation, under its id.
+        if (request.taskId() != null) {
+            A2ATaskRecord existing = resolve(principal, request.taskId())
+                    .filter(found -> agentId.equals(found.agentId()))
+                    .orElseThrow(() -> new InvalidA2ARequestException(ERROR_TASK_NOT_FOUND, "Task not found"));
+            if (existing.state().isTerminal()) {
+                throw new InvalidA2ARequestException(ERROR_UNSUPPORTED_OPERATION,
+                        "The task is " + existing.state().wireName(Dialect.V0_3)
+                                + " and cannot take further messages; send a new message in the same context instead");
             }
-            conversationService.endConversation(conversationId);
-            taskStateCache.put(taskKey, TaskState.canceled.name());
-            return true;
+            A2ATaskRecord continued = new A2ATaskRecord(existing.taskId(), existing.contextId(), existing.conversationId(), agentId,
+                    TaskState.working, null, null, text, Instant.now(), UUID.randomUUID().toString());
+            taskStore.saveTask(principal, continued);
+            return new Prepared(principal, agentId, continued, text, false);
+        }
+
+        final String requestedContextId = request.contextId();
+        String contextId = requestedContextId;
+        String conversationId = null;
+        boolean fromContext = false;
+        if (requestedContextId != null) {
+            conversationId = taskStore.findContextConversation(principal, requestedContextId)
+                    .or(() -> ownConversation(principal, agentId, requestedContextId) ? Optional.of(requestedContextId) : Optional.empty())
+                    .orElse(null);
+            fromContext = conversationId != null;
+        }
+        if (conversationId == null) {
+            conversationId = startConversation(agentId, principal);
+        }
+        boolean legacy = request.dialect() == Dialect.LEGACY;
+        if (contextId == null && !legacy) {
+            // A context the server opens is the conversation: it then resolves after a
+            // restart without anything having been remembered.
+            contextId = conversationId;
+        }
+        if (contextId != null) {
+            taskStore.bindContext(principal, contextId, conversationId);
+        }
+
+        String taskId = request.legacyTaskId() != null
+                ? request.legacyTaskId()
+                : legacy
+                        ? UUID.randomUUID().toString()
+                        : conversationId + TASK_ID_SEPARATOR + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        A2ATaskRecord record = new A2ATaskRecord(taskId, contextId, conversationId, agentId, TaskState.working, null, null, text,
+                Instant.now(), UUID.randomUUID().toString());
+        taskStore.saveTask(principal, record);
+        return new Prepared(principal, agentId, record, text, fromContext);
+    }
+
+    private String startConversation(String agentId, String principal) throws Exception {
+        // Owned by the calling peer. Passing null would let ConversationService
+        // substitute a random anonymous-* id, leaving the conversation owned by a
+        // principal that can never authenticate.
+        return conversationService.startConversation(Environment.production, agentId, principal, Map.of()).conversationId();
+    }
+
+    /**
+     * Whether {@code conversationId} is a conversation of {@code agentId} owned by
+     * the peer — how a context EDDI issued is recognised once the store has
+     * forgotten it.
+     */
+    private boolean ownConversation(String principal, String agentId, String conversationId) {
+        try {
+            SimpleConversationMemorySnapshot snapshot = conversationService.readConversation(conversationId, false, true, null);
+            return snapshot != null && principal.equals(snapshot.getUserId()) && agentId.equals(snapshot.getAgentId());
         } catch (Exception e) {
-            LOGGER.warnf("Failed to cancel task %s: %s", sanitize(taskId), e.getMessage());
             return false;
         }
     }
 
-    // === Internal helpers ===
+    // ==================== running a task ====================
+
+    /**
+     * Runs the task's turn. {@code onSettled} receives the final record exactly
+     * once, on whichever thread settles it; the permit is released at the same
+     * moment.
+     */
+    private void submit(Prepared prepared, Permit permit, Consumer<A2ATaskRecord> onSettled, Consumer<StreamEvent> sink) {
+        Settler settler = new Settler(prepared, permit, onSettled);
+        try {
+            runTurn(prepared, settler, sink);
+        } catch (IConversationService.ConversationEndedException | IConversationService.AgentMismatchException e) {
+            if (!prepared.conversationFromContext()) {
+                LOGGER.warnf("A2A task %s could not run: %s", sanitize(prepared.record().taskId()), e.getMessage());
+                settler.settle(TaskState.rejected, STATUS_INACTIVE, null);
+                return;
+            }
+            // The context's conversation has ended (or belongs to another agent): the
+            // context carries on in a fresh one rather than failing every later task.
+            try {
+                String fresh = startConversation(prepared.agentId(), prepared.principal());
+                Prepared moved = prepared.withConversation(fresh);
+                taskStore.bindContext(moved.principal(), moved.record().contextId(), fresh);
+                taskStore.saveTask(moved.principal(), moved.record());
+                settler.retarget(moved);
+                runTurn(moved, settler, sink);
+            } catch (Exception retryFailure) {
+                failTurn(settler, retryFailure);
+            }
+        } catch (IConversationService.ConversationAwaitingApprovalException e) {
+            settler.settle(TaskState.input_required, STATUS_SKIPPED_AWAITING_APPROVAL, null);
+        } catch (Exception e) {
+            failTurn(settler, e);
+        }
+    }
+
+    private void failTurn(Settler settler, Exception e) {
+        // The peer is a remote party: the detail stays in the log, the task says only
+        // that it failed.
+        LOGGER.errorf(e, "A2A task %s failed to start", sanitize(settler.prepared.record().taskId()));
+        settler.settle(TaskState.failed, STATUS_FAILED, null);
+    }
+
+    private void runTurn(Prepared prepared, Settler settler, Consumer<StreamEvent> sink) throws Exception {
+        InputData inputData = new InputData();
+        inputData.setInput(prepared.messageText());
+        Map<String, Context> context = new HashMap<>();
+        context.put(CONTEXT_TASK_ID, new Context(Context.ContextType.string, prepared.record().taskId()));
+        if (prepared.record().contextId() != null) {
+            context.put(CONTEXT_CONTEXT_ID, new Context(Context.ContextType.string, prepared.record().contextId()));
+        }
+        inputData.setContext(context);
+
+        String conversationId = prepared.record().conversationId();
+        String taskId = prepared.record().taskId();
+        settler.enqueue(conversationId);
+        if (sink == null) {
+            conversationService.say(Environment.production, prepared.agentId(), conversationId, DETAILED, true, null, inputData, false,
+                    new ConversationResponseHandler() {
+                        @Override
+                        public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                            settler.settleFrom(snapshot, taskId);
+                        }
+
+                        @Override
+                        public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                            settler.settleSkipped(snapshot);
+                        }
+                    });
+            return;
+        }
+
+        conversationService.sayStreaming(Environment.production, prepared.agentId(), conversationId, DETAILED, true, null, inputData,
+                new StreamingResponseHandler() {
+                    private boolean firstChunk = true;
+
+                    @Override
+                    public void onTaskStart(TaskId lifecycleTaskId, String taskType, int index) {
+                    }
+
+                    @Override
+                    public void onTaskComplete(TaskId lifecycleTaskId, String taskType, long durationMs, Map<String, Object> summary) {
+                    }
+
+                    @Override
+                    public void onToken(String token) {
+                        if (token == null || token.isEmpty()) {
+                            return;
+                        }
+                        sink.accept(new ChunkEvent(toTask(settler.prepared.record(), 0), token, !firstChunk));
+                        firstChunk = false;
+                    }
+
+                    @Override
+                    public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                        settler.settleFrom(snapshot, taskId);
+                    }
+
+                    @Override
+                    public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                        settler.settleSkipped(snapshot);
+                    }
+
+                    @Override
+                    public void onError(Throwable error) {
+                        LOGGER.warnf("A2A streamed task %s failed: %s", sanitize(taskId), error == null ? "unknown" : error.getMessage());
+                        settler.settle(TaskState.failed, STATUS_FAILED, null);
+                    }
+                });
+    }
+
+    /** Settles one task exactly once and releases its in-flight slot. */
+    private final class Settler {
+
+        private volatile Prepared prepared;
+        private final Permit permit;
+        private final Consumer<A2ATaskRecord> onSettled;
+        private final AtomicBoolean done = new AtomicBoolean();
+        private final List<String> queuedOn = new CopyOnWriteArrayList<>();
+
+        Settler(Prepared prepared, Permit permit, Consumer<A2ATaskRecord> onSettled) {
+            this.prepared = prepared;
+            this.permit = permit;
+            this.onSettled = onSettled;
+        }
+
+        void retarget(Prepared moved) {
+            this.prepared = moved;
+        }
+
+        void enqueue(String conversationId) {
+            String taskId = prepared.record().taskId();
+            unsettledByConversation.compute(conversationId, (id, tasks) -> {
+                Deque<String> queue = tasks == null ? new ArrayDeque<>() : tasks;
+                queue.addLast(taskId);
+                return queue;
+            });
+            queuedOn.add(conversationId);
+        }
+
+        private void dequeue() {
+            String taskId = prepared.record().taskId();
+            for (String conversationId : queuedOn) {
+                unsettledByConversation.computeIfPresent(conversationId, (id, tasks) -> {
+                    tasks.remove(taskId);
+                    return tasks.isEmpty() ? null : tasks;
+                });
+            }
+        }
+
+        void settleFrom(SimpleConversationMemorySnapshot snapshot, String taskId) {
+            Outcome outcome = outcomeOf(snapshot, taskId);
+            settle(outcome.state(), outcome.statusText(), outcome.responseText());
+        }
+
+        void settleSkipped(SimpleConversationMemorySnapshot snapshot) {
+            ConversationState state = snapshot == null ? null : snapshot.getConversationState();
+            if (state == ConversationState.AWAITING_HUMAN) {
+                settle(TaskState.input_required, STATUS_SKIPPED_AWAITING_APPROVAL, null);
+            } else if (state == ConversationState.ENDED || state == ConversationState.EXECUTION_INTERRUPTED) {
+                settle(TaskState.rejected, STATUS_INACTIVE, null);
+            } else {
+                settle(TaskState.rejected, STATUS_BUSY, null);
+            }
+        }
+
+        void settle(TaskState state, String statusText, String responseText) {
+            if (!done.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                String principal = prepared.principal();
+                A2ATaskRecord base = prepared.record();
+                // A cancel that won the race stands: the turn's late outcome does not
+                // un-cancel the task.
+                A2ATaskRecord stored = taskStore.findTask(principal, base.taskId()).orElse(base);
+                A2ATaskRecord settledRecord;
+                if (!Objects.equals(stored.generation(), base.generation())) {
+                    // A newer send under the same id owns the record now (a pre-0.2 peer
+                    // reusing its task id): this turn's outcome answers its own caller and
+                    // is not persisted over the newer task.
+                    settledRecord = base.withOutcome(state, statusText, responseText);
+                    countTask(state);
+                } else if (stored.state() == TaskState.canceled) {
+                    settledRecord = stored;
+                } else {
+                    settledRecord = base.withOutcome(state, statusText, responseText);
+                    taskStore.saveTask(principal, settledRecord);
+                    countTask(state);
+                }
+                onSettled.accept(settledRecord);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Failed to record the outcome of A2A task %s: %s", sanitize(prepared.record().taskId()), e.getMessage());
+                // The waiting peer (a blocking send, a stream) must still be answered, not
+                // left to run out its timeout on a store failure.
+                try {
+                    onSettled.accept(prepared.record().withOutcome(TaskState.failed, STATUS_FAILED, null));
+                } catch (RuntimeException ignored) {
+                    // nothing more can be done for this task
+                }
+            } finally {
+                dequeue();
+                permit.release();
+            }
+        }
+    }
+
+    /**
+     * Whether another task's turn is ahead of {@code taskId} in its conversation,
+     * as far as this node knows. Read under the map's lock for the key, so it sees
+     * a consistent queue.
+     */
+    boolean queuedBehindAnotherTask(String conversationId, String taskId) {
+        boolean[] behind = {false};
+        unsettledByConversation.computeIfPresent(conversationId, (id, tasks) -> {
+            behind[0] = tasks.contains(taskId) && !taskId.equals(tasks.peekFirst());
+            return tasks;
+        });
+        return behind[0];
+    }
+
+    /** How a task's turn ended, as A2A sees it. */
+    record Outcome(TaskState state, String statusText, String responseText) {
+    }
+
+    /**
+     * Maps the conversation's state after the turn to the task's. The answer is
+     * this turn's output, or none: an output that does not carry this task's id is
+     * another turn's, and handing it back is exactly the stale answer this guards
+     * against.
+     */
+    static Outcome outcomeOf(SimpleConversationMemorySnapshot snapshot, String taskId) {
+        ConversationState state = snapshot == null ? null : snapshot.getConversationState();
+        String text = null;
+        if (snapshot != null && snapshot.getConversationOutputs() != null && !snapshot.getConversationOutputs().isEmpty()) {
+            ConversationOutput last = snapshot.getConversationOutputs().getLast();
+            if (taskId.equals(taskIdOf(last))) {
+                text = ConversationOutputExtractor.extractText(last);
+            } else {
+                LOGGER.warnf("A2A task %s: the turn's snapshot carries no output of this task — returning none", sanitize(taskId));
+            }
+        }
+        if (state == null) {
+            return new Outcome(TaskState.completed, null, text == null ? "" : text);
+        }
+        return switch (state) {
+            case AWAITING_HUMAN -> new Outcome(TaskState.input_required, text != null ? text : STATUS_AWAITING_APPROVAL, null);
+            case ERROR -> new Outcome(TaskState.failed, STATUS_FAILED, null);
+            case EXECUTION_INTERRUPTED -> new Outcome(TaskState.canceled, STATUS_CANCELED, null);
+            case IN_PROGRESS -> new Outcome(TaskState.working, null, null);
+            default -> new Outcome(TaskState.completed, null, text == null ? "" : text);
+        };
+    }
+
+    /** The task id a conversation output was produced for, or null. */
+    static String taskIdOf(ConversationOutput output) {
+        return contextValue(output, CONTEXT_TASK_ID);
+    }
+
+    private static String contextValue(ConversationOutput output, String key) {
+        if (output != null && output.get("context") instanceof Map<?, ?> context && context.get(key) instanceof String value) {
+            return value;
+        }
+        return null;
+    }
+
+    // ==================== resolving a task ====================
+
+    /**
+     * The caller's task: the store's record while it is terminal, otherwise what
+     * the conversation store says about it now. A task this server issued is found
+     * in the conversation store even when the task store has forgotten it.
+     */
+    Optional<A2ATaskRecord> resolve(String principal, String taskId) {
+        Optional<A2ATaskRecord> stored = taskStore.findTask(principal, taskId);
+        if (stored.isPresent() && stored.get().state().isTerminal()) {
+            return stored;
+        }
+        Optional<A2ATaskRecord> derived = derive(principal, taskId, stored.orElse(null));
+        if (derived.isPresent() && (stored.isEmpty() || !derived.get().equals(stored.get()))) {
+            taskStore.saveTask(principal, derived.get());
+        }
+        return derived.or(() -> stored);
+    }
+
+    private Optional<A2ATaskRecord> derive(String principal, String taskId, A2ATaskRecord stored) {
+        String conversationId = stored != null ? stored.conversationId() : conversationIdOf(taskId);
+        if (conversationId == null) {
+            return Optional.empty();
+        }
+        SimpleConversationMemorySnapshot snapshot;
+        try {
+            snapshot = conversationService.readConversation(conversationId, DETAILED, false, null);
+        } catch (ResourceNotFoundException e) {
+            return Optional.empty();
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read the conversation of A2A task %s: %s", sanitize(taskId), e.getMessage());
+            return Optional.empty();
+        }
+        if (snapshot == null || !principal.equals(snapshot.getUserId())) {
+            return Optional.empty();
+        }
+        List<ConversationOutput> outputs = snapshot.getConversationOutputs();
+        if (outputs == null || outputs.isEmpty()) {
+            // Nothing persisted for this conversation yet: nothing to add.
+            return Optional.ofNullable(stored);
+        }
+        int index = -1;
+        for (int i = outputs.size() - 1; i >= 0; i--) {
+            if (taskId.equals(taskIdOf(outputs.get(i)))) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) {
+            // The turn has not been persisted yet (or never ran): nothing to add.
+            return Optional.ofNullable(stored);
+        }
+        ConversationOutput output = outputs.get(index);
+        boolean latestTurn = index == outputs.size() - 1;
+        String text = ConversationOutputExtractor.extractText(output);
+
+        TaskState state;
+        String statusText = null;
+        String responseText = null;
+        if (!latestTurn) {
+            // A later turn ran, so this one finished.
+            state = TaskState.completed;
+            responseText = text == null ? "" : text;
+        } else {
+            ConversationState conversationState = snapshot.getConversationState();
+            Outcome outcome = conversationState == null
+                    ? new Outcome(TaskState.completed, null, text == null ? "" : text)
+                    : switch (conversationState) {
+                        case AWAITING_HUMAN -> new Outcome(TaskState.input_required, text != null ? text : STATUS_AWAITING_APPROVAL, null);
+                        case ERROR -> new Outcome(TaskState.failed, STATUS_FAILED, null);
+                        case EXECUTION_INTERRUPTED -> new Outcome(TaskState.canceled, STATUS_CANCELED, null);
+                        case IN_PROGRESS -> new Outcome(TaskState.working, null, null);
+                        default -> new Outcome(TaskState.completed, null, text == null ? "" : text);
+                    };
+            state = outcome.state();
+            statusText = outcome.statusText();
+            responseText = outcome.responseText();
+        }
+
+        if (stored != null) {
+            if (stored.state() == state && Objects.equals(stored.responseText(), responseText)
+                    && Objects.equals(stored.statusText(), statusText)) {
+                return Optional.of(stored);
+            }
+            return Optional.of(stored.withOutcome(state, statusText, responseText));
+        }
+        String contextId = contextValue(output, CONTEXT_CONTEXT_ID);
+        String userText = output.get("input") instanceof String input ? input : null;
+        return Optional.of(new A2ATaskRecord(taskId, contextId, conversationId, snapshot.getAgentId(), state, statusText, responseText,
+                userText, Instant.now()));
+    }
+
+    /** The conversation a server-issued task id names, or null for any other id. */
+    static String conversationIdOf(String taskId) {
+        int separator = taskId == null ? -1 : taskId.lastIndexOf(TASK_ID_SEPARATOR);
+        return separator > 0 ? taskId.substring(0, separator) : null;
+    }
+
+    // ==================== rendering ====================
+
+    private A2ATaskRecord currentRecord(Prepared prepared) {
+        return taskStore.findTask(prepared.principal(), prepared.record().taskId()).orElse(prepared.record());
+    }
+
+    /**
+     * The task a peer sees. The answer is an artifact, an explanation of any other
+     * state is the status message, and the history is the exchange itself.
+     *
+     * @param historyLength
+     *            how many history messages to include; null for all
+     */
+    static A2ATask toTask(A2ATaskRecord record, Integer historyLength) {
+        String taskId = record.taskId();
+        String contextId = record.contextId();
+        A2AMessage statusMessage = record.statusText() == null
+                ? null
+                : new A2AMessage(taskId + "-status", A2AMessage.ROLE_AGENT, List.of(Part.textPart(record.statusText())), taskId, contextId);
+        TaskStatus status = new TaskStatus(record.state(), statusMessage, record.updatedAt());
+
+        List<Artifact> artifacts = null;
+        if (record.state() == TaskState.completed && record.responseText() != null) {
+            artifacts = List.of(new Artifact(RESPONSE_ARTIFACT_ID, RESPONSE_ARTIFACT_ID, List.of(Part.textPart(record.responseText()))));
+        }
+
+        List<A2AMessage> history = new ArrayList<>();
+        if (record.userText() != null) {
+            history.add(new A2AMessage(taskId + "-user", A2AMessage.ROLE_USER, List.of(Part.textPart(record.userText())), taskId, contextId));
+        }
+        if (record.responseText() != null && record.state() == TaskState.completed) {
+            history.add(new A2AMessage(taskId + "-agent", A2AMessage.ROLE_AGENT, List.of(Part.textPart(record.responseText())), taskId,
+                    contextId));
+        }
+        if (historyLength != null) {
+            int keep = Math.max(0, Math.min(historyLength, history.size()));
+            history = new ArrayList<>(history.subList(history.size() - keep, history.size()));
+        }
+        return new A2ATask(taskId, contextId, status, history.isEmpty() ? null : history, artifacts);
+    }
+
+    // ==================== helpers ====================
+
+    private void countTask(TaskState state) {
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi.a2a.tasks", "state", state.name()).increment();
+        }
+    }
 
     /**
      * The identity a task/context is filed under. The JSON-RPC surface is
      * authenticated, so a remote peer always has a principal; the anonymous
      * fallback only applies with authorization disabled.
      */
-    private String callerPrincipal() {
+    String callerPrincipal() {
         if (identity != null && !identity.isAnonymous() && identity.getPrincipal() != null) {
             String name = identity.getPrincipal().getName();
             if (name != null && !name.isBlank()) {
@@ -325,80 +893,5 @@ public class A2ATaskHandler {
             }
         }
         return ANONYMOUS_PEER;
-    }
-
-    /**
-     * Compound cache key binding a caller-supplied id to the peer that supplied it.
-     * The principal is length-prefixed so the encoding stays injective even if a
-     * principal or an id contains the separator — without that, a peer could craft
-     * an id that collides with another peer's key.
-     */
-    static String scopedKey(String principal, String id) {
-        return principal.length() + ":" + principal + "|" + id;
-    }
-
-    /**
-     * The task's recorded state when it is terminal ({@code completed},
-     * {@code canceled}, {@code failed}); {@code null} while it is still running or
-     * was never recorded.
-     */
-    private TaskState terminalStateOf(String taskKey) {
-        String recorded = taskStateCache.get(taskKey);
-        if (recorded == null) {
-            return null;
-        }
-        try {
-            TaskState state = TaskState.valueOf(recorded);
-            return switch (state) {
-                case completed, canceled, failed -> state;
-                default -> null;
-            };
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-    }
-
-    private String resolveConversation(String agentId, String taskId, String contextId, String principal) throws Exception {
-        // If contextId is provided, try to reuse an existing conversation — but only
-        // one this same peer opened. Another peer's contextId simply does not resolve.
-        if (contextId != null) {
-            String existingConvId = contextConversationCache.get(scopedKey(principal, contextId));
-            if (existingConvId != null) {
-                taskConversationCache.put(scopedKey(principal, taskId), existingConvId);
-                return existingConvId;
-            }
-        }
-
-        // Start a new conversation owned by the calling peer. Passing null here would
-        // let ConversationService substitute a random anonymous-* id, leaving the
-        // conversation owned by a principal that can never authenticate.
-        var result = conversationService.startConversation(Environment.production, agentId, principal, Map.of());
-        String conversationId = result.conversationId();
-
-        // Cache the mapping
-        taskConversationCache.put(scopedKey(principal, taskId), conversationId);
-        if (contextId != null) {
-            contextConversationCache.put(scopedKey(principal, contextId), conversationId);
-        }
-
-        return conversationId;
-    }
-
-    private String extractTextFromMessage(Map<String, Object> message) {
-        Object partsObj = message.get("parts");
-        if (partsObj instanceof List<?> parts) {
-            for (Object part : parts) {
-                if (part instanceof Map<?, ?> partMap) {
-                    String type = (String) partMap.get("type");
-                    if ("text".equals(type) || type == null) {
-                        Object text = partMap.get("text");
-                        if (text != null) {
-                            return text.toString();
-                        }
-                    }
-                }
-            }
-        }
-        return null;
     }
 }

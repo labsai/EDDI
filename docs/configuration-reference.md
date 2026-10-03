@@ -343,7 +343,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions |
 | `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
 | `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
-| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a peer's `tasks/send` may wait for the turn. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking A2A send (`SendMessage`, `message/send`, `tasks/send`) waits for the turn before answering with the task still `working` — the peer then polls `GetTask`. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+| `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once, across all peers and agents. The excess is refused with HTTP `503`, `Retry-After: 1` and a JSON-RPC error, before any conversation is started. A slot is held for the turn (a `returnImmediately` send and a stream keep it until the turn settles) and released at the latest task timeout + 30 s after it was taken |
 
 ### Slack
 

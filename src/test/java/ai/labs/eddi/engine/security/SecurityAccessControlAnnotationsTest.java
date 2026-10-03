@@ -57,8 +57,8 @@ class SecurityAccessControlAnnotationsTest {
     @Test
     @DisplayName("Finding 9: the A2A JSON-RPC endpoint requires a real role")
     void a2aJsonRpcRoleGated() throws Exception {
-        var handleJsonRpc = RestA2AEndpoint.class.getMethod("handleJsonRpc", String.class, JsonRpcRequest.class);
+        var handleJsonRpc = RestA2AEndpoint.class.getMethod("handleJsonRpc", String.class, String.class, JsonRpcRequest.class);
         var roles = rolesOf(handleJsonRpc.getAnnotation(RolesAllowed.class));
-        assertTrue(roles.contains("eddi-user"), "a role-less realm user must not reach A2A tasks/send");
+        assertTrue(roles.contains("eddi-user"), "a role-less realm user must not reach A2A SendMessage");
     }
 }

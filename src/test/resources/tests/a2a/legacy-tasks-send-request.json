@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "method": "tasks/send",
+  "id": "req-1",
+  "params": {
+    "id": "task-1",
+    "contextId": "ctx-legacy",
+    "message": {
+      "role": "user",
+      "parts": [{"type": "text", "text": "Track order #12345"}]
+    }
+  }
+}

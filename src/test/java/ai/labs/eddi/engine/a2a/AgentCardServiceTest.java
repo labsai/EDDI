@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -324,7 +325,7 @@ class AgentCardServiceTest {
             assertEquals("EDDI Agent agent-1", card.name());
             assertEquals("My agent", card.description());
             assertTrue(card.url().contains("agent-1"));
-            assertEquals("EDDI", card.provider());
+            assertEquals("EDDI", card.provider().organization());
         }
 
         /**
@@ -440,6 +441,26 @@ class AgentCardServiceTest {
             assertTrue(card.authentication().credentials().contains("openid-connect/token"));
         }
 
+        /** The A2A 1.0 shape: a oneof-wrapped scheme, and a requirement naming it. */
+        @Test
+        @SuppressWarnings("unchecked")
+        void withAuth_declaresA10SecurityScheme() {
+            var authService = authServiceWith("http://keycloak:8080/realms/eddi", null, null);
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(true);
+
+            var card = authService.buildAgentCard("a4", config, 1);
+
+            var bearer = (Map<String, Object>) card.securitySchemes().get(AgentCardService.BEARER_SCHEME);
+            var http = (Map<String, Object>) bearer.get("httpAuthSecurityScheme");
+            assertEquals("Bearer", http.get("scheme"));
+            var oidc = (Map<String, Object>) card.securitySchemes().get(AgentCardService.OIDC_SCHEME);
+            assertEquals("http://keycloak:8080/realms/eddi/.well-known/openid-configuration",
+                    ((Map<String, Object>) oidc.get("openIdConnectSecurityScheme")).get("openIdConnectUrl"));
+            var requirement = (Map<String, Object>) card.securityRequirements().getFirst().get("schemes");
+            assertTrue(requirement.containsKey(AgentCardService.BEARER_SCHEME));
+        }
+
         @Test
         void defaultDescription_whenNone() {
             var config = new AgentConfiguration();
@@ -455,9 +476,46 @@ class AgentCardServiceTest {
             config.setA2aEnabled(true);
 
             var card = service.buildAgentCard("a6", config, 1);
-            assertTrue(card.capabilities().stateTransitionHistory());
-            assertFalse(card.capabilities().streaming());
+            assertTrue(card.capabilities().streaming(), "message/stream and SendStreamingMessage are served");
             assertFalse(card.capabilities().pushNotifications());
+            assertFalse(card.capabilities().extendedAgentCard());
+        }
+
+        /**
+         * One card for both protocol versions: a 1.0 client reads supportedInterfaces,
+         * a 0.3 client reads url / protocolVersion / preferredTransport.
+         */
+        @Test
+        void servesBothProtocolVersions() {
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(true);
+
+            var card = service.buildAgentCard("a7", config, 1);
+
+            assertEquals(List.of("1.0", "0.3"), card.supportedInterfaces().stream().map(A2AModels.AgentInterface::protocolVersion).toList());
+            card.supportedInterfaces().forEach(iface -> {
+                assertEquals("JSONRPC", iface.protocolBinding());
+                assertEquals(card.url(), iface.url());
+            });
+            assertEquals("0.3.0", card.protocolVersion());
+            assertEquals("JSONRPC", card.preferredTransport());
+            assertEquals(List.of("text/plain", "application/json"), card.defaultInputModes());
+            assertEquals(List.of("text/plain"), card.defaultOutputModes());
+            assertEquals("EDDI", card.provider().organization());
+            card.skills().forEach(skill -> assertFalse(skill.tags() == null || skill.tags().isEmpty(), "1.0 requires tags on every skill"));
+            assertNull(card.securitySchemes(), "no security is declared while the endpoint asks for none");
+        }
+
+        @Test
+        void configuredSkillsCarryTheirIdAsTag() {
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(true);
+            config.setA2aSkills(List.of("Order Tracking"));
+
+            var skill = service.buildAgentCard("a8", config, 1).skills().getFirst();
+
+            assertEquals("order-tracking", skill.id());
+            assertEquals(List.of("order-tracking"), skill.tags());
         }
     }
 
