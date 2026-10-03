@@ -1959,12 +1959,25 @@ public class ConversationService implements IConversationService, UserErasurePar
         turn.put("userId", memory.getUserId());
         turn.put("rerun", rerun);
         if (captureDeadLetterInput && inputData != null) {
+            if (isSecretInput(inputData)) {
+                // A turn the client flagged secretInput: its input must not sit in a dead
+                // letter for days. Recorded as such, without input or context — so it can
+                // be discarded but not replayed.
+                turn.put("secretInput", true);
+                return turn;
+            }
             turn.put("input", inputData.getInput());
             if (inputData.getContext() != null && !inputData.getContext().isEmpty()) {
                 turn.put("context", inputData.getContext());
             }
         }
         return turn;
+    }
+
+    private static boolean isSecretInput(InputData inputData) {
+        var context = inputData.getContext();
+        Context flag = context == null ? null : context.get("secretInput");
+        return flag != null && "true".equals(String.valueOf(flag.getValue()));
     }
 
     /** A turn's write was refused by the cluster fence (cluster mode only). */

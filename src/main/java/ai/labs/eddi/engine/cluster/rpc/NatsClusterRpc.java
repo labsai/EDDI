@@ -78,15 +78,33 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
         connections.onConnected(this::subscribe);
     }
 
-    private synchronized void subscribe() {
-        Connection connection = connections.requireConnected();
+    synchronized void subscribe() {
+        Connection connection;
+        try {
+            connection = connections.requireConnected();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Node RPC not subscribed — retried on the next connect: %s", e.getMessage());
+            return;
+        }
         if (subscribedOn == connection) {
             return;
         }
-        Dispatcher dispatcher = connection.createDispatcher(this::onRequest);
-        dispatcher.subscribe(subjects.rpcNodeWildcard(connections.node().nodeId()));
-        dispatcher.subscribe(subjects.rpcAllWildcard());
-        subscribedOn = connection;
+        Dispatcher dispatcher = null;
+        try {
+            dispatcher = connection.createDispatcher(this::onRequest);
+            dispatcher.subscribe(subjects.rpcNodeWildcard(connections.node().nodeId()));
+            dispatcher.subscribe(subjects.rpcAllWildcard());
+            subscribedOn = connection;
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Node RPC not subscribed — retried on the next connect: %s", e.getMessage());
+            if (dispatcher != null) {
+                try {
+                    connection.closeDispatcher(dispatcher);
+                } catch (RuntimeException ignored) {
+                    // the connection is going away anyway
+                }
+            }
+        }
     }
 
     private void onRequest(Message msg) {
@@ -174,7 +192,14 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
                 if (msg == null) {
                     break;
                 }
-                Map<String, Object> reply = JSON.readValue(msg.getData(), MAP);
+                Map<String, Object> reply;
+                try {
+                    reply = JSON.readValue(msg.getData(), MAP);
+                } catch (IOException unreadable) {
+                    // One bad reply must not cost the replies of every other node.
+                    LOGGER.debugf("Unreadable RPC scatter reply for %s: %s", op, unreadable.getMessage());
+                    continue;
+                }
                 String from = String.valueOf(reply.get("node"));
                 if (!self.equals(from)) {
                     replies.put(from, reply);

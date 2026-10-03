@@ -495,4 +495,47 @@ class ClusterConversationCoordinatorTest {
         assertEquals(1, listed.size(), "and no longer kept locally");
         assertFalse(listed.get(0).id().startsWith("local-"));
     }
+
+    @Test
+    @DisplayName("a turn whose lease binding throws is answered, its lease released, and the queue behind it still runs")
+    void bindFailureDoesNotWedgeTheConversation() throws Exception {
+        Turn broken = new Turn("broken", log) {
+            @Override
+            public void bindLease(LeaseHandle l) {
+                throw new IllegalStateException("bind failed");
+            }
+        };
+        Turn next = new Turn("next", log);
+        coordinator.submitInOrder("conv1", broken);
+        coordinator.submitInOrder("conv1", next);
+        await(broken);
+        await(next);
+        awaitIdle();
+        assertInstanceOf(IllegalStateException.class, broken.discarded.get(), "the caller is answered");
+        assertEquals(List.of("next"), log, "the turn behind it ran");
+        assertEquals(2, leases.released.size(), "both leases went back");
+        assertTrue(coordinator.getQueueDepths().isEmpty());
+    }
+
+    @Test
+    @DisplayName("paging past a local dead letter never repeats one — even when the cursor entry is gone")
+    void localDeadLettersPage() throws Exception {
+        store.down = true;
+        for (int i = 0; i < 3; i++) {
+            Turn t = new Turn("boom" + i, log);
+            t.failWith = new IllegalStateException("x" + i);
+            coordinator.submitInOrder("conv" + i, t);
+            await(t);
+        }
+        awaitIdle();
+        List<DeadLetterEntry> first = coordinator.getDeadLetters(2, null);
+        assertEquals(2, first.size());
+        String cursor = first.get(1).id();
+        List<DeadLetterEntry> second = coordinator.getDeadLetters(2, cursor);
+        assertEquals(1, second.size(), "only the entry after the cursor: " + second);
+        assertFalse(first.stream().anyMatch(e -> e.id().equals(second.get(0).id())), "no entry on two pages");
+
+        assertTrue(coordinator.discardDeadLetter(cursor));
+        assertEquals(second, coordinator.getDeadLetters(2, cursor), "a discarded cursor still pages from where it was");
+    }
 }

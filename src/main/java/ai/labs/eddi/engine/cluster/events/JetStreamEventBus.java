@@ -167,7 +167,7 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
         try {
             JetStream js = connections.jetStream();
             CompletableFuture<?> ack = js.publishAsync(subject, data);
-            ack.whenComplete((ok, failure) -> {
+            ack.whenComplete((ignoredAck, failure) -> {
                 if (failure != null) {
                     enqueue(subject, data);
                 } else {
@@ -202,13 +202,21 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
             String subject = new String(item[0], StandardCharsets.UTF_8);
             try {
                 connections.jetStream().publish(subject, item[1]);
-            } catch (IOException | JetStreamApiException | ClusterUnavailableException e) {
+                meterRegistry.counter("eddi.cluster.events.published", "type", typeOf(subject)).increment();
+            } catch (IOException | JetStreamApiException | RuntimeException e) {
+                // Any failure — a closing connection throws IllegalStateException — puts the
+                // event back at the head; it was dropped before.
                 outbox.addFirst(item);
                 outboxCount.incrementAndGet();
                 LOGGER.debugf("Outbox flush paused: %s", e.getMessage());
                 return;
             }
         }
+    }
+
+    private String typeOf(String subject) {
+        String prefix = subjects.event("");
+        return subject.startsWith(prefix) ? subject.substring(prefix.length()) : subject;
     }
 
     // ---------------------------------------------------------------- subscribe
