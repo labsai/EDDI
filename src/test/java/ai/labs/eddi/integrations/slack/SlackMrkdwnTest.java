@@ -104,4 +104,30 @@ class SlackMrkdwnTest {
             assertFalse(chunk.contains("<"), "unescaped text");
         }
     }
+
+    @Test
+    void longLinesThatFitTheAllowedMessagesAreNotTruncated() {
+        // 25 lines of 2,501 characters: 62,525 in all, under 20 x 3,900. Cutting at
+        // every line break used one message per line and truncated at message 20.
+        String line = "y".repeat(2500) + "\n";
+        String text = line.repeat(25);
+
+        List<String> chunks = SlackMrkdwn.escapeInChunks(text, SlackMrkdwn.MAX_MESSAGE_LENGTH);
+
+        assertTrue(chunks.size() <= SlackMrkdwn.MAX_MESSAGES, "chunks: " + chunks.size());
+        assertEquals(text, String.join("", chunks), "the whole text arrives, without a truncation marker");
+        for (String chunk : chunks) {
+            assertTrue(chunk.length() <= SlackMrkdwn.MAX_MESSAGE_LENGTH, "chunk of " + chunk.length());
+        }
+    }
+
+    @Test
+    void lineBreaksAreStillPreferredWhenThereIsRoom() {
+        String text = ("z".repeat(60) + "\n").repeat(5);
+
+        List<String> chunks = SlackMrkdwn.escapeInChunks(text, 100, 20);
+
+        assertEquals(5, chunks.size());
+        assertTrue(chunks.stream().allMatch(chunk -> chunk.endsWith("\n")), chunks.toString());
+    }
 }

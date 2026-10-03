@@ -121,7 +121,14 @@ public final class SlackMrkdwn {
         while (offset < escaped.length() && chunks.size() < maxChunks) {
             int end = Math.min(offset + maxLength, escaped.length());
             if (end < escaped.length()) {
-                end = cutPoint(escaped, offset, end);
+                // A line break is the nicer cut, but it can leave most of a chunk
+                // unused: lines of 2,500 characters would get one chunk each, and a
+                // text that fits the messages allowed would be truncated anyway. When
+                // the rest would no longer fit the messages that are left, fill this
+                // one to the length limit instead (still at a safe boundary).
+                int lineEnd = cutPoint(escaped, offset, end);
+                long remainingCapacity = (long) (maxChunks - chunks.size() - 1) * maxLength;
+                end = escaped.length() - lineEnd > remainingCapacity ? safeCut(escaped, offset, end) : lineEnd;
             }
             chunks.add(escaped.substring(offset, end));
             offset = end;
