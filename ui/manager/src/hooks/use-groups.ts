@@ -278,8 +278,11 @@ export function useDeleteGroupWithMembers() {
       /** Hard delete — only when the user explicitly chose it. Soft otherwise. */
       permanent?: boolean;
     }) => deleteGroupWithMembers(groupId, version, config, permanent),
-    onSuccess: () => {
+    // Settled, not success: a partial failure has still deleted something (the
+    // group on the soft path, some members on either), and the lists must say so.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
 }

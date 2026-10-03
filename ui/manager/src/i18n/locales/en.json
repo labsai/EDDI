@@ -3051,7 +3051,9 @@
       "humanNeedsId_other": "{{count}} human members need the person's user id."
     },
     "deletePermanentlyHint": "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.",
-    "deletePermanentlyWithMembersHint": "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged."
+    "deletePermanentlyWithMembersHint": "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged.",
+    "deleteMembersFailedAfterGroup": "The group was deleted, but these member agents could not be: {{ids}}. Delete them from the Agents page.",
+    "deleteMembersFailedGroupKept": "The group was kept: these member agents could not be deleted: {{ids}}. Try again to finish."
   },
   "taskBoard": {
     "title": "Task Board",

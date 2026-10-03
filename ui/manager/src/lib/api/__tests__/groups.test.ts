@@ -261,3 +261,69 @@ describe("parseIdFromLocation", () => {
     expect(parseIdFromLocation(undefined)).toBeNull();
   });
 });
+
+describe("deleteGroupWithMembers — failures are reported, and a permanent delete keeps the group until its members are gone", () => {
+  const config = {
+    name: "G",
+    description: "",
+    members: [
+      { agentId: "agent-a", memberType: "AGENT" as const, displayName: "A", speakingOrder: null, role: null },
+      { agentId: "agent-b", memberType: "AGENT" as const, displayName: "B", speakingOrder: null, role: null },
+    ],
+    moderatorAgentId: null,
+    style: "ROUND_TABLE" as const,
+    maxRounds: 1,
+    phases: null,
+    protocol: null,
+  };
+
+  async function setup(opts: { groupCurrent?: number; failAgent?: { id: string; status: number } }) {
+    const { api } = await import("../../api-client");
+    const groups = await import("../groups");
+    vi.mocked(api.get).mockReset().mockImplementation(async (path: string) =>
+      path.includes("groupstore/groups/") ? (opts.groupCurrent ?? 3) : 7,
+    );
+    vi.mocked(api.delete)
+      .mockReset()
+      .mockImplementation(async (path: string) => {
+        if (opts.failAgent && path.includes(`agentstore/agents/${opts.failAgent.id}`)) {
+          throw Object.assign(new Error("refused"), { status: opts.failAgent.status });
+        }
+        return undefined;
+      });
+    const calls = () => vi.mocked(api.delete).mock.calls.map(([path]) => path as string);
+    return { groups, calls };
+  }
+
+  it("permanent: a member that cannot be deleted keeps the group (nothing purged) and is reported", async () => {
+    const { groups, calls } = await setup({ failAgent: { id: "agent-b", status: 409 } });
+    const err = await groups.deleteGroupWithMembers("grp1", 3, config as never, true).catch((e) => e);
+    expect(err).toBeInstanceOf(groups.GroupMembersDeleteError);
+    expect(err.failedAgentIds).toEqual(["agent-b"]);
+    expect(err.groupDeleted).toBe(false);
+    expect(calls().some((p) => p.includes("groupstore/groups/"))).toBe(false);
+  });
+
+  it("permanent: deletes the group last, permanently, once every member is gone (a 404 member counts as gone)", async () => {
+    const { groups, calls } = await setup({ failAgent: { id: "agent-b", status: 404 } });
+    await groups.deleteGroupWithMembers("grp1", 3, config as never, true);
+    const all = calls();
+    expect(all[all.length - 1]).toBe("/groupstore/groups/grp1?version=3&permanent=true");
+    expect(all.filter((p) => p.includes("agentstore/agents/")).every((p) => p.includes("permanent=true"))).toBe(true);
+  });
+
+  it("permanent: a superseded group version is refused before anything is deleted", async () => {
+    const { groups, calls } = await setup({ groupCurrent: 4 });
+    await expect(groups.deleteGroupWithMembers("grp1", 3, config as never, true)).rejects.toThrow(/version 4/);
+    expect(calls()).toEqual([]);
+  });
+
+  it("soft: a member that cannot be deleted is reported, not swallowed", async () => {
+    const { groups, calls } = await setup({ failAgent: { id: "agent-a", status: 403 } });
+    const err = await groups.deleteGroupWithMembers("grp1", 3, config as never).catch((e) => e);
+    expect(err).toBeInstanceOf(groups.GroupMembersDeleteError);
+    expect(err.groupDeleted).toBe(true);
+    expect(err.failedAgentIds).toEqual(["agent-a"]);
+    expect(calls()[0]).toBe("/groupstore/groups/grp1?version=3&permanent=false");
+  });
+});

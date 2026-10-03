@@ -3033,7 +3033,9 @@
       "humanNeedsId_other": "{{count}} miembros humanos necesitan el id de usuario de la persona."
     },
     "deletePermanentlyHint": "No se puede deshacer: el grupo y su espacio de trabajo (pendientes, cadencias y sus programaciones) se eliminan definitivamente. Sin esta opción, el grupo solo se marca como eliminado y sigue siendo recuperable hasta que se purgue.",
-    "deletePermanentlyWithMembersHint": "No se puede deshacer: el grupo, su espacio de trabajo y todos los agentes miembros se eliminan definitivamente. Sin esta opción, solo se marcan como eliminados y siguen siendo recuperables hasta que se purguen."
+    "deletePermanentlyWithMembersHint": "No se puede deshacer: el grupo, su espacio de trabajo y todos los agentes miembros se eliminan definitivamente. Sin esta opción, solo se marcan como eliminados y siguen siendo recuperables hasta que se purguen.",
+    "deleteMembersFailedAfterGroup": "El grupo se eliminó, pero estos agentes miembros no: {{ids}}. Elimínelos desde la página Agentes.",
+    "deleteMembersFailedGroupKept": "El grupo se conservó: estos agentes miembros no se pudieron eliminar: {{ids}}. Vuelva a intentarlo para terminar."
   },
   "taskBoard": {
     "title": "Tablero de tareas",

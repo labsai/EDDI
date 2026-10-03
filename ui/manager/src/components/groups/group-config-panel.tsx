@@ -19,6 +19,7 @@ import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/li
 import { formatIsoDuration } from "@/lib/hitl-config";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
+import { describeGroupDeleteError } from "@/lib/group-delete-errors";
 import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
 import { GroupAdvancedEditor } from "./group-advanced-editor";
 import { GroupHitlEditor } from "./group-hitl-editor";
@@ -153,7 +154,7 @@ export function GroupConfigPanel({
           toast.success(t("groups.deleteWithMembersSuccess", "Group and all member agents deleted"));
           navigate("/manage/groups");
         },
-        onError: (err) => toast.error(t("common.error"), { description: getErrorMessage(err) }),
+        onError: (err) => toast.error(t("common.error"), { description: describeGroupDeleteError(err, t) }),
       }
     );
   }

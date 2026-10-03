@@ -18,6 +18,7 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { toast } from "sonner";
+import { describeGroupDeleteError } from "@/lib/group-delete-errors";
 import { cn } from "@/lib/utils";
 import {
   useGroup,
@@ -527,9 +528,10 @@ function WorkforceSettings() {
             );
             navigate("/workforce");
           },
-          onError: () => {
+          onError: (err) => {
             toast.error(
-              t("Workforce.settings.deleteError", "Failed to delete task force")
+              t("Workforce.settings.deleteError", "Failed to delete task force"),
+              { description: describeGroupDeleteError(err, t) }
             );
           },
         }

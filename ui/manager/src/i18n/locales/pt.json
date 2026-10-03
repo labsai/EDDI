@@ -3033,7 +3033,9 @@
       "humanNeedsId_other": "{{count}} membros humanos precisam do id de utilizador da pessoa."
     },
     "deletePermanentlyHint": "Não pode ser desfeito: o grupo e seu espaço de trabalho (lista de pendências, cadências e seus agendamentos) são removidos definitivamente. Sem esta opção, o grupo é apenas marcado como excluído e continua recuperável até ser expurgado.",
-    "deletePermanentlyWithMembersHint": "Não pode ser desfeito: o grupo, seu espaço de trabalho e todos os agentes membros são removidos definitivamente. Sem esta opção, eles são apenas marcados como excluídos e continuam recuperáveis até serem expurgados."
+    "deletePermanentlyWithMembersHint": "Não pode ser desfeito: o grupo, seu espaço de trabalho e todos os agentes membros são removidos definitivamente. Sem esta opção, eles são apenas marcados como excluídos e continuam recuperáveis até serem expurgados.",
+    "deleteMembersFailedAfterGroup": "O grupo foi excluído, mas estes agentes membros não: {{ids}}. Exclua-os na página Agentes.",
+    "deleteMembersFailedGroupKept": "O grupo foi mantido: estes agentes membros não puderam ser excluídos: {{ids}}. Tente novamente para concluir."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",

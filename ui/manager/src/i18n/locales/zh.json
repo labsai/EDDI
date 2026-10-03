@@ -2997,7 +2997,9 @@
       "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。"
     },
     "deletePermanentlyHint": "无法撤消：群组及其工作区（待办事项、节奏及其计划任务）将被永久删除。不勾选此项时，群组仅被标记为已删除，在被清除前仍可恢复。",
-    "deletePermanentlyWithMembersHint": "无法撤消：群组、其工作区以及所有成员代理将被永久删除。不勾选此项时，它们仅被标记为已删除，在被清除前仍可恢复。"
+    "deletePermanentlyWithMembersHint": "无法撤消：群组、其工作区以及所有成员代理将被永久删除。不勾选此项时，它们仅被标记为已删除，在被清除前仍可恢复。",
+    "deleteMembersFailedAfterGroup": "群组已删除，但以下成员代理无法删除：{{ids}}。请在“代理”页面中删除它们。",
+    "deleteMembersFailedGroupKept": "群组已保留：以下成员代理无法删除：{{ids}}。请重试以完成操作。"
   },
   "taskBoard": {
     "title": "任务看板",

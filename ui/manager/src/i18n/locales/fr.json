@@ -3033,7 +3033,9 @@
       "humanNeedsId_other": "{{count}} membres humains ont besoin de l'identifiant utilisateur de la personne."
     },
     "deletePermanentlyHint": "Action irréversible : le groupe et son espace de travail (tâches en attente, cadences et leurs planifications) sont supprimés définitivement. Sans cette option, le groupe est seulement marqué comme supprimé et reste récupérable jusqu'à sa purge.",
-    "deletePermanentlyWithMembersHint": "Action irréversible : le groupe, son espace de travail et tous les agents membres sont supprimés définitivement. Sans cette option, ils sont seulement marqués comme supprimés et restent récupérables jusqu'à leur purge."
+    "deletePermanentlyWithMembersHint": "Action irréversible : le groupe, son espace de travail et tous les agents membres sont supprimés définitivement. Sans cette option, ils sont seulement marqués comme supprimés et restent récupérables jusqu'à leur purge.",
+    "deleteMembersFailedAfterGroup": "Le groupe a été supprimé, mais pas ces agents membres : {{ids}}. Supprimez-les depuis la page Agents.",
+    "deleteMembersFailedGroupKept": "Le groupe a été conservé : ces agents membres n'ont pas pu être supprimés : {{ids}}. Réessayez pour terminer."
   },
   "taskBoard": {
     "title": "Tableau des tâches",

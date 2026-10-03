@@ -16,6 +16,7 @@ import { styleDisplay } from "@/lib/discussion-styles";
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog";
 import { getGroup, type AgentGroupConfiguration } from "@/lib/api/groups";
 import { getErrorMessage } from "@/lib/api-client";
+import { describeGroupDeleteError } from "@/lib/group-delete-errors";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -203,7 +204,7 @@ export function GroupsPage() {
             );
             closeDeleteDialog();
           },
-          onError: (err) => toast.error(getErrorMessage(err)),
+          onError: (err) => toast.error(describeGroupDeleteError(err, t)),
         },
       );
       return;

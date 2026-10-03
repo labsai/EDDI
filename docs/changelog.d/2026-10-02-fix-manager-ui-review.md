@@ -20,6 +20,13 @@ fail).
   card / settings / bulk, connections list and detail) offers one unticked
   `PermanentDeleteOption` that names what a hard delete removes and relabels the confirm button.
   `deleteGroupWithMembers` applies the same choice to the group and every member agent.
+- A member that cannot be deleted is no longer swallowed (`GroupMembersDeleteError`, a 404 counts
+  as already gone). On the permanent path the group is checked against its current version first,
+  the members go next, and the group is purged **last** — only once every member is gone — so a
+  failed member leaves a group to retry from instead of orphaned agents and an unrecoverable group.
+- Review follow-up: the sidebar stores collapsed sections by `labelKey` (positions shift when a role
+  hides a section; old numeric state is migrated), and the command palette no longer offers a
+  recent page the current role cannot open.
 
 ### Unsaved changes are guarded inside the app too
 

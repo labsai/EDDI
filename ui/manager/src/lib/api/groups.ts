@@ -2119,9 +2119,39 @@ async function getCurrentAgentVersion(agentId: string): Promise<number> {
 }
 
 /**
+ * Some member agents of a group could not be deleted.
+ *
+ * `groupDeleted` says which state the group was left in: on the soft path it is
+ * already (softly, recoverably) deleted; on the permanent path the group is
+ * kept — it is only purged once every member is gone — so the operation can
+ * simply be retried (members already deleted count as done: a 404 is success).
+ */
+export class GroupMembersDeleteError extends Error {
+  constructor(
+    readonly failedAgentIds: string[],
+    readonly groupDeleted: boolean,
+  ) {
+    super(
+      groupDeleted
+        ? `The group was deleted, but ${failedAgentIds.length} member agent(s) could not be: ${failedAgentIds.join(", ")}`
+        : `The group was kept: ${failedAgentIds.length} member agent(s) could not be deleted (${failedAgentIds.join(", ")}). Try again to finish.`,
+    );
+    this.name = "GroupMembersDeleteError";
+  }
+}
+
+function httpStatus(err: unknown): number | undefined {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : undefined;
+}
+
+/**
  * Delete a group and all its member agents (and the moderator).
  * Soft by default, for the group and every agent alike; `permanent` applies the
  * same choice to all of them (and, for the group, deletes its workspace too).
+ *
+ * A member that cannot be deleted is reported ({@link GroupMembersDeleteError}),
+ * never swallowed; one that is already gone (404) counts as deleted.
  */
 export async function deleteGroupWithMembers(
   groupId: string,
@@ -2140,22 +2170,50 @@ export async function deleteGroupWithMembers(
   }
   if (config.moderatorAgentId) agentIds.add(config.moderatorAgentId);
 
-  // The group goes FIRST. It is the one delete here that can be refused (a 409
-  // when `version` is no longer current, e.g. a page still on the version it
+  /** Every member at its current version; returns the ids that could not be deleted. */
+  async function deleteMembers(): Promise<string[]> {
+    const outcomes = await Promise.all(
+      Array.from(agentIds).map(async (agentId) => {
+        try {
+          const currentVersion = await getCurrentAgentVersion(agentId);
+          await deleteAgent(agentId, currentVersion, { permanent });
+          return null;
+        } catch (err) {
+          return httpStatus(err) === 404 ? null : agentId;
+        }
+      }),
+    );
+    return outcomes.filter((id): id is string => id !== null);
+  }
+
+  if (permanent) {
+    // A permanent group delete purges every version and the workspace, so it
+    // goes LAST: if a member cannot be deleted (a 409 because it changed under
+    // us, a 403, a dropped connection) the group must still exist to retry
+    // from. The version is checked first, without deleting anything, so a page
+    // on a superseded version is refused before any member is touched.
+    const current = await getGroupCurrentVersion(groupId);
+    if (current !== version) {
+      throw Object.assign(
+        new Error(
+          `The group is at version ${current}, not ${version}: reload it before deleting. Nothing was deleted.`,
+        ),
+        { status: 409 },
+      );
+    }
+    const failed = await deleteMembers();
+    if (failed.length > 0) throw new GroupMembersDeleteError(failed, false);
+    await deleteGroup(groupId, version, true);
+    return;
+  }
+
+  // Soft: the group goes FIRST. It is the one delete here that can be refused (a
+  // 409 when `version` is no longer current, e.g. a page still on the version it
   // was opened with after a save), and it used to run last: every member agent
   // was already soft-deleted when it failed, leaving a live group of deleted
-  // agents. Refused now, it throws before any member is touched.
-  await deleteGroup(groupId, version, permanent);
-
-  // Delete each agent at its current version (best-effort)
-  const memberDeletes = Array.from(agentIds).map(async (agentId) => {
-    try {
-      const currentVersion = await getCurrentAgentVersion(agentId);
-      await deleteAgent(agentId, currentVersion, { permanent });
-    } catch {
-      // Ignore — agent may already be deleted
-    }
-  });
-
-  await Promise.allSettled(memberDeletes);
+  // agents. Refused now, it throws before any member is touched. A soft-deleted
+  // group stays recoverable, so a member failure after it is reported, not fatal.
+  await deleteGroup(groupId, version, false);
+  const failed = await deleteMembers();
+  if (failed.length > 0) throw new GroupMembersDeleteError(failed, true);
 }
