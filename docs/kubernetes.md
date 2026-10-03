@@ -613,7 +613,8 @@ helm install eddi ./helm/eddi \
 |---|---|---|
 | `eddi.replicas` | `1` | Any number; omitted while `autoscaling.enabled=true` |
 | `autoscaling.enabled` | `false` | Renders an HPA (`minReplicas` 2, `maxReplicas` 6, CPU 70 %, memory 80 %) |
-| `eddi.updateStrategy` | `""` | Empty picks `RollingUpdate` (maxSurge 1, maxUnavailable 0); in-memory picks `Recreate` |
+| `eddi.updateStrategy` | `""` | Empty picks `RollingUpdate` (maxSurge 1, maxUnavailable 0); in-memory picks `Recreate`. A string, or the Deployment's own strategy object (`{type: RollingUpdate, rollingUpdate: {...}}`) |
+| `networkPolicy.natsEgressTo` | `[]` | With `networkPolicy.enabled` and `nats.externalUrl` the chart opens egress to the URL's port; this narrows the destination (NetworkPolicyPeers) |
 | `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the drain plus 3 s |
 | `eddi.shutdownDrainTimeoutSeconds` | `""` | 65 s: a terminating pod lets its running turns finish |
 | `podDisruptionBudget.*` | off | `minAvailable: 1` with more than one replica, so a drain never takes the last pod |
@@ -621,6 +622,9 @@ helm install eddi ./helm/eddi \
 | `nats.replicas`, `nats.cluster.enabled` | `3`, `true` | Three routed nodes, R3 buckets and streams |
 | `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects |
 | `nats.tls.*` | off | Client and route TLS from a `kubernetes.io/tls` Secret you provide |
+
+The first switch of an existing release from in-memory to `nats` should roll out with
+`Recreate` — see [Clustering → Moving from one node to a cluster, and back](clustering.md#moving-from-one-node-to-a-cluster-and-back).
 
 Each replica's node id is its pod name (`EDDI_CLUSTER_NODE_ID`), and the pods are
 spread over nodes and zones. Every path balances freely except `/mcp`: an MCP session

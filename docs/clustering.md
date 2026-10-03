@@ -77,7 +77,7 @@ out. Longer, each area applies its policy:
 | Area | Default | Alternative |
 |---|---|---|
 | Turns | run with node-local ordering only, **unfenced** (no loss — appends merge — but concurrent turns on different nodes may miss each other's context) | `degraded.turns=reject`: 409 + `Retry-After` |
-| Replay nonces | **reject** (fail closed: signed envelopes are not accepted) | `degraded.nonces=local` |
+| Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide, so a signature that needs a fresh one is refused. Inter-agent signing in group discussions then records the entry **unsigned** (the discussion carries on); nothing else uses nonces | `degraded.nonces=local` |
 | Tool rate limits | `local-share`: this node enforces the global limit ÷ known members, the per-conversation limit in full | `degraded.rate-limits=reject` |
 | Cost budgets | local total | — |
 | A2A mappings, tool pages, Slack dedup, thread locks | node-local copy | — |
@@ -133,8 +133,16 @@ The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_*`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`;
 streams: `EVENTS` and `DEAD_LETTERS`. Subjects live
 under `eddi.<prefix>.>`, so a NATS user restricted to `eddi.>`, `$JS.API.>`,
-`$JS.ACK.>`, `$JS.FC.>`, `$KV.<prefix>_*.>` and `_INBOX.>` is sufficient — the Helm
-chart's in-chart NATS grants exactly that.
+`$JS.ACK.>`, `$JS.FC.>`, `$KV.<prefix>_*.>`, `$O.<prefix>_ARCHIVES.>` (the exported-archive
+object store; without it archives stay on the node that made them) and `_INBOX.>` is
+sufficient — the Helm chart's in-chart NATS grants exactly that.
+
+**NATS is inside the trust boundary.** Every node uses one NATS identity, and nothing on
+the wire is signed: whoever holds those credentials can publish a `deployment.changed`
+event (undeploy an agent everywhere), a cancel or GDPR-stop request, or write the nonce,
+rate-limit and audit-position buckets. Keep the NATS credentials in a Secret, restrict
+NATS ports with a NetworkPolicy (the Helm chart and the `nats` overlay do), and turn on
+`nats.tls` when pod traffic is not already encrypted.
 
 ### Upgrading from the build-profile NATS coordinator
 
@@ -169,6 +177,26 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
   or PostgreSQL, nginx and a mock LLM — and runs every failure scenario on this
   page against it, each with a pass/fail verdict.
 
+## Moving from one node to a cluster, and back
+
+**To a cluster.** Start NATS first (`nats.enabled=true`, or your own cluster), then switch
+`eddi.messaging.type` to `nats`. Do the **first** switch with a `Recreate` rollout
+(`--set eddi.updateStrategy=Recreate` for that one `helm upgrade`, then remove it): with the
+default `RollingUpdate` the old single-node pod, whose conversation lock, nonces and caches
+live in its JVM, would run next to the new cluster pod for as long as the new one takes to
+boot. Afterwards scale `eddi.replicas` (or enable the HPA). Nothing in the database changes:
+existing conversations and audit chains continue — each chain position counter is seeded from
+the highest stored position the first time a conversation is written in cluster mode.
+
+**Back to one node.** Set `eddi.replicas=1`, disable the HPA and the PDB, and switch
+`eddi.messaging.type` back to `in-memory` (again with `Recreate`, and only once the cluster
+has drained to a single pod). Conversations, configurations and audit entries are in the
+database and carry over. What lives only in NATS is dropped: unreplayed dead letters (list and
+replay or discard them first), A2A task mappings and unread paginated tool pages (both
+short-lived), and the exported archives of the last retention window. The JetStream objects
+can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, and the
+`<prefix>_*` KV buckets).
+
 ## Residual limitations
 
 - **`/mcp` needs client affinity.** An MCP (Streamable HTTP) session lives on
@@ -185,6 +213,24 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
 - Paginated tool responses larger than the NATS payload limit (1 MiB by
   default) stay node-local; a page fetched through another node then fails as
   on a single node.
+- **A node that crashes can leave a gap in an audit chain.** A chain position is taken from
+  the shared counter when an entry is queued, and the queue is flushed to the database every
+  few seconds; the entries still queued when the node dies were never stored, and their
+  positions are not handed out again. Verification then reports that conversation `BROKEN`
+  (a missing position is indistinguishable from a deleted row), although every stored entry
+  verifies. On a single node the same crash loses the same entries but leaves no gap, because
+  the positions are re-seeded from the store. Lower `eddi.audit.flush-interval-seconds` to
+  shrink the window.
+- **Cache coherence is event-driven with a time backstop.** A node that misses an event (NATS
+  down, restarting) serves stale data for at most: 60 s (agent triggers, user conversations),
+  30 s (conversation state), 15 min (a rotated key in an already built chat model), 5 min
+  (prompt snippets, which have no event of their own), 30 s (the A2A agent roster). A NATS
+  outage longer than the event retention flushes everything on reconnect.
+- **An agent undeployed on one node can answer on another for up to ~20 s** if a request
+  deployed it there on demand at the very moment of the undeploy (the deployment was started
+  from a record that was already being retired); the reconciliation sweep removes it after two
+  passes. An agent that was deployed with `autoDeploy=false` and whose undeploy event is lost
+  (NATS down at that moment) stays deployed on the other nodes until they restart.
 - An audit entry written on another node by work that the erasure had not yet
   stopped is pseudonymised only if the `gdpr.user-erased` event reached that
   node first.
