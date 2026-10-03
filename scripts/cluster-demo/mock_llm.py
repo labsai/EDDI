@@ -18,6 +18,7 @@ Behaviours, chosen by the last user message:
   contains "nap"      2 s delay, then a reply
   contains "slow"    70 s delay, then a reply (longer than EDDI's turn timeout)
   contains "linger"  15 s delay, then a reply (a long turn that still finishes)
+  contains "stall"   35 s delay, then a reply (outlives a lease, inside the turn timeout)
   contains "error500" HTTP 500
   starts "usetool:<name>:<json>" (after the tag) — call that tool once
   anything else       an immediate echo
@@ -82,6 +83,9 @@ class Handler(BaseHTTPRequestHandler):
             finish = "tool_calls"
         elif "error500" in content:
             code = 500
+        elif "stall" in content and last.get("role") == "user":
+            time.sleep(35)
+            msg, finish = {"role": "assistant", "content": "stalled " + content[:40]}, "stop"
         elif "linger" in content and last.get("role") == "user":
             time.sleep(15)
             msg, finish = {"role": "assistant", "content": "lingered " + content[:40]}, "stop"
