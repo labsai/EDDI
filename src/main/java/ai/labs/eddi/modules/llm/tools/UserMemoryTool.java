@@ -209,6 +209,12 @@ public class UserMemoryTool {
             } else {
                 store.upsert(entry);
             }
+            if (existing == null) {
+                String overCap = settleCapacityAfterInsert(trimmedKey, vis);
+                if (overCap != null) {
+                    return overCap;
+                }
+            }
             writesThisTurn++;
 
             LOGGER.debugf("[MEMORY] Tool rememberFact: user='%s', key='%s', category='%s', visibility='%s'", userId, key, normalizedCategory, vis);
@@ -468,6 +474,59 @@ public class UserMemoryTool {
                             required);
         }
         return null;
+    }
+
+    /**
+     * Re-checks the cap once an insert has landed, and settles any overshoot.
+     * <p>
+     * {@link #enforceCapacity} reads the count and the write then inserts, so two
+     * conversations of the same user writing at the same moment both read
+     * {@code cap - 1}, both insert, and the user ends above the cap — one row per
+     * concurrent writer, with nothing ever pulling it back. Counting again after
+     * the write sees every insert that landed. The overshoot is attributed by a
+     * rule every writer computes identically: the {@code excess} most recently
+     * created entries are the ones over the cap. A writer whose own insert is among
+     * them settles exactly one row — in {@code reject} mode by deleting its own
+     * insert and refusing, in {@code evict_oldest} mode by evicting one of its
+     * agent's oldest entries (its rank among the excess picks which, so two writers
+     * never evict the same row). A writer whose insert is within the cap does
+     * nothing.
+     *
+     * @return a refusal when this write was undone, otherwise null
+     */
+    private String settleCapacityAfterInsert(String key, Visibility vis) throws IResourceStore.ResourceStoreException {
+        int cap = config.getMaxEntriesPerUser();
+        long count = store.countEntries(userId);
+        if (count <= cap) {
+            return null;
+        }
+        UserMemoryEntry inserted = findUpsertTarget(key, vis);
+        if (inserted == null || inserted.id() == null) {
+            return null; // already gone — nothing of ours is over the cap
+        }
+        List<UserMemoryEntry> newestFirst = new ArrayList<>(store.getAllEntries(userId).stream().filter(e -> e.id() != null).toList());
+        newestFirst.sort(Comparator.comparing(UserMemoryEntry::createdAt, Comparator.nullsLast(Comparator.<Instant>reverseOrder()))
+                .thenComparing(UserMemoryEntry::id, Comparator.reverseOrder()));
+        int excess = (int) Math.min(count - cap, newestFirst.size());
+        List<String> overCapIds = newestFirst.subList(0, excess).stream().map(UserMemoryEntry::id).toList();
+        int rank = overCapIds.indexOf(inserted.id());
+        if (rank < 0) {
+            return null; // a later concurrent insert is the one over the cap, and settles it
+        }
+
+        if (ON_CAP_EVICT_OLDEST.equals(config.getOnCapReached())) {
+            List<UserMemoryEntry> evictable = evictableEntries().stream().filter(e -> !overCapIds.contains(e.id())).toList();
+            if (rank < evictable.size()) {
+                UserMemoryEntry victim = evictable.get(rank);
+                store.deleteEntry(victim.id());
+                LOGGER.debugf("[MEMORY] Evicted oldest entry after a concurrent write overshot the cap: user='%s', key='%s'", userId,
+                        victim.key());
+                return null;
+            }
+        }
+        store.deleteEntry(inserted.id());
+        return ("⚠️ Memory capacity reached (%d/%d): another conversation of this user stored a memory at the same moment, and this "
+                + "fact was NOT saved. Tell the user; it can be saved once a memory is removed.").formatted(cap, cap);
     }
 
     /**

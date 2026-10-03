@@ -330,6 +330,36 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         memoriesCollection.deleteOne(eq("_id", new ObjectId(entryId)));
     }
 
+    /**
+     * One conditional {@code deleteOne}. {@code updatedAt} is stored as the
+     * {@link Instant#toString()} of the write, and {@link #documentToEntry} parses
+     * it back, so the expected value round-trips to the exact stored string.
+     */
+    @Override
+    public boolean deleteEntryIfUnchanged(String entryId, Instant expectedUpdatedAt) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entryId, "entryId");
+        return memoriesCollection.deleteOne(and(eq(FIELD_ID, new ObjectId(entryId)), updatedAtIs(expectedUpdatedAt))).getDeletedCount() == 1;
+    }
+
+    @Override
+    public boolean replaceIfUnchanged(String entryId, UserMemoryEntry entry, Instant expectedUpdatedAt)
+            throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entryId, "entryId");
+        RuntimeUtilities.checkNotNull(entry, "entry");
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
+                Updates.set(FIELD_VISIBILITY, entry.visibility().name()), Updates.set(FIELD_GROUP_IDS, entry.groupIds()),
+                Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()), Updates.set(FIELD_CONFLICTED, entry.conflicted()),
+                Updates.set(FIELD_UPDATED_AT, Instant.now().toString()));
+        return memoriesCollection.updateOne(and(eq(FIELD_ID, new ObjectId(entryId)), updatedAtIs(expectedUpdatedAt)), update)
+                .getModifiedCount() == 1;
+    }
+
+    /** {@code eq(updatedAt, null)} also matches a document without the field. */
+    private static Bson updatedAtIs(Instant expectedUpdatedAt) {
+        return eq(FIELD_UPDATED_AT, expectedUpdatedAt != null ? expectedUpdatedAt.toString() : null);
+    }
+
     @Override
     public Optional<UserMemoryEntry> findEntryById(String entryId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(entryId, "entryId");
