@@ -203,7 +203,7 @@ public class SummarizationService {
 
             List<ChatMessage> messages = List.of(SystemMessage.from(instructions), UserMessage.from(content));
 
-            var response = model.chat(ChatRequest.builder().messages(messages).build());
+            var response = TransientFailureRetry.call(() -> model.chat(ChatRequest.builder().messages(messages).build()), "Summarization");
 
             callCounter.increment();
 

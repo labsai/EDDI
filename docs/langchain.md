@@ -1288,9 +1288,12 @@ became 3 × 3 = 9 upstream requests before the turn failed. EDDI builds every no
 model with the provider's own retries switched off (`maxRetries = 0` for OpenAI and the
 OpenAI-compatible providers, Azure OpenAI, Anthropic, Gemini, Vertex Gemini, Mistral, Ollama and
 Bedrock), so `retry.maxAttempts` is exactly the number of upstream requests a failing call makes.
-Model calls EDDI makes outside a task's pipeline — the rolling-summary and tool-response
-summarizers, the cascade judge — therefore no longer retry at all; a failure there degrades to the
-fallback each of them already has.
+Model calls EDDI makes outside a task's pipeline — the shared summarizer (rolling and stance
+summaries, Dream consolidation), the tool-response summarizer and the cascade judge — have no task
+policy to draw on and used to get their only retry from the SDK, so each retries exactly once after
+500 ms, and only for a transient failure (rate limit, 5xx, timeout). A failure after that is handled
+as before: the tool-response summarizer and the judge fall back, the shared summarizer throws to its
+caller.
 
 **When the call still fails**, the turn ends with `conversationState: "ERROR"`. The non-streaming
 response (`POST /agents/{conversationId}`) then carries a top-level `error` object with the same

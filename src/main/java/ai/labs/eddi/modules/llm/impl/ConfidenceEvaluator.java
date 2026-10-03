@@ -10,6 +10,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import org.jboss.logging.Logger;
@@ -254,8 +255,9 @@ class ConfidenceEvaluator {
                     + "to 1.0 (fully confident, complete, and accurate). " + "Respond with ONLY a JSON object: {\"confidence\": <score>}\n\n"
                     + "Response to evaluate:\n%s", response);
 
-            var judgeResponse = judgeModel.chat(
-                    List.of(SystemMessage.from("You are a response quality evaluator. Output only valid JSON."), UserMessage.from(judgePrompt)));
+            List<ChatMessage> judgeMessages = List.of(SystemMessage.from("You are a response quality evaluator. Output only valid JSON."),
+                    UserMessage.from(judgePrompt));
+            var judgeResponse = TransientFailureRetry.call(() -> judgeModel.chat(judgeMessages), "Confidence judge");
 
             if (judgeResponse.metadata() != null && judgeResponse.metadata().tokenUsage() != null) {
                 judgeUsage = ToolContextBudget.tokenUsageMap(judgeResponse.metadata().tokenUsage());
