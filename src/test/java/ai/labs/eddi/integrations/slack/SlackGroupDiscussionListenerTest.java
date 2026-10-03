@@ -677,4 +677,16 @@ class SlackGroupDiscussionListenerTest {
         }
         assertTrue(String.join("", texts.getAllValues()).contains(SlackMrkdwn.escape(response)), "the contribution arrives whole");
     }
+
+    @Test
+    void failedChunk_stopsTheRestOfTheMessage() {
+        initExpanded();
+        // header delivered, then the first chunk of the contribution fails
+        when(slackApi.postMessage(any(), any(), any(), any())).thenReturn("1700.1").thenReturn(null);
+        listener.onSpeakerComplete(speakerEvent("a0", "Agent", "y".repeat(20_000), null, null));
+
+        // the group-start message, the header and the one failed chunk — nothing after
+        // it
+        verify(slackApi, times(3)).postMessage(any(), any(), any(), any());
+    }
 }

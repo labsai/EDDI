@@ -766,14 +766,17 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      */
     private String postSafe(String channel, String threadTs, String text) {
         // Escaped, then split into messages Slack will not truncate; the first
-        // message's ts is the one callers thread under.
+        // message's ts is the one callers thread under. A failed chunk ends the
+        // message: posting the rest would show a text without its beginning (or a
+        // gap in the middle), which reads as if it were complete.
         String firstTs = null;
-        boolean first = true;
         for (String chunk : SlackMrkdwn.escapeInChunks(text, SlackMrkdwn.MAX_MESSAGE_LENGTH)) {
             String ts = postChunk(channel, threadTs, chunk);
-            if (first) {
+            if (ts == null) {
+                break;
+            }
+            if (firstTs == null) {
                 firstTs = ts;
-                first = false;
             }
         }
         return firstTs;

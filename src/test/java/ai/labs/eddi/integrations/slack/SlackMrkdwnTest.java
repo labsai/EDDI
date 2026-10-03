@@ -39,7 +39,7 @@ class SlackMrkdwnTest {
     void escapedChunksStayWithinTheLimitAndReassembleExactly() {
         String text = ("line with <!here> & a > b\n").repeat(400) + "x".repeat(5000) + "&&&&";
 
-        List<String> chunks = SlackMrkdwn.escapeInChunks(text, 200);
+        List<String> chunks = SlackMrkdwn.escapeInChunks(text, 200, 1000);
 
         assertTrue(chunks.size() > 1);
         for (String chunk : chunks) {
@@ -72,5 +72,36 @@ class SlackMrkdwnTest {
     void emptyTextHasNoChunks() {
         assertTrue(SlackMrkdwn.escapeInChunks(null, 100).isEmpty());
         assertTrue(SlackMrkdwn.escapeInChunks("", 100).isEmpty());
+    }
+
+    @Test
+    void aTextNeedingMoreThanTheMaximumMessagesIsCutWithAMarker() {
+        List<String> chunks = SlackMrkdwn.escapeInChunks("x".repeat(100_000), 100, 3);
+
+        assertEquals(3, chunks.size());
+        for (String chunk : chunks) {
+            assertTrue(chunk.length() <= 100, "chunk of " + chunk.length());
+        }
+        assertTrue(chunks.getLast().endsWith(SlackMrkdwn.TRUNCATION_MARKER), chunks.getLast());
+        assertFalse(chunks.get(1).endsWith(SlackMrkdwn.TRUNCATION_MARKER));
+    }
+
+    @Test
+    void aTextThatFitsIsNotMarked() {
+        List<String> chunks = SlackMrkdwn.escapeInChunks("x".repeat(250), 100, 3);
+
+        assertEquals("x".repeat(250), String.join("", chunks));
+    }
+
+    @Test
+    void aTwoMegabyteNewlineFreeReplyBecomesAtMostTheMaximumNumberOfMessages() {
+        List<String> chunks = SlackMrkdwn.escapeInChunks("<&>".repeat(700_000), SlackMrkdwn.MAX_MESSAGE_LENGTH);
+
+        assertEquals(SlackMrkdwn.MAX_MESSAGES, chunks.size());
+        assertTrue(chunks.getLast().endsWith(SlackMrkdwn.TRUNCATION_MARKER));
+        for (String chunk : chunks) {
+            assertTrue(chunk.length() <= SlackMrkdwn.MAX_MESSAGE_LENGTH, "chunk of " + chunk.length());
+            assertFalse(chunk.contains("<"), "unescaped text");
+        }
     }
 }

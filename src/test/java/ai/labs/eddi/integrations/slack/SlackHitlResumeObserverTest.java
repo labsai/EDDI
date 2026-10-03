@@ -263,6 +263,7 @@ class SlackHitlResumeObserverTest {
         when(userConversationStore.readUserConversationByConversationId("conv-1")).thenReturn(mapping);
         when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
         String continuation = "<!channel> " + "&".repeat(5000);
+        when(slackApi.postMessage(anyString(), anyString(), anyString(), anyString())).thenReturn("1700.2");
 
         observer.onResumeCompleted(new HitlResumeCompletedEvent("conv-1", HitlVerdict.APPROVED, "slack:U9", snapshotWithText(continuation)));
 
@@ -274,5 +275,20 @@ class SlackHitlResumeObserverTest {
         }
         assertTrue(texts.getAllValues().getFirst().contains("<@U9>"), texts.getAllValues().getFirst());
         assertEquals(5000, String.join("", texts.getAllValues()).split("&amp;", -1).length - 1, "no part of the continuation was lost");
+    }
+
+    @Test
+    void onResumeCompleted_failedFirstMessage_stopsTheContinuation() throws Exception {
+        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "U1",
+                Deployment.Environment.production, "agent-1", "conv-1");
+        when(userConversationStore.readUserConversationByConversationId("conv-1")).thenReturn(mapping);
+        when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
+        // Slack refuses the first message (non-retryable error: null)
+        when(slackApi.postMessage(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent("conv-1", HitlVerdict.APPROVED, "slack:U9",
+                snapshotWithText("x".repeat(20_000))));
+
+        verify(slackApi, times(1)).postMessage(anyString(), anyString(), anyString(), anyString());
     }
 }

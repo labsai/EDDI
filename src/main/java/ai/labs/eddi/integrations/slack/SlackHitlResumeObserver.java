@@ -124,14 +124,17 @@ public class SlackHitlResumeObserver {
             return;
         }
         String firstChunk = continuationChunks.getFirst();
+        boolean delivered;
         if (summary.length() + 2 + firstChunk.length() <= SlackMrkdwn.MAX_MESSAGE_LENGTH) {
-            postSafe(auth, route.channelId(), route.threadTs(), summary + "\n\n" + firstChunk);
+            delivered = postSafe(auth, route.channelId(), route.threadTs(), summary + "\n\n" + firstChunk);
             continuationChunks = continuationChunks.subList(1, continuationChunks.size());
         } else {
-            postSafe(auth, route.channelId(), route.threadTs(), summary);
+            delivered = postSafe(auth, route.channelId(), route.threadTs(), summary);
         }
-        for (String chunk : continuationChunks) {
-            postSafe(auth, route.channelId(), route.threadTs(), chunk);
+        // A failed message ends the delivery: the rest of the continuation would
+        // arrive without its beginning (or without the decision it follows).
+        for (int i = 0; delivered && i < continuationChunks.size(); i++) {
+            delivered = postSafe(auth, route.channelId(), route.threadTs(), continuationChunks.get(i));
         }
     }
 
@@ -234,11 +237,13 @@ public class SlackHitlResumeObserver {
         return new SlackRoute(channelId, threadTs);
     }
 
-    private void postSafe(String auth, String channelId, String threadTs, String text) {
+    /** @return whether Slack accepted the message */
+    private boolean postSafe(String auth, String channelId, String threadTs, String text) {
         try {
-            slackApi.postMessage(auth, channelId, threadTs, text);
+            return slackApi.postMessage(auth, channelId, threadTs, text) != null;
         } catch (SlackDeliveryException e) {
             LOGGER.warnf("Slack HITL outcome post failed (channel=%s): %s", sanitize(channelId), e.getMessage());
+            return false;
         }
     }
 

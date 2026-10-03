@@ -1578,7 +1578,11 @@ public class SlackEventHandler {
         // without cutting an entity in half (SlackMrkdwn, shared with the group and
         // HITL listeners).
         for (String chunk : SlackMrkdwn.escapeInChunks(text, SlackMrkdwn.MAX_MESSAGE_LENGTH)) {
-            postMessage(channelId, threadTs, chunk, botToken);
+            if (!postMessage(channelId, threadTs, chunk, botToken)) {
+                // Not delivered even after the retries: the rest would arrive without
+                // this part, so stop here.
+                break;
+            }
         }
     }
 
@@ -1589,8 +1593,8 @@ public class SlackEventHandler {
      *            explicit bot token; if {@code null}, falls back to
      *            {@link ChannelTargetRouter#getBotToken}
      */
-    private void postMessage(String channelId, String threadTs, String text,
-                             String botToken) {
+    private boolean postMessage(String channelId, String threadTs, String text,
+                                String botToken) {
         // Resolve bot token: prefer explicit parameter, fallback to router
         String resolvedToken = botToken;
         if (resolvedToken == null || resolvedToken.isEmpty()) {
@@ -1599,7 +1603,7 @@ public class SlackEventHandler {
 
         if (resolvedToken == null || resolvedToken.isEmpty()) {
             LOGGER.warnf("No bot token configured for Slack channel %s — cannot post message", sanitize(channelId));
-            return;
+            return false;
         }
 
         String auth = "Bearer " + resolvedToken;
@@ -1607,8 +1611,8 @@ public class SlackEventHandler {
         int maxRetries = slackConfig.getApiMaxRetries();
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                slackApi.postMessage(auth, channelId, threadTs, text);
-                return;
+                // null is a non-retryable API error (already logged by the client)
+                return slackApi.postMessage(auth, channelId, threadTs, text) != null;
             } catch (SlackDeliveryException e) {
                 if (attempt < maxRetries) {
                     long backoff = slackConfig.getApiRetryBaseMs() * (1L << (attempt - 1));
@@ -1618,7 +1622,7 @@ public class SlackEventHandler {
                         Thread.sleep(backoff);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
-                        return;
+                        return false;
                     }
                 } else {
                     LOGGER.errorf("SLACK_DELIVERY_FAILED | channel=%s | threadTs=%s | textLength=%d | attempts=%d | error=%s",
@@ -1627,6 +1631,7 @@ public class SlackEventHandler {
                 }
             }
         }
+        return false;
     }
 
     /**
