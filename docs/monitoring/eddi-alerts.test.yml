@@ -1,0 +1,157 @@
+# Unit tests for eddi-alerts.yml: promtool test rules docs/monitoring/eddi-alerts.test.yml
+# (CI runs it in the "Deployment Manifests" job.) Each case feeds synthetic series and
+# states which alerts must fire and which must stay quiet — the quiet cases matter as
+# much: a rule that fires on an idle, healthy system gets silenced and then misses
+# the real incident.
+rule_files:
+  - eddi-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a scrape target that stays down pages; one that recovers does not
+    interval: 1m
+    input_series:
+      - series: 'up{job="eddi", instance="a"}'
+        values: '1 0 0 0 0'
+      - series: 'up{job="eddi", instance="b"}'
+        values: '1 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: EddiDown
+        exp_alerts:
+          - exp_labels: { severity: critical, job: eddi, instance: a }
+            exp_annotations:
+              summary: "EDDI target a is down"
+              description: "Prometheus has not been able to scrape a for 2 minutes: the process is down, unreachable, or /q/metrics answers 401 (authentication on, scrape without a token)."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddidown"
+
+  - name: LLM error ratio fires on a failing provider, not on a single error
+    interval: 1m
+    input_series:
+      # openai: 2 calls/min, 1 of them failing -> 50%
+      - series: 'eddi_llm_request_duration_seconds_count{job="eddi", instance="a", provider="openai", model="m", outcome="success"}'
+        values: '0+1x20'
+      - series: 'eddi_llm_request_duration_seconds_count{job="eddi", instance="a", provider="openai", model="m", outcome="error"}'
+        values: '0+1x20'
+      # anthropic: one error in 20 minutes among 2 calls/min -> below every threshold
+      - series: 'eddi_llm_request_duration_seconds_count{job="eddi", instance="a", provider="anthropic", model="m", outcome="success"}'
+        values: '0+2x20'
+      - series: 'eddi_llm_request_duration_seconds_count{job="eddi", instance="a", provider="anthropic", model="m", outcome="error"}'
+        values: '0x10 1x10'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: EddiLlmErrorRatio
+        exp_alerts:
+          - exp_labels: { severity: warning, job: eddi, instance: a, provider: openai }
+            exp_annotations:
+              summary: "50% of openai LLM calls fail on a"
+              description: "More than 10% of calls to openai failed for 5 minutes (at least 5 calls per 10 minutes). eddi_llm_request_errors_total names the exception."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddillmerrorratio"
+
+  - name: tool failure ratio counts a tool that has never succeeded
+    interval: 1m
+    input_series:
+      # never succeeded: there is no success series at all
+      - series: 'eddi_tool_execution_failure_total{job="eddi", instance="a", tool="fetch"}'
+        values: '0+1x20'
+      # healthy tool with an occasional failure
+      - series: 'eddi_tool_execution_success_total{job="eddi", instance="a", tool="calc"}'
+        values: '0+10x20'
+      - series: 'eddi_tool_execution_failure_total{job="eddi", instance="a", tool="calc"}'
+        values: '0x10 1x10'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: EddiToolFailureRatio
+        exp_alerts:
+          - exp_labels: { severity: warning, job: eddi, instance: a, tool: fetch }
+            exp_annotations:
+              summary: "100% of fetch tool calls fail on a"
+              description: "More than 25% of executions of tool fetch failed for 10 minutes (at least 5 failures per 10 minutes). Failures include rate-limit refusals and timeouts."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#edditoolfailureratio"
+
+  - name: the operator gate alerts when it regresses, not on a deployment that never verified one
+    interval: 1m
+    input_series:
+      - series: 'eddi_operator_gate_verified{job="eddi", instance="regressed"}'
+        values: '1 1 1 0 0'
+      - series: 'eddi_operator_gate_verified{job="eddi", instance="never-activated"}'
+        values: '0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: EddiOperatorGateRegressed
+        exp_alerts:
+          - exp_labels: { severity: critical, job: eddi, instance: regressed }
+            exp_annotations:
+              description: "The gate read back as sound within the last day and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddioperatorgateregressed"
+              summary: "The Platform Operator's write-approval gate is no longer verified on regressed"
+
+  - name: a dropped audit entry pages; a quiet counter does not
+    interval: 1m
+    input_series:
+      - series: 'eddi_audit_entries_dropped_total{job="eddi", instance="a"}'
+        values: '0 0 0 3 3'
+      - series: 'eddi_audit_entries_dropped_total{job="eddi", instance="b"}'
+        values: '0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: EddiAuditEntriesDropped
+        exp_alerts:
+          - exp_labels: { severity: critical, job: eddi, instance: a }
+            exp_annotations:
+              description: "The audit queue was full and entries were dropped. A dropped entry is unrecoverable and invisible to /auditstore/verify."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiauditentriesdropped"
+              summary: "3 audit entries were dropped on a"
+
+  - name: heap after GC above 85% warns; a busy heap that GC clears does not
+    interval: 1m
+    input_series:
+      - series: 'jvm_memory_usage_after_gc{job="eddi", instance="a", area="heap", pool="long-lived"}'
+        values: '0.9x15'
+      - series: 'jvm_memory_usage_after_gc{job="eddi", instance="b", area="heap", pool="long-lived"}'
+        values: '0.3x15'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: EddiHeapAfterGcHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, job: eddi, instance: a }
+            exp_annotations:
+              description: "Live data after garbage collection stayed above 85% of the maximum heap for 10 minutes. The next allocation burst ends in long GC pauses or an OutOfMemoryError."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiheapaftergchigh"
+              summary: "a keeps 90% of its heap after GC"
+      - eval_time: 15m
+        alertname: EddiHeapAfterGcCritical
+        exp_alerts: []
+
+  - name: a restart loop is three restarts in half an hour
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="eddi", instance="a"}'
+        values: '100 100 400 400 700 700 1000 1000'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: EddiRestartLoop
+        exp_alerts:
+          - exp_labels: { severity: warning, job: eddi, instance: a }
+            exp_annotations:
+              description: "The process start time changed 3 times in 30 minutes. A crash loop, an OOM kill or a liveness probe that keeps failing."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddirestartloop"
+              summary: "EDDI a restarted 3 times in 30 minutes"
+
+  - name: turns waiting for a worker thread for five minutes means the pool is saturated
+    interval: 1m
+    input_series:
+      - series: 'eddi_runtime_executor_queued{job="eddi", instance="a", pool="managed"}'
+        values: '3x10'
+      - series: 'eddi_runtime_executor_queued{job="eddi", instance="b", pool="managed"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: EddiExecutorSaturated
+        exp_alerts:
+          - exp_labels: { severity: warning, job: eddi, instance: a }
+            exp_annotations:
+              description: "For 5 minutes at least one turn was submitted to the worker pool and had to wait for a free thread. Every thread is busy: raise quarkus.thread-pool.max-threads or find what holds the threads (slow tools, slow LLM calls)."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiexecutorsaturated"
+              summary: "Conversation turns on a are waiting for a worker thread"
