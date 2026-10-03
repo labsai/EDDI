@@ -193,6 +193,12 @@ conversation**, so the context stays usable. Cancelling a task that already
 reached a terminal state answers `-32002` TaskNotCancelable. (Up to 6.5, a
 cancel ended the whole conversation.)
 
+A conversation runs one turn at a time, and cancelling stops the turn it is
+running. So a task **queued behind another task's turn** in the same context is
+answered `-32002` too — cancelling it then would stop its sibling instead. Once
+the turn ahead has settled, the task can be cancelled. This queue is known per
+node; a cancel that reaches a node which did not submit the turn cannot see it.
+
 ### Where tasks are remembered
 
 Tasks and context bindings are kept behind `IA2ATaskStore`. The default
@@ -234,7 +240,8 @@ shortly."). `GetTask` and `CancelTask` are never refused.
 A slot is held for the turn, not the HTTP request: a `returnImmediately` send, a
 stream and a blocking send that stopped waiting keep it until the turn settles.
 Every slot is released at the latest `task-timeout + 30 s` after it was taken,
-so a turn that never reports back cannot leak one. A cancelled turn keeps its
+so a turn that never reports back cannot leak one; a normal release cancels that
+timer. A cancelled turn keeps its
 slot until it actually stops (an in-flight LLM call is not interrupted).
 
 Metrics: `eddi_a2a_requests_total{method,dialect,outcome}` (`outcome=busy` counts

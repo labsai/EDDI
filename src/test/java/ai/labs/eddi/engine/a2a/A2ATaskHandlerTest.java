@@ -561,6 +561,21 @@ class A2ATaskHandlerTest {
         }
 
         @Test
+        @DisplayName("a normal release cancels the lease timer instead of leaving it queued")
+        void releaseCancelsTheLeaseTimer() {
+            var small = new A2AInFlightLimiter(4, null);
+            var first = small.tryAcquire(3600);
+            var second = small.tryAcquire(3600);
+            assertEquals(2, small.pendingLeases());
+
+            first.release();
+            second.release();
+
+            assertEquals(0, small.pendingLeases());
+            small.shutdown();
+        }
+
+        @Test
         void nonPositiveCapacityFallsBackToTheDefault() {
             assertEquals(A2AInFlightLimiter.DEFAULT_MAX_CONCURRENT, new A2AInFlightLimiter(0, null).capacity());
         }
@@ -694,6 +709,45 @@ class A2ATaskHandlerTest {
             pending.get().onComplete(turn);
             assertEquals(TaskState.canceled, handler.get(task.id(), null).state());
             assertEquals(CancelResult.NOT_CANCELABLE, handler.cancel(task.id()).result());
+        }
+
+        @Test
+        @DisplayName("a task queued behind a sibling's running turn is not cancelable — the sibling's turn is left alone")
+        void queuedTaskDoesNotCancelItsSibling() throws Exception {
+            List<ConversationResponseHandler> pending = new ArrayList<>();
+            List<String> taskIds = new ArrayList<>();
+            doAnswer(invocation -> {
+                pending.add(invocation.getArgument(8));
+                taskIds.add(taskIdOf(invocation.getArgument(6)));
+                return null;
+            }).when(conversationService).say(any(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean(), any());
+            when(conversationService.cancelConversation(anyString(), any(), any())).thenReturn(CancelOutcome.CANCELLED);
+            A2ATask running = handler.send(AGENT, new SendRequest("first", "m", null, null, null, true, null, Dialect.V1_0));
+            A2ATask queued = handler.send(AGENT, new SendRequest("second", "m", running.contextId(), null, null, true, null, Dialect.V1_0));
+
+            var outcome = handler.cancel(queued.id());
+
+            assertEquals(CancelResult.NOT_CANCELABLE, outcome.result());
+            verify(conversationService, never()).cancelConversation(anyString(), any(), any());
+
+            // Once the turn ahead has settled, the queued task is the running one and
+            // cancels.
+            var turn = new SimpleConversationMemorySnapshot();
+            turn.setConversationState(ConversationState.READY);
+            turn.setConversationOutputs(List.of(output(taskIds.getFirst(), "ok")));
+            pending.getFirst().onComplete(turn);
+            assertEquals(CancelResult.CANCELED, handler.cancel(queued.id()).result());
+        }
+
+        @Test
+        @DisplayName("the head of the queue — the running turn — is cancelable")
+        void runningHeadIsCancelable() throws Exception {
+            sayNeverReturns();
+            when(conversationService.cancelConversation(anyString(), any(), any())).thenReturn(CancelOutcome.CANCELLED);
+            A2ATask running = handler.send(AGENT, new SendRequest("first", "m", null, null, null, true, null, Dialect.V1_0));
+            handler.send(AGENT, new SendRequest("second", "m", running.contextId(), null, null, true, null, Dialect.V1_0));
+
+            assertEquals(CancelResult.CANCELED, handler.cancel(running.id()).result());
         }
 
         @Test

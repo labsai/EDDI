@@ -31,6 +31,10 @@ and tasks lived only in a node-local 1,000-entry cache.
   blocking send stops waiting → `working`. Each turn carries its task id in the
   input context and an output is returned only if it carries that id, so a
   stale previous answer can no longer be returned.
+- **A task queued behind a sibling's turn is not cancelable** (`-32002`)
+  until that turn settles: cancelling the conversation would have stopped the
+  sibling's turn instead. The in-flight bound's lease timer is cancelled on a
+  normal release rather than left queued for task timeout + 30 s.
 - **`CancelTask` cancels the turn**, not the conversation (it used to end the
   whole context), and a terminal task answers `TaskNotCancelable`.
 - **In-flight bound** `eddi.a2a.max-concurrent-requests` (default 64): the

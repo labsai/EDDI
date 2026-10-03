@@ -38,7 +38,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +48,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -139,6 +143,17 @@ public class A2ATaskHandler {
     private final AgentCardService agentCardService;
     private final A2AInFlightLimiter limiter;
     private final MeterRegistry meterRegistry;
+
+    /**
+     * The unsettled tasks of each conversation, oldest first, as submitted from
+     * this node. A conversation runs one turn at a time, so the head is the turn
+     * that is running (or next to run) and the rest are queued behind it.
+     * {@code cancelConversation} stops whatever turn the conversation is running,
+     * so a cancel of a queued task would stop its sibling's turn instead; this is
+     * how {@link #cancel} tells the two apart. Transport bookkeeping, not
+     * conversation state: entries live only until their turn settles.
+     */
+    private final Map<String, Deque<String>> unsettledByConversation = new ConcurrentHashMap<>();
 
     /**
      * The calling peer's identity. For a remote agent this is the principal of the
@@ -302,6 +317,13 @@ public class A2ATaskHandler {
         }
         A2ATaskRecord record = found.get();
         if (record.state().isTerminal()) {
+            return new CancelOutcomeAndTask(CancelResult.NOT_CANCELABLE, toTask(record, null));
+        }
+        if (queuedBehindAnotherTask(record.conversationId(), taskId)) {
+            // Cancelling the conversation would stop the sibling task's running turn,
+            // not this one. Refused rather than mis-aimed; the peer can retry once the
+            // turn ahead of it has settled.
+            LOGGER.debugf("A2A task %s is queued behind another turn of its conversation — not cancelable now", sanitize(taskId));
             return new CancelOutcomeAndTask(CancelResult.NOT_CANCELABLE, toTask(record, null));
         }
         try {
@@ -500,6 +522,7 @@ public class A2ATaskHandler {
 
         String conversationId = prepared.record().conversationId();
         String taskId = prepared.record().taskId();
+        settler.enqueue(conversationId);
         if (sink == null) {
             conversationService.say(Environment.production, prepared.agentId(), conversationId, DETAILED, true, null, inputData, false,
                     new ConversationResponseHandler() {
@@ -562,6 +585,7 @@ public class A2ATaskHandler {
         private final Permit permit;
         private final Consumer<A2ATaskRecord> onSettled;
         private final AtomicBoolean done = new AtomicBoolean();
+        private final List<String> queuedOn = new CopyOnWriteArrayList<>();
 
         Settler(Prepared prepared, Permit permit, Consumer<A2ATaskRecord> onSettled) {
             this.prepared = prepared;
@@ -571,6 +595,26 @@ public class A2ATaskHandler {
 
         void retarget(Prepared moved) {
             this.prepared = moved;
+        }
+
+        void enqueue(String conversationId) {
+            String taskId = prepared.record().taskId();
+            unsettledByConversation.compute(conversationId, (id, tasks) -> {
+                Deque<String> queue = tasks == null ? new ArrayDeque<>() : tasks;
+                queue.addLast(taskId);
+                return queue;
+            });
+            queuedOn.add(conversationId);
+        }
+
+        private void dequeue() {
+            String taskId = prepared.record().taskId();
+            for (String conversationId : queuedOn) {
+                unsettledByConversation.computeIfPresent(conversationId, (id, tasks) -> {
+                    tasks.remove(taskId);
+                    return tasks.isEmpty() ? null : tasks;
+                });
+            }
         }
 
         void settleFrom(SimpleConversationMemorySnapshot snapshot, String taskId) {
@@ -618,9 +662,24 @@ public class A2ATaskHandler {
                     // nothing more can be done for this task
                 }
             } finally {
+                dequeue();
                 permit.release();
             }
         }
+    }
+
+    /**
+     * Whether another task's turn is ahead of {@code taskId} in its conversation,
+     * as far as this node knows. Read under the map's lock for the key, so it sees
+     * a consistent queue.
+     */
+    boolean queuedBehindAnotherTask(String conversationId, String taskId) {
+        boolean[] behind = {false};
+        unsettledByConversation.computeIfPresent(conversationId, (id, tasks) -> {
+            behind[0] = tasks.contains(taskId) && !taskId.equals(tasks.peekFirst());
+            return tasks;
+        });
+        return behind[0];
     }
 
     /** How a task's turn ended, as A2A sees it. */
