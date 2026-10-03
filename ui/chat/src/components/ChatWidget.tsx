@@ -32,6 +32,7 @@ import {
   setBaseUrl,
 } from "@/api/chat-api";
 import { setAuthToken } from "@/api/http";
+import { parseAllowedTokenOrigins, startEmbedAuth } from "@/api/embed-auth";
 import {
   isDemoMode,
   demoStartConversation,
@@ -141,25 +142,66 @@ const COLOR_PARAM_MAP: Record<string, string[]> = {
   fontFamily:   ["--chat-font"],
 };
 
+/**
+ * Whether a `?…Color=` value is a plain colour. The value lands in a CSS
+ * custom property, and a custom property takes ANY token sequence — so an
+ * unchecked `?bgColor=url(https://tracker/x)` made the widget fetch a URL the
+ * link's author chose, and a garbage value silently broke the theme. Accepted:
+ * hex (#rgb, #rgba, #rrggbb, #rrggbbaa), rgb()/rgba()/hsl()/hsla() with plain
+ * numeric arguments, and named colours (letters only — `transparent`,
+ * `rebeccapurple`). Nothing with a URL, quote, semicolon or nested function.
+ */
+export function isSafeCssColor(value: string): boolean {
+  const v = value.trim();
+  if (!v || v.length > 64) return false;
+  if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v)) return true;
+  if (/^(?:rgb|rgba|hsl|hsla)\(\s*[-+0-9.%\s,/deg]+\)$/i.test(v)) return true;
+  return /^[a-z]{3,30}$/i.test(v);
+}
+
+/**
+ * Whether a `?fontFamily=` value is a plain font list: names, spaces, commas,
+ * hyphens and quotes — no parentheses, so no url() or other function.
+ */
+export function isSafeFontFamily(value: string): boolean {
+  const v = value.trim();
+  return !!v && v.length <= 200 && /^[a-z0-9 ,'"_-]+$/i.test(v);
+}
+
+/** `#rgb` / `#rrggbb` as `#rrggbb`, or null — the only form an alpha suffix can extend. */
+function sixDigitHex(value: string): string | null {
+  const v = value.trim();
+  if (/^#[0-9a-f]{6}$/i.test(v)) return v;
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v);
+  return short ? `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}` : null;
+}
+
 /** Apply color overrides from query params as CSS custom properties */
-function applyColorOverrides(params: URLSearchParams): void {
+export function applyColorOverrides(params: URLSearchParams): void {
   const root = document.documentElement;
   for (const [param, vars] of Object.entries(COLOR_PARAM_MAP)) {
     const value = params.get(param);
-    if (value) {
-      for (const cssVar of vars) {
-        root.style.setProperty(cssVar, value);
-      }
+    if (!value) continue;
+    const valid = param === "fontFamily" ? isSafeFontFamily(value) : isSafeCssColor(value);
+    if (!valid) {
+      console.warn(`[eddi-chat] ignoring ${param}: not a plain ${param === "fontFamily" ? "font list" : "colour"}`);
+      continue;
+    }
+    for (const cssVar of vars) {
+      root.style.setProperty(cssVar, value.trim());
     }
   }
-  // accentColor also derives soft/hover variants automatically
+  // accentColor also derives soft/hover variants automatically. They are built
+  // by appending an alpha byte, which only extends a six-digit hex colour;
+  // any other valid accent keeps the theme's own variants.
   const accent = params.get("accentColor");
-  if (accent) {
-    root.style.setProperty("--chat-accent-soft", accent + "22");
-    root.style.setProperty("--chat-qr-border", accent + "66");
-    root.style.setProperty("--chat-qr-bg", accent + "2e");
-    root.style.setProperty("--chat-qr-text", accent);
-    root.style.setProperty("--chat-qr-hover", accent + "55");
+  const hex = accent && isSafeCssColor(accent) ? sixDigitHex(accent) : null;
+  if (hex) {
+    root.style.setProperty("--chat-accent-soft", hex + "22");
+    root.style.setProperty("--chat-qr-border", hex + "66");
+    root.style.setProperty("--chat-qr-bg", hex + "2e");
+    root.style.setProperty("--chat-qr-text", hex);
+    root.style.setProperty("--chat-qr-hover", hex + "55");
   }
 }
 
@@ -191,30 +233,11 @@ export function sanitizeApiServer(raw: string | null): string | null {
   return raw;
 }
 
-/**
- * Origins allowed to hand the widget a bearer token via postMessage, read from
- * `?tokenOrigin=` (comma-separated, exact `scheme://host[:port]` each). This is
- * an explicit operator opt-in: with no value, no postMessage token is accepted.
- * A malformed entry is dropped rather than widening the allow-list.
- */
-export function parseAllowedTokenOrigins(params: URLSearchParams): string[] {
-  const raw = params.get("tokenOrigin");
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((o) => o.trim())
-    .filter((o) => {
-      if (!o) return false;
-      try {
-        return new URL(o).origin === o;
-      } catch {
-        return false;
-      }
-    });
-}
+// Re-exported: the helpers' tests and older imports name it from here.
+export { parseAllowedTokenOrigins };
 
 /** Read feature toggles from query parameters */
-function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
+export function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
   const cfg: Partial<ChatConfig> = {};
   if (params.get("hideUndo") === "true") cfg.enableUndo = false;
   if (params.get("hideRedo") === "true") cfg.enableRedo = false;
@@ -223,9 +246,13 @@ function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
   if (params.get("hideStreaming") === "true") cfg.enableStreaming = false;
   if (params.get("hideLogo") === "true") cfg.showLogo = false;
   if (params.get("hideAgentName") === "true") cfg.showAgentName = false;
-  if (params.get("theme")) cfg.theme = params.get("theme") as ChatConfig["theme"];
+  // Only the three modes the theme hook knows. Anything else was written into
+  // data-theme verbatim, matched no stylesheet and left the widget unstyled.
+  const theme = params.get("theme");
+  if (theme === "dark" || theme === "light" || theme === "system") cfg.theme = theme;
   if (params.get("title")) cfg.title = params.get("title")!;
-  if (params.get("accentColor")) cfg.accentColor = params.get("accentColor")!;
+  const accent = params.get("accentColor");
+  if (accent && isSafeCssColor(accent)) cfg.accentColor = accent.trim();
   return cfg;
 }
 
@@ -336,32 +363,28 @@ export function ChatWidget() {
     // login-CSRF vector — a crafted link can silently authenticate the widget as
     // someone else's session. Fully closing this needs a PKCE/OIDC login flow
     // (out of scope here). Prefer the postMessage handshake below, or config.
-    setAuthToken(urlToken ?? state.config.authToken ?? null);
+    //
+    // Only a token that is actually present is installed: clearing it here
+    // would wipe one the host handed over by postMessage.
+    const explicit = urlToken ?? state.config.authToken ?? null;
+    if (explicit) setAuthToken(explicit);
   }, [urlToken, state.config.authToken]);
 
-  /* ─── Accept a token via postMessage from an allow-listed parent ──
-     Safer than the URL: the token never touches the address bar, history or
-     Referer. Only origins named in ?tokenOrigin= are honoured, and only when
-     the message comes from our own parent frame. */
+  /* ─── Token hand-off from an allow-listed host page ──
+     See api/embed-auth.ts for the protocol. The widget announces itself to
+     the parent (at an allow-listed origin, never "*"), accepts a token only
+     from that parent at an allow-listed origin, asks again before the token
+     expires, and answers a 401 by asking for a fresh one and repeating the
+     request once — so a conversation started before the host's first token
+     arrived, or a turn sent after it expired, still goes through. */
+  const tokenOrigins = searchParams.get("tokenOrigin");
   useEffect(() => {
-    const allowed = parseAllowedTokenOrigins(searchParams);
-    if (allowed.length === 0) return;
-    const onMessage = (event: MessageEvent) => {
-      if (!allowed.includes(event.origin)) return;
-      if (event.source !== window.parent) return;
-      const data = event.data as unknown;
-      if (
-        data &&
-        typeof data === "object" &&
-        (data as { type?: unknown }).type === "eddi-chat-token" &&
-        typeof (data as { token?: unknown }).token === "string"
-      ) {
-        setAuthToken((data as { token: string }).token);
-      }
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [searchParams]);
+    const allowedOrigins = parseAllowedTokenOrigins(
+      new URLSearchParams(tokenOrigins ? { tokenOrigin: tokenOrigins } : {}),
+    );
+    const embed = startEmbedAuth({ allowedOrigins });
+    return () => embed.stop();
+  }, [tokenOrigins]);
 
   /* ─── SSE event handler (declared early to avoid reference issues) ──
      Returns `true` when the stream is logically complete (done / error),
@@ -1084,6 +1107,11 @@ export function ChatWidget() {
           dispatch({ type: "SET_PROCESSING", value: false });
         }
       } catch (err) {
+        // A failure that lands after New Conversation belongs to the turn the
+        // user abandoned. Every branch below writes into the transcript —
+        // withdrawing a bubble, restoring a draft, a warning, a state re-read —
+        // and would otherwise do so in the conversation that replaced it.
+        if (sendGen !== generationRef.current) return;
         dispatch({ type: "SET_PROCESSING", value: false });
         dispatch({ type: "SET_THINKING", value: false });
         // This path never reaches FINISH_STREAMING, so clear it here too.
@@ -1115,6 +1143,7 @@ export function ChatWidget() {
                 state.conversationId,
                 true,
               );
+              if (sendGen !== generationRef.current) return;
               if (snap.conversationState) {
                 dispatch({
                   type: "SET_CONVERSATION_STATE",
@@ -1239,6 +1268,8 @@ export function ChatWidget() {
         redoAvailable: snapshot.redoAvailable ?? true,
       });
     } catch (err) {
+      // Abandoned by New Conversation: its error is not the new one's.
+      if (gen !== generationRef.current) return;
       // 409 is expected while the conversation is paused or a turn is running —
       // undo/redo availability is deliberately NOT pause-aware server-side, so
       // the button can be enabled while the operation is refused.
@@ -1251,7 +1282,9 @@ export function ChatWidget() {
         ),
       });
     } finally {
-      dispatch({ type: "SET_PROCESSING", value: false });
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_PROCESSING", value: false });
+      }
     }
   }, [dispatch, state.conversationId, isDemo]);
 
@@ -1287,6 +1320,8 @@ export function ChatWidget() {
         redoAvailable: snapshot.redoAvailable ?? false,
       });
     } catch (err) {
+      // Abandoned by New Conversation: its error is not the new one's.
+      if (gen !== generationRef.current) return;
       dispatch({
         type: "ADD_MESSAGE",
         message: makeAgentMessage(
@@ -1296,7 +1331,9 @@ export function ChatWidget() {
         ),
       });
     } finally {
-      dispatch({ type: "SET_PROCESSING", value: false });
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_PROCESSING", value: false });
+      }
     }
   }, [dispatch, state.conversationId, isDemo]);
 
@@ -1368,9 +1405,13 @@ export function ChatWidget() {
 
   const handleCancel = useCallback(async () => {
     if (!state.conversationId) return;
+    const gen = generationRef.current;
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
       await cancelConversation(state.conversationId);
+      // "This request was cancelled." and EXECUTION_INTERRUPTED describe the
+      // conversation that was cancelled, not one started since.
+      if (gen !== generationRef.current) return;
       dispatch({ type: "SET_APPROVAL_STATUS", status: null });
       dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
       dispatch({
@@ -1378,6 +1419,7 @@ export function ChatWidget() {
         message: makeAgentMessage("This request was cancelled."),
       });
     } catch (err) {
+      if (gen !== generationRef.current) return;
       if (err instanceof ApiError && err.status === 409) {
         // Nothing to cancel — it resolved between render and click.
         dispatch({ type: "SET_APPROVAL_STATUS", status: null });
@@ -1385,7 +1427,9 @@ export function ChatWidget() {
         console.error("Cancel failed:", err);
       }
     } finally {
-      dispatch({ type: "SET_PROCESSING", value: false });
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_PROCESSING", value: false });
+      }
     }
   }, [dispatch, state.conversationId]);
 
@@ -1412,6 +1456,8 @@ export function ChatWidget() {
       // Retry re-reads the same step that failed; its output is already shown.
       processSnapshot(snapshot, { dedupe: true });
     } catch (err) {
+      // Abandoned by New Conversation: its error is not the new one's.
+      if (gen !== generationRef.current) return;
       dispatch({
         type: "ADD_MESSAGE",
         message: makeAgentMessage(
@@ -1421,7 +1467,9 @@ export function ChatWidget() {
         ),
       });
     } finally {
-      dispatch({ type: "SET_PROCESSING", value: false });
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_PROCESSING", value: false });
+      }
     }
   }, [dispatch, state.conversationId, processSnapshot]);
 
@@ -1439,8 +1487,12 @@ export function ChatWidget() {
     dispatch({ type: "SET_THINKING", value: false });
 
     if (!state.conversationId || isDemo) return;
+    const gen = generationRef.current;
     try {
       await cancelConversation(state.conversationId);
+      // New Conversation while the cancel was in flight: the fresh
+      // conversation is not interrupted.
+      if (gen !== generationRef.current) return;
       dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
     } catch (err) {
       // 409 = nothing to cancel; the turn finished as we clicked.

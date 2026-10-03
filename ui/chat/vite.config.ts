@@ -34,8 +34,16 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+    // Every path prefix the API layer (src/api/*.ts) calls must be listed, or
+    // `npm run dev` answers it with the SPA's index.html. vite-proxy.test.ts
+    // checks this list against the code.
     proxy: {
       "/agents": {
+        target: "http://localhost:7070",
+        changeOrigin: true,
+      },
+      // Attachment upload and delete (attachments-api.ts).
+      "/conversations": {
         target: "http://localhost:7070",
         changeOrigin: true,
       },

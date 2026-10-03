@@ -172,45 +172,65 @@ export async function* sendMessageStreaming(
       buffer = parts.pop() ?? "";
 
       for (const part of parts) {
-        if (!part.trim()) continue;
-        let eventType: SSEEventType | null = null;
-        const dataLines: string[] = [];
-
-        for (const line of part.split("\n")) {
-          if (line.startsWith(":")) {
-            // Comment / keep-alive — carries no event
-            continue;
-          }
-          if (line.startsWith("event:")) {
-            eventType = line.slice(6).trim() as SSEEventType;
-          } else if (line.startsWith("data:")) {
-            // Strip exactly ONE leading space — the SSE spec's delimiter — and
-            // keep everything after it verbatim.
-            //
-            // EDDI writes that delimiter explicitly: RESTEasy's SseUtil emits
-            // "data:" with no space of its own, so RestAgentEngineStreaming
-            // .padDataLines prefixes every data line with one. A token " word"
-            // therefore arrives as "data:  word". Keeping the delimiter put an
-            // extra space in front of every token ("quota tion"); stripping
-            // more than one would run words together again.
-            dataLines.push(line[5] === " " ? line.slice(6) : line.slice(5));
-          }
-        }
-
-        // A frame with neither an event name nor data (bare comment/keep-alive)
-        // is not an event. Defaulting to "token" made every unrecognised frame
-        // render as visible text in the agent's message.
-        if (eventType === null && dataLines.length === 0) continue;
-
-        yield {
-          type: eventType ?? "token",
-          data: dataLines.join("\n"),
-        };
+        const event = parseSseFrame(part);
+        if (event) yield event;
       }
+    }
+    // The stream ended. A last frame that was not followed by the blank line
+    // that normally terminates it is still a complete frame — a proxy or a
+    // server that closes right after `done` drops that line — and it is
+    // usually the one that matters (`done` or `error`). Flush the decoder and
+    // parse what is left instead of discarding it.
+    buffer += decoder.decode();
+    buffer = buffer.replace(/\r\n/g, "\n");
+    for (const part of buffer.split("\n\n")) {
+      const event = parseSseFrame(part);
+      if (event) yield event;
     }
   } finally {
     reader.releaseLock();
   }
+}
+
+/**
+ * One SSE frame (the text between two blank lines) as an event, or null for a
+ * frame that carries none — blank, or only comments/keep-alives.
+ */
+export function parseSseFrame(part: string): SSEEvent | null {
+  if (!part.trim()) return null;
+  let eventType: SSEEventType | null = null;
+  const dataLines: string[] = [];
+
+  for (const line of part.split("\n")) {
+    if (line.startsWith(":")) {
+      // Comment / keep-alive — carries no event
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      eventType = line.slice(6).trim() as SSEEventType;
+    } else if (line.startsWith("data:")) {
+      // Strip exactly ONE leading space — the SSE spec's delimiter — and
+      // keep everything after it verbatim.
+      //
+      // EDDI writes that delimiter explicitly: RESTEasy's SseUtil emits
+      // "data:" with no space of its own, so RestAgentEngineStreaming
+      // .padDataLines prefixes every data line with one. A token " word"
+      // therefore arrives as "data:  word". Keeping the delimiter put an
+      // extra space in front of every token ("quota tion"); stripping
+      // more than one would run words together again.
+      dataLines.push(line[5] === " " ? line.slice(6) : line.slice(5));
+    }
+  }
+
+  // A frame with neither an event name nor data (bare comment/keep-alive)
+  // is not an event. Defaulting to "token" made every unrecognised frame
+  // render as visible text in the agent's message.
+  if (eventType === null && dataLines.length === 0) return null;
+
+  return {
+    type: eventType ?? "token",
+    data: dataLines.join("\n"),
+  };
 }
 
 /* ─── Managed agent endpoints ──────────────────── */
