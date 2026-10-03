@@ -1,0 +1,41 @@
+{{- if .Values.serviceMonitor.enabled }}
+{{- /*
+  Prometheus Operator scrape config for the EDDI Service. Opt-in: the
+  monitoring.coreos.com CRDs exist only where the operator is installed, and a
+  release that renders this without them fails to apply.
+
+  The job label is rewritten to "eddi" because the shipped alert rules
+  (prometheusrule.yaml) and dashboards select on it. Without the relabel the job
+  would be the Service name, <release>-eddi, and EddiDown could never fire.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "eddi.fullname" . }}
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "eddi.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  endpoints:
+    - port: http
+      path: /q/metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+      relabelings:
+        - action: replace
+          targetLabel: job
+          replacement: eddi
+      {{- with .Values.serviceMonitor.endpointConfig }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+{{- end }}

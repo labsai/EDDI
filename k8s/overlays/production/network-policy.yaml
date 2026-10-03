@@ -3,7 +3,8 @@
 # Allows:
 #   - Ingress: HTTP (7070) from any pod in the eddi namespace
 #   - Egress: MongoDB (27017), PostgreSQL (5432), NATS (4222),
-#             Keycloak (8080), DNS, and external HTTPS (LLM APIs)
+#             Keycloak (8080), DNS, and external HTTPS (LLM APIs);
+#             OTLP (4317) only once you uncomment its rule below
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -85,6 +86,19 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    # OTLP trace export — only if you turned tracing on
+    # (QUARKUS_OTEL_SDK_DISABLED=false, QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT).
+    # An in-cluster collector has a private address, which the HTTPS rule below
+    # excludes, so without a rule like this every span is dropped and only the
+    # exporter's timeouts reach the log. Uncomment and narrow it to your
+    # collector (the Helm chart renders it from eddi.tracing.otlpEndpoint):
+    # - to:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: observability
+    #   ports:
+    #     - protocol: TCP
+    #       port: 4317
     # External HTTPS — LLM API providers (OpenAI, Anthropic, etc.)
     #
     # The `except` list mirrors the application's own SSRF blocklist

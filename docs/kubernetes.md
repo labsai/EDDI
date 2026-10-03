@@ -199,7 +199,7 @@ on one does not work by design — and are composed with a database overlay.
 |---|---|---|
 | **Keycloak Auth** | OIDC authentication — ⚠️ Kustomize needs the `keycloak-admin` Secret created first, see [Authentication](#authentication-keycloak) | `--set keycloak.enabled=true --set eddi.oidc.enabled=true --set eddi.oidc.publicUrl=http://localhost:8080 --set keycloak.adminPassword=…` |
 | **NATS JetStream** | Durable, ordered messaging | ⚠️ needs an image built with `-Dquarkus.profile=nats` — see [Durable Messaging](#durable-messaging-production) |
-| **Monitoring** | Prometheus + Grafana | — (Kustomize only: `k8s/overlays/monitoring/`) |
+| **Monitoring** | Prometheus (with the shipped alert rules) + Grafana (with the three dashboards) | Prometheus Operator only: `--set serviceMonitor.enabled=true --set prometheusRule.enabled=true`. The stack itself is Kustomize only: `k8s/overlays/monitoring/` |
 | **Ingress** | External HTTPS access | `--set ingress.enabled=true --set ingress.hosts[0].host=eddi.example.com` |
 | **Production** | PDB, NetworkPolicy | `--set podDisruptionBudget.enabled=true --set networkPolicy.enabled=true` |
 
@@ -615,9 +615,13 @@ annotations:
   prometheus.io/path: "/q/metrics"
 ```
 
-Deploy the monitoring stack with Kustomize. The Helm chart ships **no**
-Prometheus or Grafana templates and no longer offers `monitoring.*` values — they
-used to exist and render nothing, which read as success:
+Deploy the monitoring stack with Kustomize. It runs Prometheus with EDDI's alert
+rules loaded (`docs/monitoring/eddi-alerts.yml`, runbooks in the
+[monitoring guide](monitoring/monitoring-guide.md#alert-runbooks)) and Grafana with
+the Prometheus datasource (uid `prometheus`) and all three EDDI dashboards
+provisioned into an "EDDI" folder. The rules and dashboards come from generated
+ConfigMaps; the largest is ~230 KB once escaped, inside the 256 KiB limit of
+client-side `kubectl apply` — if you add to it, apply with `--server-side`:
 
 ```bash
 # Kustomize (with MongoDB + Auth + Monitoring)
@@ -643,6 +647,33 @@ prune: `kubectl delete clusterrolebinding eddi-prometheus` and
 
 With the auth component, `/q/metrics` requires a token and an anonymous scrape
 answers 401 — see [Scraping with authentication on](monitoring/monitoring-guide.md#scraping-with-authentication-on).
+
+**Helm with the Prometheus Operator.** The chart ships no Prometheus or Grafana of
+its own (the old `monitoring.*` values rendered nothing and were removed), but it
+can hand EDDI to a Prometheus Operator such as kube-prometheus-stack. Both
+switches are off by default because their CRDs exist only where the operator runs:
+
+```bash
+helm upgrade --install eddi helm/eddi … \
+  --set serviceMonitor.enabled=true \
+  --set prometheusRule.enabled=true \
+  --set serviceMonitor.labels.release=kube-prometheus-stack \
+  --set prometheusRule.labels.release=kube-prometheus-stack
+```
+
+The `ServiceMonitor` rewrites the job label to `eddi`, which the rules and the
+dashboards select on; with authentication on, give it a token through
+`serviceMonitor.endpointConfig` (`authorization:` or `oauth2:`). If your
+Prometheus also honours the `prometheus.io/*` pod annotations, clear
+`eddi.podAnnotations`, or EDDI is scraped twice. Import the dashboards from
+`docs/monitoring/` (they pick the datasource through a variable).
+
+**Tracing.** `--set eddi.tracing.otlpEndpoint=http://<collector>:4317` turns the
+OpenTelemetry SDK on. With `networkPolicy.enabled=true` the chart then also allows
+egress to `eddi.tracing.otlpPort` (default 4317) for the peers in
+`networkPolicy.otlpEgressTo` (default: any pod in the cluster) — without it the
+default-deny policy drops every span bound for an in-cluster collector. The
+Kustomize production NetworkPolicy carries the same rule commented out.
 
 ## Health Checks
 

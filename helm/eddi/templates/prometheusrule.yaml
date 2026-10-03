@@ -1,0 +1,24 @@
+{{- if .Values.prometheusRule.enabled }}
+{{- /*
+  The shipped alert rules as a Prometheus Operator PrometheusRule. Opt-in, for
+  the same reason as the ServiceMonitor: the CRD only exists with the operator.
+
+  files/eddi-alerts.yml is a copy of docs/monitoring/eddi-alerts.yml made by
+  scripts/sync-monitoring-assets.py (Helm can only read files inside the chart);
+  DeploymentManifestsTest fails when the two differ. It is inserted verbatim, NOT
+  through `tpl`: the rules' own {{ $labels.instance }} templates are for
+  Prometheus to expand, and Helm must leave them alone.
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "eddi.fullname" . }}
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+{{ .Files.Get "files/eddi-alerts.yml" | indent 2 }}
+{{- end }}
