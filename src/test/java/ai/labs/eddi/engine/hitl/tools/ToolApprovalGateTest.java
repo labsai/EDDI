@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -19,6 +18,12 @@ class ToolApprovalGateTest {
 
     private static ToolExecutionRequest req(String id, String name) {
         return ToolExecutionRequest.builder().id(id).name(name).arguments("{}").build();
+    }
+
+    private static ClearedToolCalls cleared(String id, String name, String args) {
+        var c = ClearedToolCalls.none();
+        c.clear(id, name, args);
+        return c;
     }
 
     private static ToolApprovalsConfig cfg(List<String> require, List<String> exempt) {
@@ -47,7 +52,7 @@ class ToolApprovalGateTest {
         // newly generated endpoint cannot arrive ungated.
         var gate = new ToolApprovalGate();
         var result = gate.classify(allThree(), SOURCES, ENDPOINTS,
-                cfg(List.of("http.post:*", "http.put:*", "http.patch:*", "http.delete:*"), null), Set.of());
+                cfg(List.of("http.post:*", "http.put:*", "http.patch:*", "http.delete:*"), null), ClearedToolCalls.none());
 
         assertEquals(List.of("createAgent", "updateLlm"), result.gated().stream().map(ToolExecutionRequest::name).toList());
         assertEquals(List.of("listAgents"), result.allowed().stream().map(ToolExecutionRequest::name).toList());
@@ -58,7 +63,7 @@ class ToolApprovalGateTest {
         // Different POSTs carry different weight, so a pattern must be able to name
         // the endpoint rather than only the method.
         var gate = new ToolApprovalGate();
-        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http.post:/agentstore/agents"), null), Set.of());
+        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http.post:/agentstore/agents"), null), ClearedToolCalls.none());
 
         assertEquals(List.of("createAgent"), result.gated().stream().map(ToolExecutionRequest::name).toList());
     }
@@ -66,7 +71,7 @@ class ToolApprovalGateTest {
     @Test
     void pathTemplateBracesAreLiterals_notRegexQuantifiers() {
         var gate = new ToolApprovalGate();
-        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http.put:/llmstore/llms/{id}"), null), Set.of());
+        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http.put:/llmstore/llms/{id}"), null), ClearedToolCalls.none());
 
         assertEquals(List.of("updateLlm"), result.gated().stream().map(ToolExecutionRequest::name).toList());
     }
@@ -76,7 +81,7 @@ class ToolApprovalGateTest {
         // Gate everything, then exempt reads — the only safe direction, since a
         // missed exemption costs an approval prompt rather than an ungated write.
         var gate = new ToolApprovalGate();
-        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http:*"), List.of("http.get:*")), Set.of());
+        var result = gate.classify(allThree(), SOURCES, ENDPOINTS, cfg(List.of("http:*"), List.of("http.get:*")), ClearedToolCalls.none());
 
         assertEquals(List.of("createAgent", "updateLlm"), result.gated().stream().map(ToolExecutionRequest::name).toList());
     }
@@ -116,7 +121,7 @@ class ToolApprovalGateTest {
         var batch = List.of(req("1", "mcp_write_thing"));
         var sources = Map.of("mcp_write_thing", "mcp");
 
-        var result = gate.classify(batch, sources, Map.of(), cfg(List.of("mcp.post:*"), null), Set.of());
+        var result = gate.classify(batch, sources, Map.of(), cfg(List.of("mcp.post:*"), null), ClearedToolCalls.none());
         assertTrue(result.gated().isEmpty(), "documents the fail-open: this is why save-time validation must reject it");
     }
 
@@ -125,7 +130,7 @@ class ToolApprovalGateTest {
         // Backward compatibility: agents configured before endpoint provenance
         // existed pass an empty map and must gate exactly as they did.
         var gate = new ToolApprovalGate();
-        var result = gate.classify(allThree(), SOURCES, Map.of(), cfg(List.of("http:*"), null), Set.of());
+        var result = gate.classify(allThree(), SOURCES, Map.of(), cfg(List.of("http:*"), null), ClearedToolCalls.none());
 
         assertEquals(3, result.gated().size(), "http:* must still gate every http tool");
     }
@@ -134,9 +139,9 @@ class ToolApprovalGateTest {
     void nullOrEmptyConfig_gatesNothing() {
         var gate = new ToolApprovalGate();
         var batch = List.of(req("1", "delete_account"));
-        assertTrue(gate.classify(batch, Map.of(), null, Set.of()).gated().isEmpty());
-        assertTrue(gate.classify(batch, Map.of(), cfg(null, null), Set.of()).gated().isEmpty());
-        assertTrue(gate.classify(batch, Map.of(), cfg(List.of(), List.of("x")), Set.of()).gated().isEmpty());
+        assertTrue(gate.classify(batch, Map.of(), null, ClearedToolCalls.none()).gated().isEmpty());
+        assertTrue(gate.classify(batch, Map.of(), cfg(null, null), ClearedToolCalls.none()).gated().isEmpty());
+        assertTrue(gate.classify(batch, Map.of(), cfg(List.of(), List.of("x")), ClearedToolCalls.none()).gated().isEmpty());
     }
 
     @Test
@@ -144,7 +149,7 @@ class ToolApprovalGateTest {
         var gate = new ToolApprovalGate();
         var batch = List.of(req("1", "read_file"), req("2", "getCurrentDateTime"));
         var sources = Map.of("read_file", "mcp", "getCurrentDateTime", "builtin");
-        var result = gate.classify(batch, sources, cfg(List.of("mcp:*"), null), Set.of());
+        var result = gate.classify(batch, sources, cfg(List.of("mcp:*"), null), ClearedToolCalls.none());
         assertEquals(1, result.gated().size());
         assertEquals("read_file", result.gated().get(0).name());
         assertEquals("mcp:*", result.gateReasonByCallId().get("1"));
@@ -155,7 +160,7 @@ class ToolApprovalGateTest {
         var gate = new ToolApprovalGate();
         var batch = List.of(req("1", "read_file"), req("2", "write_file"));
         var sources = Map.of("read_file", "mcp", "write_file", "mcp");
-        var result = gate.classify(batch, sources, cfg(List.of("mcp:*"), List.of("mcp:read_*")), Set.of());
+        var result = gate.classify(batch, sources, cfg(List.of("mcp:*"), List.of("mcp:read_*")), ClearedToolCalls.none());
         assertEquals(List.of("write_file"), result.gated().stream().map(ToolExecutionRequest::name).toList());
     }
 
@@ -163,8 +168,47 @@ class ToolApprovalGateTest {
     void clearedCallIds_neverReGated() {
         var gate = new ToolApprovalGate();
         var batch = List.of(req("1", "delete_account"));
-        var result = gate.classify(batch, Map.of("delete_account", "http"), cfg(List.of("delete_*"), null), Set.of("1"));
+        var result = gate.classify(batch, Map.of("delete_account", "http"), cfg(List.of("delete_*"), null), cleared("1", "delete_account", "{}"));
         assertTrue(result.gated().isEmpty());
+    }
+
+    @Test
+    void clearance_doesNotCoverADifferentToolReusingTheApprovedId() {
+        // Providers that number calls per message (call_1 on every turn) hand the
+        // continuation a NEW call under the approved id. It must be gated.
+        var gate = new ToolApprovalGate();
+        var batch = List.of(req("call_1", "delete_database"));
+        var result = gate.classify(batch, Map.of(), cfg(List.of("delete_*"), null), cleared("call_1", "delete_account", "{}"));
+        assertEquals(1, result.gated().size());
+    }
+
+    @Test
+    void clearance_doesNotCoverTheSameToolWithDifferentArguments() {
+        var gate = new ToolApprovalGate();
+        var batch = List.of(ToolExecutionRequest.builder().id("call_1").name("delete_account").arguments("{\"id\":\"victim\"}").build());
+        var result = gate.classify(batch, Map.of(), cfg(List.of("delete_*"), null),
+                cleared("call_1", "delete_account", "{\"id\":\"me\"}"));
+        assertEquals(1, result.gated().size());
+    }
+
+    @Test
+    void clearance_matchesCanonicalArguments_andIsConsumedOnce() {
+        var gate = new ToolApprovalGate();
+        var cleared = cleared("call_1", "delete_account", "{\"a\":1,\"b\":2}");
+        var reissue = ToolExecutionRequest.builder().id("call_1").name("delete_account").arguments("{ \"b\": 2, \"a\": 1 }").build();
+        var first = gate.classify(List.of(reissue), Map.of(), cfg(List.of("delete_*"), null), cleared);
+        assertTrue(first.gated().isEmpty(), "key order and whitespace do not make a call different");
+        var second = gate.classify(List.of(reissue), Map.of(), cfg(List.of("delete_*"), null), cleared);
+        assertEquals(1, second.gated().size(), "an approval covers one execution, not every later iteration");
+    }
+
+    @Test
+    void blankId_isNeverCleared() {
+        var gate = new ToolApprovalGate();
+        var cleared = cleared("", "delete_account", "{}");
+        var result = gate.classify(List.of(req("", "delete_account")), Map.of(), cfg(List.of("delete_*"), null), cleared);
+        assertEquals(1, result.gated().size());
+        assertTrue(result.gateReasonByCallId().isEmpty(), "a blank id is not an address");
     }
 
     @Test
@@ -172,7 +216,7 @@ class ToolApprovalGateTest {
         var gate = new ToolApprovalGate();
         var batch = List.of(req("1", "delete_account"));
         // tool missing from the sources map entirely — bare-name match must still gate
-        var result = gate.classify(batch, Map.of(), cfg(List.of("delete_*"), null), Set.of());
+        var result = gate.classify(batch, Map.of(), cfg(List.of("delete_*"), null), ClearedToolCalls.none());
         assertEquals(1, result.gated().size());
     }
 
@@ -185,7 +229,7 @@ class ToolApprovalGateTest {
         // found"), as it did pre-HITL — instead of failing the whole turn.
         var batch = List.of(ToolExecutionRequest.builder().id("1").name(null).arguments("{}").build());
         var result = assertDoesNotThrow(
-                () -> gate.classify(batch, Map.of(), cfg(List.of("*"), null), Set.of()));
+                () -> gate.classify(batch, Map.of(), cfg(List.of("*"), null), ClearedToolCalls.none()));
         assertTrue(result.gated().isEmpty(), "null-name call must not be gated");
         assertEquals(1, result.allowed().size(), "null-name call must flow to allowed");
     }

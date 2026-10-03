@@ -32,10 +32,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 import java.security.NoSuchAlgorithmException;
@@ -227,8 +229,16 @@ public class ToolApprovalGateSupport {
      * at a time, a null-id request in the transcript paired with an invented id on
      * resume breaks providers that match tool results by {@code tool_call_id}, and
      * the gate itself only records a reason per non-null id. Returns the message
-     * unchanged when the gate is inert (pre-HITL byte-identical) or no id is
-     * missing.
+     * unchanged when the gate is inert (pre-HITL byte-identical) or every id is
+     * present and distinct.
+     * <p>
+     * "Present" means non-blank: some OpenAI-compatible servers send
+     * {@code "id": ""}, and an empty id is no more addressable than a missing one —
+     * every such call in a batch would share one approval. An id repeated within
+     * the same message is re-minted for the same reason: per-call verdicts are
+     * keyed by id, so two different calls sharing {@code call_1} would be approved
+     * (or rejected) together. The rewritten message is the one appended to the
+     * transcript, so the provider sees the same ids on the results it gets back.
      * <p>
      * Rebuilds through {@link AiMessage#toBuilder()}: the
      * {@code AiMessage.from(...)} factories carry only text and requests, and
@@ -243,12 +253,21 @@ public class ToolApprovalGateSupport {
             return aiMessage;
         }
         List<ToolExecutionRequest> requests = aiMessage.toolExecutionRequests();
-        if (requests.stream().allMatch(r -> r.id() != null)) {
+        Set<String> seen = new HashSet<>();
+        boolean needsRewrite = false;
+        for (ToolExecutionRequest r : requests) {
+            if (r.id() == null || r.id().isBlank() || !seen.add(r.id())) {
+                needsRewrite = true;
+                break;
+            }
+        }
+        if (!needsRewrite) {
             return aiMessage;
         }
+        seen.clear();
         List<ToolExecutionRequest> normalized = new ArrayList<>(requests.size());
         for (ToolExecutionRequest r : requests) {
-            if (r.id() == null) {
+            if (r.id() == null || r.id().isBlank() || !seen.add(r.id())) {
                 normalized.add(ToolExecutionRequest.builder()
                         .id("gen-" + UUID.randomUUID())
                         .name(r.name())

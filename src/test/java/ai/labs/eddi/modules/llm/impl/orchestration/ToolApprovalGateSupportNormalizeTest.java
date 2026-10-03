@@ -111,4 +111,32 @@ class ToolApprovalGateSupportNormalizeTest {
         assertTrue(normalized.toolExecutionRequests().get(1).id().startsWith("gen-"));
         assertEquals(SIGNATURE, normalized.attribute(THINKING_SIGNATURE_KEY, String.class));
     }
+
+    @Test
+    @DisplayName("an empty-string id is treated as missing")
+    void emptyIdIsReMinted() {
+        AiMessage empty = AiMessage.builder()
+                .toolExecutionRequests(List.of(ToolExecutionRequest.builder().id("").name("deployAgent").arguments("{}").build()))
+                .build();
+
+        AiMessage normalized = ToolApprovalGateSupport.normalizeToolCallIds(empty, gateActive());
+
+        assertTrue(normalized.toolExecutionRequests().getFirst().id().startsWith("gen-"));
+    }
+
+    @Test
+    @DisplayName("an id repeated within one message is re-minted for the repeat, so per-call verdicts stay per call")
+    void duplicateIdInOneMessageIsReMinted() {
+        AiMessage dup = AiMessage.builder()
+                .toolExecutionRequests(List.of(
+                        ToolExecutionRequest.builder().id("call_1").name("getStatus").arguments("{}").build(),
+                        ToolExecutionRequest.builder().id("call_1").name("deployAgent").arguments("{}").build()))
+                .build();
+
+        AiMessage normalized = ToolApprovalGateSupport.normalizeToolCallIds(dup, gateActive());
+
+        assertEquals("call_1", normalized.toolExecutionRequests().get(0).id());
+        assertTrue(normalized.toolExecutionRequests().get(1).id().startsWith("gen-"));
+        assertEquals("deployAgent", normalized.toolExecutionRequests().get(1).name());
+    }
 }

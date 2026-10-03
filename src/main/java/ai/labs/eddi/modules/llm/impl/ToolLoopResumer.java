@@ -7,7 +7,9 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
+import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
@@ -167,7 +169,7 @@ class ToolLoopResumer {
         trace.add(Map.of("type", "hitl_resume", "transcriptRestored", transcriptRestored));
 
         // ── Step 3: apply verdicts in batch order ──
-        Set<String> clearedCallIds = new HashSet<>();
+        ClearedToolCalls clearedCalls = ClearedToolCalls.none();
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
         HitlDecision.HitlVerdict topVerdict = decision.getVerdict();
         Map<String, ToolCallDecision> perCall = decision.getToolDecisions() != null ? decision.getToolDecisions() : Map.of();
@@ -246,6 +248,22 @@ class ToolLoopResumer {
                 continue;
             }
 
+            // An agent may not take its own approval gate away: no write to its own
+            // agent (updateResourceUri is the hinge of the repoint-and-redeploy loop),
+            // and no LLM-config write carrying toolApprovals. Same seam and the same
+            // reason as the check above — the Manager's self-guard/gate-guard only
+            // govern the Manager, while Slack, MCP resume_conversation and REST
+            // /resume all execute the approved call here.
+            String selfUngating = selfUngating(c, amended, setup.toolRequestResolvers(), memory.getAgentId());
+            if (selfUngating != null) {
+                auditRequestChanged(memory, c, selfUngating);
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        toJson(Map.of("status", "NOT_EXECUTED", "reason", selfUngating))));
+                trace.add(Map.of("type", "hitl_self_ungating", "tool", c.getToolName(), "callId", c.getCallId(),
+                        "detail", selfUngating));
+                continue;
+            }
+
             // Journal protocol — at-most-once across crashes/re-approvals.
             if (journalStore.tryClaim(conversationId, pauseEpoch, c.getCallId(), c.getToolName(), decision.getDecidedBy())) {
                 String args = amended != null ? amended : c.getArgumentsRaw();
@@ -263,7 +281,7 @@ class ToolLoopResumer {
                         ToolApprovalGateSupport.capUtf8(result, AgentOrchestrator.JOURNAL_RESULT_MAX_BYTES));
                 String envelope = amended != null ? amendedEnvelope(result) : result;
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), envelope));
-                clearedCallIds.add(c.getCallId());
+                clearedCalls.clear(c.getCallId(), c.getToolName(), amended != null ? amended : c.getArgumentsRaw());
             } else {
                 // Duplicate claim — a prior attempt already ran (or crashed mid-tool).
                 var prior = journalStore.find(conversationId, pauseEpoch, c.getCallId());
@@ -271,7 +289,7 @@ class ToolLoopResumer {
                     // Replay the stored result — NEVER re-execute (no checkpoint re-fire).
                     currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), prior.get().resultCapped()));
                     trace.add(Map.of("type", "hitl_replayed", "tool", c.getToolName(), "callId", c.getCallId()));
-                    clearedCallIds.add(c.getCallId());
+                    clearedCalls.clear(c.getCallId(), c.getToolName(), amended != null ? amended : c.getArgumentsRaw());
                 } else {
                     // EXECUTING (crash inside the tool) — honest at-most-once outcome.
                     currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
@@ -279,7 +297,7 @@ class ToolLoopResumer {
                                     + "it may or may not have taken effect — verify externally before retrying\"}"));
                     auditOutcomeUnknown(memory, c);
                     trace.add(Map.of("type", "hitl_outcome_unknown", "tool", c.getToolName(), "callId", c.getCallId()));
-                    clearedCallIds.add(c.getCallId());
+                    clearedCalls.clear(c.getCallId(), c.getToolName(), amended != null ? amended : c.getArgumentsRaw());
                 }
             }
         }
@@ -292,8 +310,11 @@ class ToolLoopResumer {
         // eddi.hitl.tool.task-approvals.mode (TaskToolApprovalsResolver — strict
         // merge by default, wholesale replace as the legacy escape hatch), so NEW
         // calls in the continuation re-gate → re-pause under the same effective
-        // gate the live path would compute. Approved ids are pre-cleared so they
-        // are never re-gated if the model reissues them. Threading toolHitlEnabled
+        // gate the live path would compute. Approved calls are pre-cleared so an
+        // identical reissue is not re-gated — bound to (id, tool, canonical args) and
+        // usable once: a DIFFERENT call that merely reuses an approved id (providers
+        // that repeat call_1, or send "") is gated like any other. Threading
+        // toolHitlEnabled
         // here keeps the resume path from re-arming an approval flow an operator
         // disabled.
         ToolApprovalsConfig effectiveToolApprovals = null;
@@ -312,7 +333,7 @@ class ToolLoopResumer {
         // governs the initial pause.
         TokenUsage[] tokenHolder = new TokenUsage[1];
         String response = toolLoopRunner.runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, AgentOrchestrator.DEFAULT_TRANSCRIPT_MAX_BYTES,
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCalls, AgentOrchestrator.DEFAULT_TRANSCRIPT_MAX_BYTES,
                 tokenHolder,
                 jsonPolicy, null, null);
 
@@ -675,6 +696,33 @@ class ToolLoopResumer {
         return uriTargetsConversation(rawArguments, conversationId)
                 ? "the request targets the conversation the agent is running in"
                 : null;
+    }
+
+    /**
+     * Whether this approved call would remove the acting agent's own approval gate
+     * — see {@link SelfUngatingGuard}. Resolved when a resolver exists (so a read
+     * of its own configuration still runs); otherwise checked on the raw arguments,
+     * the coarser test, erring toward refusal.
+     *
+     * @return null when the call may proceed, otherwise the refusal reason
+     */
+    String selfUngating(PendingToolCallBatch.PendingToolCall c, String amendedArguments, Map<String, ToolRequestResolver> resolvers,
+                        String actingAgentId) {
+        String args = amendedArguments != null ? amendedArguments : c.getArgumentsRaw();
+        var resolver = resolvers != null ? resolvers.get(c.getToolName()) : null;
+        if (resolver != null) {
+            try {
+                ResolvedRequest resolved = resolver.resolve(rebuiltRequest(c, args));
+                if (resolved != null) {
+                    return SelfUngatingGuard.refusal(resolved.method(), resolved.uri(), resolved.body(), actingAgentId);
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Could not resolve the request for tool '%s' (%s); "
+                        + "falling back to its arguments for the self-ungating check.", sanitize(c.getToolName()),
+                        e.getClass().getSimpleName());
+            }
+        }
+        return SelfUngatingGuard.refusalFromArguments(args, actingAgentId);
     }
 
     @FunctionalInterface
