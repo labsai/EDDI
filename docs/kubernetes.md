@@ -665,7 +665,11 @@ The `ServiceMonitor` rewrites the job label to `eddi`, which the rules and the
 dashboards select on; with authentication on, give it a token through
 `serviceMonitor.endpointConfig` (`authorization:` or `oauth2:`). If your
 Prometheus also honours the `prometheus.io/*` pod annotations, clear
-`eddi.podAnnotations`, or EDDI is scraped twice. Import the dashboards from
+`eddi.podAnnotations`, or EDDI is scraped twice. With `networkPolicy.enabled=true` the
+chart's ingress rules admit only the release namespace and
+`networkPolicy.allowedIngressNamespaces`: a Prometheus in another namespace (kube-prometheus-stack
+usually runs in `monitoring`) must be listed there, or every scrape times out and
+`EddiDown` fires. Import the dashboards from
 `docs/monitoring/` (they pick the datasource through a variable).
 
 **Tracing.** `--set eddi.tracing.otlpEndpoint=http://<collector>:4317` turns the
