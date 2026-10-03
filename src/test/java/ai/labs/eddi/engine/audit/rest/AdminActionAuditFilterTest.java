@@ -132,6 +132,23 @@ class AdminActionAuditFilterTest {
         assertTrue(path.startsWith("/admin/gdpr/gdpr-erased:"), path);
     }
 
+    @Test
+    @DisplayName("a user id that is also a path word replaces that segment only, not the rest of the path")
+    void pseudonymisesWholeSegmentsOnly() {
+        when(request.getMethod()).thenReturn("DELETE");
+        when(uriInfo.getPath()).thenReturn("/admin/gdpr/admin");
+        var parameters = new MultivaluedHashMap<String, String>();
+        parameters.add("userId", "admin");
+        when(uriInfo.getPathParameters()).thenReturn(parameters);
+        when(response.getStatus()).thenReturn(200);
+
+        filter.filter(request, response);
+
+        String path = (String) recorded().input().get("path");
+        assertTrue(path.startsWith("/admin/gdpr/gdpr-erased:"), path);
+        assertEquals(3, path.split("/").length - 1, path);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"GET", "HEAD", "OPTIONS"})
     @DisplayName("reads are not recorded")

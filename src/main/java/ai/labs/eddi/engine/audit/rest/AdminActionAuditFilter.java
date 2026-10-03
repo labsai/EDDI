@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
 
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -165,15 +166,24 @@ public class AdminActionAuditFilter implements ContainerResponseFilter {
                                  String resource, int status, String actor) {
         String recordedPath = path;
         if (pathParameters != null) {
+            Set<String> people = new HashSet<>();
             for (var parameter : pathParameters.entrySet()) {
-                if (!namesAPerson(parameter.getKey())) {
-                    continue;
+                if (namesAPerson(parameter.getKey())) {
+                    parameter.getValue().stream().filter(v -> v != null && !v.isEmpty()).forEach(people::add);
                 }
-                for (String value : parameter.getValue()) {
-                    if (value != null && !value.isEmpty()) {
-                        recordedPath = recordedPath.replace(value, auditLedger.pseudonymOf(value));
+            }
+            if (!people.isEmpty()) {
+                // Whole path segments only, and never the first one (the resource root,
+                // never a parameter): a user called "admin" must not rewrite the "/admin/"
+                // prefix, nor a one-letter id every letter of the path.
+                String[] segments = path.split("/", -1);
+                int firstSegment = path.startsWith("/") ? 1 : 0;
+                for (int i = firstSegment + 1; i < segments.length; i++) {
+                    if (people.contains(segments[i])) {
+                        segments[i] = auditLedger.pseudonymOf(segments[i]);
                     }
                 }
+                recordedPath = String.join("/", segments);
             }
         }
         var input = new LinkedHashMap<String, Object>();
