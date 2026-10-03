@@ -94,9 +94,11 @@ public final class SlackMrkdwn {
      * {@code &lt;}, {@code &gt;}) or a surrogate pair. A text that needs more
      * messages is cut, and its last message ends with {@link #TRUNCATION_MARKER}.
      * <p>
-     * Linear in the part of the text that is posted: only the prefix that can fit
-     * is escaped, and every search for a cut point stays inside its own chunk (a
-     * search over the whole prefix made a newline-free text quadratic).
+     * A text is truncated only when it cannot be split into {@code maxChunks}
+     * chunks at safe boundaries at all; within that, line breaks are preferred.
+     * Only the prefix that can fit is escaped, every search for a cut point stays
+     * inside its own chunk, and the feasibility check costs one step per chunk, so
+     * the cost is bounded by the posted output, not by the input.
      *
      * @return the escaped pieces, in order; empty for {@code null} or empty text
      */
@@ -121,36 +123,87 @@ public final class SlackMrkdwn {
         while (offset < escaped.length() && chunks.size() < maxChunks) {
             int end = Math.min(offset + maxLength, escaped.length());
             if (end < escaped.length()) {
-                // A line break is the nicer cut, but it can leave most of a chunk
-                // unused: lines of 2,500 characters would get one chunk each, and a
-                // text that fits the messages allowed would be truncated anyway. When
-                // the rest would no longer fit the messages that are left, fill this
-                // one to the length limit instead (still at a safe boundary).
-                int lineEnd = cutPoint(escaped, offset, end);
-                long remainingCapacity = (long) (maxChunks - chunks.size() - 1) * maxLength;
-                end = escaped.length() - lineEnd > remainingCapacity ? safeCut(escaped, offset, end) : lineEnd;
+                // Filling every chunk to its last safe boundary (the greedy cut) needs
+                // the fewest chunks: with indivisible units — an entity, a surrogate
+                // pair, any other character — no partition reaches further after k
+                // chunks than the greedy one does. A line break is the nicer cut, so it
+                // is taken only when the rest still fits the chunks that are left when
+                // packed greedily; otherwise this chunk is filled to the limit. A text
+                // is therefore truncated only when no safe partition into maxChunks
+                // exists at all. (A plain length estimate missed that entities cannot
+                // be split: "x\n" plus nine "&amp;" in 3 chunks of 24 was truncated.)
+                int greedyEnd = safeCut(escaped, offset, end);
+                int lineEnd = lineBreakCut(escaped, offset, end);
+                int chunksLeft = maxChunks - chunks.size() - 1;
+                end = lineEnd > 0 && fitsGreedily(escaped, lineEnd, maxLength, chunksLeft) ? lineEnd : greedyEnd;
             }
             chunks.add(escaped.substring(offset, end));
             offset = end;
         }
-        if ((rawCut || offset < escaped.length()) && maxLength > TRUNCATION_MARKER.length()) {
+        if (rawCut || offset < escaped.length()) {
+            // The last chunk can end where the raw prefix was cut — possibly between
+            // the two halves of a surrogate pair — so it is re-cut at a safe boundary,
+            // with room for the marker when the limit allows one.
             String last = chunks.getLast();
-            int keep = safeCut(last, 0, Math.min(last.length(), maxLength - TRUNCATION_MARKER.length()));
-            chunks.set(chunks.size() - 1, last.substring(0, keep) + TRUNCATION_MARKER);
+            boolean marker = maxLength > TRUNCATION_MARKER.length();
+            int limit = marker ? Math.min(last.length(), maxLength - TRUNCATION_MARKER.length()) : last.length();
+            int keep = safeBoundaryAtOrBefore(last, limit);
+            chunks.set(chunks.size() - 1, last.substring(0, keep) + (marker ? TRUNCATION_MARKER : ""));
         }
         return chunks;
     }
 
     /**
-     * The last line break inside {@code (offset, end)}, else a {@link #safeCut}.
+     * The cut just after the last line break inside {@code (offset, end)}, or
+     * {@code -1} when there is none. A line break is a single character, so a cut
+     * after it is always a safe boundary.
      */
-    private static int cutPoint(String escaped, int offset, int end) {
+    private static int lineBreakCut(String escaped, int offset, int end) {
         for (int i = end - 1; i > offset; i--) {
             if (escaped.charAt(i) == '\n') {
                 return i + 1;
             }
         }
-        return safeCut(escaped, offset, end);
+        return -1;
+    }
+
+    /**
+     * Whether {@code escaped} from {@code from} fits into {@code chunks} chunks
+     * when each is filled to its last safe boundary — exactly whether it fits at
+     * all, since that packing needs the fewest chunks. Costs one step per chunk.
+     */
+    private static boolean fitsGreedily(String escaped, int from, int maxLength, int chunks) {
+        int offset = from;
+        for (int used = 0; used < chunks; used++) {
+            if (escaped.length() - offset <= maxLength) {
+                return true;
+            }
+            offset = safeCut(escaped, offset, offset + maxLength);
+        }
+        return offset >= escaped.length();
+    }
+
+    /**
+     * The last safe boundary at or before {@code end}, which may be {@code 0}: the
+     * re-cut of a final chunk for the truncation marker can land inside an entity
+     * the chunk starts with, where {@link #safeCut} (which always keeps at least
+     * one character) would leave half of it.
+     */
+    private static int safeBoundaryAtOrBefore(String text, int end) {
+        for (int i = end - 1; i >= Math.max(0, end - 4); i--) {
+            char c = text.charAt(i);
+            if (c == ';') {
+                break;
+            }
+            if (c == '&') {
+                end = i;
+                break;
+            }
+        }
+        if (end > 0 && Character.isHighSurrogate(text.charAt(end - 1))) {
+            end--;
+        }
+        return end;
     }
 
     /**
