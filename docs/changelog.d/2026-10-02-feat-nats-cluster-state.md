@@ -22,7 +22,10 @@ to the single-node behaviour it had before.
   announces evictions; `SecretResolver`, `GlobalVariableResolver`, `ConnectionRegistry` and
   the `ChatModelRegistry` (plus a max-age) drop entries when another node changes them.
   Undeploy on one node stops the others within seconds, with a two-sweep reconciliation
-  against the store as the safety net for a missed event.
+  against the store as the safety net for a missed event. A request that reaches a node
+  for an agent another node has only just deployed no longer answers 404: the node deploys
+  it on demand and waits, bounded, for it to become ready (found by the shared live
+  harness through a round-robin load balancer).
 - **Rate limits and costs** — `ToolRateLimiter` keeps its global and per-tool buckets in KV
   ([`KvRateLimitBackend`](../../src/main/java/ai/labs/eddi/modules/llm/tools/KvRateLimitBackend.java),
   CAS token bucket); `ToolCostTracker` sums budgets cluster-wide. While NATS is down both

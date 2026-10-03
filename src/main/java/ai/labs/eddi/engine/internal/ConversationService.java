@@ -55,6 +55,7 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -74,6 +75,7 @@ import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -419,6 +421,10 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             IAgent latestAgent = agentFactory.getLatestReadyAgent(environment, agentId);
             if (latestAgent == null) {
+                final String requestedAgent = agentId;
+                latestAgent = awaitClusterDeployment(environment, agentId, () -> agentFactory.getLatestReadyAgent(environment, requestedAgent));
+            }
+            if (latestAgent == null) {
                 String message = "No version of agent (agentId=%s) ready for interaction (environment=%s)!";
                 message = String.format(message, agentId, environment);
                 throw new AgentNotReadyException(message);
@@ -553,6 +559,37 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Inject
     IClusterRpc clusterRpc;
+
+    @Inject
+    Instance<IAgentDeploymentManagement> deploymentManagement;
+
+    /** How long a request waits for an agent another node has just deployed. */
+    static final Duration CLUSTER_DEPLOY_WAIT = Duration.ofSeconds(15);
+
+    /** A resolution step that may throw, for {@link #awaitClusterDeployment}. */
+    @FunctionalInterface
+    interface AgentLookup<T> {
+        T find() throws Exception;
+    }
+
+    /**
+     * Cluster mode: the agent is not deployed on THIS node yet, though another node
+     * has just deployed it — this node's sweep has not caught up. Deploys it here
+     * on demand and waits (bounded) instead of answering 404. Single node: null at
+     * once.
+     */
+    <T> T awaitClusterDeployment(Environment environment, String agentId, AgentLookup<T> lookup) {
+        if (deploymentManagement == null || !deploymentManagement.isResolvable() || leaseManager == null || !leaseManager.isClustered()) {
+            return null;
+        }
+        return deploymentManagement.get().awaitClusterDeployment(environment, agentId, () -> {
+            try {
+                return lookup.find();
+            } catch (Exception e) {
+                return null;
+            }
+        }, CLUSTER_DEPLOY_WAIT);
+    }
 
     /**
      * Signals the turn of {@code conversationId} running on THIS node, if any — the
@@ -810,7 +847,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            IAgent resolvedAgent = resolveConversationAgent(environment, conversationMemory);
+            if (resolvedAgent == null) {
+                final IConversationMemory memoryToResolve = conversationMemory;
+                resolvedAgent = awaitClusterDeployment(environment, conversationMemory.getAgentId(),
+                        () -> resolveConversationAgent(environment, memoryToResolve));
+            }
+            IAgent agent = resolvedAgent;
             if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
                 // The turn runs on another, compatible version: log it as that one.
                 loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
@@ -1001,7 +1044,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            IAgent resolvedAgent = resolveConversationAgent(environment, conversationMemory);
+            if (resolvedAgent == null) {
+                final IConversationMemory memoryToResolve = conversationMemory;
+                resolvedAgent = awaitClusterDeployment(environment, conversationMemory.getAgentId(),
+                        () -> resolveConversationAgent(environment, memoryToResolve));
+            }
+            IAgent agent = resolvedAgent;
             if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
                 // The turn runs on another, compatible version: log it as that one.
                 loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));

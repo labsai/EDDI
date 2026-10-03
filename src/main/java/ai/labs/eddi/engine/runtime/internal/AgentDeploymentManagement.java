@@ -25,6 +25,7 @@ import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -54,6 +55,7 @@ import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.function.Supplier;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
@@ -205,6 +207,41 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
     private boolean clustered() {
         return clusterConfig != null && clusterConfig.isNats();
+    }
+
+    @Override
+    public <T> T awaitClusterDeployment(Environment environment, String agentId, Supplier<T> resolve, Duration maxWait) {
+        if (!clustered() || agentId == null) {
+            return null;
+        }
+        try {
+            boolean deployedSomewhere = deploymentStore.readDeploymentInfos(deployed).stream()
+                    .anyMatch(info -> info.getEnvironment() == environment && agentId.equals(info.getAgentId()));
+            if (!deployedSomewhere) {
+                return null;
+            }
+        } catch (RuntimeException | IResourceStore.ResourceStoreException e) {
+            LOGGER.debugf("On-demand deployment check of %s failed: %s", agentId, e.getMessage());
+            return null;
+        }
+        checkDeployments();
+        long deadline = System.nanoTime() + maxWait.toNanos();
+        while (true) {
+            T found = resolve.get();
+            if (found != null) {
+                LOGGER.debugf("Agent %s deployed on demand on this node", agentId);
+                return found;
+            }
+            if (System.nanoTime() >= deadline) {
+                return null;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
     }
 
     @Inject
