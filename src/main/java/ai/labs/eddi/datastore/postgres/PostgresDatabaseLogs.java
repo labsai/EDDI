@@ -192,12 +192,28 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             throw new IllegalArgumentException("olderThanDays must be positive, got " + olderThanDays);
         }
         ensureSchema();
-        String sql = "DELETE FROM database_logs WHERE timestamp < ?";
+        // In batches: the first sweep after retention is switched on may face the
+        // whole history, and one DELETE of millions of rows is a single transaction
+        // that holds every row lock, bloats WAL and delays vacuum until it ends.
+        String sql = "DELETE FROM database_logs WHERE ctid IN (SELECT ctid FROM database_logs WHERE timestamp < ? LIMIT ?)";
+        Timestamp cutoff = Timestamp.from(Instant.now().minus(Duration.ofDays(olderThanDays)));
+        long total = 0;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setTimestamp(1, Timestamp.from(Instant.now().minus(Duration.ofDays(olderThanDays))));
-            return ps.executeUpdate();
+            int deleted;
+            do {
+                ps.setTimestamp(1, cutoff);
+                ps.setInt(2, RETENTION_BATCH_SIZE);
+                deleted = ps.executeUpdate();
+                total += deleted;
+            } while (deleted >= RETENTION_BATCH_SIZE);
+            return total;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to delete expired database logs", e);
         }
     }
+
+    /**
+     * Rows one retention DELETE removes; the sweep repeats until a batch is short.
+     */
+    static final int RETENTION_BATCH_SIZE = 10_000;
 }

@@ -220,11 +220,19 @@ class PostgresDatabaseLogsUnitTest {
 
         var sql = ArgumentCaptor.forClass(String.class);
         verify(connection, atLeastOnce()).prepareStatement(sql.capture());
-        assertTrue(sql.getAllValues().contains("DELETE FROM database_logs WHERE timestamp < ?"), sql.getAllValues().toString());
+        assertTrue(sql.getAllValues().stream().anyMatch(q -> q.startsWith("DELETE FROM database_logs WHERE ctid IN")), sql.getAllValues().toString());
         var cutoff = ArgumentCaptor.forClass(Timestamp.class);
         verify(preparedStatement).setTimestamp(eq(1), cutoff.capture());
         long expected = before - Duration.ofDays(30).toMillis();
         assertTrue(Math.abs(cutoff.getValue().getTime() - expected) < 60_000, "cutoff is now minus 30 days");
+    }
+
+    @Test
+    void deleteOlderThan_repeatsUntilABatchIsShort() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(PostgresDatabaseLogs.RETENTION_BATCH_SIZE, PostgresDatabaseLogs.RETENTION_BATCH_SIZE, 5);
+
+        assertEquals(2L * PostgresDatabaseLogs.RETENTION_BATCH_SIZE + 5, databaseLogs.deleteOlderThan(30));
+        verify(preparedStatement, times(3)).executeUpdate();
     }
 
     @Test
