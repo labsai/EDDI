@@ -202,7 +202,7 @@ class RestAgentStoreTest {
         void undeployFailureIsNotFatal() throws Exception {
             when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
                     .thenReturn(List.of(deployed(Deployment.Environment.production, AGENT_ID, 1)));
-            doThrow(new IllegalAccessException("busy")).when(agentFactory).undeployAgent(Deployment.Environment.production, AGENT_ID, 1);
+            doThrow(new IllegalStateException("busy")).when(agentFactory).undeployAgent(Deployment.Environment.production, AGENT_ID, 1);
 
             assertDoesNotThrow(() -> restAgentStore.deleteAgent(AGENT_ID, 1, false, false));
 
