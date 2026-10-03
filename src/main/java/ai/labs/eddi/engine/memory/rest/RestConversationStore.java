@@ -1078,6 +1078,13 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     /**
+     * The end reasons a caller may record. A closed list rather than free text: the
+     * reason is stored on the conversation and shown to its user by clients, so it
+     * must be a code they know, never caller-supplied prose.
+     */
+    static final Set<String> ACCEPTED_END_REASONS = Set.of(IConversationService.END_REASON_AGENT_VERSION_RETIRED);
+
+    /**
      * Ends the listed conversations. Only the conversation ids are read from the
      * request: which agent a conversation belongs to and which state it is in come
      * from the server.
@@ -1118,13 +1125,6 @@ public class RestConversationStore implements IRestConversationStore {
      * to the snapshot.
      * </p>
      */
-    /**
-     * The end reasons a caller may record. A closed list rather than free text: the
-     * reason is stored on the conversation and shown to its user by clients, so it
-     * must be a code they know, never caller-supplied prose.
-     */
-    static final Set<String> ACCEPTED_END_REASONS = Set.of(IConversationService.END_REASON_AGENT_VERSION_RETIRED);
-
     @Override
     public Response endActiveConversations(List<ConversationStatus> conversationStatuses, String endReason) {
         if (conversationStatuses == null) {

@@ -102,28 +102,6 @@ public interface IConversationService {
     String END_REASON_AGENT_VERSION_RETIRED = "agent-version-retired";
 
     /**
-     * Get the current state of a conversation (from cache or DB).
-     *
-     * @throws ConversationNotFoundException
-     *             if no conversation exists with the given ID
-     */
-    ConversationState getConversationState(Environment environment, String conversationId);
-
-    /**
-     * Read a conversation memory snapshot.
-     *
-     * @throws AgentMismatchException
-     *             if the conversationId does not belong to the given agentId
-     * @throws ResourceStoreException
-     *             on persistence failures
-     * @throws ResourceNotFoundException
-     *             if the conversation is not found
-     */
-    SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
-                                                      Boolean returnCurrentStepOnly, List<String> returningFields)
-            throws AgentMismatchException, ResourceStoreException, ResourceNotFoundException;
-
-    /**
      * Read conversation log in text or structured format.
      *
      * @throws ResourceStoreException
@@ -225,32 +203,15 @@ public interface IConversationService {
         }
     }
 
-    /**
-     * Process user input with SSE streaming. Token and step events are delivered
-     * via the streamingHandler callback.
-     */
-    void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-                      List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
-            throws Exception;
-
-    Boolean isUndoAvailable(Environment environment, String agentId, String conversationId) throws ResourceStoreException, ResourceNotFoundException;
-
-    /**
-     * @return true if undo was performed, false if not available
-     */
-    boolean undo(Environment environment, String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException;
-
-    Boolean isRedoAvailable(Environment environment, String agentId, String conversationId) throws ResourceStoreException, ResourceNotFoundException;
-
-    /**
-     * @return true if redo was performed, false if not available
-     */
-    boolean redo(Environment environment, String agentId, String conversationId)
-            throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException;
-
     // --- Conversation-only overloads (resolve agentId + env from stored
     // conversation) ---
+    //
+    // The environment-qualified twins of these (readConversation,
+    // getConversationState,
+    // sayStreaming, undo/redo and their availability checks) had no caller outside
+    // ConversationService and are no longer part of the contract. say() keeps its
+    // qualified form above: schedules and A2A address an agent, not a stored
+    // record.
 
     /**
      * Read a conversation memory snapshot — resolves agentId + environment from the

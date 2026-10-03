@@ -558,7 +558,7 @@ class ConversationHitlService {
                         // resolution principal — a PER_USER credential the resumed turn
                         // spends belongs to the user who asked, never to the
                         // administrator who approved on their behalf.
-                        conversationService.waitForExecutionFinishOrTimeout(loggingContext, conversationId,
+                        conversationService.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory,
                                 runtime.submitCallable(withConversationPrincipal(memory,
                                         callerIdentityContext.withIdentity(resumeCallerIdentity,
                                                 callerIdentityContext.withApprover(approvedCallsIdentity, resumeCallable))),

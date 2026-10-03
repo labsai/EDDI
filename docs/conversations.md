@@ -339,8 +339,11 @@ Response Body
 }
 ```
 
+### When a message is refused or a turn runs too long
 
-```
+A request the server cannot act on is answered with `400` and a JSON body — `{"error": "bad_request", "message": "…"}` — that names what was wrong: a malformed conversation id, a body that is not valid JSON (with line and column), a `context` value of the wrong shape (with its JSON path), a document nested past the parser's limit, or a query parameter of the wrong type (`?conversationState=BOGUS` lists the legal states; `?version=abc` says a number is expected). Before this release several of these came back as an empty `400`, as `404 Not Found`, or — posting to a malformed id — as `500`.
+
+A turn that is still running when `systemRuntime.agentTimeoutInSeconds` (default `60`) expires is abandoned: the conversation is set to `EXECUTION_INTERRUPTED` and the turn is flagged cancelled. It stops before its next lifecycle task even when a model client or tool swallowed the interrupt, so it makes no further model or tool calls and writes no long-term properties. Until it has actually stopped it stays reachable for `POST /agents/{conversationId}/cancel` and for GDPR erasure, which stops a user's in-flight turns. The next message on the conversation runs normally and returns it to `READY`.
 
 ### Receive a message
 

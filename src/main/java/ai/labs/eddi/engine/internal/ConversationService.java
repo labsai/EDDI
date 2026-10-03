@@ -88,7 +88,6 @@ import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.createURI;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
-import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static jakarta.ws.rs.core.MediaType.APPLICATION_JSON;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
@@ -620,29 +619,17 @@ public class ConversationService implements IConversationService, UserErasurePar
         recordMetrics(timerConversationEnd, counterConversationEnd, startTime);
     }
 
-    @Override
-    public ConversationState getConversationState(Environment environment, String conversationId) {
+    /**
+     * Environment-qualified twin of {@link #getConversationState(String)}; internal
+     * and tests only.
+     */
+    ConversationState getConversationState(Environment environment, String conversationId) {
         checkNotNull(environment, "environment");
-        checkNotNull(conversationId, "conversationId");
-
-        ConversationState conversationState = conversationStateCache.get(conversationId);
-        if (conversationState == null) {
-            conversationState = conversationMemoryStore.getConversationState(conversationId);
-            cacheConversationState(conversationId, conversationState);
-        }
-
-        if (conversationState == null) {
-            String message = "No conversation found! (conversationId=%s)";
-            message = String.format(message, conversationId);
-            throw new ConversationNotFoundException(message);
-        }
-
-        return conversationState;
+        return getConversationState(conversationId);
     }
 
-    @Override
-    public SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
-                                                             Boolean returnCurrentStepOnly, List<String> returningFields)
+    SimpleConversationMemorySnapshot readConversation(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
+                                                      Boolean returnCurrentStepOnly, List<String> returningFields)
             throws AgentMismatchException, ResourceStoreException, ResourceNotFoundException {
 
         long startTime = System.nanoTime();
@@ -674,9 +661,12 @@ public class ConversationService implements IConversationService, UserErasurePar
 
         var memorySnapshot = requireSnapshot(conversationId);
         var conversationLog = new ConversationLogGenerator(memorySnapshot).generate(logSize != null ? logSize : -1);
-        outputType = outputType.toLowerCase();
+        // Null-safe: the REST layer hands an empty "?outputType=" through as null
+        // (Quarkus treats it like an absent parameter but skips the @DefaultValue),
+        // and lowercasing first turned that into a 500.
+        outputType = outputType == null ? "" : outputType.trim().toLowerCase(Locale.ROOT);
 
-        if (isNullOrEmpty(outputType) || outputType.equals("string") || outputType.equals("text")) {
+        if (outputType.isEmpty() || outputType.equals("string") || outputType.equals("text")) {
             return new ConversationLogResult(conversationLog.toString(), TEXT_PLAIN);
         } else {
             return new ConversationLogResult(conversationLog.toObject(), APPLICATION_JSON);
@@ -686,6 +676,138 @@ public class ConversationService implements IConversationService, UserErasurePar
     @Override
     public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
+            throws Exception {
+        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly,
+                new TurnListener() {
+                    @Override
+                    public void completed(SimpleConversationMemorySnapshot snapshot) {
+                        responseHandler.onComplete(snapshot);
+                    }
+
+                    @Override
+                    public void skipped(SimpleConversationMemorySnapshot snapshot) {
+                        responseHandler.onSkipped(snapshot);
+                    }
+                });
+    }
+
+    /**
+     * Environment-qualified twin of
+     * {@link #sayStreaming(String, Boolean, Boolean, List, InputData, StreamingResponseHandler)};
+     * internal and tests only.
+     */
+    void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                      List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
+            throws Exception {
+        ConversationEventSink eventSink = eventSinkFor(streamingHandler);
+        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false,
+                new TurnListener() {
+                    @Override
+                    public void completed(SimpleConversationMemorySnapshot snapshot) {
+                        streamingHandler.onComplete(snapshot);
+                    }
+
+                    @Override
+                    public void skipped(SimpleConversationMemorySnapshot snapshot) {
+                        streamingHandler.onSkipped(snapshot);
+                    }
+
+                    @Override
+                    public ConversationEventSink eventSink() {
+                        return eventSink;
+                    }
+
+                    @Override
+                    public void pipelineFailed(Exception e) {
+                        streamingHandler.onError(e);
+                    }
+                });
+    }
+
+    /**
+     * What differs between a plain and a streamed turn: where the outcome goes and
+     * whether progress events are emitted. Everything else — validation, quota, the
+     * turn builder, submission and the release of the processing gauge — is one
+     * code path, {@link #admitTurn}. It used to be two copies of 170 lines that had
+     * already started to drift.
+     */
+    private interface TurnListener {
+        void completed(SimpleConversationMemorySnapshot snapshot);
+
+        void skipped(SimpleConversationMemorySnapshot snapshot);
+
+        /** Progress events for a streamed turn; {@code null} for a plain one. */
+        default ConversationEventSink eventSink() {
+            return null;
+        }
+
+        /** The pipeline failed inside the turn (after admission). */
+        default void pipelineFailed(Exception e) {
+        }
+    }
+
+    /** Forwards the pipeline's progress events to a streaming handler. */
+    private static ConversationEventSink eventSinkFor(StreamingResponseHandler streamingHandler) {
+        return new ConversationEventSink() {
+            @Override
+            public void onTaskStart(TaskId taskId, String taskType, int index) {
+                streamingHandler.onTaskStart(taskId, taskType, index);
+            }
+
+            @Override
+            public void onToolCall(String toolName) {
+                streamingHandler.onToolCall(toolName);
+            }
+
+            @Override
+            public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
+                streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
+            }
+
+            @Override
+            public void onToken(String token) {
+                streamingHandler.onToken(token);
+            }
+
+            @Override
+            public void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
+                streamingHandler.onCascadeStepStart(stepIndex, modelType, modelName, totalSteps);
+            }
+
+            @Override
+            public void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
+                streamingHandler.onCascadeEscalation(fromStep, toStep, confidence, threshold, reason, durationMs);
+            }
+
+            @Override
+            public void onComplete() {
+                // Handled separately after memory conversion
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                streamingHandler.onError(error);
+            }
+
+            @Override
+            public void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                                     String errorType, String errorSummary) {
+                streamingHandler.onTaskFailed(taskId, taskType, durationMs, errorType, errorSummary);
+            }
+        };
+    }
+
+    /**
+     * Validates, admits and queues one turn — the single path behind {@code say}
+     * and {@code sayStreaming}.
+     *
+     * @param rerunOnly
+     *            re-execute the last step instead of consuming new input (never set
+     *            for a streamed turn); a rerun is not rebuilt over a newer memory
+     */
+    private void admitTurn(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
+                           Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData, boolean rerunOnly,
+                           TurnListener listener)
             throws Exception {
 
         long startTime = System.nanoTime();
@@ -758,14 +880,15 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             // Handler contract: a skipped turn (pause/busy committed by the time the
             // queued turn executed) must still complete the response — with the
-            // persisted state and WITHOUT the metrics reference leaking.
+            // persisted state and WITHOUT the metrics reference leaking. For a stream
+            // this is what terminates it instead of leaving it open.
             Consumer<IConversationMemory> notifySkipped = skippedMemory -> {
                 SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(skippedMemory,
                         returnDetailed, returnCurrentStepOnly, returningFields);
                 memorySnapshot.setEnvironment(environment);
                 recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                 processingTurn.release();
-                responseHandler.onSkipped(memorySnapshot);
+                listener.skipped(memorySnapshot);
             };
 
             // Everything bound to one memory instance lives in the builder, so a queued
@@ -773,6 +896,12 @@ public class ConversationService implements IConversationService, UserErasurePar
             ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
                 adoptResolvedAgentVersion(memory, agent);
+                // A streamed turn reports its progress through the sink on memory, which
+                // LifecycleManager and the tasks read.
+                if (listener.eventSink() != null) {
+                    memory.setEventSink(listener.eventSink());
+                }
+
                 // Set the audit collector on memory (if auditing is enabled)
                 if (auditLedgerService.isEnabled()) {
                     String envName = environment.toString();
@@ -790,7 +919,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                             processingTurn.release();
-                            responseHandler.onComplete(memorySnapshot);
+                            listener.completed(memorySnapshot);
                         });
 
                 if (conversation.isEnded()) {
@@ -805,6 +934,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversation.rerun(inputData.getContext());
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
+                            listener.pipelineFailed(e);
                         }
                         return null;
                     };
@@ -815,6 +945,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversation.say(inputData.getInput(), inputData.getContext());
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
+                            listener.pipelineFailed(e);
                         }
                         return null;
                     };
@@ -843,7 +974,10 @@ public class ConversationService implements IConversationService, UserErasurePar
             // TenantQuotaService.recordDenial's own.
             releaseTurn(admittedTurn);
             throw e;
-        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
+        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException | IllegalArgumentException e) {
+            // IllegalArgumentException: a malformed conversation id, refused by the store
+            // before any lookup. A client mistake (the REST layer answers 400), not a
+            // fault worth an ERROR stack trace.
             releaseTurn(admittedTurn);
             throw e;
         } catch (Exception e) {
@@ -877,214 +1011,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
-    @Override
-    public void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-                             List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
-            throws Exception {
-
-        long startTime = System.nanoTime();
-        rejectIfShuttingDown();
-        // See say(): assigned inside the try, aliased for the lambdas below.
-        ProcessingTurn admittedTurn = null;
-        try {
-            final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
-            checkConversationMemoryNotNull(conversationMemory, conversationId);
-
-            // GDPR Art. 18 — processing restriction check
-            if (conversationMemory.getUserId() != null
-                    && gdprComplianceService.isProcessingRestricted(conversationMemory.getUserId())) {
-                throw new ProcessingRestrictedException(
-                        "Processing is restricted for this user (GDPR Art. 18)");
-            }
-
-            var loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, conversationMemory.getUserId());
-            Integer agentVersion = conversationMemory.getAgentVersion();
-            loggingContext.put("agentVersion", agentVersion.toString());
-            contextLogger.setLoggingContext(loggingContext);
-
-            if (!agentId.equals(conversationMemory.getAgentId())) {
-                String message = "Supplied agentId (%s) is incompatible with conversationId (%s)";
-                message = String.format(message, agentId, conversationId);
-                throw new AgentMismatchException(message);
-            }
-
-            rejectIfEnded(conversationMemory);
-
-            // HITL fast-fail (mirrors say()): reject input into a paused
-            // conversation promptly instead of leaving the SSE stream dangling.
-            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                throw new ConversationAwaitingApprovalException(
-                        "Conversation is awaiting human approval — a reviewer must resolve it via"
-                                + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
-            }
-
-            IAgent agent = resolveConversationAgent(environment, conversationMemory);
-            if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
-                // The turn runs on another, compatible version: log it as that one.
-                loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
-                contextLogger.setLoggingContext(loggingContext);
-            }
-            if (agent == null) {
-                String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
-                msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
-                throw new AgentNotReadyException(msg);
-            }
-
-            // Tenant quota — atomic slot acquisition AFTER cheap validations
-            // (avoids burning quota on not-found, GDPR-restricted, agent-mismatch, or
-            // agent-not-ready failures)
-            QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
-            if (!quotaCheck.allowed()) {
-                throw quotaCheck.accountingUnavailable()
-                        // A store that could not answer is a 503, not a 429: the
-                        // tenant is not over anything, and a client that backs off
-                        // for a minute on the strength of a Retry-After is reacting
-                        // to the wrong signal.
-                        ? new QuotaAccountingUnavailableException(quotaCheck.reason())
-                        : new QuotaExceededException(quotaCheck.reason());
-            }
-
-            admittedTurn = new ProcessingTurn(processingConversationCount);
-            final ProcessingTurn processingTurn = admittedTurn;
-
-            // Create event sink that delegates to the streaming handler
-            var eventSink = new ConversationEventSink() {
-                @Override
-                public void onTaskStart(TaskId taskId, String taskType, int index) {
-                    streamingHandler.onTaskStart(taskId, taskType, index);
-                }
-
-                @Override
-                public void onToolCall(String toolName) {
-                    streamingHandler.onToolCall(toolName);
-                }
-
-                @Override
-                public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
-                    streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
-                }
-
-                @Override
-                public void onToken(String token) {
-                    streamingHandler.onToken(token);
-                }
-
-                @Override
-                public void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
-                    streamingHandler.onCascadeStepStart(stepIndex, modelType, modelName, totalSteps);
-                }
-
-                @Override
-                public void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
-                    streamingHandler.onCascadeEscalation(fromStep, toStep, confidence, threshold, reason, durationMs);
-                }
-
-                @Override
-                public void onComplete() {
-                    // Handled separately after memory conversion
-                }
-
-                @Override
-                public void onError(Throwable error) {
-                    streamingHandler.onError(error);
-                }
-
-                @Override
-                public void onTaskFailed(TaskId taskId, String taskType, long durationMs,
-                                         String errorType, String errorSummary) {
-                    streamingHandler.onTaskFailed(taskId, taskType, durationMs, errorType, errorSummary);
-                }
-            };
-
-            // Everything bound to one memory instance lives in the builder, so a queued
-            // turn can be rebuilt over the current document when it finally runs (H13a).
-            ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
-                Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
-                adoptResolvedAgentVersion(memory, agent);
-                // Set the event sink on memory so LifecycleManager and tasks can use it
-                memory.setEventSink(eventSink);
-
-                // Set the audit collector on memory (if auditing is enabled)
-                if (auditLedgerService.isEnabled()) {
-                    String envName = environment.toString();
-                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
-                }
-
-                final IConversation conversation = agent.continueConversation(memory,
-                        createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
-                        returnConversationMemory -> {
-                            SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
-                                    returnDetailed, returnCurrentStepOnly, returningFields);
-                            memorySnapshot.setEnvironment(environment);
-                            cacheConversationState(conversationId, memorySnapshot.getConversationState());
-                            conversationDescriptorStore.updateTimeStamp(conversationId);
-                            recordAgentVersionMove(returnConversationMemory, storedVersion);
-                            recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                            processingTurn.release();
-                            streamingHandler.onComplete(memorySnapshot);
-                        });
-
-                if (conversation.isEnded()) {
-                    throw new ConversationEndedException("Conversation has ended!");
-                }
-
-                Callable<Void> executeConversation = () -> {
-                    try {
-                        contextLogger.setLoggingContext(loggingContext);
-                        conversation.say(inputData.getInput(), inputData.getContext());
-                    } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
-                        LOGGER.error(e.getLocalizedMessage(), e);
-                        streamingHandler.onError(e);
-                    }
-                    return null;
-                };
-                return withResolutionPrincipal(memory, executeConversation);
-            };
-
-            // Handler contract (mirrors say()): a skipped turn must terminate the
-            // stream with the persisted state instead of leaving it open.
-            Consumer<IConversationMemory> notifySkipped = skippedMemory -> {
-                SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(skippedMemory,
-                        returnDetailed, returnCurrentStepOnly, returningFields);
-                memorySnapshot.setEnvironment(environment);
-                recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                processingTurn.release();
-                streamingHandler.onSkipped(memorySnapshot);
-            };
-
-            Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, true, notifySkipped, processingTurn);
-
-            conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
-                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException e) {
-            // All five are thrown before the turn is admitted, and none is an internal
-            // fault of this class: the generic handler below logs a full ERROR stack
-            // trace, which for the restriction-unavailable case meant every turn of
-            // every user wrote two of them (here and again in RestAgentEngine) for the
-            // duration of a store failover. The REST layer reports each one with its
-            // own status.
-            //
-            // QuotaAccountingUnavailableException is listed even though it extends
-            // RejectedExecutionException: it is thrown two lines after the
-            // QuotaExceededException it replaces on the same denial, so leaving it out
-            // put exactly the log flood this multi-catch removes back on the
-            // quota-store outage path — one ERROR stack trace per turn, on top of
-            // TenantQuotaService.recordDenial's own.
-            releaseTurn(admittedTurn);
-            throw e;
-        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
-            releaseTurn(admittedTurn);
-            throw e;
-        } catch (Exception e) {
-            LOGGER.error(e.getLocalizedMessage(), e);
-            releaseTurn(admittedTurn);
-            throw e;
-        }
-    }
-
-    @Override
-    public Boolean isUndoAvailable(Environment environment, String agentId, String conversationId)
+    /**
+     * Environment-qualified twin of {@link #isUndoAvailable(String)}; internal and
+     * tests only.
+     */
+    Boolean isUndoAvailable(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
 
         validateParams(environment, agentId, conversationId);
@@ -1092,57 +1023,65 @@ public class ConversationService implements IConversationService, UserErasurePar
         return conversationMemory.isUndoAvailable();
     }
 
-    @Override
-    public boolean undo(Environment environment, String agentId, String conversationId)
+    /**
+     * Environment-qualified twin of {@link #undo(String)}; internal and tests only.
+     */
+    boolean undo(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
 
         validateParams(environment, agentId, conversationId);
         long startTime = System.nanoTime();
         try {
-            IConversationMemory conversationMemory = loadAndValidateConversationMemory(agentId, conversationId);
-
-            // #5: undo during AWAITING_HUMAN would corrupt the HITL bookmark, and
-            // undo during IN_PROGRESS (a resume executing) would round-trip a
-            // persisted IN_PROGRESS from outside the resume CAS — breaking the
-            // invariant crash recovery relies on. Checked against the loaded
-            // (DB-backed) state; false maps to 409 CONFLICT at the REST layer.
-            ConversationState loadedStateForUndo = conversationMemory.getConversationState();
-            if (loadedStateForUndo == ConversationState.AWAITING_HUMAN
-                    || loadedStateForUndo == ConversationState.IN_PROGRESS) {
-                LOGGER.warnf("Undo rejected: conversation %s is in state %s", conversationId, loadedStateForUndo);
-                return false;
-            }
-
-            if (conversationMemory.isUndoAvailable()) {
-                conversationMemory.undoLastStep();
-                // undo/redo run on the REST thread, NOT through the per-conversation
-                // coordinator, so a say turn on this conversation can commit a fresh
-                // pause between the state check above and this store. An unconditional
-                // full-document replace would then clobber that just-persisted
-                // AWAITING_HUMAN snapshot — destroying the pending approval and
-                // orphaning its armed timer. CAS from the loaded (pre-undo) state so
-                // the store lands only if nothing moved the DB state meanwhile; on a
-                // miss the concurrent writer wins and undo reports no-op.
-                if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForUndo)) {
-                    LOGGER.warnf("Undo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
-                            conversationId, loadedStateForUndo);
-                    return false;
-                }
-                // The undone step is now on top of the redo cache.
-                var undone = conversationMemory.getRedoCache().peek();
-                applyAgentMemoryConfig(environment, conversationMemory, undone);
-                syncLongTermChanges(conversationMemory, undone, true);
-                return true;
-            } else {
-                return false;
-            }
+            return undoLoaded(environment, loadAndValidateConversationMemory(agentId, conversationId));
         } finally {
             recordMetrics(timerConversationUndo, counterConversationUndo, startTime);
         }
     }
 
-    @Override
-    public Boolean isRedoAvailable(Environment environment, String agentId, String conversationId)
+    private boolean undoLoaded(Environment environment, IConversationMemory conversationMemory) throws ResourceStoreException {
+        String conversationId = conversationMemory.getConversationId();
+        // #5: undo during AWAITING_HUMAN would corrupt the HITL bookmark, and
+        // undo during IN_PROGRESS (a resume executing) would round-trip a
+        // persisted IN_PROGRESS from outside the resume CAS — breaking the
+        // invariant crash recovery relies on. Checked against the loaded
+        // (DB-backed) state; false maps to 409 CONFLICT at the REST layer.
+        ConversationState loadedStateForUndo = conversationMemory.getConversationState();
+        if (loadedStateForUndo == ConversationState.AWAITING_HUMAN
+                || loadedStateForUndo == ConversationState.IN_PROGRESS) {
+            LOGGER.warnf("Undo rejected: conversation %s is in state %s", conversationId, loadedStateForUndo);
+            return false;
+        }
+
+        if (conversationMemory.isUndoAvailable()) {
+            conversationMemory.undoLastStep();
+            // undo/redo run on the REST thread, NOT through the per-conversation
+            // coordinator, so a say turn on this conversation can commit a fresh
+            // pause between the state check above and this store. An unconditional
+            // full-document replace would then clobber that just-persisted
+            // AWAITING_HUMAN snapshot — destroying the pending approval and
+            // orphaning its armed timer. CAS from the loaded (pre-undo) state so
+            // the store lands only if nothing moved the DB state meanwhile; on a
+            // miss the concurrent writer wins and undo reports no-op.
+            if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForUndo)) {
+                LOGGER.warnf("Undo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
+                        conversationId, loadedStateForUndo);
+                return false;
+            }
+            // The undone step is now on top of the redo cache.
+            var undone = conversationMemory.getRedoCache().peek();
+            applyAgentMemoryConfig(environment, conversationMemory, undone);
+            syncLongTermChanges(conversationMemory, undone, true);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Environment-qualified twin of {@link #isRedoAvailable(String)}; internal and
+     * tests only.
+     */
+    Boolean isRedoAvailable(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
 
         validateParams(environment, agentId, conversationId);
@@ -1150,42 +1089,47 @@ public class ConversationService implements IConversationService, UserErasurePar
         return conversationMemory.isRedoAvailable();
     }
 
-    @Override
-    public boolean redo(Environment environment, String agentId, String conversationId)
+    /**
+     * Environment-qualified twin of {@link #redo(String)}; internal and tests only.
+     */
+    boolean redo(Environment environment, String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
 
         validateParams(environment, agentId, conversationId);
         long startTime = System.nanoTime();
         try {
-            IConversationMemory conversationMemory = loadAndValidateConversationMemory(agentId, conversationId);
-
-            // #5: redo during AWAITING_HUMAN would corrupt the HITL bookmark;
-            // redo during IN_PROGRESS races an executing resume (see undo).
-            // DB-backed state check; false maps to 409 CONFLICT at the REST layer.
-            ConversationState loadedStateForRedo = conversationMemory.getConversationState();
-            if (loadedStateForRedo == ConversationState.AWAITING_HUMAN
-                    || loadedStateForRedo == ConversationState.IN_PROGRESS) {
-                LOGGER.warnf("Redo rejected: conversation %s is in state %s", conversationId, loadedStateForRedo);
-                return false;
-            }
-
-            if (conversationMemory.isRedoAvailable()) {
-                conversationMemory.redoLastStep();
-                // Same second-writer race as undo (see above): CAS from the loaded
-                // state so a concurrent say-turn pause commit is not clobbered.
-                if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForRedo)) {
-                    LOGGER.warnf("Redo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
-                            conversationId, loadedStateForRedo);
-                    return false;
-                }
-                applyAgentMemoryConfig(environment, conversationMemory, conversationMemory.getCurrentStep());
-                syncLongTermChanges(conversationMemory, conversationMemory.getCurrentStep(), false);
-                return true;
-            } else {
-                return false;
-            }
+            return redoLoaded(environment, loadAndValidateConversationMemory(agentId, conversationId));
         } finally {
             recordMetrics(timerConversationRedo, counterConversationRedo, startTime);
+        }
+    }
+
+    private boolean redoLoaded(Environment environment, IConversationMemory conversationMemory) throws ResourceStoreException {
+        String conversationId = conversationMemory.getConversationId();
+        // #5: redo during AWAITING_HUMAN would corrupt the HITL bookmark;
+        // redo during IN_PROGRESS races an executing resume (see undo).
+        // DB-backed state check; false maps to 409 CONFLICT at the REST layer.
+        ConversationState loadedStateForRedo = conversationMemory.getConversationState();
+        if (loadedStateForRedo == ConversationState.AWAITING_HUMAN
+                || loadedStateForRedo == ConversationState.IN_PROGRESS) {
+            LOGGER.warnf("Redo rejected: conversation %s is in state %s", conversationId, loadedStateForRedo);
+            return false;
+        }
+
+        if (conversationMemory.isRedoAvailable()) {
+            conversationMemory.redoLastStep();
+            // Same second-writer race as undo (see above): CAS from the loaded
+            // state so a concurrent say-turn pause commit is not clobbered.
+            if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForRedo)) {
+                LOGGER.warnf("Redo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
+                        conversationId, loadedStateForRedo);
+                return false;
+            }
+            applyAgentMemoryConfig(environment, conversationMemory, conversationMemory.getCurrentStep());
+            syncLongTermChanges(conversationMemory, conversationMemory.getCurrentStep(), false);
+            return true;
+        } else {
+            return false;
         }
     }
 
@@ -1368,39 +1312,41 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    // The four below read the conversation ONCE. They used to load the snapshot to
+    // learn its environment and agent, then hand both to the qualified overload,
+    // which loaded the same document a second time.
+
     @Override
     public Boolean isUndoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         // requireSnapshot, not the raw load: a missing conversation was a null
         // dereference here, i.e. a 500 where every sibling endpoint answers 404.
-        var snapshot = requireSnapshot(conversationId);
-        return isUndoAvailable(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
+        return convertConversationMemorySnapshot(requireSnapshot(conversationId)).isUndoAvailable();
     }
 
     @Override
     public boolean undo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = requireSnapshot(conversationId);
+        long startTime = System.nanoTime();
         try {
-            return undo(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
-        } catch (AgentMismatchException e) {
-            // Cannot happen when agentId comes from the stored snapshot
-            throw new ResourceStoreException("Unexpected agent mismatch", e);
+            var snapshot = requireSnapshot(conversationId);
+            return undoLoaded(snapshot.getEnvironment(), convertConversationMemorySnapshot(snapshot));
+        } finally {
+            recordMetrics(timerConversationUndo, counterConversationUndo, startTime);
         }
     }
 
     @Override
     public Boolean isRedoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = requireSnapshot(conversationId);
-        return isRedoAvailable(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
+        return convertConversationMemorySnapshot(requireSnapshot(conversationId)).isRedoAvailable();
     }
 
     @Override
     public boolean redo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
-        var snapshot = requireSnapshot(conversationId);
+        long startTime = System.nanoTime();
         try {
-            return redo(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId);
-        } catch (AgentMismatchException e) {
-            // Cannot happen when agentId comes from the stored snapshot
-            throw new ResourceStoreException("Unexpected agent mismatch", e);
+            var snapshot = requireSnapshot(conversationId);
+            return redoLoaded(snapshot.getEnvironment(), convertConversationMemorySnapshot(snapshot));
+        } finally {
+            recordMetrics(timerConversationRedo, counterConversationRedo, startTime);
         }
     }
 
@@ -1810,8 +1756,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                 loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn);
     }
 
-    void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {
-        conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, future);
+    boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
+                                            IConversationMemory memory, Future<Void> future) {
+        return conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future);
     }
 
     void logConversationError(Map<String, String> loggingContext, String conversationId, Throwable t) {
