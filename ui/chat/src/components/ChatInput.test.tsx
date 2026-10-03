@@ -205,6 +205,72 @@ describe("ChatInput — attachments", () => {
     }
   });
 
+  describe("an upload that settles while the composer is unmounted", () => {
+    // ChatWidget swaps ChatInput out for SecretInput while an agent's input
+    // field is open, and mounts a fresh ChatInput afterwards (CodeRabbit on
+    // #948, round 2).
+    function Harness({ show, conversationId }: { show: boolean; conversationId: string }) {
+      return (
+        <ChatProvider>
+          {show ? (
+            <ChatInput onSend={vi.fn()} conversationId={conversationId} />
+          ) : (
+            <p data-testid="secret-input-stand-in" />
+          )}
+        </ChatProvider>
+      );
+    }
+
+    async function startHeldUpload(conversationId: string) {
+      let finish!: (r: Awaited<ReturnType<typeof uploadAttachment>>) => void;
+      vi.mocked(uploadAttachment).mockImplementationOnce(
+        () => new Promise((resolve) => { finish = resolve; }),
+      );
+      const view = render(<Harness show conversationId={conversationId} />);
+      fireEvent.change(screen.getByTestId("chat-file-input"), {
+        target: { files: [pdf("held.pdf")] },
+      });
+      await waitFor(() => expect(uploadAttachment).toHaveBeenCalledWith(conversationId, expect.anything()));
+      return {
+        ...view,
+        settle: () =>
+          act(async () => {
+            finish({
+              storageRef: "ref-held",
+              fileName: "held.pdf",
+              mimeType: "application/pdf",
+              sizeBytes: 3,
+              forwardableInline: true,
+            });
+          }),
+      };
+    }
+
+    it("keeps it when the composer returns to the same conversation", async () => {
+      // Clearing the ref on unmount, as suggested, would delete a file the
+      // user attached to the conversation they are still in.
+      const { rerender, settle } = await startHeldUpload("conv-1");
+      rerender(<Harness show={false} conversationId="conv-1" />);
+      await settle();
+      rerender(<Harness show conversationId="conv-1" />);
+
+      expect(await screen.findByTestId("attachment-chip")).toHaveTextContent("held.pdf");
+      expect(deleteAttachment).not.toHaveBeenCalled();
+    });
+
+    it("discards it when the composer returns for a new conversation", async () => {
+      // A ref owned by the unmounted instance stayed on conv-1 for good, so
+      // the old upload was staged into conv-2's composer.
+      const { rerender, settle } = await startHeldUpload("conv-1");
+      rerender(<Harness show={false} conversationId="conv-1" />);
+      rerender(<Harness show conversationId="conv-2" />);
+      await settle();
+
+      await waitFor(() => expect(deleteAttachment).toHaveBeenCalledWith("conv-1", "ref-held"));
+      expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument();
+    });
+  });
+
   it("does not stage an upload that finishes after the conversation changed", async () => {
     let finish!: (r: Awaited<ReturnType<typeof uploadAttachment>>) => void;
     vi.mocked(uploadAttachment).mockImplementationOnce(

@@ -13,7 +13,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Eye, EyeOff, LoaderCircle, Lock, LockOpen, Paperclip, SendHorizontal, X } from "lucide-react";
-import { useChatState, useChatDispatch } from "@/store/chat-store";
+import { useChatState, useChatDispatch, useComposerConversationRef } from "@/store/chat-store";
 import {
   uploadAttachment,
   deleteAttachment,
@@ -184,10 +184,21 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   // the old id and stage its file into the new conversation. A layout effect
   // runs synchronously as part of the commit, so no continuation can see a
   // committed conversation change before this ref has followed it.
-  const currentConversationRef = useRef(conversationId);
+  //
+  // The ref belongs to the ChatProvider, not to this instance (see
+  // useComposerConversationRef). The composer is unmounted while an agent's
+  // input field is open and remounted afterwards. An upload that settles
+  // meanwhile is still staged when the conversation has not changed: the chip
+  // is waiting when the composer returns. But when the composer comes back for
+  // a NEW conversation, the fresh instance writes the new id here, and the old
+  // upload is discarded. Deliberately no cleanup on unmount: an unmount alone
+  // does not change the conversation, and clearing the ref would delete a file
+  // the user attached to the conversation they are still in.
+  const ownConversationRef = useRef<string | null | undefined>(conversationId);
+  const currentConversationRef = useComposerConversationRef() ?? ownConversationRef;
   useLayoutEffect(() => {
     currentConversationRef.current = conversationId;
-  }, [conversationId]);
+  }, [conversationId, currentConversationRef]);
   const atCapacity =
     pendingAttachments.length + uploading.length >= MAX_ATTACHMENTS_PER_TURN;
 
@@ -324,6 +335,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
     },
     [
       conversationId,
+      currentConversationRef,
       dispatch,
       notify,
       announce,
