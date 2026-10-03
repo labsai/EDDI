@@ -314,6 +314,7 @@ public class RestA2AEndpoint {
             return jsonRpcError(request == null ? null : request.id(), A2AModels.ERROR_INVALID_REQUEST, "Invalid JSON-RPC request");
         }
         if (!a2aEnabled) {
+            count("disabled", "none", "error");
             return jsonRpcError(request.id(), A2AModels.ERROR_METHOD_NOT_FOUND, "A2A is disabled");
         }
 
@@ -464,12 +465,30 @@ public class RestA2AEndpoint {
      * passed.
      */
     void drain(OutputStream out, BlockingQueue<StreamEvent> events, Object rpcId, Dialect dialect, long waitMillis) throws IOException {
+        drain(out, events, rpcId, dialect, waitMillis, KEEPALIVE_INTERVAL_MILLIS);
+    }
+
+    /**
+     * How often an idle stream writes an SSE comment. A turn can run for minutes
+     * without a token (a tool loop, a model cascade), and a proxy that sees no
+     * bytes for its idle timeout drops the connection before the final status
+     * arrives. SSE clients ignore comment lines.
+     */
+    static final long KEEPALIVE_INTERVAL_MILLIS = 15_000;
+
+    void drain(OutputStream out, BlockingQueue<StreamEvent> events, Object rpcId, Dialect dialect, long waitMillis, long keepaliveMillis)
+            throws IOException {
         long deadline = System.currentTimeMillis() + waitMillis;
         A2ATask lastSeen = null;
         try {
             while (true) {
                 long remaining = deadline - System.currentTimeMillis();
-                StreamEvent event = remaining > 0 ? events.poll(remaining, TimeUnit.MILLISECONDS) : null;
+                StreamEvent event = remaining > 0 ? events.poll(Math.min(remaining, keepaliveMillis), TimeUnit.MILLISECONDS) : null;
+                if (event == null && remaining > keepaliveMillis) {
+                    out.write(": keepalive\n\n".getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                    continue;
+                }
                 if (event == null) {
                     // The turn outlived the stream: end it on the last known state; the
                     // peer can poll the task.

@@ -77,7 +77,7 @@ class RestA2AEndpointTest {
     }
 
     /** A card in the old eight-field shape these tests were written against. */
-    private static AgentCard card(String name, String description, String url, String provider, String version,
+    private static AgentCard card(String name, String description, String url, String version,
                                   AgentCapabilities capabilities, List<AgentSkill> skills, AgentAuthentication authentication) {
         return new AgentCard(name, description, url, "0.3.0", "JSONRPC", null, null, version, capabilities, null, null,
                 null, null, skills, authentication);
@@ -110,7 +110,7 @@ class RestA2AEndpointTest {
     void getDefaultAgentCard_success_returnsFirstCard() {
         endpoint = createEndpoint(true, false);
         var card1 = card("Agent1", "First agent", "http://localhost/a2a/agents/1",
-                "EDDI", "1.0", null, null, null);
+                "1.0", null, null, null);
         when(agentCardService.getDefaultAgentCard()).thenReturn(card1);
 
         Response response = endpoint.getDefaultAgentCard();
@@ -129,7 +129,7 @@ class RestA2AEndpointTest {
         endpoint = createEndpoint(true, false);
         when(agentCardService.getDefaultAgentCard()).thenReturn(
                 card("Agent1", "First agent", "http://localhost/a2a/agents/1",
-                        "EDDI", "1.0", null, null, null));
+                        "1.0", null, null, null));
 
         endpoint.getDefaultAgentCard();
 
@@ -163,7 +163,7 @@ class RestA2AEndpointTest {
         endpoint = createEndpoint(true, false);
         var card = card("TestAgent", "A test agent",
                 "http://localhost/a2a/agents/" + AGENT_ID,
-                "EDDI", "1.0",
+                "1.0",
                 new AgentCapabilities(true, false, true),
                 List.of(new AgentSkill("skill1", "Greeting", "Says hello", List.of("greeting"), List.of("Hello!"))),
                 null);
@@ -190,7 +190,7 @@ class RestA2AEndpointTest {
     @Test
     void listA2AAgents_enabled_returnsCards() {
         endpoint = createEndpoint(true, false);
-        var card = card("Agent", "desc", "http://localhost", "EDDI", "1.0", null, null, null);
+        var card = card("Agent", "desc", "http://localhost", "1.0", null, null, null);
         when(agentCardService.listA2AAgents()).thenReturn(List.of(card));
 
         Response response = endpoint.listA2AAgents();
@@ -329,6 +329,15 @@ class RestA2AEndpointTest {
 
         assertEquals(200, response.getStatus()); // JSON-RPC errors are 200 OK
         assertEquals(A2AModels.ERROR_METHOD_NOT_FOUND, errorCode(response));
+    }
+
+    @Test
+    void handleJsonRpc_disabled_isCounted() {
+        endpoint = createEndpoint(false, false);
+
+        endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "SendMessage", Map.of(), "req-1"));
+
+        assertEquals(1.0, meterRegistry.counter("eddi.a2a.requests", "method", "disabled", "dialect", "none", "outcome", "error").count());
     }
 
     @Test
@@ -634,6 +643,20 @@ class RestA2AEndpointTest {
     }
 
     @Test
+    void stream_writesKeepaliveCommentsWhileIdle() throws Exception {
+        endpoint = createEndpoint(true, false);
+        var queue = new LinkedBlockingQueue<StreamEvent>();
+        queue.add(new TaskEvent(new A2ATask("t1", "c1", new TaskStatus(TaskState.working, null, Instant.now()), null, null)));
+        var out = new ByteArrayOutputStream();
+
+        endpoint.drain(out, queue, "s-4", Dialect.V1_0, 400, 50);
+
+        String body = out.toString(StandardCharsets.UTF_8);
+        assertTrue(body.contains(": keepalive\n\n"), body);
+        assertTrue(body.trim().endsWith("}"), "the stream still ends on the final status event");
+    }
+
+    @Test
     void stream_refusalBeforeTheStream_isAnOrdinaryJsonRpcError() throws Exception {
         endpoint = createEndpoint(true, false);
         doThrow(new A2ABusyException("busy")).when(taskHandler).stream(eq(AGENT_ID), any(), any());
@@ -675,8 +698,8 @@ class RestA2AEndpointTest {
     @Test
     void wellKnownCardPaths_serveTheSameCards() {
         endpoint = createEndpoint(true, false);
-        var defaultCard = card("A", "d", "u", "EDDI", "1", null, null, null);
-        var agentCard = card("B", "d", "u", "EDDI", "1", null, null, null);
+        var defaultCard = card("A", "d", "u", "1", null, null, null);
+        var agentCard = card("B", "d", "u", "1", null, null, null);
         when(agentCardService.getDefaultAgentCard()).thenReturn(defaultCard);
         when(agentCardService.getAgentCard(AGENT_ID)).thenReturn(agentCard);
 

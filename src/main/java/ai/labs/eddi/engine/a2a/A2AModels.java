@@ -251,16 +251,28 @@ public final class A2AModels {
      *            the peer's message
      * @param updatedAt
      *            when {@code state} was reached
+     * @param generation
+     *            which send this record belongs to. A pre-0.2 peer chooses its own
+     *            task id and may send under the same id again while an earlier turn
+     *            is still running; the earlier turn's late outcome must not
+     *            overwrite the newer send's record. Null for a record re-derived
+     *            from the conversation store.
      */
     public record A2ATaskRecord(String taskId, String contextId, String conversationId, String agentId, TaskState state, String statusText,
-            String responseText, String userText, Instant updatedAt) implements Serializable {
+            String responseText, String userText, Instant updatedAt, String generation) implements Serializable {
 
         @Serial
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
+
+        /** A record that belongs to no particular send. */
+        public A2ATaskRecord(String taskId, String contextId, String conversationId, String agentId, TaskState state, String statusText,
+                String responseText, String userText, Instant updatedAt) {
+            this(taskId, contextId, conversationId, agentId, state, statusText, responseText, userText, updatedAt, null);
+        }
 
         public A2ATaskRecord withOutcome(TaskState newState, String newStatusText, String newResponseText) {
             return new A2ATaskRecord(taskId, contextId, conversationId, agentId, newState, newStatusText, newResponseText, userText,
-                    Instant.now());
+                    Instant.now(), generation);
         }
     }
 

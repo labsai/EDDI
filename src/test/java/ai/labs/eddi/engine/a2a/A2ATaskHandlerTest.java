@@ -423,6 +423,32 @@ class A2ATaskHandlerTest {
         }
 
         @Test
+        @DisplayName("an earlier send's late outcome does not overwrite a newer send under the same legacy id")
+        void lateOutcomeOfAnEarlierSendUnderTheSameIdIsNotPersisted() throws Exception {
+            List<ConversationResponseHandler> pending = new ArrayList<>();
+            doAnswer(invocation -> {
+                pending.add(invocation.getArgument(8));
+                return null;
+            }).when(conversationService).say(any(), anyString(), anyString(), any(), any(), any(), any(), anyBoolean(), any());
+            handler.send(AGENT, new SendRequest("first", null, null, null, "same-id", true, null, Dialect.LEGACY));
+            handler.send(AGENT, new SendRequest("second", null, null, null, "same-id", true, null, Dialect.LEGACY));
+
+            // The second send settles first, then the first one's outcome arrives late.
+            var second = new SimpleConversationMemorySnapshot();
+            second.setConversationState(ConversationState.READY);
+            second.setConversationOutputs(List.of(output("same-id", "second answer")));
+            pending.get(1).onComplete(second);
+            var first = new SimpleConversationMemorySnapshot();
+            first.setConversationState(ConversationState.ERROR);
+            first.setConversationOutputs(List.of(output("same-id", null)));
+            pending.get(0).onComplete(first);
+
+            A2ATask read = handler.get("same-id", null);
+            assertEquals(TaskState.completed, read.state());
+            assertEquals("second answer", read.artifacts().getFirst().parts().getFirst().text());
+        }
+
+        @Test
         @DisplayName("a legacy task keeps the peer's id, and no context is invented for it")
         void legacyKeepsItsContract() throws Exception {
             sayCompletes(ConversationState.READY, "ok");
@@ -627,6 +653,18 @@ class A2ATaskHandlerTest {
             assertNotNull(read);
             assertEquals(TaskState.completed, read.state());
             assertEquals("remembered", read.artifacts().getFirst().parts().getFirst().text());
+        }
+
+        @Test
+        @DisplayName("a conversation with no persisted output yields no task")
+        void noOutputsNoTask() {
+            var empty = new SimpleConversationMemorySnapshot();
+            empty.setUserId(PEER_A);
+            empty.setAgentId(AGENT);
+            empty.setConversationOutputs(null);
+            stored.put("convX", empty);
+
+            assertNull(handler.get("convX_0123456789abcdef", null));
         }
 
         @Test

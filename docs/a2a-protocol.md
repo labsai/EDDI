@@ -164,7 +164,10 @@ under its id. A task in a terminal state takes no further messages (`-32004`);
 send a new message in the same context instead.
 
 A pre-0.2 `tasks/send` keeps its old contract: the task id is the one the peer
-chose (`params.id`), and no context is invented when the peer named none.
+chose (`params.id`), and no context is invented when the peer named none. If a
+peer sends again under the same id while an earlier turn is still running, the
+id belongs to the newer send: the earlier turn's outcome answers its own caller
+but is not recorded over the newer task.
 
 ### Task states
 
@@ -227,7 +230,9 @@ event is a JSON-RPC response carrying the request's `id`:
    final state.
 
 A turn that outlives the stream ends it on its last known state; poll `GetTask`
-for the rest.
+for the rest. While no event is due, the stream writes an SSE comment
+(`: keepalive`) every 15 seconds so a proxy does not drop an idle connection;
+SSE clients ignore comment lines.
 
 ### The in-flight bound
 

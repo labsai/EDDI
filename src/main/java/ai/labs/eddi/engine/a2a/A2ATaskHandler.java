@@ -357,7 +357,7 @@ public class A2ATaskHandler {
 
         Prepared withConversation(String conversationId) {
             A2ATaskRecord moved = new A2ATaskRecord(record.taskId(), record.contextId(), conversationId, record.agentId(), record.state(),
-                    record.statusText(), record.responseText(), record.userText(), record.updatedAt());
+                    record.statusText(), record.responseText(), record.userText(), record.updatedAt(), record.generation());
             return new Prepared(principal, agentId, moved, messageText, false);
         }
     }
@@ -407,7 +407,7 @@ public class A2ATaskHandler {
                                 + " and cannot take further messages; send a new message in the same context instead");
             }
             A2ATaskRecord continued = new A2ATaskRecord(existing.taskId(), existing.contextId(), existing.conversationId(), agentId,
-                    TaskState.working, null, null, text, Instant.now());
+                    TaskState.working, null, null, text, Instant.now(), UUID.randomUUID().toString());
             taskStore.saveTask(principal, continued);
             return new Prepared(principal, agentId, continued, text, false);
         }
@@ -441,7 +441,7 @@ public class A2ATaskHandler {
                         ? UUID.randomUUID().toString()
                         : conversationId + TASK_ID_SEPARATOR + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
         A2ATaskRecord record = new A2ATaskRecord(taskId, contextId, conversationId, agentId, TaskState.working, null, null, text,
-                Instant.now());
+                Instant.now(), UUID.randomUUID().toString());
         taskStore.saveTask(principal, record);
         return new Prepared(principal, agentId, record, text, fromContext);
     }
@@ -644,7 +644,13 @@ public class A2ATaskHandler {
                 // un-cancel the task.
                 A2ATaskRecord stored = taskStore.findTask(principal, base.taskId()).orElse(base);
                 A2ATaskRecord settledRecord;
-                if (stored.state() == TaskState.canceled) {
+                if (!Objects.equals(stored.generation(), base.generation())) {
+                    // A newer send under the same id owns the record now (a pre-0.2 peer
+                    // reusing its task id): this turn's outcome answers its own caller and
+                    // is not persisted over the newer task.
+                    settledRecord = base.withOutcome(state, statusText, responseText);
+                    countTask(state);
+                } else if (stored.state() == TaskState.canceled) {
                     settledRecord = stored;
                 } else {
                     settledRecord = base.withOutcome(state, statusText, responseText);
@@ -764,8 +770,12 @@ public class A2ATaskHandler {
             return Optional.empty();
         }
         List<ConversationOutput> outputs = snapshot.getConversationOutputs();
+        if (outputs == null || outputs.isEmpty()) {
+            // Nothing persisted for this conversation yet: nothing to add.
+            return Optional.ofNullable(stored);
+        }
         int index = -1;
-        for (int i = outputs == null ? -1 : outputs.size() - 1; i >= 0; i--) {
+        for (int i = outputs.size() - 1; i >= 0; i--) {
             if (taskId.equals(taskIdOf(outputs.get(i)))) {
                 index = i;
                 break;

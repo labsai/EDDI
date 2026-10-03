@@ -35,6 +35,10 @@ and tasks lived only in a node-local 1,000-entry cache.
   until that turn settles: cancelling the conversation would have stopped the
   sibling's turn instead. The in-flight bound's lease timer is cancelled on a
   normal release rather than left queued for task timeout + 30 s.
+- **A reused legacy task id belongs to the newest send**: an earlier turn's
+  late outcome is no longer recorded over it. Streams write an SSE keepalive
+  comment every 15 s while idle, and calls to a disabled A2A surface are
+  counted in `eddi_a2a_requests_total` (`method="disabled"`).
 - **`CancelTask` cancels the turn**, not the conversation (it used to end the
   whole context), and a terminal task answers `TaskNotCancelable`.
 - **In-flight bound** `eddi.a2a.max-concurrent-requests` (default 64): the
