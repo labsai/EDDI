@@ -47,7 +47,7 @@ and tasks lived only in a node-local 1,000-entry cache.
   `tasks/send` for a stock EDDI up to 6.5 — tries the well-known card paths,
   reads results in all three shapes, and reports a failed, rejected,
   input-required or still-working task to the model as such instead of as an
-  answer. The configured URL stays the endpoint; a card cannot redirect it.
+  answer. The configured URL stays the endpoint; a card cannot redirect it (when the configured URL is the card document itself, the card's endpoint must be on the card's origin, since the credential is sent there).
 
 Verified live with the official `a2a-sdk` 1.2.1 Python client (1.0 transport
 and its 0.3 compatibility transport) against a jar of this branch, and compared
