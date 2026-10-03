@@ -368,7 +368,7 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 |---|---|---|
 | `eddi.openai-compat.enabled` | `false` | Serve `/v1` |
 | `eddi.openai-compat.api-key` | *(empty)* | Shared key clients present |
-| `eddi.openai-compat.http-policy` | `permit` | `permit` accepts the shared key; `authenticated` has Quarkus OIDC validate per-user tokens instead, which must carry `eddi-admin`, `eddi-editor` or `eddi-user` (else 403) |
+| `eddi.openai-compat.http-policy` | `permit` | `permit` accepts the shared key; `authenticated` has Quarkus OIDC validate per-user tokens instead, which, with `authorization.enabled=true`, must carry `eddi-admin`, `eddi-editor` or `eddi-user` (else 403) |
 | `eddi.openai-compat.trust-user-headers` | `true` | Believe `X-OpenWebUI-User-Id` as the EDDI userId. Safe only because the caller proved possession of the shared key — **a leaked key therefore permits impersonating any user** |
 | `eddi.openai-compat.allow-anonymous` | `false` | Serve requests carrying no user identity |
 | `eddi.openai-compat.default-user` | `openai-anonymous` | userId used when anonymous is allowed |
