@@ -17,6 +17,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipException;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
@@ -163,7 +164,48 @@ public class ZipArchive implements IZipArchive {
         }
 
         String targetDirPath = targetDir.getCanonicalPath();
-        try (ZipInputStream zipIn = new ZipInputStream(new BufferedInputStream(zipFile))) {
+        // The raw archive is copied aside as it streams past, so its central directory
+        // can be checked once the entries are out (see requireCompleteArchive).
+        Path rawCopy = Files.createTempFile(targetDir.getCanonicalFile().getParentFile().toPath(), "upload-", ".zip");
+        try (OutputStream rawOut = new BufferedOutputStream(Files.newOutputStream(rawCopy));
+                InputStream teed = new TeeInputStream(zipFile, rawOut)) {
+            extractEntries(teed, targetDir, targetDirPath);
+            // Whatever ZipInputStream did not consume — the central directory and the
+            // end record — still has to reach the copy.
+            teed.transferTo(OutputStream.nullOutputStream());
+            rawOut.flush();
+            requireCompleteArchive(rawCopy);
+        } finally {
+            Files.deleteIfExists(rawCopy);
+        }
+    }
+
+    /**
+     * {@link ZipInputStream} reads local entry headers only, and treats end of
+     * input where the next header should be as a normal end. An upload cut off
+     * after its last complete entry — before the central directory — therefore
+     * unpacked "successfully" with entries missing, and the importer worked from an
+     * incomplete agent. {@link ZipFile} reads the central directory and the end
+     * record, so opening the copy is the completeness check.
+     */
+    private static void requireCompleteArchive(Path rawCopy) throws IOException {
+        try {
+            // Opening it is the check: ZipFile refuses an archive without a readable
+            // central directory and end record.
+            new ZipFile(rawCopy.toFile()).close();
+        } catch (ZipException e) {
+            throw new MalformedArchiveException("Zip archive is corrupt or truncated: " + e.getMessage());
+        }
+    }
+
+    private void extractEntries(InputStream archive, File targetDir, String targetDirPath) throws IOException {
+        try (ZipInputStream zipIn = new ZipInputStream(new BufferedInputStream(archive) {
+            @Override
+            public void close() {
+                // The tee owns the underlying stream: it still has to read what
+                // ZipInputStream leaves behind.
+            }
+        })) {
             ZipEntry entry;
             int entryCount = 0;
             // A running total across all entries, so many small entries cannot add up
@@ -239,6 +281,49 @@ public class ZipArchive implements IZipArchive {
     public static class ZipLimitExceededException extends IOException {
         public ZipLimitExceededException(String message) {
             super(message);
+        }
+    }
+
+    /** Copies every byte read through it to a side stream. */
+    private static final class TeeInputStream extends FilterInputStream {
+        private final OutputStream copy;
+
+        TeeInputStream(InputStream in, OutputStream copy) {
+            super(in);
+            this.copy = copy;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int b = super.read();
+            if (b != -1) {
+                copy.write(b);
+            }
+            return b;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int n = super.read(buffer, offset, length);
+            if (n > 0) {
+                copy.write(buffer, offset, n);
+            }
+            return n;
+        }
+
+        @Override
+        public long skip(long n) throws IOException {
+            // Skipped bytes must reach the copy too.
+            byte[] discard = new byte[(int) Math.min(n, BUFFER_SIZE)];
+            long skipped = 0;
+            while (skipped < n) {
+                int r = read(discard, 0, (int) Math.min(discard.length, n - skipped));
+                if (r < 0) {
+                    break;
+                }
+                skipped += r;
+            }
+            return skipped;
         }
     }
 

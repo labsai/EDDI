@@ -13,6 +13,7 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -178,6 +179,37 @@ class ZipArchiveTest {
 
         assertThrows(ZipArchive.MalformedArchiveException.class,
                 () -> zipArchive.unzip(new ByteArrayInputStream(truncated), tempDir.resolve("extracted").toFile()));
+    }
+
+    @Test
+    void unzip_cutOffAfterTheLastCompleteEntry_isMalformed(@TempDir Path tempDir) throws IOException {
+        // Every local entry intact, the central directory and end record missing:
+        // ZipInputStream alone reads this as a complete two-entry archive.
+        byte[] zip = zipOf(2, 1024);
+        int centralDirectory = -1;
+        for (int i = zip.length - 4; i >= 0; i--) {
+            if (readIntLe(zip, i) == 0x02014b50 && (centralDirectory < 0 || i < centralDirectory)) {
+                centralDirectory = i;
+            }
+        }
+        assertTrue(centralDirectory > 0, "fixture: the archive has a central directory");
+        byte[] truncated = Arrays.copyOf(zip, centralDirectory);
+
+        var thrown = assertThrows(ZipArchive.MalformedArchiveException.class,
+                () -> zipArchive.unzip(new ByteArrayInputStream(truncated), tempDir.resolve("extracted").toFile()));
+        assertTrue(thrown.getMessage().contains("truncated"), thrown.getMessage());
+    }
+
+    @Test
+    void unzip_completeArchive_leavesNoCopyBehind(@TempDir Path tempDir) throws IOException {
+        File targetDir = tempDir.resolve("extracted").toFile();
+
+        zipArchive.unzip(new ByteArrayInputStream(zipOf(3, 100)), targetDir);
+
+        try (var siblings = Files.list(tempDir)) {
+            assertEquals(List.of("extracted"), siblings.map(p -> p.getFileName().toString()).toList(),
+                    "the raw copy kept for the completeness check must be removed");
+        }
     }
 
     @Test

@@ -153,6 +153,20 @@ public class RemoteApiResourceSource implements IResourceSource {
         this.ownsHttpClient = true;
     }
 
+    /**
+     * Re-throws a size-cap refusal from a catch block that otherwise tolerates a
+     * failed read. Those blocks skip what they cannot read — a workflow, an
+     * extension, a snippet, a display name — and the upgrade then works from
+     * incomplete source data, where a missing workflow reads as one the source
+     * removed. A response this instance refused for its size is not "unreadable",
+     * it is a source this instance will not sync from: the whole sync fails (502).
+     */
+    static void rethrowIfTooLarge(Exception e) {
+        if (isTooLarge(e)) {
+            throw e instanceof RemoteReadException remote ? remote : new RemoteReadException(e.getMessage(), e);
+        }
+    }
+
     /** Whether a failed read was the response-size cap, wherever in the chain. */
     static boolean isTooLarge(Throwable failure) {
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
@@ -313,6 +327,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                     workflowDataList.add(wfData);
                 }
             } catch (Exception e) {
+                rethrowIfTooLarge(e);
                 LOGGER.warnf(e, "Failed to read workflow %d from remote %s", i, LogSanitizer.sanitize(baseUrl));
             }
         }
@@ -380,6 +395,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                         sharing.merge(snippet.getName(), 1, Integer::sum);
                     }
                 } catch (Exception e) {
+                    rethrowIfTooLarge(e);
                     LOGGER.debugf("Could not read remote snippet %s: %s",
                             LogSanitizer.sanitize(desc.getName()), LogSanitizer.sanitize(e.getMessage()));
                 }
@@ -392,6 +408,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             });
         } catch (Exception e) {
+            rethrowIfTooLarge(e);
             LOGGER.warnf("Failed to read snippets from remote %s: %s",
                     LogSanitizer.sanitize(baseUrl), LogSanitizer.sanitize(e.getMessage()));
         }
@@ -417,6 +434,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             }
         } catch (Exception e) {
+            rethrowIfTooLarge(e);
             // A source that cannot be read at all fails loudly elsewhere; here it just
             // means no snippet can be attributed to this agent.
             LOGGER.warnf("Could not scan agent %s for snippet references: %s",
@@ -784,6 +802,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                     }
                 }
             } catch (Exception e) {
+                rethrowIfTooLarge(e);
                 LOGGER.debugf("Could not scan remote parser %s for its dictionaries: %s",
                         LogSanitizer.sanitize(String.valueOf(ref.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
             }
@@ -802,6 +821,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             into.put(ref.key(), new ExtensionSourceData(
                     extId, name, ref.fileExtension(), ref.stepType(), contentJson));
         } catch (Exception e) {
+            rethrowIfTooLarge(e);
             LOGGER.debugf("Could not read remote extension %s: %s",
                     LogSanitizer.sanitize(String.valueOf(ref.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
         }
@@ -864,6 +884,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             }
         } catch (Exception e) {
+            rethrowIfTooLarge(e);
             LOGGER.debugf("Could not read remote descriptors from %s: %s",
                     LogSanitizer.sanitize(descriptorsPath), LogSanitizer.sanitize(e.getMessage()));
         }

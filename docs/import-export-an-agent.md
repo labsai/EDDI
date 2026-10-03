@@ -532,10 +532,20 @@ agent export; see `eddi.backup.import.*` in the
 [configuration reference](configuration-reference.md).
 
 An archive that is **malformed** is refused with `400` and the reason, never `500` (which
-would blame this server for the archive): an entry whose path would land outside the
-extraction directory (`../../x`, "zip-slip"), an entry name that is not a valid path,
-corrupt or truncated compressed data, and a configuration file in it that is not valid JSON.
-Nothing from such an archive is written.
+would blame this server for the archive). Two kinds, with different guarantees:
+
+- **The archive itself** — an entry whose path would land outside the extraction directory
+  (`../../x`, "zip-slip"), an entry name that is not a valid path, corrupt compressed data, or a
+  truncated upload (including one cut off after its last complete entry, before the ZIP's central
+  directory). These are found while unpacking, before anything is imported, so **nothing is
+  written**.
+- **The agent, a workflow or an extension config is not valid JSON** — the import stops with
+  `400`, and whatever it had already created (snippets, connections, earlier resources) is
+  rolled back, as for any failed import.
+
+A **snippet or connection file** that is not valid JSON is *not* fatal: like any snippet or
+connection the importer cannot use, it is skipped with a warning in the log, and the rest of the
+archive is imported.
 
 ## Live Sync (Without ZIP)
 
