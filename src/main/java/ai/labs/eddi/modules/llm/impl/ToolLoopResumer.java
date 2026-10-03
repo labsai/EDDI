@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -274,9 +275,13 @@ class ToolLoopResumer {
                 // approved: this call is exactly what they saw, so a caller-bound
                 // credential on it is theirs to spend — and ONLY on it. The rest of
                 // the resumed turn runs with no caller (ConversationHitlService).
-                String result = CALLER_CONTEXT.callAsApprover(() -> toolLoopRunner.executeSingleToolCallResult(req, memory, trace,
-                        toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
-                        enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs));
+                // ApprovedCallScope: the self-ungating rule is also applied to the request
+                // as finally built and sent (ApiCallExecutor), not only to the preview
+                // checked above, which preRequest property instructions can change.
+                String result = ApprovedCallScope.run(memory.getAgentId(),
+                        () -> CALLER_CONTEXT.callAsApprover(() -> toolLoopRunner.executeSingleToolCallResult(req, memory, trace,
+                                toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
+                                enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs)));
                 journalStore.markExecuted(conversationId, pauseEpoch, c.getCallId(),
                         ToolApprovalGateSupport.capUtf8(result, AgentOrchestrator.JOURNAL_RESULT_MAX_BYTES));
                 String envelope = amended != null ? amendedEnvelope(result) : result;
