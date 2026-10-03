@@ -285,7 +285,13 @@ class ConversationStepRunner {
         // #2: register the live memory so cancelConversation can signal the
         // running pipeline via setCancelled (checked at task boundaries).
         InFlightRegistration registration = new InFlightRegistration(conversationId, conversationMemory);
-        boolean abandoned = false;
+        // Assume the turn may still be running until the dispatcher reports otherwise:
+        // the abandon branch of the watchdog does store round trips that can throw
+        // (a datastore outage is the likeliest reason for a timeout), and a turn whose
+        // dispatcher died there must not be unregistered while its body still runs.
+        // Releasing as "abandoned" is always safe — a finished or never-started body
+        // is unregistered straight away.
+        boolean abandoned = true;
         try {
             // Carry the agent-level tool-approval config onto memory BEFORE the
             // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
@@ -580,6 +586,14 @@ class ConversationStepRunner {
                             errorMessage = String.format(errorMessage, conversationId);
                             conversationService.contextLogger.setLoggingContext(loggingContext);
                             LOGGER.warn(errorMessage, t);
+                            if (conversationMemory.isCancelled()) {
+                                // The pipeline's own failure handling set ERROR on the memory and
+                                // its completion callback cached it, so the state endpoint
+                                // reported ERROR for as long as the cache lives while the store
+                                // (the watchdog's EXECUTION_INTERRUPTED, a cancel's state) says
+                                // otherwise. Same repair the success path makes.
+                                refreshCachedState(conversationId);
+                            }
                         } else if (t instanceof IConversation.ConversationNotReadyException) {
                             String msg = "Conversation not ready! (conversationId=%s)";
                             msg = String.format(msg, conversationId);

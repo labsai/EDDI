@@ -96,6 +96,7 @@ class ConversationWatchdogAbandonTest {
     private BaseRuntime runtime;
     private ExecutorService pool;
     private ConversationService conversationService;
+    private ICache<String, ConversationState> stateCache;
 
     @SuppressWarnings("unchecked")
     @BeforeEach
@@ -116,7 +117,8 @@ class ConversationWatchdogAbandonTest {
         var contextLogger = mock(IContextLogger.class);
         var auditLedgerService = mock(AuditLedgerService.class);
         var tenantQuotaService = mock(TenantQuotaService.class);
-        doReturn(mock(ICache.class)).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
+        stateCache = mock(ICache.class);
+        doReturn(stateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         when(contextLogger.createLoggingContext(any(), any(), any(), any())).thenReturn(new HashMap<>());
         when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
         when(auditLedgerService.isEnabled()).thenReturn(false);
@@ -260,6 +262,114 @@ class ConversationWatchdogAbandonTest {
         Thread.sleep(500); // let the failure callback run
         verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("a store failure while the watchdog abandons the turn does not unregister the still-running zombie")
+    void watchdogStoreFailureKeepsTheZombieReachable() throws Exception {
+        IConversation conversation = mock(IConversation.class);
+        IAgent agent = mock(IAgent.class);
+        AtomicReference<IConversationMemory> turnMemory = new AtomicReference<>();
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch returned = new CountDownLatch(1);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot());
+        when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(agent);
+        when(agent.continueConversation(any(), any(), any())).thenAnswer(inv -> {
+            turnMemory.set(inv.getArgument(0));
+            return conversation;
+        });
+        when(conversation.isEnded()).thenReturn(false);
+        // A datastore outage is the likeliest reason for a timeout, and it also fails
+        // the watchdog's own state read.
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenAnswer(inv -> {
+            if (turnMemory.get() != null && turnMemory.get().isCancelled()) {
+                throw new IllegalStateException("datastore unavailable");
+            }
+            return ConversationState.READY;
+        });
+        doAnswer(inv -> {
+            running.countDown();
+            try {
+                while (release.getCount() > 0) {
+                    try {
+                        release.await();
+                    } catch (InterruptedException swallowed) {
+                        // swallowed, as lower layers do
+                    }
+                }
+            } finally {
+                returned.countDown();
+            }
+            return null;
+        }).when(conversation).say(anyString(), anyMap());
+
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        assertThrows(IllegalStateException.class, () -> captor.getValue().call());
+        assertTrue(running.await(10, TimeUnit.SECONDS));
+
+        assertEquals(1, conversationService.stopInFlightWork(USER_ID),
+                "the dispatcher died in the abandon branch, but the body still runs: it must stay reachable");
+        release.countDown();
+        assertTrue(returned.await(10, TimeUnit.SECONDS));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (conversationService.stopInFlightWork(USER_ID) != 0 && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertEquals(0, conversationService.stopInFlightWork(USER_ID), "unregistered once the body returned");
+    }
+
+    @Test
+    @Timeout(60)
+    @DisplayName("an abandoned turn's failure does not leave ERROR in the state cache over the persisted EXECUTION_INTERRUPTED")
+    void abandonedTurnFailureRepairsTheStateCache() throws Exception {
+        IConversation conversation = mock(IConversation.class);
+        IAgent agent = mock(IAgent.class);
+        CountDownLatch dispatcherDone = new CountDownLatch(1);
+        CountDownLatch failed = new CountDownLatch(1);
+        AtomicReference<ConversationState> persisted = new AtomicReference<>(ConversationState.READY);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot());
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenAnswer(inv -> persisted.get());
+        doAnswer(inv -> {
+            persisted.set(inv.getArgument(1));
+            return null;
+        }).when(conversationMemoryStore).setConversationState(eq(CONVERSATION_ID), any());
+        when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(agent);
+        when(agent.continueConversation(any(), any(), any())).thenReturn(conversation);
+        when(conversation.isEnded()).thenReturn(false);
+        // What the live run showed: the interrupted pipeline's own failure handling
+        // caches ERROR, after the watchdog has already recorded EXECUTION_INTERRUPTED.
+        doAnswer(inv -> {
+            try {
+                Thread.sleep(30_000);
+            } catch (InterruptedException e) {
+                dispatcherDone.await(10, TimeUnit.SECONDS);
+                conversationService.cacheConversationState(CONVERSATION_ID, ConversationState.ERROR);
+                failed.countDown();
+                throw new IllegalStateException("Interrupted waiting for lock");
+            }
+            return null;
+        }).when(conversation).say(anyString(), anyMap());
+
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getValue().call();
+        dispatcherDone.countDown();
+
+        assertTrue(failed.await(10, TimeUnit.SECONDS));
+        Thread.sleep(500); // let the failure callback run
+        ArgumentCaptor<ConversationState> cached = ArgumentCaptor.forClass(ConversationState.class);
+        verify(stateCache, atLeastOnce()).put(eq(CONVERSATION_ID), cached.capture());
+        assertEquals(ConversationState.EXECUTION_INTERRUPTED, cached.getAllValues().get(cached.getAllValues().size() - 1),
+                "the last state cached must be the persisted one, not the zombie's ERROR");
     }
 
     @Test
