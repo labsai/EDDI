@@ -10,7 +10,10 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,9 +27,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -178,5 +184,26 @@ class ConversationStepRunnerLeaseTest {
         runTurn(new TestLease(null));
         verify(memory, never()).setFenceToken(any());
         verify(store, never()).raiseFence(anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("a dead letter of a secretInput turn records neither the input nor its context, and is not replayable")
+    void secretInputNeverReachesADeadLetter() throws Exception {
+        ConversationService service = mock(ConversationService.class, CALLS_REAL_METHODS);
+        setFinal(service, "captureDeadLetterInput", true);
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+
+        var secret = new InputData("my-password", Map.of("secretInput", new Context(Context.ContextType.string, "true")));
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, secret, false);
+        assertFalse(turn.containsKey("input"), "the secret must not be kept");
+        assertFalse(turn.containsKey("context"));
+        assertEquals(true, turn.get("secretInput"));
+        assertFalse(new DeadLetterEntry("1", ID, "e", 1, "{}", turn).isReplayable());
+
+        var plain = new InputData("hello", Map.of("lang", new Context(Context.ContextType.string, "en")));
+        Map<String, Object> plainTurn = service.describeTurn(Environment.production, turnMemory, ID, plain, false);
+        assertEquals("hello", plainTurn.get("input"), "an ordinary turn keeps its input for replay");
+        assertTrue(new DeadLetterEntry("2", ID, "e", 1, "{}", plainTurn).isReplayable());
     }
 }

@@ -132,10 +132,12 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     }
 
     private void runUnderLease(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable, LeaseHandle lease) {
-        if (callable instanceof ILeaseAwareTask aware) {
-            aware.bindLease(lease);
-        }
         try {
+            // Inside the guard: a bind that throws must still release the lease, answer the
+            // caller and drain the queue — outside it, the conversation stayed wedged.
+            if (callable instanceof ILeaseAwareTask aware) {
+                aware.bindLease(lease);
+            }
             runtime.submitCallable(callable, new IRuntime.IFinishedExecution<>() {
                 @Override
                 public void onComplete(Void result) {
@@ -270,13 +272,28 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
                 LOGGER.debugf("Dead-letter stream unavailable: %s", e.getMessage());
             }
         }
+        // Local fallback entries come after the stream. When paging past one of them,
+        // skip every local entry up to it — by number, since the entry named in `after`
+        // may have been discarded or forwarded meanwhile — so a page never repeats.
+        long afterLocal = isLocalId(after) ? localNumber(after) : -1;
         for (DeadLetterEntry local : super.getDeadLetters()) {
             if (entries.size() >= limit) {
                 break;
             }
+            if (afterLocal >= 0 && localNumber(local.id()) <= afterLocal) {
+                continue;
+            }
             entries.add(local);
         }
         return entries;
+    }
+
+    private static long localNumber(String id) {
+        try {
+            return Long.parseLong(id.substring("local-".length()));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     @Override
