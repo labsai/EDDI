@@ -434,8 +434,21 @@ Besides the MongoDB change in [section 2.4](#24-helm-with-the-in-chart-mongodb-t
   - **MongoDB is pinned to `7.0.43`** (compose was `7.0.14`, Helm and Kustomize floated on
     `7.0`). A patch release within 7.0 reads the existing data directory as it is; no
     `featureCompatibilityVersion` change is involved. The Manager's development compose
-    stacks moved from `6.0` to `7.0.43`: a 6.0 volume opens under 7.0 (its
-    compatibility version is still 6.0), but cannot be opened by 6.0 again afterwards.
+    stacks moved from `6.0` to `7.0.43`. MongoDB 7.0 opens a 6.0 data directory only when
+    its `featureCompatibilityVersion` is `"6.0"`; a volume that started on 5.0 can still
+    be at `"5.0"` and then fails to start. Check it on the running 6.0 container before
+    switching the image, and raise it if needed (pass the same `-f` file you start the
+    stack with):
+
+    ```bash
+    docker compose exec mongodb mongosh --quiet --eval \
+      'db.adminCommand({getParameter: 1, featureCompatibilityVersion: 1})'
+    docker compose exec mongodb mongosh --quiet --eval \
+      'db.adminCommand({setFeatureCompatibilityVersion: "6.0"})'
+    ```
+
+    MongoDB 7.0 leaves the compatibility version at `"6.0"`, so going back to the 6.0
+    image stays possible until someone sets it to `"7.0"`.
 
 ---
 
