@@ -50,7 +50,7 @@ public class NatsLeaseManager extends KvLeaseManager {
 
                     @Override
                     public Optional<String> liveBoot(String nodeId) {
-                        return presence.member(nodeId).map(m -> String.valueOf(m.get("boot")));
+                        return presence.memberStrict(nodeId).map(m -> String.valueOf(m.get("boot")));
                     }
                 }, meterRegistry);
         connections.onConnected(this::sweepOwnStaleLeases);

@@ -142,17 +142,26 @@ public class ClusterPresence {
     /** The presence record of {@code nodeId}, if it is alive. */
     public Optional<Map<String, Object>> member(String nodeId) {
         try {
-            return nodes.get(KEY_PREFIX + nodeId).map(v -> {
-                try {
-                    return JSON.readValue(v.value(), new TypeReference<Map<String, Object>>() {
-                    });
-                } catch (IOException e) {
-                    return null;
-                }
-            });
+            return memberStrict(nodeId);
         } catch (ClusterUnavailableException e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * Like {@link #member}, but a lookup that failed throws instead of answering
+     * "not present": a caller deciding whether a node is gone must tell the two
+     * apart.
+     */
+    public Optional<Map<String, Object>> memberStrict(String nodeId) {
+        return nodes.get(KEY_PREFIX + nodeId).map(v -> {
+            try {
+                return JSON.readValue(v.value(), new TypeReference<Map<String, Object>>() {
+                });
+            } catch (IOException e) {
+                return null;
+            }
+        });
     }
 
     /** The member count last observed; never below 1 (this node). */

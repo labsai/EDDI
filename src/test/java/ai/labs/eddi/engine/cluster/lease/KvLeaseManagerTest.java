@@ -63,6 +63,7 @@ class KvLeaseManagerTest {
     static final class View implements KvLeaseManager.ClusterView {
         volatile boolean connected = true;
         volatile boolean degraded;
+        volatile boolean presenceDown;
         final Map<String, String> live = new ConcurrentHashMap<>();
 
         @Override
@@ -77,6 +78,9 @@ class KvLeaseManagerTest {
 
         @Override
         public Optional<String> liveBoot(String nodeId) {
+            if (presenceDown) {
+                throw new ClusterUnavailableException("presence bucket unreachable");
+            }
             return Optional.ofNullable(live.get(nodeId));
         }
     }
@@ -385,6 +389,74 @@ class KvLeaseManagerTest {
         a.tryAcquireKey("c.conv9");
         var f = b.acquire("conv9", Duration.ofMillis(200)).toCompletableFuture();
         assertThrows(ExecutionException.class, () -> f.get(3, TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisplayName("a holder is not robbed because the presence lookup failed")
+    void unreadablePresenceIsNotAbandonment() throws Exception {
+        // A lease from a node the presence bucket cannot be asked about: the lookup
+        // failing says nothing about the holder, however old the lease looks.
+        OptionalLong rev = kv.create("c.conv1", "{\"node\":\"ghost\",\"boot\":\"g1\",\"since\":1}".getBytes(StandardCharsets.UTF_8));
+        assertTrue(rev.isPresent());
+        view.presenceDown = true;
+        KvLeaseManager b = manager("b", "b1");
+        var waiting = b.acquire("conv1", Duration.ofMillis(900)).toCompletableFuture();
+        ExecutionException e = assertThrows(ExecutionException.class, () -> waiting.get(5, TimeUnit.SECONDS));
+        assertEquals(LeaseUnavailableException.Reason.TIMEOUT, assertInstanceOf(LeaseUnavailableException.class, e.getCause()).reason());
+        assertTrue(kv.get("c.conv1").isPresent(), "the lease is untouched");
+    }
+
+    @Test
+    @DisplayName("a holder missing from presence that keeps renewing its lease is not robbed, whatever its clock says")
+    void renewingHolderWithoutPresenceIsNotRobbed() throws Exception {
+        // "since" is the holder's own clock, here decades behind ours.
+        String value = "{\"node\":\"ghost\",\"boot\":\"g1\",\"since\":1}";
+        long[] revision = {kv.create("c.conv1", value.getBytes(StandardCharsets.UTF_8)).getAsLong()};
+        AtomicBoolean renew = new AtomicBoolean(true);
+        Thread renewer = Thread.ofPlatform().daemon().start(() -> {
+            while (renew.get()) {
+                // a live holder rewrites its lease every heartbeat interval (100 ms here)
+                revision[0] = kv.update("c.conv1", value.getBytes(StandardCharsets.UTF_8), revision[0]).orElse(revision[0]);
+                try {
+                    Thread.sleep(40);
+                } catch (InterruptedException ie) {
+                    return;
+                }
+            }
+        });
+        try {
+            KvLeaseManager b = manager("b", "b1");
+            var waiting = b.acquire("conv1", Duration.ofMillis(1200)).toCompletableFuture();
+            ExecutionException e = assertThrows(ExecutionException.class, () -> waiting.get(5, TimeUnit.SECONDS));
+            assertEquals(LeaseUnavailableException.Reason.TIMEOUT, assertInstanceOf(LeaseUnavailableException.class, e.getCause()).reason());
+        } finally {
+            renew.set(false);
+            renewer.join(1000);
+        }
+    }
+
+    @Test
+    @DisplayName("a release that races the heartbeat's renewal still frees the lease")
+    void releaseAfterRenewalFreesTheKey() throws Exception {
+        KvLeaseManager a = manager("a", "a1");
+        LeaseHandle lease = get(a.acquire("conv1", Duration.ofSeconds(1)));
+        // The heartbeat renewed the key on the server, but its new revision had not
+        // been recorded yet when the turn finished and the lease was released.
+        ISharedKv.Versioned current = kv.get("c.conv1").orElseThrow();
+        assertTrue(kv.update("c.conv1", current.value(), current.revision()).isPresent());
+        a.release(lease);
+        assertTrue(kv.get("c.conv1").isEmpty(), "the key must not be left to expire after the TTL");
+    }
+
+    @Test
+    @DisplayName("a release never deletes a lease another node holds now")
+    void releaseDoesNotDeleteTheirLease() throws Exception {
+        KvLeaseManager a = manager("a", "a1");
+        LeaseHandle lease = get(a.acquire("conv1", Duration.ofSeconds(1)));
+        kv.delete("c.conv1");
+        kv.create("c.conv1", "{\"node\":\"b\",\"boot\":\"b1\",\"since\":1}".getBytes(StandardCharsets.UTF_8));
+        a.release(lease);
+        assertTrue(kv.get("c.conv1").isPresent(), "b's lease survives a's late release");
     }
 
     /**

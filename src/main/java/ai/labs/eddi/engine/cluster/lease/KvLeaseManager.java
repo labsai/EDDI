@@ -89,7 +89,11 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
         boolean isDegraded();
 
-        /** The boot id of a live member, empty when the node is not present. */
+        /**
+         * The boot id of a live member, empty when the node is not present. Throws
+         * {@link ClusterUnavailableException} when presence could not be read: that is
+         * "unknown", never "not present".
+         */
         Optional<String> liveBoot(String nodeId);
     }
 
@@ -105,6 +109,14 @@ public class KvLeaseManager implements IConversationLeaseManager {
     private final Map<String, Held> held = new ConcurrentHashMap<>();
     private final Map<String, Set<Waiter>> waiters = new ConcurrentHashMap<>();
     private final Map<String, Long> yieldUntil = new ConcurrentHashMap<>();
+    /**
+     * What this node last saw in a contended lease whose holder has no presence
+     * record: the revision and when (monotonic clock) it was first seen.
+     */
+    private final Map<String, Observation> observed = new ConcurrentHashMap<>();
+
+    private record Observation(long revision, long sinceNanos) {
+    }
     private volatile boolean shuttingDown;
 
     private final Counter takeovers;
@@ -170,6 +182,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
             set.remove(waiter);
             if (set.isEmpty()) {
                 waiters.remove(waiter.key, set);
+                observed.remove(waiter.key);
             }
         }
         ScheduledFuture<?> next = waiter.next;
@@ -218,12 +231,14 @@ public class KvLeaseManager implements IConversationLeaseManager {
             Optional<ISharedKv.Versioned> current = kv.get(w.key);
             if (current.isEmpty()) {
                 // Released between our create and our read — try again at once.
+                observed.remove(w.key);
                 reschedule(w, 1);
                 return;
             }
             LeaseInfo info = decode(current.get());
             w.lastHolder = info.node();
-            if (isStale(info) && kv.delete(w.key, info.revision())) {
+            if (isStale(w.key, info) && kv.delete(w.key, info.revision())) {
+                observed.remove(w.key);
                 takeovers.increment();
                 w.takenOver = true;
                 LOGGER.infof("Took over lease %s from %s/%s (holder gone)", sanitize(w.key), info.node(), info.boot());
@@ -282,25 +297,42 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
     }
 
-    private boolean isStale(LeaseInfo info) {
+    private boolean isStale(String key, LeaseInfo info) {
         if (node.nodeId().equals(info.node())) {
             // Our own earlier incarnation (same node id, different boot) — or, if the
             // boot matches, a lease this process holds under the same key, which the
             // local FIFO makes impossible for conversations; never take that over.
             return !node.bootId().equals(info.boot());
         }
-        Optional<String> liveBoot = view.liveBoot(info.node());
+        Optional<String> liveBoot;
+        try {
+            liveBoot = view.liveBoot(info.node());
+        } catch (ClusterUnavailableException e) {
+            // The presence lookup itself failed (a different bucket from the leases, so it
+            // can fail while they work): unknown is not "gone". Never rob a holder
+            // because a lookup failed.
+            return false;
+        }
         if (liveBoot.isPresent()) {
             return !liveBoot.get().equals(info.boot());
         }
-        // Not present: only stale once the presence record would surely have been
-        // written, so a holder that is just starting up is not robbed.
-        long age = System.currentTimeMillis() - info.since();
-        return age > config.presenceInterval().multipliedBy(3).toMillis();
+        // No presence record. Presence and the lease heartbeat are separate writes, so
+        // that alone does not prove the holder dead — and the holder's own clock (the
+        // lease's "since") cannot be compared with ours. What does: a live holder
+        // rewrites its lease every heartbeat interval, so a revision this node has
+        // watched stay the same for three of them belongs to a holder that is gone.
+        long now = System.nanoTime();
+        Observation seen = observed.get(key);
+        if (seen == null || seen.revision() != info.revision()) {
+            observed.put(key, new Observation(info.revision(), now));
+            return false;
+        }
+        return now - seen.sinceNanos() >= config.leaseHeartbeatInterval().multipliedBy(3).toNanos();
     }
 
     private void grant(Waiter w, long revision) {
         Held h = new Held(w.key, revision, w.takenOver);
+        observed.remove(w.key);
         held.put(w.key, h);
         if (!w.future.complete(h)) {
             // The waiter timed out in the meantime: give it straight back.
@@ -361,7 +393,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
                 Optional<ISharedKv.Versioned> current = kv.get(key);
                 if (current.isPresent()) {
                     LeaseInfo info = decode(current.get());
-                    if (isStale(info) && kv.delete(key, info.revision())) {
+                    if (isStale(key, info) && kv.delete(key, info.revision())) {
+                        observed.remove(key);
                         takeovers.increment();
                         revision = kv.create(key, encode(System.currentTimeMillis()));
                     }
@@ -371,6 +404,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
                 return Optional.empty();
             }
             Held h = new Held(key, revision.getAsLong(), false);
+            observed.remove(key);
             held.put(key, h);
             return Optional.of(h);
         } catch (ClusterUnavailableException e) {
@@ -391,7 +425,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
         try {
             if (!kv.delete(h.key, h.revision)) {
-                releaseConflicts.increment();
+                deleteIfStillOurs(h);
             }
             notifier.publishReleased(h.key);
             Optional<ISharedKv.Versioned> marker = kv.get(WAITER_PREFIX + h.key);
@@ -405,6 +439,25 @@ public class KvLeaseManager implements IConversationLeaseManager {
             // The lease expires on the server within the TTL; waiters poll for that.
             LOGGER.debugf("Lease release of %s could not reach NATS: %s", sanitize(h.key), e.getMessage());
         }
+    }
+
+    /**
+     * The delete at the last revision we knew missed. Either the lease was taken
+     * over (a real conflict), or our own heartbeat renewed it between that revision
+     * being read and this release — then the key is still ours at a newer revision,
+     * and leaving it would hold the conversation for the whole TTL after the turn
+     * had finished.
+     */
+    private void deleteIfStillOurs(Held h) {
+        Optional<ISharedKv.Versioned> current = kv.get(h.key);
+        if (current.isEmpty()) {
+            return; // already gone
+        }
+        LeaseInfo info = decode(current.get());
+        if (node.nodeId().equals(info.node()) && node.bootId().equals(info.boot()) && kv.delete(h.key, info.revision())) {
+            return;
+        }
+        releaseConflicts.increment();
     }
 
     @Override
