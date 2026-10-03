@@ -66,13 +66,18 @@ its member conversation, display name, vote weight, `participants` lists and
 the facilitator all key on it — so listing the same agent twice does not give
 the group two panelists: both seats would speak through *one* member
 conversation, and the "independent" second answer would read the first as its
-own history. A group config that repeats a member (same `agentId`
-and member type) is **rejected with `400`**, naming both positions, on create,
+own history. A group config that repeats a member (same `agentId`, whatever
+the member type — the runtime keys every seat by the id alone) is **rejected with `400`**, naming both positions, on create,
 update and over MCP (`create_group`, `update_group`, `create_group_from_template`).
 For a second seat with the same behaviour, duplicate the agent and add the copy.
 A group **already stored** with a repeated member still loads: each repeat is
 dropped on read — the first seat wins, with its display name, role and speaking
 order — and a warning is logged; saving the group once stores the cleaned list.
+One case needs a roster change first: if the dropped seat held a role a preset
+style is built on — typically one agent seated as both `PRO` and `CON` in a
+`DEBATE` — the save is refused with the ordinary role message naming the missing
+role (that group never had two sides; one conversation argued both). The warning
+logged on read names the dropped role; put a second agent in that seat and save.
 
 ## Member Roles
 

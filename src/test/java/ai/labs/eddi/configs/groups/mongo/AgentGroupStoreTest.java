@@ -116,10 +116,36 @@ class AgentGroupStoreTest {
     }
 
     @Test
-    void sameIdOfDifferentMemberTypes_isNotADuplicate() {
+    void sameIdOfDifferentMemberTypes_isStillADuplicate() {
+        // The runtime keys member conversations, speakers and weights by agentId
+        // alone, so an AGENT and a GROUP seat with one id would collide just the same.
         var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
         c.setMembers(List.of(new GroupMember("x", "Agent", 1, null), new GroupMember("x", "Nested", 2, null, MemberType.GROUP)));
-        assertTrue(AgentGroupStore.memberAndLimitProblems(c).isEmpty());
+        assertTrue(String.join("; ", AgentGroupStore.memberAndLimitProblems(c)).contains("members[1] repeats members[0]"));
+
+        var stored = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        stored.setMembers(new ArrayList<>(c.getMembers()));
+        AgentGroupStore.dropDuplicateSeats("g1", stored);
+        assertEquals(1, stored.getMembers().size());
+    }
+
+    @Test
+    void legacyDebateWithOneAgentOnBothSides_namesTheSeatToFillBeforeItSaves() {
+        // One agent seated as PRO and CON never had two sides. After the repeat is
+        // dropped the save says exactly which role still needs an agent, and a second
+        // agent in that seat makes it save.
+        var debate = config(DiscussionStyle.DEBATE, null, "judge");
+        debate.setMembers(new ArrayList<>(List.of(new GroupMember("a", "Pro", 1, "PRO"), new GroupMember("a", "Con", 2, "CON"))));
+
+        AgentGroupStore.dropDuplicateSeats("g1", debate);
+
+        String problems = String.join("; ", AgentGroupStore.memberAndLimitProblems(debate));
+        assertTrue(problems.contains("role PRO and one with role CON"), problems);
+
+        var repaired = new ArrayList<>(debate.getMembers());
+        repaired.add(new GroupMember("b", "Con", 2, "CON"));
+        debate.setMembers(repaired);
+        assertTrue(AgentGroupStore.memberAndLimitProblems(debate).isEmpty());
     }
 
     @Test

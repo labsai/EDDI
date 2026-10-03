@@ -195,24 +195,33 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
 
     /**
      * The identity a seat is addressed by, or {@code null} for a member that names
-     * nothing (reported separately). Type is part of it: a nested GROUP, an AGENT
-     * and a HUMAN could in principle carry the same id string.
+     * nothing (reported separately). The trimmed {@code agentId} alone, whatever
+     * the member type: the runtime keys member conversations, display names,
+     * transcript speakers and vote weights by that id only, so an AGENT and a GROUP
+     * (or HUMAN) member carrying the same id string would collide exactly as two
+     * AGENT seats do.
      */
     private static String seatKey(AgentGroupConfiguration.GroupMember member) {
         if (member == null || member.agentId() == null || member.agentId().isBlank()) {
             return null;
         }
-        var type = member.memberType() != null ? member.memberType() : AgentGroupConfiguration.MemberType.AGENT;
-        return type.name() + ":" + member.agentId().trim();
+        return member.agentId().trim();
     }
 
     /**
      * Stored configs written before duplicate members were refused still load. Each
      * repeated seat is dropped on read — the FIRST occurrence wins, with its
      * display name, role and speaking order — so the discussion runs the agent once
-     * instead of twice through one shared conversation, and a GET → PUT round trip
-     * of such a group saves cleanly. Nothing is rewritten in the database until the
-     * group is next saved.
+     * instead of twice through one shared conversation. Nothing is rewritten in the
+     * database until the group is next saved.
+     * <p>
+     * A GET → PUT round trip saves cleanly unless the dropped seat held a role the
+     * preset style is built on — the classic case is one agent seated as both PRO
+     * and CON in a DEBATE. That group never had two sides (one conversation argued
+     * both), and the save is refused with the ordinary role message naming the
+     * missing role until a second agent takes the seat. The warning logged here
+     * names the dropped roles so the required roster change is visible before the
+     * save.
      */
     @Override
     public AgentGroupConfiguration read(String id, Integer version)
@@ -229,18 +238,27 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         Set<String> seen = new HashSet<>();
         List<AgentGroupConfiguration.GroupMember> kept = new ArrayList<>(config.getMembers().size());
         int dropped = 0;
+        List<String> droppedRoles = new ArrayList<>();
         for (var member : config.getMembers()) {
             String key = seatKey(member);
             if (key != null && !seen.add(key)) {
                 dropped++;
+                if (member.role() != null && !member.role().isBlank()) {
+                    droppedRoles.add(member.role().trim());
+                }
                 continue;
             }
             kept.add(member);
         }
         if (dropped > 0) {
-            LOGGER.warnf("Group %s lists %d member(s) more than once; running each agent once (first seat wins). "
-                    + "Save the group again to store the de-duplicated member list.", LogSanitizer.sanitize(id), dropped);
             config.setMembers(kept);
+            List<String> problems = presetRoleProblems(config);
+            LOGGER.warnf("Group %s lists %d member(s) more than once; running each agent once (first seat wins)%s. %s",
+                    LogSanitizer.sanitize(id), dropped,
+                    droppedRoles.isEmpty() ? "" : " — dropped seat role(s): " + String.join(", ", droppedRoles),
+                    problems.isEmpty()
+                            ? "Save the group again to store the de-duplicated member list."
+                            : "Before it can be saved again, give the missing seat to another agent: " + String.join("; ", problems));
         }
     }
 
