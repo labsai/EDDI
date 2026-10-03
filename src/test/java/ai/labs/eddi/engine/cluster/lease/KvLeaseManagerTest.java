@@ -392,6 +392,19 @@ class KvLeaseManagerTest {
     }
 
     @Test
+    @DisplayName("a holder missing from presence is taken over only after its lease revision sat still for three heartbeats")
+    void missingPresenceNeedsAnUnchangedRevisionForThreeHeartbeats() throws Exception {
+        // heartbeat 100 ms in this test config, so the window is 300 ms
+        kv.create("c.conv1", "{\"node\":\"ghost\",\"boot\":\"g1\",\"since\":1}".getBytes(StandardCharsets.UTF_8));
+        KvLeaseManager b = manager("b", "b1");
+        long start = System.nanoTime();
+        LeaseHandle lease = get(b.acquire("conv1", Duration.ofSeconds(3)));
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertTrue(lease.wasTakenOver());
+        assertTrue(elapsedMillis >= 280, "taken over after " + elapsedMillis + " ms, before the observation window had passed");
+    }
+
+    @Test
     @DisplayName("a holder is not robbed because the presence lookup failed")
     void unreadablePresenceIsNotAbandonment() throws Exception {
         // A lease from a node the presence bucket cannot be asked about: the lookup
