@@ -50,7 +50,7 @@ public class ContextMatcher implements IRuleCondition {
     private final IExpressionProvider expressionProvider;
     private final IJsonSerialization jsonSerialization;
 
-    private static final Logger log = Logger.getLogger(ContextMatcher.class);
+    private static final Logger LOGGER = Logger.getLogger(ContextMatcher.class);
 
     public ContextMatcher(IExpressionProvider expressionProvider, IJsonSerialization jsonSerialization) {
         this.expressionProvider = expressionProvider;
@@ -176,7 +176,7 @@ public class ContextMatcher implements IRuleCondition {
                                 }
                             }
                         } catch (IOException e) {
-                            log.error(e.getLocalizedMessage(), e);
+                            LOGGER.error(e.getLocalizedMessage(), e);
                             success = false;
                         }
                         break;
@@ -200,20 +200,20 @@ public class ContextMatcher implements IRuleCondition {
      */
     private boolean isMatchableContext(Context context) {
         if (context == null || context.getType() == null || context.getValue() == null) {
-            log.debugf("Context '%s' is not evaluable (context, type or value is null) — treated as non-match.", contextKey);
+            LOGGER.debugf("Context '%s' is not evaluable (context, type or value is null) — treated as non-match.", contextKey);
             return false;
         }
 
         if (!isSupportedContextType(context.getType())) {
             // Not a plain type mismatch: no contextmatcher configuration can ever match
             // this context, so the author's rule silently never fires. Worth a warning.
-            log.warnf("Context '%s' is of runtime type '%s', which '%s' cannot evaluate (supported types: %s)."
+            LOGGER.warnf("Context '%s' is of runtime type '%s', which '%s' cannot evaluate (supported types: %s)."
                     + " This condition can never match.", contextKey, context.getType(), ID, Arrays.toString(ContextType.values()));
             return false;
         }
 
         if (!context.getType().toString().equals(contextType)) {
-            log.debugf("Context '%s' is of type '%s' but '%s' is configured for type '%s' — treated as non-match.", contextKey,
+            LOGGER.debugf("Context '%s' is of type '%s' but '%s' is configured for type '%s' — treated as non-match.", contextKey,
                     context.getType(), ID, contextType);
             return false;
         }

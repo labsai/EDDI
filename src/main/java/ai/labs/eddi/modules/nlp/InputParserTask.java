@@ -87,7 +87,7 @@ public class InputParserTask implements ILifecycleTask {
     private final Map<String, Provider<IDictionaryProvider>> dictionaryProviders;
     private final Map<String, Provider<ICorrectionProvider>> correctionProviders;
 
-    private static final Logger log = Logger.getLogger(InputParserTask.class);
+    private static final Logger LOGGER = Logger.getLogger(InputParserTask.class);
 
     @Inject
     public InputParserTask(IExpressionProvider expressionProvider,
@@ -137,7 +137,7 @@ public class InputParserTask implements ILifecycleTask {
             // flag before returning normally; otherwise the remaining tasks of an
             // interrupted turn keep running.
             Thread.currentThread().interrupt();
-            log.warn(e.getLocalizedMessage(), e);
+            LOGGER.warn(e.getLocalizedMessage(), e);
             return;
         }
 
@@ -292,13 +292,13 @@ public class InputParserTask implements ILifecycleTask {
         try {
             int parsed = Integer.parseInt(value.toString().trim());
             if (parsed < 1) {
-                log.warnf("Parser limit must be greater than 0, but was %s. Falling back to %s.", parsed, defaultValue);
+                LOGGER.warnf("Parser limit must be greater than 0, but was %s. Falling back to %s.", parsed, defaultValue);
                 return defaultValue;
             }
 
             return parsed;
         } catch (NumberFormatException e) {
-            log.warnf("Parser limit '%s' is not a number. Falling back to %s.", value, defaultValue);
+            LOGGER.warnf("Parser limit '%s' is not a number. Falling back to %s.", value, defaultValue);
             return defaultValue;
         }
     }
