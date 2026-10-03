@@ -266,18 +266,6 @@ public class ToolRateLimiter {
     }
 
     /**
-     * Try to acquire permission to execute a tool, with no conversation
-     * attribution.
-     *
-     * @param toolName
-     *            Name of the tool
-     * @return true if allowed, false if rate limited
-     */
-    public boolean tryAcquire(String toolName) {
-        return tryAcquire(null, toolName, DEFAULT_RATE_LIMIT);
-    }
-
-    /**
      * Try to acquire permission with a custom rate limit and no conversation
      * attribution. All such calls share one bucket per tool — prefer
      * {@link #tryAcquire(String, String, int)} wherever a conversation id exists.

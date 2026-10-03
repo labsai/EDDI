@@ -14,6 +14,8 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Date and time tool for timezone conversions, calculations, and formatting.
  */
@@ -24,24 +26,26 @@ public class DateTimeTool {
     private static final DateTimeFormatter READABLE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z");
 
     @Tool("Gets the current date and time in a specified timezone. Returns formatted date/time string.")
-    public String getCurrentDateTime(@P("timezone") String timezone) {
+    public String getCurrentDateTime(@P("IANA timezone name, e.g. 'Europe/Vienna', 'America/New_York' or 'UTC'") String timezone) {
 
         try {
             ZoneId zoneId = ZoneId.of(timezone);
             ZonedDateTime now = ZonedDateTime.now(zoneId);
 
             String result = now.format(READABLE_FORMATTER);
-            LOGGER.debug("Current time in " + timezone + ": " + result);
+            LOGGER.debugf("Current time in %s: %s", sanitize(timezone), result);
             return result;
 
         } catch (DateTimeException e) {
-            LOGGER.error("Invalid timezone: " + timezone);
+            LOGGER.debugf("Invalid timezone: %s", sanitize(timezone));
             return "Error: Invalid timezone '" + timezone + "'. Use standard timezone names like 'America/New_York' or 'UTC'.";
         }
     }
 
     @Tool("Converts a date/time from one timezone to another")
-    public String convertTimezone(@P("dateTime") String dateTime, @P("fromTimezone") String fromTimezone, @P("toTimezone") String toTimezone) {
+    public String convertTimezone(@P("Local date-time in ISO-8601 form, e.g. '2025-11-03T10:30:00'") String dateTime,
+                                  @P("Timezone the date-time is expressed in (IANA name)") String fromTimezone,
+                                  @P("Timezone to convert to (IANA name)") String toTimezone) {
 
         try {
             ZoneId fromZone = ZoneId.of(fromTimezone);
@@ -52,17 +56,19 @@ public class DateTimeTool {
             ZonedDateTime toZdt = fromZdt.withZoneSameInstant(toZone);
 
             String result = toZdt.format(READABLE_FORMATTER);
-            LOGGER.info("Converted " + dateTime + " from " + fromTimezone + " to " + toTimezone + ": " + result);
+            LOGGER.debugf("Converted %s from %s to %s: %s", sanitize(dateTime), sanitize(fromTimezone), sanitize(toTimezone), result);
             return result;
 
         } catch (DateTimeException e) {
-            LOGGER.error("Timezone conversion error: " + e.getMessage());
+            LOGGER.debugf("Timezone conversion rejected: %s", sanitize(e.getMessage()));
             return "Error: " + e.getMessage();
         }
     }
 
     @Tool("Calculates the difference between two dates/times")
-    public String calculateDateDifference(@P("startDateTime") String startDateTime, @P("endDateTime") String endDateTime, @P("unit") String unit) {
+    public String calculateDateDifference(@P("Start, as an ISO-8601 local date-time") String startDateTime,
+                                          @P("End, as an ISO-8601 local date-time") String endDateTime,
+                                          @P("Unit of the result: days, hours, minutes or seconds") String unit) {
 
         try {
             LocalDateTime start = LocalDateTime.parse(startDateTime, ISO_FORMATTER);
@@ -97,13 +103,16 @@ public class DateTimeTool {
             return result;
 
         } catch (DateTimeParseException e) {
-            LOGGER.error("Date parsing error: " + e.getMessage());
+            LOGGER.debugf("Date parsing rejected: %s", sanitize(e.getMessage()));
             return "Error: Invalid date format. Use ISO format like '2025-11-03T10:30:00'.";
         }
     }
 
     @Tool("Adds or subtracts time from a date")
-    public String addTime(@P("dateTime") String dateTime, @P("amount") long amount, @P("unit") String unit, @P("timezone") String timezone) {
+    public String addTime(@P("Local date-time in ISO-8601 form, e.g. '2025-11-03T10:30:00'") String dateTime,
+                          @P("Amount to add; negative to subtract") long amount,
+                          @P("Unit of the amount: years, months, weeks, days, hours, minutes or seconds") String unit,
+                          @P("Timezone of the date-time (IANA name)") String timezone) {
 
         try {
             LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);
@@ -138,17 +147,19 @@ public class DateTimeTool {
 
             ZonedDateTime zonedResult = ZonedDateTime.of(result, zoneId);
             String formatted = zonedResult.format(READABLE_FORMATTER);
-            LOGGER.debug("Added " + amount + " " + unit + " to " + dateTime + ": " + formatted);
+            LOGGER.debugf("Added %d %s to %s: %s", amount, sanitize(unit), sanitize(dateTime), formatted);
             return formatted;
 
         } catch (DateTimeException e) {
-            LOGGER.error("Date calculation error: " + e.getMessage());
+            LOGGER.debugf("Date calculation rejected: %s", sanitize(e.getMessage()));
             return "Error: " + e.getMessage();
         }
     }
 
     @Tool("Formats a date/time string into a different format")
-    public String formatDateTime(@P("dateTime") String dateTime, @P("pattern") String pattern, @P("timezone") String timezone) {
+    public String formatDateTime(@P("Local date-time in ISO-8601 form, e.g. '2025-11-03T10:30:00'") String dateTime,
+                                 @P("java.time format pattern, e.g. 'dd.MM.yyyy HH:mm' or 'EEEE, MMMM d'") String pattern,
+                                 @P("Timezone of the date-time (IANA name)") String timezone) {
 
         try {
             LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);
@@ -158,14 +169,14 @@ public class DateTimeTool {
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
             String result = zonedDateTime.format(formatter);
 
-            LOGGER.debug("Formatted " + dateTime + " as: " + result);
+            LOGGER.debugf("Formatted %s as: %s", sanitize(dateTime), sanitize(result));
             return result;
 
         } catch (DateTimeException e) {
-            LOGGER.error("Date formatting error: " + e.getMessage());
+            LOGGER.debugf("Date formatting rejected: %s", sanitize(e.getMessage()));
             return "Error: " + e.getMessage();
         } catch (IllegalArgumentException e) {
-            LOGGER.error("Invalid format pattern: " + pattern);
+            LOGGER.debugf("Invalid format pattern: %s", sanitize(pattern));
             return "Error: Invalid format pattern '" + pattern + "'.";
         }
     }

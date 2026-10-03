@@ -84,6 +84,9 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = OllamaChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
+        // One retry layer: the task's retry policy (RetryConfiguration) — see
+        // ModelParameterValues#PROVIDER_MAX_RETRIES.
+        builder.maxRetries(ModelParameterValues.PROVIDER_MAX_RETRIES);
 
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
             // Never let a model base URL point at the cloud instance-metadata service

@@ -290,7 +290,7 @@ class AgentOrchestratorExtendedBranchTest {
         @Test
         @DisplayName("valid discovery result activates matching built-in specs")
         void validDiscoveryActivatesSpecs() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = ToolLoopRunner.class.getDeclaredMethod(
                     "activateDiscoveredTools", String.class, List.class, List.class);
             method.setAccessible(true);
 
@@ -319,7 +319,7 @@ class AgentOrchestratorExtendedBranchTest {
         @Test
         @DisplayName("already-active specs are not duplicated")
         void alreadyActiveNotDuplicated() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = ToolLoopRunner.class.getDeclaredMethod(
                     "activateDiscoveredTools", String.class, List.class, List.class);
             method.setAccessible(true);
 
@@ -340,7 +340,7 @@ class AgentOrchestratorExtendedBranchTest {
         @Test
         @DisplayName("discovery result with no matching specs activates nothing")
         void noMatchingSpecsActivatesNothing() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = ToolLoopRunner.class.getDeclaredMethod(
                     "activateDiscoveredTools", String.class, List.class, List.class);
             method.setAccessible(true);
 

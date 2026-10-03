@@ -356,8 +356,15 @@ class ToolLoopRunner {
             // the first tool result ten times. Lives on the call stack — the orchestrator
             // is a shared singleton and must stay stateless.
             Map<ChatMessage, Integer> toolContextTokenMemo = new IdentityHashMap<>();
-            int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
+            int maxIterations = effectiveMaxToolIterations(task);
             boolean modelAnswered = false;
+
+            // Call caps. The per-turn count starts from the calls the trace already
+            // records, so a HITL resume continues the turn's count instead of
+            // restarting it.
+            int perResponseCap = effectiveCallCap(task.getMaxToolCallsPerIteration(), DEFAULT_MAX_TOOL_CALLS_PER_ITERATION);
+            int perTurnCap = effectiveCallCap(task.getMaxToolCallsPerTurn(), DEFAULT_MAX_TOOL_CALLS_PER_TURN);
+            int toolCallsThisTurn = countToolCalls(trace);
 
             // Engine-enforced counterweight: strict mode caps iterations
             var counterweight = task.getCounterweight();
@@ -439,12 +446,23 @@ class ToolLoopRunner {
                 }
 
                 if (aiMessage.hasToolExecutionRequests()) {
+                    // === Call caps ===
+                    // Admit at most the per-response cap, and no more than what is left of
+                    // the per-turn cap. The rest never reach the gate, so a refused call
+                    // can never pause the turn for an approval of a call that was not going
+                    // to run. They are answered after the admitted calls, which keeps the
+                    // results in the order the model listed the calls (the refused ones are
+                    // always the tail).
+                    CallAdmission admission = admitWithinCallCaps(aiMessage, perResponseCap, perTurnCap, toolCallsThisTurn);
+                    List<ToolExecutionRequest> admitted = admission.admitted();
+                    toolCallsThisTurn += admitted.size();
+
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
                     // calls. clearedCallIds carries the human-approved ids on resume so
                     // they are never re-gated. Inert when effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
-                    var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources, setup.toolEndpoints(),
+                    var gateResult = toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
                             effectiveToolApprovals, clearedCallIds);
 
                     if (!gateResult.gated().isEmpty()) {
@@ -483,15 +501,8 @@ class ToolLoopRunner {
                                 // never checked again anywhere. A mixed batch (one
                                 // gated call, one ungated self-message) was exactly
                                 // the remaining hole.
-                                String selfTargetedPre = ToolLoopResumer.targetsOwnConversationLive(
-                                        allowedReq, setup.toolRequestResolvers(), conversationId);
-                                if (selfTargetedPre != null) {
-                                    LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(allowedReq.name()), selfTargetedPre);
-                                    addResult(currentMessages, aiMessage, allowedReq,
-                                            "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}",
-                                            exchangeRecorder);
-                                    trace.add(Map.of("type", "hitl_self_conversation", "tool", allowedReq.name(),
-                                            "detail", selfTargetedPre));
+                                if (refusedAsSelfTargeted(allowedReq, aiMessage, setup, conversationId, currentMessages, trace,
+                                        exchangeRecorder)) {
                                     continue;
                                 }
                                 addResult(currentMessages, aiMessage, allowedReq,
@@ -530,7 +541,10 @@ class ToolLoopRunner {
                                     setup.toolEndpoints(), effectiveToolApprovals);
                             var governingRule = ToolApprovalRules.governing(ruleByCallId.values());
                             gateSupport.recordRuleMatches(ruleByCallId.values());
-                            // 3) snapshot + persist the pending batch, then abort the loop
+                            // 3) answer the refused calls, so the frozen transcript has a result
+                            // for every call the resume will not answer
+                            admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
+                            // 4) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = gateSupport.buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, ToolApprovalGateSupport.activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
                                     toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
@@ -557,15 +571,8 @@ class ToolLoopRunner {
                         // or the whole gate inert) executed with no check anywhere.
                         // The resume path has its own copy; a rule enforced only where
                         // approvals funnel is a rule that vanishes with the gate.
-                        String selfTargeted = ToolLoopResumer.targetsOwnConversationLive(
-                                toolRequest, setup.toolRequestResolvers(), conversationId);
-                        if (selfTargeted != null) {
-                            LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(toolRequest.name()), selfTargeted);
-                            addResult(currentMessages, aiMessage, toolRequest,
-                                    "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}",
-                                    exchangeRecorder);
-                            trace.add(Map.of("type", "hitl_self_conversation", "tool", toolRequest.name(),
-                                    "detail", selfTargeted));
+                        if (refusedAsSelfTargeted(toolRequest, aiMessage, setup, conversationId, currentMessages, trace,
+                                exchangeRecorder)) {
                             continue;
                         }
 
@@ -575,6 +582,7 @@ class ToolLoopRunner {
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs),
                                 exchangeRecorder);
                     }
+                    admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
                 } else {
                     return finish(currentMessages, transcriptOut, aiMessage.text());
                 }
@@ -608,6 +616,138 @@ class ToolLoopRunner {
         } catch (Exception e) {
             throw wrapLoopFailure(e);
         }
+    }
+
+    /**
+     * The absolute rule that an agent may not send a request into its own
+     * conversation, for a call about to execute on the live path. When the call
+     * targets this conversation it is answered with a {@code NOT_EXECUTED} result
+     * and traced, and the caller skips it.
+     * <p>
+     * One copy for both live-path sites — the ungated half of a batch that is about
+     * to pause, and the main execution loop. The resume path enforces the same rule
+     * through {@link ToolLoopResumer#targetsOwnConversation}, with an audit entry
+     * of its own because a human approved the call.
+     *
+     * @return true when the call was refused
+     */
+    private static boolean refusedAsSelfTargeted(ToolExecutionRequest request, AiMessage call, AgentOrchestrator.ToolSetup setup,
+                                                 String conversationId, List<ChatMessage> currentMessages,
+                                                 List<Map<String, Object>> trace, ToolExchangeRecorder exchangeRecorder) {
+        String selfTargeted = ToolLoopResumer.targetsOwnConversationLive(request, setup.toolRequestResolvers(), conversationId);
+        if (selfTargeted == null) {
+            return false;
+        }
+        LOGGER.warnf("Refusing ungated tool '%s': %s", sanitize(request.name()), selfTargeted);
+        addResult(currentMessages, call, request, SELF_CONVERSATION_REFUSAL, exchangeRecorder);
+        trace.add(Map.of("type", "hitl_self_conversation", "tool", request.name(), "detail", selfTargeted));
+        return true;
+    }
+
+    /** Tool result for a call refused by {@link #refusedAsSelfTargeted}. */
+    static final String SELF_CONVERSATION_REFUSAL = "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}";
+
+    /** Default {@code maxToolIterations}. */
+    static final int DEFAULT_MAX_TOOL_ITERATIONS = 10;
+
+    /**
+     * Engine ceiling on {@code maxToolIterations}. Configuration chooses a value
+     * below it; it cannot buy an unbounded loop.
+     */
+    static final int MAX_TOOL_ITERATIONS_CEILING = 100;
+
+    /** Default {@code maxToolCallsPerIteration}. */
+    static final int DEFAULT_MAX_TOOL_CALLS_PER_ITERATION = 20;
+
+    /** Default {@code maxToolCallsPerTurn}. */
+    static final int DEFAULT_MAX_TOOL_CALLS_PER_TURN = 100;
+
+    /** {@code maxToolIterations}, defaulted and clamped to the engine ceiling. */
+    static int effectiveMaxToolIterations(LlmConfiguration.Task task) {
+        Integer configured = task.getMaxToolIterations();
+        if (configured == null) {
+            return DEFAULT_MAX_TOOL_ITERATIONS;
+        }
+        if (configured > MAX_TOOL_ITERATIONS_CEILING) {
+            LOGGER.warnf("maxToolIterations=%d exceeds the engine ceiling of %d; using %d", configured, MAX_TOOL_ITERATIONS_CEILING,
+                    MAX_TOOL_ITERATIONS_CEILING);
+            return MAX_TOOL_ITERATIONS_CEILING;
+        }
+        return configured;
+    }
+
+    /**
+     * A call cap as configured: null means the default, and a non-positive value
+     * (the documented {@code -1}) means no cap.
+     */
+    static int effectiveCallCap(Integer configured, int defaultCap) {
+        if (configured == null) {
+            return defaultCap;
+        }
+        return configured > 0 ? configured : Integer.MAX_VALUE;
+    }
+
+    /** Tool calls the trace already records for this turn. */
+    static int countToolCalls(List<Map<String, Object>> trace) {
+        int count = 0;
+        for (Map<String, Object> step : trace) {
+            if ("tool_call".equals(step.get("type"))) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * The outcome of applying the call caps to one model response: the calls to
+     * run, in the order the model listed them, and the tail that is refused.
+     *
+     * @param admitted
+     *            calls within both caps
+     * @param refused
+     *            calls past a cap, never shown to the gate or an executor
+     * @param refusal
+     *            the {@code NOT_EXECUTED} result each refused call receives
+     * @param limit
+     *            the setting that refused them, for the trace
+     */
+    record CallAdmission(List<ToolExecutionRequest> admitted, List<ToolExecutionRequest> refused, String refusal, String limit) {
+
+        /**
+         * Answers every refused call and traces it as {@code tool_call_capped}. Called
+         * once the admitted calls have their results, so the results stay in call
+         * order.
+         */
+        void answerRefused(AiMessage call, List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
+                           ToolExchangeRecorder exchangeRecorder) {
+            for (ToolExecutionRequest skipped : refused) {
+                addResult(currentMessages, call, skipped, refusal, exchangeRecorder);
+                trace.add(Map.of("type", "tool_call_capped", "tool", skipped.name(), "limit", limit));
+            }
+        }
+    }
+
+    /**
+     * Splits one model response at the call caps. Nothing is appended here — see
+     * {@link CallAdmission#answerRefused}.
+     */
+    static CallAdmission admitWithinCallCaps(AiMessage aiMessage, int perResponseCap, int perTurnCap, int toolCallsThisTurn) {
+        List<ToolExecutionRequest> requested = aiMessage.toolExecutionRequests();
+        long turnRoom = perTurnCap == Integer.MAX_VALUE ? Integer.MAX_VALUE : Math.max(0L, (long) perTurnCap - toolCallsThisTurn);
+        int room = (int) Math.min(perResponseCap, turnRoom);
+        if (requested.size() <= room) {
+            return new CallAdmission(requested, List.of(), null, null);
+        }
+        boolean turnBound = turnRoom < perResponseCap;
+        String limit = turnBound
+                ? "the limit of " + perTurnCap + " tool calls per turn (maxToolCallsPerTurn) is reached"
+                : "at most " + perResponseCap + " tool calls are executed per response (maxToolCallsPerIteration)";
+        String refusal = "{\"status\":\"NOT_EXECUTED\",\"reason\":\"" + limit
+                + "; this call was not run. Do not repeat it in this turn — answer with the results you have.\"}";
+        LOGGER.warnf("Model requested %d tool calls in one response; executing %d, refusing the rest: %s", requested.size(), room,
+                limit);
+        return new CallAdmission(requested.subList(0, room), requested.subList(room, requested.size()), refusal,
+                turnBound ? "maxToolCallsPerTurn" : "maxToolCallsPerIteration");
     }
 
     /**
@@ -668,32 +808,6 @@ class ToolLoopRunner {
                 + "before finishing the task. Everything I already did has taken effect — completed calls are not "
                 + "rolled back. Say \"continue\" and I will pick up where I stopped. If this task regularly needs "
                 + "more rounds, the agent's maxToolIterations setting can be raised.";
-    }
-
-    /**
-     * Executes a single tool call through the full per-request pipeline:
-     * auto-checkpoint, trace entry, per-conversation budget check, tenant cost
-     * budget check, executor dispatch (via {@link ToolExecutionService} for rate
-     * limiting/caching/cost tracking), response truncation, result trace, and LAZY
-     * activation. Extracted verbatim from the live loop so the live path and Task
-     * 9's resume path share ONE copy.
-     * <p>
-     * Package-private for direct unit testing of the gate.
-     */
-    void executeSingleToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
-                               List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
-                               Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                               Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
-                               int defaultRateLimit, Double maxBudget, String conversationId,
-                               boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
-                               LlmConfiguration.Task task, boolean isLazy,
-                               List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
-        // Live path: run the full pipeline, then append the governed result. It is
-        // no longer appended verbatim — see executeSingleToolCallResult.
-        String toolResult = executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
-                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
-        currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
     }
 
     /**
@@ -823,7 +937,12 @@ class ToolLoopRunner {
             // A2A tools — which can have side effects — are not cached at all unless the
             // task names them in toolCacheScopes. See ToolCacheService#mayCache.
             String toolSource = toolSources == null ? null : toolSources.get(toolRequest.name());
+            //
+            // A tool object built for this conversation (attachments, artifacts, memory,
+            // dynamic agents) is never cached — derived from the executor's class, see
+            // ToolCacheService#isConversationBound.
             boolean cacheThisCall = enableCaching
+                    && !ToolCacheService.isConversationBound(executor)
                     && ToolCacheService.mayCache(toolSource, toolRequest.name(), canonicalName, task.getToolCacheScopes());
             String cacheScopeTag = cacheThisCall
                     ? ToolCacheService.namespacedScopeTag(
@@ -839,6 +958,12 @@ class ToolLoopRunner {
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
         }
+
+        // The untruncated result, for the LAZY activation below: discover_tools
+        // answers with a JSON catalogue, and truncating it first cut the JSON off
+        // mid-array whenever a response limit was configured, so the parse failed and
+        // NO discovered tool was ever activated.
+        String untruncatedResult = toolResult;
 
         // Apply response truncation (MCP governance).
         //
@@ -868,7 +993,7 @@ class ToolLoopRunner {
         // a provenance envelope first would make that parse fail. The envelope is
         // for the model's benefit, and the model still gets one.
         if (isLazy && "discover_tools".equals(toolRequest.name())) {
-            activateDiscoveredTools(toolResult, builtInSpecs, activeSpecs);
+            activateDiscoveredTools(untruncatedResult, builtInSpecs, activeSpecs);
         }
 
         // Govern what comes back. Until now the comment on the live loop's caller
@@ -1071,9 +1196,9 @@ class ToolLoopRunner {
      * Parses the discover_tools JSON result and activates matching built-in tool
      * specs so the LLM can call them on subsequent iterations.
      */
-    void activateDiscoveredTools(String discoverResult,
-                                 List<ToolSpecification> builtInSpecs,
-                                 List<ToolSpecification> activeSpecs) {
+    static void activateDiscoveredTools(String discoverResult,
+                                        List<ToolSpecification> builtInSpecs,
+                                        List<ToolSpecification> activeSpecs) {
         try {
             ObjectMapper mapper = new ObjectMapper();
             JsonNode root = mapper.readTree(discoverResult);

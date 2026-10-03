@@ -740,6 +740,39 @@ class AgentOrchestratorResumeToolLoopTest {
     }
 
     @Test
+    @DisplayName("per-turn cap: the calls made before the pause count against it after the resume")
+    void perTurnCapCountsCallsMadeBeforeThePause() throws Exception {
+        var task = twoToolTask();
+        task.setMaxToolCallsPerTurn(3);
+        var approved = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(approved));
+        // Three calls already ran before the pause; the approved one is the fourth.
+        List<Map<String, Object>> before = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            before.add(Map.of("type", "tool_call", "tool", "getCurrentDateTime"));
+        }
+        batch.setTraceSoFar(before);
+
+        when(journalStore.tryClaim(anyString(), anyString(), eq("c1"), anyString(), anyString())).thenReturn(true);
+        when(calculatorTool.calculate("6*7")).thenReturn("42");
+
+        var dateRequest = ToolExecutionRequest.builder().id("c9").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(dateRequest)).thenReturn(text("done"));
+
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        assertEquals("done", result.response());
+        verify(calculatorTool, times(1)).calculate("6*7");
+        // Over the cap of 3 (three before the pause plus the approved call): refused.
+        verify(dateTimeTool, never()).getCurrentDateTime(anyString());
+        assertTrue(result.trace().stream().anyMatch(step -> "tool_call_capped".equals(step.get("type"))),
+                "the refused call is traced as capped");
+        assertEquals(3, result.trace().stream().filter(step -> "getCurrentDateTime".equals(step.get("tool"))
+                && "tool_call".equals(step.get("type"))).count(), "the pre-pause entries appear exactly once");
+    }
+
+    @Test
     @DisplayName("iteration budget: batch.iterationIndex = maxToolIterations - 1 → at most one more model call")
     void iterationBudgetContinuity() throws Exception {
         var task = twoToolTask();

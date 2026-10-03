@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Field;
 import java.util.Optional;
 
+import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -34,49 +35,49 @@ class WeatherToolTest {
     @Test
     void testGetCurrentWeather_ValidCity() {
         // Note: Without API key configured, this will return an error
-        String result = weatherTool.getCurrentWeather("London", "metric");
+        String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
         assertNotNull(result);
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
 
     @Test
     void testGetCurrentWeather_EmptyCity() {
-        String result = weatherTool.getCurrentWeather("", "metric");
+        String result = textOf(() -> weatherTool.getCurrentWeather("", "metric"));
         assertNotNull(result);
         assertTrue(result.startsWith("Error") || result.contains("Error"));
     }
 
     @Test
     void testGetCurrentWeather_InvalidCity() {
-        String result = weatherTool.getCurrentWeather("NonExistentCity12345", "metric");
+        String result = textOf(() -> weatherTool.getCurrentWeather("NonExistentCity12345", "metric"));
         assertNotNull(result);
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
 
     @Test
     void testGetCurrentWeather_CityWithSpaces() {
-        String result = weatherTool.getCurrentWeather("New York", "metric");
+        String result = textOf(() -> weatherTool.getCurrentWeather("New York", "metric"));
         assertNotNull(result);
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
 
     @Test
     void testGetCurrentWeather_CityWithSpecialCharacters() {
-        String result = weatherTool.getCurrentWeather("São Paulo", "metric");
+        String result = textOf(() -> weatherTool.getCurrentWeather("São Paulo", "metric"));
         assertNotNull(result);
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
 
     @Test
     void testGetCurrentWeather_ImperialUnits() {
-        String result = weatherTool.getCurrentWeather("London", "imperial");
+        String result = textOf(() -> weatherTool.getCurrentWeather("London", "imperial"));
         assertNotNull(result);
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
 
     @Test
     void testGetCurrentWeather_NullUnits() {
-        String result = weatherTool.getCurrentWeather("London", null);
+        String result = textOf(() -> weatherTool.getCurrentWeather("London", null));
         assertNotNull(result);
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
@@ -85,49 +86,49 @@ class WeatherToolTest {
 
     @Test
     void testGetWeatherForecast_NoApiKey() {
-        String result = weatherTool.getWeatherForecast("London", 3, "metric");
+        String result = textOf(() -> weatherTool.getWeatherForecast("London", 3, "metric"));
         assertNotNull(result);
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
 
     @Test
     void testGetWeatherForecast_NullUnits_DefaultsToMetric() {
-        String result = weatherTool.getWeatherForecast("Berlin", 3, null);
+        String result = textOf(() -> weatherTool.getWeatherForecast("Berlin", 3, null));
         assertNotNull(result);
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testGetWeatherForecast_EmptyUnits_DefaultsToMetric() {
-        String result = weatherTool.getWeatherForecast("Berlin", 3, "");
+        String result = textOf(() -> weatherTool.getWeatherForecast("Berlin", 3, ""));
         assertNotNull(result);
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testGetWeatherForecast_NullDays_DefaultsTo3() {
-        String result = weatherTool.getWeatherForecast("Paris", null, "metric");
+        String result = textOf(() -> weatherTool.getWeatherForecast("Paris", null, "metric"));
         assertNotNull(result);
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testGetWeatherForecast_NegativeDays_DefaultsTo3() {
-        String result = weatherTool.getWeatherForecast("Paris", -1, "metric");
+        String result = textOf(() -> weatherTool.getWeatherForecast("Paris", -1, "metric"));
         assertNotNull(result);
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testGetWeatherForecast_DaysExceeds5_ClampedTo5() {
-        String result = weatherTool.getWeatherForecast("Tokyo", 10, "imperial");
+        String result = textOf(() -> weatherTool.getWeatherForecast("Tokyo", 10, "imperial"));
         assertNotNull(result);
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testGetCurrentWeather_EmptyUnits_DefaultsToMetric() {
-        String result = weatherTool.getCurrentWeather("London", "");
+        String result = textOf(() -> weatherTool.getCurrentWeather("London", ""));
         assertNotNull(result);
         assertTrue(result.contains("Error"));
     }

@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 
+import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -497,7 +498,7 @@ class WebSearchToolTest {
         void searchWeb_nullMaxResults_defaultsTo5() {
             // searchWeb with null maxResults should not throw and should default to 5
             // (will fail on HTTP call, but we test the parameter clamping)
-            String result = mockedTool.searchWeb("test query", null);
+            String result = textOf(() -> mockedTool.searchWeb("test query", null));
 
             // Should return error since mock doesn't set up response
             assertNotNull(result);
@@ -506,7 +507,7 @@ class WebSearchToolTest {
 
         @Test
         void searchWeb_negativeMaxResults_defaultsTo5() {
-            String result = mockedTool.searchWeb("test query", -1);
+            String result = textOf(() -> mockedTool.searchWeb("test query", -1));
 
             assertNotNull(result);
             assertTrue(result.contains("Error:"));
@@ -514,7 +515,7 @@ class WebSearchToolTest {
 
         @Test
         void searchWeb_maxResultsOver10_clampedTo10() {
-            String result = mockedTool.searchWeb("test query", 20);
+            String result = textOf(() -> mockedTool.searchWeb("test query", 20));
 
             assertNotNull(result);
             assertTrue(result.contains("Error:"));
@@ -530,7 +531,7 @@ class WebSearchToolTest {
                     }
                     """);
 
-            String result = mockedTool.searchWeb("test", 5);
+            String result = textOf(() -> mockedTool.searchWeb("test", 5));
 
             assertTrue(result.contains("Test abstract answer"));
             assertTrue(result.contains("https://example.com"));
@@ -540,7 +541,7 @@ class WebSearchToolTest {
         void searchWeb_duckDuckGoNon200_returnsError() throws Exception {
             answer(mockedClient, 429, "");
 
-            String result = mockedTool.searchWeb("test", 5);
+            String result = textOf(() -> mockedTool.searchWeb("test", 5));
 
             assertTrue(result.contains("Error:"));
         }
@@ -551,7 +552,7 @@ class WebSearchToolTest {
             // JSON; it is reported, not parsed.
             answer(mockedClient, 200, "{\"Abstract\": \"cut", true);
 
-            String result = mockedTool.searchWeb("test", 5);
+            String result = textOf(() -> mockedTool.searchWeb("test", 5));
 
             assertTrue(result.contains("Error:"), result);
             assertTrue(result.contains("exceeded " + WebSearchTool.MAX_RESPONSE_BYTES + " bytes"), result);
@@ -577,7 +578,7 @@ class WebSearchToolTest {
                     {"items":[{"title":"Google Result","snippet":"Google snippet","link":"https://g.com"}]}
                     """);
 
-            String result = mockedTool.searchWeb("test", 5);
+            String result = textOf(() -> mockedTool.searchWeb("test", 5));
 
             assertTrue(result.contains("Google Result"));
         }
@@ -600,7 +601,7 @@ class WebSearchToolTest {
             } catch (Exception ignored) {
             }
 
-            String result = tool.searchNews("AI", 3);
+            String result = textOf(() -> tool.searchNews("AI", 3));
 
             assertNotNull(result);
             // Either error or results - either way, searchNews ran
@@ -617,7 +618,7 @@ class WebSearchToolTest {
             } catch (Exception ignored) {
             }
 
-            assertDoesNotThrow(() -> tool.searchNews("test", null));
+            assertDoesNotThrow(() -> textOf(() -> tool.searchNews("test", null)));
         }
     }
 
@@ -641,7 +642,7 @@ class WebSearchToolTest {
                     {"query":{"search":[{"title":"Test Article","snippet":"Test snippet"}]}}
                     """);
 
-            String result = mockedTool.searchWikipedia("test");
+            String result = textOf(() -> mockedTool.searchWikipedia("test"));
 
             assertTrue(result.contains("Test Article"));
         }
@@ -650,7 +651,7 @@ class WebSearchToolTest {
         void searchWikipedia_non200_returnsError() throws Exception {
             answer(mockedClient, 500, "");
 
-            String result = mockedTool.searchWikipedia("test");
+            String result = textOf(() -> mockedTool.searchWikipedia("test"));
 
             assertTrue(result.contains("Error:"));
         }
@@ -661,7 +662,7 @@ class WebSearchToolTest {
                     org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
                     org.mockito.ArgumentMatchers.anyLong())).thenThrow(new IOException("Network error"));
 
-            String result = mockedTool.searchWikipedia("test");
+            String result = textOf(() -> mockedTool.searchWikipedia("test"));
 
             assertTrue(result.contains("Error:"));
             assertTrue(result.contains("Network error"));
@@ -694,7 +695,7 @@ class WebSearchToolTest {
         @Test
         void keyAndCxAreEncodedIntoTheRequest() throws Exception {
             answer(mockedClient, 200, "{\"items\":[]}");
-            googleTool.searchWeb("q", 3);
+            textOf(() -> googleTool.searchWeb("q", 3));
             var request = ArgumentCaptor.forClass(HttpRequest.class);
             verify(mockedClient).sendBounded(request.capture(), anyLong());
             String uri = request.getValue().uri().toString();
@@ -707,7 +708,7 @@ class WebSearchToolTest {
             doThrow(new IOException(
                     "Too many redirects for URL: https://www.googleapis.com/customsearch/v1?key=SECRETKEY&cx=abc&q=q"))
                     .when(mockedClient).sendBounded(any(HttpRequest.class), anyLong());
-            String result = googleTool.searchWeb("q", 3);
+            String result = textOf(() -> googleTool.searchWeb("q", 3));
             assertFalse(result.contains("SECRETKEY"), result);
             assertTrue(result.contains("key=[REDACTED]"), result);
         }

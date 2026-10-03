@@ -45,6 +45,22 @@ class TokenCounterFactoryTest {
         }
 
         @Test
+        @DisplayName("azure deployment name unknown to jtokkit → approximate, never throws")
+        void azureDeploymentName_fallsBackToApproximate() {
+            TokenCountEstimator estimator = assertDoesNotThrow(() -> factory.getEstimator("azure-openai", "my-gpt4-prod-deployment"));
+            assertInstanceOf(TokenCounterFactory.ApproximateTokenCountEstimator.class, estimator);
+            assertEquals(3, estimator.estimateTokenCountInText("123456789012"));
+        }
+
+        @Test
+        @DisplayName("unknown model on an OpenAI-compatible endpoint → approximate, and the fallback is remembered")
+        void unknownOpenAiCompatibleModel_fallsBackToApproximate() {
+            TokenCountEstimator first = assertDoesNotThrow(() -> factory.getEstimator("openai", "llama-3.1-70b-instruct"));
+            assertInstanceOf(TokenCounterFactory.ApproximateTokenCountEstimator.class, first);
+            assertSame(first, factory.getEstimator("openai", "llama-3.1-70b-instruct"));
+        }
+
+        @Test
         @DisplayName("unknown model type → returns approximate estimator")
         void unknownType_returnsApproximate() {
             TokenCountEstimator estimator = factory.getEstimator("anthropic", null);

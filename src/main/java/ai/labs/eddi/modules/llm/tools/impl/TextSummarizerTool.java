@@ -12,6 +12,8 @@ import org.jboss.logging.Logger;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Text summarization and processing tool. Provides extractive summarization and
  * text analysis.
@@ -21,7 +23,8 @@ public class TextSummarizerTool {
     private static final Logger LOGGER = Logger.getLogger(TextSummarizerTool.class);
 
     @Tool("Summarizes long text by extracting the most important sentences. Good for quick overviews of articles or documents.")
-    public String summarizeText(@P("text") String text, @P("numSentences") Integer numSentences) {
+    public String summarizeText(@P("The text to summarize") String text,
+                                @P(value = "Number of sentences to keep (default 3)", required = false) Integer numSentences) {
 
         try {
             if (numSentences == null || numSentences < 1) {
@@ -61,17 +64,17 @@ public class TextSummarizerTool {
                 summary += ".";
             }
 
-            LOGGER.info("Summarized " + sentences.length + " sentences to " + numSentences);
+            LOGGER.debugf("Summarized %d sentences to %d", sentences.length, numSentences);
             return "Summary:\n" + summary;
 
         } catch (Exception e) {
-            LOGGER.error("Text summarization error: " + e.getMessage());
+            LOGGER.warnf("Text summarization error: %s", sanitize(e.getMessage()));
             return "Error: Could not summarize text - " + e.getMessage();
         }
     }
 
     @Tool("Counts words, sentences, and characters in text")
-    public String analyzeText(@P("text") String text) {
+    public String analyzeText(@P("The text to analyze") String text) {
 
         try {
             int charCount = text.length();
@@ -99,13 +102,14 @@ public class TextSummarizerTool {
             return result.toString();
 
         } catch (Exception e) {
-            LOGGER.error("Text analysis error: " + e.getMessage());
+            LOGGER.warnf("Text analysis error: %s", sanitize(e.getMessage()));
             return "Error: Could not analyze text - " + e.getMessage();
         }
     }
 
     @Tool("Extracts keywords from text based on frequency and importance")
-    public String extractKeywords(@P("text") String text, @P("numKeywords") Integer numKeywords) {
+    public String extractKeywords(@P("The text to extract keywords from") String text,
+                                  @P(value = "Number of keywords to return (default 10)", required = false) Integer numKeywords) {
 
         try {
             if (numKeywords == null || numKeywords < 1) {
@@ -137,17 +141,17 @@ public class TextSummarizerTool {
                 result.append(rank++).append(". ").append(entry.getKey()).append(" (").append(entry.getValue()).append(" occurrences)\n");
             }
 
-            LOGGER.info("Extracted " + topKeywords.size() + " keywords");
+            LOGGER.debugf("Extracted %d keywords", topKeywords.size());
             return result.toString();
 
         } catch (Exception e) {
-            LOGGER.error("Keyword extraction error: " + e.getMessage());
+            LOGGER.warnf("Keyword extraction error: %s", sanitize(e.getMessage()));
             return "Error: Could not extract keywords - " + e.getMessage();
         }
     }
 
     @Tool("Removes extra whitespace and normalizes text formatting")
-    public String normalizeText(@P("text") String text) {
+    public String normalizeText(@P("The text to normalize") String text) {
 
         try {
             // Remove extra whitespace
@@ -163,7 +167,7 @@ public class TextSummarizerTool {
             return normalized;
 
         } catch (Exception e) {
-            LOGGER.error("Text normalization error: " + e.getMessage());
+            LOGGER.warnf("Text normalization error: %s", sanitize(e.getMessage()));
             return "Error: Could not normalize text - " + e.getMessage();
         }
     }

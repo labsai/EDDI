@@ -54,6 +54,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
      */
     public ChatModel build(Map<String, String> parameters, Map<String, Object> customParameters) {
         var builder = OpenAiChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
+        // One retry layer: the task's retry policy (RetryConfiguration) — see
+        // ModelParameterValues#PROVIDER_MAX_RETRIES.
+        builder.maxRetries(ModelParameterValues.PROVIDER_MAX_RETRIES);
         if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
             // Never let a model base URL point at the cloud instance-metadata service
             // (always-on, independent of eddi.security.ssrf-protection.enabled).

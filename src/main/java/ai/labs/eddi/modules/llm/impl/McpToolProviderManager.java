@@ -841,19 +841,29 @@ public class McpToolProviderManager {
      * yields one client whose header supplier reads the caller per request, so
      * every user of that config shares it.
      */
-    private static String cacheKey(McpServerConfig config) {
+    static String cacheKey(McpServerConfig config) {
+        // The timeout is part of the key because it is baked into the client's
+        // transport at construction: keyed on URL and credential alone, the first
+        // config to reach a server fixed the timeout for every later config naming
+        // the same server, so raising timeoutMs on one agent silently did nothing.
+        String timeout = "|t" + effectiveTimeoutMs(config);
         String apiKey = config.getApiKey();
         if (isNullOrEmpty(apiKey)) {
-            return config.getUrl() + "|anonymous";
+            return config.getUrl() + "|anonymous" + timeout;
         }
         try {
             var digest = MessageDigest.getInstance("SHA-256").digest(apiKey.getBytes(StandardCharsets.UTF_8));
-            return config.getUrl() + "|" + HexFormat.of().formatHex(digest);
+            return config.getUrl() + "|" + HexFormat.of().formatHex(digest) + timeout;
         } catch (NoSuchAlgorithmException e) {
             // SHA-256 is mandated by the platform; if it is truly absent, fall back to
             // isolating by identity so distinct credentials still cannot share.
-            return config.getUrl() + "|" + System.identityHashCode(apiKey);
+            return config.getUrl() + "|" + System.identityHashCode(apiKey) + timeout;
         }
+    }
+
+    /** The transport timeout a client for {@code config} is built with. */
+    private static long effectiveTimeoutMs(McpServerConfig config) {
+        return config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000L;
     }
 
     /**
@@ -871,7 +881,7 @@ public class McpToolProviderManager {
             LOGGER.infof("Creating MCP client for '%s' (%s transport)", sanitize(config.getName() != null ? config.getName() : url),
                     sanitize(config.getTransport()));
 
-            Duration timeout = Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000L);
+            Duration timeout = Duration.ofMillis(effectiveTimeoutMs(config));
 
             McpTransport transport = createTransport(config, timeout);
 

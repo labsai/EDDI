@@ -96,7 +96,7 @@ final class ToolObjectReflector {
                 if (method.isAnnotationPresent(Tool.class)) {
                     Tool toolAnnotation = method.getAnnotation(Tool.class);
                     String toolName = toolAnnotation.name().isEmpty() ? method.getName() : toolAnnotation.name();
-                    toolExecutors.put(toolName, new DefaultToolExecutor(tool, method));
+                    toolExecutors.put(toolName, executorFor(tool, method));
                     toolSources.put(toolName, sourceForBuiltInTool(tool));
                     toolCanonicalNames.put(toolName, canonicalToolName != null ? canonicalToolName : toolName);
                 }
@@ -104,6 +104,29 @@ final class ToolObjectReflector {
         }
 
         return new Reflected(toolSpecs, toolExecutors, toolSources, toolCanonicalNames);
+    }
+
+    /**
+     * An executor that lets a tool's exception reach {@code ToolExecutionService}
+     * instead of folding it into an ordinary result.
+     * <p>
+     * The two-argument {@link DefaultToolExecutor} constructor catches whatever the
+     * tool throws and returns its message as the result text, marked as an error
+     * only on a {@code ToolExecutionResult} that {@code execute(…)} then discards.
+     * Downstream that looked like a successful call: the exception's raw text went
+     * to the model, and the "result" was cached for the tool's full TTL. With
+     * propagation on, a {@code ToolFailureException} keeps its model-facing text, a
+     * malformed argument surfaces as a {@code ToolArgumentsException}, and neither
+     * is ever cached.
+     */
+    static DefaultToolExecutor executorFor(Object tool, Method method) {
+        return DefaultToolExecutor.builder()
+                .object(tool)
+                .originalMethod(method)
+                .methodToInvoke(method)
+                .propagateToolExecutionExceptions(true)
+                .wrapToolArgumentsExceptions(true)
+                .build();
     }
 
     /** The actual bean class behind a possible CDI proxy. */

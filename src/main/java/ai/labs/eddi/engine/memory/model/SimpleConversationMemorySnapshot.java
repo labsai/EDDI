@@ -38,6 +38,15 @@ public class SimpleConversationMemorySnapshot {
      * assistant was updated" apart from any other end.
      */
     private String endReason;
+    /**
+     * Why the turn failed, when {@link #conversationState} is {@code ERROR} and the
+     * failing task reported a reason; {@code null} (and therefore absent from the
+     * JSON) otherwise. The same sanitized description the streaming endpoint sends
+     * as its {@code task_failed} event, so a plain REST caller no longer receives
+     * HTTP 200 with an ERROR state and nothing to say why. The full per-task digest
+     * stays in the turn's {@code conversationOutputs[…].taskErrors}.
+     */
+    private TurnError error;
     private Instant hitlPausedAt;
     /**
      * Task 13: HITL pause type ("TOOL_CALL" | "RULE" | null) carried onto the
@@ -195,6 +204,31 @@ public class SimpleConversationMemorySnapshot {
 
     public String getEndReason() {
         return endReason;
+    }
+
+    public TurnError getError() {
+        return error;
+    }
+
+    public void setError(TurnError error) {
+        this.error = error;
+    }
+
+    /**
+     * A failed turn's reason, shaped like the streaming {@code task_failed} event.
+     *
+     * @param taskId
+     *            the failing lifecycle task, e.g. {@code eddi://ai.labs.llm}
+     * @param taskType
+     *            its type, e.g. {@code langchain}
+     * @param errorType
+     *            the failure class used for metrics and audit (e.g.
+     *            {@code LifecycleException}), when known
+     * @param message
+     *            sanitized description — URLs, stack frames and credentials are
+     *            stripped before it leaves the server
+     */
+    public record TurnError(String taskId, String taskType, String errorType, String message) {
     }
 
     public void setEndReason(String endReason) {

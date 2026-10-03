@@ -17,6 +17,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.http.HttpRequest;
 import java.io.IOException;
+import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -36,33 +37,33 @@ class PdfReaderToolTest {
     @ParameterizedTest
     @ValueSource(strings = {"/etc/passwd", "C:\\Windows\\System32\\config\\SAM", "../../../etc/shadow", "/tmp/secret.pdf"})
     void testExtractTextFromPdf_RejectsLocalFilePaths(String path) {
-        String result = pdfReaderTool.extractTextFromPdf(path);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdf(path));
         assertTrue(result.contains("Error"), "Should reject local file path: " + path);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"file:///etc/passwd", "ftp://evil.com/malware.pdf", "jar:file:///app.jar!/config"})
     void testExtractTextFromPdf_RejectsNonHttpSchemes(String url) {
-        String result = pdfReaderTool.extractTextFromPdf(url);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdf(url));
         assertTrue(result.contains("Error"), "Should reject non-HTTP scheme: " + url);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"http://127.0.0.1/admin.pdf", "http://localhost/secret.pdf", "http://169.254.169.254/latest/meta-data/"})
     void testExtractTextFromPdf_RejectsInternalAddresses(String url) {
-        String result = pdfReaderTool.extractTextFromPdf(url);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdf(url));
         assertTrue(result.contains("Error"), "Should reject internal URL: " + url);
     }
 
     @Test
     void testExtractTextFromPdf_EmptyUrl() {
-        String result = pdfReaderTool.extractTextFromPdf("");
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdf(""));
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testExtractTextFromPdf_NullUrl() {
-        String result = pdfReaderTool.extractTextFromPdf(null);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdf(null));
         assertTrue(result.contains("Error"));
     }
 
@@ -70,19 +71,19 @@ class PdfReaderToolTest {
 
     @Test
     void testExtractTextFromPdfPages_RejectsLocalPath() {
-        String result = pdfReaderTool.extractTextFromPdfPages("/etc/passwd", 1, 1);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdfPages("/etc/passwd", 1, 1));
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testExtractTextFromPdfPages_RejectsFileScheme() {
-        String result = pdfReaderTool.extractTextFromPdfPages("file:///etc/passwd", 1, 1);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdfPages("file:///etc/passwd", 1, 1));
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testExtractTextFromPdfPages_RejectsLocalhost() {
-        String result = pdfReaderTool.extractTextFromPdfPages("http://localhost/secret.pdf", 1, 1);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdfPages("http://localhost/secret.pdf", 1, 1));
         assertTrue(result.contains("Error"));
     }
 
@@ -90,19 +91,19 @@ class PdfReaderToolTest {
 
     @Test
     void testGetPdfInfo_RejectsLocalPath() {
-        String result = pdfReaderTool.getPdfInfo("/etc/passwd");
+        String result = textOf(() -> pdfReaderTool.getPdfInfo("/etc/passwd"));
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testGetPdfInfo_RejectsFileScheme() {
-        String result = pdfReaderTool.getPdfInfo("file:///etc/passwd");
+        String result = textOf(() -> pdfReaderTool.getPdfInfo("file:///etc/passwd"));
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testGetPdfInfo_RejectsLocalhost() {
-        String result = pdfReaderTool.getPdfInfo("http://localhost/secret.pdf");
+        String result = textOf(() -> pdfReaderTool.getPdfInfo("http://localhost/secret.pdf"));
         assertTrue(result.contains("Error"));
     }
 
@@ -112,38 +113,38 @@ class PdfReaderToolTest {
     @Test
     void testExtractTextFromPdf_AcceptsHttpsUrl() {
         // The URL validation itself should pass; the actual download will fail
-        String result = pdfReaderTool.extractTextFromPdf("https://example.com/test.pdf");
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdf("https://example.com/test.pdf"));
         assertNotNull(result);
         // Either succeeds or fails with download error, NOT validation error
     }
 
     @Test
     void testGetPdfInfo_AcceptsHttpsUrl() {
-        String result = pdfReaderTool.getPdfInfo("https://example.com/test.pdf");
+        String result = textOf(() -> pdfReaderTool.getPdfInfo("https://example.com/test.pdf"));
         assertNotNull(result);
     }
 
     @Test
     void testExtractTextFromPdfPages_AcceptsHttpsUrl() {
-        String result = pdfReaderTool.extractTextFromPdfPages("https://example.com/test.pdf", 1, 1);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdfPages("https://example.com/test.pdf", 1, 1));
         assertNotNull(result);
     }
 
     @Test
     void testGetPdfInfo_RejectsCloudMetadata() {
-        String result = pdfReaderTool.getPdfInfo("http://169.254.169.254/latest/meta-data/");
+        String result = textOf(() -> pdfReaderTool.getPdfInfo("http://169.254.169.254/latest/meta-data/"));
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testExtractTextFromPdfPages_RejectsCloudMetadata() {
-        String result = pdfReaderTool.extractTextFromPdfPages("http://169.254.169.254/", 1, 1);
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdfPages("http://169.254.169.254/", 1, 1));
         assertTrue(result.contains("Error"));
     }
 
     @Test
     void testExtractTextFromPdf_RejectsInvalidUrl() {
-        String result = pdfReaderTool.extractTextFromPdf("not-a-valid-url");
+        String result = textOf(() -> pdfReaderTool.extractTextFromPdf("not-a-valid-url"));
         assertTrue(result.contains("Error"));
     }
 
@@ -180,7 +181,7 @@ class PdfReaderToolTest {
         void extractText_non200_returnsError() throws Exception {
             mockStatus(404);
 
-            String result = mockedTool.extractTextFromPdf("https://example.com/notfound.pdf");
+            String result = textOf(() -> mockedTool.extractTextFromPdf("https://example.com/notfound.pdf"));
 
             assertTrue(result.startsWith("Error:"));
             assertTrue(result.contains("HTTP 404"));
@@ -191,7 +192,7 @@ class PdfReaderToolTest {
         void extractPages_non200_returnsError() throws Exception {
             mockStatus(500);
 
-            String result = mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 3);
+            String result = textOf(() -> mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 3));
 
             assertTrue(result.startsWith("Error:"));
             assertTrue(result.contains("HTTP 500"));
@@ -202,7 +203,7 @@ class PdfReaderToolTest {
         void pdfInfo_non200_returnsError() throws Exception {
             mockStatus(403);
 
-            String result = mockedTool.getPdfInfo("https://example.com/forbidden.pdf");
+            String result = textOf(() -> mockedTool.getPdfInfo("https://example.com/forbidden.pdf"));
 
             assertTrue(result.startsWith("Error:"));
             assertTrue(result.contains("HTTP 403"));
@@ -216,7 +217,7 @@ class PdfReaderToolTest {
                             org.mockito.ArgumentMatchers.any(HttpRequest.class),
                             org.mockito.ArgumentMatchers.anyLong());
 
-            String result = mockedTool.extractTextFromPdf("https://example.com/huge.pdf");
+            String result = textOf(() -> mockedTool.extractTextFromPdf("https://example.com/huge.pdf"));
 
             assertTrue(result.startsWith("Error:"));
             assertTrue(result.contains("maximum download size"));
@@ -227,7 +228,7 @@ class PdfReaderToolTest {
         void extractText_ioException_returnsError() throws Exception {
             mockThrow(new IOException("Connection refused"));
 
-            String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
+            String result = textOf(() -> mockedTool.extractTextFromPdf("https://example.com/doc.pdf"));
 
             assertTrue(result.startsWith("Error:"));
             assertTrue(result.contains("Connection refused"));
@@ -238,7 +239,7 @@ class PdfReaderToolTest {
         void extractPages_ioException_returnsError() throws Exception {
             mockThrow(new IOException("Timeout"));
 
-            String result = mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 5);
+            String result = textOf(() -> mockedTool.extractTextFromPdfPages("https://example.com/doc.pdf", 1, 5));
 
             assertTrue(result.startsWith("Error:"));
             assertTrue(result.contains("Timeout"));
@@ -249,7 +250,7 @@ class PdfReaderToolTest {
         void pdfInfo_ioException_returnsError() throws Exception {
             mockThrow(new IOException("DNS failed"));
 
-            String result = mockedTool.getPdfInfo("https://example.com/doc.pdf");
+            String result = textOf(() -> mockedTool.getPdfInfo("https://example.com/doc.pdf"));
 
             assertTrue(result.startsWith("Error:"));
             assertTrue(result.contains("DNS failed"));
@@ -260,7 +261,7 @@ class PdfReaderToolTest {
         void extractText_interruptedException_returnsError() throws Exception {
             mockThrow(new InterruptedException("Interrupted"));
 
-            String result = mockedTool.extractTextFromPdf("https://example.com/doc.pdf");
+            String result = textOf(() -> mockedTool.extractTextFromPdf("https://example.com/doc.pdf"));
 
             assertTrue(result.startsWith("Error:"));
         }
@@ -365,7 +366,7 @@ class PdfReaderToolTest {
             Path pdfPath = createTinyPdf("Hello EDDI World");
             try {
                 mockHttpToServePdf(pdfPath);
-                String result = mockedTool.extractTextFromPdf("https://example.com/test.pdf");
+                String result = textOf(() -> mockedTool.extractTextFromPdf("https://example.com/test.pdf"));
 
                 assertNotNull(result);
                 assertTrue(result.contains("Hello EDDI World"),
@@ -381,8 +382,8 @@ class PdfReaderToolTest {
             Path pdfPath = createTinyPdf("Only page");
             try {
                 mockHttpToServePdf(pdfPath);
-                String result = mockedTool.extractTextFromPdfPages(
-                        "https://example.com/doc.pdf", 5, 10);
+                String result = textOf(() -> mockedTool.extractTextFromPdfPages(
+                        "https://example.com/doc.pdf", 5, 10));
 
                 assertTrue(result.contains("Error"),
                         "Should return error for startPage > totalPages. Got: " + result);
@@ -399,8 +400,8 @@ class PdfReaderToolTest {
             Path pdfPath = createMultiPagePdf("Page one text", "Page two text");
             try {
                 mockHttpToServePdf(pdfPath);
-                String result = mockedTool.extractTextFromPdfPages(
-                        "https://example.com/doc.pdf", 1, 100);
+                String result = textOf(() -> mockedTool.extractTextFromPdfPages(
+                        "https://example.com/doc.pdf", 1, 100));
 
                 assertNotNull(result);
                 assertFalse(result.contains("Error"),
@@ -421,7 +422,7 @@ class PdfReaderToolTest {
                     "EDDI Test Document", "Test Author", "Testing Subject", "PDFBox Creator");
             try {
                 mockHttpToServePdf(pdfPath);
-                String result = mockedTool.getPdfInfo("https://example.com/meta.pdf");
+                String result = textOf(() -> mockedTool.getPdfInfo("https://example.com/meta.pdf"));
 
                 assertNotNull(result);
                 assertTrue(result.contains("EDDI Test Document"),
@@ -466,7 +467,7 @@ class PdfReaderToolTest {
                 }
 
                 mockHttpToServePdf(tempFile);
-                String result = mockedTool.extractTextFromPdf("https://example.com/long.pdf");
+                String result = textOf(() -> mockedTool.extractTextFromPdf("https://example.com/long.pdf"));
 
                 assertNotNull(result);
                 assertTrue(result.contains("[Content truncated"),
@@ -482,8 +483,8 @@ class PdfReaderToolTest {
             Path pdfPath = createMultiPagePdf("First page", "Second page", "Third page");
             try {
                 mockHttpToServePdf(pdfPath);
-                String result = mockedTool.extractTextFromPdfPages(
-                        "https://example.com/doc.pdf", 2, 2);
+                String result = textOf(() -> mockedTool.extractTextFromPdfPages(
+                        "https://example.com/doc.pdf", 2, 2));
 
                 assertNotNull(result);
                 assertFalse(result.contains("Error"), "Should not error. Got: " + result);
@@ -504,7 +505,7 @@ class PdfReaderToolTest {
             Path pdfPath = createTinyPdf("bare content");
             try {
                 mockHttpToServePdf(pdfPath);
-                String result = mockedTool.getPdfInfo("https://example.com/bare.pdf");
+                String result = textOf(() -> mockedTool.getPdfInfo("https://example.com/bare.pdf"));
 
                 assertNotNull(result);
                 assertTrue(result.contains("Number of pages: 1"),
