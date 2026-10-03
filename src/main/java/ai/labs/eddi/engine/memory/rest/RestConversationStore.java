@@ -34,6 +34,8 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.scheduler.Scheduled;
@@ -174,6 +176,14 @@ public class RestConversationStore implements IRestConversationStore {
      */
     @Inject
     Instance<V6RenameMigration> v6RenameMigrationInstance;
+
+    /**
+     * Channel conversation mappings ({@code /v1}, Slack); optional so the unit
+     * tests that construct this store directly need none. Absent means mappings are
+     * not swept with their conversations.
+     */
+    @Inject
+    Instance<IUserConversationStore> userConversationStoreInstance;
 
     /**
      * The operator's confirmation that 6.x's retention may delete ended
@@ -960,6 +970,7 @@ public class RestConversationStore implements IRestConversationStore {
                     if (!deleteAutoVaultedSecretsForConversation(endedConversationId)) {
                         continue; // kept, with its secret references, for the next run
                     }
+                    deleteChannelMappingsForConversation(endedConversationId);
                     documentDescriptorStore.deleteAllDescriptor(endedConversationId);
                     conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                     deleteAttachmentsForConversation(endedConversationId);
@@ -1282,6 +1293,39 @@ public class RestConversationStore implements IRestConversationStore {
      * Delete any binary attachments stored for a conversation. Silently skips if no
      * attachment storage is configured.
      */
+    /**
+     * Delete the channel mappings ({@code (intent, userId)} rows of
+     * {@link IUserConversationStore}) that point at a conversation the retention
+     * sweep is deleting. Nothing else removes them: a {@code /v1} client that sends
+     * no chat id and no history opens a new conversation — and a new mapping — per
+     * distinct message, and the sweep deleted the conversations but left every row.
+     * Runs before the descriptor is deleted, because the descriptor names the owner
+     * whose mappings are read. Best effort: a mapping left behind is stale, not
+     * wrong — the next message of that chat finds its conversation gone and
+     * replaces it.
+     */
+    void deleteChannelMappingsForConversation(String conversationId) {
+        if (userConversationStoreInstance == null || !userConversationStoreInstance.isResolvable()) {
+            return;
+        }
+        try {
+            ConversationDescriptor descriptor = conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+            String userId = descriptor == null ? null : descriptor.getUserId();
+            if (isNullOrEmpty(userId)) {
+                return;
+            }
+            IUserConversationStore mappings = userConversationStoreInstance.get();
+            for (UserConversation mapping : mappings.getAllForUser(userId)) {
+                if (conversationId.equals(mapping.getConversationId())) {
+                    mappings.deleteUserConversationIfMatches(mapping.getIntent(), userId, conversationId);
+                }
+            }
+        } catch (Exception e) {
+            log.warn(format("Failed to delete the channel mappings of conversation %s: %s",
+                    sanitize(conversationId), sanitize(e.getMessage())));
+        }
+    }
+
     private void deleteAttachmentsForConversation(String conversationId) {
         if (attachmentStorageInstance.isResolvable()) {
             try {

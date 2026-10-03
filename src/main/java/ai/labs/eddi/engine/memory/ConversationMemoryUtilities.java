@@ -228,12 +228,6 @@ public class ConversationMemoryUtilities {
     }
 
     /**
-     * Whether a step/output key must be withheld from the caller-controlled
-     * {@code returnDetailed} projection. Covers audit records (compiled system
-     * prompts), raw model traces and raw error bodies — none of which are meant for
-     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
-     */
-    /**
      * Whether everything under {@code key} is masked as a credential. The token
      * counts are exempt: the name contains "token", which would mask three numbers.
      */
@@ -241,6 +235,12 @@ public class ConversationMemoryUtilities {
         return !MemoryKeys.AUDIT_TOKEN_USAGE.equals(key) && SecretRedactionFilter.isCredentialFieldName(key);
     }
 
+    /**
+     * Whether a step/output key must be withheld from the caller-controlled
+     * {@code returnDetailed} projection. Covers audit records (compiled system
+     * prompts), raw model traces and raw error bodies — none of which are meant for
+     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
+     */
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
             return false;
