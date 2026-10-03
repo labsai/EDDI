@@ -1,0 +1,4 @@
+# What a demo run writes next to the script
+results-*.json
+logs-*/
+mock-requests.jsonl
