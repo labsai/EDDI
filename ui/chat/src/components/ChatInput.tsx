@@ -8,6 +8,7 @@ import {
   useRef,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   type KeyboardEvent,
 } from "react";
@@ -20,6 +21,39 @@ import {
   type AttachmentResult,
 } from "@/api/attachments-api";
 import { ApiError, errorPayload } from "@/api/http";
+
+/** Delay before the one retry of a failed background attachment delete. */
+export const DISCARD_RETRY_MS = 2_000;
+
+/**
+ * Delete an attachment nobody will send — removed by the user, or uploaded into
+ * a conversation that was abandoned before the upload finished. A background
+ * cleanup: the chip is already gone, so there is nothing for the user to act
+ * on, and a banner for it would only be noise.
+ *
+ * A transient failure (network, 5xx, 429) gets one retry. A 4xx means the file
+ * is already gone or not ours to delete, so it is not retried. Whatever is
+ * still left is logged and lives as long as its conversation does: deleting
+ * the conversation, the ended-conversation retention sweep and GDPR erasure
+ * all remove its attachments.
+ */
+export function discardAttachment(conversationId: string, storageRef: string): void {
+  const permanent = (err: unknown) =>
+    err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 429;
+  deleteAttachment(conversationId, storageRef).catch((first: unknown) => {
+    if (permanent(first)) return;
+    setTimeout(() => {
+      deleteAttachment(conversationId, storageRef).catch((second: unknown) => {
+        if (permanent(second)) return;
+        console.warn(
+          `[eddi-chat] could not delete attachment ${storageRef} from conversation ${conversationId}; ` +
+            "it is removed with the conversation",
+          second,
+        );
+      });
+    }, DISCARD_RETRY_MS);
+  });
+}
 
 /** Turn an upload failure into copy that names the actual reason. */
 function describeUploadFailure(err: unknown, fileName: string): string {
@@ -142,12 +176,16 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   const chipsRef = useRef<HTMLDivElement>(null);
   const uploadSeq = useRef(0);
   /** The conversation the composer belongs to right now, for upload continuations. */
-  // Synced after commit, not during render (as in ChatWidget): a render React
-  // discards would otherwise leave an id the user never saw here, and an
-  // upload finishing then would be deleted from a conversation that is still
-  // open. Readers are upload continuations, which cannot run before a commit.
+  // Synced in the commit itself, not during render and not in a passive
+  // effect. Not during render: a render React discards would leave an id the
+  // user never saw, and an upload finishing then would be deleted from a
+  // conversation that is still open. Not in useEffect: a passive effect can
+  // run after the commit, and an upload settling in that gap would still see
+  // the old id and stage its file into the new conversation. A layout effect
+  // runs synchronously as part of the commit, so no continuation can see a
+  // committed conversation change before this ref has followed it.
   const currentConversationRef = useRef(conversationId);
-  useEffect(() => {
+  useLayoutEffect(() => {
     currentConversationRef.current = conversationId;
   }, [conversationId]);
   const atCapacity =
@@ -264,7 +302,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             // conversation's blob to the next message. Drop it and free the
             // quota it took.
             if (currentConversationRef.current !== conversationId) {
-              deleteAttachment(conversationId, result.storageRef).catch(() => {});
+              discardAttachment(conversationId, result.storageRef);
               return;
             }
             // Stage it. The ref reaches the agent as an attachment_N context
@@ -314,11 +352,12 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
       // skipping it leaves the file in the store for the life of the
       // conversation, counting against the per-conversation file and byte
       // quotas until the user can no longer attach anything at all.
-      // Fire-and-forget: the chip goes regardless of what the server says.
+      // The chip goes regardless of what the server says; discardAttachment
+      // retries a transient failure once and logs what is left.
       // Prefer the id the upload reported over whatever is current now.
       const owner = a.conversationId ?? conversationId;
       if (owner) {
-        deleteAttachment(owner, storageRef).catch(() => {});
+        discardAttachment(owner, storageRef);
       }
       dispatch({ type: "REMOVE_ATTACHMENT", storageRef });
       announce(`${fileName} removed.`);
