@@ -15,7 +15,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -48,6 +50,8 @@ public class ClusterHitlRecovery implements ClusterStartable {
      * conversation → (revision, first seen millis) of the IN_PROGRESS sightings.
      */
     private final Map<String, long[]> sightings = new HashMap<>();
+    /** The conversations the current pass looked at; the rest are forgotten. */
+    private final Set<String> touched = new HashSet<>();
 
     @Inject
     public ClusterHitlRecovery(ClusterConfig config, Instance<NatsConnectionManager> connections, IConversationLeaseManager leases,
@@ -71,7 +75,12 @@ public class ClusterHitlRecovery implements ClusterStartable {
                 sightings.clear(); // another node leads; our observations go stale
                 return;
             }
+            touched.clear();
             observer.runClusterRecovery(this::eligible);
+            // A conversation that left IN_PROGRESS is not asked about again; without this
+            // its sighting (a turn that ran without a lease while degraded, say) would
+            // stay in the map for the life of the leadership.
+            sightings.keySet().retainAll(touched);
         } catch (RuntimeException e) {
             LOGGER.warnf("HITL cluster recovery pass failed: %s", e.getMessage());
         }
@@ -79,6 +88,7 @@ public class ClusterHitlRecovery implements ClusterStartable {
 
     /** No lease, and unchanged for at least the minimum age. */
     synchronized boolean eligible(String conversationId) {
+        touched.add(conversationId);
         if (leases.peek(conversationId).isPresent()) {
             sightings.remove(conversationId);
             return false;
