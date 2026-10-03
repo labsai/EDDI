@@ -195,9 +195,12 @@ public class ScheduleFireExecutor {
             return hitlFireLog;
         }
 
-        String revoked = creatorAccessRevoked(schedule);
-        if (revoked != null) {
-            return refuseRevokedFire(schedule, instanceId, attemptNumber, revoked);
+        ResourceAccessGuard.UseCheck creatorAccess = creatorUseCheck(schedule);
+        if (creatorAccess == ResourceAccessGuard.UseCheck.DENIED) {
+            return refuseRevokedFire(schedule, instanceId, attemptNumber, revokedReason(schedule));
+        }
+        if (creatorAccess == ResourceAccessGuard.UseCheck.UNKNOWN) {
+            return failUnverifiedFire(schedule, instanceId, attemptNumber);
         }
 
         if (DreamService.isDreamSchedule(md)) {
@@ -395,9 +398,10 @@ public class ScheduleFireExecutor {
      * internally minted ones) is left alone, as there is nobody to re-check. With
      * workspaces off, everything is admitted, as everywhere else.
      *
-     * @return null when the fire may run, otherwise why it may not
+     * @return null when the check does not apply; otherwise ALLOWED, DENIED, or
+     *         UNKNOWN when the descriptor store could not answer
      */
-    String creatorAccessRevoked(ScheduleConfiguration schedule) {
+    ResourceAccessGuard.UseCheck creatorUseCheck(ScheduleConfiguration schedule) {
         if (resourceAccessGuard == null || RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata())
                 || TeamCadenceService.isTeamCadenceSchedule(schedule.getMetadata())) {
             return null;
@@ -415,18 +419,42 @@ public class ScheduleFireExecutor {
         if (schedule.getCreatorTeams() == null) {
             return null;
         }
-        if (resourceAccessGuard.principalMayUse(agentId, creator, schedule.getCreatorTeams(), schedule.isCreatorAdmin())) {
-            return null;
-        }
-        return "The schedule's creator can no longer use agent " + agentId
+        return resourceAccessGuard.checkPrincipalUse(agentId, creator, schedule.getCreatorTeams(), schedule.isCreatorAdmin());
+    }
+
+    private static String revokedReason(ScheduleConfiguration schedule) {
+        return "The schedule's creator can no longer use agent " + schedule.getAgentId()
                 + " (access was revoked or unshared) — the schedule was disabled; re-enable it once access is restored";
     }
 
     /**
-     * Records a fire refused by {@link #creatorAccessRevoked} as FAILED and
-     * disables the schedule with {@code disabledReason=access-revoked}, so it
-     * neither retries into the same refusal nor comes back on the agent's next
-     * redeploy. Re-enabling it is a deliberate act, and the next fire checks again.
+     * The access check could not be answered (the descriptor store failed). Not a
+     * denial, so nothing is disabled: the fire is recorded FAILED and goes through
+     * the ordinary retry ladder, and the next attempt checks again. Disabling here
+     * turned a short database outage into schedules marked access-revoked that no
+     * redeploy brings back.
+     */
+    private ScheduleFireLog failUnverifiedFire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        String reason = "Could not verify that the schedule's creator may still use agent " + schedule.getAgentId()
+                + " (access store unavailable) — not fired; it will be retried";
+        LOGGER.warnf("[SCHEDULE] Fire of schedule '%s' (id=%s) not run: %s", sanitize(schedule.getName()), sanitize(schedule.getId()),
+                reason);
+        Instant now = Instant.now();
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), now,
+                Instant.now(), ScheduleConfiguration.FireStatus.FAILED.name(), instanceId, null, reason, attemptNumber, 0.0);
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log unverified fire for schedule %s", sanitize(schedule.getId()));
+        }
+        return fireLog;
+    }
+
+    /**
+     * Records a fire refused by {@link #creatorUseCheck} as FAILED and disables the
+     * schedule with {@code disabledReason=access-revoked}, so it neither retries
+     * into the same refusal nor comes back on the agent's next redeploy.
+     * Re-enabling it is a deliberate act, and the next fire checks again.
      */
     private ScheduleFireLog refuseRevokedFire(ScheduleConfiguration schedule, String instanceId, int attemptNumber, String reason) {
         Instant now = Instant.now();

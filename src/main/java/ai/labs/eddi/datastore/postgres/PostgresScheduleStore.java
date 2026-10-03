@@ -1196,8 +1196,14 @@ public class PostgresScheduleStore implements IScheduleStore {
             return TEAMS_MAPPER.readValue(json, new TypeReference<List<String>>() {
             });
         } catch (JsonProcessingException e) {
-            LOGGER.warnf("Unreadable creator_teams value on a schedule row — treating it as no teams: %s", e.getMessage());
-            return null;
+            // Fail closed, but for this row only. null would mean "no snapshot" and
+            // skip the fire-time USE re-check entirely (fail open); throwing, as
+            // deserializeMetadata does, would make every listing and the poller's due
+            // query fail on one corrupt row. An empty list keeps the check and judges
+            // the creator without team shares — the strictest reading of the row.
+            LOGGER.warnf("Unreadable creator_teams value on a schedule row — re-checking its creator without team shares: %s",
+                    e.getMessage());
+            return List.of();
         }
     }
 

@@ -165,13 +165,17 @@ class ConversationHitlService {
             changed = conversationMemoryStore.compareAndSetState(conversationId,
                     ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
         }
-        // MAJOR-3: drop the stale HITL timeout schedule — but only once the state
-        // write has gone through. Deleting it first meant a cancel whose CAS failed
-        // (a store error) left the pause in place with no timeout at all: a timeout
-        // ABORT that could not be applied was re-armed onto a row that no longer
-        // existed, and a finite policy became wait-forever.
-        deleteHitlTimeoutSchedule(conversationId);
         if (changed) {
+            // MAJOR-3: drop the stale HITL timeout schedule — but only once a state
+            // transition went through. Deleting it first meant a cancel whose CAS
+            // failed (a store error) left the pause in place with no timeout at all:
+            // a timeout ABORT that could not be applied was re-armed onto a row that
+            // no longer existed. And when neither CAS matched there is nothing of
+            // ours to clean up — deleting by name then could take the schedule of a
+            // pause that started a moment later. A row left behind for an already
+            // finished pause is harmless: its fire finds nothing awaiting a decision
+            // and completes.
+            deleteHitlTimeoutSchedule(conversationId);
             conversationService.cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             if (pauseCancelled) {
                 // A pending human approval was terminally resolved outside resume:

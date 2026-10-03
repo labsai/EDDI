@@ -280,6 +280,19 @@ class ResourceAccessGuardTest {
         }
 
         @Test
+        @DisplayName("checkPrincipalUse tells a store failure (UNKNOWN) apart from a denial")
+        void storeFailureIsUnknownNotDenied() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+            var guard = guard(identity("alice"), settings, store);
+
+            assertEquals(ResourceAccessGuard.UseCheck.UNKNOWN, guard.checkPrincipalUse(RESOURCE_ID, "alice", List.of(), false));
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "alice", List.of(), false), "the boolean form stays fail-closed");
+            assertEquals(ResourceAccessGuard.UseCheck.DENIED,
+                    guardReturning(ownedBy("alice")).checkPrincipalUse(RESOURCE_ID, "mallory", List.of(), false));
+        }
+
+        @Test
         @DisplayName("with workspaces off everything is admitted, as everywhere else")
         void disabledAdmitsEverything() {
             var off = settings(false, true, WorkspaceSettings.LEGACY_SHARED);

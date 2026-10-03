@@ -383,20 +383,43 @@ public class ResourceAccessGuard {
      * itself being withdrawn, which is the revocation that matters here.
      */
     public boolean principalMayUse(String resourceId, String principal, Collection<String> teamSubjects, boolean principalIsAdmin) {
+        return checkPrincipalUse(resourceId, principal, teamSubjects, principalIsAdmin) == UseCheck.ALLOWED;
+    }
+
+    /**
+     * The answer of {@link #checkPrincipalUse}: an unreadable descriptor is neither
+     * yes nor no.
+     */
+    public enum UseCheck {
+        ALLOWED, DENIED,
+        /**
+         * The descriptor store could not answer — retry later, do not act on it as a
+         * denial.
+         */
+        UNKNOWN
+    }
+
+    /**
+     * {@link #principalMayUse(String, String, Collection, boolean)}, telling a
+     * denial apart from a store that could not answer. A caller that takes a
+     * lasting action on a denial — disabling a schedule — must not take it on
+     * {@link UseCheck#UNKNOWN}, which a transient database error produces.
+     */
+    public UseCheck checkPrincipalUse(String resourceId, String principal, Collection<String> teamSubjects, boolean principalIsAdmin) {
         if (!settings.isEnforcing() || principalIsAdmin) {
-            return true;
+            return UseCheck.ALLOWED;
         }
         if (resourceId == null || resourceId.isBlank() || principal == null || principal.isBlank()) {
-            return false;
+            return UseCheck.DENIED;
         }
         DocumentDescriptor descriptor;
         try {
             descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
         } catch (ResourceNotFoundException e) {
-            return settings.admitsLegacy();
+            return settings.admitsLegacy() ? UseCheck.ALLOWED : UseCheck.DENIED;
         } catch (ResourceStoreException e) {
             LOGGER.warnf("Could not load descriptor for use check on %s: %s", sanitize(resourceId), e.getMessage());
-            return false;
+            return UseCheck.UNKNOWN;
         }
         String personal = Subjects.personalSpace(principal.trim());
         Set<String> subjects = new LinkedHashSet<>();
@@ -406,7 +429,7 @@ public class ResourceAccessGuard {
         }
         CallerSpaces caller = new CallerSpaces(Set.of(principal.trim()), subjects, subjects);
         AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, caller, settings.admitsLegacy());
-        return granted != null && granted.includes(AccessLevel.USE);
+        return granted != null && granted.includes(AccessLevel.USE) ? UseCheck.ALLOWED : UseCheck.DENIED;
     }
 
     /**

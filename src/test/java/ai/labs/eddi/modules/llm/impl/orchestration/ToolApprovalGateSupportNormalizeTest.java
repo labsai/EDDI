@@ -139,4 +139,19 @@ class ToolApprovalGateSupportNormalizeTest {
         assertTrue(normalized.toolExecutionRequests().get(1).id().startsWith("gen-"));
         assertEquals("deployAgent", normalized.toolExecutionRequests().get(1).name());
     }
+
+    @Test
+    @DisplayName("a re-minted call keeps a JSON-object argument string")
+    void reMintedCallWithoutArgumentsGetsEmptyObject() {
+        AiMessage dup = AiMessage.builder()
+                .toolExecutionRequests(List.of(
+                        ToolExecutionRequest.builder().id("call_1").name("getStatus").arguments("{}").build(),
+                        ToolExecutionRequest.builder().id("call_1").name("deployAgent").build()))
+                .build();
+
+        AiMessage normalized = ToolApprovalGateSupport.normalizeToolCallIds(dup, gateActive());
+
+        assertEquals("{}", normalized.toolExecutionRequests().get(1).arguments());
+        assertEquals("{}", normalized.toolExecutionRequests().get(0).arguments());
+    }
 }

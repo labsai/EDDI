@@ -6714,17 +6714,6 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "skipped"
-            },
-            {
-              "refId": "E",
-              "expr": "sum(rate(eddi_schedule_fire_timedout_total{job=~\"$job\"}[$__rate_interval]))",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "timed out"
             }
           ],
           "fieldConfig": {
@@ -6935,6 +6924,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "skipped"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(eddi_schedule_fire_timedout_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "timed out"
             }
           ],
           "fieldConfig": {

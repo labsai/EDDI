@@ -395,6 +395,21 @@ class PostgresScheduleStoreUnitTest {
         assertTrue(result.isAllowSelfScheduling());
     }
 
+    @Test
+    void readSchedule_unreadableCreatorTeams_failsClosedAsNoTeams_notAsNoSnapshot() throws Exception {
+        // null would mean "no snapshot" and skip the fire-time USE re-check (fail
+        // open). A corrupt value must keep the check, judged without team shares.
+        setupResultSetForSchedule();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("created_by")).thenReturn("alice");
+        when(resultSet.getString("creator_teams")).thenReturn("{not json");
+
+        ScheduleConfiguration result = sut.readSchedule("sched-1");
+
+        assertNotNull(result.getCreatorTeams());
+        assertTrue(result.getCreatorTeams().isEmpty());
+    }
+
     /**
      * Enabling clears the failure state whether or not a nextFire could be
      * computed. Gating that reset on a non-null nextFire left a re-enabled schedule

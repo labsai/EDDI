@@ -271,7 +271,10 @@ public class ToolApprovalGateSupport {
                 normalized.add(ToolExecutionRequest.builder()
                         .id("gen-" + UUID.randomUUID())
                         .name(r.name())
-                        .arguments(r.arguments() != null ? r.arguments() : "")
+                        // "{}" for a missing argument list, as ToolLoopRunner.withCallIds
+                        // does: this message is replayed to the provider, and providers
+                        // that require a JSON-object argument string reject "".
+                        .arguments(r.arguments() != null && !r.arguments().isBlank() ? r.arguments() : "{}")
                         .build());
             } else {
                 normalized.add(r);

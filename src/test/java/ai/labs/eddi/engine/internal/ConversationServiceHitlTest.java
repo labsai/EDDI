@@ -245,6 +245,9 @@ class ConversationServiceHitlTest {
             var outcome = conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
 
             assertEquals(IConversationService.CancelOutcome.NOTHING_TO_CANCEL, outcome);
+            // No transition, nothing of this cancel's to clean up: a delete by name
+            // here could take the timeout of a pause that started a moment later.
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
         }
 
         @Test

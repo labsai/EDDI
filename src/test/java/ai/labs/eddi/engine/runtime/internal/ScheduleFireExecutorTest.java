@@ -1010,7 +1010,7 @@ class ScheduleFireExecutorTest {
         schedule.setAgentId("agent-1");
         schedule.setCreatedBy("alice");
         schedule.setCreatorTeams(List.of("team:support"));
-        when(guard.principalMayUse("agent-1", "alice", List.of("team:support"), false)).thenReturn(false);
+        when(guard.checkPrincipalUse("agent-1", "alice", List.of("team:support"), false)).thenReturn(ResourceAccessGuard.UseCheck.DENIED);
 
         ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
 
@@ -1029,14 +1029,14 @@ class ScheduleFireExecutorTest {
         schedule.setAgentId("agent-1");
         schedule.setCreatedBy("alice");
         schedule.setCreatorTeams(List.of("team:support"));
-        when(guard.principalMayUse("agent-1", "alice", List.of("team:support"), false)).thenReturn(true);
+        when(guard.checkPrincipalUse("agent-1", "alice", List.of("team:support"), false)).thenReturn(ResourceAccessGuard.UseCheck.ALLOWED);
 
-        assertNull(executor.creatorAccessRevoked(schedule));
+        assertEquals(ResourceAccessGuard.UseCheck.ALLOWED, executor.creatorUseCheck(schedule));
 
         // No recorded creator → nobody to re-check (older rows, internal schedules).
         schedule.setCreatedBy(null);
-        assertNull(executor.creatorAccessRevoked(schedule));
-        verify(guard).principalMayUse("agent-1", "alice", List.of("team:support"), false);
+        assertNull(executor.creatorUseCheck(schedule));
+        verify(guard).checkPrincipalUse("agent-1", "alice", List.of("team:support"), false);
     }
 
     @Test
@@ -1049,13 +1049,36 @@ class ScheduleFireExecutorTest {
         // Created before the snapshot existed: null, not "no teams". Re-checking it
         // with an empty team set would disable every team-shared / admin schedule.
         schedule.setCreatorTeams(null);
-        when(guard.principalMayUse(any(), any(), any(), anyBoolean())).thenReturn(false);
+        when(guard.checkPrincipalUse(any(), any(), any(), anyBoolean())).thenReturn(ResourceAccessGuard.UseCheck.DENIED);
 
-        assertNull(executor.creatorAccessRevoked(schedule));
+        assertNull(executor.creatorUseCheck(schedule));
         verifyNoInteractions(guard);
 
         schedule.setCreatorTeams(List.of());
-        assertNotNull(executor.creatorAccessRevoked(schedule));
+        assertEquals(ResourceAccessGuard.UseCheck.DENIED, executor.creatorUseCheck(schedule));
+    }
+
+    @Test
+    void fire_accessStoreUnavailable_failsTheFireButDoesNotDisableTheSchedule() throws Exception {
+        // A transient descriptor-store error is not a revocation: no access-revoked
+        // disable (which no redeploy undoes), just a FAILED fire that is retried.
+        var guard = mock(ResourceAccessGuard.class);
+        setField(executor, "resourceAccessGuard", guard);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("sched-unknown");
+        schedule.setName("nightly");
+        schedule.setAgentId("agent-1");
+        schedule.setCreatedBy("alice");
+        schedule.setCreatorTeams(List.of());
+        when(guard.checkPrincipalUse("agent-1", "alice", List.of(), false)).thenReturn(ResourceAccessGuard.UseCheck.UNKNOWN);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertTrue(result.errorMessage().contains("Could not verify"), result.errorMessage());
+        verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any(), any());
+        verify(scheduleStore, never()).setScheduleEnabled(anyString(), anyBoolean(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
     }
 
     // --- Dream consolidation dispatch (finding I1) ---
