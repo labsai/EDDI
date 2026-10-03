@@ -28,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -99,7 +101,7 @@ class ClusterArchiveStoreTest {
         // interleave.
         CyclicBarrier bothHaveStarted = new CyclicBarrier(2);
         AtomicInteger downloads = new AtomicInteger();
-        when(objects.get(org.mockito.ArgumentMatchers.eq("a.zip"), org.mockito.ArgumentMatchers.any(OutputStream.class)))
+        when(objects.get(eq("a.zip"), any(OutputStream.class)))
                 .thenAnswer(invocation -> {
                     OutputStream out = invocation.getArgument(1);
                     byte[] mine = String.valueOf((char) ('a' + downloads.getAndIncrement())).repeat(8).getBytes();

@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -72,7 +73,7 @@ class SharedKvCacheTest {
     void refusedValueStaysReadableLocally() {
         ISharedKv refusing = mock(ISharedKv.class);
         when(refusing.bucket()).thenReturn("TOOL_PAGES");
-        when(refusing.get(any())).thenReturn(java.util.Optional.empty());
+        when(refusing.get(any())).thenReturn(Optional.empty());
         when(refusing.put(any(), any())).thenThrow(new ClusterUnavailableException("payload exceeds the server limit (test)"));
         ICache<String, String> node = new SharedKvCache<>(local("big"), refusing, false);
 
