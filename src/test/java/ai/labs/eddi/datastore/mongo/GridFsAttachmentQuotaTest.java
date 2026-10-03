@@ -7,6 +7,7 @@ package ai.labs.eddi.datastore.mongo;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentQuotaExceededException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
 import com.mongodb.ErrorCategory;
+import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoWriteException;
 import com.mongodb.ServerAddress;
 import com.mongodb.WriteError;
@@ -153,6 +154,45 @@ class GridFsAttachmentQuotaTest {
         sut.store("hello".getBytes(), "text/plain", "a.txt", "conv-1", null, null);
 
         verify(gridFSBucket).uploadFromStream(anyString(), any(InputStream.class), any(GridFSUploadOptions.class));
+    }
+
+    private static BsonDocument bson(Bson filter) {
+        return filter.toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+    }
+
+    @Test
+    void theTakeoverFilter_matchesOnlyALeaseThatHasRunOut() throws Exception {
+        set("maxPerConversation", 5L);
+        givenExistingFiles(0, 0);
+        doThrow(duplicateKey()).when(locks).insertOne(any(Document.class));
+        when(locks.findOneAndUpdate(any(Bson.class), any(Bson.class))).thenReturn(new Document("_id", "x"));
+        long before = System.currentTimeMillis();
+
+        sut.store("hello".getBytes(), "text/plain", "a.txt", "conv-1", null, null);
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(locks).findOneAndUpdate(filter.capture(), any(Bson.class));
+        String rendered = bson(filter.getValue()).toJson();
+        assertTrue(rendered.contains("conversation:conv-1"), rendered);
+        assertTrue(rendered.contains("$lt") && rendered.contains("expiresAt"), rendered);
+        long bound = bson(filter.getValue()).getArray("$and").stream().map(v -> v.asDocument()).filter(d -> d.containsKey("expiresAt"))
+                .findFirst().orElseThrow().getDocument("expiresAt").getDateTime("$lt").getValue();
+        assertTrue(bound >= before, "a lease is expired only relative to now, not to the epoch: " + bound);
+    }
+
+    @Test
+    void theRelease_deletesOnlyTheLeaseThisHolderOwns() throws Exception {
+        set("maxPerConversation", 5L);
+        givenExistingFiles(0, 0);
+
+        sut.store("hello".getBytes(), "text/plain", "a.txt", "conv-1", null, null);
+
+        ArgumentCaptor<Document> inserted = ArgumentCaptor.forClass(Document.class);
+        verify(locks).insertOne(inserted.capture());
+        ArgumentCaptor<Bson> released = ArgumentCaptor.forClass(Bson.class);
+        verify(locks).deleteOne(released.capture());
+        String rendered = bson(released.getValue()).toJson();
+        assertTrue(rendered.contains(inserted.getValue().getString("owner")), "the filter must name the holder token: " + rendered);
     }
 
     @Test
