@@ -28,6 +28,35 @@ async function collect(chunks: string[]): Promise<SSEEvent[]> {
   return events;
 }
 
+describe("sendMessageStreaming — a final frame with no trailing blank line", () => {
+  it("still yields the last frame when the stream ends right after it", async () => {
+    // A server or proxy that closes the connection straight after `done`
+    // drops the terminating blank line. That frame used to stay in the buffer
+    // and be discarded — and it is the one that ends the turn.
+    const events = await collect([
+      "event: token\ndata: hi\n\n",
+      'event: done\ndata: {"conversationState":"READY"}',
+    ]);
+
+    expect(events).toEqual([
+      { type: "token", data: "hi" },
+      { type: "done", data: '{"conversationState":"READY"}' },
+    ]);
+  });
+
+  it("yields a final frame ended by a single newline, with CRLF line endings", async () => {
+    const events = await collect(['event: error\r\ndata: {"message":"boom"}\r\n']);
+
+    expect(events).toEqual([{ type: "error", data: '{"message":"boom"}' }]);
+  });
+
+  it("yields nothing extra for a trailing keep-alive or blank tail", async () => {
+    const events = await collect(["event: token\ndata: a\n\n", ": keep-alive\n"]);
+
+    expect(events).toEqual([{ type: "token", data: "a" }]);
+  });
+});
+
 describe("sendMessageStreaming — SSE parsing", () => {
   it("strips exactly one delimiter space — the one padDataLines adds", async () => {
     // RestAgentEngineStreaming.padDataLines prefixes every data line with ONE

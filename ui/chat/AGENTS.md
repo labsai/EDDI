@@ -30,7 +30,8 @@
 ```
 src/
 ├── api/            # API layer
-│   ├── http.ts             # Status-aware fetch core, ApiError, errorPayload, auth token
+│   ├── http.ts             # Status-aware fetch core, ApiError, errorPayload, auth token, 401 retry hook
+│   ├── embed-auth.ts       # postMessage token hand-off with the host page (docs/chat-ui-embedding.md)
 │   ├── chat-api.ts         # Conversation lifecycle (start, read, send, stream, undo, redo)
 │   ├── hitl-api.ts         # Approval status, cancel, deadline maths, poll cadence
 │   ├── attachments-api.ts  # Upload/delete + attachment_N context construction
@@ -141,7 +142,7 @@ src/
 3. **API** — Pure `fetch` in `chat-api.ts`. SSE streaming uses `AsyncGenerator`.
 4. **Testing** — Wrap components in `<ChatProvider>`. Mock `window.matchMedia` in `test-setup.ts`.
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
-6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `apiServer`, `token` (read once, then removed from the address bar), `userId`. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
+6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `apiServer`, `token` (read once, then removed from the address bar), `tokenOrigin` (exact host origins for the postMessage token hand-off, `embed-auth.ts`), `userId`. `theme` must be `dark`/`light`/`system`; every colour must pass `isSafeCssColor` and `fontFamily` `isSafeFontFamily`, or it is ignored. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
 7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in the Manager's approvals page (`/manage/approvals`), which reads the backend's pending-approvals endpoint.
 8. **Lint** — `npm run lint` (ESLint, zero warnings) runs in CI next to `npm run typecheck` and `npm test`.
 

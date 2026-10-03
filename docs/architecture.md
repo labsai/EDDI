@@ -1022,7 +1022,7 @@ Production response headers (configured via `application.properties`):
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `X-XSS-Protection: 0`
 - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
-- `Content-Security-Policy: default-src 'self'; ...`
+- `Content-Security-Policy: default-src 'self'; ...` (on `/chat`, `img-src` also takes `eddi.chat.img-sources`, default `https:`, so designer-configured output images render; see [chat-ui-embedding.md](chat-ui-embedding.md))
 
 `Strict-Transport-Security` is **not** set by EDDI — configure it at your TLS terminator / ingress.
 

@@ -131,12 +131,14 @@ class ConfigurationReferenceCoverageTest {
             "eddi.messaging.type",
             // Consumed by the NATS extension's own configuration, not by EDDI code.
             "eddi.nats.ack-wait-seconds",
-            // The next three are read by Quarkus HTTP configuration through
+            // The next four are read by Quarkus HTTP configuration through
             // ${...} expressions in application.properties, not by Java: the /chat
-            // CSP filter's frame-ancestors, the application CSP's connect-src, and
-            // the /q/metrics permission policy. CspPolicyTest pins the first two to
-            // their filters, MetricsHttpPolicyConfigTest the third to its rule.
+            // CSP filter's frame-ancestors and img-src, the application CSP's
+            // connect-src, and the /q/metrics permission policy. CspPolicyTest pins
+            // the first three to their filters, MetricsHttpPolicyConfigTest the
+            // last to its rule.
             "eddi.chat.frame-ancestors",
+            "eddi.chat.img-sources",
             "eddi.csp.extra-connect-sources",
             "eddi.metrics.http-policy");
 
