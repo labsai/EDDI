@@ -9,6 +9,8 @@ import ai.labs.eddi.engine.cluster.NatsConnectionManager;
 import ai.labs.eddi.engine.cluster.NodeIdentity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.nats.client.JetStream;
+import io.nats.client.api.PublishAck;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -94,5 +98,30 @@ class JetStreamEventBusTest {
             bus.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
         }
         assertEquals(3, bus.outboxDepth(), "bounded by eddi.cluster.events.outbox-size");
+    }
+
+    @Test
+    @DisplayName("an outbox flush that hits a closing connection keeps the events; flushed events count as published")
+    void outboxFlushKeepsEventsOnAnyFailureAndCountsDrained() throws Exception {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        bus = new JetStreamEventBus(connections, registry);
+        bus.startCluster();
+        bus.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
+        bus.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
+        assertEquals(2, bus.outboxDepth());
+
+        JetStream jetStream = mock(JetStream.class);
+        when(connections.jetStream()).thenReturn(jetStream);
+        when(jetStream.publish(anyString(), any(byte[].class))).thenThrow(new IllegalStateException("connection closing"));
+        bus.flushOutbox();
+        assertEquals(2, bus.outboxDepth(), "nothing dropped by an unchecked failure");
+
+        JetStream healthy = mock(JetStream.class);
+        when(healthy.publish(anyString(), any(byte[].class))).thenReturn(mock(PublishAck.class));
+        when(connections.jetStream()).thenReturn(healthy);
+        bus.flushOutbox();
+        assertEquals(0, bus.outboxDepth());
+        assertEquals(2.0, registry.counter("eddi.cluster.events.published", "type", ClusterEvent.CONNECTION_CHANGED).count(),
+                "drained events count as published");
     }
 }
