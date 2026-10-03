@@ -134,9 +134,18 @@ public class KnowledgeBaseStorageGuard {
             return;
         }
         String parameter = KnowledgeBaseStorage.physicalNameParameter(config.getStoreType());
-        // A ${vars:...} / ${vault:...} reference is resolved later and set by an
-        // administrator, not by a knowledge base editor, so it cannot be judged here.
-        if ("pgvector".equals(config.getStoreType()) && !explicit.contains("${") && !KnowledgeBaseStorage.isPlainPgIdentifier(explicit)) {
+        // The location must be written out, not referenced. A ${vars:...} value is
+        // resolved only when the store is built — and global variables are writable
+        // by any editor — so a reference here could resolve to another knowledge
+        // base's table, or to SQL (the pgvector store interpolates the name), after
+        // every check below had passed on the reference text. Stored values that
+        // already use one are not re-judged; EmbeddingStoreFactory validates what
+        // they resolve to.
+        if (explicit.contains("${")) {
+            throw new BadRequestException("storeParameters." + parameter + " must be a literal name, not a ${...} reference: "
+                    + "the location decides which knowledge base's documents an agent reads, so it is checked when it is saved.");
+        }
+        if ("pgvector".equals(config.getStoreType()) && !KnowledgeBaseStorage.isPlainPgIdentifier(explicit)) {
             throw new BadRequestException("storeParameters." + parameter + " must be a plain table name, optionally qualified "
                     + "with a schema (letters, digits, '_' and '$'): the pgvector store puts it into SQL as it is, so quotes, "
                     + "whitespace and punctuation are refused.");

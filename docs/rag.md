@@ -331,7 +331,7 @@ Rules enforced when a knowledge base is saved:
   location another knowledge base already uses only if you may edit that knowledge base too (`public.t`
   and `t` are the same pgvector table). A pgvector `table` must be a plain identifier, optionally
   qualified with a schema (letters, digits, `_`, `$`; no quotes, spaces or punctuation), because the
-  store puts it into SQL as it is; a `${vars:...}` or `${vault:...}` reference is not judged. Two knowledge bases in the `"id"` layout that share a table still see only their
+  store puts it into SQL as it is. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table), and for a stored one EDDI checks what it resolves to when the store is built — a plain identifier, outside the `eddi_kb` namespace. Two knowledge bases in the `"id"` layout that share a table still see only their
   own chunks. These checks run when the value is new or changed; a stored value is never refused on a
   save that leaves it alone. The comparison is by store type and name only (not host), so it can ask for
   edit rights on a knowledge base that is actually on another server.

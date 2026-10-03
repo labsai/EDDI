@@ -12,7 +12,7 @@ An independent review of the isolation change found six gaps; all are fixed on t
   reserved name is now any whose dot-separated part starts with the prefix (case-insensitive), and a
   pgvector `table` must be a plain, optionally schema-qualified identifier: the store puts the value
   into SQL unquoted, so anything else was either a way round the check or SQL an editor could run. A
-  `${vars:…}` / `${vault:…}` reference is not judged. The same-location collision check now treats
+  `${vars:…}` / `${vault:…}` reference is refused as the location (see the PR #945 follow-up below). The same-location collision check now treats
   `public.t` and `t` as one table.
 - **A run in flight across a switch to `storeNamespace: "id"`** kept writing into the old store and
   recorded its documents as ingested, so the next run found them "unchanged" and never filled the new
@@ -36,13 +36,34 @@ purged, id-layout rename keeps state), import (storage rules on create). Docs: `
 
 - **Refuse by shape, not by normalising.** Quoted pgvector identifiers could be unquoted and compared, but
   the store does not escape them either; refusing everything but a plain identifier removes the whole class.
-- **Not changed, noted:** a pgvector `table` that resolves from a variable is not checked (variables are
-  set by administrators); switching a knowledge base that has an explicit location to `"id"` leaves the
+- **Not changed, noted:** switching a knowledge base that has an explicit location to `"id"` leaves the
   old chunks in the shared table, untagged and no longer retrieved.
 
 **Files:** [`KnowledgeBaseStorage.java`](../../src/main/java/ai/labs/eddi/configs/rag/model/KnowledgeBaseStorage.java),
 [`KnowledgeBaseStorageGuard.java`](../../src/main/java/ai/labs/eddi/configs/rag/rest/KnowledgeBaseStorageGuard.java),
 [`RagSourceIngestionService.java`](../../src/main/java/ai/labs/eddi/modules/ingestion/RagSourceIngestionService.java),
 [`RestImportService.java`](../../src/main/java/ai/labs/eddi/backup/impl/RestImportService.java),
+[`EmbeddingModelFactory.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/EmbeddingModelFactory.java),
+[`rag.md`](../rag.md).
+
+## 🔒 fix(rag): a knowledge base's location may not be a reference (2026-10-03)
+
+**Repo:** EDDI (`fix/rag-kb-isolation`, PR #945 review)
+
+CodeRabbit found that the pgvector identifier check skipped any value containing `${`, so
+`x${vars:a}; DROP TABLE y --` reached the store, which interpolates the table into SQL unquoted. The
+earlier reasoning ("variables are set by administrators") was wrong: `/variablestore` admits
+`eddi-editor`, so even a whole `${vars:t}` could be pointed at another knowledge base's table, or at SQL,
+after the save-time checks had passed on the reference text.
+
+- `KnowledgeBaseStorageGuard` refuses a `${...}` reference as `table` / `collectionName` / `indexName` on
+  create or change, so every location rule is judged on the literal value.
+- `EmbeddingStoreFactory` validates what a stored location resolves to when the store is built: a pgvector
+  table must be a plain identifier, and a reference may not resolve into the `eddi_kb` namespace. A literal
+  reserved name stored before the rule existed keeps working.
+- The Vertex embedding `endpoint` is trimmed once, and that value is both checked and used.
+
+**Files:** [`KnowledgeBaseStorageGuard.java`](../../src/main/java/ai/labs/eddi/configs/rag/rest/KnowledgeBaseStorageGuard.java),
+[`EmbeddingStoreFactory.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/EmbeddingStoreFactory.java),
 [`EmbeddingModelFactory.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/EmbeddingModelFactory.java),
 [`rag.md`](../rag.md).

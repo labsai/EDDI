@@ -108,6 +108,26 @@ class KnowledgeBaseStorageGuardTest {
                     () -> guard.prepareNew(kb("beta", null, Map.of("table", "EDDI_KBID_" + OTHER)), true));
         }
 
+        /**
+         * PR #945 review: the identifier check skipped any value containing "${", so a
+         * reference with SQL around it reached the pgvector store, which puts the table
+         * into SQL unquoted. A whole reference was no safer: global variables are
+         * writable by editors, so it could resolve to another knowledge base's table
+         * after the checks here had passed on the reference text.
+         */
+        @Test
+        @DisplayName("a location given as a ${...} reference is refused, with or without text around it")
+        void refusesReferencesAsTheLocation() {
+            for (String table : List.of("x${vars:a}; DROP TABLE y --", "${vars:table}", "${vault:t}")) {
+                var e = assertThrows(BadRequestException.class, () -> guard.prepareNew(kb("beta", null, Map.of("table", table)), true),
+                        table);
+                assertTrue(e.getMessage().contains("literal"), e.getMessage());
+            }
+            var qdrant = kb("beta", null, Map.of("collectionName", "${vars:c}"));
+            qdrant.setStoreType("qdrant");
+            assertThrows(BadRequestException.class, () -> guard.prepareNew(qdrant, true));
+        }
+
         @Test
         @DisplayName("a quoted, schema-qualified or padded spelling of a reserved table is refused too")
         void refusesDisguisedReservedNames() {
@@ -118,9 +138,12 @@ class KnowledgeBaseStorageGuardTest {
         }
 
         @Test
-        @DisplayName("a vault or variable reference is not judged as a table name")
-        void leavesReferencesAlone() {
-            assertDoesNotThrow(() -> guard.prepareNew(kb("beta", null, Map.of("table", "${vars:team-table}")), true));
+        @DisplayName("a reference stored before the rule is not refused on a save that leaves it alone")
+        void storedReferenceIsNotRejudged() {
+            // What it resolves to is checked when the store is built
+            // (EmbeddingStoreFactory).
+            var stored = Map.of("table", "${vars:team-table}");
+            assertDoesNotThrow(() -> guard.prepareUpdate(SELF, kb("beta", "id", stored), kb("beta", "id", stored)));
         }
 
         @Test
