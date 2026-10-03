@@ -268,7 +268,7 @@ public class BaseRuntime implements IRuntime {
                     load.active.decrementAndGet();
                 }
             });
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             leaveQueue.run();
             throw e;
         }

@@ -261,6 +261,54 @@ class BaseRuntimeTest {
         assertTrue(gauge(registry, "eddi.runtime.executor.max_threads", "managed") > 0);
     }
 
+    /**
+     * Every way out of a submission has to give the gauges back: a refused
+     * submission never queues, a callable that throws still stops being active, and
+     * one cancelled while running leaves the queue exactly once. A leak here reads
+     * as permanent saturation, which is the alert's own trigger.
+     */
+    @Test
+    @DisplayName("executor load returns to zero after a rejection, a failure and a cancel during the run")
+    void executorLoadBalancesOnEveryPath() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        runtime.meterRegistry = registry;
+        runtime.registerMetrics();
+
+        // Rejection: the executor refuses the submission.
+        when(mockExecutor.submit(any(Callable.class))).thenThrow(new RejectedExecutionException("full"));
+        assertThrows(RejectedExecutionException.class, () -> runtime.submitCallable(() -> "x", null));
+        assertEquals(0.0, gauge(registry, "eddi.runtime.executor.queued", "managed"), "a refused submission must not stay queued");
+
+        // Failure and cancel during the run, on a working executor.
+        when(mockExecutor.submit(any(Callable.class))).thenAnswer(inv -> {
+            Callable<?> callable = inv.getArgument(0);
+            return realExecutor.submit(callable);
+        });
+        runtime.submitCallable(() -> {
+            throw new IllegalStateException("boom");
+        }, null);
+        CountDownLatch running = new CountDownLatch(1);
+        Future<String> cancelledWhileRunning = runtime.submitCallable(() -> {
+            running.countDown();
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return "late";
+        }, null);
+        assertTrue(running.await(5, TimeUnit.SECONDS));
+        assertEquals(1.0, gauge(registry, "eddi.runtime.executor.active", "managed"));
+        cancelledWhileRunning.cancel(true);
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (gauge(registry, "eddi.runtime.executor.active", "managed") > 0 && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertEquals(0.0, gauge(registry, "eddi.runtime.executor.active", "managed"));
+        assertEquals(0.0, gauge(registry, "eddi.runtime.executor.queued", "managed"));
+    }
+
     private static double gauge(SimpleMeterRegistry registry, String name, String pool) {
         return registry.get(name).tag("pool", pool).gauge().value();
     }
