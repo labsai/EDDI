@@ -75,20 +75,31 @@ tests:
               description: "More than 25% of executions of tool fetch failed for 10 minutes (at least 5 failures per 10 minutes). Failures include rate-limit refusals and timeouts."
               runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#edditoolfailureratio"
 
-  - name: the operator gate alerts when it regresses, not on a deployment that never verified one
+  - name: the operator gate alerts when it regresses, not on a deployment that never verified one or on a restart
     interval: 1m
     input_series:
       - series: 'eddi_operator_gate_verified{job="eddi", instance="regressed"}'
         values: '1 1 1 0 0'
       - series: 'eddi_operator_gate_verified{job="eddi", instance="never-activated"}'
         values: '0 0 0 0 0'
+      # Up for 9 hours: the whole lookback belongs to this process.
+      - series: 'process_uptime_seconds{job="eddi", instance="regressed"}'
+        values: '32400+60x4'
+      - series: 'process_uptime_seconds{job="eddi", instance="never-activated"}'
+        values: '32400+60x4'
+      # Verified, then the process restarted and the gauge came back at its boot
+      # value of 0, before the Manager has reported: forgetting is not a regression.
+      - series: 'eddi_operator_gate_verified{job="eddi", instance="restarted"}'
+        values: '1 1 1 0 0'
+      - series: 'process_uptime_seconds{job="eddi", instance="restarted"}'
+        values: '30000 30060 30120 5 65'
     alert_rule_test:
       - eval_time: 4m
         alertname: EddiOperatorGateRegressed
         exp_alerts:
           - exp_labels: { severity: critical, job: eddi, instance: regressed }
             exp_annotations:
-              description: "The gate read back as sound within the last day and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
+              description: "The gate read back as sound within the last 6 hours and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
               runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddioperatorgateregressed"
               summary: "The Platform Operator's write-approval gate is no longer verified on regressed"
 

@@ -212,12 +212,20 @@ groups:
           runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddivaultresolveerrors"
 
       - alert: EddiOperatorGateRegressed
-        expr: eddi_operator_gate_verified == 0 and max_over_time(eddi_operator_gate_verified[1d]) == 1
+        # The gauge starts at 0 on every boot and reads 1 only after the Manager has
+        # reported a verified gate (it reports when someone opens the Platform Operator
+        # page), so after a restart "was 1, is 0" is just the process forgetting. The
+        # uptime condition keeps the lookback inside the current process: a restart
+        # within the window silences the alert instead of paging as a regression.
+        expr: |
+          eddi_operator_gate_verified == 0
+          and on (job, instance) max_over_time(eddi_operator_gate_verified[6h]) == 1
+          and on (job, instance) process_uptime_seconds{job="eddi"} > 21600
         labels:
           severity: critical
         annotations:
           summary: "The Platform Operator's write-approval gate is no longer verified on {{ $labels.instance }}"
-          description: "The gate read back as sound within the last day and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
+          description: "The gate read back as sound within the last 6 hours and now does not. Until it is re-verified the operator's write tools may run without human approval. Treat it as a security incident."
           runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddioperatorgateregressed"
 
       - alert: EddiOperatorCanaryFailing

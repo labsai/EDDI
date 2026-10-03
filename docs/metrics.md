@@ -559,9 +559,12 @@ eddi_operator_canary_duration_seconds       # Canary probe latency
 human-approval gate is no longer proven — treat it as a security alert. It also
 reads `0` before any report has arrived (a deployment that never activated the
 operator), so the shipped rule `EddiOperatorGateRegressed` fires on the
-transition — verified within the last day, unverified now — not on the value.
-The gauge is registered when the operator first reports, so the dashboards fall
-back to `0` until then.
+transition — verified within the last 6 hours, unverified now, and the process
+has been up for longer than that — not on the value. The uptime condition matters:
+the gauge restarts at `0` on every boot and reads `1` only after the Manager has
+reported a verified gate, so without it each restart would page as a regression.
+The gauge is created with the service, on first use, so the dashboards fall back
+to `0` until then.
 
 ### Prompt & Guardrail Metrics
 
