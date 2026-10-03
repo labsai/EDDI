@@ -391,9 +391,9 @@ public class ScheduleFireExecutor {
      * {@code principalMayUse(id, principal)} does, would disable every schedule on
      * a team-shared agent. Team cadences, ingestion and HITL timeouts are governed
      * by their group, knowledge base and conversation instead and never reach here;
-     * a schedule with no recorded creator (older rows, internally minted ones) is
-     * left alone, as there is nobody to re-check. With workspaces off, everything
-     * is admitted, as everywhere else.
+     * a schedule with no recorded creator or no access snapshot (older rows,
+     * internally minted ones) is left alone, as there is nobody to re-check. With
+     * workspaces off, everything is admitted, as everywhere else.
      *
      * @return null when the fire may run, otherwise why it may not
      */
@@ -405,6 +405,14 @@ public class ScheduleFireExecutor {
         String creator = schedule.getCreatedBy();
         String agentId = schedule.getAgentId();
         if (ScheduleOwnerScope.isShared(creator) || agentId == null || agentId.isBlank()) {
+            return null;
+        }
+        // No snapshot at all (null, as opposed to an empty list for "no teams") means
+        // the row was created before the snapshot existed. Re-checking it with an
+        // empty team set would refuse every schedule on a team-shared agent — and
+        // every administrator's — on its first fire after an upgrade, so such a row
+        // is left alone until it is next created afresh.
+        if (schedule.getCreatorTeams() == null) {
             return null;
         }
         if (resourceAccessGuard.principalMayUse(agentId, creator, schedule.getCreatorTeams(), schedule.isCreatorAdmin())) {

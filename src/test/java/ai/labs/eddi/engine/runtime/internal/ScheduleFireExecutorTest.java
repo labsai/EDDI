@@ -1039,6 +1039,25 @@ class ScheduleFireExecutorTest {
         verify(guard).principalMayUse("agent-1", "alice", List.of("team:support"), false);
     }
 
+    @Test
+    void fire_creatorAccessCheck_skipsRowsWithoutAnAccessSnapshot_butChecksAnEmptyOne() {
+        var guard = mock(ResourceAccessGuard.class);
+        setField(executor, "resourceAccessGuard", guard);
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setCreatedBy("alice");
+        // Created before the snapshot existed: null, not "no teams". Re-checking it
+        // with an empty team set would disable every team-shared / admin schedule.
+        schedule.setCreatorTeams(null);
+        when(guard.principalMayUse(any(), any(), any(), anyBoolean())).thenReturn(false);
+
+        assertNull(executor.creatorAccessRevoked(schedule));
+        verifyNoInteractions(guard);
+
+        schedule.setCreatorTeams(List.of());
+        assertNotNull(executor.creatorAccessRevoked(schedule));
+    }
+
     // --- Dream consolidation dispatch (finding I1) ---
 
     /**

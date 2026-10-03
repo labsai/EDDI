@@ -1171,9 +1171,14 @@ public class PostgresScheduleStore implements IScheduleStore {
         return result;
     }
 
-    /** The creator's team subjects as a JSON array, or null for none. */
+    /**
+     * The creator's team subjects as a JSON array. {@code null} stays SQL NULL —
+     * "no access snapshot was taken" — and is kept distinct from {@code []} ("the
+     * creator was in no team"), because the fire-time USE re-check skips rows
+     * without one.
+     */
     private String serializeTeams(List<String> teams) throws IResourceStore.ResourceStoreException {
-        if (teams == null || teams.isEmpty()) {
+        if (teams == null) {
             return null;
         }
         try {

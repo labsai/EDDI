@@ -127,6 +127,19 @@ class PostgresScheduleStoreUnitTest {
     }
 
     @Test
+    void createSchedule_keepsNoSnapshotApartFromNoTeams() throws Exception {
+        var legacy = newScheduleConfig();
+        legacy.setCreatorTeams(null);
+        sut.createSchedule(legacy);
+        verify(preparedStatement).setString(25, null);
+
+        var noTeams = newScheduleConfig();
+        noTeams.setCreatorTeams(List.of());
+        sut.createSchedule(noTeams);
+        verify(preparedStatement).setString(25, "[]");
+    }
+
+    @Test
     void updateSchedule_persistsUserId() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
         var config = newScheduleConfig();

@@ -65,7 +65,13 @@ leave a team later, since nothing server-side knows that without their token. A 
 lost access (grant revoked, agent unshared or unpublished) is recorded `FAILED` with the reason and
 the schedule is disabled (`disabledReason: "access-revoked"`); it does not come back on a redeploy —
 re-enable it once access is restored, and the next fire checks again. Schedules with no recorded
-creator, team cadences, ingestion and HITL timeouts are not re-checked this way.
+creator or no access snapshot (rows created before this check existed), team cadences, ingestion and
+HITL timeouts are not re-checked this way.
+
+**Upgrading:** a schedule that a release before this one disabled on undeploy carries no
+`disabledReason`, so it is indistinguishable from one you switched off yourself and is **not**
+re-enabled by the next deploy — enable it once by hand (`POST .../schedules/{id}/enable`); schedules
+disabled from now on are marked and come back on their own.
 
 | Strategy | Behavior | Use When |
 |----------|----------|----------|
