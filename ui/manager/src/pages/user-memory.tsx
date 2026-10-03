@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { useDebounce } from "@/hooks/use-debounce";
+import { getErrorMessage } from "@/lib/api-client";
 import {
   useUserMemories,
   useDeleteMemory,
@@ -91,15 +92,21 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
     [memories],
   );
 
-  const handleDeleteEntry = useCallback(
-    (entryId: string) => {
-      deleteMemory.mutate(entryId, {
-        onSuccess: () => toast.success(t("memories.entryDeleted", "Memory entry deleted")),
-        onError: (err) => toast.error(err.message),
-      });
-    },
-    [deleteMemory, t],
-  );
+  // A single entry is asked about first, like "Delete All": the trash icon sits
+  // at the end of a row that expands on click, one slip away from it.
+  const [pendingDelete, setPendingDelete] = useState<UserMemoryEntry | null>(null);
+
+  const handleDeleteEntry = useCallback(() => {
+    const entryId = pendingDelete?.id;
+    if (!entryId) return;
+    deleteMemory.mutate(entryId, {
+      onSuccess: () => {
+        setPendingDelete(null);
+        toast.success(t("memories.entryDeleted", "Memory entry deleted"));
+      },
+      onError: (err) => toast.error(getErrorMessage(err)),
+    });
+  }, [pendingDelete, deleteMemory, t]);
 
   const handleDeleteAll = useCallback(() => {
     deleteAll.mutate(debouncedUserId, {
@@ -240,13 +247,32 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
               <MemoryRow
                 key={entry.id ?? entry.key}
                 entry={entry}
-                onDelete={handleDeleteEntry}
+                onDelete={setPendingDelete}
                 isDeleting={deleteMemory.isPending}
               />
             ))
           )}
         </div>
       )}
+
+      {/* Delete one entry */}
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title={t("memories.deleteEntryTitle", "Delete this memory?")}
+        description={t(
+          "memories.deleteEntryDesc",
+          "\"{{key}}\" is permanently removed for this user. Agents stop recalling it. This cannot be undone.",
+          { key: pendingDelete?.key ?? "" },
+        )}
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        variant="destructive"
+        onConfirm={handleDeleteEntry}
+        isPending={deleteMemory.isPending}
+      />
 
       {/* Delete All Confirm */}
       <AlertDialog
@@ -293,11 +319,12 @@ function MemoryRow({
   isDeleting,
 }: {
   entry: UserMemoryEntry;
-  onDelete: (id: string) => void;
+  onDelete: (entry: UserMemoryEntry) => void;
   isDeleting: boolean;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const detailId = useId();
 
   const valuePreview = useMemo(() => {
     if (entry.value === null || entry.value === undefined) return "—";
@@ -313,44 +340,50 @@ function MemoryRow({
       )}
       data-testid={`memory-entry-${entry.id ?? entry.key}`}
     >
-      <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer"
-        data-testid={`memory-expand-toggle-${entry.id ?? entry.key}`}
-        onClick={() => setExpanded(!expanded)}
-      >
-        <button type="button" className="shrink-0 text-muted-foreground">
-          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        </button>
-
-        {/* Key */}
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{entry.key}</span>
-
-        {/* Badges */}
-        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", categoryColors[entry.category] ?? "bg-muted text-muted-foreground")}>
-          {entry.category}
-        </span>
-        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", visibilityColors[entry.visibility] ?? "bg-muted text-muted-foreground")}>
-          {entry.visibility}
-        </span>
-        {entry.conflicted && (
-          <span title={t("memories.conflicted", "Conflicted")}>
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+      <div className="flex items-center gap-3 px-4 py-3">
+        {/* The whole summary is one real button: it used to be a clickable div,
+            unreachable by keyboard and silent to a screen reader. The delete
+            button is its sibling, not its child — a button cannot hold one. */}
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-3 text-start rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={expanded}
+          aria-controls={detailId}
+          onClick={() => setExpanded((prev) => !prev)}
+          data-testid={`memory-expand-toggle-${entry.id ?? entry.key}`}
+        >
+          <span className="shrink-0 text-muted-foreground" aria-hidden="true">
+            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </span>
-        )}
 
-        {/* Value preview */}
-        <span className="hidden text-xs text-muted-foreground sm:block max-w-48 truncate">{valuePreview}</span>
+          {/* Key */}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{entry.key}</span>
+
+          {/* Badges */}
+          <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", categoryColors[entry.category] ?? "bg-muted text-muted-foreground")}>
+            {entry.category}
+          </span>
+          <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold", visibilityColors[entry.visibility] ?? "bg-muted text-muted-foreground")}>
+            {entry.visibility}
+          </span>
+          {entry.conflicted && (
+            <span title={t("memories.conflicted", "Conflicted")}>
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+            </span>
+          )}
+
+          {/* Value preview */}
+          <span className="hidden text-xs text-muted-foreground sm:block max-w-48 truncate">{valuePreview}</span>
+        </button>
 
         {/* Delete */}
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (entry.id) onDelete(entry.id);
-          }}
+          onClick={() => onDelete(entry)}
           disabled={isDeleting || !entry.id}
           className="shrink-0 rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
           title={t("common.delete")}
+          aria-label={t("common.delete")}
           data-testid={`delete-memory-${entry.id}`}
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -359,7 +392,7 @@ function MemoryRow({
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="border-t border-border px-4 py-3 space-y-2">
+        <div id={detailId} className="border-t border-border px-4 py-3 space-y-2">
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("memories.value", "Value")}

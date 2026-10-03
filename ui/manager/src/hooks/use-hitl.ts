@@ -35,8 +35,27 @@ function clearChatPauseIfCurrent(conversationId: string) {
 
 // ── Queries ──────────────────────────────────────────────────────
 
+/**
+ * How many 1:1 pending approvals the inbox asks for. The backend endpoint has
+ * no offset, so anything past this is not reachable from one request; a result
+ * of exactly this many is reported as "more pending" rather than presented as
+ * the whole queue (see {@link isPendingApprovalsCapped}).
+ */
+export const PENDING_APPROVALS_LIMIT = 200;
+
+/**
+ * Whether a pending-approvals list hit the request cap. Like the group inbox's
+ * `truncated`, a heuristic: it also fires when exactly `limit` are pending.
+ */
+export function isPendingApprovalsCapped(
+  list: readonly unknown[] | undefined,
+  limit = PENDING_APPROVALS_LIMIT,
+): boolean {
+  return (list?.length ?? 0) >= limit;
+}
+
 /** Pending approvals for regular (1:1) conversations. */
-export function usePendingApprovals(limit = 200) {
+export function usePendingApprovals(limit = PENDING_APPROVALS_LIMIT) {
   return useQuery({
     queryKey: ["pending-approvals", { limit }],
     queryFn: () => listPendingApprovals(limit),

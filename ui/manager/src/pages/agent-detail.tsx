@@ -118,7 +118,21 @@ export function AgentDetailPage() {
   // Default to latest version once loaded
   const resolvedVersion = version ?? versions?.[0]?.version ?? 1;
 
-  const { data: agent, isLoading, isError, error: loadError, refetch } = useAgent(id!, resolvedVersion);
+  const {
+    data: agent,
+    isLoading,
+    isError,
+    error: loadError,
+    refetch,
+    isPlaceholderData,
+  } = useAgent(id!, resolvedVersion);
+  /**
+   * The document on screen is the PREVIOUS version's, kept while the selected
+   * one loads. Every write addresses `resolvedVersion`, so nothing may be edited
+   * or saved from it — a section save would otherwise write that document into
+   * the version being loaded.
+   */
+  const configPending = isPlaceholderData;
   const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
   const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
@@ -244,7 +258,7 @@ export function AgentDetailPage() {
   }
 
   function handleRemoveWorkflow(packageUri: string) {
-    if (!agent?.workflows) return;
+    if (!agent?.workflows || configPending) return;
     const updated = agent.workflows.filter((p) => p !== packageUri);
     updateWorkflowsMutation.mutate(
       { agentId: id!, version: resolvedVersion, workflows: updated },
@@ -256,6 +270,7 @@ export function AgentDetailPage() {
   }
 
   function handleAddWorkflow(packageUri: string) {
+    if (configPending) return;
     const current = agent?.workflows ?? [];
     if (current.includes(packageUri)) return;
     updateWorkflowsMutation.mutate(
@@ -273,7 +288,7 @@ export function AgentDetailPage() {
   }
 
   function handleUpdateWorkflowVersion(oldUri: string, newVersion: number) {
-    if (!agent?.workflows) return;
+    if (!agent?.workflows || configPending) return;
     const updated = agent.workflows.map((u) => {
       if (u === oldUri) {
         return u.replace(/([?&]version=)\d+/, `$1${newVersion}`);
@@ -702,6 +717,14 @@ export function AgentDetailPage() {
         />
       )}
 
+      {/* The editable sections. Disabled while the previous version's document
+          is standing in for the one being loaded (see `configPending`). */}
+      <fieldset
+        disabled={configPending}
+        aria-busy={configPending}
+        className="contents"
+        data-testid="agent-config-sections"
+      >
       {/* A2A Protocol (collapsible, hidden by default) */}
       <A2ASection
         agent={agent}
@@ -735,6 +758,7 @@ export function AgentDetailPage() {
 
       {/* Raw config (collapsible) */}
       <RawConfigSection agent={agent} />
+      </fieldset>
 
       {/* Undeploy confirmation dialog */}
       <AlertDialog
@@ -1344,7 +1368,7 @@ function A2ASection({
                       type="button"
                       onClick={() => handleRemoveSkill(i)}
                       className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                      aria-label={`Remove ${skill}`}
+                      aria-label={t("common.removeItem", { item: skill, defaultValue: "Remove {{item}}" })}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -1405,7 +1429,7 @@ function A2ASection({
                       type="button"
                       onClick={() => copyToClipboard(url, label)}
                       className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
-                      aria-label="Copy URL"
+                      aria-label={t("agentDetail.copyUrl", "Copy URL")}
                       data-testid={`copy-url-${label}`}
                     >
                       {copied === label ? (

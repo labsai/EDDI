@@ -30,6 +30,8 @@ import {
 } from "@/hooks/use-dashboard";
 import { groupAgentsByName } from "@/hooks/use-agents";
 import { usePlatformStatus } from "@/hooks/use-platform-status";
+import { useIsAdminOrUnknown, useMayOpenScreen } from "@/hooks/use-auth";
+import { isApiError } from "@/lib/api-client";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -57,9 +59,20 @@ export function DashboardPage() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: recentAgentsRaw, isLoading: agentsLoading } = useRecentAgents();
   const { data: recentConversations, isLoading: convsLoading } = useRecentConversations(5);
-  const { data: coordinatorStatus } = useCoordinatorStatusLight();
+  // Coordinator status and vault health are eddi-admin endpoints. For a user
+  // whose token shows other EDDI roles they are not requested at all, and the
+  // strip says "requires admin" — it used to fire both, get two 403s, and show
+  // "Coordinator —" and "Vault unavailable" as if something were down.
+  const mayOpen = useMayOpenScreen();
+  const canSeeAdminHealth = useIsAdminOrUnknown();
+  const { data: coordinatorStatus, error: coordinatorError } = useCoordinatorStatusLight({
+    enabled: canSeeAdminHealth,
+  });
   const platformStatus = usePlatformStatus();
-  const { data: vaultHealth } = useVaultHealth();
+  const { data: vaultHealth } = useVaultHealth({ enabled: canSeeAdminHealth });
+  const coordinatorForbidden =
+    !canSeeAdminHealth || (isApiError(coordinatorError) && (coordinatorError.status === 401 || coordinatorError.status === 403));
+  const vaultForbidden = !canSeeAdminHealth || vaultHealth?.forbidden === true;
   const { data: agentDescriptors = [] } = useAgentDescriptors(50);
 
   const recentAgents = useMemo(
@@ -169,7 +182,7 @@ export function DashboardPage() {
 
         {/* Coordinator */}
         <div className="flex items-center gap-2 text-xs">
-          {coordinatorStatus ? (
+          {coordinatorStatus && !coordinatorForbidden ? (
             coordinatorStatus.coordinatorType === "nats" ? (
               <Cloud className="h-3.5 w-3.5 text-blue-500" />
             ) : (
@@ -178,12 +191,14 @@ export function DashboardPage() {
           ) : (
             <Network className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span className="text-muted-foreground">
-            {coordinatorStatus
-              ? coordinatorStatus.connected
-                ? t("dashboard.coordConnected", "Coordinator connected")
-                : t("dashboard.coordDisconnected", "Coordinator disconnected")
-              : t("dashboard.coordUnknown", "Coordinator —")}
+          <span className="text-muted-foreground" data-testid="health-coordinator">
+            {coordinatorForbidden
+              ? t("dashboard.coordAdminOnly", "Coordinator: requires admin")
+              : coordinatorStatus
+                ? coordinatorStatus.connected
+                  ? t("dashboard.coordConnected", "Coordinator connected")
+                  : t("dashboard.coordDisconnected", "Coordinator disconnected")
+                : t("dashboard.coordUnknown", "Coordinator —")}
           </span>
         </div>
 
@@ -191,15 +206,19 @@ export function DashboardPage() {
 
         {/* Vault */}
         <div className="flex items-center gap-2 text-xs">
-          {vaultHealth?.available ? (
+          {vaultForbidden ? (
+            <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : vaultHealth?.available ? (
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           ) : (
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
           )}
-          <span className="text-muted-foreground">
-            {vaultHealth?.available
-              ? t("dashboard.vaultUp", "Vault ready")
-              : t("dashboard.vaultDown", "Vault unavailable")}
+          <span className="text-muted-foreground" data-testid="health-vault">
+            {vaultForbidden
+              ? t("dashboard.vaultAdminOnly", "Vault: requires admin")
+              : vaultHealth?.available
+                ? t("dashboard.vaultUp", "Vault ready")
+                : t("dashboard.vaultDown", "Vault unavailable")}
           </span>
         </div>
       </div>
@@ -271,24 +290,31 @@ export function DashboardPage() {
               {t("nav.chat")}
             </Link>
           </Button>
-          <Button variant="outline" asChild>
-            <Link to="/manage/logs">
-              <FileText className="h-4 w-4" />
-              {t("dashboard.viewLogs", "View Logs")}
-            </Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to="/manage/audit">
-              <ShieldCheck className="h-4 w-4" />
-              {t("dashboard.auditTrail", "Audit Trail")}
-            </Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to="/manage/secrets">
-              <KeyRound className="h-4 w-4" />
-              {t("dashboard.secretVault", "Secret Vault")}
-            </Link>
-          </Button>
+          {/* Admin-only screens are offered only to a role that can open them. */}
+          {mayOpen("/manage/logs") && (
+            <Button variant="outline" asChild>
+              <Link to="/manage/logs" data-testid="quick-action-logs">
+                <FileText className="h-4 w-4" />
+                {t("dashboard.viewLogs", "View Logs")}
+              </Link>
+            </Button>
+          )}
+          {mayOpen("/manage/audit") && (
+            <Button variant="outline" asChild>
+              <Link to="/manage/audit" data-testid="quick-action-audit">
+                <ShieldCheck className="h-4 w-4" />
+                {t("dashboard.auditTrail", "Audit Trail")}
+              </Link>
+            </Button>
+          )}
+          {mayOpen("/manage/secrets") && (
+            <Button variant="outline" asChild>
+              <Link to="/manage/secrets" data-testid="quick-action-secrets">
+                <KeyRound className="h-4 w-4" />
+                {t("dashboard.secretVault", "Secret Vault")}
+              </Link>
+            </Button>
+          )}
           <Button variant="outline" asChild>
             <Link to="/manage/groups/wizard">
               <Users className="h-4 w-4" />

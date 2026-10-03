@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   ArrowLeft,
   Search,
@@ -9,6 +10,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { getErrorMessage } from "@/lib/api-client";
 import {
   useResolvedGroupVersion,
   useGroup,
@@ -136,6 +138,7 @@ function ConversationItem({
           onDelete();
         }}
         aria-label={t("Workforce.history.delete", "Delete conversation")}
+        data-testid={`history-delete-${conversation.id}`}
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
@@ -353,9 +356,16 @@ function WorkforceHistory() {
           }
           setDeleteTarget(null);
         },
+        // A refused delete (403 not yours, 409 still running) used to leave the
+        // dialog idle with no word of why; the row simply stayed.
+        onError: (err) => {
+          toast.error(t("Workforce.history.deleteFailed", "Could not delete the conversation"), {
+            description: getErrorMessage(err),
+          });
+        },
       },
     );
-  }, [deleteTarget, boardId, deleteConversation, selectedId]);
+  }, [deleteTarget, boardId, deleteConversation, selectedId, t]);
 
   const handleLoadMore = useCallback(() => {
     setPage((prev) => prev + 1);

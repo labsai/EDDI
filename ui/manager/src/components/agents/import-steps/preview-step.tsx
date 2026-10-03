@@ -259,6 +259,7 @@ function PreviewRow({
   workflowOrder: string[];
   onMoveWorkflow: (id: string, dir: -1 | 1) => void;
 }) {
+  const { t } = useTranslation();
   // A conflict is the row whose diff matters most; a removal shows what goes.
   const hasDiff =
     (resource.action === "UPDATE" || resource.action === "CONFLICT" || resource.action === "REMOVE") &&
@@ -286,7 +287,8 @@ function PreviewRow({
                   onClick={() => onMoveWorkflow(resource.sourceId, -1)}
                   disabled={wfIdx === 0}
                   className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                  title="Move up"
+                  title={t("importDialog.moveUp", "Move up")}
+                  aria-label={t("importDialog.moveUp", "Move up")}
                 >
                   <ArrowUp className="h-3 w-3" />
                 </button>
@@ -294,7 +296,8 @@ function PreviewRow({
                   onClick={() => onMoveWorkflow(resource.sourceId, 1)}
                   disabled={wfIdx === workflowOrder.length - 1}
                   className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                  title="Move down"
+                  title={t("importDialog.moveDown", "Move down")}
+                  aria-label={t("importDialog.moveDown", "Move down")}
                 >
                   <ArrowDown className="h-3 w-3" />
                 </button>
