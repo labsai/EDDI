@@ -612,7 +612,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
     }
 
-    final class Held implements LeaseHandle {
+    static final class Held implements LeaseHandle {
         final String key;
         final long fence;
         final long since = System.currentTimeMillis();

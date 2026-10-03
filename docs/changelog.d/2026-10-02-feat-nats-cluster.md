@@ -155,6 +155,14 @@ letters) turned up eight defects. Each is fixed here with a test that fails with
   an earlier build still counts from 1 until it is recreated once.
 - **Dead letters kept on a node while NATS was down are forwarded on reconnect** to the shared
   stream, so every node lists them and they survive that node's restart.
+- **PR #956 review fixes.** A turn whose lease binding throws is now answered, its lease
+  released and the queue drained, instead of wedging the conversation. A dead letter of a turn
+  flagged `secretInput` keeps neither the input nor its context (it is marked and cannot be
+  replayed). Paging dead letters past a node-local entry no longer repeats the local ring. An
+  outbox flush that hits a closing connection puts the event back instead of dropping it, and
+  flushed events count in `eddi.cluster.events.published`. Node RPC tolerates one unreadable
+  scatter reply and logs a failed subscribe instead of throwing into the connect listener.
+  `ClusterCoordinatorIT` picks a free host port instead of a fixed 4319.
 
 ### Known and not fixed here
 

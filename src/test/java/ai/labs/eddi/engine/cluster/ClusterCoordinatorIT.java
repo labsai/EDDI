@@ -30,6 +30,9 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -62,7 +65,21 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Cluster coordinator against real NATS")
 class ClusterCoordinatorIT {
 
-    private static final int NATS_HOST_PORT = 4319;
+    /**
+     * Fixed for the whole class — the outage test stops and restarts the container
+     * and the clients must find it on the same port — but picked free at load, so a
+     * busy port on a developer machine or CI runner does not fail the class.
+     */
+    private static final int NATS_HOST_PORT = freePort();
+
+    private static int freePort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            socket.setReuseAddress(true);
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new UncheckedIOException("no free local port for NATS", e);
+        }
+    }
 
     @SuppressWarnings("resource")
     static final GenericContainer<?> NATS = new GenericContainer<>("nats:2.11-alpine").withExposedPorts(4222)
@@ -273,7 +290,7 @@ class ClusterCoordinatorIT {
         // FIFO per node: each node's turns ran in its own submission order
         for (Node node : nodes) {
             List<Integer> mine = order.stream().filter(s -> s.startsWith(node.id + "-"))
-                    .map(s -> Integer.parseInt(s.substring(s.indexOf('-') + 1))).toList();
+                    .map(s -> Integer.parseInt(s.substring(node.id.length() + 1))).toList();
             List<Integer> sorted = new ArrayList<>(mine);
             Collections.sort(sorted);
             assertEquals(sorted, mine, node.id + " ran its own turns out of order");
