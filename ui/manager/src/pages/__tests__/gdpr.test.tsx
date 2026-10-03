@@ -659,4 +659,23 @@ describe("GDPR Privacy Admin Page — panels follow the user id", () => {
 
     expect(screen.queryByTestId("gdpr-export-incomplete")).not.toBeInTheDocument();
   });
+
+  // ─── Restriction status lookup is debounced ─────────────────────
+
+  it("looks the restriction status up once typing pauses, not per keystroke", async () => {
+    // Regression: every character of the id fired its own status GET.
+    const looked: string[] = [];
+    server.use(
+      http.get("*/admin/gdpr/:userId/restrict", ({ params }) => {
+        looked.push(String(params.userId));
+        return HttpResponse.json(false);
+      }),
+    );
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("gdpr-user-id"), "user-123");
+
+    await waitFor(() => expect(screen.getByTestId("restriction-badge-active")).toBeInTheDocument());
+    expect(looked).toEqual(["user-123"]);
+  });
 });

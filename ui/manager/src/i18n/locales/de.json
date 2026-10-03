@@ -2987,7 +2987,8 @@
       "humanNeedsName_other": "{{count}} menschliche Mitglieder brauchen einen Anzeigenamen.",
       "humanNeedsId_one": "{{count}} menschliches Mitglied braucht die Benutzer-ID der Person.",
       "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person."
-    }
+    },
+    "versionLookupFailed": "Die aktuelle Version dieser Gruppe konnte nicht ermittelt werden."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",

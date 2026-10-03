@@ -3041,7 +3041,8 @@
       "humanNeedsName_other": "{{count}} human members need a display name.",
       "humanNeedsId_one": "{{count}} human member needs the person's user id.",
       "humanNeedsId_other": "{{count}} human members need the person's user id."
-    }
+    },
+    "versionLookupFailed": "Could not find this group's current version."
   },
   "taskBoard": {
     "title": "Task Board",

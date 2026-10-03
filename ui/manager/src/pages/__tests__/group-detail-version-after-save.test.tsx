@@ -131,3 +131,63 @@ describe("GroupDetailPage — after an inline save", () => {
     expect(conflicts).toEqual([]);
   });
 });
+
+describe("GroupDetailPage — a link without ?version (review 2026-10-02)", () => {
+  it("opens the CURRENT version, not version 1, and deletes that one", async () => {
+    // Two saves happened elsewhere: the group is on version 3.
+    current = 3;
+    docs[2] = structuredClone(BASE);
+    docs[3] = { ...structuredClone(BASE), name: "Renamed Group" };
+    const reads: number[] = [];
+    server.use(
+      http.get("*/groupstore/groups/gv1/currentversion", () => HttpResponse.json(3)),
+      http.get("*/groupstore/groups/gv1", ({ request }) => {
+        const v = Number(new URL(request.url).searchParams.get("version"));
+        reads.push(v);
+        const doc = docs[v];
+        return doc ? HttpResponse.json(doc) : new HttpResponse(null, { status: 404 });
+      }),
+    );
+    renderPage("/manage/groups/gv1", <GroupDetailPage />, "/manage/groups/:id");
+    const user = userEvent.setup();
+
+    expect((await screen.findAllByText("Renamed Group", {}, { timeout: 3000 })).length).toBeGreaterThan(0);
+    expect(reads).not.toContain(1);
+
+    const [deleteOnly] = await screen.findAllByRole("button", { name: /Delete Group Only/ });
+    await user.click(deleteOnly!);
+    await user.click(screen.getAllByRole("button", { name: /Confirm/ })[0]!);
+    await waitFor(() => expect(deletes).toEqual(["group@3"]));
+    expect(conflicts).toEqual([]);
+  });
+});
+
+describe("GroupDetailPage — the current-version lookup fails (review follow-up)", () => {
+  it("shows a retryable error instead of loading version 1", async () => {
+    current = 3;
+    docs[3] = { ...structuredClone(BASE), name: "Renamed Group" };
+    let lookups = 0;
+    const reads: number[] = [];
+    server.use(
+      http.get("*/groupstore/groups/gv1/currentversion", () => {
+        lookups += 1;
+        return lookups === 1 ? new HttpResponse(null, { status: 500 }) : HttpResponse.json(3);
+      }),
+      http.get("*/groupstore/groups/gv1", ({ request }) => {
+        const v = Number(new URL(request.url).searchParams.get("version"));
+        reads.push(v);
+        const doc = docs[v];
+        return doc ? HttpResponse.json(doc) : new HttpResponse(null, { status: 404 });
+      }),
+    );
+    renderPage("/manage/groups/gv1", <GroupDetailPage />, "/manage/groups/:id");
+    const user = userEvent.setup();
+
+    expect(await screen.findByTestId("error-state", {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(reads).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /Retry/ }));
+    expect((await screen.findAllByText("Renamed Group", {}, { timeout: 3000 })).length).toBeGreaterThan(0);
+    expect(reads).not.toContain(1);
+  });
+});

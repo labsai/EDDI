@@ -2987,7 +2987,8 @@
       "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
       "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
       "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
-    }
+    },
+    "versionLookupFailed": "このグループの現在のバージョンを取得できませんでした。"
   },
   "taskBoard": {
     "title": "タスクボード",

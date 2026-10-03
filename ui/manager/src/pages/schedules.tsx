@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueries } from "@tanstack/react-query";
-import { isApiError } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
   useSchedules,
   useCreateSchedule,
@@ -421,8 +421,8 @@ function FailedFiresPanel({
     retryMutation.mutate(scheduleId, {
       onSuccess: () =>
         toast.success(t("schedules.retrySuccess", "Schedule re-queued")),
-      onError: () =>
-        toast.error(t("schedules.retryError", "Failed to retry schedule")),
+      onError: (err) =>
+        toast.error(t("schedules.retryError", "Failed to retry schedule"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -430,8 +430,8 @@ function FailedFiresPanel({
     dismissMutation.mutate(scheduleId, {
       onSuccess: () =>
         toast.success(t("schedules.dismissSuccess", "Dead letter dismissed")),
-      onError: () =>
-        toast.error(t("schedules.dismissError", "Failed to dismiss dead letter")),
+      onError: (err) =>
+        toast.error(t("schedules.dismissError", "Failed to dismiss dead letter"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -826,9 +826,10 @@ function ScheduleFormDialog({
             toast.success(t("schedules.updateSuccess", "Schedule updated"));
             onClose();
           },
-          onError: () =>
+          onError: (err) =>
             toast.error(
-              t("schedules.updateError", "Failed to update schedule")
+              t("schedules.updateError", "Failed to update schedule"),
+              { description: getErrorMessage(err) }
             ),
         }
       );
@@ -840,8 +841,8 @@ function ScheduleFormDialog({
           );
           onClose();
         },
-        onError: () =>
-          toast.error(t("schedules.createError", "Failed to create schedule")),
+        onError: (err) =>
+          toast.error(t("schedules.createError", "Failed to create schedule"), { description: getErrorMessage(err) }),
       });
     }
   };
@@ -1334,8 +1335,8 @@ export function SchedulesPage() {
               ? t("schedules.disabled", "Schedule disabled")
               : t("schedules.enabled", "Schedule enabled")
           ),
-        onError: () =>
-          toast.error(t("schedules.toggleError", "Failed to toggle schedule")),
+        onError: (err) =>
+          toast.error(t("schedules.toggleError", "Failed to toggle schedule"), { description: getErrorMessage(err) }),
       }
     );
   };
@@ -1355,9 +1356,9 @@ export function SchedulesPage() {
           toast.success(t("schedules.fired", "Schedule fired successfully"));
         }
       },
-      onError: () => {
+      onError: (err) => {
         setConfirmFireId(null);
-        toast.error(t("schedules.fireError", "Failed to fire schedule"));
+        toast.error(t("schedules.fireError", "Failed to fire schedule"), { description: getErrorMessage(err) });
       },
     });
   };
@@ -1375,8 +1376,8 @@ export function SchedulesPage() {
         toast.success(t("schedules.deleteSuccess", "Schedule deleted"));
         setConfirmDeleteId(null);
       },
-      onError: () =>
-        toast.error(t("schedules.deleteError", "Failed to delete schedule")),
+      onError: (err) =>
+        toast.error(t("schedules.deleteError", "Failed to delete schedule"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -1384,8 +1385,8 @@ export function SchedulesPage() {
     retryMutation.mutate(id, {
       onSuccess: () =>
         toast.success(t("schedules.retrySuccess", "Schedule re-queued")),
-      onError: () =>
-        toast.error(t("schedules.retryError", "Failed to retry schedule")),
+      onError: (err) =>
+        toast.error(t("schedules.retryError", "Failed to retry schedule"), { description: getErrorMessage(err) }),
     });
   };
 

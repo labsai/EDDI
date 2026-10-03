@@ -24,13 +24,6 @@ const KEYS = {
 
 // ==================== Queries ====================
 
-export function useRecentLogs(filters: LogFilters = {}) {
-  return useQuery({
-    queryKey: KEYS.recent(filters),
-    queryFn: () => getRecentLogs(filters),
-  });
-}
-
 /** Rows per history page. The backend defaults to 100 as well. */
 export const HISTORY_PAGE_SIZE = 100;
 
@@ -141,7 +134,12 @@ export function useLogStream(filters: LogFilters = {}) {
   const eventSourceRef = useRef<BearerEventSource | null>(null);
   const filterKey = JSON.stringify(filters);
 
-  const connect = useCallback(() => {
+  // `isCurrent` turns false once the stream it belongs to is torn down (filter
+  // change, switch to unfiltered, unmount). A reseed fetch is a round trip
+  // that outlives the stream that started it: without the check, the history
+  // fetched for the OLD filter resolved after the change and merged its rows
+  // into the new view.
+  const connect = useCallback((isCurrent: () => boolean) => {
     try {
       const es = createLogEventSource(filters);
       eventSourceRef.current = es;
@@ -151,6 +149,7 @@ export function useLogStream(filters: LogFilters = {}) {
       // made "Resume" silently skip everything logged during the pause.
       const handleEvent = (event: MessageEvent) => {
         try {
+          if (!isCurrent()) return;
           const entry = JSON.parse(event.data) as LogEntry;
           // De-duplicated: every (re)connect replays up to 50 recent lines.
           setFilteredEntries((prev) =>
@@ -180,11 +179,13 @@ export function useLogStream(filters: LogFilters = {}) {
         // Same gap as the session store: what was logged while the stream was
         // down never arrives on it, so re-fetch the ring buffer on every open.
         getRecentLogs({ ...filters, limit: FILTERED_RESEED_LIMIT })
-          .then((recent) =>
+          .then((recent) => {
+            // Stale: the filter changed (or the view left) while this ran.
+            if (!isCurrent()) return;
             setFilteredEntries((prev) =>
               mergeNewestFirst(prev, recent, MAX_LOG_ENTRIES)
-            )
-          )
+            );
+          })
           .catch(() => {
             /* the live stream still works; the gap just stays unfilled */
           });
@@ -200,8 +201,10 @@ export function useLogStream(filters: LogFilters = {}) {
     if (!filtered) return;
     setFilteredEntries([]); // reset on filter change
     setFilteredConnected(false); // reset connection state before reconnecting
-    connect();
+    let live = true;
+    connect(() => live);
     return () => {
+      live = false;
       eventSourceRef.current?.close();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

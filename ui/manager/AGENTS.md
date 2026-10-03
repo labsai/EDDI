@@ -238,8 +238,11 @@ what it finds. Off by default. Worth knowing before touching it:
   document carries an approval gate of its own) is as deliberate as what is
   included. `llmstore` writes ARE granted — that document can carry a gate
   (`Task.toolApprovals` fully replaces the agent's), so the grant is valid only
-  alongside `gate-guard.ts`, which hard-refuses any llmstore write carrying that
-  field. Do not separate the two.
+  alongside `gate-guard.ts`, which refuses any llmstore write carrying that
+  field. Do not separate the two. `gate-guard.ts` and `self-guard.ts` run in the
+  Manager's approval UI only — defence in depth: a pause approved over REST, MCP
+  or a Slack approval channel never reaches them, and the server's own check of
+  the approved call is the enforcement on those paths.
   `read_write` is the DEFAULT scope and freely selectable on first activation
   (read-only is the explicit opt-down); the safety lives in activation itself:
   the gate is read back from the just-provisioned document

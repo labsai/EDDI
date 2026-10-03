@@ -403,8 +403,41 @@ describe("RulesEditor sizematcher bounds", () => {
   it("stores -1 when an empty added key is renamed to a bound", () => {
     const onChange = vi.fn();
     renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", key1: "" })} onChange={onChange} />);
-    fireEvent.change(screen.getByDisplayValue("key1"), { target: { value: "max" } });
+    const keyInput = screen.getByDisplayValue("key1");
+    fireEvent.change(keyInput, { target: { value: "max" } });
+    fireEvent.blur(keyInput);
     expect(lastConfigs(onChange)).toEqual({ valuePath: "p", max: "-1" });
+  });
+
+  // Review 2026-10-02: the key was renamed on every keystroke, so a name that
+  // matched another key — even as an intermediate spelling — merged the two rows.
+  it("refuses a rename onto an existing key instead of merging the rows", () => {
+    const onChange = vi.fn();
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", key1: "x" })} onChange={onChange} />);
+    const keyInput = screen.getByDisplayValue("key1");
+    fireEvent.change(keyInput, { target: { value: "valuePath" } });
+    expect(keyInput).toHaveAttribute("aria-invalid", "true");
+    fireEvent.blur(keyInput);
+    expect(onChange).not.toHaveBeenCalled();
+    // Reverted to the stored key; both rows are still there.
+    expect(screen.getByDisplayValue("key1")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("valuePath")).toBeInTheDocument();
+  });
+
+  it("does not re-key the map while a rename is being typed", () => {
+    const onChange = vi.fn();
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", key1: "x" })} onChange={onChange} />);
+    fireEvent.change(screen.getByDisplayValue("key1"), { target: { value: "ma" } });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("adds a config entry under a free key — never over an existing one", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    // Two entries, the second already called key2: `key${length}` would be key2.
+    renderWithProviders(<RulesEditor data={sizeConfig({ valuePath: "p", key2: "keep me" })} onChange={onChange} />);
+    await user.click(screen.getByRole("button", { name: /Add config/ }));
+    expect(lastConfigs(onChange)).toEqual({ valuePath: "p", key2: "keep me", key3: "" });
   });
 
   it("flags a bound that is not a whole number", () => {

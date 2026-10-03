@@ -296,8 +296,11 @@ export interface ProvisionOperatorParams {
 /**
  * Create and deploy the operator agent.
  *
- * `apiBaseUrl` is the manager's own origin: the generated tools call the same
- * EDDI instance the manager is talking to.
+ * `apiBaseUrl` is `config.apiBaseUrl`, which the caller must already have
+ * resolved with {@link resolveOperatorApiBaseUrl}: the address EDDI can reach
+ * ITSELF at, so the generated tools call the same instance. It is not the
+ * Manager's browser origin (wrong behind any proxy), and provisioning throws
+ * rather than guess when it is missing.
  */
 export async function provisionOperator(
   params: ProvisionOperatorParams,

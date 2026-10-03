@@ -8,6 +8,7 @@ import {
   X,
   GitBranch,
 } from "lucide-react";
+import { RenamableKeyInput } from "./renamable-key-input";
 
 // ─── Types matching RulesConfiguration backend model ──────────────────────
 
@@ -139,7 +140,7 @@ function ActionTags({
                 type="button"
                 onClick={() => onChange(actions.filter((_, j) => j !== i))}
                 className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                aria-label={`Remove ${a}`}
+                aria-label={t("common.removeItem", { item: a, defaultValue: "Remove {{item}}" })}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -188,6 +189,7 @@ function KeyValueRow({
   configKey,
   value,
   onKeyChange,
+  isKeyAvailable,
   onValueChange,
   onRemove,
   readOnly,
@@ -197,6 +199,8 @@ function KeyValueRow({
   configKey: string;
   value: string;
   onKeyChange: (k: string) => void;
+  /** Whether `k` may be used as this row's new key (not already another row's). */
+  isKeyAvailable: (k: string) => boolean;
   onValueChange: (v: string) => void;
   onRemove: () => void;
   readOnly?: boolean;
@@ -208,12 +212,17 @@ function KeyValueRow({
   return (
     <div>
     <div className="flex items-center gap-1.5">
-      <input
-        type="text"
+      {/* Committed on blur/Enter and refused when taken: renaming on every
+          keystroke re-keyed the map mid-word, and a spelling that matched
+          another key (typing "occurrence" over "o…") silently merged the two
+          rows into one, losing a value. */}
+      <RenamableKeyInput
         value={configKey}
-        onChange={(e) => onKeyChange(e.target.value)}
+        onRename={onKeyChange}
+        isAvailable={isKeyAvailable}
         readOnly={readOnly}
         placeholder={t("rulesEditor.configKey", "Key")}
+        data-testid={`rule-config-key-${configKey}`}
         className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
       />
       <span className="text-xs text-muted-foreground">=</span>
@@ -319,7 +328,12 @@ function ConditionEditor({
   };
 
   const addConfigEntry = () => {
-    const nextKey = `key${configEntries.length}`;
+    // The first free `keyN` — `key${length}` collided after a removal (keys
+    // key0, key1 → remove key0 → add writes key1 again, wiping its value).
+    const taken = new Set(Object.keys(condition.configs ?? {}));
+    let n = configEntries.length;
+    while (taken.has(`key${n}`)) n++;
+    const nextKey = `key${n}`;
     onChange({
       ...condition,
       configs: { ...condition.configs, [nextKey]: "" },
@@ -432,9 +446,9 @@ function ConditionEditor({
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
           {/* Config key-value pairs */}
-          {configEntries.map(([k, v], i) => (
+          {configEntries.map(([k, v]) => (
             <KeyValueRow
-              key={i}
+              key={k}
               configKey={k}
               value={isSizeBound(k) && v === NO_SIZE_BOUND ? "" : v}
               valuePlaceholder={isSizeBound(k) ? t("rulesEditor.sizeNoBound", "no limit") : undefined}
@@ -444,6 +458,7 @@ function ConditionEditor({
                   : undefined
               }
               onKeyChange={(nk) => renameConfigKey(k, nk)}
+              isKeyAvailable={(nk) => nk === k || !Object.prototype.hasOwnProperty.call(condition.configs ?? {}, nk)}
               onValueChange={(nv) => updateConfig(k, nv)}
               onRemove={() => removeConfigEntry(k)}
               readOnly={readOnly}

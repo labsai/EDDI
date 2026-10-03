@@ -5,7 +5,7 @@ import { http, HttpResponse } from "msw";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 import { renderPage } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 /**
  * A save in cascade mode writes a new AGENT version. Whether that version is
@@ -150,5 +150,38 @@ describe("ResourceDetailPage — cascade context switch", () => {
     await user.click(screen.getByRole("button", { name: "switch agent" }));
 
     await waitFor(() => expect(checkbox().checked).toBe(false));
+  });
+});
+
+describe("ResourceDetailPage — cascade versions in the URL (review 2026-10-02)", () => {
+  function LocationProbe() {
+    const location = useLocation();
+    return <output data-testid="location-search">{location.search}</output>;
+  }
+
+  it("moves wfVer/agentVer in the URL onto the versions the save created", async () => {
+    const agentPuts = stubCascade();
+    renderPage(
+      PATH,
+      <>
+        <LocationProbe />
+        <ResourceDetailPage />
+      </>,
+      ROUTE,
+    );
+    const user = userEvent.setup();
+
+    await editAndSave(user);
+    await waitFor(() => expect(agentPuts).toHaveLength(1));
+
+    // A reload, a shared link or the Back-to-workflow link reads these — they
+    // used to stay on the versions the page was opened with (wfVer=1, agentVer=1).
+    await waitFor(() => {
+      const params = new URLSearchParams(screen.getByTestId("location-search").textContent ?? "");
+      expect(params.get("wfVer")).toBe("2");
+      expect(params.get("agentVer")).toBe("2");
+      expect(params.get("wfId")).toBe("wf1");
+      expect(params.get("agentId")).toBe("agent1");
+    });
   });
 });
