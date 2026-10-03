@@ -129,8 +129,3 @@ export async function getAuditTrailByAgent(
   }
   return api.get<AuditEntry[]>(`${BASE}/agent/${agentId}?${params.toString()}`);
 }
-
-/** Get the number of audit entries for a conversation. */
-export async function getEntryCount(conversationId: string): Promise<number> {
-  return api.get<number>(`${BASE}/${conversationId}/count`);
-}

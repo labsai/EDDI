@@ -5,7 +5,6 @@ import { type ReactNode } from "react";
 import {
   useAuditTrail,
   useAuditTrailByAgent,
-  useAuditEntryCount,
 } from "@/hooks/use-audit";
 
 function createWrapper() {
@@ -75,23 +74,6 @@ describe("useAuditTrailByAgent", () => {
       () => useAuditTrailByAgent(""),
       { wrapper: createWrapper() },
     );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useAuditEntryCount", () => {
-  it("fetches audit entry count", async () => {
-    const { result } = renderHook(() => useAuditEntryCount("conv1"), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(typeof result.current.data).toBe("number");
-  });
-
-  it("is disabled when conversationId is empty", () => {
-    const { result } = renderHook(() => useAuditEntryCount(""), {
-      wrapper: createWrapper(),
-    });
     expect(result.current.fetchStatus).toBe("idle");
   });
 });

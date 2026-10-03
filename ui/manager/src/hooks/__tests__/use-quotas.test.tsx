@@ -5,7 +5,6 @@ import { server } from "@/test/mocks/server";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
 import {
-  useQuotas,
   useQuota,
   useQuotaUsage,
   useUpdateQuota,
@@ -25,19 +24,6 @@ function createWrapper() {
     );
   };
 }
-
-// ─── useQuotas (list) ──────────────────────────────────────────
-
-describe("useQuotas", () => {
-  it("fetches quota list", async () => {
-    const { result } = renderHook(() => useQuotas(), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(Array.isArray(result.current.data)).toBe(true);
-    expect(result.current.data!.length).toBeGreaterThan(0);
-  });
-});
 
 // ─── useQuota (single tenant) ──────────────────────────────────
 

@@ -14,7 +14,6 @@ import {
   extractActions,
   getConversationDescriptors,
   getSimpleConversationLog,
-  getRawConversationLog,
   deleteConversation,
   getDetailedConversation,
 } from "../conversations";
@@ -482,14 +481,6 @@ describe("getSimpleConversationLog", () => {
   it("passes returnDetailed and returnCurrentStepOnly params", async () => {
     const result = await getSimpleConversationLog("conv1", true, true);
     expect(result).toBeDefined();
-  });
-});
-
-describe("getRawConversationLog", () => {
-  it("fetches raw conversation log", async () => {
-    const result = await getRawConversationLog("conv1");
-    expect(result).toBeDefined();
-    expect(result.agentId).toBe("agent1");
   });
 });
 

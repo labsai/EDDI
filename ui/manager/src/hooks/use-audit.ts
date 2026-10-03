@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   getAuditTrail,
   getAuditTrailByAgent,
-  getEntryCount,
 } from "@/lib/api/audit";
 
 /* ─── Query Keys ─── */
@@ -12,8 +11,6 @@ const KEYS = {
     ["audit", "trail", conversationId, skip, limit] as const,
   trailByAgent: (agentId: string, agentVersion: number | null | undefined, skip: number, limit: number) =>
     ["audit", "trail-by-agent", agentId, agentVersion, skip, limit] as const,
-  count: (conversationId: string) =>
-    ["audit", "count", conversationId] as const,
 };
 
 /* ─── Queries ─── */
@@ -38,14 +35,5 @@ export function useAuditTrailByAgent(
     queryKey: KEYS.trailByAgent(agentId, agentVersion, skip, limit),
     queryFn: () => getAuditTrailByAgent(agentId, agentVersion, skip, limit),
     enabled: !!agentId,
-  });
-}
-
-/** Fetch audit entry count for a conversation. Disabled when conversationId is empty. */
-export function useAuditEntryCount(conversationId: string) {
-  return useQuery({
-    queryKey: KEYS.count(conversationId),
-    queryFn: () => getEntryCount(conversationId),
-    enabled: !!conversationId,
   });
 }
