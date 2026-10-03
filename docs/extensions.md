@@ -87,7 +87,7 @@ The list of `extensions` will allow you to have an overview of what is enabled i
 
 ## Example
 
-> More about regular dictionaries can be found [here](creating-your-first-agent/creating-your-first-agent-1.md#1-creating-a-regular-dictionary-inside-parser).
+> More about regular dictionaries: [Creating a Regular Dictionary inside Parser](creating-your-first-agent/creating-your-first-agent-1.md#1-creating-a-regular-dictionary-inside-parser).
 
 The response below is abridged: every registered step type is listed with its config fields, including `eddi://ai.labs.llm`, `eddi://ai.labs.mcpcalls` and `eddi://ai.labs.rag`, which are shown with their `uri` only.
 

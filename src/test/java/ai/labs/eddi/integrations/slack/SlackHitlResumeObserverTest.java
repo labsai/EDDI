@@ -255,4 +255,24 @@ class SlackHitlResumeObserverTest {
         snapshot.setConversationState(state);
         return snapshot;
     }
+
+    @Test
+    void onResumeCompleted_longContinuation_isChunkedAndKeepsTheMentionInTheFirstMessage() throws Exception {
+        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "U1",
+                Deployment.Environment.production, "agent-1", "conv-1");
+        when(userConversationStore.readUserConversationByConversationId("conv-1")).thenReturn(mapping);
+        when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
+        String continuation = "<!channel> " + "&".repeat(5000);
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent("conv-1", HitlVerdict.APPROVED, "slack:U9", snapshotWithText(continuation)));
+
+        ArgumentCaptor<String> texts = ArgumentCaptor.forClass(String.class);
+        verify(slackApi, atLeast(2)).postMessage(eq("Bearer xoxb-token"), eq("C123"), eq("1700.0001"), texts.capture());
+        for (String text : texts.getAllValues()) {
+            assertTrue(text.length() <= SlackMrkdwn.MAX_MESSAGE_LENGTH, "message of " + text.length());
+            assertFalse(text.contains("<!channel>"), text);
+        }
+        assertTrue(texts.getAllValues().getFirst().contains("<@U9>"), texts.getAllValues().getFirst());
+        assertEquals(5000, String.join("", texts.getAllValues()).split("&amp;", -1).length - 1, "no part of the continuation was lost");
+    }
 }

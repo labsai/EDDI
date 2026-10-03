@@ -765,8 +765,23 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * not: a member replying {@code <!channel>} pinged the channel.
      */
     private String postSafe(String channel, String threadTs, String text) {
+        // Escaped, then split into messages Slack will not truncate; the first
+        // message's ts is the one callers thread under.
+        String firstTs = null;
+        boolean first = true;
+        for (String chunk : SlackMrkdwn.escapeInChunks(text, SlackMrkdwn.MAX_MESSAGE_LENGTH)) {
+            String ts = postChunk(channel, threadTs, chunk);
+            if (first) {
+                firstTs = ts;
+                first = false;
+            }
+        }
+        return firstTs;
+    }
+
+    private String postChunk(String channel, String threadTs, String text) {
         try {
-            return slackApi.postMessage(authToken, channel, threadTs, SlackMrkdwn.escape(text));
+            return slackApi.postMessage(authToken, channel, threadTs, text);
         } catch (SlackDeliveryException e) {
             LOGGER.warnf("Slack post failed (channel=%s, thread=%s): %s",
                     channel, threadTs, e.getMessage());

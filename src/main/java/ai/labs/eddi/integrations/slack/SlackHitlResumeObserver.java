@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import java.util.List;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -104,20 +105,34 @@ public class SlackHitlResumeObserver {
 
         String summary = decisionSummary(event.verdict(), event.decidedBy(), event.snapshot());
 
-        var sb = new StringBuilder(summary);
         // Append genuine agent continuation only when the resume actually continued
         // (APPROVED and not ERROR). A rejection/cancellation/failure carries no
         // continuation to show; placeholders (leading "_") are always suppressed.
+        List<String> continuationChunks = List.of();
         if (event.verdict() == HitlVerdict.APPROVED && !isError(event.snapshot())) {
             String continuation = SlackHitlSupport.extractSlackResponseText(event.snapshot());
             if (continuation != null && !continuation.startsWith("_")) {
                 // The agent's text, after EDDI's own summary (which may mention the
-                // approver): only the continuation is escaped.
-                sb.append("\n\n").append(SlackMrkdwn.escape(continuation));
+                // approver): only the continuation is escaped, and split so Slack does
+                // not truncate it. The summary and its mention stay in the first message.
+                continuationChunks = SlackMrkdwn.escapeInChunks(continuation, SlackMrkdwn.MAX_MESSAGE_LENGTH);
             }
         }
 
-        postSafe(auth, route.channelId(), route.threadTs(), sb.toString());
+        if (continuationChunks.isEmpty()) {
+            postSafe(auth, route.channelId(), route.threadTs(), summary);
+            return;
+        }
+        String firstChunk = continuationChunks.getFirst();
+        if (summary.length() + 2 + firstChunk.length() <= SlackMrkdwn.MAX_MESSAGE_LENGTH) {
+            postSafe(auth, route.channelId(), route.threadTs(), summary + "\n\n" + firstChunk);
+            continuationChunks = continuationChunks.subList(1, continuationChunks.size());
+        } else {
+            postSafe(auth, route.channelId(), route.threadTs(), summary);
+        }
+        for (String chunk : continuationChunks) {
+            postSafe(auth, route.channelId(), route.threadTs(), chunk);
+        }
     }
 
     private static boolean isError(SimpleConversationMemorySnapshot snapshot) {

@@ -661,4 +661,20 @@ class SlackGroupDiscussionListenerTest {
 
         verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), any(), contains("plan &lt;!channel&gt; &amp; co"));
     }
+
+    @Test
+    void longContribution_isSplitIntoMessagesSlackWillNotTruncate() {
+        initExpanded();
+        // The header's ts is what the full contribution is threaded under.
+        when(slackApi.postMessage(any(), any(), any(), any())).thenReturn("1700.1");
+        String response = "<b> & ".repeat(3000);
+        listener.onSpeakerComplete(speakerEvent("a0", "Agent", response, null, null));
+
+        ArgumentCaptor<String> texts = ArgumentCaptor.forClass(String.class);
+        verify(slackApi, atLeast(3)).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), any(), texts.capture());
+        for (String text : texts.getAllValues()) {
+            assertTrue(text.length() <= SlackMrkdwn.MAX_MESSAGE_LENGTH, "message of " + text.length());
+        }
+        assertTrue(String.join("", texts.getAllValues()).contains(SlackMrkdwn.escape(response)), "the contribution arrives whole");
+    }
 }

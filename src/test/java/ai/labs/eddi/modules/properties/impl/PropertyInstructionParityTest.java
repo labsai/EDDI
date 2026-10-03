@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
@@ -37,6 +38,8 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -188,6 +191,31 @@ class PropertyInstructionParityTest {
         assertEquals(-3_000_000_000L, instructions.get(1).getValueLong());
         assertEquals(7, instructions.get(2).getValueInt());
         assertNull(instructions.get(2).getValueLong());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"{\"name\":\"x\",\"valueInt\":3.7}", "{\"name\":\"x\",\"valueInt\":1e20}",
+            "{\"name\":\"x\",\"valueInt\":99999999999999999999}", "{\"name\":\"x\",\"valueLong\":1e20}",
+            "{\"name\":\"x\",\"valueLong\":-0.5}"})
+    @DisplayName("an inline valueInt/valueLong that is fractional or beyond the long range is refused, not silently changed")
+    void inexactInlineWholeNumberIsRefused(String instruction) throws Exception {
+        var task = newPropertySetterTask();
+        Map<String, Object> config = MAPPER.readValue("{\"setOnActions\":[{\"actions\":[\"go\"],\"setProperties\":[" + instruction + "]}]}",
+                Map.class);
+
+        var e = assertThrows(IllegalArgumentException.class, () -> task.configure(config, Map.of()));
+        assertTrue(e.getMessage().contains("'x'"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("an inline valueInt written as 3.0 is the whole number 3")
+    void wholeDecimalInlineValueIntIsAccepted() throws Exception {
+        Map<String, Object> config = MAPPER.readValue("""
+                {"setOnActions":[{"actions":["go"],"setProperties":[{"name":"x","valueInt":3.0}]}]}""", Map.class);
+
+        var setter = (IPropertySetter) newPropertySetterTask().configure(config, Map.of());
+
+        assertEquals(3, setter.getSetOnActionsList().getFirst().getSetProperties().getFirst().getValueInt());
     }
 
     @Test

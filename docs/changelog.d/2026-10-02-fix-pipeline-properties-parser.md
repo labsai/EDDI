@@ -62,3 +62,9 @@
 - **Legacy `value` migration** now maps a `Long` beyond the `int` range to `valueLong` (it was left unmigrated) and a `Double` to `valueDouble` (it went to `valueFloat`, read back at seven digits).
 - **MCP result cap** no longer ends a truncated result on the first half of a surrogate pair.
 - **Slack HITL summary**: a non-Slack `decidedBy` (an IdP principal name) is escaped, and a `slack:` id is only turned into a `<@…>` mention when it is a Slack user id.
+
+### Review follow-up (PR #944, CodeRabbit)
+
+- **Slack messages are split after escaping.** Escaping can lengthen a message, and the group-discussion and HITL-resume paths posted one unbounded `text` that Slack truncates past 40,000 characters. All three Slack paths (agent replies, group discussion, HITL continuation) now share `SlackMrkdwn.escapeInChunks`: messages of at most 3,900 characters, preferably at a line break, never inside an entity or a surrogate pair. The HITL decision summary, with its intentional approver mention, stays at the head of the first message.
+- **Inline `valueInt` / `valueLong` are converted exactly.** `Number.longValue()` truncated `3.7` to `3`, saturated `1e20` and kept only the low bits of a larger `BigInteger`; such a value is now refused at configure time with a message naming the property (`3.0` is still `3`).
+- Docs: `conversation-memory.md` no longer suggests a `postResponse` instruction cleans a saved response up (it adds a property; `maxResponseSizeInBytes` is what bounds the response); the booking request body in `putting-it-all-together.md` was double-escaped and sent invalid JSON; link texts in `extensions.md` and `httpcalls.md` name their target instead of "here".

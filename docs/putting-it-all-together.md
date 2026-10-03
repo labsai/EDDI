@@ -234,7 +234,7 @@ curl -X POST http://localhost:7070/apicallstore/apicalls \
           "method": "POST",
           "path": "/bookings",
           "contentType": "application/json",
-          "body": "{\\\"roomId\\\": \\\"{properties.room_id}\\\", \\\"userId\\\": \\\"{userInfo.userId}\\\", \\\"checkIn\\\": \\\"{properties.checkInDate}\\\", \\\"checkOut\\\": \\\"{properties.checkOutDate}\\\"}"
+          "body": "{\"roomId\": \"{properties.room_id}\", \"userId\": \"{userInfo.userId}\", \"checkIn\": \"{properties.checkInDate}\", \"checkOut\": \"{properties.checkOutDate}\"}"
         },
         "postResponse": {
           "propertyInstructions": [

@@ -33,8 +33,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.math.BigDecimal;
 import java.net.URI;
-import java.math.BigInteger;
 import java.util.*;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
@@ -299,17 +299,14 @@ public class PropertySetterTask implements ILifecycleTask {
                 // reads 3 as an Integer but 3.0 or 3000000000 as something else, and the
                 // value was dropped without a word. A whole number beyond the int range
                 // goes to valueLong — intValue() would wrap it to a different number.
-                if (n instanceof BigInteger big && big.bitLength() >= 64) {
-                    throw new IllegalArgumentException("valueInt of property '" + propertyInstruction.getName() + "' is beyond the long range: " + n);
-                }
-                long whole = n.longValue();
+                long whole = exactWholeNumber(n, VALUE_INT, propertyInstruction.getName());
                 if (whole >= Integer.MIN_VALUE && whole <= Integer.MAX_VALUE) {
                     propertyInstruction.setValueInt((int) whole);
                 } else {
                     propertyInstruction.setValueLong(whole);
                 }
             } else if (property.get(VALUE_LONG) instanceof Number n) {
-                propertyInstruction.setValueLong(n.longValue());
+                propertyInstruction.setValueLong(exactWholeNumber(n, VALUE_LONG, propertyInstruction.getName()));
             } else if (property.get(VALUE_FLOAT) instanceof Number n) {
                 // Jackson reads 1.5 as a Double, which "instanceof Float" never matched.
                 propertyInstruction.setValueFloat(n.floatValue());
@@ -346,6 +343,23 @@ public class PropertySetterTask implements ILifecycleTask {
 
             return propertyInstruction;
         }).toList();
+    }
+
+    /**
+     * The exact whole number an inline {@code valueInt} / {@code valueLong} holds.
+     * {@code Number.longValue()} changed valid-looking input without a word: it
+     * truncated {@code 3.7} to {@code 3}, saturated {@code 1e20} to
+     * {@code Long.MAX_VALUE} and kept only the low-order bits of a larger
+     * {@code BigInteger}. A fractional, non-finite or out-of-range value is refused
+     * instead, naming the property.
+     */
+    static long exactWholeNumber(Number n, String field, String propertyName) {
+        try {
+            return new BigDecimal(n.toString()).longValueExact();
+        } catch (ArithmeticException | NumberFormatException e) {
+            throw new IllegalArgumentException(field + " of property '" + propertyName + "' must be a whole number within the long range, but was "
+                    + n, e);
+        }
     }
 
     /** Whether the instruction sets any value field other than valueString. */

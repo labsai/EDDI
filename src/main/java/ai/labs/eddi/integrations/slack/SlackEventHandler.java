@@ -81,7 +81,6 @@ public class SlackEventHandler {
     private static final Pattern ANY_MENTION_PATTERN = Pattern.compile("<@[A-Z0-9]+(\\|[^>]*)?>");
 
     /** Maximum Slack message length (safe limit under 4000). */
-    private static final int MAX_SLACK_MESSAGE_LENGTH = 3900;
 
     /** Retry budget for reading the HITL bookmark after a pause (see H10). */
     private static final int HITL_BOOKMARK_READ_ATTEMPTS = 5;
@@ -1575,32 +1574,11 @@ public class SlackEventHandler {
     private void postMessageChunked(String channelId, String threadTs, String text,
                                     String botToken) {
         // The agent's reply is not EDDI's text: escaped so a "<!channel>" in it is
-        // shown, not broadcast (SlackMrkdwn). Each chunk is escaped after the split,
-        // so an entity is never cut in half.
-        if (text == null || text.isEmpty())
-            return;
-        if (text.length() <= MAX_SLACK_MESSAGE_LENGTH) {
-            postMessage(channelId, threadTs, SlackMrkdwn.escape(text), botToken);
-            return;
-        }
-
-        // Chunk at paragraph or line boundaries
-        int offset = 0;
-        while (offset < text.length()) {
-            int end = Math.min(offset + MAX_SLACK_MESSAGE_LENGTH, text.length());
-            if (end < text.length()) {
-                // Try to break at a newline
-                int lastNewline = text.lastIndexOf('\n', end);
-                if (lastNewline > offset) {
-                    end = lastNewline;
-                }
-            }
-            // Safety: ensure forward progress even if end == offset
-            if (end <= offset) {
-                end = Math.min(offset + MAX_SLACK_MESSAGE_LENGTH, text.length());
-            }
-            postMessage(channelId, threadTs, SlackMrkdwn.escape(text.substring(offset, end)), botToken);
-            offset = end;
+        // shown, not broadcast, and split after escaping — escaping can lengthen it —
+        // without cutting an entity in half (SlackMrkdwn, shared with the group and
+        // HITL listeners).
+        for (String chunk : SlackMrkdwn.escapeInChunks(text, SlackMrkdwn.MAX_MESSAGE_LENGTH)) {
+            postMessage(channelId, threadTs, chunk, botToken);
         }
     }
 
