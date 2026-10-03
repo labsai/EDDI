@@ -87,6 +87,7 @@ class ClusterCoordinatorIT {
         final NatsConnectionManager connections;
         final ClusterPresence presence;
         final NatsLeaseManager leases;
+        final NatsSharedStateFactory shared;
         final JetStreamDeadLetterStore deadLetters;
         final JetStreamEventBus events;
         final NatsClusterRpc rpc;
@@ -100,7 +101,7 @@ class ClusterCoordinatorIT {
                     .withPresenceInterval(Duration.ofSeconds(1)).withDegradedGrace(Duration.ofSeconds(2));
             var meters = new SimpleMeterRegistry();
             connections = new NatsConnectionManager(config, new NodeIdentity(id, UUID.randomUUID().toString().substring(0, 8)), meters);
-            var shared = new NatsSharedStateFactory(connections, meters);
+            shared = new NatsSharedStateFactory(connections, meters);
             presence = new ClusterPresence(connections, shared, meters);
             leases = new NatsLeaseManager(connections, shared, presence, meters);
             deadLetters = new JetStreamDeadLetterStore(connections);
@@ -372,5 +373,31 @@ class ClusterCoordinatorIT {
         assertTrue(a.connections.isConnected(), "reconnected");
         LeaseHandle fenced = a.leases.acquire("conv-degraded", Duration.ofSeconds(10)).toCompletableFuture().get(15, TimeUnit.SECONDS);
         assertNotNull(fenced.fence(), "fenced again after recovery");
+    }
+
+    /**
+     * Fencing tokens are lease revisions, and the stores keep the highest one seen.
+     * A leases bucket recreated after NATS lost its data must not start below the
+     * fences the stores already hold, or every write to those conversations is
+     * refused for good: a new bucket starts at its creation time in microseconds.
+     */
+    @Test
+    @Order(7)
+    @DisplayName("a recreated leases bucket hands out fences above every earlier one")
+    void recreatedLeasesBucketStaysAboveEarlierFences() throws Exception {
+        long before = System.currentTimeMillis();
+        Node a = nodes.get(0);
+        LeaseHandle first = a.leases.acquire("conv-epoch", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertTrue(first.fence() >= NatsSharedStateFactory.firstRevisionAt(before - 60_000),
+                "a new leases bucket starts at its creation time, not at 1: " + first.fence());
+        a.leases.release(first);
+
+        a.connections.keyValueManagement().delete(prefix + "_LEASES");
+        Thread.sleep(5);
+        a.shared.provisionAll();
+
+        LeaseHandle second = a.leases.acquire("conv-epoch", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertTrue(second.fence() > first.fence(), "after recreation " + second.fence() + " must exceed " + first.fence());
+        a.leases.release(second);
     }
 }
