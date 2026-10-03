@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.rules.impl;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition;
+import ai.labs.eddi.modules.rules.impl.conditions.TemplateDataScope;
 import ai.labs.eddi.utils.RuntimeUtilities;
 
 import java.util.LinkedList;
@@ -15,13 +16,26 @@ import java.util.LinkedList;
  */
 
 class RulesEvaluator {
-    private RuleSet behaviorSet;
+    private final RuleSet behaviorSet;
+    private final boolean appendActions;
+    private final boolean expressionsAsActions;
 
-    boolean appendActions;
-    boolean expressionsAsActions;
-
+    /**
+     * Evaluates the rule set inside a {@link TemplateDataScope}, so the conditions
+     * that need the template data share one conversion of the memory.
+     */
     RuleSetResult evaluate(IConversationMemory memory) throws RuleExecutionException, InterruptedException {
         RuntimeUtilities.checkNotNull(behaviorSet, "behaviorSet");
+        try {
+            return TemplateDataScope.call(memory, () -> evaluateRules(memory));
+        } catch (RuleExecutionException | InterruptedException | RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuleExecutionException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    private RuleSetResult evaluateRules(IConversationMemory memory) throws RuleExecutionException, InterruptedException {
 
         RuleSetResult resultSet = new RuleSetResult();
 
@@ -83,36 +97,21 @@ class RulesEvaluator {
         }
     }
 
-    public RulesEvaluator() {
-    }
-
     public RulesEvaluator(RuleSet behaviorSet, boolean appendActions, boolean expressionsAsActions) {
         this.behaviorSet = behaviorSet;
         this.appendActions = appendActions;
         this.expressionsAsActions = expressionsAsActions;
     }
 
-    public RuleSet getRuleSet() {
+    RuleSet getRuleSet() {
         return behaviorSet;
-    }
-
-    public void setRuleSet(RuleSet behaviorSet) {
-        this.behaviorSet = behaviorSet;
     }
 
     public boolean isAppendActions() {
         return appendActions;
     }
 
-    public void setAppendActions(boolean appendActions) {
-        this.appendActions = appendActions;
-    }
-
     public boolean isExpressionsAsActions() {
         return expressionsAsActions;
-    }
-
-    public void setExpressionsAsActions(boolean expressionsAsActions) {
-        this.expressionsAsActions = expressionsAsActions;
     }
 }

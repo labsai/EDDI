@@ -298,12 +298,16 @@ propertyInstruction.setScope("conversation");  // This persists!
 propertyInstruction.setScope("step");  // Cleaned after this step
 ```
 
-### 2. Clean Up Large Data
+### 2. Bound Large API Responses
 
-If you store large API responses, consider cleaning them after use:
+A saved API response stays in the conversation step it was received in — that step is persisted, and memory is loaded on every turn. Extract the values later turns need into properties, and cap the size of what is kept:
 
 ```json
 {
+  "name": "getWeather",
+  "saveResponse": true,
+  "responseObjectName": "weatherResponse",
+  "maxResponseSizeInBytes": 100000,
   "postResponse": {
     "propertyInstructions": [
       {
@@ -316,7 +320,7 @@ If you store large API responses, consider cleaning them after use:
 }
 ```
 
-Extract only what you need instead of storing the entire response.
+The `postResponse` instruction **adds** `temperature` as a property; it does not remove the saved response, which remains under `memory.current.httpCalls.weatherResponse` for that step. What bounds it is `maxResponseSizeInBytes` (default 2 MB, `eddi.httpcalls.default-max-response-size-bytes`): a longer body is truncated before it is stored. `saveResponse: false` keeps the body out of memory entirely, but then no `postResponse` instruction can read it either. Inside the call's own `postResponse` the path starts at its `responseObjectName`; the value is stored with its type (a number stays a number). Later turns read the property (`{properties.temperature}`), not the old step's response.
 
 ### 3. Leverage History for Context
 

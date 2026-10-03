@@ -401,7 +401,7 @@ class McpSetupToolsTest {
     @Test
     void createBehaviorConfig_producesCorrectStructure() {
         var config = service.createBehaviorConfig();
-        assertTrue(config.getExpressionsAsActions());
+        assertNotEquals(Boolean.TRUE, config.getExpressionsAsActions(), "setup must not force expressionsAsActions");
         assertEquals(1, config.getBehaviorGroups().size());
 
         var group = config.getBehaviorGroups().get(0);

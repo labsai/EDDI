@@ -809,7 +809,9 @@ public class AgentSetupService {
         group.setRules(List.of(rule));
 
         var config = new RuleSetConfiguration();
-        config.setExpressionsAsActions(true);
+        // expressionsAsActions stays at its default (false). It used to be forced on,
+        // which nothing here needs — the single rule fires on any input — and it
+        // turned every expression the parser produced into an action.
         config.setBehaviorGroups(List.of(group));
         return config;
     }

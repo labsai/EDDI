@@ -131,5 +131,14 @@ class PrePostUtilsVerifyHttpCodeTest {
             // skipOnHttpCode is null → should use DEFAULT skipOn
             assertTrue(prePostUtils.verifyHttpCode(validator, 200));
         }
+
+        @Test
+        @DisplayName("never writes the defaults back into the shared configuration")
+        void doesNotMutateTheConfiguredValidator() {
+            var validator = new HttpCodeValidator();
+            prePostUtils.verifyHttpCode(validator, 200);
+            assertNull(validator.getRunOnHttpCode(), "the cached configuration was modified at run time");
+            assertNull(validator.getSkipOnHttpCode(), "the cached configuration was modified at run time");
+        }
     }
 }

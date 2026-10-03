@@ -375,4 +375,27 @@ class RuntimeTemplateEngineFactoryTest {
             }
         }
     }
+
+    @Nested
+    @DisplayName("decimals render as plain numbers")
+    class Decimals {
+
+        @Test
+        @DisplayName("a Double or Float that toString() would print in E-notation renders in plain digits")
+        void scientificNotationIsAvoided() throws Exception {
+            assertEquals("1.0E7|1.0E-4", renderSource("{a}|{b}", Map.of("a", 1.0e7, "b", 0.0001)),
+                    "precondition: Qute prints toString()");
+
+            assertEquals("10000000|0.0001|12500000.5|1759400000000|0.00025",
+                    render("{a}|{b}|{c}|{d}|{e}", Map.of("a", 1.0e7, "b", 0.0001, "c", 12_500_000.5, "d", 1.7594e12, "e", 2.5e-4f)));
+        }
+
+        @Test
+        @DisplayName("ordinary decimals, extreme magnitudes, NaN and integers are unchanged")
+        void otherValuesUnchanged() throws Exception {
+            assertEquals("19.99|48.2081743|3.0|1.0E21|1.0E-8|NaN|Infinity|3000000000",
+                    render("{a}|{b}|{c}|{d}|{e}|{f}|{g}|{h}", Map.of("a", 19.99, "b", 48.2081743, "c", 3.0, "d", 1e21, "e", 1e-8, "f",
+                            Double.NaN, "g", Double.POSITIVE_INFINITY, "h", 3_000_000_000L)));
+        }
+    }
 }

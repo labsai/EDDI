@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.output.impl;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
@@ -105,7 +106,7 @@ public class OutputGenerationTask implements ILifecycleTask {
                 Map<String, List<OutputEntry>> outputs = outputGeneration.getOutputs(outputFilters);
                 outputs.forEach((action, outputEntries) -> outputEntries.forEach(outputEntry -> {
                     List<OutputValue> outputValues = outputEntry.getOutputs();
-                    selectAndStoreOutput(currentStep, action, outputValues, false);
+                    selectAndStoreOutput(currentStep, action, outputValues, false, true);
                     storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction(), false);
                 }));
             }
@@ -133,11 +134,22 @@ public class OutputGenerationTask implements ILifecycleTask {
             String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length());
             if (key.startsWith(MEMORY_OUTPUT_IDENTIFIER) && context.getType().equals(Context.ContextType.object)) {
                 List<OutputValue> outputList = convertOutputMap(convertObjectToListOfMapsWithObjects(context.getValue()));
-                selectAndStoreOutput(currentStep, CONTEXT_IDENTIFIER, outputList, true);
+                // A quickReply item inside client-sent output is a quick reply like any
+                // other client one — display only, see storeContextQuickReplies.
+                selectAndStoreOutput(currentStep, CONTEXT_IDENTIFIER, outputList, true, context.isServerGenerated());
             }
         });
     }
 
+    /**
+     * Quick replies supplied as {@code context}. Those a {@code postResponse} built
+     * ({@link Context#isServerGenerated()}) are the agent's own and are stored like
+     * output-set quick replies, so the next turn's parser matches them to their
+     * expressions. Those a client sent are shown, but stored in the conversation
+     * output only and without expressions: they must never become a temporary
+     * dictionary, or a client could mint any expression — an action on every agent
+     * with {@code expressionsAsActions} — by offering itself a quick reply.
+     */
     private void storeContextQuickReplies(IWritableConversationStep currentStep, List<IData<Context>> contextDataList) {
         contextDataList.forEach(contextData -> {
             String contextKey = contextData.getKey();
@@ -151,7 +163,11 @@ public class OutputGenerationTask implements ILifecycleTask {
                 }
 
                 List<QuickReply> quickReplies = convertQuickReplyMap(convertObjectToListOfMapsWithStrings(context.getValue()));
-                storeQuickReplies(currentStep, quickReplies, quickRepliesKey, true);
+                if (context.isServerGenerated()) {
+                    storeQuickReplies(currentStep, quickReplies, quickRepliesKey, true);
+                } else {
+                    storeDisplayOnlyQuickReplies(currentStep, quickReplies);
+                }
             }
         });
     }
@@ -177,7 +193,22 @@ public class OutputGenerationTask implements ILifecycleTask {
                 .toList();
     }
 
-    private void selectAndStoreOutput(IWritableConversationStep currentStep, String action, List<OutputValue> outputValues, boolean verbatim) {
+    /**
+     * Shows client-supplied quick replies without making them the agent's own: they
+     * go into the conversation output only, without expressions, and get no
+     * {@code quickReplies:*} data entry — which is what the next turn's parser
+     * builds its temporary dictionary from.
+     */
+    private void storeDisplayOnlyQuickReplies(IWritableConversationStep currentStep, List<QuickReply> quickReplies) {
+        var displayOnly = quickReplies.stream().filter(quickReply -> quickReply.getValue() != null)
+                .map(quickReply -> new QuickReply(quickReply.getValue(), null, quickReply.getIsDefault())).toList();
+        if (!displayOnly.isEmpty()) {
+            currentStep.addConversationOutputList(MEMORY_QUICK_REPLIES_IDENTIFIER, displayOnly);
+        }
+    }
+
+    private void selectAndStoreOutput(IWritableConversationStep currentStep, String action, List<OutputValue> outputValues, boolean verbatim,
+                                      boolean trustedQuickReplies) {
         List<QuickReply> quickReplies = new LinkedList<>();
         IntStream.range(0, outputValues.size()).forEach(index -> {
             OutputValue outputValue = outputValues.get(index);
@@ -201,7 +232,11 @@ public class OutputGenerationTask implements ILifecycleTask {
         });
 
         if (!quickReplies.isEmpty()) {
-            storeQuickReplies(currentStep, quickReplies, action, verbatim);
+            if (trustedQuickReplies) {
+                storeQuickReplies(currentStep, quickReplies, action, verbatim);
+            } else {
+                storeDisplayOnlyQuickReplies(currentStep, quickReplies);
+            }
         }
     }
 
@@ -226,10 +261,13 @@ public class OutputGenerationTask implements ILifecycleTask {
         try {
             Object uriObj = configuration.get(OUTPUT_SET_CONFIG_URI);
             if (uriObj != null) {
-                URI uri = URI.create(uriObj.toString());
+                URI uri = ResourceUris.require(uriObj, ID);
                 var outputConfigurationSet = resourceClientLibrary.getResource(uri, OutputConfigurationSet.class);
                 var outputLanguage = outputConfigurationSet.getLang();
-                var outputSet = outputConfigurationSet.getOutputSet();
+                // A copy: the set comes from the resource cache and is shared — sorting
+                // it in place mutated configuration other deployments read.
+                var outputSet = new ArrayList<>(
+                        outputConfigurationSet.getOutputSet() != null ? outputConfigurationSet.getOutputSet() : List.<OutputConfiguration>of());
                 outputSet.sort((o1, o2) -> {
                     int comparisonOfKeys = o1.getAction().compareTo(o2.getAction());
                     if (comparisonOfKeys == 0) {
@@ -310,10 +348,15 @@ public class OutputGenerationTask implements ILifecycleTask {
      * @return List<QuickReply> as it is used in the internal system
      */
     private List<QuickReply> convertQuickRepliesConfig(List<QuickReply> configQuickReplies) {
+        if (configQuickReplies == null) {
+            return new LinkedList<>();
+        }
         return configQuickReplies.stream().map(configQuickReply -> {
             QuickReply quickReply = new QuickReply();
             quickReply.setValue(configQuickReply.getValue());
             quickReply.setExpressions(configQuickReply.getExpressions());
+            // isDefault was dropped here, so a configured default never reached the client.
+            quickReply.setIsDefault(configQuickReply.getIsDefault());
             return quickReply;
         }).collect(Collectors.toCollection(LinkedList::new));
     }

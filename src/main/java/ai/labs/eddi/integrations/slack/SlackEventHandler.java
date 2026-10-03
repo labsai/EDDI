@@ -81,7 +81,6 @@ public class SlackEventHandler {
     private static final Pattern ANY_MENTION_PATTERN = Pattern.compile("<@[A-Z0-9]+(\\|[^>]*)?>");
 
     /** Maximum Slack message length (safe limit under 4000). */
-    private static final int MAX_SLACK_MESSAGE_LENGTH = 3900;
 
     /** Retry budget for reading the HITL bookmark after a pause (see H10). */
     private static final int HITL_BOOKMARK_READ_ATTEMPTS = 5;
@@ -1574,30 +1573,16 @@ public class SlackEventHandler {
      */
     private void postMessageChunked(String channelId, String threadTs, String text,
                                     String botToken) {
-        if (text == null || text.isEmpty())
-            return;
-        if (text.length() <= MAX_SLACK_MESSAGE_LENGTH) {
-            postMessage(channelId, threadTs, text, botToken);
-            return;
-        }
-
-        // Chunk at paragraph or line boundaries
-        int offset = 0;
-        while (offset < text.length()) {
-            int end = Math.min(offset + MAX_SLACK_MESSAGE_LENGTH, text.length());
-            if (end < text.length()) {
-                // Try to break at a newline
-                int lastNewline = text.lastIndexOf('\n', end);
-                if (lastNewline > offset) {
-                    end = lastNewline;
-                }
+        // The agent's reply is not EDDI's text: escaped so a "<!channel>" in it is
+        // shown, not broadcast, and split after escaping — escaping can lengthen it —
+        // without cutting an entity in half (SlackMrkdwn, shared with the group and
+        // HITL listeners).
+        for (String chunk : SlackMrkdwn.escapeInChunks(text, SlackMrkdwn.MAX_MESSAGE_LENGTH)) {
+            if (!postMessage(channelId, threadTs, chunk, botToken)) {
+                // Not delivered even after the retries: the rest would arrive without
+                // this part, so stop here.
+                break;
             }
-            // Safety: ensure forward progress even if end == offset
-            if (end <= offset) {
-                end = Math.min(offset + MAX_SLACK_MESSAGE_LENGTH, text.length());
-            }
-            postMessage(channelId, threadTs, text.substring(offset, end), botToken);
-            offset = end;
         }
     }
 
@@ -1608,8 +1593,8 @@ public class SlackEventHandler {
      *            explicit bot token; if {@code null}, falls back to
      *            {@link ChannelTargetRouter#getBotToken}
      */
-    private void postMessage(String channelId, String threadTs, String text,
-                             String botToken) {
+    private boolean postMessage(String channelId, String threadTs, String text,
+                                String botToken) {
         // Resolve bot token: prefer explicit parameter, fallback to router
         String resolvedToken = botToken;
         if (resolvedToken == null || resolvedToken.isEmpty()) {
@@ -1618,7 +1603,7 @@ public class SlackEventHandler {
 
         if (resolvedToken == null || resolvedToken.isEmpty()) {
             LOGGER.warnf("No bot token configured for Slack channel %s — cannot post message", sanitize(channelId));
-            return;
+            return false;
         }
 
         String auth = "Bearer " + resolvedToken;
@@ -1626,8 +1611,8 @@ public class SlackEventHandler {
         int maxRetries = slackConfig.getApiMaxRetries();
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                slackApi.postMessage(auth, channelId, threadTs, text);
-                return;
+                // null is a non-retryable API error (already logged by the client)
+                return slackApi.postMessage(auth, channelId, threadTs, text) != null;
             } catch (SlackDeliveryException e) {
                 if (attempt < maxRetries) {
                     long backoff = slackConfig.getApiRetryBaseMs() * (1L << (attempt - 1));
@@ -1637,7 +1622,7 @@ public class SlackEventHandler {
                         Thread.sleep(backoff);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
-                        return;
+                        return false;
                     }
                 } else {
                     LOGGER.errorf("SLACK_DELIVERY_FAILED | channel=%s | threadTs=%s | textLength=%d | attempts=%d | error=%s",
@@ -1646,6 +1631,7 @@ public class SlackEventHandler {
                 }
             }
         }
+        return false;
     }
 
     /**
@@ -1673,7 +1659,7 @@ public class SlackEventHandler {
                     && name.equalsIgnoreCase(config.getDefaultTargetName())
                             ? " _(default)_"
                             : "";
-            sb.append("• *").append(name).append("*").append(isDefault);
+            sb.append("• *").append(SlackMrkdwn.escape(name)).append("*").append(isDefault);
             sb.append(" [").append(type).append("]\n");
             if (target.getTriggers() != null && !target.getTriggers().isEmpty()) {
                 sb.append("  Triggers: ");

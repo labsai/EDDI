@@ -28,6 +28,8 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.*;
 
+import org.mockito.ArgumentCaptor;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -79,7 +81,7 @@ class PrePostUtilsExtendedTest {
             instruction.setScope(Property.Scope.conversation);
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
-            verify(conversationProperties).put(eq("prop"), any(Property.class));
+            assertEquals("val", stored("prop").getValueString());
         }
 
         @Test
@@ -110,7 +112,8 @@ class PrePostUtilsExtendedTest {
             templateData.put("context", Map.of("obj", innerMap));
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
-            verify(conversationProperties).put(eq("mapProp"), any(Property.class));
+            assertEquals(Map.of("key", "value"), stored("mapProp").getValueObject());
+            assertNull(stored("mapProp").getValueString(), "an object must not be flattened to a string");
         }
 
         @Test
@@ -125,7 +128,7 @@ class PrePostUtilsExtendedTest {
             templateData.put("context", Map.of("arr", innerList));
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
-            verify(conversationProperties).put(eq("listProp"), any(Property.class));
+            assertEquals(List.of("a", "b"), stored("listProp").getValueList());
         }
 
         @Test
@@ -139,7 +142,8 @@ class PrePostUtilsExtendedTest {
             templateData.put("context", Map.of("num", 42));
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
-            verify(conversationProperties).put(eq("intProp"), any(Property.class));
+            assertEquals(42, stored("intProp").getValueInt());
+            assertNull(stored("intProp").getValueString(), "a number used to be stored as an empty string");
         }
 
         @Test
@@ -153,7 +157,7 @@ class PrePostUtilsExtendedTest {
             templateData.put("context", Map.of("fval", 3.14f));
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
-            verify(conversationProperties).put(eq("floatProp"), any(Property.class));
+            assertEquals(3.14f, stored("floatProp").getValueFloat());
         }
 
         @Test
@@ -167,7 +171,88 @@ class PrePostUtilsExtendedTest {
             templateData.put("context", Map.of("flag", true));
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
-            verify(conversationProperties).put(eq("boolProp"), any(Property.class));
+            assertEquals(Boolean.TRUE, stored("boolProp").getValueBoolean());
+        }
+
+        @Test
+        @DisplayName("Double (a JSON decimal) keeps full precision")
+        void doublePropertyValue() throws Exception {
+            var instruction = new PropertyInstruction();
+            instruction.setName("price");
+            instruction.setFromObjectPath("context.price");
+            instruction.setScope(Property.Scope.conversation);
+
+            templateData.put("context", Map.of("price", 48.2081743d));
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+            assertEquals(48.2081743d, stored("price").getValueDouble());
+        }
+
+        @Test
+        @DisplayName("Long beyond the int range is stored as valueLong, a small Long as valueInt")
+        void longPropertyValue() throws Exception {
+            var big = new PropertyInstruction();
+            big.setName("epochMillis");
+            big.setFromObjectPath("context.ts");
+            big.setScope(Property.Scope.conversation);
+            var small = new PropertyInstruction();
+            small.setName("count");
+            small.setFromObjectPath("context.count");
+            small.setScope(Property.Scope.conversation);
+
+            templateData.put("context", Map.of("ts", 1_759_400_000_000L, "count", 7L));
+
+            prePostUtils.executePropertyInstructions(List.of(big, small), 0, false, memory, templateData);
+            assertEquals(1_759_400_000_000L, stored("epochMillis").getValueLong());
+            assertEquals(7, stored("count").getValueInt());
+        }
+
+        @Test
+        @DisplayName("a path that resolves to nothing writes nothing (it used to overwrite with an empty string)")
+        void missingPathWritesNothing() throws Exception {
+            var instruction = new PropertyInstruction();
+            instruction.setName("absent");
+            instruction.setFromObjectPath("context.nope");
+            instruction.setScope(Property.Scope.conversation);
+            templateData.put("context", Map.of());
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+            verify(conversationProperties, never()).put(eq("absent"), any(Property.class));
+        }
+
+        @Test
+        @DisplayName("a failing instruction is recorded in the step and the next one still runs")
+        void failureIsRecordedAndDoesNotStopTheBatch() throws Exception {
+            var step = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(step);
+            when(memory.getConversationId()).thenReturn("conv-1");
+            IData<Object> recorded = mock(IData.class);
+            when(dataFactory.createData(eq(PrePostUtils.KEY_PROPERTY_INSTRUCTION_ERRORS), any())).thenReturn(recorded);
+            when(templatingEngine.processTemplate(eq("{broken"), any()))
+                    .thenThrow(new ITemplatingEngine.TemplateEngineException("unterminated", null));
+
+            var broken = new PropertyInstruction();
+            broken.setName("broken");
+            broken.setValueString("{broken");
+            broken.setScope(Property.Scope.conversation);
+            var fine = new PropertyInstruction();
+            fine.setName("fine");
+            fine.setValueString("ok");
+            fine.setScope(Property.Scope.conversation);
+
+            prePostUtils.executePropertyInstructions(List.of(broken, fine), 0, false, memory, templateData);
+
+            ArgumentCaptor<Object> errors = ArgumentCaptor.forClass(Object.class);
+            verify(dataFactory).createData(eq(PrePostUtils.KEY_PROPERTY_INSTRUCTION_ERRORS), errors.capture());
+            assertTrue(errors.getValue().toString().contains("broken"), errors.getValue().toString());
+            verify(step).storeData(recorded);
+            assertEquals("ok", stored("fine").getValueString());
+        }
+
+        private Property stored(String name) {
+            ArgumentCaptor<Property> captor = ArgumentCaptor.forClass(Property.class);
+            verify(conversationProperties, atLeastOnce()).put(eq(name), captor.capture());
+            return captor.getValue();
         }
 
         @Test
@@ -182,7 +267,7 @@ class PrePostUtilsExtendedTest {
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
             verify(jsonSerialization, never()).deserialize(anyString());
-            verify(conversationProperties).put(eq("noParse"), any(Property.class));
+            assertEquals("{\"key\":\"val\"}", stored("noParse").getValueString());
         }
 
         @Test

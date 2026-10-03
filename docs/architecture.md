@@ -331,6 +331,8 @@ Extensions are the **actual agent logic**:
     {
       "name": "getWeather",
       "actions": ["fetch_weather"],
+      "saveResponse": true,
+      "responseObjectName": "weatherResponse",
       "request": {
         "method": "GET",
         "path": "/current?location={context.userLocation}"

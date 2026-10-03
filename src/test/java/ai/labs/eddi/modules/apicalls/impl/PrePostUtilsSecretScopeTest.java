@@ -175,15 +175,15 @@ class PrePostUtilsSecretScopeTest {
     }
 
     @Test
-    @DisplayName("without scope secret a native non-string value keeps its old behaviour")
-    void nativeNonStringWithoutSecretUnchanged() throws Exception {
+    @DisplayName("without scope secret a native non-string value is stored typed (it used to become an empty string)")
+    void nativeNonStringWithoutSecretStoredTyped() throws Exception {
         templateData.put("tokenResponse", Map.of("expires_in", 3600));
         var instruction = secret("expiresIn", "tokenResponse.expires_in");
         instruction.setScope(Scope.conversation);
 
         prePostUtils.executePropertyInstructions(List.of(instruction), 200, false, memory, templateData);
 
-        assertEquals("", memory.getConversationProperties().get("expiresIn").getValueString());
+        assertEquals(3600, memory.getConversationProperties().get("expiresIn").getValueInt());
     }
 
     @Test
