@@ -296,6 +296,21 @@ def stored_inputs(conv, base=LB):
     return [o.get("input") for o in jl(b).get("conversationOutputs", []) if o.get("input")]
 
 
+def stored_after(conv, expected, timeout=15):
+    """The stored inputs once every turn in `expected` is there (or the timeout). A turn's reply is
+    rendered inside the pipeline, before its write commits, so a read right after the last 200 can
+    precede the last write."""
+    expected = set(expected)
+    stored = []
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        stored = stored_inputs(conv)
+        if expected <= set(stored):
+            break
+        time.sleep(0.5)
+    return stored
+
+
 def conv_state(conv, base=LB):
     return jl(http(base, "GET", f"/agents/{conv}?returnCurrentStepOnly=true")[2]).get("conversationState")
 
@@ -326,7 +341,7 @@ def s1_ordering(infra, ctx):
     # call carries the previous call's user message as its own previous one.
     increasing = all(b > a or b == a == max(counts) for a, b in zip(counts, counts[1:]))
     chained = all(b.get("prev_user") == a["user"] for a, b in zip(entries, entries[1:]))
-    stored = stored_inputs(conv)
+    stored = stored_after(conv, [t for t, r in res if r[0] == 200])
     ok_inputs = [t for t, r in res if r[0] == 200]
     dupes = [x for x, c in collections.Counter(stored).items() if c > 1]
     lost = sorted(set(ok_inputs) - set(stored))
@@ -339,7 +354,7 @@ def s1_ordering(infra, ctx):
     entries2 = sorted(mock_entries(tag2, since=t0), key=lambda e: e["start"])
     overlaps2 = sum(1 for a, b in zip(entries2, entries2[1:]) if b["start"] < a["end"] - 0.01)
     counts2 = [e["messages"] for e in entries2]
-    stored2 = stored_inputs(conv2)
+    stored2 = stored_after(conv2, [t for t, r in res2 if r[0] == 200])
     ok2 = [t for t, r in res2 if r[0] == 200]
     chained2 = all(b.get("prev_user") == a["user"] for a, b in zip(entries2, entries2[1:]))
     record("1", "strict ordering across nodes (18 concurrent 2 s turns + 120 instant turns)",
