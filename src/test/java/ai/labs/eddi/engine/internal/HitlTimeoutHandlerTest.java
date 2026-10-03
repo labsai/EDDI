@@ -4,11 +4,14 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,6 +23,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.lang.reflect.Field;
 import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -274,6 +278,86 @@ class HitlTimeoutHandlerTest {
             assertDoesNotThrow(() -> handler.handleTimeout(metadata));
 
             verify(groupConversationService).skipHumanTurnOnTimeout("gc-1");
+        }
+    }
+
+    // =========================================================================
+    // H2/H3 — a decision that cannot be applied yet keeps the timeout armed;
+    // a decision is bound to the pause it was armed for
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Failure before execution and pause binding")
+    class RetryAndPauseBinding {
+
+        private Map<String, Object> regular(String policy) {
+            return HitlSchedules.timeoutMetadata(policy, HitlSchedules.SURFACE_REGULAR, "conv-1", "1700000000000");
+        }
+
+        @Test
+        @DisplayName("the decision names the pause the timeout was armed for")
+        void decisionCarriesPauseId() throws Exception {
+            handler.handleTimeout(regular("AUTO_REJECT"));
+
+            var captor = ArgumentCaptor.forClass(HitlDecision.class);
+            verify(conversationService).resumeConversation(eq("conv-1"), captor.capture(), isNull());
+            assertEquals("1700000000000", captor.getValue().getPauseId());
+        }
+
+        @Test
+        @DisplayName("agent undeployed while still paused → RetryLaterException, so the fire is FAILED and re-armed, not COMPLETED")
+        void undeployedAgent_isRetried() throws Exception {
+            doThrow(new IllegalStateException("Agent not deployed for resume"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("AUTO_REJECT")));
+        }
+
+        @Test
+        @DisplayName("a node draining for shutdown is retried too")
+        void shutdownDrain_isRetried() throws Exception {
+            doThrow(new RejectedExecutionException("shutting down"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("AUTO_APPROVE")));
+        }
+
+        @Test
+        @DisplayName("a stale fire for an earlier pause completes without deciding anything")
+        void pauseMismatch_isDone() throws Exception {
+            doThrow(new IConversationService.PauseMismatchException("changed"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+
+            assertDoesNotThrow(() -> handler.handleTimeout(regular("AUTO_REJECT")));
+            verify(conversationService, never()).getConversationState(anyString());
+        }
+
+        @Test
+        @DisplayName("a conversation no longer paused (decided, cancelled) completes without retrying")
+        void noLongerPaused_isDone() throws Exception {
+            doThrow(new IllegalStateException("not AWAITING_HUMAN"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.READY);
+
+            assertDoesNotThrow(() -> handler.handleTimeout(regular("AUTO_REJECT")));
+        }
+
+        @Test
+        @DisplayName("group: still awaiting approval → retried; mismatch → done")
+        void group() throws Exception {
+            var md = HitlSchedules.timeoutMetadata("AUTO_REJECT", HitlSchedules.SURFACE_GROUP, "gc-1", "42");
+            doThrow(new IllegalStateException("agent missing")).when(groupConversationService).resumeDiscussion(eq("gc-1"), any(), isNull());
+            var gc = new GroupConversation();
+            gc.setState(GroupConversation.GroupConversationState.AWAITING_APPROVAL);
+            when(groupConversationService.readGroupConversation("gc-1")).thenReturn(gc);
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(md));
+
+            reset(groupConversationService);
+            doThrow(new IGroupConversationService.GroupPauseMismatchException("changed"))
+                    .when(groupConversationService).resumeDiscussion(eq("gc-1"), any(), isNull());
+            assertDoesNotThrow(() -> handler.handleTimeout(md));
         }
     }
 }

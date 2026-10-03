@@ -1513,11 +1513,8 @@ class ConversationHitlService {
             schedule.setEnabled(true);
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(Map.of(
-                    HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
-                    HitlSchedules.METADATA_POLICY_KEY, policy.name(),
-                    HitlSchedules.METADATA_SURFACE_KEY, HitlSchedules.SURFACE_REGULAR,
-                    HitlSchedules.METADATA_CONVERSATION_ID_KEY, conversationId));
+            schedule.setMetadata(HitlSchedules.timeoutMetadata(policy.name(), HitlSchedules.SURFACE_REGULAR, conversationId,
+                    HitlDecision.pauseIdOf(pausedAt)));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled HITL timeout for conversation %s at %s (policy: %s)",
                     sanitize(conversationId), fireAt, policy.name());
