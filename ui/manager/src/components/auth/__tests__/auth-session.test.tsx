@@ -81,6 +81,19 @@ describe("AuthProvider — failure handling", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign in again" })).toBeEnabled());
   });
 
+  it("keeps the banner when updateToken reports the token was not renewed", async () => {
+    const url = `${window.location.origin}/agentstore/agents`;
+    server.use(http.get(url, () => new HttpResponse(null, { status: 401 })));
+    // false = "token still valid, nothing refreshed" — not proof the session is alive.
+    kc.updateToken.mockResolvedValue(false);
+    renderProvider();
+    await screen.findByTestId("app");
+    await expect(api.get("/agentstore/agents")).rejects.toMatchObject({ status: 401 });
+    await screen.findByTestId("session-expired-banner");
+    await expect(api.get("/agentstore/agents")).rejects.toMatchObject({ status: 401 });
+    expect(screen.getByTestId("session-expired-banner")).toBeInTheDocument();
+  });
+
   it("takes the banner down once a refresh succeeds again", async () => {
     const url = `${window.location.origin}/agentstore/agents`;
     let fail = true;

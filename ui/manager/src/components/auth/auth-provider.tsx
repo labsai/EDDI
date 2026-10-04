@@ -92,7 +92,7 @@ function KeycloakAuthProvider({
         // API client, which calls it before each request (a token that expired
         // while the tab was throttled is otherwise only noticed as a 401) and
         // once more, forced, after a 401.
-        const syncTokens = () => {
+        const syncTokens = (refreshed: boolean) => {
           if (!mounted || !keycloak.token) return false;
           api.setAuthToken(keycloak.token);
           // Keep idTokenRef in sync — Keycloak may or may not return a
@@ -103,12 +103,12 @@ function KeycloakAuthProvider({
           }
           // A refresh that works again (a transient failure, a retry) means the
           // session is alive: take the expired banner down.
-          setSessionExpired(false);
+          if (refreshed) setSessionExpired(false);
           return true;
         };
         const refresh = async (force: boolean) => {
-          await keycloak.updateToken(force ? -1 : 30);
-          return syncTokens();
+          const refreshed = await keycloak.updateToken(force ? -1 : 30);
+          return syncTokens(refreshed);
         };
 
         keycloak.onTokenExpired = () => {

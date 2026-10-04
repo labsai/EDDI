@@ -674,6 +674,17 @@ describe("DashboardPage — failure and loading states", () => {
     expect(screen.getByTestId("stat-value-agents")).toHaveTextContent("5");
   });
 
+  it("shows both notices when cached counts are partial and a refetch failed", () => {
+    mockUseDashboardStats.mockReturnValue({
+      data: { agentCount: 5, workflowCount: 0, conversationCount: 42, resourceCount: 0, failed: ["workflows"] },
+      isLoading: false,
+      isError: true,
+      refetch: vi.fn(),
+    });
+    renderWithProviders(<DashboardPage />);
+    expect(screen.getAllByTestId("refetch-error-notice")).toHaveLength(2);
+  });
+
   it("renders the error, with its cause, when every count failed", () => {
     mockUseDashboardStats.mockReturnValue({
       data: undefined,

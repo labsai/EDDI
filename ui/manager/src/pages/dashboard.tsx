@@ -224,7 +224,7 @@ export function DashboardPage() {
       <OperatorDiscoveryCard />
 
       {/* Stats cards */}
-      {stats?.failed && stats.failed.length > 0 ? (
+      {stats?.failed && stats.failed.length > 0 && (
         <RefetchErrorNotice
           onRetry={() => void refetchStats?.()}
           message={t(
@@ -232,10 +232,10 @@ export function DashboardPage() {
             "Some counts could not be loaded — they are shown as unavailable, not zero.",
           )}
         />
-      ) : (
-        // A failed refetch keeps the last good counts on screen; say they are stale.
-        statsError && stats && <RefetchErrorNotice onRetry={() => void refetchStats?.()} />
       )}
+      {/* A failed refetch keeps the last good counts on screen; say they are stale.
+          Independent of the partial notice: both can be true at once. */}
+      {statsError && stats && <RefetchErrorNotice onRetry={() => void refetchStats?.()} />}
       {statsError && !stats ? (
         <div data-tour="dashboard-stats">
           <ErrorState
