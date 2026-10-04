@@ -125,6 +125,35 @@ describe("ChatPanel — transcript and agent selector accessibility", () => {
     expect(useChatStore.getState().selectedAgentId).toBeFalsy();
   });
 
+  it("does not send the message input on an IME-confirming Enter, but sends on a normal one", async () => {
+    let posted = 0;
+    server.use(
+      http.post("*/agents/conv1", () => {
+        posted += 1;
+        return HttpResponse.json({
+          conversationOutputs: [{ output: [{ type: "text", text: "got it" }] }],
+        });
+      }),
+    );
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    const user = userEvent.setup();
+    renderWithProviders(<ChatPanel />);
+
+    const input = screen.getByTestId("chat-input");
+    await waitFor(() => expect(input).toBeEnabled());
+    await user.type(input, "にほん");
+
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(posted).toBe(0);
+    expect(useChatStore.getState().messages).toHaveLength(0);
+    expect(input).toHaveValue("にほん");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(posted).toBe(1));
+  });
+
   it("opens the list from the trigger with ArrowDown", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ChatPanel />);
