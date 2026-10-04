@@ -173,9 +173,13 @@ public class NatsSharedStateFactory implements ISharedStateFactory {
                                 : "Recreate the bucket to apply it.");
                 return;
             }
-            boolean direct = status.getBackingStreamInfo() == null || status.getBackingStreamInfo().getConfiguration().getAllowDirect();
-            if (!spec.ttl().equals(status.getTtl()) || direct) {
-                connections.jetStreamManagement().updateStream(leaderReads(desired));
+            StreamConfiguration current = status.getBackingStreamInfo().getConfiguration();
+            if (!spec.ttl().equals(status.getTtl()) || current.getAllowDirect()) {
+                // From the bucket's own stream configuration, so everything else — the first
+                // sequence a fenced bucket was created with above all, which the desired
+                // configuration does not carry — stays as it is.
+                connections.jetStreamManagement()
+                        .updateStream(StreamConfiguration.builder(current).maxAge(spec.ttl()).allowDirect(false).build());
                 LOGGER.infof("Updated KV bucket %s (ttl %s, reads answered by the stream leader only)", name, spec.ttl());
             }
         } catch (IOException | JetStreamApiException e) {

@@ -83,3 +83,4 @@ to the single-node behaviour it had before.
 - **Deployment sweep:** a local undeploy forgets the version's record history, so an
   unrecorded redeploy whose event overtook the undeploy is not undeployed again.
 - **Docs (PR #958 review):** `clustering.md` no longer says that losing NATS loses no audit entry. An entry the database refused waits only in the dead-letter stream. The page also no longer says the demo covers every failure scenario on it.
+- **KV reads come from the stream leader (console review).** Every bucket is created with direct get off, and a bucket that still has it on is switched in place. The switch starts from the bucket's own stream configuration, so a fenced bucket keeps its first sequence; starting from the desired configuration reset it to 1, which `ClusterCoordinatorIT` caught. A KV handle drops itself after any failed call, so a handle opened before the switch recovers on its next call instead of at the next reconnect.
