@@ -2,7 +2,10 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 
-const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+// Disabled controls cannot take focus: counting one as the first or last stop made
+// Tab step out of the dialog when the last control (say a disabled "Replay") was disabled.
+const FOCUSABLE =
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 /**
  * A side sheet for details: modal (focus is trapped inside, Escape and the
@@ -31,6 +34,13 @@ export function ClusterDrawer({
     returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   }
   wasOpen.current = open;
+  // Callers pass an inline arrow; depending on it re-ran the effect below on every
+  // parent render (each data refresh), whose cleanup returned focus to the opener
+  // behind the dialog and then pulled it back to the first control.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -41,7 +51,7 @@ export function ClusterDrawer({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -51,7 +61,7 @@ export function ClusterDrawer({
       const target = returnTo.current;
       if (target?.isConnected) target.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
