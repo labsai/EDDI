@@ -679,6 +679,11 @@
           "expr": "sum(rate(eddi_cluster_ratelimit_decisions_total{job=~\"$job\"}[$__rate_interval])) by (scope, outcome)",
           "legendFormat": "{{scope}} {{outcome}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eddi_cluster_ratelimit_cas_retries_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "CAS retries",
+          "refId": "B"
         }
       ],
       "fieldConfig": {

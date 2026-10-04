@@ -335,13 +335,9 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     }
 
     /** Removes the dead letters of one conversation (GDPR erasure). */
+    @Override
     public int purgeDeadLetters(String conversationId) {
-        int purged = 0;
-        for (DeadLetterEntry local : super.getDeadLetters()) {
-            if (conversationId.equals(local.conversationId()) && super.discardDeadLetter(local.id())) {
-                purged++;
-            }
-        }
+        int purged = super.purgeDeadLetters(conversationId);
         purged += deadLetterStore.purgeConversation(conversationId);
         deadLetterCountAt = 0;
         return purged;

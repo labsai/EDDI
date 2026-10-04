@@ -4,6 +4,15 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import java.util.OptionalDouble;
+import java.nio.charset.StandardCharsets;
+import jakarta.enterprise.inject.Instance;
+import ai.labs.eddi.engine.cluster.SharedBucket;
+import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
+import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.engine.cluster.ISharedKv;
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
+import ai.labs.eddi.engine.cluster.ClusterConfig;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -199,6 +208,72 @@ public class ToolCostTracker {
         return trackToolCall(ToolInvocation.of(toolName), conversationId);
     }
 
+    // ---- cluster mode: per-conversation totals shared by every node ----
+
+    /** Field-injected; null in tests built with {@code new}. */
+    @Inject
+    ClusterConfig clusterConfig;
+
+    @Inject
+    Instance<NatsSharedStateFactory> natsSharedState;
+
+    private volatile ISharedKv costs;
+
+    private ISharedKv costs() {
+        if (clusterConfig == null || !clusterConfig.isNats()) {
+            return null;
+        }
+        ISharedKv kv = costs;
+        if (kv == null) {
+            kv = natsSharedState.get().bucket(new SharedBucket("COSTS", clusterConfig.costTtl(), 256));
+            costs = kv;
+        }
+        return kv;
+    }
+
+    /**
+     * Cluster mode: adds {@code cost} to the conversation's shared total (CAS; the
+     * turn holds the conversation's lease, so it is uncontended). A turn that runs
+     * on another node therefore sees what earlier turns spent anywhere — the
+     * per-conversation budget is enforced cluster-wide. NATS unreachable: the cost
+     * is still counted locally, and the budget check falls back to the local total.
+     */
+    private void addSharedCost(String conversationId, double cost) {
+        ISharedKv kv = costs();
+        if (kv == null || conversationId == null || cost <= 0) {
+            return;
+        }
+        String key = "c." + KvKeys.safe(conversationId);
+        try {
+            for (int attempt = 0; attempt < 5; attempt++) {
+                var current = kv.get(key);
+                double total = current.map(v -> Double.parseDouble(new String(v.value(), StandardCharsets.UTF_8))).orElse(0.0);
+                byte[] next = Double.toString(total + cost).getBytes(StandardCharsets.UTF_8);
+                var written = current.isPresent() ? kv.update(key, next, current.get().revision()) : kv.create(key, next);
+                if (written.isPresent()) {
+                    return;
+                }
+            }
+        } catch (ClusterUnavailableException | NumberFormatException e) {
+            LOGGER.debugf("Shared cost total of %s not updated: %s", sanitize(conversationId), e.getMessage());
+        }
+    }
+
+    /** The shared total, or empty when not clustered or unreachable. */
+    private OptionalDouble sharedCost(String conversationId) {
+        ISharedKv kv = costs();
+        if (kv == null || conversationId == null) {
+            return OptionalDouble.empty();
+        }
+        try {
+            return kv.get("c." + KvKeys.safe(conversationId))
+                    .map(v -> OptionalDouble.of(Double.parseDouble(new String(v.value(), StandardCharsets.UTF_8))))
+                    .orElse(OptionalDouble.of(0.0));
+        } catch (ClusterUnavailableException | NumberFormatException e) {
+            return OptionalDouble.empty();
+        }
+    }
+
     /**
      * Track cost for a tool call.
      *
@@ -238,6 +313,7 @@ public class ToolCostTracker {
 
         // Track per-conversation costs
         conversationCosts.computeIfAbsent(conversationId, ConversationCostMetrics::new).addToolCost(toolName, cost);
+        addSharedCost(conversationId, cost);
 
         // Evict oldest entries if map exceeds max size
         evictIfNeeded();
@@ -291,6 +367,16 @@ public class ToolCostTracker {
      * Check if conversation is within budget
      */
     public boolean isWithinBudget(String conversationId, double maxBudget) {
+        var shared = sharedCost(conversationId);
+        if (shared.isPresent()) {
+            boolean within = shared.getAsDouble() <= maxBudget;
+            if (!within) {
+                recordMeter(() -> meterRegistry.counter("eddi.tool.budget.exceeded").increment());
+                LOGGER.warn(String.format("Conversation %s exceeded budget (cluster-wide): $%.4f > $%.4f", sanitize(conversationId),
+                        shared.getAsDouble(), maxBudget));
+            }
+            return within;
+        }
         ConversationCostMetrics metrics = conversationCosts.get(conversationId);
         if (metrics == null) {
             return true;

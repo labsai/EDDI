@@ -440,6 +440,19 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
     }
 
     @Override
+    public int purgeDeadLetters(String conversationId) {
+        int removed = 0;
+        Iterator<DeadLetterEntry> it = deadLetters.iterator();
+        while (it.hasNext()) {
+            if (Objects.equals(conversationId, it.next().conversationId())) {
+                it.remove();
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    @Override
     public int purgeDeadLetters() {
         int count = deadLetters.size();
         deadLetters.clear();

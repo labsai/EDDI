@@ -10,9 +10,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import io.nats.client.Connection;
-import io.nats.client.JetStream;
-import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -237,8 +234,7 @@ class AuditLedgerServiceBranchTest {
         AgentSigningService signingService = mock(AgentSigningService.class);
         doReturn("sig123").when(signingService).sign(anyString(), anyString(), anyString());
 
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(false).when(natsInstance).isResolvable();
+        IAuditClusterSupport natsInstance = null;
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.of("master-key"), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
@@ -273,8 +269,7 @@ class AuditLedgerServiceBranchTest {
         doThrow(new AgentSigningService.AgentSigningException("no key", new RuntimeException("missing")))
                 .when(signingService).sign(anyString(), anyString(), anyString());
 
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(false).when(natsInstance).isResolvable();
+        IAuditClusterSupport natsInstance = null;
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
@@ -305,8 +300,7 @@ class AuditLedgerServiceBranchTest {
         AgentSigningService signingService = mock(AgentSigningService.class);
         doReturn("sig-from-id").when(signingService).sign(anyString(), anyString(), anyString());
 
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(false).when(natsInstance).isResolvable();
+        IAuditClusterSupport natsInstance = null;
 
         // No master key → no hmac
         var service = new AuditLedgerService(auditStore, true, 60,
@@ -353,22 +347,17 @@ class AuditLedgerServiceBranchTest {
 
     // ==================== writeToDeadLetter — NATS path ====================
 
-    @SuppressWarnings("unchecked")
     @Test
-    @DisplayName("writeToDeadLetter publishes to NATS when available")
+    @DisplayName("writeToDeadLetter publishes to the cluster dead-letter stream in cluster mode")
     void writeToDeadLetterNats() throws Exception {
-        Connection conn = mock(Connection.class);
-        doReturn(Connection.Status.CONNECTED).when(conn).getStatus();
-        JetStream js = mock(JetStream.class);
-        doReturn(js).when(conn).jetStream();
-
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(true).when(natsInstance).isResolvable();
-        doReturn(conn).when(natsInstance).get();
+        IAuditClusterSupport cluster = mock(IAuditClusterSupport.class);
+        doReturn(true).when(cluster).isClustered();
+        doReturn(true).when(cluster).publishDeadLetter(anyString());
+        doReturn(OptionalLong.of(0L)).when(cluster).nextSequence(anyString(), any());
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
+                true, 500, meterRegistry, cluster, null, new ObjectMapper());
         service.init();
 
         // Make flush fail 3 times to trigger dead letter
@@ -379,7 +368,7 @@ class AuditLedgerServiceBranchTest {
         service.flush(); // fail 2
         service.flush(); // fail 3 → drop → writeToDeadLetter
 
-        verify(js).publish(eq("eddi.deadletter.audit"), any(byte[].class));
+        verify(cluster).publishDeadLetter(argThat(json -> json.contains("audit_dead_letter")));
         assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
                 "the abandoned entry must be counted as dropped, not silently stored by the per-entry retry");
 
@@ -389,25 +378,19 @@ class AuditLedgerServiceBranchTest {
     // ==================== writeToDeadLetter — NATS fails, fallback to file
     // ====================
 
-    @SuppressWarnings("unchecked")
     @Test
-    @DisplayName("writeToDeadLetter falls back to file when NATS publish fails")
+    @DisplayName("writeToDeadLetter falls back to file when the cluster stream is unavailable")
     void writeToDeadLetterNatsFails() throws Exception {
-        Connection conn = mock(Connection.class);
-        doReturn(Connection.Status.CONNECTED).when(conn).getStatus();
-        JetStream js = mock(JetStream.class);
-        doReturn(js).when(conn).jetStream();
-        doThrow(new RuntimeException("nats fail")).when(js).publish(anyString(), any(byte[].class));
-
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(true).when(natsInstance).isResolvable();
-        doReturn(conn).when(natsInstance).get();
+        IAuditClusterSupport cluster = mock(IAuditClusterSupport.class);
+        doReturn(true).when(cluster).isClustered();
+        doReturn(false).when(cluster).publishDeadLetter(anyString());
+        doReturn(OptionalLong.of(0L)).when(cluster).nextSequence(anyString(), any());
 
         // Use a temp file path that likely fails (to cover the file-fallback error
         // path)
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), unwritableDeadLetterPath(), false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
+                true, 500, meterRegistry, cluster, null, new ObjectMapper());
         service.init();
 
         storeIsDown();
@@ -417,17 +400,16 @@ class AuditLedgerServiceBranchTest {
         service.flush();
         service.flush(); // triggers dead letter
 
-        // NATS was actually attempted: without this the test would still pass if
-        // writeToDeadLetter were never reached at all.
-        verify(js, atLeastOnce()).publish(anyString(), any(byte[].class));
+        // The stream was actually attempted: without this the test would still pass
+        // if writeToDeadLetter were never reached at all.
+        verify(cluster, atLeastOnce()).publishDeadLetter(anyString());
         // ...and the file fallback genuinely failed rather than quietly succeeding.
         assertFalse(Files.exists(Path.of(unwritableDeadLetterPath())),
                 "the dead-letter write must fail, otherwise this test does not cover the failure path");
-        verify(js).publish(eq("eddi.deadletter.audit"), any(byte[].class));
         assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
                 "the dead-letter path must actually have been reached");
 
-        // Should not throw even though both NATS and file fail
+        // Should not throw even though both the stream and the file fail
         service.shutdown();
     }
 
@@ -446,8 +428,7 @@ class AuditLedgerServiceBranchTest {
     @Test
     @DisplayName("writeToDeadLetter creates the parent directory rather than silently writing nothing")
     void deadLetterWriteCreatesItsMissingParentDirectory(@TempDir Path tempDir) throws Exception {
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(false).when(natsInstance).isResolvable();
+        IAuditClusterSupport natsInstance = null;
 
         Path deadLetterFile = tempDir.resolve("opt").resolve("eddi").resolve("data").resolve("audit-deadletter.jsonl");
         var service = new AuditLedgerService(auditStore, true, 60,
@@ -480,8 +461,7 @@ class AuditLedgerServiceBranchTest {
     @Test
     @DisplayName("writeToDeadLetter uses file when NATS not available")
     void writeToDeadLetterFileOnly() throws Exception {
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(false).when(natsInstance).isResolvable();
+        IAuditClusterSupport natsInstance = null;
 
         // Use a nonexistent path to test error handling
         var service = new AuditLedgerService(auditStore, true, 60,
@@ -496,14 +476,10 @@ class AuditLedgerServiceBranchTest {
         service.flush();
         service.flush(); // triggers dead letter
 
-        // NATS is unresolvable, so the file fallback is the path under test...
-        verify(natsInstance, atLeastOnce()).isResolvable();
-        verify(natsInstance, never()).get();
-        // ...and it failed, rather than creating the file and passing vacuously.
+        // No cluster support (single node), so the file fallback is the path under
+        // test — and it failed, rather than creating the file and passing vacuously.
         assertFalse(Files.exists(Path.of(unwritableDeadLetterPath())),
                 "the dead-letter write must fail, otherwise this test does not cover the failure path");
-        verify(natsInstance).isResolvable();
-        verify(natsInstance, never()).get(); // unresolvable → straight to the file branch
         assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
                 "the dead-letter path must actually have been reached");
 
@@ -521,8 +497,7 @@ class AuditLedgerServiceBranchTest {
         doThrow(mock(JsonProcessingException.class)).when(failingMapper).writeValueAsString(any());
 
         @SuppressWarnings("unchecked")
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(false).when(natsInstance).isResolvable();
+        IAuditClusterSupport natsInstance = null;
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
@@ -560,22 +535,18 @@ class AuditLedgerServiceBranchTest {
         service.shutdown();
     }
 
-    // ==================== NATS connection not CONNECTED ====================
+    // ==================== single node: cluster support present but inert
+    // ====================
 
-    @SuppressWarnings("unchecked")
     @Test
-    @DisplayName("writeToDeadLetter skips NATS when connection not CONNECTED")
+    @DisplayName("writeToDeadLetter never uses the cluster stream on a single node")
     void writeToDeadLetterNatsNotConnected() throws Exception {
-        Connection conn = mock(Connection.class);
-        doReturn(Connection.Status.CLOSED).when(conn).getStatus();
-
-        Instance<Connection> natsInstance = mock(Instance.class);
-        doReturn(true).when(natsInstance).isResolvable();
-        doReturn(conn).when(natsInstance).get();
+        IAuditClusterSupport cluster = mock(IAuditClusterSupport.class);
+        doReturn(false).when(cluster).isClustered();
 
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), unwritableDeadLetterPath(), false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, 500, meterRegistry, natsInstance, null, new ObjectMapper());
+                true, 500, meterRegistry, cluster, null, new ObjectMapper());
         service.init();
 
         storeIsDown();
@@ -587,8 +558,8 @@ class AuditLedgerServiceBranchTest {
 
         assertEquals(1.0, meterRegistry.counter("eddi_audit_entries_dropped_total").count(),
                 "the dead-letter path must actually have been reached");
-        // Should not call jetStream since connection is CLOSED
-        verify(conn, never()).jetStream();
+        verify(cluster, never()).publishDeadLetter(anyString());
+        verify(cluster, never()).nextSequence(anyString(), any());
 
         service.shutdown();
     }
