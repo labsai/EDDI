@@ -28,9 +28,9 @@ import io.nats.client.impl.Headers;
  * {@link ISharedKv} on a NATS JetStream KV bucket.
  * <p>
  * The bucket handle is opened lazily and re-opened after a reconnect. A "wrong
- * last sequence" answer (API error 10071, or 10164 when the write expected the
- * key not to exist yet) is the server telling us a create found the key or a
- * compare-and-set lost — returned as a conflict, not thrown. Every other
+ * last sequence" answer (API error 10071, or 10164 for a write that expected
+ * the key not to exist yet) is the server telling us a create found the key or
+ * a compare-and-set lost — returned as a conflict, not thrown. Every other
  * failure is a {@link ClusterUnavailableException}, so a caller can apply its
  * degraded policy at once.
  */
@@ -40,12 +40,16 @@ public class NatsSharedKv implements ISharedKv {
     static final int WRONG_LAST_SEQUENCE = 10071;
     /**
      * The same answer to a write that expected the key not to exist yet (a create).
-     * Seen live as the loser of two concurrent creates of one key: before it was
-     * recognised, losing that race was reported as NATS being unreachable.
+     * The loser of two concurrent creates of one key gets it (seen live, 8 of 15
+     * races): before it was recognised, losing that race — two nodes racing for one
+     * lease — was reported as NATS being unreachable.
      */
     static final int WRONG_LAST_SEQUENCE_CONSTANT = 10164;
 
-    /** Whether the server refused a write because the key or its revision moved. */
+    /**
+     * Whether the server refused a write because the key exists or its revision
+     * moved.
+     */
     static boolean isConflict(JetStreamApiException e) {
         return e.getApiErrorCode() == WRONG_LAST_SEQUENCE || e.getApiErrorCode() == WRONG_LAST_SEQUENCE_CONSTANT;
     }

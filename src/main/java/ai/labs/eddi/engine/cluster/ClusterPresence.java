@@ -127,23 +127,36 @@ public class ClusterPresence {
         if (now - cachedAt < MEMBER_CACHE_MILLIS) {
             return cachedMembers;
         }
-        List<Map<String, Object>> members = new ArrayList<>();
         try {
-            for (String key : nodes.keys()) {
-                if (!key.startsWith(KEY_PREFIX)) {
-                    continue;
-                }
-                nodes.get(key).ifPresent(v -> {
-                    try {
-                        members.add(JSON.readValue(v.value(), new TypeReference<Map<String, Object>>() {
-                        }));
-                    } catch (IOException e) {
-                        LOGGER.debugf("Unreadable presence record %s", key);
-                    }
-                });
-            }
+            return currentMembers();
         } catch (ClusterUnavailableException e) {
+            LOGGER.debugf("Presence read failed, answering with the last member list: %s", e.getMessage());
             return cachedMembers;
+        }
+    }
+
+    /**
+     * The presence records read now, uncached; throws
+     * {@link ClusterUnavailableException} when the bucket cannot be read. For a
+     * decision that must not be taken on a stale or empty list — "is this the last
+     * node serving?" — where {@link #members()} would answer from its cache, or
+     * with nothing before the first successful read.
+     */
+    public List<Map<String, Object>> currentMembers() {
+        long now = System.currentTimeMillis();
+        List<Map<String, Object>> members = new ArrayList<>();
+        for (String key : nodes.keys()) {
+            if (!key.startsWith(KEY_PREFIX)) {
+                continue;
+            }
+            nodes.get(key).ifPresent(v -> {
+                try {
+                    members.add(JSON.readValue(v.value(), new TypeReference<Map<String, Object>>() {
+                    }));
+                } catch (IOException e) {
+                    LOGGER.debugf("Unreadable presence record %s", key);
+                }
+            });
         }
         members.sort(Comparator.comparing(m -> String.valueOf(m.get("node"))));
         cachedMembers = List.copyOf(members);
