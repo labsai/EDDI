@@ -298,15 +298,21 @@ export function AgentStudioPage() {
   const confirmSaveThenLeave = useCallback(async () => {
     const action = pendingNavigation;
     if (!action) return;
-    const results = await Promise.all([...savers.current.values()].map((save) => save()));
-    if (results.every(Boolean)) {
-      setPendingNavigation(null);
-      action();
+    // Only panels that actually hold edits, one after the other: two saves in
+    // parallel would race on the same resource, workflow and agent versions.
+    let ok = true;
+    for (const panelId of dirtyPanels) {
+      const save = savers.current.get(panelId);
+      if (save && !(await save())) {
+        ok = false;
+        break;
+      }
     }
-    // A failed save keeps the prompt closed and the edits in place — the error
-    // is already on screen as a toast.
-    else setPendingNavigation(null);
-  }, [pendingNavigation]);
+    setPendingNavigation(null);
+    // A failed save keeps the edits in place — the error is already on screen
+    // as a toast.
+    if (ok) action();
+  }, [pendingNavigation, dirtyPanels]);
 
   if (!agentId) {
     return (

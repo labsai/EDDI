@@ -219,7 +219,7 @@ describe("WorkflowDetailPage — a step added in this session", () => {
     expect(url.searchParams.get("agentVer")).toBe("4");
   });
 
-  it("offers to delete configs created during the edit when the edit is discarded", async () => {
+  it("shows no delete-created option when the discarded edit created nothing", async () => {
     renderWorkflow();
     await waitFor(() => expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("6"));
     // A removed step is dirty enough to discard; the created-resource checkbox

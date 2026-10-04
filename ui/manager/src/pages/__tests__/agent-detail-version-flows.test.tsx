@@ -158,7 +158,7 @@ describe("AgentDetailPage — section saves", () => {
     const [title, options] = toastSuccess.mock.calls[0]!;
     expect(String(title)).toBe("Saved as v2 — not live yet");
     // The one action that closes the gap.
-    expect(options.action.label).toBe("Deploy");
+    expect(options.action.label).toBe("Deploy to production");
   });
 });
 

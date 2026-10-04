@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
@@ -165,11 +165,17 @@ export function ConfigEditorLayout({
 
   // Ctrl/Cmd+S saves, as in every editor. Re-bound on each change so it never
   // saves stale data.
+  const containerRef = useRef<HTMLDivElement>(null);
   const busy = isSaving || isSaveAndDeploying;
   useEffect(() => {
     if (readOnly) return;
     function onKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s") {
+        // Only for the editor that has focus: several can be mounted at once
+        // (the Studio mounts a desktop and a mobile panel), and an unfocused
+        // one must not save on a shortcut meant for another.
+        const target = e.target instanceof Node ? e.target : document.activeElement;
+        if (!containerRef.current || !target || !containerRef.current.contains(target)) return;
         e.preventDefault();
         if (isDirty && !busy) handleSave();
       }
@@ -179,7 +185,7 @@ export function ConfigEditorLayout({
   }, [readOnly, isDirty, busy, handleSave]);
 
   return (
-    <div className="space-y-4" data-testid="config-editor-layout">
+    <div ref={containerRef} className="space-y-4" data-testid="config-editor-layout">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">

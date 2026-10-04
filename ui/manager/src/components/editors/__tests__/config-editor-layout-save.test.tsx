@@ -109,22 +109,30 @@ describe("ConfigEditorLayout — save feedback", () => {
   it("saves on Ctrl+S and on Cmd+S, only when there is something to save", () => {
     const onSave = vi.fn();
     renderWithProviders(<ConfigEditorLayout {...props} onSave={onSave} />);
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(screen.getByTestId("config-editor-layout"), { key: "s", ctrlKey: true });
     expect(onSave).not.toHaveBeenCalled(); // clean
 
     fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: '{"a": 3}' } });
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(screen.getByTestId("config-editor-layout"), { key: "s", ctrlKey: true });
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave).toHaveBeenCalledWith('{"a": 3}');
 
-    fireEvent.keyDown(window, { key: "s", metaKey: true });
+    fireEvent.keyDown(screen.getByTestId("config-editor-layout"), { key: "s", metaKey: true });
     expect(onSave).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores Ctrl+S that does not come from inside this editor", () => {
+    const onSave = vi.fn();
+    renderWithProviders(<ConfigEditorLayout {...props} onSave={onSave} />);
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: '{"a": 3}' } });
+    fireEvent.keyDown(document.body, { key: "s", ctrlKey: true });
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("does not save on Ctrl+S in read-only mode", () => {
     const onSave = vi.fn();
     renderWithProviders(<ConfigEditorLayout {...props} onSave={onSave} readOnly />);
-    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(screen.getByTestId("config-editor-layout"), { key: "s", ctrlKey: true });
     expect(onSave).not.toHaveBeenCalled();
   });
 });

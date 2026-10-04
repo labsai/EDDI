@@ -268,6 +268,8 @@ export function StudioEditorPanel({
   // The layout reports its working copy; the page asks about it before it
   // replaces this editor with another stage's.
   const draftRef = useRef<{ data: string; dirty: boolean }>({ data: "", dirty: false });
+  const busyRef = useRef(false);
+  busyRef.current = isSaveAndTesting || cascadeSave.isPending;
   const handleDraftChange = useCallback(
     (draft: { data: string; dirty: boolean }) => {
       const wasDirty = draftRef.current.dirty;
@@ -279,7 +281,11 @@ export function StudioEditorPanel({
   useEffect(() => {
     registerSaver?.(panelId, async () => {
       const { data: draft, dirty } = draftRef.current;
-      return dirty ? saveJson(draft) : true;
+      if (!dirty) return true;
+      // A save or Save & Test is already writing: starting a second would race
+      // it on the same versions. Report "not saved" so the page stays put.
+      if (busyRef.current) return false;
+      return saveJson(draft);
     });
     return () => registerSaver?.(panelId, null);
   }, [registerSaver, panelId, saveJson]);

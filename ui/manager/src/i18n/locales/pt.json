@@ -463,7 +463,7 @@
       "noticePlaceholder": "As conversas com este agente podem ser lidas pelas pessoas que o mantêm, para melhorá-lo.",
       "versionNote": "Abrange conversas na versão criada por esta alteração e nas posteriores — nunca o que foi dito antes. Slack, Teams e clientes da API não conseguem exibir o aviso; se as pessoas usarem este agente por esses meios, mencione isso na saudação."
     },
-    "liveElsewhere": "Ativa: v{{live}} · A ver v{{viewing}} (não implementada)",
+    "liveElsewhere": "Ativa: v{{live}} · A ver v{{viewing}} (não implantada)",
     "removeWorkflow": "Remover o fluxo de trabalho do agente",
     "confirmRemoveWorkflow": "Remover o fluxo de trabalho deste agente?",
     "confirmRemoveWorkflowDescription": "{{name}} é removido deste agente numa nova versão do agente, ainda não ativa. O fluxo de trabalho em si não é eliminado.",
@@ -2143,7 +2143,7 @@
     "selectStageHint": "Selecione uma extensão no pipeline para ver e editar a sua configuração em linha",
     "noConfig": "Esta etapa do pipeline não tem URI de configuração",
     "unsupportedType": "Editor não disponível para este tipo de extensão",
-    "testReady": "Guardado e implementado como v{{version}} — o chat está pronto",
+    "testReady": "Guardado e implantado como v{{version}} — o chat está pronto",
     "workflow": "Fluxo de trabalho",
     "unsavedTitle": "Alterações por guardar nesta etapa",
     "unsavedMessage": "Mudar de etapa substitui o editor. Guarde primeiro as alterações, descarte-as ou permaneça nesta etapa.",

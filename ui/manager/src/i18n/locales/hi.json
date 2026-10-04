@@ -622,7 +622,7 @@
     "saved": "Workflow सफलतापूर्वक सहेजा गया",
     "saveError": "Workflow सहेजने में विफल",
     "noTasks": "[EN] No tasks in this workflow",
-    "addTask": "[EN] Add Task",
+    "addTask": "कार्य जोड़ें",
     "stepUnsaved": "अभी सहेजा नहीं गया",
     "saveAndEditHint": "यह चरण अभी सहेजा नहीं गया है। पहले वर्कफ़्लो सहेजें, फिर उसका कॉन्फ़िगरेशन संपादित करें।",
     "saveAndEdit": "वर्कफ़्लो सहेजें और संपादित करें",

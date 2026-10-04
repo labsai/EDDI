@@ -44,7 +44,8 @@ export function showSavedNotLiveToast(opts: {
       action:
         version !== undefined
           ? {
-              label: t("editor.deployNow", "Deploy"),
+              // The action always targets production; say so.
+              label: t("agents.deployToProduction", "Deploy to production"),
               onClick: () => {
                 deployAgent("production", agentId, version)
                   .then(() => {

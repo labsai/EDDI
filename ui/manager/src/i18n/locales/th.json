@@ -622,7 +622,7 @@
     "saved": "บันทึก Workflow สำเร็จ",
     "saveError": "บันทึก Workflow ล้มเหลว",
     "noTasks": "[EN] No tasks in this workflow",
-    "addTask": "[EN] Add Task",
+    "addTask": "เพิ่มงาน",
     "stepUnsaved": "ยังไม่ได้บันทึก",
     "saveAndEditHint": "ขั้นตอนนี้ยังไม่ได้บันทึก โปรดบันทึกเวิร์กโฟลว์ก่อน แล้วจึงแก้ไขการกำหนดค่า",
     "saveAndEdit": "บันทึกเวิร์กโฟลว์และแก้ไข",

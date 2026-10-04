@@ -489,6 +489,17 @@ export function WorkflowDetailPage() {
           return newWfUri;
         }),
       };
+      // Nothing to repoint: do not write an unchanged agent version and call it saved.
+      if (!replaced) {
+        toast.error(
+          t(
+            "packageEditor.agentMissingWorkflow",
+            "Agent version {{agentVer}} does not use this workflow, so saving here would not change the agent. Nothing was saved.",
+            { agentVer: currentAgentVer },
+          ),
+        );
+        return;
+      }
       const result = agentCompatible
         ? await updateAgent(agentId, currentAgentVer, updatedAgent, { compatible: true })
         : await updateAgent(agentId, currentAgentVer, updatedAgent);
