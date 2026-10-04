@@ -337,7 +337,7 @@ export function ClusterDeadLettersPanel({ nodes, initialConversationId = "" }: {
                     <button
                       className="w-full truncate text-start text-foreground underline-offset-2 hover:underline"
                       onClick={() => setDetail(e)}
-                      title={e.error}
+                      title={e.error ?? undefined}
                       data-testid={`cluster-dl-open-${e.id}`}
                     >
                       {e.error}

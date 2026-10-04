@@ -105,7 +105,7 @@ function useClusterMutation<TArg, TResult>(fn: (arg: TArg) => Promise<TResult>) 
 }
 
 export const useReleaseLease = () =>
-  useClusterMutation((args: { conversationId: string; expectedRevision: number | null }) =>
+  useClusterMutation((args: { conversationId: string; expectedRevision: string | null }) =>
     releaseLease(args.conversationId, args.expectedRevision),
   );
 export const useReplayDeadLetters = () => useClusterMutation(replayDeadLetters);
@@ -160,6 +160,7 @@ export function useClusterActivity(enabled = true): ClusterActivityState {
   const [exhausted, setExhausted] = useState(false);
   const [error, setError] = useState(false);
   const pausedRef = useRef(false);
+  const [generation, setGeneration] = useState(0);
 
   const accept = useCallback((incoming: ActivityEvent[]) => {
     if (pausedRef.current) setBuffer((b) => mergeActivity(b, incoming));
@@ -189,6 +190,13 @@ export function useClusterActivity(enabled = true): ClusterActivityState {
       }
     });
     source.addEventListener("ping", () => setLive(true));
+    // The server closes a stream whose access token expired; open a new one, which
+    // carries the refreshed token and is checked again.
+    source.addEventListener("expired", () => {
+      source.close();
+      setLive(false);
+      setGeneration((g) => g + 1);
+    });
     source.addEventListener("busy", () => {
       setLive(false);
       setExhausted(true);
@@ -208,7 +216,7 @@ export function useClusterActivity(enabled = true): ClusterActivityState {
     };
     source.onexhausted = () => setExhausted(true);
     return () => source.close();
-  }, [enabled, accept, refresh]);
+  }, [enabled, accept, refresh, generation]);
 
   const setPaused = useCallback((next: boolean) => {
     pausedRef.current = next;

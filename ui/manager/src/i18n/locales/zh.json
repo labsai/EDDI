@@ -5332,7 +5332,8 @@
       "notFound": "已不存在",
       "notReplayable": "不可重放",
       "rejected": "被拒绝——已保留",
-      "unavailable": "NATS 不可达——已保留"
+      "unavailable": "NATS 不可达——已保留",
+      "inProgress": "其他人正在重放 — 不会执行两次"
     },
     "activity": {
       "nodeJoined": "节点 {{node}} 已加入",

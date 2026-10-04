@@ -178,7 +178,7 @@ describe("Cluster console — leases", () => {
         bodies.push(await request.json());
         calls++;
         return calls === 1
-          ? HttpResponse.json({ action: "lease.release", outcome: "RENEWED", message: "renewed", details: { currentRevision: 99 } })
+          ? HttpResponse.json({ action: "lease.release", outcome: "RENEWED", message: "renewed", details: { currentRevision: "99" } })
           : HttpResponse.json({ action: "lease.release", outcome: "RELEASED", message: "released", details: {} });
       }),
     );
@@ -189,8 +189,8 @@ describe("Cluster console — leases", () => {
     expect(await screen.findByText("The holder is alive — release anyway?")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
     await waitFor(() => expect(calls).toBe(2));
-    expect(bodies[0]).toEqual({ expectedRevision: 1_791_045_643_049_537 });
-    expect(bodies[1]).toEqual({ expectedRevision: 99 });
+    expect(bodies[0]).toEqual({ expectedRevision: "1791045643049537" });
+    expect(bodies[1]).toEqual({ expectedRevision: "99" });
   });
 
   it("filters to suspicious leases only", async () => {
@@ -256,6 +256,21 @@ describe("Cluster console — dead letters", () => {
     await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
     expect(await screen.findByTestId("cluster-dl-outcome-14")).toHaveAttribute("data-outcome", "REPLAYED");
     expect(sent).toEqual(["14"]);
+  });
+
+  it("a replay another admin is already running is reported, not run twice", async () => {
+    server.use(
+      http.post("*/administration/cluster/dead-letters/replay", () =>
+        HttpResponse.json({ results: [{ id: "14", outcome: "IN_PROGRESS", message: "another administrator is replaying this entry right now" }], succeeded: 0, failed: 1 }),
+      ),
+    );
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    await userEvent.click(await screen.findByTestId("cluster-dl-select-14"));
+    await userEvent.click(screen.getByTestId("cluster-dl-bulk-replay"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const row = await screen.findByTestId("cluster-dl-outcome-14");
+    expect(row).toHaveAttribute("data-outcome", "IN_PROGRESS");
+    expect(row).toHaveTextContent(/not run twice/);
   });
 
   it("bulk discard reports a per-item outcome, including one already gone", async () => {
@@ -344,6 +359,15 @@ describe("Cluster console — activity", () => {
     act(() => source.onopen?.());
     expect(await screen.findByTestId("cluster-activity-node.lost")).toHaveTextContent("eddi-2");
     expect(reads).toBe(2);
+  });
+
+  it("re-opens the stream when the server closes it because the token expired", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    const before = sources.length;
+    emit("expired", "token expired");
+    await waitFor(() => expect(sources.length).toBe(before + 1));
+    expect(sources[before - 1]!.close).toHaveBeenCalled();
   });
 
   it("filters by kind", async () => {

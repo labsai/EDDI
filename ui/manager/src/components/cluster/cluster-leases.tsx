@@ -29,7 +29,7 @@ export function ClusterLeasesPanel({ canAct }: { canAct: boolean }) {
 
   const confirm = () => {
     if (!target?.lease.conversationId) return;
-    const expected = target.renewed ? Number(target.renewed.details["currentRevision"]) : target.lease.revision;
+    const expected = target.renewed ? String(target.renewed.details["currentRevision"]) : target.lease.revision;
     release.mutate(
       { conversationId: target.lease.conversationId, expectedRevision: expected },
       {

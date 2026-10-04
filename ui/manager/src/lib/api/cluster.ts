@@ -86,7 +86,8 @@ export interface NatsView {
   rttMillis: number;
   streams: StreamView[];
   buckets: BucketView[];
-  leaseEpoch: { firstRevision: number; createdAt: number | null; lastRevision: number } | null;
+  /** Strings: fencing tokens can exceed what a JS number holds exactly. */
+  leaseEpoch: { firstRevision: string; createdAt: number | null; lastRevision: string } | null;
   account: { memoryBytes: number; storageBytes: number; streams: number; consumers: number } | null;
   error: string | null;
 }
@@ -116,7 +117,8 @@ export interface LeaseView {
   conversationState: string | null;
   holderNode: string;
   holderBoot: string;
-  revision: number;
+  /** The fencing token, as a string (exact beyond 2^53). */
+  revision: string;
   since: number;
   ageMs: number;
   renewedAt: number;
@@ -152,11 +154,12 @@ export interface DeadLetterView {
   agentId: string | null;
   agentVersion: number | null;
   environment: string | null;
-  error: string;
+  /** The exception text — only in the admin listing (it can quote user input). */
+  error: string | null;
   timestamp: number;
   reason: DeadLetterReason;
   nodeId: string | null;
-  fence: { token?: number; storedFence?: number } | null;
+  fence: { token?: string; storedFence?: string } | null;
   input: string | null;
   secretInput: boolean;
   replayable: boolean;
@@ -192,7 +195,7 @@ export interface DeadLetterFilter {
   to?: number;
 }
 
-export type ItemOutcomeCode = "REPLAYED" | "DISCARDED" | "NOT_FOUND" | "NOT_REPLAYABLE" | "REJECTED" | "UNAVAILABLE";
+export type ItemOutcomeCode = "REPLAYED" | "DISCARDED" | "NOT_FOUND" | "NOT_REPLAYABLE" | "REJECTED" | "UNAVAILABLE" | "IN_PROGRESS";
 
 export interface ItemOutcome {
   id: string;
@@ -255,7 +258,7 @@ export function getClusterLeases(q?: string, flagged = false, limit = 200): Prom
   return api.get<LeasePage>(`${BASE}/leases${query({ q, flagged: flagged || undefined, limit })}`);
 }
 
-export function releaseLease(conversationId: string, expectedRevision: number | null): Promise<ActionResult> {
+export function releaseLease(conversationId: string, expectedRevision: string | null): Promise<ActionResult> {
   return api.post<ActionResult>(`${BASE}/leases/${encodeURIComponent(conversationId)}/release`, { expectedRevision });
 }
 

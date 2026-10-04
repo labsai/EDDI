@@ -5391,7 +5391,8 @@
       "notFound": "Déjà disparu",
       "notReplayable": "Non rejouable",
       "rejected": "Refusé — conservé",
-      "unavailable": "NATS injoignable — conservé"
+      "unavailable": "NATS injoignable — conservé",
+      "inProgress": "Déjà rejoué par quelqu'un d'autre — pas exécuté deux fois"
     },
     "activity": {
       "nodeJoined": "Le nœud {{node}} a rejoint le cluster",

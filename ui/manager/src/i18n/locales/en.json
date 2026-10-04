@@ -5541,7 +5541,8 @@
       "notReplayable": "Not replayable",
       "rejected": "Rejected — kept",
       "replayed": "Replayed",
-      "unavailable": "NATS unreachable — kept"
+      "unavailable": "NATS unreachable — kept",
+      "inProgress": "Being replayed by someone else — not run twice"
     },
     "reason": {
       "deadLettersWaiting": "Dead letters waiting",

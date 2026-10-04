@@ -5332,7 +5332,8 @@
       "notFound": "이미 없음",
       "notReplayable": "재실행 불가",
       "rejected": "거부됨 — 보관",
-      "unavailable": "NATS 연결 불가 — 보관"
+      "unavailable": "NATS 연결 불가 — 보관",
+      "inProgress": "다른 사람이 재실행 중입니다 — 두 번 실행되지 않습니다"
     },
     "activity": {
       "nodeJoined": "노드 {{node}} 참여",

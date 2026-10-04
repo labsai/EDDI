@@ -221,6 +221,8 @@ export function outcomeLabel(t: TFunction, outcome: ItemOutcomeCode): string {
       return t("cluster.outcome.rejected", "Rejected — kept");
     case "UNAVAILABLE":
       return t("cluster.outcome.unavailable", "NATS unreachable — kept");
+    case "IN_PROGRESS":
+      return t("cluster.outcome.inProgress", "Being replayed by someone else — not run twice");
   }
 }
 

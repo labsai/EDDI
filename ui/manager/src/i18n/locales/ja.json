@@ -5332,7 +5332,8 @@
       "notFound": "既に存在しません",
       "notReplayable": "再実行不可",
       "rejected": "拒否 — 保持",
-      "unavailable": "NATS 到達不可 — 保持"
+      "unavailable": "NATS 到達不可 — 保持",
+      "inProgress": "別の管理者が再実行中です — 二重には実行されません"
     },
     "activity": {
       "nodeJoined": "ノード {{node}} が参加しました",

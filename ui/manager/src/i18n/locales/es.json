@@ -5391,7 +5391,8 @@
       "notFound": "Ya no existe",
       "notReplayable": "No reproducible",
       "rejected": "Rechazado — conservado",
-      "unavailable": "NATS inaccesible — conservado"
+      "unavailable": "NATS inaccesible — conservado",
+      "inProgress": "Otra persona ya lo está reproduciendo — no se ejecuta dos veces"
     },
     "activity": {
       "nodeJoined": "El nodo {{node}} se unió",

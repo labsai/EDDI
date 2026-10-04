@@ -5332,7 +5332,8 @@
       "notFound": "Bereits entfernt",
       "notReplayable": "Nicht erneut abspielbar",
       "rejected": "Abgelehnt — behalten",
-      "unavailable": "NATS nicht erreichbar — behalten"
+      "unavailable": "NATS nicht erreichbar — behalten",
+      "inProgress": "Wird gerade von jemand anderem erneut abgespielt — nicht doppelt ausgeführt"
     },
     "activity": {
       "nodeJoined": "Knoten {{node}} beigetreten",

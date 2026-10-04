@@ -5332,7 +5332,8 @@
       "notFound": "पहले ही हट चुका",
       "notReplayable": "रीप्ले योग्य नहीं",
       "rejected": "अस्वीकृत — रखा गया",
-      "unavailable": "NATS तक पहुँच नहीं — रखा गया"
+      "unavailable": "NATS तक पहुँच नहीं — रखा गया",
+      "inProgress": "कोई और इसे अभी दोबारा चला रहा है — दो बार नहीं चलेगा"
     },
     "activity": {
       "nodeJoined": "नोड {{node}} जुड़ा",

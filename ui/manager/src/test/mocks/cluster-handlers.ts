@@ -67,7 +67,7 @@ function freshOverview(): ClusterOverview {
         { bucket: "EDDI_NODES", name: "NODES", replicas: 3, values: 2, bytes: 1_490, ttlMillis: 30_000, leader: "nats-1", peers: peers("nats-1") },
         { bucket: "EDDI_NONCES", name: "NONCES", replicas: 3, values: 18, bytes: 2_160, ttlMillis: 600_000, leader: "nats-2", peers: peers("nats-2") },
       ],
-      leaseEpoch: { firstRevision: 1_791_045_643_000_000, createdAt: now() - 86_400_000, lastRevision: 1_791_045_643_049_538 },
+      leaseEpoch: { firstRevision: "1791045643000000", createdAt: now() - 86_400_000, lastRevision: "1791045643049538" },
       account: { memoryBytes: 0, storageBytes: 812_334, streams: 14, consumers: 4 },
       error: null,
     },
@@ -80,10 +80,10 @@ function freshOverview(): ClusterOverview {
 function freshLeases(): LeaseView[] {
   const t = now();
   return [
-    { key: "c.68b1f0c2d4e5a60012ab34cd", kind: "conversation", conversationId: "68b1f0c2d4e5a60012ab34cd", agentId: "68b1e9a0d4e5a60012ab0001", conversationState: "IN_PROGRESS", holderNode: "eddi-3", holderBoot: "c9d0e1f2", revision: 1_791_045_643_049_501, since: t - 52_000, ageMs: 52_000, renewedAt: t - 43_000, sinceRenewalMs: 43_000, holderStatus: "GONE", flags: ["HOLDER_GONE", "NOT_RENEWED", "LONG_RUNNING", "CONTENDED"], waitingNode: "eddi-2" },
-    { key: "c.68b1f0c2d4e5a60012ab9911", kind: "conversation", conversationId: "68b1f0c2d4e5a60012ab9911", agentId: "68b1e9a0d4e5a60012ab0002", conversationState: "IN_PROGRESS", holderNode: "eddi-1", holderBoot: "a1b2c3d4", revision: 1_791_045_643_049_537, since: t - 3_000, ageMs: 3_000, renewedAt: t - 900, sinceRenewalMs: 900, holderStatus: "LIVE", flags: [], waitingNode: null },
-    { key: "c.68b1f0c2d4e5a60012ab7722", kind: "conversation", conversationId: "68b1f0c2d4e5a60012ab7722", agentId: "68b1e9a0d4e5a60012ab0001", conversationState: "IN_PROGRESS", holderNode: "eddi-2", holderBoot: "e5f6a7b8", revision: 1_791_045_643_049_538, since: t - 1_200, ageMs: 1_200, renewedAt: t - 1_200, sinceRenewalMs: 1_200, holderStatus: "LIVE", flags: [], waitingNode: null },
-    { key: "leader.hitl-recovery", kind: "leader", conversationId: null, agentId: null, conversationState: null, holderNode: "eddi-1", holderBoot: "a1b2c3d4", revision: 1_791_045_643_049_530, since: t - 3_000_000, ageMs: 3_000_000, renewedAt: t - 2_000, sinceRenewalMs: 2_000, holderStatus: "LIVE", flags: [], waitingNode: null },
+    { key: "c.68b1f0c2d4e5a60012ab34cd", kind: "conversation", conversationId: "68b1f0c2d4e5a60012ab34cd", agentId: "68b1e9a0d4e5a60012ab0001", conversationState: "IN_PROGRESS", holderNode: "eddi-3", holderBoot: "c9d0e1f2", revision: "1791045643049501", since: t - 52_000, ageMs: 52_000, renewedAt: t - 43_000, sinceRenewalMs: 43_000, holderStatus: "GONE", flags: ["HOLDER_GONE", "NOT_RENEWED", "LONG_RUNNING", "CONTENDED"], waitingNode: "eddi-2" },
+    { key: "c.68b1f0c2d4e5a60012ab9911", kind: "conversation", conversationId: "68b1f0c2d4e5a60012ab9911", agentId: "68b1e9a0d4e5a60012ab0002", conversationState: "IN_PROGRESS", holderNode: "eddi-1", holderBoot: "a1b2c3d4", revision: "1791045643049537", since: t - 3_000, ageMs: 3_000, renewedAt: t - 900, sinceRenewalMs: 900, holderStatus: "LIVE", flags: [], waitingNode: null },
+    { key: "c.68b1f0c2d4e5a60012ab7722", kind: "conversation", conversationId: "68b1f0c2d4e5a60012ab7722", agentId: "68b1e9a0d4e5a60012ab0001", conversationState: "IN_PROGRESS", holderNode: "eddi-2", holderBoot: "e5f6a7b8", revision: "1791045643049538", since: t - 1_200, ageMs: 1_200, renewedAt: t - 1_200, sinceRenewalMs: 1_200, holderStatus: "LIVE", flags: [], waitingNode: null },
+    { key: "leader.hitl-recovery", kind: "leader", conversationId: null, agentId: null, conversationState: null, holderNode: "eddi-1", holderBoot: "a1b2c3d4", revision: "1791045643049530", since: t - 3_000_000, ageMs: 3_000_000, renewedAt: t - 2_000, sinceRenewalMs: 2_000, holderStatus: "LIVE", flags: [], waitingNode: null },
   ];
 }
 
@@ -91,7 +91,7 @@ function freshDeadLetters(): DeadLetterView[] {
   const t = now();
   const base = { agentVersion: 3, environment: "production", local: false, secretInput: false, replayable: true, notReplayableReason: null, fence: null };
   return [
-    { ...base, id: "14", conversationId: "68b1f0c2d4e5a60012ab34cd", agentId: "68b1e9a0d4e5a60012ab0001", error: "Conversation '68b1f0c2d4e5a60012ab34cd' was taken over by another node — this turn's write (fencing token 1791045643049531) was refused because the conversation already carries token 1791045643049538; the message was not stored", timestamp: t - 600_000, reason: "fenced", nodeId: "eddi-3", fence: { token: 1_791_045_643_049_531, storedFence: 1_791_045_643_049_538 }, input: "Can you move my booking to Friday?" },
+    { ...base, id: "14", conversationId: "68b1f0c2d4e5a60012ab34cd", agentId: "68b1e9a0d4e5a60012ab0001", error: "Conversation '68b1f0c2d4e5a60012ab34cd' was taken over by another node — this turn's write (fencing token 1791045643049531) was refused because the conversation already carries token 1791045643049538; the message was not stored", timestamp: t - 600_000, reason: "fenced", nodeId: "eddi-3", fence: { token: "1791045643049531", storedFence: "1791045643049538" }, input: "Can you move my booking to Friday?" },
     { ...base, id: "15", conversationId: "68b1f0c2d4e5a60012ab5566", agentId: "68b1e9a0d4e5a60012ab0002", error: "Timed out waiting for the model after 60s", timestamp: t - 1_800_000, reason: "timeout", nodeId: "eddi-2", input: "Summarise last month's tickets" },
     { ...base, id: "17", conversationId: "68b1f0c2d4e5a60012ab5577", agentId: "68b1e9a0d4e5a60012ab0002", error: "LifecycleException: Cannot store property 'api_token' with scope 'secret'", timestamp: t - 3_600_000, reason: "failed", nodeId: "eddi-1", input: null, secretInput: true, replayable: false, notReplayableReason: "SECRET_INPUT" },
   ];
@@ -102,7 +102,7 @@ function freshActivity(): ActivityEvent[] {
   return [
     { id: "a1", type: "node.joined", severity: "info", node: "eddi-1", ts: t - 3_600_000, payload: { nodeId: "eddi-1", boot: "a1b2c3d4" } },
     { id: "a2", type: "deployment.propagated", severity: "info", node: "eddi-2", ts: t - 900_000, payload: { originNode: "eddi-1", agentId: "68b1e9a0d4e5a60012ab0002", version: 3, environment: "production", status: "READY", latencyMs: 31 } },
-    { id: "a3", type: "fence.rejected", severity: "warning", node: "eddi-3", ts: t - 600_000, payload: { entryId: "14", conversationId: "68b1f0c2d4e5a60012ab34cd", reason: "fenced", fence: { token: 1_791_045_643_049_531, storedFence: 1_791_045_643_049_538 } } },
+    { id: "a3", type: "fence.rejected", severity: "warning", node: "eddi-3", ts: t - 600_000, payload: { entryId: "14", conversationId: "68b1f0c2d4e5a60012ab34cd", reason: "fenced", fence: { token: "1791045643049531", storedFence: "1791045643049538" } } },
     { id: "a4", type: "cache.invalidations", severity: "info", node: "eddi-2", ts: t - 120_000, payload: { counts: { agents: 4, secrets: 1 }, total: 5, windowSeconds: 60 } },
     { id: "node.lost:eddi-3:c9d0e1f2", type: "node.lost", severity: "error", node: "eddi-1", ts: t - 11_000, payload: { nodeId: "eddi-3", boot: "c9d0e1f2", lastHeartbeat: t - 41_000 } },
   ];
@@ -169,7 +169,7 @@ export const clusterHandlers = [
   }),
 
   http.post("*/administration/cluster/leases/:conversationId/release", async ({ params, request }) => {
-    const body = (await request.json().catch(() => ({}))) as { expectedRevision?: number | null };
+    const body = (await request.json().catch(() => ({}))) as { expectedRevision?: string | null };
     const lease = state.leases.find((l) => l.conversationId === params.conversationId);
     if (!lease) {
       return HttpResponse.json({ action: "lease.release", outcome: "ALREADY_RELEASED", message: "Nobody holds this conversation's lease; nothing was changed.", details: { currentRevision: 0 } });
