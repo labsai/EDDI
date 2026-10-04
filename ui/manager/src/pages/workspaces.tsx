@@ -256,6 +256,7 @@ function SpaceVariables({ space }: { space: SpaceInfo }) {
   const remove = useDeleteSpaceVariable(space.id);
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const save = () => {
     store.mutate(
@@ -299,7 +300,7 @@ function SpaceVariables({ space }: { space: SpaceInfo }) {
                 variant="ghost"
                 size="sm"
                 disabled={remove.isPending}
-                onClick={() => remove.mutate(variable.key, { onError: (e) => toast.error(getErrorMessage(e)) })}
+                onClick={() => setDeleting(variable.key)}
                 aria-label={t("workspacesPage.deleteNamed", "Delete {{name}}", { name: variable.key })}
               >
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -328,6 +329,26 @@ function SpaceVariables({ space }: { space: SpaceInfo }) {
           {t("common.save", "Save")}
         </Button>
       </div>
+      <AlertDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={t("workspacesPage.deleteVariableTitle", "Delete this variable?")}
+        description={t(
+          "workspacesPage.deleteVariableDescription",
+          "Agents that refer to it can no longer resolve it. This cannot be undone."
+        )}
+        onConfirm={() =>
+          deleting &&
+          remove.mutate(deleting, {
+            onSuccess: () => setDeleting(null),
+            onError: (e) => toast.error(getErrorMessage(e)),
+          })
+        }
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        isPending={remove.isPending}
+        variant="destructive"
+      />
     </section>
   );
 }

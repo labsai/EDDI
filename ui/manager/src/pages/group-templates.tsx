@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { LayoutTemplate, Users, ArrowLeft, Sparkles, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
 } from "@/hooks/use-group-templates";
 import type { TemplateManifest } from "@/lib/api/group-templates";
 import { parseGroupResourceUri } from "@/lib/api/groups";
+import { humanizeRole } from "@/lib/role-labels";
 
 /** Icon per packaged template — matched by id, falls back to a generic template icon. */
 const TEMPLATE_ICONS: Record<string, string> = {
@@ -54,12 +55,22 @@ function humanRoles(config: Record<string, unknown> | undefined): Set<string> {
 
 export function GroupTemplatesPage() {
   const { t } = useTranslation();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The chosen template lives in the URL, not in component state: browser Back
+  // returns to the gallery instead of leaving the page, a reload keeps the
+  // selection, and the error view's "Back" link points somewhere different from
+  // where the user already is.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get("template");
+  const select = useCallback(
+    (id: string) => setSearchParams({ template: id }),
+    [setSearchParams],
+  );
+  const clear = useCallback(() => setSearchParams({}), [setSearchParams]);
 
   return selectedId ? (
-    <TemplateInstantiateView templateId={selectedId} onBack={() => setSelectedId(null)} />
+    <TemplateInstantiateView templateId={selectedId} onBack={clear} />
   ) : (
-    <TemplateGalleryView onSelect={setSelectedId} t={t} />
+    <TemplateGalleryView onSelect={select} t={t} />
   );
 }
 
@@ -85,6 +96,19 @@ function TemplateGalleryView({
             "groupTemplates.subtitle",
             "Start from a packaged, pre-tuned discussion — just assign agents to its named roles.",
           )}
+        </p>
+        {/* The wizard has its own, lighter "starter presets"; say how the two differ. */}
+        <p className="text-xs text-muted-foreground" data-testid="templates-wizard-note">
+          {t(
+            "groupTemplates.wizardNote",
+            "Prefer to create new agents as you go, or build from scratch? The group wizard offers lighter starter presets.",
+          )}{" "}
+          <Link
+            to="/manage/groups/wizard"
+            className="font-medium text-primary underline-offset-2 hover:underline"
+          >
+            {t("groupTemplates.wizardLink", "Open the group wizard")}
+          </Link>
         </p>
       </div>
 
@@ -174,7 +198,7 @@ function TemplateInstantiateView({ templateId, onBack }: { templateId: string; o
   if (isError || !detail) {
     return (
       <div className="space-y-4">
-        <BackLink to="/manage/groups/templates" label={t("common.back", "Back")} />
+        <BackLink to="/manage/groups/templates" label={t("groupTemplates.backToGallery", "Back to templates")} />
         <ErrorState message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
       </div>
     );
@@ -263,7 +287,7 @@ function TemplateInstantiateView({ templateId, onBack }: { templateId: string; o
                   htmlFor={`template-role-${role.role}`}
                   className="flex items-center gap-1.5 text-xs font-medium text-foreground"
                 >
-                  {role.role}
+                  {humanizeRole(role.role)}
                   {isHuman && (
                     <span className="rounded bg-primary/10 px-1 py-0 text-[9px] font-medium text-primary">
                       {t("groupWizard.memberTypeHuman", "Human")}
