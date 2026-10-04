@@ -33,7 +33,10 @@ Any other value fails the boot. Every property is in the
 ```
 
 Everything in NATS is coordination or a copy: losing the whole NATS cluster
-loses no conversation, configuration or audit entry.
+loses no conversation, no configuration and no audit entry the database has
+stored. The exception is an audit entry the database refused while NATS was
+up: it is kept only in the dead-letter stream, so losing NATS within the
+dead-letter retention loses it.
 
 ## What stays where
 
@@ -154,8 +157,8 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
 - **Kustomize**: the `nats` and `cluster` overlays.
 - **Docker Compose**: `docker-compose.cluster.yml` (three EDDI replicas, a
   three-node NATS cluster and an nginx load balancer).
-- **Demo**: `scripts/cluster-demo/` runs every failure scenario above against
-  three local jars and records the results.
+- **Demo**: `scripts/cluster-demo/` runs the failure scenarios listed in its
+  README against three local jars and records the results.
 
 ## Residual limitations
 

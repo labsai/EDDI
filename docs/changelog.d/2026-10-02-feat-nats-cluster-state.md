@@ -82,3 +82,4 @@ to the single-node behaviour it had before.
   of reporting `false`.
 - **Deployment sweep:** a local undeploy forgets the version's record history, so an
   unrecorded redeploy whose event overtook the undeploy is not undeployed again.
+- **Docs (PR #958 review):** `clustering.md` no longer says that losing NATS loses no audit entry. An entry the database refused waits only in the dead-letter stream. The page also no longer says the demo covers every failure scenario on it.
