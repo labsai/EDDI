@@ -169,6 +169,8 @@ letters) turned up eight defects. Each is fixed here with a test that fails with
 
 - **The first dead letter of a new cluster reaches the shared stream.** It was seen live while checking the lease-lost fix. The dead-letter stream is created by the first dead letter that needs it, and a publish right after the creation got "no responders" while the replicated stream elected its leader. The entry fell back to the node-local ring, and that ring was forwarded only on a reconnect, so it stayed on one node. Now the publish after a creation retries for up to 2 s, and a dead letter kept locally while NATS is connected is forwarded again after 10 s.
 
+- **A lost KV race is a conflict whichever code NATS answers with (ported from the console branch).** The loser of two concurrent creates of one key can get JetStream error 10164 as well as 10071. `NatsSharedKv` recognised only 10071, so two nodes racing for one lease could report NATS as unreachable. Create, compare-and-set and guarded delete now treat both as a lost race. `ClusterPresence.currentMembers()` reads the member list uncached and throws on a read error, for decisions that must not be taken on a stale or empty list; `members()` keeps answering from its cache.
+
 ### Known and not fixed here
 
 - A fenced-out turn's caller still gets the reply it was rendered (HTTP 200), where the design

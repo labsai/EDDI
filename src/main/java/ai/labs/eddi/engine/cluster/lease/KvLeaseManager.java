@@ -255,6 +255,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
             }
             reschedule(w, pollDelayMillis());
         } catch (ClusterUnavailableException e) {
+            LOGGER.debugf("Lease attempt for %s could not reach NATS: %s", sanitize(w.key), e.getMessage());
             if (view.isDegraded()) {
                 degraded(w);
             } else {
