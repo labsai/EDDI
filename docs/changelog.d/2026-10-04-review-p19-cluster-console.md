@@ -58,6 +58,11 @@
   which every caller of the shared KV (leases included) relies on. After the fix, 20 of 20 races
   answered `BUSY` or ran one after the other. A failed replay claim or drain gate now logs its
   cause.
+- **The drain guard reads presence now (found live, 1 race in 40).** It used the cached member
+  list the status views use, which after a failed read answers with the last or an empty list,
+  and once refused a drain as `LAST_NODE` with two other nodes serving. It now reads
+  `ClusterPresence.currentMembers()` (merged from the deploy branch, together with its port of
+  the 10164 fix) and answers `409 NATS_UNREACHABLE` when that read fails.
 - **The audit trail shows what a bulk replay or discard did** ("1 of 2 done", a warning when any
   failed) instead of a blank outcome: those entries record counts, not one outcome.
 - **Fencing tokens and lease revisions are JSON strings** in the console API, exact beyond 2^53.

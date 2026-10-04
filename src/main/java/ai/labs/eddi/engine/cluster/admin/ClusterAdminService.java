@@ -1143,7 +1143,18 @@ public class ClusterAdminService implements ClusterStartable {
         requireCluster(drain ? "Draining a node" : "Undraining a node");
         NatsConnectionManager manager = connections.get();
         String self = manager.node().nodeId();
-        Map<String, Map<String, Object>> members = membersById();
+        // Read now, not from the cached list the status views use: a read error there
+        // answers with the last (or an empty) list, and the last-node guard below once
+        // refused a drain with two other nodes serving (seen live, 1 race in 40).
+        Map<String, Map<String, Object>> members = new HashMap<>();
+        try {
+            for (Map<String, Object> m : presence.get().currentMembers()) {
+                members.put(String.valueOf(m.get("node")), m);
+            }
+        } catch (ClusterUnavailableException e) {
+            LOGGER.warnf("Presence read for draining %s failed: %s", sanitize(nodeId), e.getMessage());
+            throw new ActionRefusedException(409, "NATS_UNREACHABLE", "NATS is unreachable from this node; nothing was changed.");
+        }
         if (!self.equals(nodeId) && !members.containsKey(nodeId)) {
             throw new ActionRefusedException(404, "NODE_NOT_FOUND", "No live node " + sanitize(nodeId));
         }

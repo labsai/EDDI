@@ -137,6 +137,7 @@ class ClusterAdminServiceTest {
         members.add(member("n2", "b2", NOW));
         members.add(member("n3", "b3", NOW));
         when(presence.members()).thenAnswer(i -> List.copyOf(members));
+        when(presence.currentMembers()).thenAnswer(i -> List.copyOf(members));
         when(presence.selfRecord()).thenAnswer(i -> members.get(0));
         natsLeases = mock(NatsLeaseManager.class);
         eventBus = mock(JetStreamEventBus.class);
@@ -576,6 +577,21 @@ class ClusterAdminServiceTest {
             assertEquals("DRAINED", newService(config).drain("n2", true, "admin-b").outcome());
             var e = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n3", true, "admin-a"));
             assertEquals("LAST_NODE", e.code());
+        }
+
+        @Test
+        @DisplayName("the drain guard reads presence now: a stale cached list cannot make it refuse LAST_NODE, a read error is NATS_UNREACHABLE")
+        void drainGuardReadsPresenceNow() {
+            when(rpc.call(anyString(), eq(ClusterAdminService.RPC_DRAIN), anyMap())).thenReturn(Optional.of(Map.of("draining", true)));
+            // The cached list after a failed read lacks n1 and n3; three nodes are serving.
+            Map<String, Object> n2 = members.stream().filter(m -> m.get("node").equals("n2")).findFirst().orElseThrow();
+            when(presence.members()).thenReturn(List.of(n2));
+            assertEquals("DRAINED", service.drain("n2", true, "a").outcome());
+
+            when(presence.currentMembers()).thenThrow(new ClusterUnavailableException("presence bucket unreadable"));
+            var e = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n3", true, "a"));
+            assertEquals("NATS_UNREACHABLE", e.code());
+            assertEquals(409, e.status());
         }
 
         @Test
