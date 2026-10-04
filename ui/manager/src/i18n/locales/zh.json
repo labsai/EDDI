@@ -5370,7 +5370,7 @@
       "loadError": "无法加载活动历史。",
       "empty": "尚无任何活动",
       "seenBy": "由 {{node}} 观察到",
-      "offline": "实时推送未连接；重新打开此标签页时列表会刷新。",
+      "offline": "实时动态未连接；每 30 秒重试一次。",
       "adminResyncQueued": "{{actor}} 重新同步了 {{node}} 的缓存；NATS 恢复后其他节点会收到"
     },
     "activityGroup": {
@@ -5596,7 +5596,8 @@
       "subtitle": "可安全重复执行并会被审计。强制释放租约和排空节点的操作位于其所作用的租约和节点上。此处的任何操作都不会删除数据或绕过隔离保护。",
       "outcomeDone": "完成",
       "outcomeQueued": "已排队 — NATS 恢复后发出",
-      "outcomePartial": "部分完成"
+      "outcomePartial": "部分完成",
+      "outcomeStarted": "已启动 — 部分节点仍在运行"
     },
     "audit": {
       "title": "恢复操作审计记录",

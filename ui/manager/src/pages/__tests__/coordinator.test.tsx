@@ -390,6 +390,25 @@ describe("Cluster console — actions", () => {
     warning.mockRestore();
   });
 
+  it("a reconcile still running on a node is reported as started, not as a failure", async () => {
+    server.use(
+      http.post("*/administration/cluster/deployments/reconcile", () =>
+        HttpResponse.json({
+          action: "deployments.reconcile",
+          outcome: "STARTED",
+          message: "The deployment sweep ran on [eddi-1]. It is still running on [eddi-2] and finishes on its own.",
+          details: { nodes: ["eddi-1"], running: ["eddi-2"], missing: [] },
+        }),
+      ),
+    );
+    renderConsole();
+    await userEvent.click(await screen.findByTestId("cluster-action-reconcile"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const result = await screen.findByTestId("cluster-action-result");
+    expect(result).toHaveAttribute("data-outcome", "STARTED");
+    expect(result).toHaveTextContent("Started — still running on some nodes");
+  });
+
   it("a reconcile some nodes missed is reported as partly done, naming them", async () => {
     const warning = vi.spyOn(toast, "warning");
     server.use(
@@ -476,6 +495,35 @@ describe("Cluster console — activity", () => {
     emit("expired", "token expired");
     await waitFor(() => expect(sources.length).toBe(before + 1));
     expect(sources[before - 1]!.close).toHaveBeenCalled();
+  });
+
+  it("a feed refused as busy, or given up after retries, is opened again 30 s later and recovers", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const before = sources.length;
+      emit("busy", "too many live feeds");
+      expect(await screen.findByTestId("cluster-activity-offline")).toBeInTheDocument();
+      expect(sources[before - 1]!.close).toHaveBeenCalled();
+      expect(sources.length).toBe(before);
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      await waitFor(() => expect(sources.length).toBe(before + 1));
+      act(() => sources[sources.length - 1]!.onopen?.());
+      await waitFor(() => expect(screen.queryByTestId("cluster-activity-offline")).not.toBeInTheDocument());
+
+      const reopened = sources.length;
+      act(() => (sources[reopened - 1] as unknown as { onexhausted: (() => void) | null }).onexhausted?.());
+      expect(await screen.findByTestId("cluster-activity-offline")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      await waitFor(() => expect(sources.length).toBe(reopened + 1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("filters by kind", async () => {

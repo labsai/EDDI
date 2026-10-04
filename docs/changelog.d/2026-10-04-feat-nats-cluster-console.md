@@ -17,7 +17,7 @@ doing what, what went wrong, and what can safely be done about it.
 - **Leases**: one KV watch lists every lease with holder, age, revision (fencing token), the
   server's renewal time and flags (`HOLDER_GONE`, `HOLDER_RESTARTED`, `NOT_RENEWED`,
   `LONG_RUNNING`, `CONTENDED`), suspicious first, agent and state read in one query.
-- **Dead letters** now record `reason` (`fenced`, `timeout`, `failed`), `nodeId` and, for a
+- **Dead letters** now record `reason` (`fenced`, `lease-lost`, `timeout`, `failed`), `nodeId` and, for a
   fenced write, both tokens; `notReplayableReason` says why one cannot be replayed (`SECRET_INPUT`,
   `INPUT_NOT_CAPTURED`, `NOT_A_TURN`). Filtered, cursor-paged listing (scan bounded at 2,000 per
   call), a content-free summary, and bulk replay/discard (≤ 100 ids) with one outcome per id.

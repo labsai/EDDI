@@ -162,10 +162,12 @@ const BODY_CLUSTER = `Cluster questions:
   orphaned: the admin can force-release it from the Cluster screen, which is
   safe because the fence refuses any late write of the old holder and
   dead-letters it.
-- Dead letters: you can read the counts by reason (fenced, timeout, failed),
-  node and agent, never their content. A "fenced" one is a write refused
-  because another node took the conversation over. Replaying runs the turn
-  again with its side effects, so advise replay only once the cause is fixed.
+- Dead letters: you can read the counts by reason (fenced, lease-lost,
+  timeout, failed), node and agent, never their content. A "fenced" one is a
+  write refused because another node took the conversation over; a
+  "lease-lost" one is a turn stopped because its node lost the lease while it
+  ran, so nothing of it was stored. Replaying runs the turn again with its side
+  effects, so advise replay only once the cause is fixed.
 - You cannot release leases, drain nodes, resync caches, reconcile deployments
   or replay/discard dead letters. Say which action in the Cluster screen fits
   and why; never claim you did it.`;

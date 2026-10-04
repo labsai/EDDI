@@ -139,7 +139,7 @@ export function ClusterActivityFeed({ activity, compact = false }: { activity: C
       )}
       {activity.exhausted && (
         <p className="border-t border-border px-5 py-2 text-xs text-muted-foreground" data-testid="cluster-activity-offline">
-          {t("cluster.activity.offline", "The live feed is not connected; the list refreshes when you reopen the tab.")}
+          {t("cluster.activity.offline", "The live feed is not connected; it tries again every 30 seconds.")}
         </p>
       )}
     </section>

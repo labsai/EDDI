@@ -5429,7 +5429,7 @@
       "loadError": "Impossible de charger l’historique d’activité.",
       "empty": "Rien ne s’est encore produit",
       "seenBy": "vu par {{node}}",
-      "offline": "Le flux en direct n’est pas connecté ; la liste s’actualise lorsque vous rouvrez l’onglet.",
+      "offline": "Le flux en direct n'est pas connecté ; il réessaie toutes les 30 secondes.",
       "adminResyncQueued": "{{actor}} a resynchronisé les caches de {{node}} ; les autres nœuds le recevront quand NATS sera de retour"
     },
     "activityGroup": {
@@ -5655,7 +5655,8 @@
       "subtitle": "Répétables sans risque et auditées. La libération forcée d’un bail et le drainage d’un nœud se trouvent sur le bail et le nœud concernés. Rien ici ne peut supprimer de données ni contourner le fencing.",
       "outcomeDone": "Terminé",
       "outcomeQueued": "En file d'attente — part dès que NATS est de retour",
-      "outcomePartial": "Partiellement terminé"
+      "outcomePartial": "Partiellement terminé",
+      "outcomeStarted": "Démarré — encore en cours sur certains nœuds"
     },
     "audit": {
       "title": "Piste d’audit des actions de récupération",

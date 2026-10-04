@@ -152,6 +152,9 @@ export interface ClusterActivityState {
  * reconnects the history is read again, so entries missed while it was down are
  * filled in (the merge de-duplicates by id).
  */
+/** How soon a refused (busy) or given-up live feed is opened again. */
+export const ACTIVITY_RETRY_MS = 30_000;
+
 export function useClusterActivity(enabled = true): ClusterActivityState {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [buffer, setBuffer] = useState<ActivityEvent[]>([]);
@@ -181,6 +184,12 @@ export function useClusterActivity(enabled = true): ClusterActivityState {
     refresh();
     const source = createClusterActivitySource();
     let wasDown = false;
+    // A refused or given-up stream is tried again later: a busy node frees slots as
+    // other consoles close, and the console tabs do not remount this hook.
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const retryLater = () => {
+      if (retry === undefined) retry = setTimeout(() => setGeneration((g) => g + 1), ACTIVITY_RETRY_MS);
+    };
     source.addEventListener("activity", (event) => {
       try {
         accept([JSON.parse(event.data) as ActivityEvent]);
@@ -201,6 +210,7 @@ export function useClusterActivity(enabled = true): ClusterActivityState {
       setLive(false);
       setExhausted(true);
       source.close();
+      retryLater();
     });
     source.onopen = () => {
       setLive(true);
@@ -214,8 +224,15 @@ export function useClusterActivity(enabled = true): ClusterActivityState {
       wasDown = true;
       setLive(false);
     };
-    source.onexhausted = () => setExhausted(true);
-    return () => source.close();
+    source.onexhausted = () => {
+      setExhausted(true);
+      source.close();
+      retryLater();
+    };
+    return () => {
+      if (retry !== undefined) clearTimeout(retry);
+      source.close();
+    };
   }, [enabled, accept, refresh, generation]);
 
   const setPaused = useCallback((next: boolean) => {

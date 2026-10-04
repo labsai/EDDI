@@ -5266,7 +5266,8 @@
       "title": "Recovery actions",
       "outcomeDone": "Done",
       "outcomeQueued": "Queued — goes out when NATS is back",
-      "outcomePartial": "Partly done"
+      "outcomePartial": "Partly done",
+      "outcomeStarted": "Started — still running on some nodes"
     },
     "activity": {
       "adminDiscard": "{{actor}} discarded dead letters ({{ok}} of {{n}})",
@@ -5292,7 +5293,7 @@
       "nodeLeft": "Node {{node}} left cleanly",
       "nodeLost": "Node {{node}} was lost (stopped heartbeating)",
       "nodeStale": "Node {{node}} heartbeat is late",
-      "offline": "The live feed is not connected; the list refreshes when you reopen the tab.",
+      "offline": "The live feed is not connected; it tries again every 30 seconds.",
       "onlyProblems": "Only warnings and errors",
       "pause": "Pause",
       "pending": "{{n}} new while paused",

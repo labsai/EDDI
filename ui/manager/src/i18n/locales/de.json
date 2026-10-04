@@ -5370,7 +5370,7 @@
       "loadError": "Der Aktivitätsverlauf konnte nicht geladen werden.",
       "empty": "Noch keine Ereignisse",
       "seenBy": "gesehen von {{node}}",
-      "offline": "Der Live-Feed ist nicht verbunden; die Liste wird beim erneuten Öffnen des Tabs aktualisiert.",
+      "offline": "Der Live-Feed ist nicht verbunden; er versucht es alle 30 Sekunden erneut.",
       "adminResyncQueued": "{{actor}} hat die Caches von {{node}} neu synchronisiert; die anderen Knoten erhalten es, sobald NATS wieder erreichbar ist"
     },
     "activityGroup": {
@@ -5596,7 +5596,8 @@
       "subtitle": "Gefahrlos wiederholbar und protokolliert. Das zwangsweise Freigeben einer Lease und das Entleeren eines Knotens finden Sie bei der jeweiligen Lease bzw. dem Knoten. Nichts hier kann Daten löschen oder das Fencing umgehen.",
       "outcomeDone": "Erledigt",
       "outcomeQueued": "In Warteschlange — wird gesendet, sobald NATS wieder erreichbar ist",
-      "outcomePartial": "Teilweise erledigt"
+      "outcomePartial": "Teilweise erledigt",
+      "outcomeStarted": "Gestartet — läuft auf einigen Knoten noch"
     },
     "audit": {
       "title": "Audit-Trail der Wiederherstellungsaktionen",

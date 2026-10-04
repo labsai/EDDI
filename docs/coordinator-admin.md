@@ -163,7 +163,9 @@ An action that ran answers `200` with an `outcome` saying how far it got: `DONE`
 every node), `QUEUED` (a cache resync while this node is cut off from NATS: this node flushed,
 and the request to the others waits in the outbox until it reconnects) or `PARTIAL` (a reconcile
 or forward that some nodes did not answer, named in `details.missing`, or a forward that left
-entries kept locally, counted in `details.remaining`). The console shows anything but `DONE` as
+entries kept locally, counted in `details.remaining`) or `STARTED` (a reconcile that every node
+answered, but whose sweep was still running on some — named in `details.running` — when the
+answer was due; it finishes on its own). The console shows anything but `DONE` as
 a warning, and the audit entry records the same outcome.
 
 ### The health verdict

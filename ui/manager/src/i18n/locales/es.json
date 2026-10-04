@@ -5429,7 +5429,7 @@
       "loadError": "No se pudo cargar el historial de actividad.",
       "empty": "Todavía no ha ocurrido nada",
       "seenBy": "visto por {{node}}",
-      "offline": "El feed en vivo no está conectado; la lista se actualiza al volver a abrir la pestaña.",
+      "offline": "El feed en directo no está conectado; lo vuelve a intentar cada 30 segundos.",
       "adminResyncQueued": "{{actor}} resincronizó las cachés de {{node}}; los demás nodos lo recibirán cuando NATS vuelva"
     },
     "activityGroup": {
@@ -5655,7 +5655,8 @@
       "subtitle": "Se pueden repetir con seguridad y quedan auditadas. Liberar a la fuerza un lease y drenar un nodo están en el propio lease y nodo sobre los que actúan. Nada de aquí puede borrar datos ni eludir el fencing.",
       "outcomeDone": "Hecho",
       "outcomeQueued": "En cola — se envía cuando NATS vuelva",
-      "outcomePartial": "Hecho en parte"
+      "outcomePartial": "Hecho en parte",
+      "outcomeStarted": "Iniciado — aún en curso en algunos nodos"
     },
     "audit": {
       "title": "Registro de auditoría de las acciones de recuperación",

@@ -126,7 +126,7 @@ that set `degraded.turns=reject`. Security state always fails closed.
 
 The Manager's **Cluster** screen answers most of these at a glance: the health verdict with
 its reasons, one card per node, the leases with suspicious ones flagged, the dead letters
-filterable by reason (`fenced`, `timeout`, `failed`), node and agent, a cluster-wide activity
+filterable by reason (`fenced`, `lease-lost`, `timeout`, `failed`), node and agent, a cluster-wide activity
 timeline, a "why is this conversation stuck?" lookup, and the recovery actions — force-release
 a lease, resync caches, reconcile deployments, drain a node, forward local dead letters. The
 API behind it, and why each action is safe, is in

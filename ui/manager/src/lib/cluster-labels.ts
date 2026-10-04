@@ -28,6 +28,8 @@ export function actionOutcomeLabel(t: TFunction, outcome: string): string {
       return t("cluster.action.outcomeQueued", "Queued — goes out when NATS is back");
     case "PARTIAL":
       return t("cluster.action.outcomePartial", "Partly done");
+    case "STARTED":
+      return t("cluster.action.outcomeStarted", "Started — still running on some nodes");
     default:
       return outcome;
   }

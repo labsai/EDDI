@@ -63,6 +63,23 @@
   and once refused a drain as `LAST_NODE` with two other nodes serving. It now reads
   `ClusterPresence.currentMembers()` (merged from the deploy branch, together with its port of
   the 10164 fix) and answers `409 NATS_UNREACHABLE` when that read fails.
+- **PR #970 review (CodeRabbit).**
+  - A drain could miss a turn that registered as a lease waiter just after the drain swept the
+    waiters; that turn could then take a lease on the drained node. Each attempt now re-checks
+    the drain before it creates the lease key (an attempt already past the check is refused by
+    the sweep, and `grant` hands back a lease whose waiter was completed meanwhile).
+  - Reconcile no longer reports a slow sweep as a node that did not answer: the handler answers
+    within half the RPC timeout, `running` when the sweep is still going, and the action answers
+    `STARTED` with `details.running` instead of `PARTIAL`.
+  - The dead-letter summary (up to 5,000 entries scanned per poll, per open console) is shared
+    for 12 s and concurrent requests wait for one scan; replay, discard and forward on this node
+    drop it, and a scan that overlapped one of them is not kept.
+  - The live activity feed recovers after a `busy` refusal or after its reconnects gave up: it
+    is opened again 30 s later (the console tabs never remounted it).
+  - A dead letter kept locally is announced with the id it was recorded under, not the ring's
+    last entry, which under concurrent failures could be another one.
+  - `lease-lost` is listed among the reasons in `clustering.md`, the Platform Operator prompt
+    (revision 4) and the feature fragment; two `ClusterCoordinatorIT` tests got unique `@Order`s.
 - **The audit trail shows what a bulk replay or discard did** ("1 of 2 done", a warning when any
   failed) instead of a blank outcome: those entries record counts, not one outcome.
 - **Fencing tokens and lease revisions are JSON strings** in the console API, exact beyond 2^53.
