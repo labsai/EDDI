@@ -9,6 +9,7 @@ import { useForwardLocalDeadLetters, useReconcileDeployments, useResyncCaches } 
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/shared/error-state";
+import { actionOutcomeLabel } from "@/lib/cluster-labels";
 
 type ActionId = "resync" | "reconcile" | "forward";
 
@@ -31,7 +32,9 @@ export function ClusterRecoveryActions({ localDeadLetters, clustered }: { localD
     mutation.mutate(undefined, {
       onSuccess: (r) => {
         setLast(r);
-        toast.success(r.message);
+        // Only DONE is a success: QUEUED and PARTIAL left work undone, and say what.
+        if (r.outcome === "DONE") toast.success(r.message);
+        else toast.warning(r.message);
         setOpen(null);
       },
       onError: (e) => {
@@ -99,8 +102,13 @@ export function ClusterRecoveryActions({ localDeadLetters, clustered }: { localD
         </Button>
       </div>
       {last && (
-        <p className="mt-3 text-sm text-foreground" role="status" data-testid="cluster-action-result">
-          <span className="font-semibold">{last.outcome}</span> — {last.message}
+        <p
+          className={`mt-3 text-sm ${last.outcome === "DONE" ? "text-foreground" : "text-warning"}`}
+          role="status"
+          data-testid="cluster-action-result"
+          data-outcome={last.outcome}
+        >
+          <span className="font-semibold">{actionOutcomeLabel(t, last.outcome)}</span> — {last.message}
         </p>
       )}
       <AlertDialog

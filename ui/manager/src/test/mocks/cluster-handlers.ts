@@ -122,6 +122,11 @@ export function resetClusterFixture() {
   state.activity = freshActivity();
 }
 
+/** Adds a dead letter to the fixture — e.g. one with a reason this console does not know yet. */
+export function addDeadLetter(entry: Partial<DeadLetterView> & Pick<DeadLetterView, "id" | "reason">) {
+  state.deadLetters.push({ ...freshDeadLetters()[1]!, ...entry });
+}
+
 /** The single-node answer of an in-memory deployment. */
 export const SINGLE_NODE_OVERVIEW: ClusterOverview = {
   mode: "single-node",

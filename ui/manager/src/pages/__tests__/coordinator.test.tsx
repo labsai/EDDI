@@ -4,7 +4,8 @@ import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { CoordinatorPage } from "@/pages/coordinator";
 import { server } from "@/test/mocks/server";
-import { degradedOverview, resetClusterFixture, SINGLE_NODE_OVERVIEW } from "@/test/mocks/cluster-handlers";
+import { toast } from "sonner";
+import { addDeadLetter, degradedOverview, resetClusterFixture, SINGLE_NODE_OVERVIEW } from "@/test/mocks/cluster-handlers";
 import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
 
 /**
@@ -216,6 +217,32 @@ describe("Cluster console — dead letters", () => {
     await waitFor(() => expect(reasons).toContain("fenced"));
   });
 
+  it("counts a lease-lost turn under its name and an unknown reason under its own code", async () => {
+    addDeadLetter({ id: "21", reason: "lease-lost" });
+    addDeadLetter({ id: "22", reason: "quota-exceeded" });
+    renderConsole();
+    expect(await screen.findByTestId("cluster-dl-reason-lease-lost")).toHaveTextContent("Lease lost: 1");
+    // An unknown reason is shown as recorded, never relabelled as something it is not.
+    expect(screen.getByTestId("cluster-dl-reason-quota-exceeded")).toHaveTextContent("quota-exceeded: 1");
+    expect(screen.getByTestId("cluster-dl-reason-quota-exceeded")).not.toHaveTextContent("Failed");
+  });
+
+  it("names a lease-lost turn, filters by it, and shows an unknown reason as its own code", async () => {
+    addDeadLetter({ id: "21", reason: "lease-lost", error: "lease lost while the turn ran" });
+    addDeadLetter({ id: "22", reason: "quota-exceeded", error: "the tenant ran out of quota" });
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    const filter = await screen.findByTestId("cluster-dl-filter-reason");
+    expect(within(filter).getByRole("option", { name: "Lease lost" })).toHaveValue("lease-lost");
+
+    await userEvent.click(await screen.findByTestId("cluster-dl-open-21"));
+    expect(within(await screen.findByTestId("cluster-dl-drawer")).getByTestId("cluster-dl-why")).toHaveTextContent(/stopped before its result was stored/);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("cluster-dl-drawer")).not.toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId("cluster-dl-open-22"));
+    expect(within(await screen.findByTestId("cluster-dl-drawer")).getByTestId("cluster-dl-why")).toHaveTextContent('Recorded with the reason "quota-exceeded"');
+  });
+
   it("the drawer explains a fenced write with both tokens and shows the input", async () => {
     renderConsole("/manage/coordinator?tab=deadLetters");
     await userEvent.click(await screen.findByTestId("cluster-dl-open-14"));
@@ -317,7 +344,57 @@ describe("Cluster console — actions", () => {
     await userEvent.click(await screen.findByTestId("cluster-action-resync"));
     expect(screen.getByRole("dialog")).toHaveTextContent(/No data changes/);
     await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
-    expect(await screen.findByTestId("cluster-action-result")).toHaveTextContent("DONE");
+    const result = await screen.findByTestId("cluster-action-result");
+    expect(result).toHaveAttribute("data-outcome", "DONE");
+    expect(result).toHaveTextContent("Done");
+  });
+
+  it("a resync that only reached the outbox says so, and warns instead of celebrating", async () => {
+    const success = vi.spyOn(toast, "success");
+    const warning = vi.spyOn(toast, "warning");
+    server.use(
+      http.post("*/administration/cluster/caches/resync", () =>
+        HttpResponse.json({
+          action: "caches.resync",
+          outcome: "QUEUED",
+          message: "This node flushed its caches. NATS is unreachable, so the request to the other nodes waits in the outbox and goes out when this node reconnects.",
+          details: {},
+        }),
+      ),
+    );
+    renderConsole();
+    await userEvent.click(await screen.findByTestId("cluster-action-resync"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const result = await screen.findByTestId("cluster-action-result");
+    expect(result).toHaveAttribute("data-outcome", "QUEUED");
+    expect(result).toHaveTextContent("Queued — goes out when NATS is back");
+    expect(result).toHaveClass("text-warning");
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("outbox"));
+    expect(success).not.toHaveBeenCalled();
+    success.mockRestore();
+    warning.mockRestore();
+  });
+
+  it("a reconcile some nodes missed is reported as partly done, naming them", async () => {
+    const warning = vi.spyOn(toast, "warning");
+    server.use(
+      http.post("*/administration/cluster/deployments/reconcile", () =>
+        HttpResponse.json({
+          action: "deployments.reconcile",
+          outcome: "PARTIAL",
+          message: "The deployment sweep ran on [eddi-1]; [eddi-2] did not answer (their own sweep still runs every 10 s).",
+          details: { nodes: ["eddi-1"], missing: ["eddi-2"] },
+        }),
+      ),
+    );
+    renderConsole();
+    await userEvent.click(await screen.findByTestId("cluster-action-reconcile"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const result = await screen.findByTestId("cluster-action-result");
+    expect(result).toHaveTextContent("Partly done");
+    expect(result).toHaveTextContent("[eddi-2] did not answer");
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
   });
 });
 
@@ -327,6 +404,15 @@ describe("Cluster console — activity", () => {
     expect(await screen.findByTestId("cluster-activity-node.lost")).toHaveTextContent("eddi-3");
     emit("activity", { id: "live-1", type: "lease.takeover", severity: "warning", node: "eddi-2", ts: Date.now(), payload: { conversationId: "c-9", previousNode: "eddi-3" } });
     expect(await screen.findByTestId("cluster-activity-lease.takeover")).toHaveTextContent("c-9");
+  });
+
+  it("a queued resync reads as reaching this node only, until NATS is back", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    emit("activity", { id: "live-2", type: "admin.caches.resync", severity: "info", node: "eddi-2", ts: Date.now(), payload: { actor: "ops", outcome: "QUEUED" } });
+    const entry = await screen.findByTestId("cluster-activity-admin.caches.resync");
+    expect(entry).toHaveTextContent("ops resynced the caches of eddi-2; the other nodes get it when NATS is back");
+    expect(entry).not.toHaveTextContent("resynced every cache");
   });
 
   it("pausing keeps what is shown and loses nothing: entries that arrive meanwhile appear on resume", async () => {

@@ -146,7 +146,8 @@ export interface ActivityEvent {
   payload: Record<string, unknown>;
 }
 
-export type DeadLetterReason = "fenced" | "timeout" | "failed";
+/** Known reasons; a newer backend may send others, which the console shows as their code. */
+export type DeadLetterReason = "fenced" | "lease-lost" | "timeout" | "failed" | (string & {});
 
 export interface DeadLetterView {
   id: string;

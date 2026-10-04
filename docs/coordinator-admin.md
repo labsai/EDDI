@@ -159,6 +159,13 @@ is cut off from NATS). Never a `503`: the shipped nginx configuration retries th
 `503`, so a `503` from every node during a NATS outage would take the whole API out of the load
 balancer for its fail timeout.
 
+An action that ran answers `200` with an `outcome` saying how far it got: `DONE` (it reached
+every node), `QUEUED` (a cache resync while this node is cut off from NATS: this node flushed,
+and the request to the others waits in the outbox until it reconnects) or `PARTIAL` (a reconcile
+or forward that some nodes did not answer, named in `details.missing`, or a forward that left
+entries kept locally, counted in `details.remaining`). The console shows anything but `DONE` as
+a warning, and the audit entry records the same outcome.
+
 ### The health verdict
 
 | Verdict | Means | Typical reason codes |
@@ -192,7 +199,7 @@ write time of the current revision) and these flags:
 ### Dead letters in the console
 
 Every entry now records **why** it was dead-lettered (`reason`: `fenced`, `timeout` or
-`failed`), the node it failed on (`nodeId`) and, for a fenced write, both tokens (`fence`:
+`failed`; the console also knows `lease-lost`, and shows any other reason by its code), the node it failed on (`nodeId`) and, for a fenced write, both tokens (`fence`:
 `token` — what the refused write carried — and `storedFence`, what the conversation already
 had). An entry that cannot be replayed says why (`notReplayableReason`): `SECRET_INPUT` (the
 client flagged the turn `secretInput`, so its input was never stored), `INPUT_NOT_CAPTURED`

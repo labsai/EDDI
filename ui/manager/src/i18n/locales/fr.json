@@ -5377,7 +5377,10 @@
       "failed": "Échec",
       "fencedHelp": "Ce nœud a perdu le bail de la conversation pendant l’exécution du tour, et un tour plus récent a été validé entre-temps. La base de données a refusé l’écriture de ce tour (jeton {{token}} < stocké {{stored}}) afin qu’il n’écrase pas le plus récent. La réponse a peut-être déjà atteint l’utilisateur ; l’historique de la conversation ne la contient pas.",
       "timeoutHelp": "Le tour a dépassé son délai. Vérifiez la latence du modèle ou des outils de l’agent avant de rejouer.",
-      "failedHelp": "Le tour a échoué après son démarrage. Corrigez la cause indiquée dans l’erreur avant de rejouer."
+      "failedHelp": "Le tour a échoué après son démarrage. Corrigez la cause indiquée dans l’erreur avant de rejouer.",
+      "leaseLost": "Bail perdu",
+      "leaseLostHelp": "Ce nœud a perdu le bail de la conversation pendant le tour ; le tour a donc été arrêté avant l'enregistrement de son résultat. L'utilisateur n'a peut-être reçu aucune réponse. Rejouez-le si le message doit encore compter.",
+      "otherHelp": "Enregistré avec la raison « {{reason}} ». L'erreur ci-dessous indique ce qui s'est passé."
     },
     "notReplayable": {
       "secret": "Non rejouable : le client a marqué l’entrée comme secrète, elle n’a donc jamais été stockée.",
@@ -5426,7 +5429,8 @@
       "loadError": "Impossible de charger l’historique d’activité.",
       "empty": "Rien ne s’est encore produit",
       "seenBy": "vu par {{node}}",
-      "offline": "Le flux en direct n’est pas connecté ; la liste s’actualise lorsque vous rouvrez l’onglet."
+      "offline": "Le flux en direct n’est pas connecté ; la liste s’actualise lorsque vous rouvrez l’onglet.",
+      "adminResyncQueued": "{{actor}} a resynchronisé les caches de {{node}} ; les autres nœuds le recevront quand NATS sera de retour"
     },
     "activityGroup": {
       "nodes": "Nœuds",
@@ -5648,7 +5652,10 @@
       "forwardText": "Les nœuds qui ne pouvaient pas joindre NATS ont gardé leurs lettres mortes en mémoire, où un redémarrage les perdrait. Chaque nœud les déplace maintenant vers le stream partagé (il le fait aussi de lui-même à la reconnexion). Rien n’est rejoué.",
       "forward": "Transférer les lettres mortes",
       "title": "Actions de récupération",
-      "subtitle": "Répétables sans risque et auditées. La libération forcée d’un bail et le drainage d’un nœud se trouvent sur le bail et le nœud concernés. Rien ici ne peut supprimer de données ni contourner le fencing."
+      "subtitle": "Répétables sans risque et auditées. La libération forcée d’un bail et le drainage d’un nœud se trouvent sur le bail et le nœud concernés. Rien ici ne peut supprimer de données ni contourner le fencing.",
+      "outcomeDone": "Terminé",
+      "outcomeQueued": "En file d'attente — part dès que NATS est de retour",
+      "outcomePartial": "Partiellement terminé"
     },
     "audit": {
       "title": "Piste d’audit des actions de récupération",

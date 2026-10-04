@@ -636,20 +636,65 @@ class ClusterAdminServiceTest {
         @Test
         @DisplayName("resync asks every node through the event bus; reconcile runs here and on every other node")
         void resyncAndReconcile() {
-            service.resyncCaches("a");
+            when(eventBus.requestResyncAll(anyString())).thenReturn(true);
+            assertEquals("DONE", service.resyncCaches("a").outcome());
             verify(eventBus).requestResyncAll(anyString());
             when(rpc.callAll(ClusterAdminService.RPC_RECONCILE, Map.of())).thenReturn(Map.of("n2", Map.of(), "n3", Map.of()));
             ActionResult result = service.reconcileDeployments("a");
             verify(deployments).reconcileNow();
+            assertEquals("DONE", result.outcome());
             assertEquals(3, ((List<?>) result.details().get("nodes")).size());
+        }
+
+        @Test
+        @DisplayName("a resync that only reached the outbox (NATS down) is QUEUED, not DONE — and audited as such")
+        void resyncQueuedWhileDisconnected() {
+            when(eventBus.requestResyncAll(anyString())).thenReturn(false);
+            ActionResult result = service.resyncCaches("a");
+            assertEquals("QUEUED", result.outcome());
+            assertTrue(result.message().contains("outbox"));
+            verify(audit).submit(argThat(e -> "QUEUED".equals(e.output().get("outcome"))));
+        }
+
+        @Test
+        @DisplayName("a reconcile some members did not answer is PARTIAL and names them")
+        void reconcilePartial() {
+            when(rpc.callAll(ClusterAdminService.RPC_RECONCILE, Map.of())).thenReturn(Map.of("n2", Map.of()));
+            ActionResult result = service.reconcileDeployments("a");
+            assertEquals("PARTIAL", result.outcome());
+            assertEquals(List.of("n3"), result.details().get("missing"));
+            // a reply carrying an error does not count as having run
+            when(rpc.callAll(ClusterAdminService.RPC_RECONCILE, Map.of()))
+                    .thenReturn(Map.of("n2", Map.of(), "n3", Map.of("error", "no handler for admin-reconcile")));
+            assertEquals("PARTIAL", service.reconcileDeployments("a").outcome());
+        }
+
+        @Test
+        @DisplayName("forwarding that leaves entries local, or misses a node, is PARTIAL")
+        void forwardPartial() {
+            when(coordinator.forwardLocalDeadLetters()).thenReturn(1);
+            when(coordinator.localDeadLetterCount()).thenReturn(2);
+            when(rpc.callAll(ClusterAdminService.RPC_FORWARD, Map.of()))
+                    .thenReturn(Map.of("n2", Map.of("forwarded", 0, "remaining", 0), "n3", Map.of("forwarded", 0, "remaining", 0)));
+            ActionResult stuck = service.forwardLocalDeadLetters("a");
+            assertEquals("PARTIAL", stuck.outcome());
+            assertTrue(stuck.message().contains("2 are still kept locally"));
+            when(coordinator.localDeadLetterCount()).thenReturn(0);
+            when(rpc.callAll(ClusterAdminService.RPC_FORWARD, Map.of())).thenReturn(Map.of("n2", Map.of("forwarded", 0, "remaining", 0)));
+            ActionResult missing = service.forwardLocalDeadLetters("a");
+            assertEquals("PARTIAL", missing.outcome());
+            assertEquals(List.of("n3"), missing.details().get("missing"));
         }
 
         @Test
         @DisplayName("forwarding local dead letters sums every node's count; refused while this node has no NATS")
         void forward() {
             when(coordinator.forwardLocalDeadLetters()).thenReturn(2);
-            when(rpc.callAll(ClusterAdminService.RPC_FORWARD, Map.of())).thenReturn(Map.of("n2", Map.of("forwarded", 3)));
-            assertEquals(5, service.forwardLocalDeadLetters("a").details().get("total"));
+            when(rpc.callAll(ClusterAdminService.RPC_FORWARD, Map.of()))
+                    .thenReturn(Map.of("n2", Map.of("forwarded", 3, "remaining", 0), "n3", Map.of("forwarded", 0, "remaining", 0)));
+            ActionResult done = service.forwardLocalDeadLetters("a");
+            assertEquals(5, done.details().get("total"));
+            assertEquals("DONE", done.outcome());
             when(connections.isConnected()).thenReturn(false);
             assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.forwardLocalDeadLetters("a"));
         }

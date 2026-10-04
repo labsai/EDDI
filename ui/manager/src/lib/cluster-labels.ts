@@ -19,6 +19,20 @@ import type {
 
 // ---------------------------------------------------------------- verdict
 
+/** A recovery action's outcome in words. */
+export function actionOutcomeLabel(t: TFunction, outcome: string): string {
+  switch (outcome) {
+    case "DONE":
+      return t("cluster.action.outcomeDone", "Done");
+    case "QUEUED":
+      return t("cluster.action.outcomeQueued", "Queued — goes out when NATS is back");
+    case "PARTIAL":
+      return t("cluster.action.outcomePartial", "Partly done");
+    default:
+      return outcome;
+  }
+}
+
 export function verdictLabel(t: TFunction, verdict: ClusterVerdict): string {
   switch (verdict) {
     case "HEALTHY":
@@ -174,10 +188,19 @@ export function deadLetterReasonLabel(t: TFunction, reason: string): string {
       return t("cluster.dlReason.fenced", "Fenced write");
     case "timeout":
       return t("cluster.dlReason.timeout", "Timeout");
-    default:
+    case "lease-lost":
+      return t("cluster.dlReason.leaseLost", "Lease lost");
+    case "failed":
       return t("cluster.dlReason.failed", "Failed");
+    default:
+      // A reason a newer backend records and this console does not know yet: show
+      // the code itself rather than calling it something it is not.
+      return reason;
   }
 }
+
+/** The reasons the console filters by; anything else still lists and counts. */
+export const KNOWN_DEAD_LETTER_REASONS = ["fenced", "lease-lost", "timeout", "failed"] as const;
 
 export function deadLetterReasonHelp(t: TFunction, entry: Pick<DeadLetterView, "reason" | "fence">): string {
   switch (entry.reason) {
@@ -189,8 +212,15 @@ export function deadLetterReasonHelp(t: TFunction, entry: Pick<DeadLetterView, "
       );
     case "timeout":
       return t("cluster.dlReason.timeoutHelp", "The turn ran out of time. Check the agent's model or tool latency before replaying.");
-    default:
+    case "lease-lost":
+      return t(
+        "cluster.dlReason.leaseLostHelp",
+        "This node lost the conversation's lease while the turn ran, so the turn was stopped before its result was stored. The user may have seen no answer. Replay it if the message should still count.",
+      );
+    case "failed":
       return t("cluster.dlReason.failedHelp", "The turn failed after it started. Fix the cause shown in the error before replaying.");
+    default:
+      return t("cluster.dlReason.otherHelp", "Recorded with the reason \"{{reason}}\". The error below says what happened.", { reason: entry.reason });
   }
 }
 
@@ -277,7 +307,12 @@ export function activityTitle(t: TFunction, e: ActivityEvent): string {
         outcome: s("outcome"),
       });
     case "admin.caches.resync":
-      return t("cluster.activity.adminResync", "{{actor}} resynced every cache", { actor: s("actor") });
+      return p["outcome"] === "QUEUED"
+        ? t("cluster.activity.adminResyncQueued", "{{actor}} resynced the caches of {{node}}; the other nodes get it when NATS is back", {
+            actor: s("actor"),
+            node: e.node,
+          })
+        : t("cluster.activity.adminResync", "{{actor}} resynced every cache", { actor: s("actor") });
     case "admin.deployments.reconcile":
       return t("cluster.activity.adminReconcile", "{{actor}} reconciled deployments", { actor: s("actor") });
     case "admin.deadletters.forward":

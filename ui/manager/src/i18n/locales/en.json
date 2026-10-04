@@ -5263,7 +5263,10 @@
       "resyncText": "Every node flushes its invalidatable caches (secrets, variables, connections, deployments, triggers, conversation states) and reloads them from the database. No data changes; expect a short burst of database reads. Use it when a node serves stale configuration.",
       "resyncTitle": "Resync every cache in the cluster?",
       "subtitle": "Safe to repeat and audited. Force-releasing a lease and draining a node are on the lease and node they act on. Nothing here can delete data or bypass fencing.",
-      "title": "Recovery actions"
+      "title": "Recovery actions",
+      "outcomeDone": "Done",
+      "outcomeQueued": "Queued — goes out when NATS is back",
+      "outcomePartial": "Partly done"
     },
     "activity": {
       "adminDiscard": "{{actor}} discarded dead letters ({{ok}} of {{n}})",
@@ -5297,7 +5300,8 @@
       "resume": "Resume",
       "seenBy": "seen by {{node}}",
       "title": "Cluster activity",
-      "warning": "Warning"
+      "warning": "Warning",
+      "adminResyncQueued": "{{actor}} resynced the caches of {{node}}; the other nodes get it when NATS is back"
     },
     "activityGroup": {
       "admin": "Admin actions",
@@ -5401,7 +5405,10 @@
       "fenced": "Fenced write",
       "fencedHelp": "This node lost the conversation's lease while the turn ran, and a newer turn committed meanwhile. The database refused this turn's write (token {{token}} < stored {{stored}}) so it could not overwrite the newer one. The reply may already have reached the user; the conversation history does not contain it.",
       "timeout": "Timeout",
-      "timeoutHelp": "The turn ran out of time. Check the agent's model or tool latency before replaying."
+      "timeoutHelp": "The turn ran out of time. Check the agent's model or tool latency before replaying.",
+      "leaseLost": "Lease lost",
+      "leaseLostHelp": "This node lost the conversation's lease while the turn ran, so the turn was stopped before its result was stored. The user may have seen no answer. Replay it if the message should still count.",
+      "otherHelp": "Recorded with the reason \"{{reason}}\". The error below says what happened."
     },
     "drain": {
       "confirm": "Drain",

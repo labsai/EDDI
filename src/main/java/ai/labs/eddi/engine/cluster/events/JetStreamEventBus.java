@@ -327,10 +327,17 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
      * Administrative: flush every invalidatable cache on every node, this one
      * included (an event from this node's own boot is ignored when it comes back,
      * so the local flush runs here). The caches reload from the database.
+     *
+     * @return true when the request went out to the other nodes now; false when it
+     *         waits in the outbox for a reconnect (this node has flushed already)
      */
-    public void requestResyncAll(String reason) {
+    public boolean requestResyncAll(String reason) {
+        // Decided before publishing: a disconnected publish goes to the outbox and only
+        // reaches the other nodes on reconnect — the caller must not report it as done.
+        boolean connected = connections.isConnected();
         publish(ClusterEvent.RESYNC_ALL, Map.of("reason", reason, "node", node.nodeId()));
         resync(reason);
+        return connected;
     }
 
     void resync(String reason) {

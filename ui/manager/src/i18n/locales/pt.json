@@ -5377,7 +5377,10 @@
       "failed": "Falhou",
       "fencedHelp": "Este nó perdeu o lease da conversa enquanto o turno era executado, e um turno mais recente foi confirmado nesse meio-tempo. O banco de dados recusou a gravação deste turno (token {{token}} < armazenado {{stored}}) para que ela não sobrescrevesse a mais recente. A resposta pode já ter chegado ao usuário; o histórico da conversa não a contém.",
       "timeoutHelp": "O turno ficou sem tempo. Verifique a latência do modelo ou das ferramentas do agente antes de reproduzir.",
-      "failedHelp": "O turno falhou depois de iniciado. Corrija a causa mostrada no erro antes de reproduzir."
+      "failedHelp": "O turno falhou depois de iniciado. Corrija a causa mostrada no erro antes de reproduzir.",
+      "leaseLost": "Concessão perdida",
+      "leaseLostHelp": "Este nó perdeu a concessão da conversa enquanto o turno era executado, por isso o turno foi interrompido antes de o resultado ser guardado. O utilizador pode não ter visto nenhuma resposta. Reexecute-o se a mensagem ainda deve contar.",
+      "otherHelp": "Registado com o motivo «{{reason}}». O erro abaixo indica o que aconteceu."
     },
     "notReplayable": {
       "secret": "Não reproduzível: o cliente marcou a entrada como secreta, então ela nunca foi armazenada.",
@@ -5426,7 +5429,8 @@
       "loadError": "Não foi possível carregar o histórico de atividade.",
       "empty": "Nada aconteceu ainda",
       "seenBy": "visto por {{node}}",
-      "offline": "O feed ao vivo não está conectado; a lista é atualizada quando você reabre a aba."
+      "offline": "O feed ao vivo não está conectado; a lista é atualizada quando você reabre a aba.",
+      "adminResyncQueued": "{{actor}} ressincronizou as caches de {{node}}; os outros nós recebem-no quando o NATS voltar"
     },
     "activityGroup": {
       "nodes": "Nós",
@@ -5648,7 +5652,10 @@
       "forwardText": "Os nós que não conseguiram alcançar o NATS mantiveram suas dead letters em memória, onde uma reinicialização as perderia. Agora cada nó as move para o stream compartilhado (ele também faz isso sozinho ao se reconectar). Nada é reproduzido.",
       "forward": "Encaminhar dead letters",
       "title": "Ações de recuperação",
-      "subtitle": "Seguras para repetir e auditadas. Liberar um lease à força e drenar um nó ficam no próprio lease e nó em que atuam. Nada aqui pode excluir dados ou contornar o fencing."
+      "subtitle": "Seguras para repetir e auditadas. Liberar um lease à força e drenar um nó ficam no próprio lease e nó em que atuam. Nada aqui pode excluir dados ou contornar o fencing.",
+      "outcomeDone": "Concluído",
+      "outcomeQueued": "Em fila — sai quando o NATS voltar",
+      "outcomePartial": "Concluído em parte"
     },
     "audit": {
       "title": "Trilha de auditoria das ações de recuperação",

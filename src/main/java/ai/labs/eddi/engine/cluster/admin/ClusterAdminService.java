@@ -215,8 +215,9 @@ public class ClusterAdminService implements ClusterStartable {
             deployments.reconcileNow();
             return Map.of("reconciled", true);
         });
-        rpc.handle(RPC_FORWARD, request -> Map.of("forwarded", clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters)
-                .orElse(0)));
+        rpc.handle(RPC_FORWARD, request -> Map.of("forwarded",
+                clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters).orElse(0), "remaining",
+                clusterCoordinator().map(ClusterConversationCoordinator::localDeadLetterCount).orElse(0)));
     }
 
     public boolean isClustered() {
@@ -1053,11 +1054,16 @@ public class ClusterAdminService implements ClusterStartable {
     public ActionResult resyncCaches(String actor) {
         requireCluster("A cluster-wide cache resync");
         String reason = "requested by an administrator";
-        eventBus.get().requestResyncAll(reason);
-        audit("caches.resync", actor, Map.of(), Map.of("outcome", "DONE"));
-        activity.record("admin.caches.resync", ClusterActivityLog.INFO, Map.of("actor", actor), null);
-        count("caches.resync", "done");
-        return new ActionResult("caches.resync", "DONE", "Every node flushes its invalidatable caches and reloads from the database.",
+        boolean sent = eventBus.get().requestResyncAll(reason);
+        String outcome = sent ? DONE : QUEUED;
+        audit("caches.resync", actor, Map.of(), Map.of("outcome", outcome));
+        activity.record("admin.caches.resync", ClusterActivityLog.INFO, Map.of("actor", actor, "outcome", outcome), null);
+        count("caches.resync", outcome.toLowerCase(Locale.ROOT));
+        return new ActionResult("caches.resync", outcome,
+                sent
+                        ? "Every node flushes its invalidatable caches and reloads from the database."
+                        : "This node flushed its caches. NATS is unreachable, so the request to the other nodes waits in the outbox "
+                                + "and goes out when this node reconnects.",
                 Map.of());
     }
 
@@ -1065,15 +1071,38 @@ public class ClusterAdminService implements ClusterStartable {
         deployments.reconcileNow();
         List<String> answered = new ArrayList<>();
         answered.add(isClustered() ? connections.get().node().nodeId() : "local");
+        List<String> missing = new ArrayList<>();
         if (isClustered()) {
-            answered.addAll(rpc.callAll(RPC_RECONCILE, Map.of()).keySet());
+            Map<String, Map<String, Object>> replies = rpc.callAll(RPC_RECONCILE, Map.of());
+            replies.forEach((node, reply) -> {
+                if (reply.get("error") == null) {
+                    answered.add(node);
+                }
+            });
+            missing.addAll(otherMembers().stream().filter(n -> !answered.contains(n)).toList());
         }
-        audit("deployments.reconcile", actor, Map.of(), Map.of("outcome", "DONE", "nodes", answered));
-        activity.record("admin.deployments.reconcile", ClusterActivityLog.INFO, Map.of("actor", actor, "nodes", answered), null);
-        count("deployments.reconcile", "done");
-        return new ActionResult("deployments.reconcile", "DONE", "The deployment sweep ran on " + answered.size() + " node(s).",
-                Map.of("nodes", answered));
+        String outcome = missing.isEmpty() ? DONE : PARTIAL;
+        audit("deployments.reconcile", actor, Map.of(), Map.of("outcome", outcome, "nodes", answered, "missing", missing));
+        activity.record("admin.deployments.reconcile", ClusterActivityLog.INFO, Map.of("actor", actor, "nodes", answered, "outcome", outcome),
+                null);
+        count("deployments.reconcile", outcome.toLowerCase(Locale.ROOT));
+        String message = missing.isEmpty()
+                ? "The deployment sweep ran on " + answered.size() + " node(s)."
+                : "The deployment sweep ran on " + answered + "; " + missing + " did not answer (their own sweep still runs every 10 s).";
+        return new ActionResult("deployments.reconcile", outcome, message, Map.of("nodes", answered, "missing", missing));
     }
+
+    /** The other members this node can see, by id. */
+    private List<String> otherMembers() {
+        String self = connections.get().node().nodeId();
+        return membersById().keySet().stream().filter(n -> !n.equals(self)).sorted().toList();
+    }
+
+    static final String DONE = "DONE";
+    /** Applied here; the rest waits for a reconnect. */
+    static final String QUEUED = "QUEUED";
+    /** Applied on some nodes only — the details name the rest. */
+    static final String PARTIAL = "PARTIAL";
 
     public ActionResult forwardLocalDeadLetters(String actor) {
         requireCluster("Forwarding local dead letters");
@@ -1081,14 +1110,32 @@ public class ClusterAdminService implements ClusterStartable {
             throw new ActionRefusedException(409, "NATS_UNREACHABLE", "NATS is unreachable from this node; local dead letters stay where they are");
         }
         Map<String, Object> perNode = new TreeMap<>();
-        perNode.put(connections.get().node().nodeId(), clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters).orElse(0));
-        rpc.callAll(RPC_FORWARD, Map.of()).forEach((node, reply) -> perNode.put(node, reply.getOrDefault("forwarded", 0)));
-        int total = perNode.values().stream().mapToInt(v -> v instanceof Number n ? n.intValue() : 0).sum();
-        audit("deadletters.forward-local", actor, Map.of(), Map.of("outcome", "DONE", "forwarded", perNode));
-        activity.record("admin.deadletters.forward", ClusterActivityLog.INFO, Map.of("actor", actor, "forwarded", total), null);
-        count("deadletters.forward-local", "done");
-        return new ActionResult("deadletters.forward-local", "DONE", total + " dead letter(s) moved to the shared stream.",
-                Map.of("perNode", perNode, "total", total));
+        Map<String, Object> remaining = new TreeMap<>();
+        String self = connections.get().node().nodeId();
+        perNode.put(self, clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters).orElse(0));
+        remaining.put(self, clusterCoordinator().map(ClusterConversationCoordinator::localDeadLetterCount).orElse(0));
+        rpc.callAll(RPC_FORWARD, Map.of()).forEach((node, reply) -> {
+            perNode.put(node, reply.getOrDefault("forwarded", 0));
+            remaining.put(node, reply.getOrDefault("remaining", 0));
+        });
+        List<String> missing = otherMembers().stream().filter(n -> !perNode.containsKey(n)).toList();
+        int total = sum(perNode);
+        int left = sum(remaining);
+        // Forwarding stops at the first entry that cannot be appended, and a node that
+        // did
+        // not answer forwarded nothing: either way entries are still local, so not
+        // DONE.
+        String outcome = missing.isEmpty() && left == 0 ? DONE : PARTIAL;
+        audit("deadletters.forward-local", actor, Map.of(),
+                Map.of("outcome", outcome, "forwarded", perNode, "remaining", remaining, "missing", missing));
+        activity.record("admin.deadletters.forward", ClusterActivityLog.INFO, Map.of("actor", actor, "forwarded", total, "outcome", outcome),
+                null);
+        count("deadletters.forward-local", outcome.toLowerCase(Locale.ROOT));
+        String message = total + " dead letter(s) moved to the shared stream."
+                + (left > 0 ? " " + left + " are still kept locally (the shared stream refused them for now)." : "")
+                + (missing.isEmpty() ? "" : " " + missing + " did not answer.");
+        return new ActionResult("deadletters.forward-local", outcome, message,
+                Map.of("perNode", perNode, "total", total, "remaining", remaining, "missing", missing));
     }
 
     public ActionResult drain(String nodeId, boolean drain, String actor) {
@@ -1246,6 +1293,10 @@ public class ClusterAdminService implements ClusterStartable {
 
     private void count(String action, String outcome) {
         meterRegistry.counter("eddi.cluster.admin.actions", "action", action, "outcome", outcome).increment();
+    }
+
+    private static int sum(Map<String, Object> counts) {
+        return counts.values().stream().mapToInt(v -> v instanceof Number n ? n.intValue() : 0).sum();
     }
 
     private static long num(Object value) {

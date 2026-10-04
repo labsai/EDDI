@@ -5377,7 +5377,10 @@
       "failed": "Fallido",
       "fencedHelp": "Este nodo perdió el lease de la conversación mientras se ejecutaba el turno, y entretanto se confirmó un turno más reciente. La base de datos rechazó la escritura de este turno (token {{token}} < almacenado {{stored}}) para que no sobrescribiera el más reciente. Es posible que la respuesta ya haya llegado al usuario; el historial de la conversación no la contiene.",
       "timeoutHelp": "El turno se quedó sin tiempo. Revise la latencia del modelo o de las herramientas del agente antes de reproducirlo.",
-      "failedHelp": "El turno falló después de iniciarse. Corrija la causa indicada en el error antes de reproducirlo."
+      "failedHelp": "El turno falló después de iniciarse. Corrija la causa indicada en el error antes de reproducirlo.",
+      "leaseLost": "Concesión perdida",
+      "leaseLostHelp": "Este nodo perdió la concesión de la conversación mientras se ejecutaba el turno, así que el turno se detuvo antes de guardar su resultado. Puede que el usuario no haya visto ninguna respuesta. Vuelve a ejecutarlo si el mensaje aún debe contar.",
+      "otherHelp": "Registrado con el motivo «{{reason}}». El error de abajo indica qué pasó."
     },
     "notReplayable": {
       "secret": "No reproducible: el cliente marcó la entrada como secreta, por lo que nunca se almacenó.",
@@ -5426,7 +5429,8 @@
       "loadError": "No se pudo cargar el historial de actividad.",
       "empty": "Todavía no ha ocurrido nada",
       "seenBy": "visto por {{node}}",
-      "offline": "El feed en vivo no está conectado; la lista se actualiza al volver a abrir la pestaña."
+      "offline": "El feed en vivo no está conectado; la lista se actualiza al volver a abrir la pestaña.",
+      "adminResyncQueued": "{{actor}} resincronizó las cachés de {{node}}; los demás nodos lo recibirán cuando NATS vuelva"
     },
     "activityGroup": {
       "nodes": "Nodos",
@@ -5648,7 +5652,10 @@
       "forwardText": "Los nodos que no pudieron alcanzar NATS retuvieron sus dead letters en memoria, donde un reinicio las perdería. Ahora cada nodo las mueve al stream compartido (también lo hace por sí solo al reconectarse). No se reproduce nada.",
       "forward": "Reenviar dead letters",
       "title": "Acciones de recuperación",
-      "subtitle": "Se pueden repetir con seguridad y quedan auditadas. Liberar a la fuerza un lease y drenar un nodo están en el propio lease y nodo sobre los que actúan. Nada de aquí puede borrar datos ni eludir el fencing."
+      "subtitle": "Se pueden repetir con seguridad y quedan auditadas. Liberar a la fuerza un lease y drenar un nodo están en el propio lease y nodo sobre los que actúan. Nada de aquí puede borrar datos ni eludir el fencing.",
+      "outcomeDone": "Hecho",
+      "outcomeQueued": "En cola — se envía cuando NATS vuelva",
+      "outcomePartial": "Hecho en parte"
     },
     "audit": {
       "title": "Registro de auditoría de las acciones de recuperación",

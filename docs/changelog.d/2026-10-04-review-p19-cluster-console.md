@@ -32,6 +32,17 @@
   node-local dead letters are forwarded every 30 s while connected, not only on a reconnect. The
   `ADMIN` bucket is provisioned at start: two nodes creating it on first use made the loser of a
   replay race answer `UNAVAILABLE` instead of `IN_PROGRESS`.
+- **Recovery actions report what actually happened.** A cache resync while the node is cut off
+  from NATS answered `DONE`, though only this node had flushed and the request sat in the outbox.
+  It now answers `QUEUED` and says the others get it on reconnect (`requestResyncAll` reports
+  whether it was sent). Reconcile and forward-local answer `PARTIAL` when a member did not answer
+  (an RPC reply carrying an `error` no longer counts) or, for forward, when entries are still kept
+  locally; `details.missing` and `details.remaining` say which. Drain already refused with a `409`
+  rather than half-doing it. The console shows the outcome in words and warns, instead of a
+  success toast, for anything but `DONE`; audit and activity carry the same outcome.
+- **Dead-letter reasons the console does not know** are shown by their code with a generic
+  explanation, no longer as "Failed". `lease-lost` (a turn stopped when its node lost the lease,
+  from the deploy branch's lease-path fix) has its label, help text and filter option already.
 - **Fencing tokens and lease revisions are JSON strings** in the console API, exact beyond 2^53.
 - **Cluster drawer focus:** an inline `onClose` re-ran the focus-return effect on every refresh and
   pulled focus out of the dialog; Tab no longer counts disabled controls as the last stop.

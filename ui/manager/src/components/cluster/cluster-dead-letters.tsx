@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Inbox, Lock, RotateCcw, Trash2 } from "lucide-react";
 import type { BulkResult, DeadLetterFilter, DeadLetterView } from "@/lib/api/cluster";
-import { deadLetterReasonHelp, deadLetterReasonLabel, notReplayableLabel, outcomeLabel } from "@/lib/cluster-labels";
+import { deadLetterReasonHelp, deadLetterReasonLabel, KNOWN_DEAD_LETTER_REASONS, notReplayableLabel, outcomeLabel } from "@/lib/cluster-labels";
 import { useClusterDeadLetters, useDeadLetterSummary, useDiscardDeadLetters, useReplayDeadLetters } from "@/hooks/use-cluster";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,7 @@ import { ClusterDrawer } from "./cluster-drawer";
 const PERIODS: Record<string, number | undefined> = { all: undefined, "1h": 3_600_000, "24h": 86_400_000, "7d": 604_800_000 };
 
 function reasonVariant(reason: string): "destructive" | "warning" | "secondary" {
-  return reason === "fenced" ? "warning" : reason === "timeout" ? "secondary" : "destructive";
+  return reason === "fenced" || reason === "lease-lost" ? "warning" : reason === "failed" ? "destructive" : "secondary";
 }
 
 /** Read-only roles see counts only: the entries carry what users typed. */
@@ -163,9 +163,11 @@ export function ClusterDeadLettersPanel({ nodes, initialConversationId = "" }: {
           data-testid="cluster-dl-filter-reason"
         >
           <option value="">{t("cluster.dl.anyReason", "Any reason")}</option>
-          <option value="fenced">{deadLetterReasonLabel(t, "fenced")}</option>
-          <option value="timeout">{deadLetterReasonLabel(t, "timeout")}</option>
-          <option value="failed">{deadLetterReasonLabel(t, "failed")}</option>
+          {KNOWN_DEAD_LETTER_REASONS.map((r) => (
+            <option key={r} value={r}>
+              {deadLetterReasonLabel(t, r)}
+            </option>
+          ))}
         </select>
         <select
           className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground"

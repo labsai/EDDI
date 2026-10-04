@@ -5318,7 +5318,10 @@
       "failed": "Fehlgeschlagen",
       "fencedHelp": "Dieser Knoten hat die Lease der Konversation verloren, während der Turn lief, und inzwischen wurde ein neuerer Turn festgeschrieben. Die Datenbank hat den Schreibvorgang dieses Turns abgewiesen (Token {{token}} < gespeichert {{stored}}), damit er den neueren nicht überschreibt. Die Antwort hat den Benutzer eventuell schon erreicht; der Konversationsverlauf enthält sie nicht.",
       "timeoutHelp": "Der Turn hat das Zeitlimit überschritten. Prüfen Sie vor dem erneuten Abspielen die Latenz des Modells oder der Tools des Agenten.",
-      "failedHelp": "Der Turn ist nach dem Start fehlgeschlagen. Beheben Sie vor dem erneuten Abspielen die im Fehler angezeigte Ursache."
+      "failedHelp": "Der Turn ist nach dem Start fehlgeschlagen. Beheben Sie vor dem erneuten Abspielen die im Fehler angezeigte Ursache.",
+      "leaseLost": "Lease verloren",
+      "leaseLostHelp": "Dieser Knoten hat die Lease der Konversation verloren, während der Turn lief. Der Turn wurde daher gestoppt, bevor sein Ergebnis gespeichert wurde. Der Benutzer hat möglicherweise keine Antwort gesehen. Wiederhole ihn, wenn die Nachricht noch zählen soll.",
+      "otherHelp": "Mit dem Grund „{{reason}}“ erfasst. Der Fehler unten sagt, was passiert ist."
     },
     "notReplayable": {
       "secret": "Nicht erneut abspielbar: Der Client hat die Eingabe als geheim markiert, daher wurde sie nie gespeichert.",
@@ -5367,7 +5370,8 @@
       "loadError": "Der Aktivitätsverlauf konnte nicht geladen werden.",
       "empty": "Noch keine Ereignisse",
       "seenBy": "gesehen von {{node}}",
-      "offline": "Der Live-Feed ist nicht verbunden; die Liste wird beim erneuten Öffnen des Tabs aktualisiert."
+      "offline": "Der Live-Feed ist nicht verbunden; die Liste wird beim erneuten Öffnen des Tabs aktualisiert.",
+      "adminResyncQueued": "{{actor}} hat die Caches von {{node}} neu synchronisiert; die anderen Knoten erhalten es, sobald NATS wieder erreichbar ist"
     },
     "activityGroup": {
       "nodes": "Knoten",
@@ -5589,7 +5593,10 @@
       "forwardText": "Knoten, die NATS nicht erreichten, haben ihre Dead Letters im Arbeitsspeicher behalten, wo ein Neustart sie verlieren würde. Jeder Knoten verschiebt sie jetzt in den gemeinsamen Stream (das geschieht auch automatisch beim Wiederverbinden). Nichts wird erneut abgespielt.",
       "forward": "Dead Letters weiterleiten",
       "title": "Wiederherstellungsaktionen",
-      "subtitle": "Gefahrlos wiederholbar und protokolliert. Das zwangsweise Freigeben einer Lease und das Entleeren eines Knotens finden Sie bei der jeweiligen Lease bzw. dem Knoten. Nichts hier kann Daten löschen oder das Fencing umgehen."
+      "subtitle": "Gefahrlos wiederholbar und protokolliert. Das zwangsweise Freigeben einer Lease und das Entleeren eines Knotens finden Sie bei der jeweiligen Lease bzw. dem Knoten. Nichts hier kann Daten löschen oder das Fencing umgehen.",
+      "outcomeDone": "Erledigt",
+      "outcomeQueued": "In Warteschlange — wird gesendet, sobald NATS wieder erreichbar ist",
+      "outcomePartial": "Teilweise erledigt"
     },
     "audit": {
       "title": "Audit-Trail der Wiederherstellungsaktionen",
