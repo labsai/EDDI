@@ -18,12 +18,17 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import io.nats.client.JetStream;
+import io.nats.client.api.PublishAck;
+import java.io.IOException;
+import java.util.Map;
 
 /**
  * Which JetStream errors mean "that dead letter is gone". A single-server
@@ -102,5 +107,25 @@ class JetStreamDeadLetterStoreTest {
     @CsvSource({"10037,true", "10057,true", "10043,true", "10059,true", "10077,false", "10008,false"})
     void classifiesNotFound(int code, boolean expected) throws Exception {
         assertEquals(expected, JetStreamDeadLetterStore.notFound(error(code)));
+    }
+
+    @Test
+    void aStreamStillElectingItsLeaderIsWaitedFor() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        JetStream js = mock(JetStream.class);
+        NatsConnectionManager connections = mock(NatsConnectionManager.class);
+        when(connections.config()).thenReturn(ClusterConfig.defaults());
+        when(connections.jetStreamManagement()).thenReturn(jsm);
+        when(connections.jetStream()).thenReturn(js);
+        when(connections.node()).thenReturn(new NodeIdentity("n1", "b1"));
+        when(jsm.getStreamInfo(anyString())).thenThrow(error(10059));
+        PublishAck ack = mock(PublishAck.class);
+        when(ack.getSeqno()).thenReturn(42L);
+        // missing stream, then "no responders" twice while the new stream elects a
+        // leader
+        when(js.publish(anyString(), any(byte[].class))).thenThrow(new IOException("503 No Responders Available For Request"))
+                .thenThrow(new IOException("503 No Responders Available For Request"))
+                .thenThrow(new IOException("503 No Responders Available For Request")).thenReturn(ack);
+        assertEquals("42", new JetStreamDeadLetterStore(connections).append("c1", "boom", 1L, Map.of()));
     }
 }

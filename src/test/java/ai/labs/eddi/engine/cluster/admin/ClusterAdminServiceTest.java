@@ -151,7 +151,19 @@ class ClusterAdminServiceTest {
     private ClusterAdminService newService(ClusterConfig cfg) {
         return new ClusterAdminService(cfg, activity, watcher, coordinator, leaseManager, rpc, instance(connections), instance(presence),
                 instance(natsLeases), instance(eventBus), memoryStore, conversationService, deployments, audit, new SimpleMeterRegistry(),
-                shared);
+                shared, instance(null));
+    }
+
+    @Test
+    @DisplayName("the cluster coordinator is found by its type, not by casting the injected proxy (forwarding used to report 0)")
+    void clusterCoordinatorBehindAProxy() {
+        IConversationCoordinator proxy = mock(IConversationCoordinator.class);
+        when(coordinator.forwardLocalDeadLetters()).thenReturn(3);
+        when(rpc.callAll(ClusterAdminService.RPC_FORWARD, Map.of())).thenReturn(Map.of());
+        ClusterAdminService behindProxy = new ClusterAdminService(config, activity, watcher, proxy, leaseManager, rpc, instance(connections),
+                instance(presence), instance(natsLeases), instance(eventBus), memoryStore, conversationService, deployments, audit,
+                new SimpleMeterRegistry(), shared, instance(coordinator));
+        assertEquals(3, behindProxy.forwardLocalDeadLetters("a").details().get("total"));
     }
 
     private static DeadLetterEntry entry(String id, String reason, String node, Map<String, Object> turn) {
@@ -180,7 +192,7 @@ class ClusterAdminServiceTest {
             when(inMemory.getDeadLetters()).thenReturn(List.of());
             ClusterAdminService single = new ClusterAdminService(ClusterConfig.defaults(), activity, watcher, inMemory, leaseManager, rpc,
                     instance(null), instance(null), instance(null), instance(null), memoryStore, conversationService, deployments, audit,
-                    new SimpleMeterRegistry(), new LocalSharedStateFactory());
+                    new SimpleMeterRegistry(), new LocalSharedStateFactory(), instance(null));
             ClusterOverview overview = single.overview();
             assertEquals("SINGLE_NODE", overview.verdict());
             assertEquals("single-node", overview.mode());

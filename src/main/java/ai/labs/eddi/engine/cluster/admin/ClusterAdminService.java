@@ -153,6 +153,7 @@ public class ClusterAdminService implements ClusterStartable {
     private final MeterRegistry meterRegistry;
 
     private final ISharedStateFactory sharedState;
+    private final Instance<ClusterConversationCoordinator> clusterCoordinators;
     private volatile ISharedKv claims;
     /**
      * Replay claims of node-local dead letters ({@code local-…}): those exist on
@@ -167,8 +168,10 @@ public class ClusterAdminService implements ClusterStartable {
             IConversationLeaseManager leaseManager, IClusterRpc rpc, Instance<NatsConnectionManager> connections,
             Instance<ClusterPresence> presence, Instance<NatsLeaseManager> natsLeases, Instance<JetStreamEventBus> eventBus,
             IConversationMemoryStore memoryStore, IConversationService conversationService, IAgentDeploymentManagement deployments,
-            AuditLedgerService auditLedger, MeterRegistry meterRegistry, ISharedStateFactory sharedState) {
+            AuditLedgerService auditLedger, MeterRegistry meterRegistry, ISharedStateFactory sharedState,
+            Instance<ClusterConversationCoordinator> clusterCoordinators) {
         this.config = config;
+        this.clusterCoordinators = clusterCoordinators;
         this.sharedState = sharedState;
         this.activity = activity;
         this.watcher = watcher;
@@ -195,6 +198,11 @@ public class ClusterAdminService implements ClusterStartable {
         // it,
         // and a node that is not drained (a restart ends a drain) removes a leftover
         // one.
+        // Provisioned at start, not at the first replay or drain: two nodes creating
+        // the
+        // bucket on first use raced its leader election, and the loser answered
+        // UNAVAILABLE (seen live).
+        claims();
         manager.onConnected(this::syncOwnDrainKey);
         long every = config.presenceInterval().toMillis();
         manager.scheduler().scheduleWithFixedDelay(this::syncOwnDrainKey, every, every, TimeUnit.MILLISECONDS);
@@ -215,8 +223,19 @@ public class ClusterAdminService implements ClusterStartable {
         return config.isNats();
     }
 
+    /**
+     * The cluster coordinator, resolved by its own type. Not by testing the
+     * injected {@link IConversationCoordinator}: that is the producer's client
+     * proxy, never an instance of the concrete class — so the shared dead-letter
+     * count, the paging of shared and local entries, the per-conversation lookup
+     * and forwarding local dead letters all silently fell back to their single-node
+     * paths (seen live: forwarding reported 0 with a local entry waiting).
+     */
     private Optional<ClusterConversationCoordinator> clusterCoordinator() {
-        return coordinator instanceof ClusterConversationCoordinator c ? Optional.of(c) : Optional.empty();
+        if (coordinator instanceof ClusterConversationCoordinator c) {
+            return Optional.of(c);
+        }
+        return isClustered() && clusterCoordinators.isResolvable() ? Optional.of(clusterCoordinators.get()) : Optional.empty();
     }
 
     // ================================================================ overview

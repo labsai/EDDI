@@ -40,6 +40,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import ai.labs.eddi.engine.cluster.NodeIdentity;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The cluster-mode coordinator ({@code eddi.messaging.type=nats}).
@@ -76,6 +77,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
 
     private static final Logger LOGGER = Logger.getLogger(ClusterConversationCoordinator.class);
     private static final long DEAD_LETTER_COUNT_CACHE_MILLIS = 5_000;
+    static final long LOCAL_FORWARD_SECONDS = 30;
 
     private final IConversationLeaseManager leases;
     private final IDeadLetterStore deadLetterStore;
@@ -98,6 +100,16 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
                 connections.config().leaseAcquireTimeout());
         presence.contribute(this::presenceNumbers);
         connections.onConnected(this::forwardLocalDeadLetters);
+        // Not only on reconnect: a dead letter can fall back locally while NATS is up
+        // (a
+        // stream that is still electing its leader), and would otherwise wait for the
+        // next
+        // disconnection to be shared.
+        connections.scheduler().scheduleWithFixedDelay(() -> {
+            if (connections.isConnected() && localDeadLetterCount() > 0) {
+                forwardLocalDeadLetters();
+            }
+        }, LOCAL_FORWARD_SECONDS, LOCAL_FORWARD_SECONDS, TimeUnit.SECONDS);
     }
 
     /** For tests and the in-JVM cluster ITs. */

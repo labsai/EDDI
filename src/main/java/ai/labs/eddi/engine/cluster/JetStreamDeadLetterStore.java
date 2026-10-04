@@ -133,13 +133,39 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 // The stream is provisioned asynchronously after connecting; a dead letter
                 // that arrives first creates it here rather than being lost.
                 provision();
-                ack = connections.jetStream().publish(subject, payload);
+                ack = publishWhileTheStreamSettles(subject, payload);
             }
             return String.valueOf(ack.getSeqno());
         } catch (IOException | JetStreamApiException e) {
             throw new ClusterUnavailableException("dead-letter publish failed: " + e.getMessage(), e);
         }
     }
+
+    /**
+     * A stream created a moment ago has no leader yet: its first publishes answer
+     * "no responders". Seen live on a fresh cluster — the first fenced turn's dead
+     * letter landed in the node-local fallback. Retried briefly instead.
+     */
+    private PublishAck publishWhileTheStreamSettles(String subject, byte[] payload) throws IOException, JetStreamApiException {
+        IOException last = null;
+        for (int attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+            try {
+                return connections.jetStream().publish(subject, payload);
+            } catch (IOException e) {
+                last = e;
+                try {
+                    Thread.sleep(SETTLE_PAUSE_MILLIS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        throw last != null ? last : new IOException("dead-letter publish interrupted");
+    }
+
+    static final int SETTLE_ATTEMPTS = 10;
+    static final long SETTLE_PAUSE_MILLIS = 200;
 
     @Override
     public List<DeadLetterEntry> list(int limit, String after) {
