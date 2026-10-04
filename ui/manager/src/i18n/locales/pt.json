@@ -683,7 +683,13 @@
     "purgeSuccess_one": "{{count}} conversa encerrada removida",
     "purgeSuccess_other": "{{count}} conversas encerradas removidas",
     "endStateUnavailable": "Não foi possível voltar a verificar o estado atual das conversas, por isso nada foi terminado. Tente novamente.",
-    "endStateChanged": "Uma conversa selecionada está agora a aguardar aprovação. Reveja a seleção e confirme novamente."
+    "endStateChanged": "Uma conversa selecionada está agora a aguardar aprovação. Reveja a seleção e confirme novamente.",
+    "noMoreResults": "Não há mais resultados",
+    "backToPreviousPage": "Voltar à página anterior",
+    "purgeTitleAll": "Limpar conversas encerradas – todos os agentes",
+    "purgeScopeNote": "Isto não se limita ao agente selecionado acima: exclui as conversas encerradas de todos os agentes.",
+    "confirmPurgeScope": "Aplica-se a TODOS os agentes, não apenas ao selecionado acima.",
+    "purgeDaysInvalid": "Informe um número inteiro de dias, 1 ou mais."
   },
   "conversationDetail": {
     "backToConversations": "Voltar às conversas",
@@ -701,7 +707,9 @@
     "totalCost": "Custo total",
     "cacheHitRate": "Taxa de acerto de cache",
     "endReasonRetired": "Encerrada: a versão do agente foi desativada",
-    "stepAgentVersion": "Respondido pela versão {{version}} do agente"
+    "stepAgentVersion": "Respondido pela versão {{version}} do agente",
+    "searchTranscriptLabel": "Pesquisar na transcrição",
+    "matchCount": "Etapas correspondentes: {{matches}}"
   },
   "chat": {
     "hide": "Ocultar",
@@ -782,7 +790,10 @@
     "reviewNoticeLabel": "Revisão de conversas",
     "sendRejected": "A sua mensagem não foi enviada: {{reason}}",
     "sendWhileLoading": "A sua mensagem não foi enviada: a conversa ainda está a carregar. Tente novamente dentro de momentos.",
-    "turnFailed": "O agente não conseguiu responder a esta mensagem. Consulte o log do servidor ou a trilha de auditoria da conversa para ver o motivo."
+    "turnFailed": "O agente não conseguiu responder a esta mensagem. Consulte o log do servidor ou a trilha de auditoria da conversa para ver o motivo.",
+    "searchAgents": "Pesquisar agentes",
+    "noAgentMatches": "Nenhum agente corresponde à sua pesquisa",
+    "transcript": "Conversa"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -3074,7 +3085,12 @@
     "created": "Criado",
     "updated": "Atualizado",
     "sourceConversation": "Conversa de origem",
-    "conflicted": "Em conflito"
+    "conflicted": "Em conflito",
+    "deleteEntryTitle": "Excluir a entrada de memória?",
+    "deleteEntryDesc": "Isto exclui permanentemente a entrada de memória \"{{key}}\". Não é possível desfazer.",
+    "deleteAllDescUser": "Isto exclui permanentemente todas as {{total}} entradas de memória do usuário \"{{userId}}\". Não é possível desfazer.",
+    "toggleDetails": "Mostrar ou ocultar os detalhes de {{key}}",
+    "deleteEntryLabel": "Excluir a entrada de memória {{key}}"
   },
   "properties": {
     "title": "Propriedades do utilizador",
@@ -3688,7 +3704,11 @@
     "failedConversations_other": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
     "conversationsTruncated_many": "As conversas foram limitadas — o utilizador tem {{count}} no total.",
     "failedConversations_many": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
-    "deleteIncomplete": "Eliminação incompleta — alguns dados deste utilizador podem ainda existir. Não a comunique como cumprida."
+    "deleteIncomplete": "Eliminação incompleta — alguns dados deste utilizador podem ainda existir. Não a comunique como cumprida.",
+    "noDataFoundToast": "Nenhum dado encontrado para este ID de usuário – nada foi excluído.",
+    "noDataFoundTitle": "Nenhum dado encontrado para este ID de usuário",
+    "noDataFoundBody": "Nada foi excluído para \"{{userId}}\". Verifique se há erros de digitação no ID e tente novamente.",
+    "confirmTypeLabel": "Digite o ID de usuário \"{{userId}}\" para confirmar"
   },
   "mockBanner": {
     "message": "Modo de demonstração — Exibindo dados de exemplo. Conecte um backend EDDI para dados reais."

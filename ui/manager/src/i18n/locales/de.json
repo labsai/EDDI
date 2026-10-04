@@ -675,7 +675,13 @@
     "purgeSuccess_one": "{{count}} beendete Gespräch bereinigt",
     "purgeSuccess_other": "{{count}} beendete Gespräche bereinigt",
     "endStateUnavailable": "Der aktuelle Status der Konversationen konnte nicht erneut geprüft werden, daher wurde nichts beendet. Bitte erneut versuchen.",
-    "endStateChanged": "Eine ausgewählte Konversation wartet jetzt auf Freigabe. Prüfen Sie die Auswahl und bestätigen Sie erneut."
+    "endStateChanged": "Eine ausgewählte Konversation wartet jetzt auf Freigabe. Prüfen Sie die Auswahl und bestätigen Sie erneut.",
+    "noMoreResults": "Keine weiteren Ergebnisse",
+    "backToPreviousPage": "Zurück zur vorherigen Seite",
+    "purgeTitleAll": "Beendete Konversationen bereinigen – alle Agenten",
+    "purgeScopeNote": "Dies ist nicht auf den oben ausgewählten Agenten beschränkt: Es löscht beendete Konversationen jedes Agenten.",
+    "confirmPurgeScope": "Gilt für ALLE Agenten, nicht nur für den oben ausgewählten.",
+    "purgeDaysInvalid": "Gib eine ganze Zahl von Tagen ein (mindestens 1)."
   },
   "conversationDetail": {
     "backToConversations": "Zurück zu Gesprächen",
@@ -693,7 +699,9 @@
     "totalCost": "Gesamtkosten",
     "cacheHitRate": "Cache-Trefferquote",
     "endReasonRetired": "Beendet: Die Agent-Version wurde außer Betrieb genommen",
-    "stepAgentVersion": "Beantwortet von Agent-Version {{version}}"
+    "stepAgentVersion": "Beantwortet von Agent-Version {{version}}",
+    "searchTranscriptLabel": "Im Verlauf suchen",
+    "matchCount": "Passende Schritte: {{matches}}"
   },
   "chat": {
     "hide": "Ausblenden",
@@ -772,7 +780,10 @@
     "reviewNoticeLabel": "Gesprächseinsicht",
     "sendRejected": "Ihre Nachricht wurde nicht gesendet: {{reason}}",
     "sendWhileLoading": "Ihre Nachricht wurde nicht gesendet: Die Konversation wird noch geladen. Versuchen Sie es gleich noch einmal.",
-    "turnFailed": "Der Agent konnte diese Nachricht nicht beantworten. Den Grund finden Sie im Server-Log oder im Audit-Trail der Konversation."
+    "turnFailed": "Der Agent konnte diese Nachricht nicht beantworten. Den Grund finden Sie im Server-Log oder im Audit-Trail der Konversation.",
+    "searchAgents": "Agenten suchen",
+    "noAgentMatches": "Kein Agent entspricht deiner Suche",
+    "transcript": "Konversation"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -3204,7 +3215,12 @@
     "created": "Erstellt",
     "updated": "Aktualisiert",
     "sourceConversation": "Quell-Gespräch",
-    "conflicted": "Widerspruch"
+    "conflicted": "Widerspruch",
+    "deleteEntryTitle": "Speichereintrag löschen?",
+    "deleteEntryDesc": "Dadurch wird der Speichereintrag „{{key}}“ dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    "deleteAllDescUser": "Dadurch werden alle {{total}} Speichereinträge des Benutzers „{{userId}}“ dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    "toggleDetails": "Details zu {{key}} ein- oder ausblenden",
+    "deleteEntryLabel": "Speichereintrag {{key}} löschen"
   },
   "properties": {
     "title": "Nutzereigenschaften",
@@ -3648,7 +3664,11 @@
     "conversationsTruncated_other": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
     "failedConversations_one": "{{count}} Gespräch konnte nicht gelesen werden und fehlt im Paket.",
     "failedConversations_other": "{{count}} Gespräche konnten nicht gelesen werden und fehlen im Paket.",
-    "deleteIncomplete": "Löschung unvollständig — einige Daten dieses Benutzers existieren möglicherweise noch. Nicht als erfüllt melden."
+    "deleteIncomplete": "Löschung unvollständig — einige Daten dieses Benutzers existieren möglicherweise noch. Nicht als erfüllt melden.",
+    "noDataFoundToast": "Keine Daten für diese Benutzer-ID gefunden – es wurde nichts gelöscht.",
+    "noDataFoundTitle": "Keine Daten für diese Benutzer-ID gefunden",
+    "noDataFoundBody": "Für „{{userId}}“ wurde nichts gelöscht. Prüfe die ID auf Tippfehler und versuche es erneut.",
+    "confirmTypeLabel": "Gib zur Bestätigung die Benutzer-ID „{{userId}}“ ein"
   },
   "mockBanner": {
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein EDDI-Backend für echte Daten."

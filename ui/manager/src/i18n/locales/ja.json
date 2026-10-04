@@ -675,7 +675,13 @@
     "purgeSuccess_other": "終了した会話 {{count}} 件を消去しました",
     "purgeSuccess_one": "終了した会話 {{count}} 件を消去しました",
     "endStateUnavailable": "会話の現在の状態を再確認できなかったため、何も終了していません。もう一度お試しください。",
-    "endStateChanged": "選択した会話の 1 つが承認待ちになりました。選択内容を確認して、もう一度確定してください。"
+    "endStateChanged": "選択した会話の 1 つが承認待ちになりました。選択内容を確認して、もう一度確定してください。",
+    "noMoreResults": "これ以上の結果はありません",
+    "backToPreviousPage": "前のページに戻る",
+    "purgeTitleAll": "終了した会話を削除 – すべてのエージェント",
+    "purgeScopeNote": "上で選択したエージェントに限定されません。すべてのエージェントの終了した会話が削除されます。",
+    "confirmPurgeScope": "上で選択したエージェントだけでなく、すべてのエージェントに適用されます。",
+    "purgeDaysInvalid": "1 以上の整数で日数を入力してください。"
   },
   "conversationDetail": {
     "backToConversations": "会話一覧に戻る",
@@ -693,7 +699,9 @@
     "totalCost": "合計コスト",
     "cacheHitRate": "キャッシュヒット率",
     "endReasonRetired": "終了：エージェントのバージョンが廃止されました",
-    "stepAgentVersion": "エージェントのバージョン {{version}} が応答"
+    "stepAgentVersion": "エージェントのバージョン {{version}} が応答",
+    "searchTranscriptLabel": "トランスクリプトを検索",
+    "matchCount": "一致したステップ: {{matches}}"
   },
   "chat": {
     "hide": "非表示",
@@ -772,7 +780,10 @@
     "reviewNoticeLabel": "会話のレビュー",
     "sendRejected": "メッセージは送信されませんでした: {{reason}}",
     "sendWhileLoading": "メッセージは送信されませんでした: 会話はまだ読み込み中です。しばらくしてからもう一度お試しください。",
-    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。"
+    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。",
+    "searchAgents": "エージェントを検索",
+    "noAgentMatches": "検索に一致するエージェントはありません",
+    "transcript": "会話"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -3038,7 +3049,12 @@
     "created": "作成日",
     "updated": "更新日",
     "sourceConversation": "ソース会話",
-    "conflicted": "矛盾あり"
+    "conflicted": "矛盾あり",
+    "deleteEntryTitle": "メモリエントリを削除しますか？",
+    "deleteEntryDesc": "メモリエントリ「{{key}}」を完全に削除します。この操作は元に戻せません。",
+    "deleteAllDescUser": "ユーザー「{{userId}}」のメモリエントリ全 {{total}} 件を完全に削除します。この操作は元に戻せません。",
+    "toggleDetails": "{{key}} の詳細を表示/非表示",
+    "deleteEntryLabel": "メモリエントリ {{key}} を削除"
   },
   "properties": {
     "title": "ユーザープロパティ",
@@ -3648,7 +3664,11 @@
     "failedConversations_other": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
     "conversationsTruncated_one": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
     "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
-    "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。"
+    "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。",
+    "noDataFoundToast": "このユーザー ID のデータは見つかりませんでした。何も削除されていません。",
+    "noDataFoundTitle": "このユーザー ID のデータは見つかりませんでした",
+    "noDataFoundBody": "「{{userId}}」に対して削除されたものはありません。ID に誤りがないか確認してから、もう一度お試しください。",
+    "confirmTypeLabel": "確認のため、ユーザー ID「{{userId}}」を入力してください"
   },
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"
