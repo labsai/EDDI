@@ -35,6 +35,9 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -204,6 +207,32 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             LOGGER.warnf("Dead letter of conversation %s kept node-locally: NATS unavailable (%s)", sanitize(conversationId),
                     e.getMessage());
             recordLocalDeadLetter(conversationId, failure, task);
+            scheduleForward();
+        }
+    }
+
+    /** How soon a dead letter kept locally while still connected is tried again. */
+    static final long FORWARD_RETRY_SECONDS = 10;
+
+    /**
+     * A dead letter can fail over to the local ring while NATS is connected, for
+     * example when the stream is momentarily unavailable. Forwarding only on the
+     * next reconnect would then keep it on this node indefinitely, invisible to the
+     * others and lost on a restart, so it is tried again shortly as well.
+     */
+    private void scheduleForward() {
+        ScheduledExecutorService scheduler = connections.scheduler();
+        if (scheduler == null) {
+            return;
+        }
+        try {
+            scheduler.schedule(() -> {
+                if (connections.isConnected()) {
+                    forwardLocalDeadLetters();
+                }
+            }, FORWARD_RETRY_SECONDS, TimeUnit.SECONDS);
+        } catch (RejectedExecutionException shuttingDown) {
+            // the reconnect path forwards them when this node comes back
         }
     }
 

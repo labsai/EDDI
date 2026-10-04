@@ -104,6 +104,37 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         }
     }
 
+    /**
+     * How long a dead letter waits for a stream it has just created to elect its
+     * leader.
+     */
+    static final int READY_ATTEMPTS = 10;
+    static final long READY_BACKOFF_MILLIS = 200;
+
+    /**
+     * Publishes to a stream that was created a moment ago. A replicated stream
+     * answers only once its leader is elected: until then a publish fails with "no
+     * responders". Without the wait, the first dead letter of a new cluster failed
+     * over to the node-local ring (seen live).
+     */
+    private PublishAck publishOnceReady(String subject, byte[] payload) throws IOException, JetStreamApiException {
+        IOException last = null;
+        for (int attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
+            try {
+                return connections.jetStream().publish(subject, payload);
+            } catch (IOException notReadyYet) {
+                last = notReadyYet;
+                try {
+                    Thread.sleep(READY_BACKOFF_MILLIS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("interrupted while the dead-letter stream elected its leader", e);
+                }
+            }
+        }
+        throw last;
+    }
+
     @Override
     public String append(String conversationId, String error, long timestamp, Map<String, Object> turn) {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -124,7 +155,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 // The stream is provisioned asynchronously after connecting; a dead letter
                 // that arrives first creates it here rather than being lost.
                 provision();
-                ack = connections.jetStream().publish(subject, payload);
+                ack = publishOnceReady(subject, payload);
             }
             return String.valueOf(ack.getSeqno());
         } catch (IOException | JetStreamApiException e) {

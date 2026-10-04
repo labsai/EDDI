@@ -45,6 +45,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -286,6 +288,7 @@ class ClusterConversationCoordinatorTest {
     }
 
     private ScriptedLeases leases;
+    private NatsConnectionManager connections;
     private PoolRuntime runtime;
     private ListStore store;
     private ClusterConversationCoordinator coordinator;
@@ -296,7 +299,7 @@ class ClusterConversationCoordinatorTest {
         leases = new ScriptedLeases();
         runtime = new PoolRuntime();
         store = new ListStore();
-        NatsConnectionManager connections = mock(NatsConnectionManager.class);
+        connections = mock(NatsConnectionManager.class);
         when(connections.isConnected()).thenReturn(true);
         coordinator = new ClusterConversationCoordinator(runtime, new SimpleMeterRegistry(), leases, store, connections,
                 mock(ClusterPresence.class), 10_000, 1000, Duration.ofSeconds(45));
@@ -537,5 +540,28 @@ class ClusterConversationCoordinatorTest {
 
         assertTrue(coordinator.discardDeadLetter(cursor));
         assertEquals(second, coordinator.getDeadLetters(2, cursor), "a discarded cursor still pages from where it was");
+    }
+    @Test
+    @DisplayName("a dead letter that fails over locally while NATS is connected is forwarded shortly, not only at the next reconnect")
+    void localDeadLetterIsRetriedWhileConnected() throws Exception {
+        ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+        List<Runnable> scheduled = new CopyOnWriteArrayList<>();
+        when(scheduler.schedule(any(Runnable.class), anyLong(), any(TimeUnit.class))).thenAnswer(inv -> {
+            scheduled.add(inv.getArgument(0));
+            return null;
+        });
+        when(connections.scheduler()).thenReturn(scheduler);
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-retry", failing);
+        await(failing);
+        awaitIdle();
+        assertEquals(1, scheduled.size(), "a retry is scheduled when a dead letter stays local");
+
+        store.down = false;
+        scheduled.forEach(Runnable::run);
+        assertEquals(1, store.entries.size(), "forwarded to the shared stream without waiting for a reconnect");
+        assertTrue(coordinator.getDeadLetters().stream().noneMatch(e -> e.id().startsWith("local-")));
     }
 }
