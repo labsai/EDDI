@@ -212,8 +212,12 @@ export function AdminActionsView() {
                     </button>
                   </td>
                   <td className="px-4 py-2">
-                    <span className="me-2 inline-block w-14 font-mono text-[10px] font-semibold text-primary">{row.method}</span>
-                    <code className="break-all font-mono text-xs text-foreground">{row.path}</code>
+                    {/* Two columns, so a long path wraps under itself and never
+                        under the method (seen live on …/schedules/{id}/disable). */}
+                    <div className="flex items-start gap-2">
+                      <span className="w-14 shrink-0 font-mono text-[10px] font-semibold text-primary">{row.method}</span>
+                      <code className="min-w-0 break-all font-mono text-xs text-foreground">{row.path}</code>
+                    </div>
                   </td>
                   <td className="px-4 py-2 font-mono text-[10px] text-muted-foreground">{row.endpoint ?? "—"}</td>
                   <td className="px-4 py-2">
