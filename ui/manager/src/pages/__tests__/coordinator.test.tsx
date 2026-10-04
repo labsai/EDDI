@@ -269,8 +269,8 @@ describe("Cluster console — actions", () => {
   it("drain asks first, then calls the node's drain endpoint", async () => {
     let called = "";
     server.use(
-      http.post("*/administration/cluster/nodes/:nodeId/:op", ({ params }) => {
-        called = `${String(params.nodeId)}/${String(params.op)}`;
+      http.post("*/administration/cluster/nodes/:nodeId/drain", ({ params }) => {
+        called = `${String(params.nodeId)}/drain`;
         return HttpResponse.json({ action: "node.drain", outcome: "DRAINED", message: "drained", details: {} });
       }),
     );

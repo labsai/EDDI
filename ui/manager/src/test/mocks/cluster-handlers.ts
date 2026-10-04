@@ -263,13 +263,16 @@ export const clusterHandlers = [
   http.post("*/administration/cluster/deployments/reconcile", () =>
     HttpResponse.json({ action: "deployments.reconcile", outcome: "DONE", message: "The deployment sweep ran on 2 node(s).", details: { nodes: ["eddi-1", "eddi-2"] } }),
   ),
-  http.post("*/administration/cluster/nodes/:nodeId/:op", ({ params }) => {
-    const drain = params.op === "drain";
-    const live = state.overview.nodes.filter((n) => n.state === "LIVE" && !n.draining && n.nodeId !== params.nodeId);
-    if (drain && live.length === 0) {
-      return HttpResponse.json({ code: "LAST_NODE", message: `Refused: ${String(params.nodeId)} is the last node taking turns.` }, { status: 409 });
-    }
-    state.overview = { ...state.overview, nodes: state.overview.nodes.map((n) => (n.nodeId === params.nodeId ? { ...n, draining: drain } : n)) };
-    return HttpResponse.json({ action: drain ? "node.drain" : "node.undrain", outcome: drain ? "DRAINED" : "UNDRAINED", message: drain ? "The node takes no new turns." : "The node takes turns again.", details: { nodeId: params.nodeId } });
-  }),
+  http.post("*/administration/cluster/nodes/:nodeId/drain", ({ params }) => drainResponse(String(params.nodeId), true)),
+  http.post("*/administration/cluster/nodes/:nodeId/undrain", ({ params }) => drainResponse(String(params.nodeId), false)),
 ];
+
+/** Drain refuses the last node that still takes turns, as the backend does. */
+function drainResponse(nodeId: string, drain: boolean) {
+  const live = state.overview.nodes.filter((n) => n.state === "LIVE" && !n.draining && n.nodeId !== nodeId);
+  if (drain && live.length === 0) {
+    return HttpResponse.json({ code: "LAST_NODE", message: `Refused: ${nodeId} is the last node taking turns.` }, { status: 409 });
+  }
+  state.overview = { ...state.overview, nodes: state.overview.nodes.map((n) => (n.nodeId === nodeId ? { ...n, draining: drain } : n)) };
+  return HttpResponse.json({ action: drain ? "node.drain" : "node.undrain", outcome: drain ? "DRAINED" : "UNDRAINED", message: drain ? "The node takes no new turns." : "The node takes turns again.", details: { nodeId } });
+}
