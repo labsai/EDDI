@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.runtime.internal.ClusterConversationCoordinator;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.api.model.Ports;
+import io.nats.client.api.StreamConfiguration;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -38,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -431,6 +433,52 @@ class ClusterCoordinatorIT {
         assertTrue(second.fence() > first.fence(), "after recreation " + second.fence() + " must exceed " + first.fence());
         a.leases.release(second);
     }
+    @Test
+    @Order(8)
+    @DisplayName("a bucket an older build left with direct get is switched to leader reads in place; open handles recover on their next call")
+    void directGetIsSwitchedOffInPlace() throws Exception {
+        Node a = nodes.get(0);
+        Node b = nodes.get(1);
+        String bucket = prefix + "_LEASES";
+        String stream = "KV_" + bucket;
+        LeaseHandle before = a.leases.acquire("conv-direct", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        a.leases.release(before);
+
+        var jsm = a.connections.jetStreamManagement();
+        List<String> buckets = jsm.getStreamNames().stream().filter(n -> n.startsWith("KV_" + prefix + "_")).toList();
+        assertFalse(buckets.isEmpty());
+        for (String name : buckets) {
+            assertFalse(jsm.getStreamInfo(name).getConfiguration().getAllowDirect(), name + " was created with direct get on");
+        }
+
+        // What a build without leader reads leaves behind: the same bucket, direct get
+        // on.
+        StreamConfiguration created = jsm.getStreamInfo(stream).getConfiguration();
+        jsm.updateStream(StreamConfiguration.builder(created).allowDirect(true).build());
+        // A handle opened now reads with direct get, as an older node's would.
+        NatsSharedKv older = new NatsSharedKv(b.connections, bucket, null);
+        older.put("probe", "1".getBytes());
+        assertTrue(older.get("probe").isPresent());
+
+        a.shared.provisionAll();
+
+        StreamConfiguration switched = jsm.getStreamInfo(stream).getConfiguration();
+        assertFalse(switched.getAllowDirect(), "reads must be answered by the stream leader only");
+        assertEquals(created.getFirstSequence(), switched.getFirstSequence(), "the fenced bucket keeps its first sequence");
+        Optional<ISharedKv.Versioned> read = Optional.empty();
+        for (int attempt = 0; attempt < 2 && read.isEmpty(); attempt++) {
+            try {
+                read = older.get("probe");
+            } catch (ClusterUnavailableException expectedOnce) {
+                // the direct-get handle gets no answer once; the next call reopens it
+            }
+        }
+        assertTrue(read.isPresent(), "a handle opened before the switch must recover on its next call, not at the next reconnect");
+        LeaseHandle after = a.leases.acquire("conv-direct", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertTrue(after.fence() > before.fence(), "leases keep working and fences keep rising");
+        a.leases.release(after);
+    }
+
     @Test
     @Order(9)
     @DisplayName("concurrent creates of one lease key from three nodes: exactly one wins, every loser sees a conflict, none an outage")

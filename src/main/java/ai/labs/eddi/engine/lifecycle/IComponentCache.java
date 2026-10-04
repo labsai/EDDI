@@ -10,4 +10,11 @@ public interface IComponentCache {
     Map<String, Object> getComponentMap(String type);
 
     void put(String type, String key, Object component);
+
+    /**
+     * Drops the components built for a workflow version ({@code null}: every
+     * version) — see {@code LifecycleUtilities.createComponentKey}.
+     */
+    default void evictWorkflow(String workflowId, Integer workflowVersion) {
+    }
 }

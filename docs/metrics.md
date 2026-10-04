@@ -732,6 +732,10 @@ eddi_cluster_events_outbox                  # Events waiting in the outbox (gaug
 eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
 eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
 eddi_cluster_degraded_decisions_total       # Degraded-mode decisions {area, action}
+eddi_cluster_ratelimit_decisions_total      # Cluster-wide tool rate-limit decisions {scope, outcome=allowed|denied|degraded}
+eddi_cluster_ratelimit_cas_retries_total    # Lost compare-and-sets on a shared rate-limit bucket (retried)
+eddi_cluster_audit_sequence_total           # Audit chain positions {outcome=allocated|unsequenced|conflict}
+eddi_agent_nonce_unavailable_total          # Signed envelopes refused: the shared nonce store was unreachable (fail closed)
 ```
 
 Alert on `eddi_cluster_degraded == 1` for 5 minutes, any increase of

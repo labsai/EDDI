@@ -48,4 +48,15 @@ public interface UserErasureParticipant {
      * @return how many pieces of work were signalled
      */
     int stopInFlightWork(String userId);
+
+    /**
+     * Cluster mode: the same stop, on behalf of the node running the erasure. The
+     * user arrives as {@code KvKeys.sha256(userId)} so the id itself never travels
+     * between nodes; a participant matches its in-flight work by that hash.
+     *
+     * @return how many in-flight units were signalled
+     */
+    default int stopInFlightWorkByHash(String userIdHash) {
+        return 0;
+    }
 }

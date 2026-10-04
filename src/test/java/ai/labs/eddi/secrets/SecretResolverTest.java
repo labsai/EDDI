@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.secrets;
 
+import java.util.ArrayList;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import ai.labs.eddi.engine.cluster.events.RecordingEventBus;
+import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.secrets.model.SecretReference;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -187,5 +192,31 @@ class SecretResolverTest {
         var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:agent-signing-key:agentX}"));
         assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
                 () -> SecretResolver.requireResolved(resolved, "LLM provider 'x'"));
+    }
+
+    @Nested
+    @DisplayName("cluster invalidation")
+    class ClusterInvalidation {
+
+        @Test
+        void localRotationIsAnnouncedAndRemoteOneIsNotRepublished() {
+            var bus = new RecordingEventBus();
+            var clustered = new SecretResolver(mock(ISecretProvider.class), new SimpleMeterRegistry(), 5, 100);
+            clustered.clusterEvents = bus;
+            clustered.init();
+            var listened = new ArrayList<SecretReference>();
+            clustered.registerInvalidationListener(listened::add);
+
+            clustered.invalidateCache(new SecretReference("t1", "openai"));
+            assertEquals(1, bus.ofType(ClusterEvent.SECRET_CHANGED).size());
+            assertEquals(1, listened.size());
+
+            bus.deliver(ClusterEvent.SECRET_CHANGED, Map.of("tenantId", "t1", "keyName", "openai"));
+            assertEquals(2, listened.size(), "the remote rotation reaches the local listeners (model eviction)");
+            assertEquals(1, bus.ofType(ClusterEvent.SECRET_CHANGED).size(), "a received event is never re-published");
+
+            bus.deliver(ClusterEvent.SECRET_CHANGED, Map.of("all", true));
+            assertEquals(3, listened.size());
+        }
     }
 }

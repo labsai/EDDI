@@ -75,6 +75,17 @@ public class NatsSharedKv implements ISharedKv {
         return handle;
     }
 
+    /**
+     * A failed call drops the cached handle. jnats decides at open time whether a
+     * handle reads with direct get; a handle opened before another node turned
+     * direct get off (see {@code NatsSharedStateFactory.leaderReads}) gets no
+     * answer to its reads from then on. Reopening on the next call makes that one
+     * failed call the whole cost, not every call until the connection drops.
+     */
+    private void forgetHandle() {
+        kv = null;
+    }
+
     @FunctionalInterface
     private interface KvCall<T> {
         T call(KeyValue kv) throws IOException, JetStreamApiException, InterruptedException;
@@ -86,9 +97,11 @@ public class NatsSharedKv implements ISharedKv {
         try {
             return call.call(kv());
         } catch (JetStreamApiException e) {
+            forgetHandle();
             outcome = "error";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } catch (IOException e) {
+            forgetHandle();
             outcome = "unavailable";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } catch (InterruptedException e) {
@@ -100,6 +113,7 @@ public class NatsSharedKv implements ISharedKv {
             throw e;
         } catch (RuntimeException e) {
             // jnats raises IllegalStateException on a closed connection.
+            forgetHandle();
             outcome = "unavailable";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } finally {
