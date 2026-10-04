@@ -183,6 +183,16 @@ export const DISABLED_BY_UNDEPLOY = "agent-undeployed";
 export const DISABLED_ACCESS_REVOKED = "access-revoked";
 
 /**
+ * A one-time schedule that has fired and is therefore switched off by the
+ * engine, not by a person. `markCompleted` (Mongo and Postgres alike) leaves it
+ * `enabled: false`, `nextFire` cleared, `lastFired` set — and `fireStatus`
+ * back at PENDING, not COMPLETED, so the fire status cannot tell it apart.
+ */
+export function isFinishedOneShot(s: Pick<ScheduleConfiguration, "enabled" | "oneTimeAt" | "lastFired" | "nextFire">): boolean {
+  return !s.enabled && !!s.oneTimeAt && parseInstant(s.lastFired) != null && parseInstant(s.nextFire) == null;
+}
+
+/**
  * The reason the server refused a schedule create or update, or null.
  *
  * EDDI 6.6 answers a failed validation with

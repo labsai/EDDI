@@ -128,6 +128,40 @@ describe("RagStoragePanel", () => {
     expect(screen.getByText(/it starts EMPTY/)).toBeInTheDocument();
   });
 
+  it("an unchanged saved reserved name is not 'refused' — only a change would be", () => {
+    renderWithProviders(<Harness initial={{ name: "old", storeType: "qdrant", storeParameters: { collectionName: "eddi_kb_old" } }} />);
+    const notice = screen.getByTestId("rag-location-reserved");
+    expect(notice).toHaveAttribute("data-saved", "true");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(notice).toHaveTextContent(/keeps working as saved, but the server would refuse it if it were changed/);
+    expect(notice).not.toHaveTextContent(/The server refuses/);
+  });
+
+  it("an edited location that breaks a rule is refused outright", async () => {
+    const user = userEvent.setup();
+    function Editing() {
+      const [data, setData] = useState<Cfg>({ name: "old", storeType: "qdrant", storeParameters: { collectionName: "docs" } });
+      return (
+        <>
+          <button onClick={() => setData({ ...data, storeParameters: { collectionName: "eddi_kb_other" } })}>edit</button>
+          <RagStoragePanel data={data} onChange={setData} resourceId="r1" version={1} />
+        </>
+      );
+    }
+    renderWithProviders(<Editing />);
+    await user.click(screen.getByRole("button", { name: "edit" }));
+    const notice = screen.getByTestId("rag-location-reserved");
+    expect(notice).toHaveAttribute("role", "alert");
+    expect(notice).toHaveTextContent(/The server refuses collectionName = eddi_kb_other/);
+  });
+
+  it("a saved ${…} reference is called broken, not merely 'would be refused'", () => {
+    renderWithProviders(<Harness initial={{ name: "x", storeType: "qdrant", storeParameters: { collectionName: "${vars:kb}" } }} />);
+    const notice = screen.getByTestId("rag-location-reference");
+    expect(notice).toHaveAttribute("role", "alert");
+    expect(notice).toHaveTextContent(/no longer works/);
+  });
+
   it("offers no migration when read-only", () => {
     renderWithProviders(<Harness initial={{ name: "docs", storeType: "pgvector" }} readOnly />);
     expect(screen.queryByTestId("rag-migrate-own-store")).not.toBeInTheDocument();

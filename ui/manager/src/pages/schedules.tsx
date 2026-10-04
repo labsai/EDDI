@@ -62,6 +62,7 @@ import {
   DISABLED_BY_UNDEPLOY,
   DISABLED_ACCESS_REVOKED,
   invalidScheduleReason,
+  isFinishedOneShot,
 } from "@/lib/api/schedules";
 import type {
   ScheduleConfiguration,
@@ -194,10 +195,20 @@ function DisabledReasonNotice({ schedule }: { schedule: ScheduleConfiguration })
   const reason = schedule.disabledReason?.trim() || null;
 
   if (!reason) {
-    // A one-shot schedule that has run is switched off by the engine (it is
-    // COMPLETED), not by a person; "disabled by a person ... enable it once by
-    // hand" would be wrong there.
-    if (schedule.fireStatus === "COMPLETED") return null;
+    // A one-shot schedule that has run is switched off by the engine, not by a
+    // person; "disabled by a person ... enable it once by hand" would be wrong
+    // there. Its fireStatus is back at PENDING after markCompleted, so the
+    // shape decides, not the status.
+    if (isFinishedOneShot(schedule)) {
+      return (
+        <p
+          className="mt-1 max-w-[16rem] text-[10px] leading-snug text-muted-foreground"
+          data-testid={`finished-one-shot-${schedule.id}`}
+        >
+          {t("schedules.finishedOneShot", "One-time schedule: it ran and is finished.")}
+        </p>
+      );
+    }
     return (
       <p
         className="mt-1 max-w-[16rem] text-[10px] leading-snug text-muted-foreground"

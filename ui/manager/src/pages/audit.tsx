@@ -2,6 +2,7 @@ import { formatUsd } from "@/lib/utils";
 import { displayUserInput } from "@/lib/api/conversations";
 import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useHasRole } from "@/hooks/use-auth";
 import { AdminActionsView } from "@/components/audit/admin-actions-view";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
@@ -544,7 +545,11 @@ type AuditView = "trail" | "admin";
 export function AuditPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
-  const view: AuditView = params.get("view") === "admin" ? "admin" : "trail";
+  // GET /auditstore/admin-actions is eddi-admin only. The tab is not offered to
+  // anyone else (useHasRole is true for everyone when auth is off); the view's own
+  // 401/403 state stays as the fallback for a role the token does not show.
+  const isAdmin = useHasRole("eddi-admin");
+  const view: AuditView = isAdmin && params.get("view") === "admin" ? "admin" : "trail";
   const select = (next: AuditView) => {
     const updated = new URLSearchParams(params);
     if (next === "admin") updated.set("view", "admin");
@@ -552,7 +557,7 @@ export function AuditPage() {
     setParams(updated, { replace: true });
   };
 
-  const tabs = (
+  const tabs = !isAdmin ? null : (
     <div role="tablist" aria-label={t("audit.views", "Audit views")} className="flex gap-1 border-b border-border">
       {(
         [
@@ -566,6 +571,7 @@ export function AuditPage() {
           role="tab"
           id={`audit-tab-${key}`}
           aria-selected={view === key}
+          aria-controls={`audit-panel-${key}`}
           tabIndex={view === key ? 0 : -1}
           onClick={() => select(key)}
           onKeyDown={(e) => {
@@ -625,7 +631,7 @@ function AuditHeader({ actions }: { actions?: ReactNode }) {
   );
 }
 
-function AuditTrailView({ tabs }: { tabs: ReactNode }) {
+function AuditTrailView({ tabs }: { tabs: ReactNode | null }) {
   const { t } = useTranslation();
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
@@ -867,6 +873,7 @@ function AuditTrailView({ tabs }: { tabs: ReactNode }) {
         }
       />
       {tabs}
+      <div role={tabs ? "tabpanel" : undefined} id="audit-panel-trail" aria-labelledby={tabs ? "audit-tab-trail" : undefined} className="space-y-6">
 
       {/* Search bar */}
       <div className="rounded-xl border border-border bg-card p-4">
@@ -1129,6 +1136,7 @@ function AuditTrailView({ tabs }: { tabs: ReactNode }) {
         </div>
         </AuditProblemsContext.Provider>
       )}
+      </div>
     </div>
   );
 }

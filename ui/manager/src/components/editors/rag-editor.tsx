@@ -921,7 +921,7 @@ export function RagEditor({
             </div>
           )}
 
-          <RagStoragePanel data={data} onChange={onChange} readOnly={readOnly} resourceId={resourceId} />
+          <RagStoragePanel data={data} onChange={onChange} readOnly={readOnly} resourceId={resourceId} version={version} />
         </div>
       </Section>
 

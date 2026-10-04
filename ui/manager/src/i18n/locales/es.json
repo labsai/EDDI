@@ -1983,7 +1983,8 @@
     "disabledOtherHint": "Desactivada por EDDI por el motivo indicado.",
     "serverRefusedUpdate": "El servidor rechazó este cambio:",
     "serverRefusedCreate": "El servidor rechazó esta programación:",
-    "disabledAccessRevokedHintBy": "Su creador ({{user}}) ya no puede usar este agente, por lo que dejó de dispararse. Vuelve a compartir el agente con esa persona —o crea de nuevo la programación como alguien que pueda usarlo— y luego actívala."
+    "disabledAccessRevokedHintBy": "Su creador ({{user}}) ya no puede usar este agente, por lo que dejó de dispararse. Vuelve a compartir el agente con esa persona —o crea de nuevo la programación como alguien que pueda usarlo— y luego actívala.",
+    "finishedOneShot": "Programación única: se ejecutó y ha terminado."
   },
   "cascadeTrace": {
     "title": "Cascada de modelos",
@@ -2289,7 +2290,9 @@
       "reference": "Una ubicación de almacenamiento debe escribirse de forma literal, no como referencia ${…}. La ubicación decide qué documentos lee un agente, y una referencia solo se resuelve al construir el almacén —después de todas las comprobaciones— a partir de variables que cualquier editor puede cambiar, por lo que podría apuntar al almacén de otra base de conocimiento o a SQL. Una base ya guardada con una referencia deja de ingerir y recuperar hasta que se guarde una vez con el nombre literal.",
       "pgIdentifier": "Una tabla pgvector debe ser un nombre simple, opcionalmente con esquema (letras, dígitos, _ y $). El almacén la inserta tal cual en el SQL, así que se rechazan comillas, espacios y signos de puntuación.",
       "refused": "El servidor rechaza {{param}} = {{value}}",
-      "reserved": "Los nombres que empiezan por {{prefix}} (en cualquier parte, sin importar mayúsculas) están reservados: EDDI deriva la ubicación propia de cada base de conocimiento de ese prefijo, así que este nombre podría apuntar al almacén de otra base. Elige otro nombre o déjalo vacío para obtener una ubicación propia para esta base."
+      "reserved": "Los nombres que empiezan por {{prefix}} (en cualquier parte, sin importar mayúsculas) están reservados: EDDI deriva la ubicación propia de cada base de conocimiento de ese prefijo, así que este nombre podría apuntar al almacén de otra base. Elige otro nombre o déjalo vacío para obtener una ubicación propia para esta base.",
+      "savedReference": "El {{param}} = {{value}} guardado ya no funciona",
+      "refusedIfChanged": "{{param}} = {{value}} sigue funcionando tal como está guardado, pero el servidor lo rechazaría si se cambiara"
     },
     "layout": {
       "idTitle": "Almacén propio (direccionado por id)",

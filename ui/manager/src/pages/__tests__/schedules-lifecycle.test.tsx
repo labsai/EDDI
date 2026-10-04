@@ -65,14 +65,70 @@ describe("SchedulesPage — why a schedule is disabled", () => {
     server.use(
       http.get("*/schedulestore/schedules", () =>
         HttpResponse.json([
-          scheduleRow({ id: "sched-done", name: "Run once", enabled: false, fireStatus: "COMPLETED", disabledReason: null }),
+          // Exactly what markCompleted leaves behind (Mongo and Postgres):
+          // fireStatus back at PENDING, nextFire cleared, lastFired set.
+          scheduleRow({
+            id: "sched-done",
+            name: "Run once",
+            cronExpression: undefined,
+            oneTimeAt: "2026-10-01T09:00:00Z",
+            enabled: false,
+            fireStatus: "PENDING",
+            lastFired: "2026-10-01T09:00:02Z",
+            nextFire: null,
+            disabledReason: null,
+          }),
+          // Same, but still waiting to fire: a person paused it.
+          scheduleRow({
+            id: "sched-paused",
+            name: "Paused once",
+            cronExpression: undefined,
+            oneTimeAt: "2026-12-01T09:00:00Z",
+            enabled: false,
+            fireStatus: "PENDING",
+            nextFire: "2026-12-01T09:00:00Z",
+          }),
         ]),
       ),
     );
     renderSchedules();
     await screen.findByText("Run once");
+    expect(screen.getByTestId("finished-one-shot-sched-done")).toHaveTextContent(/ran and is finished/);
     expect(screen.queryByTestId("disabled-by-person-sched-done")).not.toBeInTheDocument();
     expect(screen.queryByTestId("disabled-reason-sched-done")).not.toBeInTheDocument();
+    expect(screen.getByTestId("disabled-by-person-sched-paused")).toBeInTheDocument();
+  });
+
+  it("a one-time schedule that never fired is not 'finished', even with no next fire", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          scheduleRow({
+            id: "never-ran",
+            name: "Never ran",
+            cronExpression: undefined,
+            oneTimeAt: "2026-01-01T09:00:00Z",
+            enabled: false,
+            nextFire: null,
+          }),
+        ]),
+      ),
+    );
+    renderSchedules();
+    expect(await screen.findByTestId("disabled-by-person-never-ran")).toBeInTheDocument();
+    expect(screen.queryByTestId("finished-one-shot-never-ran")).not.toBeInTheDocument();
+  });
+
+  it("a recurring schedule a person disabled after a successful fire still says so", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          scheduleRow({ id: "cron-off", name: "Cron off", enabled: false, fireStatus: "COMPLETED", lastFired: "2026-10-01T03:00:00Z" }),
+        ]),
+      ),
+    );
+    renderSchedules();
+    expect(await screen.findByTestId("disabled-by-person-cron-off")).toBeInTheDocument();
   });
 
   it("an enabled schedule carries no disabled notice, even with a stale reason", async () => {

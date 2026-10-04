@@ -1983,7 +1983,8 @@
     "disabledOtherHint": "Desligado pelo EDDI pelo motivo mostrado.",
     "serverRefusedUpdate": "O servidor recusou esta alteração:",
     "serverRefusedCreate": "O servidor recusou este agendamento:",
-    "disabledAccessRevokedHintBy": "O criador ({{user}}) não pode mais usar este agente, então ele parou de disparar. Compartilhe o agente com essa pessoa de novo — ou recrie o agendamento como alguém que possa usá-lo — e então ative-o."
+    "disabledAccessRevokedHintBy": "O criador ({{user}}) não pode mais usar este agente, então ele parou de disparar. Compartilhe o agente com essa pessoa de novo — ou recrie o agendamento como alguém que possa usá-lo — e então ative-o.",
+    "finishedOneShot": "Agendamento único: foi executado e está concluído."
   },
   "cascadeTrace": {
     "title": "Cascata de modelos",
@@ -2289,7 +2290,9 @@
       "reference": "Um local de armazenamento deve ser escrito por extenso, não como referência ${…}. O local decide quais documentos um agente lê, e uma referência só é resolvida quando o armazenamento é montado — depois de todas as verificações — a partir de variáveis que qualquer editor pode alterar, então poderia apontar para o armazenamento de outra base de conhecimento ou para SQL. Uma base já salva com uma referência para de ingerir e recuperar até ser salva uma vez com o nome literal.",
       "pgIdentifier": "Uma tabela pgvector deve ser um nome simples, opcionalmente com esquema (letras, dígitos, _ e $). O armazenamento a insere no SQL como está, por isso aspas, espaços e pontuação são recusados.",
       "refused": "O servidor recusa {{param}} = {{value}}",
-      "reserved": "Nomes que começam com {{prefix}} (em qualquer parte, qualquer caixa) são reservados: o EDDI deriva o local próprio de cada base de conhecimento desse prefixo, então este nome poderia apontar para o armazenamento de outra base. Escolha outro nome ou deixe em branco para obter um local próprio desta base."
+      "reserved": "Nomes que começam com {{prefix}} (em qualquer parte, qualquer caixa) são reservados: o EDDI deriva o local próprio de cada base de conhecimento desse prefixo, então este nome poderia apontar para o armazenamento de outra base. Escolha outro nome ou deixe em branco para obter um local próprio desta base.",
+      "savedReference": "O {{param}} = {{value}} salvo não funciona mais",
+      "refusedIfChanged": "{{param}} = {{value}} continua funcionando como salvo, mas o servidor o recusaria se fosse alterado"
     },
     "layout": {
       "idTitle": "Armazenamento próprio (endereçado por id)",

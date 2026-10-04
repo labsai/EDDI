@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { AuditPage } from "@/pages/audit";
+import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
@@ -28,6 +29,38 @@ describe("Audit page — tabs", () => {
     renderWithProviders(<AuditPage />, { initialRoute: "/manage/audit" });
     fireEvent.keyDown(screen.getByTestId("audit-tab-trail"), { key: "ArrowRight" });
     await waitFor(() => expect(screen.getByTestId("audit-tab-admin")).toHaveAttribute("aria-selected", "true"));
+  });
+});
+
+describe("Audit page — who sees the Administrative actions tab", () => {
+  function renderAs(roles: string[], route = "/manage/audit") {
+    const auth: AuthContextValue = { ...GUEST_CONTEXT, method: "keycloak", roles };
+    return renderWithProviders(
+      <AuthContext.Provider value={auth}>
+        <AuditPage />
+      </AuthContext.Provider>,
+      { initialRoute: route },
+    );
+  }
+
+  it("is offered to eddi-admin", () => {
+    renderAs(["eddi-admin"]);
+    expect(screen.getByTestId("audit-tab-admin")).toBeInTheDocument();
+  });
+
+  it("is hidden for a non-admin, and ?view=admin falls back to the pipeline trail", () => {
+    renderAs(["eddi-viewer"], "/manage/audit?view=admin");
+    expect(screen.queryByTestId("audit-tab-admin")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("admin-actions-view")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mode-agent")).toBeInTheDocument();
+  });
+
+  it("the pipeline trail is a labelled tabpanel when the tabs are shown", () => {
+    renderAs(["eddi-admin"]);
+    const panel = screen.getByRole("tabpanel");
+    expect(panel).toHaveAttribute("id", "audit-panel-trail");
+    expect(screen.getByTestId("audit-tab-trail")).toHaveAttribute("aria-controls", "audit-panel-trail");
   });
 });
 

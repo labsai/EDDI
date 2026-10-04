@@ -1961,7 +1961,8 @@
     "disabledOtherHint": "Von EDDI aus dem angezeigten Grund ausgeschaltet.",
     "serverRefusedUpdate": "Der Server hat diese Änderung abgelehnt:",
     "serverRefusedCreate": "Der Server hat diesen Zeitplan abgelehnt:",
-    "disabledAccessRevokedHintBy": "Sein Ersteller ({{user}}) kann diesen Agenten nicht mehr nutzen, daher wird er nicht mehr ausgelöst. Teile den Agenten wieder mit ihm – oder lege den Zeitplan als jemand an, der den Agenten nutzen darf – und aktiviere ihn dann."
+    "disabledAccessRevokedHintBy": "Sein Ersteller ({{user}}) kann diesen Agenten nicht mehr nutzen, daher wird er nicht mehr ausgelöst. Teile den Agenten wieder mit ihm – oder lege den Zeitplan als jemand an, der den Agenten nutzen darf – und aktiviere ihn dann.",
+    "finishedOneShot": "Einmaliger Zeitplan: Er wurde ausgeführt und ist abgeschlossen."
   },
   "cascadeTrace": {
     "title": "Modellkaskade",
@@ -2267,7 +2268,9 @@
       "reference": "Ein Speicherort muss ausgeschrieben werden, keine ${…}-Referenz. Der Ort entscheidet, wessen Dokumente ein Agent liest, und eine Referenz wird erst beim Aufbau des Speichers aufgelöst – nach allen Prüfungen – aus Variablen, die jeder Editor ändern kann; sie könnte also auf den Speicher einer anderen Wissensbasis oder auf SQL zeigen. Eine bereits mit Referenz gespeicherte Wissensbasis nimmt nichts mehr auf und liefert nichts mehr, bis sie einmal mit dem ausgeschriebenen Namen gespeichert wird.",
       "pgIdentifier": "Eine pgvector-Tabelle muss ein einfacher Name sein, optional mit Schema (Buchstaben, Ziffern, _ und $). Der Speicher setzt ihn unverändert in SQL ein, daher werden Anführungszeichen, Leerzeichen und Satzzeichen abgelehnt.",
       "refused": "Der Server lehnt {{param}} = {{value}} ab",
-      "reserved": "Namen, die mit {{prefix}} beginnen (in jedem Teil, jede Schreibweise), sind reserviert: EDDI leitet den eigenen Ort jeder Wissensbasis von diesem Präfix ab, daher könnte dieser Name den Speicher einer anderen Wissensbasis ansprechen. Wähle einen anderen Namen oder lass ihn leer, um einen eigenen Ort für diese Wissensbasis zu erhalten."
+      "reserved": "Namen, die mit {{prefix}} beginnen (in jedem Teil, jede Schreibweise), sind reserviert: EDDI leitet den eigenen Ort jeder Wissensbasis von diesem Präfix ab, daher könnte dieser Name den Speicher einer anderen Wissensbasis ansprechen. Wähle einen anderen Namen oder lass ihn leer, um einen eigenen Ort für diese Wissensbasis zu erhalten.",
+      "savedReference": "Das gespeicherte {{param}} = {{value}} funktioniert nicht mehr",
+      "refusedIfChanged": "{{param}} = {{value}} funktioniert wie gespeichert weiter, aber der Server würde es ablehnen, wenn es geändert würde"
     },
     "layout": {
       "idTitle": "Eigener Speicher (per ID adressiert)",

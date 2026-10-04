@@ -2042,7 +2042,8 @@
     "disabledOtherHint": "Switched off by EDDI for the reason shown.",
     "serverRefusedUpdate": "The server refused this change:",
     "serverRefusedCreate": "The server refused this schedule:",
-    "disabledAccessRevokedHintBy": "Its creator ({{user}}) can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it."
+    "disabledAccessRevokedHintBy": "Its creator ({{user}}) can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
+    "finishedOneShot": "One-time schedule: it ran and is finished."
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -2348,7 +2349,9 @@
       "reference": "A store location must be written out, not a ${…} reference. The location decides whose documents an agent reads, and a reference is resolved only when the store is built — after every check — from variables any editor can change, so it could point at another knowledge base's store or at SQL. A knowledge base already saved with a reference stops ingesting and retrieving until it is saved once with the literal name.",
       "pgIdentifier": "A pgvector table must be a plain name, optionally schema-qualified (letters, digits, _ and $). The store puts it into SQL as it is, so quotes, spaces and punctuation are refused.",
       "refused": "The server refuses {{param}} = {{value}}",
-      "reserved": "Names starting with {{prefix}} (in any part, any case) are reserved: EDDI derives every knowledge base's own location from that prefix, so this name could address another knowledge base's store. Choose another name, or leave it blank to get a location of this knowledge base's own."
+      "reserved": "Names starting with {{prefix}} (in any part, any case) are reserved: EDDI derives every knowledge base's own location from that prefix, so this name could address another knowledge base's store. Choose another name, or leave it blank to get a location of this knowledge base's own.",
+      "savedReference": "The saved {{param}} = {{value}} no longer works",
+      "refusedIfChanged": "{{param}} = {{value}} keeps working as saved, but the server would refuse it if it were changed"
     },
     "layout": {
       "idTitle": "Own store (addressed by id)",

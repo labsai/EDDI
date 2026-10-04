@@ -1983,7 +1983,8 @@
     "disabledOtherHint": "Coupée par EDDI pour la raison indiquée.",
     "serverRefusedUpdate": "Le serveur a refusé cette modification :",
     "serverRefusedCreate": "Le serveur a refusé cette planification :",
-    "disabledAccessRevokedHintBy": "Son créateur ({{user}}) ne peut plus utiliser cet agent, elle ne se déclenche donc plus. Partagez à nouveau l'agent avec lui — ou recréez la planification au nom de quelqu'un qui peut l'utiliser — puis activez-la."
+    "disabledAccessRevokedHintBy": "Son créateur ({{user}}) ne peut plus utiliser cet agent, elle ne se déclenche donc plus. Partagez à nouveau l'agent avec lui — ou recréez la planification au nom de quelqu'un qui peut l'utiliser — puis activez-la.",
+    "finishedOneShot": "Planification unique : elle s'est exécutée et est terminée."
   },
   "cascadeTrace": {
     "title": "Cascade de modèles",
@@ -2289,7 +2290,9 @@
       "reference": "Un emplacement de stockage doit être écrit en toutes lettres, pas une référence ${…}. L'emplacement décide quels documents un agent lit, et une référence n'est résolue qu'à la construction du stockage — après toutes les vérifications — à partir de variables que tout éditeur peut modifier ; elle pourrait donc pointer vers le stockage d'une autre base de connaissances ou vers du SQL. Une base déjà enregistrée avec une référence cesse d'ingérer et de répondre jusqu'à ce qu'elle soit enregistrée une fois avec le nom littéral.",
       "pgIdentifier": "Une table pgvector doit être un nom simple, éventuellement qualifié par un schéma (lettres, chiffres, _ et $). Le stockage l'insère tel quel dans le SQL ; les guillemets, espaces et signes de ponctuation sont donc refusés.",
       "refused": "Le serveur refuse {{param}} = {{value}}",
-      "reserved": "Les noms commençant par {{prefix}} (dans n'importe quelle partie, quelle que soit la casse) sont réservés : EDDI dérive l'emplacement propre de chaque base de connaissances de ce préfixe, donc ce nom pourrait désigner le stockage d'une autre base. Choisissez un autre nom, ou laissez vide pour obtenir un emplacement propre à cette base."
+      "reserved": "Les noms commençant par {{prefix}} (dans n'importe quelle partie, quelle que soit la casse) sont réservés : EDDI dérive l'emplacement propre de chaque base de connaissances de ce préfixe, donc ce nom pourrait désigner le stockage d'une autre base. Choisissez un autre nom, ou laissez vide pour obtenir un emplacement propre à cette base.",
+      "savedReference": "Le {{param}} = {{value}} enregistré ne fonctionne plus",
+      "refusedIfChanged": "{{param}} = {{value}} continue de fonctionner tel qu'enregistré, mais le serveur le refuserait s'il était modifié"
     },
     "layout": {
       "idTitle": "Stockage propre (adressé par id)",
