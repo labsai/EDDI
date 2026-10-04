@@ -218,7 +218,8 @@
     "removeItem": "{{item}} हटाएँ",
     "stepOf": "चरण {{current}} / {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} का आकार बदलें"
+    "resizePanel": "{{panel}} का आकार बदलें",
+    "rename": "नाम बदलें"
   },
   "agents": {
     "confirmDeleteDescription": "इस क्रिया को पूर्ववत नहीं किया जा सकता। एजेंट और इसका सारा डेटा स्थायी रूप से हटा दिया जाएगा।",
@@ -267,7 +268,9 @@
     "deployToProduction": "प्रोडक्शन में तैनात करें",
     "undeployFromProduction": "प्रोडक्शन से हटाएँ",
     "deployFailedIn": "{{environment}} में तैनाती विफल",
-    "undeployCompatibleHint": "जिन बातचीत को कोई संगत डिप्लॉय किया गया संस्करण जारी रख सकता है, वे समाप्त नहीं होतीं: वे अपनी अगली बारी में उस पर चली जाती हैं।"
+    "undeployCompatibleHint": "जिन बातचीत को कोई संगत डिप्लॉय किया गया संस्करण जारी रख सकता है, वे समाप्त नहीं होतीं: वे अपनी अगली बारी में उस पर चली जाती हैं।",
+    "sortLoadingAll": "सॉर्ट पूरा हो सके इसलिए सभी एजेंट लोड हो रहे हैं…",
+    "createNamingFailed": "एजेंट बन गया, लेकिन उसका नाम सहेजा नहीं जा सका। उसके पृष्ठ से नाम बदलें।"
   },
   "agentDetail": {
     "a2aDescHint": "Agent Card में दिखाया जाता है — अन्य एजेंट को यह समझने में मदद करता है कि यह एजेंट क्या करता है",
@@ -300,7 +303,7 @@
     "enableSwd": "सख्त लेखन अनुशासन सक्षम करें",
     "forkingDisabledTooltip": "भविष्य के रिलीज़ में उपलब्ध",
     "forkingEnabled": "सत्र फ़ोर्किंग",
-    "forkingNote": "सत्र फ़ोर्किंग एंडपॉइंट (POST /v6/conversations/{{id}}/fork) अभी उपलब्ध नहीं है।",
+    "forkingNote": "सत्र फ़ोर्किंग एंडपॉइंट (POST /v6/conversations/:id/fork) अभी उपलब्ध नहीं है।",
     "guardrails": "लेखन गार्डरेल",
     "identity": "क्रिप्टोग्राफ़िक पहचान",
     "keyExpired": "समाप्त",
@@ -458,7 +461,15 @@
       "notice": "चैट लोगों को क्या बताती है (मानक शब्दों के लिए खाली छोड़ें)",
       "noticePlaceholder": "इस एजेंट के साथ बातचीत को इसे बेहतर बनाने के लिए इसके अनुरक्षक पढ़ सकते हैं।",
       "versionNote": "इस बदलाव से बनने वाले संस्करण और उसके बाद के संस्करणों की बातचीत पर लागू होता है — पहले कही गई बातों पर कभी नहीं। Slack, Teams और API क्लाइंट सूचना नहीं दिखा सकते; यदि लोग वहाँ से इस एजेंट तक पहुँचते हैं, तो अभिवादन में इसका उल्लेख करें।"
-    }
+    },
+    "liveElsewhere": "लाइव: v{{live}} · v{{viewing}} देख रहे हैं (तैनात नहीं)",
+    "removeWorkflow": "एजेंट से वर्कफ़्लो हटाएँ",
+    "confirmRemoveWorkflow": "इस एजेंट से वर्कफ़्लो हटाएँ?",
+    "confirmRemoveWorkflowDescription": "{{name}} को इस एजेंट से एक नए, अभी लाइव न हुए एजेंट संस्करण में हटाया जाएगा। वर्कफ़्लो स्वयं हटाया नहीं जाता।",
+    "removeWorkflowConfirm": "हटाएँ",
+    "a2aRemoveSkill": "{{skill}} हटाएँ",
+    "a2aAddSkill": "कौशल जोड़ें",
+    "a2aCopyUrl": "URL कॉपी करें"
   },
   "wizard": {
     "title": "Agent विज़ार्ड"
@@ -611,7 +622,26 @@
     "saved": "Workflow सफलतापूर्वक सहेजा गया",
     "saveError": "Workflow सहेजने में विफल",
     "noTasks": "[EN] No tasks in this workflow",
-    "addTask": "[EN] Add Task"
+    "addTask": "[EN] Add Task",
+    "stepUnsaved": "अभी सहेजा नहीं गया",
+    "saveAndEditHint": "यह चरण अभी सहेजा नहीं गया है। पहले वर्कफ़्लो सहेजें, फिर उसका कॉन्फ़िगरेशन संपादित करें।",
+    "saveAndEdit": "वर्कफ़्लो सहेजें और संपादित करें",
+    "removeStep": "कार्य हटाएँ",
+    "configCreatedUnsaved": "कॉन्फ़िगरेशन बनाया गया — इसे पाइपलाइन में रखने के लिए वर्कफ़्लो सहेजें",
+    "configNameFailed": "कॉन्फ़िगरेशन बन गया, लेकिन उसका नाम सहेजा नहीं जा सका। बाद में नाम बदलें।",
+    "newConfigName": "नए कॉन्फ़िगरेशन का नाम",
+    "newConfigNamePlaceholder": "जैसे: सहायता अभिवादन",
+    "agentPinsOtherVersion": "एजेंट संस्करण {{agentVer}} इस वर्कफ़्लो के संस्करण {{found}} का उपयोग करता है, संस्करण {{version}} का नहीं, इसलिए यहाँ सहेजने से एजेंट नहीं बदलेगा। कुछ भी सहेजा नहीं गया। संस्करण {{found}} खोलें, या एजेंट को संस्करण {{version}} पर इंगित करें।",
+    "agentMissingWorkflow": "एजेंट संस्करण {{agentVer}} इस वर्कफ़्लो का उपयोग नहीं करता, इसलिए यहाँ सहेजने से एजेंट नहीं बदलेगा। कुछ भी सहेजा नहीं गया।",
+    "noVersionReturned": "सर्वर ने नए वर्कफ़्लो संस्करण की जानकारी नहीं दी।",
+    "agentUpdateFailed": "वर्कफ़्लो संस्करण {{version}} के रूप में सहेजा गया, लेकिन एजेंट अपडेट विफल रहा: {{error}}",
+    "agentPinMismatch": "एजेंट संस्करण {{agentVer}} इस वर्कफ़्लो के संस्करण {{found}} का उपयोग करता है। आप संस्करण {{version}} देख रहे हैं, इसलिए यहाँ सहेजने से एजेंट नहीं बदलेगा।",
+    "switchToPinned": "संस्करण {{version}} खोलें",
+    "pointAgentAt": "एजेंट को संस्करण {{version}} पर इंगित करें",
+    "createdDeleteFailed_one": "इस संपादन के दौरान बनाया गया {{count}} कॉन्फ़िगरेशन हटाया नहीं जा सका",
+    "createdDeleteFailed_other": "इस संपादन के दौरान बनाए गए {{count}} कॉन्फ़िगरेशन हटाए नहीं जा सके",
+    "discardDeleteCreated_one": "इस संपादन के दौरान बनाया गया {{count}} कॉन्फ़िगरेशन भी हटाएँ",
+    "discardDeleteCreated_other": "इस संपादन के दौरान बनाए गए {{count}} कॉन्फ़िगरेशन भी हटाएँ"
   },
   "conversations": {
     "confirmDeleteSoft": "डिफ़ॉल्ट रूप से यह सॉफ्ट डिलीट है — बातचीत सूचियों से छिप जाती है लेकिन इसका डेटा सर्वर पर बना रहता है।",
@@ -839,7 +869,9 @@
       }
     },
     "emptyDescription": "Workflow में उपयोग करने के लिए अपना पहला {{type}} बनाएं।",
-    "descriptionPlaceholder": "इस {{type}} कॉन्फ़िगरेशन का वर्णन करें…"
+    "descriptionPlaceholder": "इस {{type}} कॉन्फ़िगरेशन का वर्णन करें…",
+    "viewingOldVersion": "आप संस्करण {{current}} देख रहे हैं। नवीनतम संस्करण {{latest}} है।",
+    "switchToLatest": "नवीनतम पर जाएँ"
   },
   "editor": {
     "compare": "तुलना करें",
@@ -883,7 +915,12 @@
     "savedNotLive": "सहेजा गया — अभी लाइव नहीं",
     "savedNotLiveDescription": "चल रहा एजेंट अब भी तैनात संस्करण ही दे रहा है। यह बदलाव प्रभावी करने के लिए तैनात करें।",
     "deployNow": "तैनात करें",
-    "deployStarted": "तैनाती शुरू हुई"
+    "deployStarted": "तैनाती शुरू हुई",
+    "invalidJsonSave": "सहेजा नहीं गया — JSON अमान्य है। इसे JSON टैब में ठीक करें।",
+    "invalidJsonShort": "अमान्य JSON",
+    "versionLockedDirty": "संस्करण बदलने के लिए अपने परिवर्तन सहेजें या त्यागें",
+    "savedAsVersion": "v{{version}} के रूप में सहेजा गया — अभी लाइव नहीं",
+    "updateAgentAndSave": "एजेंट अपडेट करें और सहेजें"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2081,7 +2118,12 @@
     "backToAgent": "एजेंट पर वापस जाएं",
     "selectStageHint": "कॉन्फ़िगरेशन इनलाइन देखने और संपादित करने के लिए पाइपलाइन में कोई एक्सटेंशन चुनें",
     "noConfig": "इस पाइपलाइन चरण का कोई कॉन्फ़िगरेशन URI नहीं है",
-    "unsupportedType": "इस एक्सटेंशन प्रकार के लिए एडिटर उपलब्ध नहीं है"
+    "unsupportedType": "इस एक्सटेंशन प्रकार के लिए एडिटर उपलब्ध नहीं है",
+    "testReady": "v{{version}} के रूप में सहेजा और तैनात किया गया — चैट तैयार है",
+    "workflow": "वर्कफ़्लो",
+    "unsavedTitle": "इस चरण में बिना सहेजे परिवर्तन हैं",
+    "unsavedMessage": "चरण बदलने से संपादक बदल जाएगा। पहले अपने परिवर्तन सहेजें, उन्हें त्यागें, या इसी चरण में रहें।",
+    "discardAndSwitch": "त्यागें और बदलें"
   },
   "ragEditor": {
     "general": "सामान्य",
@@ -5207,7 +5249,7 @@
     "workflowChanged": "वर्कफ़्लो {{workflowId}} कहीं और बदला गया है (अब संस्करण {{current}}, इस पृष्ठ पर संस्करण {{version}} है)। पृष्ठ पुनः लोड करें। कुछ भी सहेजा नहीं गया।",
     "agentChanged": "एजेंट {{agentId}} कहीं और बदला गया है (अब संस्करण {{current}}, इस पृष्ठ पर संस्करण {{version}} है)। पृष्ठ पुनः लोड करें। कुछ भी सहेजा नहीं गया।",
     "workflowMissingResource": "वर्कफ़्लो {{workflowId}} (संस्करण {{version}}) {{resource}} का संदर्भ नहीं देता, इसलिए यहाँ सहेजने से एजेंट नहीं बदलेगा। कुछ भी सहेजा नहीं गया।",
-    "agentWorkflowMismatch": "एजेंट {{agentId}} (संस्करण {{version}}) वर्कफ़्लो {{workflowId}} के संस्करण {{found}} का संदर्भ देता है, संस्करण {{expected}} का नहीं। यह पृष्ठ खुलने के बाद एजेंट बदल गया। इसे पुनः लोड करें। कुछ भी सहेजा नहीं गया।",
+    "agentWorkflowMismatch": "एजेंट {{agentId}} (संस्करण {{version}}) वर्कफ़्लो {{workflowId}} के संस्करण {{found}} का उपयोग करता है, लेकिन यह पृष्ठ संस्करण {{expected}} पर खोला गया था। कुछ भी सहेजा नहीं गया। एजेंट को नए वर्कफ़्लो संस्करण का उपयोग करने के लिए अपडेट करें, या संस्करण {{found}} खोलें।",
     "agentMissingWorkflow": "एजेंट {{agentId}} (संस्करण {{version}}) वर्कफ़्लो {{workflowId}} का संदर्भ नहीं देता। कुछ भी सहेजा नहीं गया।"
   },
   "llmProviders": {

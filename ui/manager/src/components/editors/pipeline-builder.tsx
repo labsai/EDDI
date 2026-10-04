@@ -20,42 +20,12 @@ import { Link } from "react-router-dom";
 import type { WorkflowExtension } from "@/lib/api/workflows";
 import { ArrowUpCircle, ExternalLink, GripVertical, Pencil, Trash2, Workflow } from "lucide-react";
 import { getExtensionIcon, getExtensionLabel } from "@/lib/api/extensions";
-
-/** Parse an eddi:// URI to extract the resource type slug and ID */
-function parseExtensionUri(uri: string): { slug: string; id: string } | null {
-  try {
-    const normalised = uri.startsWith("eddi://")
-      ? uri.replace("eddi://", "http://")
-      : uri;
-    const url = new URL(normalised, "http://dummy");
-    const segments = url.pathname.split("/").filter(Boolean);
-    // e.g. /rulestore/rulesets/abc123 → slug=rules, id=abc123
-    if (segments.length >= 3) {
-      // Map store name to resource slug
-      const storeMap: Record<string, string> = {
-        rulestore: "rules",
-        apicallstore: "apicalls",
-        llmstore: "llm",
-        outputstore: "output",
-        dictionarystore: "dictionary",
-        propertysetterstore: "propertysetter",
-        mcpcallsstore: "mcpcalls",
-        ragstore: "rag",
-        snippetstore: "snippets",
-        parserstore: "parser",
-      };
-      const storeName = segments[0];
-      const resourceId = segments[2];
-      if (storeName && resourceId) {
-        const slug = storeMap[storeName] ?? storeName;
-        return { slug, id: resourceId };
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
+import {
+  buildStepResourceLink,
+  extensionUriVersion,
+  isStepInSavedWorkflow,
+  parseExtensionUri,
+} from "@/lib/workflow-step-links";
 
 /* ─── Types ─── */
 export interface PipelineItem {
@@ -85,6 +55,14 @@ export interface PipelineBuilderProps {
   onUpdateVersion?: (index: number, newUri: string) => void;
   /** Called when a step should be edited inline (e.g. parser with embedded config) */
   onEditInline?: (index: number) => void;
+  /**
+   * The config URIs of the SAVED workflow. When given, a step whose resource is
+   * not among them exists only in unsaved state: the resource editor could not
+   * cascade into it, so its Edit link is replaced by `onSaveAndEdit`.
+   */
+  savedStepUris?: readonly string[];
+  /** Called to save the workflow, then open the step at `index` for editing. */
+  onSaveAndEdit?: (index: number) => void;
 }
 
 /* ─── Main component ─── */
@@ -100,6 +78,8 @@ export function PipelineBuilder({
   latestVersions,
   onUpdateVersion,
   onEditInline,
+  savedStepUris,
+  onSaveAndEdit,
 }: PipelineBuilderProps) {
   const { t } = useTranslation();
   const sensors = useSensors(
@@ -171,6 +151,8 @@ export function PipelineBuilder({
               latestVersions={latestVersions}
               onUpdateVersion={onUpdateVersion}
               onEditInline={onEditInline}
+              savedStepUris={savedStepUris}
+              onSaveAndEdit={onSaveAndEdit}
             />
           ))}
         </div>
@@ -193,6 +175,8 @@ function SortableExtensionItem({
   latestVersions,
   onUpdateVersion,
   onEditInline,
+  savedStepUris,
+  onSaveAndEdit,
 }: {
   item: PipelineItem;
   position: number;
@@ -206,6 +190,8 @@ function SortableExtensionItem({
   latestVersions?: Record<string, number>;
   onUpdateVersion?: (index: number, newUri: string) => void;
   onEditInline?: (index: number) => void;
+  savedStepUris?: readonly string[];
+  onSaveAndEdit?: (index: number) => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -236,7 +222,7 @@ function SortableExtensionItem({
   let latestVer = 0;
   if (configUri && parsed && latestVersions) {
     const versionMatch = configUri.match(/[?&]version=(\d+)/);
-    currentVer = versionMatch ? parseInt(versionMatch[1]!, 10) : 1;
+    currentVer = versionMatch ? parseInt(versionMatch[1]!, 10) : extensionUriVersion(configUri);
     latestVer = latestVersions[parsed.id] ?? currentVer;
     isStale = latestVer > currentVer;
   }
@@ -247,20 +233,17 @@ function SortableExtensionItem({
     onUpdateVersion(item.index, newUri);
   }
 
-  // Build resource link once (used by both label area and Edit button)
-  const resourceLink = parsed ? (() => {
-    let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
-    const params = new URLSearchParams();
-    if (workflowId && workflowVersion) {
-      params.set("wfId", workflowId);
-      params.set("wfVer", String(workflowVersion));
-    }
-    if (agentId) params.set("agentId", agentId);
-    if (agentVer) params.set("agentVer", agentVer);
-    const qs = params.toString();
-    if (qs) path += `?${qs}`;
-    return path;
-  })() : null;
+  // A step added in this session is not in the saved workflow yet: editing its
+  // resource would cascade into a workflow that does not reference it.
+  const isUnsaved =
+    !!configUri && !!parsed && savedStepUris !== undefined && !isStepInSavedWorkflow(configUri, savedStepUris);
+
+  // Build resource link once (used by both label area and Edit button). It
+  // carries the version this step references, so the editor opens what is shown.
+  const resourceLink =
+    configUri && parsed && !isUnsaved
+      ? buildStepResourceLink(configUri, { workflowId, workflowVersion, agentId, agentVer })
+      : null;
 
   // Inline-editable steps: parser with embedded config (no config.uri)
   const isInlineEditable =
@@ -313,6 +296,14 @@ function SortableExtensionItem({
       ) : (
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-foreground">{label}</p>
+          {isUnsaved && (
+            <span
+              className="mt-0.5 inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+              data-testid={`unsaved-step-${item.index}`}
+            >
+              {t("packageEditor.stepUnsaved", "Not saved yet")}
+            </span>
+          )}
         </div>
       )}
 
@@ -328,6 +319,23 @@ function SortableExtensionItem({
           >
             <ArrowUpCircle className="h-3 w-3" />
             v{latestVer}
+          </button>
+        )}
+
+        {isUnsaved && onSaveAndEdit && (
+          <button
+            type="button"
+            onClick={() => onSaveAndEdit(item.index)}
+            disabled={disabled}
+            className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+            title={t(
+              "packageEditor.saveAndEditHint",
+              "This step is not saved yet. Save the workflow first, then edit its config."
+            )}
+            data-testid={`save-and-edit-${item.index}`}
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t("packageEditor.saveAndEdit", "Save workflow & edit")}
           </button>
         )}
 
@@ -361,6 +369,7 @@ function SortableExtensionItem({
           disabled={disabled}
           className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
           title={t("common.delete")}
+          aria-label={t("packageEditor.removeStep", "Remove task")}
           data-testid={`remove-ext-${item.index}`}
         >
           <Trash2 className="h-4 w-4" />

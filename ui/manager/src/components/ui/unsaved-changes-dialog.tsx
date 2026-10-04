@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 
@@ -10,6 +10,15 @@ interface UnsavedChangesDialogProps {
   message?: string;
   /** Title. Defaults to "Unsaved Changes" */
   title?: string;
+  /** Extra controls rendered under the message (e.g. an "also delete" checkbox). */
+  children?: ReactNode;
+  /**
+   * Offers a third choice, "Save", beside Cancel and Discard — for flows where
+   * leaving is fine as long as the work is kept.
+   */
+  onSave?: () => void;
+  /** Label of the confirm (discard) button. Defaults to "Discard & Leave". */
+  confirmLabel?: string;
 }
 
 /**
@@ -22,6 +31,9 @@ export function UnsavedChangesDialog({
   onCancel,
   message,
   title,
+  children,
+  onSave,
+  confirmLabel,
 }: UnsavedChangesDialogProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -109,6 +121,7 @@ export function UnsavedChangesDialog({
                   "You have unsaved changes that will be lost. Are you sure you want to continue?"
                 )}
             </p>
+            {children}
           </div>
 
           <div className="flex justify-end gap-2 border-t border-border p-4">
@@ -124,8 +137,17 @@ export function UnsavedChangesDialog({
               className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors"
               data-testid="unsaved-confirm"
             >
-              {t("editor.discardAndLeave", "Discard & Leave")}
+              {confirmLabel ?? t("editor.discardAndLeave", "Discard & Leave")}
             </button>
+            {onSave && (
+              <button
+                onClick={onSave}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                data-testid="unsaved-save"
+              >
+                {t("editor.save", "Save")}
+              </button>
+            )}
           </div>
         </div>
       </div>

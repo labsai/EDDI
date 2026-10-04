@@ -160,7 +160,14 @@ export function useAgentVersions(agentId: string) {
       // which controls to offer (see `accessForDetail` in `@/lib/access`).
       const byVersion = new Map<
         number,
-        { version: number; lastModifiedOn: number; name: string; resource: string; callerLevel?: string }
+        {
+          version: number;
+          lastModifiedOn: number;
+          name: string;
+          description?: string;
+          resource: string;
+          callerLevel?: string;
+        }
       >();
       for (const d of descriptors) {
         const { id, version } = parseResourceUri(d.resource);
@@ -170,6 +177,7 @@ export function useAgentVersions(agentId: string) {
             version,
             lastModifiedOn: d.lastModifiedOn,
             name: d.name,
+            description: d.description,
             resource: d.resource,
             callerLevel: d.callerLevel,
           });
@@ -248,6 +256,16 @@ export function useDeploymentStatuses(agentId: string, version: number) {
   return { ...exact, data: withAnyDeployedVersion(exact.data, deployed, agentId, version) };
 }
 
+/**
+ * What `useCreateAgent` resolves with. `namingFailed` is set when the agent
+ * WAS created but the follow-up that stores its name and description failed:
+ * the caller must treat it as created — retrying creates a duplicate.
+ */
+export interface CreateAgentResult {
+  location: string;
+  namingFailed?: boolean;
+}
+
 export function useCreateAgent() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -259,7 +277,7 @@ export function useCreateAgent() {
       agent: Agent;
       name?: string;
       description?: string;
-    }) => {
+    }): Promise<CreateAgentResult> => {
       const response = await createAgent(agent);
       if ((name || description) && response.location) {
         // Location header is a URL path (e.g. /agentstore/agents/id?version=1),
@@ -268,12 +286,43 @@ export function useCreateAgent() {
         const parts = url.pathname.split("/").filter(Boolean);
         const id = parts[parts.length - 1]!;
         const version = parseInt(url.searchParams.get("version") || "1", 10);
-        await updateDescriptor(id, version, { name, description });
+        try {
+          await updateDescriptor(id, version, { name, description });
+        } catch {
+          // The agent exists. Failing here made the dialog show an error, and
+          // the user's retry created a second agent.
+          return { ...response, namingFailed: true };
+        }
       }
       return response;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
+    },
+  });
+}
+
+/**
+ * Rename an agent (name and description live on its descriptor, not in the
+ * agent document, so this does not create a new agent version).
+ */
+export function useUpdateAgentDescriptor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      version,
+      name,
+      description,
+    }: {
+      id: string;
+      version: number;
+      name: string;
+      description: string;
+    }) => updateDescriptor(id, version, { name, description }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      queryClient.invalidateQueries({ queryKey: ["studio", "descriptors"] });
     },
   });
 }

@@ -1388,25 +1388,9 @@ export const SessionManagementSection = memo(function SessionManagementSection({
           <p className="text-[10px] text-muted-foreground ps-5">
             {t(
               "agentDetail.forkingNote",
-              "Session forking endpoint (POST /v6/conversations/{id}/fork) is not yet available."
+              "Session forking endpoint (POST /v6/conversations/:id/fork) is not yet available."
             )}
           </p>
-
-          <div className="flex items-center gap-2 ps-5 opacity-50 cursor-not-allowed">
-            <label className="text-xs text-foreground whitespace-nowrap">
-              {t("agentDetail.maxForks", "Max Forks")}
-            </label>
-            <input
-              type="number"
-              value={sm.maxForksPerConversation ?? 5}
-              disabled
-              className="h-7 w-20 rounded border border-input bg-muted/50 px-2 text-xs text-muted-foreground"
-              title={t("agentDetail.forkingDisabledTooltip", "Available in a future release")}
-            />
-            <span className="text-[10px] text-muted-foreground">
-              {t("agentDetail.maxForksHint", "per conversation")}
-            </span>
-          </div>
         </div>
       </div>
     </EditorSection>

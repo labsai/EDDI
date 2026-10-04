@@ -218,7 +218,8 @@
     "removeItem": "Remove {{item}}",
     "stepOf": "Step {{current}} of {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "Resize {{panel}}"
+    "resizePanel": "Resize {{panel}}",
+    "rename": "Rename"
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -294,7 +295,9 @@
     "deployToProduction": "Deploy to production",
     "undeployFromProduction": "Undeploy from production",
     "deployFailedIn": "Deployment failed in {{environment}}",
-    "undeployCompatibleHint": "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn."
+    "undeployCompatibleHint": "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn.",
+    "sortLoadingAll": "Loading every agent so the sort is complete…",
+    "createNamingFailed": "Agent created, but its name could not be saved. Rename it from its page."
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",
@@ -327,7 +330,7 @@
     "enableSwd": "Enable Strict Write Discipline",
     "forkingDisabledTooltip": "Available in a future release",
     "forkingEnabled": "Session Forking",
-    "forkingNote": "Session forking endpoint (POST /v6/conversations/{{id}}/fork) is not yet available.",
+    "forkingNote": "Session forking endpoint (POST /v6/conversations/:id/fork) is not yet available.",
     "guardrails": "Write Guardrails",
     "identity": "Cryptographic Identity",
     "keyExpired": "Expired",
@@ -485,7 +488,15 @@
       "notice": "What the chat tells people (leave empty for the standard wording)",
       "noticePlaceholder": "Conversations with this agent may be read by the people who maintain it, to improve it.",
       "versionNote": "Covers conversations on the version this change creates and later ones — never what was said before. Slack, Teams and API clients cannot show the notice; if people reach this agent there, say it in the greeting."
-    }
+    },
+    "liveElsewhere": "Live: v{{live}} · Viewing v{{viewing}} (not deployed)",
+    "removeWorkflow": "Remove workflow from agent",
+    "confirmRemoveWorkflow": "Remove workflow from this agent?",
+    "confirmRemoveWorkflowDescription": "{{name}} is removed from this agent as a new, not yet live agent version. The workflow itself is not deleted.",
+    "removeWorkflowConfirm": "Remove",
+    "a2aRemoveSkill": "Remove {{skill}}",
+    "a2aAddSkill": "Add skill",
+    "a2aCopyUrl": "Copy URL"
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -638,7 +649,26 @@
     "addHintDialog": "Select a task type to add to the pipeline",
     "reorder": "Reorder task",
     "saved": "Workflow saved successfully",
-    "saveError": "Failed to save workflow"
+    "saveError": "Failed to save workflow",
+    "stepUnsaved": "Not saved yet",
+    "saveAndEditHint": "This step is not saved yet. Save the workflow first, then edit its config.",
+    "saveAndEdit": "Save workflow & edit",
+    "removeStep": "Remove task",
+    "configCreatedUnsaved": "Config created — save the workflow to keep it in the pipeline",
+    "configNameFailed": "Config created, but its name could not be saved. Rename it later.",
+    "newConfigName": "Name for the new config",
+    "newConfigNamePlaceholder": "e.g. Support greeting",
+    "agentPinsOtherVersion": "Agent version {{agentVer}} uses this workflow at version {{found}}, not version {{version}}, so saving here would not change the agent. Nothing was saved. Open version {{found}}, or point the agent at version {{version}}.",
+    "agentMissingWorkflow": "Agent version {{agentVer}} does not use this workflow, so saving here would not change the agent. Nothing was saved.",
+    "noVersionReturned": "The server did not report the new workflow version.",
+    "agentUpdateFailed": "Workflow saved as version {{version}}, but updating the agent failed: {{error}}",
+    "agentPinMismatch": "Agent version {{agentVer}} uses this workflow at version {{found}}. You are viewing version {{version}}, so saving here would not change the agent.",
+    "switchToPinned": "Open version {{version}}",
+    "pointAgentAt": "Point agent at version {{version}}",
+    "createdDeleteFailed_one": "{{count}} config created during this edit could not be deleted",
+    "createdDeleteFailed_other": "{{count}} configs created during this edit could not be deleted",
+    "discardDeleteCreated_one": "Also delete the {{count}} config created during this edit",
+    "discardDeleteCreated_other": "Also delete the {{count}} configs created during this edit"
   },
   "conversations": {
     "confirmDeleteSoft": "By default this is a soft delete — the conversation is hidden from listings but its stored data is kept on the server.",
@@ -879,7 +909,9 @@
         "description": "NLP input parsing and dictionary configuration"
       }
     },
-    "descriptionPlaceholder": "Describe this {{type}} configuration..."
+    "descriptionPlaceholder": "Describe this {{type}} configuration...",
+    "viewingOldVersion": "You are viewing version {{current}}. The latest is version {{latest}}.",
+    "switchToLatest": "Switch to latest"
   },
   "editor": {
     "compare": "Compare",
@@ -923,7 +955,12 @@
     "savedNotLive": "Saved — not yet live",
     "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
     "deployNow": "Deploy",
-    "deployStarted": "Deployment started"
+    "deployStarted": "Deployment started",
+    "invalidJsonSave": "Not saved — the JSON is invalid. Fix it in the JSON tab.",
+    "invalidJsonShort": "Invalid JSON",
+    "versionLockedDirty": "Save or discard your changes to switch versions",
+    "savedAsVersion": "Saved as v{{version}} — not live yet",
+    "updateAgentAndSave": "Update agent and save"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2162,7 +2199,12 @@
       "mcpcalls": "MCP Calls",
       "rag": "Knowledge Bases",
       "dictionary": "Dictionary"
-    }
+    },
+    "testReady": "Saved and deployed as v{{version}} — the chat is ready",
+    "workflow": "Workflow",
+    "unsavedTitle": "Unsaved changes in this stage",
+    "unsavedMessage": "Switching stages replaces the editor. Save your changes first, discard them, or stay on this stage.",
+    "discardAndSwitch": "Discard & switch"
   },
   "ragEditor": {
     "general": "General",
@@ -5207,7 +5249,7 @@
     "workflowChanged": "Workflow {{workflowId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
     "agentChanged": "Agent {{agentId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
     "workflowMissingResource": "Workflow {{workflowId}} (version {{version}}) does not reference {{resource}}, so saving it here would not change the agent. Nothing was saved.",
-    "agentWorkflowMismatch": "Agent {{agentId}} (version {{version}}) references workflow {{workflowId}} at version {{found}}, not version {{expected}}. The agent changed since this page was opened. Reload it. Nothing was saved.",
+    "agentWorkflowMismatch": "Agent {{agentId}} (version {{version}}) uses workflow {{workflowId}} at version {{found}}, but this page was opened at version {{expected}}. Nothing was saved. Update the agent to use the new workflow version, or open version {{found}}.",
     "agentMissingWorkflow": "Agent {{agentId}} (version {{version}}) does not reference workflow {{workflowId}}. Nothing was saved."
   },
   "llmProviders": {

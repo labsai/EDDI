@@ -218,7 +218,8 @@
     "removeItem": "{{item}} を削除",
     "stepOf": "ステップ {{current}} / {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} のサイズを変更"
+    "resizePanel": "{{panel}} のサイズを変更",
+    "rename": "名前を変更"
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",
@@ -267,7 +268,9 @@
     "deployToProduction": "本番にデプロイ",
     "undeployFromProduction": "本番から削除",
     "deployFailedIn": "{{environment}} へのデプロイに失敗しました",
-    "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。"
+    "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。",
+    "sortLoadingAll": "並べ替えを完全にするため、すべてのエージェントを読み込んでいます…",
+    "createNamingFailed": "エージェントは作成されましたが、名前を保存できませんでした。エージェントのページで名前を変更してください。"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -300,7 +303,7 @@
     "enableSwd": "厳格な書き込み規律を有効化",
     "forkingDisabledTooltip": "将来のリリースで利用可能",
     "forkingEnabled": "セッションフォーク",
-    "forkingNote": "セッションフォークのエンドポイント (POST /v6/conversations/{{id}}/fork) はまだ利用できません。",
+    "forkingNote": "セッションフォークのエンドポイント (POST /v6/conversations/:id/fork) はまだ利用できません。",
     "guardrails": "書き込みガードレール",
     "identity": "暗号アイデンティティ",
     "keyExpired": "期限切れ",
@@ -458,7 +461,15 @@
       "notice": "チャットで利用者に伝える内容（空欄にすると標準の文言を使用）",
       "noticePlaceholder": "このエージェントとの会話は、改善のために管理者が閲覧する場合があります。",
       "versionNote": "この変更で作成されるバージョン以降の会話が対象です — それ以前の会話は対象外です。Slack、Teams、API クライアントでは通知を表示できません。利用者がそこからこのエージェントを使う場合は、あいさつ文でお知らせください。"
-    }
+    },
+    "liveElsewhere": "稼働中: v{{live}} · 表示中: v{{viewing}}（未デプロイ）",
+    "removeWorkflow": "エージェントからワークフローを削除",
+    "confirmRemoveWorkflow": "このエージェントからワークフローを削除しますか？",
+    "confirmRemoveWorkflowDescription": "{{name}} は、まだ反映されていない新しいエージェントバージョンでこのエージェントから外されます。ワークフロー自体は削除されません。",
+    "removeWorkflowConfirm": "削除",
+    "a2aRemoveSkill": "{{skill}} を削除",
+    "a2aAddSkill": "スキルを追加",
+    "a2aCopyUrl": "URL をコピー"
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -611,7 +622,26 @@
     "saved": "Workflow が正常に保存されました",
     "saveError": "ワークフローの保存に失敗しました",
     "noTasks": "このワークフローにはタスクがありません",
-    "addTask": "タスクを追加"
+    "addTask": "タスクを追加",
+    "stepUnsaved": "未保存",
+    "saveAndEditHint": "このステップはまだ保存されていません。先にワークフローを保存してから、設定を編集してください。",
+    "saveAndEdit": "ワークフローを保存して編集",
+    "removeStep": "タスクを削除",
+    "configCreatedUnsaved": "設定を作成しました — パイプラインに残すにはワークフローを保存してください",
+    "configNameFailed": "設定は作成されましたが、名前を保存できませんでした。後で名前を変更してください。",
+    "newConfigName": "新しい設定の名前",
+    "newConfigNamePlaceholder": "例: サポートの挨拶",
+    "agentPinsOtherVersion": "エージェントのバージョン {{agentVer}} はこのワークフローのバージョン {{found}} を使用しており、バージョン {{version}} ではないため、ここで保存してもエージェントは変わりません。何も保存されていません。バージョン {{found}} を開くか、エージェントをバージョン {{version}} に向けてください。",
+    "agentMissingWorkflow": "エージェントのバージョン {{agentVer}} はこのワークフローを使用していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
+    "noVersionReturned": "サーバーが新しいワークフローのバージョンを返しませんでした。",
+    "agentUpdateFailed": "ワークフローをバージョン {{version}} として保存しましたが、エージェントの更新に失敗しました: {{error}}",
+    "agentPinMismatch": "エージェントのバージョン {{agentVer}} はこのワークフローのバージョン {{found}} を使用しています。表示中はバージョン {{version}} のため、ここで保存してもエージェントは変わりません。",
+    "switchToPinned": "バージョン {{version}} を開く",
+    "pointAgentAt": "エージェントをバージョン {{version}} に向ける",
+    "createdDeleteFailed_one": "この編集中に作成された {{count}} 件の設定を削除できませんでした",
+    "createdDeleteFailed_other": "この編集中に作成された {{count}} 件の設定を削除できませんでした",
+    "discardDeleteCreated_one": "この編集中に作成された {{count}} 件の設定も削除する",
+    "discardDeleteCreated_other": "この編集中に作成された {{count}} 件の設定も削除する"
   },
   "conversations": {
     "confirmDeleteSoft": "デフォルトではソフト削除です。会話は一覧から非表示になりますが、保存データはサーバーに残ります。",
@@ -839,7 +869,9 @@
       }
     },
     "emptyDescription": "最初の {{type}} を作成してワークフローで使用しましょう。",
-    "descriptionPlaceholder": "この {{type}} 設定を説明してください…"
+    "descriptionPlaceholder": "この {{type}} 設定を説明してください…",
+    "viewingOldVersion": "バージョン {{current}} を表示しています。最新はバージョン {{latest}} です。",
+    "switchToLatest": "最新に切り替え"
   },
   "editor": {
     "compare": "比較",
@@ -883,7 +915,12 @@
     "savedNotLive": "保存しました — まだ反映されていません",
     "savedNotLiveDescription": "実行中のエージェントはデプロイ済みのバージョンを使用しています。この変更を反映するにはデプロイしてください。",
     "deployNow": "デプロイ",
-    "deployStarted": "デプロイを開始しました"
+    "deployStarted": "デプロイを開始しました",
+    "invalidJsonSave": "保存されていません — JSON が無効です。JSON タブで修正してください。",
+    "invalidJsonShort": "JSON が無効です",
+    "versionLockedDirty": "バージョンを切り替えるには、変更を保存または破棄してください",
+    "savedAsVersion": "v{{version}} として保存しました — まだ反映されていません",
+    "updateAgentAndSave": "エージェントを更新して保存"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2081,7 +2118,12 @@
     "backToAgent": "エージェント詳細に戻る",
     "selectStageHint": "パイプライン内の拡張を選択して、設定をインラインで表示・編集",
     "noConfig": "このパイプラインステージには設定URIがありません",
-    "unsupportedType": "この拡張タイプのエディターは利用できません"
+    "unsupportedType": "この拡張タイプのエディターは利用できません",
+    "testReady": "v{{version}} として保存・デプロイしました — チャットの準備ができました",
+    "workflow": "ワークフロー",
+    "unsavedTitle": "このステージに未保存の変更があります",
+    "unsavedMessage": "ステージを切り替えるとエディタが置き換えられます。先に変更を保存するか、破棄するか、このステージにとどまってください。",
+    "discardAndSwitch": "破棄して切り替え"
   },
   "ragEditor": {
     "general": "一般",
@@ -5207,7 +5249,7 @@
     "workflowChanged": "ワークフロー {{workflowId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
     "agentChanged": "エージェント {{agentId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
     "workflowMissingResource": "ワークフロー {{workflowId}}（バージョン {{version}}）は {{resource}} を参照していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
-    "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を参照しており、バージョン {{expected}} ではありません。このページを開いた後にエージェントが変更されました。再読み込みしてください。何も保存されていません。",
+    "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を使用していますが、このページはバージョン {{expected}} で開かれています。何も保存されていません。エージェントを新しいワークフローバージョンに更新するか、バージョン {{found}} を開いてください。",
     "agentMissingWorkflow": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} を参照していません。何も保存されていません。"
   },
   "llmProviders": {

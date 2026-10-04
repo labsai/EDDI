@@ -218,7 +218,8 @@
     "removeItem": "{{item}} 제거",
     "stepOf": "{{total}}단계 중 {{current}}단계",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} 크기 조절"
+    "resizePanel": "{{panel}} 크기 조절",
+    "rename": "이름 바꾸기"
   },
   "agents": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 에이전트와 모든 데이터가 영구적으로 제거됩니다.",
@@ -267,7 +268,9 @@
     "deployToProduction": "프로덕션에 배포",
     "undeployFromProduction": "프로덕션에서 제거",
     "deployFailedIn": "{{environment}}에 배포하지 못했습니다",
-    "undeployCompatibleHint": "호환되는 배포 버전이 이어갈 수 있는 대화는 종료되지 않고 다음 턴에 그 버전으로 이동합니다."
+    "undeployCompatibleHint": "호환되는 배포 버전이 이어갈 수 있는 대화는 종료되지 않고 다음 턴에 그 버전으로 이동합니다.",
+    "sortLoadingAll": "정렬이 완전하도록 모든 에이전트를 불러오는 중…",
+    "createNamingFailed": "에이전트는 생성되었지만 이름을 저장하지 못했습니다. 에이전트 페이지에서 이름을 바꾸세요."
   },
   "agentDetail": {
     "a2aDescHint": "에이전트 카드에 표시됩니다 — 다른 에이전트가 이 에이전트의 기능을 이해하는 데 도움이 됩니다",
@@ -300,7 +303,7 @@
     "enableSwd": "엄격한 쓰기 규율 활성화",
     "forkingDisabledTooltip": "향후 릴리스에서 제공 예정",
     "forkingEnabled": "세션 포크",
-    "forkingNote": "세션 포크 엔드포인트(POST /v6/conversations/{{id}}/fork)는 아직 사용할 수 없습니다.",
+    "forkingNote": "세션 포크 엔드포인트(POST /v6/conversations/:id/fork)는 아직 사용할 수 없습니다.",
     "guardrails": "쓰기 가드레일",
     "identity": "암호화 신원",
     "keyExpired": "만료됨",
@@ -458,7 +461,15 @@
       "notice": "채팅이 사용자에게 알리는 내용 (비워 두면 기본 문구 사용)",
       "noticePlaceholder": "이 에이전트와의 대화는 개선을 위해 에이전트를 관리하는 사람들이 읽을 수 있습니다.",
       "versionNote": "이 변경으로 생성되는 버전과 이후 버전의 대화에 적용됩니다 — 이전에 나눈 대화에는 적용되지 않습니다. Slack, Teams 및 API 클라이언트는 알림을 표시할 수 없으므로, 그곳에서 이 에이전트를 사용한다면 인사말에서 안내하세요."
-    }
+    },
+    "liveElsewhere": "운영 중: v{{live}} · 보는 중: v{{viewing}}(배포되지 않음)",
+    "removeWorkflow": "에이전트에서 워크플로 제거",
+    "confirmRemoveWorkflow": "이 에이전트에서 워크플로를 제거하시겠습니까?",
+    "confirmRemoveWorkflowDescription": "{{name}}은(는) 아직 반영되지 않은 새 에이전트 버전에서 이 에이전트로부터 제거됩니다. 워크플로 자체는 삭제되지 않습니다.",
+    "removeWorkflowConfirm": "제거",
+    "a2aRemoveSkill": "{{skill}} 제거",
+    "a2aAddSkill": "스킬 추가",
+    "a2aCopyUrl": "URL 복사"
   },
   "wizard": {
     "title": "Agent 마법사"
@@ -611,7 +622,26 @@
     "saved": "Workflow가 성공적으로 저장되었습니다",
     "saveError": "워크플로 저장 실패",
     "noTasks": "이 워크플로에는 작업이 없습니다",
-    "addTask": "작업 추가"
+    "addTask": "작업 추가",
+    "stepUnsaved": "아직 저장되지 않음",
+    "saveAndEditHint": "이 단계는 아직 저장되지 않았습니다. 먼저 워크플로를 저장한 다음 구성을 편집하세요.",
+    "saveAndEdit": "워크플로 저장 후 편집",
+    "removeStep": "작업 제거",
+    "configCreatedUnsaved": "구성이 생성되었습니다 — 파이프라인에 유지하려면 워크플로를 저장하세요",
+    "configNameFailed": "구성은 생성되었지만 이름을 저장하지 못했습니다. 나중에 이름을 바꾸세요.",
+    "newConfigName": "새 구성의 이름",
+    "newConfigNamePlaceholder": "예: 고객 지원 인사말",
+    "agentPinsOtherVersion": "에이전트 버전 {{agentVer}}은(는) 이 워크플로의 버전 {{version}}이(가) 아닌 버전 {{found}}을(를) 사용하므로 여기서 저장해도 에이전트는 바뀌지 않습니다. 아무것도 저장되지 않았습니다. 버전 {{found}}을(를) 열거나 에이전트가 버전 {{version}}을(를) 가리키도록 하세요.",
+    "agentMissingWorkflow": "에이전트 버전 {{agentVer}}은(는) 이 워크플로를 사용하지 않으므로 여기서 저장해도 에이전트는 바뀌지 않습니다. 아무것도 저장되지 않았습니다.",
+    "noVersionReturned": "서버가 새 워크플로 버전을 알려주지 않았습니다.",
+    "agentUpdateFailed": "워크플로가 버전 {{version}}(으)로 저장되었지만 에이전트 업데이트에 실패했습니다: {{error}}",
+    "agentPinMismatch": "에이전트 버전 {{agentVer}}은(는) 이 워크플로의 버전 {{found}}을(를) 사용합니다. 현재 버전 {{version}}을(를) 보고 있으므로 여기서 저장해도 에이전트는 바뀌지 않습니다.",
+    "switchToPinned": "버전 {{version}} 열기",
+    "pointAgentAt": "에이전트가 버전 {{version}}을(를) 가리키도록 설정",
+    "createdDeleteFailed_one": "이번 편집 중 생성된 구성 {{count}}개를 삭제하지 못했습니다",
+    "createdDeleteFailed_other": "이번 편집 중 생성된 구성 {{count}}개를 삭제하지 못했습니다",
+    "discardDeleteCreated_one": "이번 편집 중 생성된 구성 {{count}}개도 삭제",
+    "discardDeleteCreated_other": "이번 편집 중 생성된 구성 {{count}}개도 삭제"
   },
   "conversations": {
     "confirmDeleteSoft": "기본적으로 소프트 삭제입니다 — 대화는 목록에서 숨겨지지만 저장된 데이터는 서버에 남습니다.",
@@ -839,7 +869,9 @@
       }
     },
     "emptyDescription": "워크플로에서 사용할 첫 번째 {{type}}을(를) 만드세요.",
-    "descriptionPlaceholder": "이 {{type}} 구성을 설명하세요…"
+    "descriptionPlaceholder": "이 {{type}} 구성을 설명하세요…",
+    "viewingOldVersion": "버전 {{current}}을(를) 보고 있습니다. 최신 버전은 {{latest}}입니다.",
+    "switchToLatest": "최신 버전으로 전환"
   },
   "editor": {
     "compare": "비교",
@@ -883,7 +915,12 @@
     "savedNotLive": "저장됨 — 아직 반영되지 않음",
     "savedNotLiveDescription": "실행 중인 에이전트는 여전히 배포된 버전을 제공합니다. 이 변경을 적용하려면 배포하세요.",
     "deployNow": "배포",
-    "deployStarted": "배포를 시작했습니다"
+    "deployStarted": "배포를 시작했습니다",
+    "invalidJsonSave": "저장되지 않음 — JSON이 올바르지 않습니다. JSON 탭에서 수정하세요.",
+    "invalidJsonShort": "JSON이 올바르지 않습니다",
+    "versionLockedDirty": "버전을 전환하려면 변경 사항을 저장하거나 취소하세요",
+    "savedAsVersion": "v{{version}}(으)로 저장됨 — 아직 반영되지 않음",
+    "updateAgentAndSave": "에이전트 업데이트 후 저장"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2081,7 +2118,12 @@
     "backToAgent": "에이전트로 돌아가기",
     "selectStageHint": "파이프라인의 확장을 선택하여 인라인으로 설정을 보고 편집하세요",
     "noConfig": "이 파이프라인 단계에는 설정 URI가 없습니다",
-    "unsupportedType": "이 확장 유형의 편집기를 사용할 수 없습니다"
+    "unsupportedType": "이 확장 유형의 편집기를 사용할 수 없습니다",
+    "testReady": "v{{version}}(으)로 저장 및 배포됨 — 채팅이 준비되었습니다",
+    "workflow": "워크플로",
+    "unsavedTitle": "이 단계에 저장되지 않은 변경 사항이 있습니다",
+    "unsavedMessage": "단계를 전환하면 편집기가 교체됩니다. 먼저 변경 사항을 저장하거나, 취소하거나, 이 단계에 머무르세요.",
+    "discardAndSwitch": "취소하고 전환"
   },
   "ragEditor": {
     "general": "일반",
@@ -5207,7 +5249,7 @@
     "workflowChanged": "워크플로 {{workflowId}}이(가) 다른 곳에서 변경되었습니다(현재 버전 {{current}}, 이 페이지는 버전 {{version}}). 페이지를 새로 고치세요. 아무것도 저장되지 않았습니다.",
     "agentChanged": "에이전트 {{agentId}}이(가) 다른 곳에서 변경되었습니다(현재 버전 {{current}}, 이 페이지는 버전 {{version}}). 페이지를 새로 고치세요. 아무것도 저장되지 않았습니다.",
     "workflowMissingResource": "워크플로 {{workflowId}}(버전 {{version}})이(가) {{resource}}을(를) 참조하지 않으므로 여기서 저장해도 에이전트가 바뀌지 않습니다. 아무것도 저장되지 않았습니다.",
-    "agentWorkflowMismatch": "에이전트 {{agentId}}(버전 {{version}})은(는) 워크플로 {{workflowId}}의 버전 {{expected}}이(가) 아닌 버전 {{found}}을(를) 참조합니다. 이 페이지를 연 후 에이전트가 변경되었습니다. 새로 고치세요. 아무것도 저장되지 않았습니다.",
+    "agentWorkflowMismatch": "에이전트 {{agentId}}(버전 {{version}})은(는) 워크플로 {{workflowId}}의 버전 {{found}}을(를) 사용하지만 이 페이지는 버전 {{expected}}(으)로 열렸습니다. 아무것도 저장되지 않았습니다. 에이전트가 새 워크플로 버전을 사용하도록 업데이트하거나 버전 {{found}}을(를) 여세요.",
     "agentMissingWorkflow": "에이전트 {{agentId}}(버전 {{version}})이(가) 워크플로 {{workflowId}}을(를) 참조하지 않습니다. 아무것도 저장되지 않았습니다."
   },
   "llmProviders": {

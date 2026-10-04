@@ -13,6 +13,7 @@ import {
   Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EditableTitle } from "@/components/shared/editable-title";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ErrorState } from "@/components/shared/error-state";
@@ -21,6 +22,7 @@ import { getResourceType } from "@/lib/api/resources";
 import {
   useResource,
   useResourceVersions,
+  useUpdateResourceDescriptor,
   useDeleteResource,
   useDuplicateResource,
   useCascadeSave,
@@ -106,8 +108,11 @@ export function ResourceDetailPage() {
   // which decides whether the checkbox has to warn about a legacy version.
   const { data: cascadeAgent } = useAgent(cascadeContext?.agentId ?? "", cascadeContext?.agentVersion);
 
-  // Version state — default to latest version once descriptors are loaded
+  // Version state — default to the version the link named (the one the pipeline
+  // shows), else the latest, once descriptors are loaded
   const [currentVersion, setCurrentVersion] = useState<number | undefined>(undefined);
+  const urlVersionRaw = parseInt(searchParams.get("version") ?? "", 10);
+  const urlVersion = Number.isSafeInteger(urlVersionRaw) && urlVersionRaw > 0 ? urlVersionRaw : undefined;
 
   // Reset version when navigating to a different resource (React reuses
   // the component for same-type routes, so useState values persist).
@@ -126,6 +131,9 @@ export function ResourceDetailPage() {
   // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
   const workspacesEnforced = useSpaces().enforcement;
   const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
+  // A viewer gets the config to read, not to edit.
+  const readOnly = !access.canEdit;
+  const renameMutation = useUpdateResourceDescriptor(type ?? "");
 
   // Resolve latest version from descriptors
   useEffect(() => {
@@ -136,13 +144,19 @@ export function ResourceDetailPage() {
           const v = match ? parseInt(match[1] ?? "1", 10) : 1;
           return v > max ? v : max;
         }, 1);
-        setCurrentVersion(latest);
+        const named =
+          urlVersion !== undefined &&
+          versionDescriptors.some((d) => {
+            const match = d.resource?.match(/\?version=(\d+)/);
+            return match ? parseInt(match[1] ?? "1", 10) === urlVersion : false;
+          });
+        setCurrentVersion(named ? urlVersion : latest);
       } else {
         // Descriptors loaded but empty — default to version 1
         setCurrentVersion(1);
       }
     }
-  }, [currentVersion, versionDescriptors]);
+  }, [currentVersion, versionDescriptors, urlVersion]);
 
   // Data hooks
   const { data, isLoading, isError, error: resourceError, refetch } = useResource(
@@ -204,6 +218,40 @@ export function ResourceDetailPage() {
   }, []);
 
   // All hooks are above — safe to do early returns below
+
+  // A save refused because the agent pins another workflow version, to be run
+  // again once the page has adopted the context that repoints the agent.
+  const [retryJson, setRetryJson] = useState<string | null>(null);
+
+  /**
+   * The agent references this workflow at another version than the one the page
+   * was opened with. Say how to fix it, and offer to: point the agent at the new
+   * workflow version and save, which is what the user came here to do. Telling
+   * them to reload could not help, because the mismatch is in the agent.
+   */
+  const reportCascadeError = useCallback(
+    (err: unknown, jsonString: string, ctx: CascadeContext) => {
+      const found =
+        err instanceof CascadeReferenceError && err.code === "agentWorkflowMismatch"
+          ? Number(err.params.found)
+          : NaN;
+      if (Number.isSafeInteger(found) && ctx.agentWorkflowVersion === undefined) {
+        toast.error(describeSaveError(err, t), {
+          duration: 15000,
+          action: {
+            label: t("editor.updateAgentAndSave", "Update agent and save"),
+            onClick: () => {
+              setCascadeContext({ ...ctx, agentWorkflowVersion: found });
+              setRetryJson(jsonString);
+            },
+          },
+        });
+        return;
+      }
+      toast.error(describeSaveError(err, t));
+    },
+    [t],
+  );
 
   const handleSave = useCallback(
     async (jsonString: string) => {
@@ -287,7 +335,7 @@ export function ResourceDetailPage() {
               },
               onError: (err) => {
                 adoptPartialCascade(err);
-                toast.error(describeSaveError(err, t));
+                reportCascadeError(err, jsonString, cascadeContext);
               },
             }
           );
@@ -332,8 +380,15 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, queryClient, adoptPartialCascade]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, queryClient, adoptPartialCascade, reportCascadeError]
   );
+
+  useEffect(() => {
+    if (retryJson === null) return;
+    const json = retryJson;
+    setRetryJson(null);
+    void handleSave(json);
+  }, [retryJson, handleSave]);
 
   const handleSaveAndDeploy = useCallback(
     async (jsonString: string) => {
@@ -501,6 +556,13 @@ export function ResourceDetailPage() {
     );
   }
 
+  const currentDescriptor = versionDescriptors?.find((d) => {
+    const match = d.resource?.match(/\?version=(\d+)/);
+    return match ? parseInt(match[1]!, 10) === currentVersion : false;
+  });
+  const latestVersion = versions.reduce((max, v) => Math.max(max, v.version), 1);
+  const isOldVersion = currentVersion !== undefined && currentVersion < latestVersion;
+
   return (
     <div className="space-y-6">
       {/* Back link — context-aware: cascade context → back to workflow, otherwise → back to list */}
@@ -535,16 +597,19 @@ export function ResourceDetailPage() {
       {/* Header with actions */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-            <Icon className="h-8 w-8 text-primary" />
-            {(() => {
-              const desc = versionDescriptors?.find(d => {
-                const match = d.resource?.match(/\?version=(\d+)/);
-                return match ? parseInt(match[1]!, 10) === currentVersion : false;
-              });
-              return desc?.name || typeName;
-            })()}
-          </h1>
+          <div className="flex items-start gap-2">
+            <Icon className="mt-1.5 h-8 w-8 shrink-0 text-primary" />
+            <EditableTitle
+              name={currentDescriptor?.name}
+              description={currentDescriptor?.description}
+              fallback={typeName}
+              canEdit={access.canEdit && currentVersion !== undefined}
+              onSave={({ name, description }) =>
+                renameMutation.mutateAsync({ id: id ?? "", version: currentVersion ?? 1, name, description })
+              }
+              data-testid="resource-title"
+            />
+          </div>
           <p className="mt-1 font-mono text-xs text-muted-foreground">
             {id}
             <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
@@ -559,7 +624,7 @@ export function ResourceDetailPage() {
               )}
             </p>
           )}
-          {cascadeContext && (
+          {!readOnly && cascadeContext && (
             <CompatibleVersionCheckbox
               checked={cascadeCompatible}
               onChange={setCascadeCompatible}
@@ -591,6 +656,24 @@ export function ResourceDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Opened at the version a workflow references, which is not the newest */}
+      {isOldVersion && (
+        <div
+          className="flex items-center gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3"
+          data-testid="old-version-notice"
+        >
+          <p className="flex-1 text-sm text-foreground">
+            {t("resources.viewingOldVersion", "You are viewing version {{current}}. The latest is version {{latest}}.", {
+              current: currentVersion,
+              latest: latestVersion,
+            })}
+          </p>
+          <Button variant="warning" size="sm" onClick={() => setCurrentVersion(latestVersion)} className="shrink-0">
+            {t("resources.switchToLatest", "Switch to latest")}
+          </Button>
+        </div>
+      )}
 
       {/* Content */}
       {(isLoading || isVersionsLoading || (currentVersion === undefined && !isVersionsError)) && (
@@ -626,7 +709,8 @@ export function ResourceDetailPage() {
             currentVersion={currentVersion ?? 1}
             onVersionChange={setCurrentVersion}
             onSave={handleSave}
-            onSaveAndDeploy={cascadeContext && agentCtx ? handleSaveAndDeploy : undefined}
+            onSaveAndDeploy={cascadeContext && agentCtx && !readOnly ? handleSaveAndDeploy : undefined}
+            readOnly={readOnly}
             isSaving={cascadeSave.isPending}
             isSaveAndDeploying={isSaveAndDeploying}
             saveSuccess={saveSuccess}

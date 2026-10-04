@@ -218,7 +218,8 @@
     "removeItem": "移除 {{item}}",
     "stepOf": "第 {{current}} 步，共 {{total}} 步",
     "versionShort": "v{{version}}",
-    "resizePanel": "调整{{panel}}大小"
+    "resizePanel": "调整{{panel}}大小",
+    "rename": "重命名"
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",
@@ -267,7 +268,9 @@
     "deployToProduction": "部署到生产环境",
     "undeployFromProduction": "从生产环境移除",
     "deployFailedIn": "在 {{environment}} 中部署失败",
-    "undeployCompatibleHint": "可由兼容的已部署版本继续的会话不会被结束：它们会在下一轮切换到该版本。"
+    "undeployCompatibleHint": "可由兼容的已部署版本继续的会话不会被结束：它们会在下一轮切换到该版本。",
+    "sortLoadingAll": "正在加载所有智能体，以便完整排序…",
+    "createNamingFailed": "智能体已创建，但无法保存其名称。请在其页面中重命名。"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -300,7 +303,7 @@
     "enableSwd": "启用严格写入规范",
     "forkingDisabledTooltip": "将在未来版本中提供",
     "forkingEnabled": "会话分叉",
-    "forkingNote": "会话分叉端点 (POST /v6/conversations/{{id}}/fork) 尚不可用。",
+    "forkingNote": "会话分叉端点 (POST /v6/conversations/:id/fork) 尚不可用。",
     "guardrails": "写入护栏",
     "identity": "加密身份",
     "keyExpired": "已过期",
@@ -458,7 +461,15 @@
       "notice": "聊天向用户显示的提示（留空则使用标准措辞）",
       "noticePlaceholder": "与此智能体的对话可能会被其维护者阅读，以便改进它。",
       "versionNote": "适用于此次更改所创建版本及之后版本上的对话——绝不包括之前的内容。Slack、Teams 和 API 客户端无法显示此提示；如果用户通过这些渠道使用此智能体，请在问候语中说明。"
-    }
+    },
+    "liveElsewhere": "生效中：v{{live}} · 正在查看 v{{viewing}}（未部署）",
+    "removeWorkflow": "从智能体中移除工作流",
+    "confirmRemoveWorkflow": "从此智能体中移除工作流？",
+    "confirmRemoveWorkflowDescription": "{{name}} 将在新的、尚未生效的智能体版本中被移除。工作流本身不会被删除。",
+    "removeWorkflowConfirm": "移除",
+    "a2aRemoveSkill": "移除 {{skill}}",
+    "a2aAddSkill": "添加技能",
+    "a2aCopyUrl": "复制 URL"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -611,7 +622,26 @@
     "saved": "Workflow 保存成功",
     "saveError": "保存工作流失败",
     "noTasks": "此工作流中没有任务",
-    "addTask": "添加任务"
+    "addTask": "添加任务",
+    "stepUnsaved": "尚未保存",
+    "saveAndEditHint": "此步骤尚未保存。请先保存工作流，然后再编辑其配置。",
+    "saveAndEdit": "保存工作流并编辑",
+    "removeStep": "移除任务",
+    "configCreatedUnsaved": "配置已创建 — 请保存工作流以将其保留在流水线中",
+    "configNameFailed": "配置已创建，但无法保存其名称。请稍后重命名。",
+    "newConfigName": "新配置的名称",
+    "newConfigNamePlaceholder": "例如：客服问候语",
+    "agentPinsOtherVersion": "智能体版本 {{agentVer}} 使用的是此工作流的版本 {{found}}，而不是版本 {{version}}，因此在此保存不会改变智能体。未保存任何内容。请打开版本 {{found}}，或让智能体指向版本 {{version}}。",
+    "agentMissingWorkflow": "智能体版本 {{agentVer}} 不使用此工作流，因此在此保存不会改变智能体。未保存任何内容。",
+    "noVersionReturned": "服务器未返回新的工作流版本。",
+    "agentUpdateFailed": "工作流已保存为版本 {{version}}，但更新智能体失败：{{error}}",
+    "agentPinMismatch": "智能体版本 {{agentVer}} 使用的是此工作流的版本 {{found}}。您当前查看的是版本 {{version}}，因此在此保存不会改变智能体。",
+    "switchToPinned": "打开版本 {{version}}",
+    "pointAgentAt": "让智能体指向版本 {{version}}",
+    "createdDeleteFailed_one": "无法删除本次编辑中创建的 {{count}} 个配置",
+    "createdDeleteFailed_other": "无法删除本次编辑中创建的 {{count}} 个配置",
+    "discardDeleteCreated_one": "同时删除本次编辑中创建的 {{count}} 个配置",
+    "discardDeleteCreated_other": "同时删除本次编辑中创建的 {{count}} 个配置"
   },
   "conversations": {
     "confirmDeleteSoft": "默认情况下这是软删除——对话会从列表中隐藏，但其数据仍保留在服务器上。",
@@ -839,7 +869,9 @@
       }
     },
     "emptyDescription": "创建您的第一个 {{type}} 以在 Workflow 中使用。",
-    "descriptionPlaceholder": "描述此 {{type}} 配置…"
+    "descriptionPlaceholder": "描述此 {{type}} 配置…",
+    "viewingOldVersion": "您正在查看版本 {{current}}。最新版本为 {{latest}}。",
+    "switchToLatest": "切换到最新版本"
   },
   "editor": {
     "compare": "比较",
@@ -883,7 +915,12 @@
     "savedNotLive": "已保存 — 尚未生效",
     "savedNotLiveDescription": "运行中的智能体仍在使用已部署的版本。请部署以使此更改生效。",
     "deployNow": "部署",
-    "deployStarted": "部署已开始"
+    "deployStarted": "部署已开始",
+    "invalidJsonSave": "未保存 — JSON 无效。请在 JSON 选项卡中修正。",
+    "invalidJsonShort": "JSON 无效",
+    "versionLockedDirty": "请先保存或放弃更改，再切换版本",
+    "savedAsVersion": "已保存为 v{{version}} — 尚未生效",
+    "updateAgentAndSave": "更新智能体并保存"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2081,7 +2118,12 @@
     "backToAgent": "返回代理详情",
     "selectStageHint": "选择管道中的任意扩展以内联查看和编辑其配置",
     "noConfig": "此管道阶段无配置 URI",
-    "unsupportedType": "此扩展类型暂无编辑器"
+    "unsupportedType": "此扩展类型暂无编辑器",
+    "testReady": "已保存并部署为 v{{version}} — 聊天已就绪",
+    "workflow": "工作流",
+    "unsavedTitle": "此阶段有未保存的更改",
+    "unsavedMessage": "切换阶段会替换编辑器。请先保存更改、放弃更改，或留在此阶段。",
+    "discardAndSwitch": "放弃并切换"
   },
   "ragEditor": {
     "general": "常规",
@@ -5207,7 +5249,7 @@
     "workflowChanged": "工作流 {{workflowId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
     "agentChanged": "智能体 {{agentId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
     "workflowMissingResource": "工作流 {{workflowId}}（版本 {{version}}）未引用 {{resource}}，因此在此保存不会改变智能体。未保存任何内容。",
-    "agentWorkflowMismatch": "智能体 {{agentId}}（版本 {{version}}）引用的是工作流 {{workflowId}} 的版本 {{found}}，而不是版本 {{expected}}。自本页打开以来智能体已被修改。请重新加载。未保存任何内容。",
+    "agentWorkflowMismatch": "智能体 {{agentId}}（版本 {{version}}）使用的是工作流 {{workflowId}} 的版本 {{found}}，但此页面打开的是版本 {{expected}}。未保存任何内容。请更新智能体以使用新的工作流版本，或打开版本 {{found}}。",
     "agentMissingWorkflow": "智能体 {{agentId}}（版本 {{version}}）未引用工作流 {{workflowId}}。未保存任何内容。"
   },
   "llmProviders": {
