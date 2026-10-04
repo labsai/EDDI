@@ -3002,7 +3002,7 @@
     "confirmDeleteLiveDiscussionDescription": "이 토론은 아직 진행 중입니다. 토론이 중지되고 기록과 모든 내용이 영구적으로 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
     "discardEditsTitle": "저장하지 않은 편집을 취소할까요?",
     "discardEditsDescription": "구성의 한 섹션이 아직 편집 중입니다. 패널을 닫으면 그곳에서 변경한 내용이 취소됩니다.",
-    "discardEditsConfirm": "취소",
+    "discardEditsConfirm": "버리기",
     "keepEditing": "계속 편집",
     "streamInterrupted": "실시간 연결이 끊어졌습니다. 저장된 토론을 표시하며, 진행 중에는 계속 업데이트됩니다."
   },

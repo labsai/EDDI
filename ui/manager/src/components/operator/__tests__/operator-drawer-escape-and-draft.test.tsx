@@ -86,4 +86,10 @@ describe("OperatorDrawer — Escape and the unsent draft", () => {
     expect(input).toHaveValue("你好");
     expect(useOperatorChatStore.getState().draft).toBe("你好");
   });
+
+  it("clears the unsent draft when the conversation is reset", () => {
+    useOperatorChatStore.setState({ draft: "half-written" });
+    useOperatorChatStore.getState().reset();
+    expect(useOperatorChatStore.getState().draft).toBe("");
+  });
 });

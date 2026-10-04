@@ -790,6 +790,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       resolveAbortController: null,
       decidedPausedAt: null,
       hydrateAbortController: null,
+      // A clean slate includes the composer: unsent text belongs to the
+      // conversation being left. (Closing the drawer does not reset.)
+      draft: "",
     });
   },
 
