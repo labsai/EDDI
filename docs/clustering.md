@@ -275,7 +275,12 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
 - A turn whose write the fence refuses has usually already answered its
   caller: the reply is rendered inside the pipeline, before the write. The
   conversation history does not contain that turn and it is dead-lettered —
-  replay it if the answer should count.
+  replay it if the answer should count. The same holds for a turn whose lease
+  is lost after its reply went out but before it was stored: the client has its
+  200, the turn is dead-lettered (`lease-lost`). A turn that loses its lease
+  earlier is answered 409 instead (an error event on a stream, whose tokens up to
+  then were already sent). Its client is expected to retry, so replay its dead
+  letter only if the client did not; otherwise the turn runs twice.
 - A paginated tool response is not bound to its conversation: anyone who
   knows the random response id can fetch its pages from any node, exactly as on
   a single node (the tool has no conversation context to check against).

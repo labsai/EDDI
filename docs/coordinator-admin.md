@@ -126,5 +126,5 @@ Emits a `status` event — the same object as `GET /status` — when you connect
 ## See also
 
 - [Configuration Reference](configuration-reference.md) — `eddi.coordinator.*`, `eddi.cluster.*`
-- [Clustering](clustering.md) — when a turn is dead-lettered in cluster mode (a fenced write)
+- [Clustering](clustering.md) — when a turn is dead-lettered in cluster mode: a fenced write (`reason: fenced`) or a turn stopped by a lost lease (`reason: lease-lost`)
 - [Metrics & Monitoring](metrics.md) — the coordinator gauges and the dead-letter alert
