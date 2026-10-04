@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, Pencil, MessagesSquare, GitMerge, UserCheck, Gavel, Info, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,7 @@ import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
 import { GroupAdvancedEditor } from "./group-advanced-editor";
 import { GroupHitlEditor } from "./group-hitl-editor";
 import { GroupPhaseEditor } from "./group-phase-editor";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 interface GroupConfigPanelProps {
   config: AgentGroupConfiguration;
@@ -34,6 +34,12 @@ interface GroupConfigPanelProps {
    * version, and the next save or delete addressed to the old one is a 409.
    */
   onVersionChange?: (version: number) => void;
+  /**
+   * Told whenever an inline editor opens or closes. An editor's unsaved draft
+   * lives inside it, so the host — which can unmount this panel (hide it, go
+   * fullscreen, close the sheet) — uses this to ask before discarding one.
+   */
+  onEditingChange?: (editing: boolean) => void;
   className?: string;
 }
 
@@ -65,6 +71,7 @@ export function GroupConfigPanel({
   groupId,
   groupVersion,
   onVersionChange,
+  onEditingChange,
   className,
 }: GroupConfigPanelProps) {
   const { t } = useTranslation();
@@ -79,6 +86,20 @@ export function GroupConfigPanel({
   const [editingHitl, setEditingHitl] = useState(false);
   const [editingPhases, setEditingPhases] = useState(false);
   const [editingAdvanced, setEditingAdvanced] = useState(false);
+  const anyEditing = editingHitl || editingPhases || editingAdvanced;
+  useEffect(() => {
+    onEditingChange?.(anyEditing);
+  }, [anyEditing, onEditingChange]);
+  // Unmounting while an editor is open must not leave the host believing one is.
+  useEffect(() => () => onEditingChange?.(false), [onEditingChange]);
+  // Opening one editor used to close the other two, silently discarding
+  // whatever was typed into them. They are mutually exclusive on purpose (each
+  // saves the whole config from its own snapshot), so the way to keep that
+  // without losing work is to not offer the second Edit until the first is
+  // saved or cancelled.
+  const editBlockedTitle = anyEditing
+    ? t("groups.finishEditingFirst", "Save or cancel the section you are editing first")
+    : undefined;
 
   /**
    * Whether the advanced block has anything to summarize. Kept separate from
@@ -163,6 +184,18 @@ export function GroupConfigPanel({
           <p className="mt-1 text-xs text-muted-foreground line-clamp-3" title={config.description}>
             {config.description}
           </p>
+        )}
+        {/* Name, description, members, moderator, style and rounds are fixed on
+            this page; the Workforce settings screen is where they are edited. */}
+        {canEditHitl && (
+          <Link
+            to={`/workforce/${groupId}/settings?version=${groupVersion}`}
+            className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+            data-testid="group-edit-basics"
+          >
+            <Pencil className="h-2.5 w-2.5" aria-hidden="true" />
+            {t("groups.editBasics", "Edit name, members and settings")}
+          </Link>
         )}
       </div>
 
@@ -295,8 +328,10 @@ export function GroupConfigPanel({
             {!editingPhases && (
               <button
                 type="button"
-                onClick={() => { setEditingHitl(false); setEditingAdvanced(false); setEditingPhases(true); }}
-                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
+                onClick={() => setEditingPhases(true)}
+                disabled={anyEditing}
+                title={editBlockedTitle}
+                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
                 data-testid="group-phase-edit"
               >
                 <Pencil className="h-2.5 w-2.5" />
@@ -433,8 +468,10 @@ export function GroupConfigPanel({
             {canEditHitl && !editingHitl && (
               <button
                 type="button"
-                onClick={() => { setEditingPhases(false); setEditingAdvanced(false); setEditingHitl(true); }}
-                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
+                onClick={() => setEditingHitl(true)}
+                disabled={anyEditing}
+                title={editBlockedTitle}
+                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
                 data-testid="group-hitl-edit"
               >
                 <Pencil className="h-2.5 w-2.5" />
@@ -619,8 +656,10 @@ export function GroupConfigPanel({
             {canEditHitl && !editingAdvanced && (
               <button
                 type="button"
-                onClick={() => { setEditingPhases(false); setEditingHitl(false); setEditingAdvanced(true); }}
-                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10"
+                onClick={() => setEditingAdvanced(true)}
+                disabled={anyEditing}
+                title={editBlockedTitle}
+                className="ms-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
                 data-testid="group-advanced-edit"
               >
                 <Pencil className="h-2.5 w-2.5" />

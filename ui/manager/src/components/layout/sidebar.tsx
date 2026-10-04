@@ -1,6 +1,6 @@
 import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { usePendingApprovals } from "@/hooks/use-hitl";
+import { usePendingApprovals, useAllGroupPendingApprovals } from "@/hooks/use-hitl";
 import {
   LayoutDashboard,
   Bot,
@@ -152,7 +152,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // eddi-approver alongside admin/editor/user, so every role that can act on
   // an approval can also see that one is waiting.
   const { data: pendingApprovals } = usePendingApprovals();
-  const pendingApprovalCount = pendingApprovals?.length ?? 0;
+  // Group phase approvals and HUMAN members' turns come from the cross-group
+  // endpoint; the approvals page merges both lists (deduped by conversation id),
+  // so the badge must count the same set or it undercounts the page.
+  const { data: groupPendings } = useAllGroupPendingApprovals();
+  const pendingApprovalCount = new Set([
+    ...(pendingApprovals ?? []).map((a) => a.conversationId),
+    ...(groupPendings ?? []).map((a) => a.conversationId),
+  ]).size;
 
   /** Avatar initials and label — both empty when the token carries no profile claims */
   const initials = showUser ? userInitials(user) : "";

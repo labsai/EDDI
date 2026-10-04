@@ -2987,7 +2987,24 @@
       "humanNeedsName_other": "{{count}}명의 사람 멤버에게 표시 이름이 필요합니다.",
       "humanNeedsId_one": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다.",
       "humanNeedsId_other": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다."
-    }
+    },
+    "transcriptLabel": "토론 기록",
+    "announceAwaitingApproval": "토론이 일시 중지되어 승인을 기다리고 있습니다.",
+    "announceAwaitingHuman": "토론이 멤버의 응답을 기다리고 있습니다.",
+    "newMessages": "새 메시지",
+    "finishEditingFirst": "먼저 편집 중인 섹션을 저장하거나 취소하세요",
+    "editBasics": "이름, 멤버, 설정 편집",
+    "humanTurnResuming": "응답이 기록되었습니다. 토론을 재개하는 중입니다. 이 페이지가 진행 상황을 따라가며 몇 초마다 업데이트됩니다.",
+    "composerMode": "메시지를 어떻게 처리할까요",
+    "composerModeNew": "새 토론",
+    "composerModeContinue": "이 토론 계속하기",
+    "loadMoreDiscussions": "이전 토론 더 불러오기",
+    "confirmDeleteLiveDiscussionDescription": "이 토론은 아직 진행 중입니다. 토론이 중지되고 기록과 모든 내용이 영구적으로 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+    "discardEditsTitle": "저장하지 않은 편집을 취소할까요?",
+    "discardEditsDescription": "구성의 한 섹션이 아직 편집 중입니다. 패널을 닫으면 그곳에서 변경한 내용이 취소됩니다.",
+    "discardEditsConfirm": "취소",
+    "keepEditing": "계속 편집",
+    "streamInterrupted": "실시간 연결이 끊어졌습니다. 저장된 토론을 표시하며, 진행 중에는 계속 업데이트됩니다."
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -3560,7 +3577,10 @@
     "groupLinkUnavailable": "이 그룹을 찾을 수 없어 안전한 링크를 제공할 수 없습니다.",
     "confirmApproveGroupDescription": "일시 중지된 단계 전체를 승인하고 토론을 재개합니다. 대기 중인 모든 작업도 함께 승인됩니다. 개별 결정은 그룹에서 하세요.",
     "confirmRejectGroupDescription": "일시 중지된 단계 전체를 거부합니다. 이 일시 중지를 기다리는 모든 작업이 함께 거부되며 논의는 더 진행되지 않습니다. 개별적으로 결정하려면 그룹을 여세요.",
-    "pauseChanged": "이 요청은 연 이후 변경되었습니다. 아무것도 결정되지 않았습니다. 다시 검토하세요."
+    "pauseChanged": "이 요청은 연 이후 변경되었습니다. 아무것도 결정되지 않았습니다. 다시 검토하세요.",
+    "conversationColumn": "대화",
+    "groupReviewLoadError": "토론을 불러오지 못했습니다.",
+    "groupReviewNoEntries": "아직 발언이 없습니다."
   },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",

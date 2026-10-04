@@ -3041,7 +3041,24 @@
       "humanNeedsName_other": "{{count}} human members need a display name.",
       "humanNeedsId_one": "{{count}} human member needs the person's user id.",
       "humanNeedsId_other": "{{count}} human members need the person's user id."
-    }
+    },
+    "transcriptLabel": "Discussion transcript",
+    "announceAwaitingApproval": "The discussion is paused and waiting for your approval.",
+    "announceAwaitingHuman": "The discussion is waiting for a member's response.",
+    "newMessages": "New messages",
+    "finishEditingFirst": "Save or cancel the section you are editing first",
+    "editBasics": "Edit name, members and settings",
+    "humanTurnResuming": "Your response was recorded. The discussion is resuming — this page follows it and updates every few seconds.",
+    "composerMode": "What to do with your message",
+    "composerModeNew": "New discussion",
+    "composerModeContinue": "Continue this discussion",
+    "loadMoreDiscussions": "Load older discussions",
+    "confirmDeleteLiveDiscussionDescription": "This discussion is still running. It is stopped, and the transcript and everything in it are removed permanently. This cannot be undone.",
+    "discardEditsTitle": "Discard unsaved edits?",
+    "discardEditsDescription": "A section of the configuration is still being edited. Closing the panel discards what you changed there.",
+    "discardEditsConfirm": "Discard",
+    "keepEditing": "Keep editing",
+    "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3601,7 +3618,10 @@
     "groupLinkUnavailable": "This group could not be located, so there is no safe link to it.",
     "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
     "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually.",
-    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again."
+    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again.",
+    "conversationColumn": "Conversation",
+    "groupReviewLoadError": "The discussion could not be loaded.",
+    "groupReviewNoEntries": "Nothing has been said yet."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",

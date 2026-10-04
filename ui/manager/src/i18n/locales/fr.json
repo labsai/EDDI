@@ -3023,7 +3023,24 @@
       "humanNeedsId_many": "{{count}} membres humains ont besoin de l'identifiant utilisateur de la personne.",
       "humanNeedsId_one": "{{count}} membre humain a besoin de l'identifiant utilisateur de la personne.",
       "humanNeedsId_other": "{{count}} membres humains ont besoin de l'identifiant utilisateur de la personne."
-    }
+    },
+    "transcriptLabel": "Transcription de la discussion",
+    "announceAwaitingApproval": "La discussion est en pause et attend votre approbation.",
+    "announceAwaitingHuman": "La discussion attend la réponse d'un membre.",
+    "newMessages": "Nouveaux messages",
+    "finishEditingFirst": "Enregistrez ou annulez d'abord la section en cours de modification",
+    "editBasics": "Modifier le nom, les membres et les paramètres",
+    "humanTurnResuming": "Votre réponse a été enregistrée. La discussion reprend : cette page la suit et se met à jour toutes les quelques secondes.",
+    "composerMode": "Que faire de votre message",
+    "composerModeNew": "Nouvelle discussion",
+    "composerModeContinue": "Poursuivre cette discussion",
+    "loadMoreDiscussions": "Charger les discussions plus anciennes",
+    "confirmDeleteLiveDiscussionDescription": "Cette discussion est toujours en cours. Elle est arrêtée, et la transcription ainsi que tout son contenu sont supprimés définitivement. Cette action est irréversible.",
+    "discardEditsTitle": "Abandonner les modifications non enregistrées ?",
+    "discardEditsDescription": "Une section de la configuration est encore en cours de modification. Fermer le panneau abandonne vos changements dans cette section.",
+    "discardEditsConfirm": "Abandonner",
+    "keepEditing": "Continuer la modification",
+    "streamInterrupted": "La connexion en direct a été perdue. Affichage de la discussion enregistrée, qui continue de se mettre à jour tant qu'elle est en cours."
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -3598,7 +3615,10 @@
     "groupLinkUnavailable": "Ce groupe est introuvable ; aucun lien fiable ne peut être proposé.",
     "confirmApproveGroupDescription": "Approuver toute la phase en pause et reprendre la discussion. Chaque tâche en attente est approuvée avec elle ; ouvrez le groupe pour les décider une par une.",
     "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une.",
-    "pauseChanged": "Cette demande a changé depuis que vous l'avez ouverte — rien n'a été décidé. Examinez-la de nouveau."
+    "pauseChanged": "Cette demande a changé depuis que vous l'avez ouverte — rien n'a été décidé. Examinez-la de nouveau.",
+    "conversationColumn": "Conversation",
+    "groupReviewLoadError": "La discussion n'a pas pu être chargée.",
+    "groupReviewNoEntries": "Rien n'a encore été dit."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",

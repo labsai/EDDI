@@ -2987,7 +2987,24 @@
       "humanNeedsName_other": "{{count}} 名人类成员需要显示名称。",
       "humanNeedsId_one": "{{count}} 名人类成员需要此人的用户 ID。",
       "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。"
-    }
+    },
+    "transcriptLabel": "讨论记录",
+    "announceAwaitingApproval": "讨论已暂停，正在等待你的批准。",
+    "announceAwaitingHuman": "讨论正在等待某位成员的回复。",
+    "newMessages": "新消息",
+    "finishEditingFirst": "请先保存或取消你正在编辑的部分",
+    "editBasics": "编辑名称、成员和设置",
+    "humanTurnResuming": "已记录你的回复。讨论正在恢复——此页面会跟随讨论进展，并每隔几秒更新一次。",
+    "composerMode": "如何处理你的消息",
+    "composerModeNew": "新讨论",
+    "composerModeContinue": "继续此讨论",
+    "loadMoreDiscussions": "加载更早的讨论",
+    "confirmDeleteLiveDiscussionDescription": "此讨论仍在运行。它将被停止，其记录及全部内容会被永久删除，且无法撤销。",
+    "discardEditsTitle": "放弃未保存的修改？",
+    "discardEditsDescription": "配置中的某一部分仍在编辑。关闭面板会放弃你在其中所做的更改。",
+    "discardEditsConfirm": "放弃",
+    "keepEditing": "继续编辑",
+    "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3560,7 +3577,10 @@
     "groupLinkUnavailable": "未找到该群组，因此无法提供可靠的链接。",
     "confirmApproveGroupDescription": "批准整个暂停阶段并继续讨论。该暂停下等待的每项任务都会一并批准；如需逐项决定，请打开该群组。",
     "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。",
-    "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。"
+    "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。",
+    "conversationColumn": "对话",
+    "groupReviewLoadError": "无法加载该讨论。",
+    "groupReviewNoEntries": "目前还没有任何发言。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
