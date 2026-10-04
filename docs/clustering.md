@@ -220,10 +220,16 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   — and every node does so at once under a shared overload. With nginx's
   defaults (`max_fails=1`) and `http_503` in `proxy_next_upstream`, one such
   answer per node marks every node failed and the whole API answers 502 for
-  `fail_timeout`. The shipped configs set `max_fails=0` on the upstream servers:
-  a 503 is still retried on the next node, none is taken out of rotation. Do the
-  same (or leave `http_503` out of the retry conditions) on any proxy you put in
-  front. Kubernetes ingress-nginx retries only `error timeout` by default.
+  `fail_timeout`. The shipped configs set `max_fails=0` on the upstream servers,
+  so no node is taken out of rotation. nginx still retries a 503 on the next node
+  for an idempotent request (GET). A POST, which is how a turn arrives, is not
+  re-sent by default, so its client gets the 503 with `Retry-After`. Only the
+  demo config adds `non_idempotent`, and that would also re-send a turn after a
+  read timeout. A node that refuses connections is skipped at once. A node that
+  hangs is no longer ejected: each request that lands on it waits out
+  `proxy_connect_timeout` (2 s) before it moves on. Do the same, or leave `http_503`
+  out of the retry conditions, on any proxy you put in front. Kubernetes
+  ingress-nginx retries only `error timeout` by default.
 
 - **`/mcp` needs client affinity.** An MCP (Streamable HTTP) session lives on
   the node that answered `initialize`; any other node answers a request with
