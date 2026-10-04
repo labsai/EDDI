@@ -93,7 +93,7 @@ export function StrategyStep({
         />
       </fieldset>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-destructive" role="alert" data-testid="strategy-error">{error}</p>}
 
       <div className="flex justify-between pt-2">
         <Button variant="ghost" onClick={onBack} disabled={isLoading}>

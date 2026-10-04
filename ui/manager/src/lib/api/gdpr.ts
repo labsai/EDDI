@@ -16,6 +16,14 @@ export interface GdprDeletionResult {
   conversationMappingsDeleted: number;
   logsPseudonymized: number;
   auditEntriesPseudonymized: number;
+  /**
+   * Audit ledger rows whose recorded content (prompt, response, LLM detail, tool
+   * calls) was replaced by a `gdprRedaction` marker (EDDI 6.6+). The rows
+   * themselves are kept — sequence, time, actions and cost — so the chain stays
+   * gap-free. `0` under `eddi.audit.erasure-mode=pseudonymize`, which keeps the
+   * content (a legal hold); absent on an older EDDI, which never redacted it.
+   */
+  auditEntriesRedacted?: number;
   attachmentsDeleted: number;
   journalEntriesDeleted: number;
   checkpointsDeleted: number;

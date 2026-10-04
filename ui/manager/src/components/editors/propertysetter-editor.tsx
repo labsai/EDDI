@@ -13,6 +13,7 @@ import {
 // Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
 import "@/lib/monaco-setup";
 import Editor from "@monaco-editor/react";
+import { PropertyValueField } from "./property-value-field";
 
 // ─── Types matching PropertySetterConfiguration backend model ────────────────
 
@@ -20,7 +21,11 @@ export interface PropertyInstruction {
   name?: string;
   valueString?: string;
   valueInt?: number;
+  /** A whole number beyond the `int` range (EDDI 6.6+). */
+  valueLong?: number;
   valueFloat?: number;
+  /** A decimal at full precision (EDDI 6.6+). */
+  valueDouble?: number;
   valueBoolean?: boolean;
   /** Edited in the JSON tab only; carried through the form untouched. */
   valueObject?: Record<string, unknown>;
@@ -47,7 +52,9 @@ function storesSecretInPlainText(prop: PropertyInstruction): boolean {
     prop.valueObject != null ||
     prop.valueList != null ||
     prop.valueInt != null ||
+    prop.valueLong != null ||
     prop.valueFloat != null ||
+    prop.valueDouble != null ||
     prop.valueBoolean != null
   );
 }
@@ -126,24 +133,34 @@ function PropertyRow({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card p-2" data-testid="property-row">
+      <div className="flex flex-wrap items-start gap-1.5 rounded-lg border border-border bg-card p-2" data-testid="property-row">
         <input type="text" value={prop.name ?? ""} onChange={(e) => onChange({ ...prop, name: e.target.value })}
           readOnly={readOnly} placeholder={t("propertySetterEditor.propName", "Property name")}
           className="h-7 w-40 rounded border border-input bg-background px-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         <span className="text-xs text-muted-foreground">=</span>
-        <div className="flex flex-1 min-w-[120px] items-center gap-1">
-          <input type="text" value={value} onChange={(e) => onChange({ ...prop, valueString: e.target.value })}
-            readOnly={readOnly} placeholder={t("propertySetterEditor.propValue", "Value / expression")}
-            title={value}
-            className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
-          {!readOnly && (
-            <button type="button" onClick={() => setShowEditor(true)}
-              className="shrink-0 rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              title={t("propertySetterEditor.openEditor", "Edit in editor")}>
-              <Maximize2 className="h-3.5 w-3.5" />
-            </button>
+        <PropertyValueField
+          value={prop}
+          onChange={onChange}
+          readOnly={readOnly}
+          testIdPrefix="property-value"
+          renderText={() => (
+            <>
+              <input type="text" value={value} onChange={(e) => onChange({ ...prop, valueString: e.target.value })}
+                readOnly={readOnly} placeholder={t("propertySetterEditor.propValue", "Value / expression")}
+                title={value}
+                aria-label={t("propertySetterEditor.propValue", "Value / expression")}
+                className="h-7 min-w-[90px] flex-1 rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+              {!readOnly && (
+                <button type="button" onClick={() => setShowEditor(true)}
+                  className="shrink-0 rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                  title={t("propertySetterEditor.openEditor", "Edit in editor")}
+                  aria-label={t("propertySetterEditor.openEditor", "Edit in editor")}>
+                  <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              )}
+            </>
           )}
-        </div>
+        />
         <select value={prop.scope ?? "conversation"} onChange={(e) => onChange({ ...prop, scope: e.target.value as PropertyInstruction["scope"] })}
           disabled={readOnly}
           className="h-7 rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"

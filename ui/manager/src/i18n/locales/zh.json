@@ -1028,7 +1028,8 @@
     "skipNone": "无——不跳过任何状态码",
     "runSkipConflict": "{{codes}} 也在跳过列表中，因此此指令永远不会针对它运行。",
     "httpCodeFilterSkipSet": "“运行状态码”留空时使用 200、201；“跳过状态码”留空时不跳过任何状态码。",
-    "useDefaultSkipCodes": "使用默认跳过列表"
+    "useDefaultSkipCodes": "使用默认跳过列表",
+    "scope": "作用域"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失败时流水线继续；错误将暴露于 ",
@@ -1086,7 +1087,9 @@
     "argumentType": "参数类型",
     "argumentText": "文本",
     "argumentInvalidJson": "不是有效的 JSON——保留最后一个有效值",
-    "removeArgument": "移除参数"
+    "removeArgument": "移除参数",
+    "maxResponseSize": "最大存储响应长度（字符）",
+    "maxResponseSizeHint": "较长的工具结果在存入会话记忆前会被截断为该字符数（并记录警告）。留空、0 或更小则使用默认值 2,000,000（约 2 MB）。需要 EDDI 6.6 或更高版本。"
   },
   "llmEditor": {
     "addCustomInstruction": "添加指令",
@@ -1356,7 +1359,13 @@
     "compatibleEndpointOverridden": "端点：{{url}}",
     "modelType": "模型类型",
     "paramName": "参数名称",
-    "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。"
+    "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。",
+    "maxToolCallsPerIteration": "每次响应最多工具调用数",
+    "maxToolCallsPerIterationDefault": "（默认 {{n}}）",
+    "maxToolCallsPerTurn": "每轮最多工具调用数",
+    "maxToolCallsPerTurnDefault": "（默认 {{n}}）",
+    "maxToolCallsHint": "超出上限的调用不会执行：每个调用都会得到一个 NOT_EXECUTED 结果，告知模型已达到上限，模型会基于已有信息作答。被拒绝的调用永远不会进入审批环节。每轮计数包含审批暂停之前的调用。-1 或 0 表示取消上限。需要 EDDI 6.6 或更高版本——在旧服务器上请留空。",
+    "maxToolCallsUncapped": "某个上限已关闭：模型在该处可执行任意数量的工具调用，仅受 Max Tool Iterations 限制。"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -1775,7 +1784,44 @@
       "reasonUncovered": "{{count}} 条已加载的条目早于已检查的范围",
       "unverifiedTitle": "未完全验证",
       "unverifiedDesc": "没有签名被证伪，但并非所有内容都能检查：{{reasons}}。"
-    }
+    },
+    "adminActions": {
+      "description": "通过 REST API 进行的每一次管理变更——部署、配置写入、导入、擦除以及被拒绝的调用——都会签名记入审计账本。请求正文从不记录，相关人员的 ID 会被假名化。",
+      "actor": "操作者",
+      "actorPlaceholder": "主体，例如 alice",
+      "apply": "应用",
+      "method": "方法",
+      "allMethods": "所有方法",
+      "window": "时间",
+      "clear": "清除筛选",
+      "noMatch": "没有符合这些筛选条件的管理操作",
+      "empty": "尚未记录任何管理操作",
+      "noMatchLoadOlder": "只加载了最新的记录——加载更早的记录以继续向前查找。",
+      "emptyHint": "EDDI 从 6.6 版本开始记录这些操作，除非 eddi.audit.admin-actions.enabled 为 false。较旧的服务器在此不显示任何内容。",
+      "caption": "管理操作，最新的在前",
+      "colTime": "时间",
+      "colActor": "操作者",
+      "colAction": "操作",
+      "colEndpoint": "端点",
+      "colStatus": "状态",
+      "filterByActor": "只显示此操作者的操作",
+      "loadOlderError": "加载更早的记录失败。",
+      "loadOlder": "加载更早的记录",
+      "forbidden": "只有管理员可以查看管理操作",
+      "forbiddenHint": "该日志记录了所有管理员的变更，因此查看需要 eddi-admin 角色。",
+      "unsupported": "此 EDDI 不记录管理操作",
+      "unsupportedHint": "从 EDDI 6.6 起开始记录。",
+      "loadError": "无法加载管理操作。",
+      "shown": "已显示 {{loaded}} 条已加载记录中的 {{shown}} 条",
+      "windowAny": "任意时间",
+      "windowHour": "最近一小时",
+      "windowDay": "最近 24 小时",
+      "windowWeek": "最近 7 天",
+      "windowMonth": "最近 30 天"
+    },
+    "views": "审计视图",
+    "tabTrail": "流水线记录",
+    "tabAdminActions": "管理操作"
   },
   "schedules": {
     "cronHelp": "5 字段格式：分 时 日 月 星期",
@@ -1906,7 +1952,16 @@
     "systemManaged": "系统",
     "systemManagedHint": "由 EDDI 管理（知识库摄取、记忆整合或团队节奏）。请在其定义处修改，而不是在这里。",
     "persistentConversationIdLocked": "在创建计划时设置。服务器会保留各次触发一直追加到的那个对话。",
-    "failedScheduleGone": "该计划已不存在"
+    "failedScheduleGone": "该计划已不存在",
+    "disabledByPerson": "由人工停用。在 EDDI 6.6 之前因取消部署而关闭的计划也会显示为此状态：请手动启用一次。",
+    "disabledUndeployed": "智能体已取消部署",
+    "disabledUndeployedHint": "在其智能体取消部署时被关闭。智能体下次成功部署时会自动重新启用——无需操作。",
+    "disabledAccessRevoked": "访问已撤销",
+    "disabledAccessRevokedHint": "其创建者已无法再使用此智能体，因此停止触发。请重新与其共享该智能体——或以有权使用者的身份重新创建计划——然后启用。",
+    "disabledOtherHint": "由 EDDI 因所示原因关闭。",
+    "serverRefusedUpdate": "服务器拒绝了此更改：",
+    "serverRefusedCreate": "服务器拒绝了此计划：",
+    "disabledAccessRevokedHintBy": "其创建者（{{user}}）已无法再使用此智能体，因此停止触发。请重新与其共享该智能体——或以有权使用者的身份重新创建计划——然后启用。"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -2207,7 +2262,29 @@
     "chunkStrategyLegacy": "{{value}}（保存为递归）",
     "saveBeforeIngest": "请先保存更改——文档会使用已保存知识库的存储和嵌入模型导入，而不是屏幕上的编辑内容。",
     "chunkStrategyUnsupported": "{{value}}（不支持）",
-    "chunkStrategyUnsupportedHint": "保存时服务器会拒绝此策略。请选择递归。"
+    "chunkStrategyUnsupportedHint": "保存时服务器会拒绝此策略。请选择递归。",
+    "location": {
+      "reference": "存储位置必须写成字面名称，不能是 ${…} 引用。该位置决定智能体读取谁的文档，而引用只在构建存储时——所有检查之后——才从任何编辑者都能修改的变量中解析，因此可能指向另一个知识库的存储或 SQL。已用引用保存的知识库会停止摄取和检索，直到用字面名称重新保存一次。",
+      "pgIdentifier": "pgvector 表名必须是简单名称，可带 schema 前缀（字母、数字、_ 和 $）。存储会将其原样放入 SQL，因此引号、空格和标点都会被拒绝。",
+      "refused": "服务器拒绝 {{param}} = {{value}}",
+      "reserved": "以 {{prefix}} 开头的名称（任一部分、不区分大小写）为保留名称：EDDI 用该前缀派生每个知识库自己的位置，因此此名称可能指向另一个知识库的存储。请换一个名称，或留空以获得此知识库自己的位置。"
+    },
+    "layout": {
+      "idTitle": "独立存储（按 ID 寻址）",
+      "nameTitle": "按名称存储（6.5 布局）",
+      "idBody": "此知识库拥有独立存储：每个分块都带有它的 ID，检索只会看到它自己的分块，即使在共享表中也是如此。",
+      "nameBody": "创建于 EDDI 6.6 之前：其存储按知识库名称查找，因此任何同名知识库都会共享它。它会按原样继续工作。",
+      "defaultUnsaved": "位置：eddi_kbid_<id>（默认，保存时分配）",
+      "migrate": "迁移到独立存储…",
+      "renameNote": "重命名此知识库也会以同样方式迁移它。需要 EDDI 6.6 或更高版本。",
+      "migrateTitle": "将此知识库迁移到独立存储？",
+      "migrateBodyExplicit": "它保留原有的表，但从现在起只检索带有其 ID 的分块——现有分块都没有这个标记，所以它会从空开始。其数据源会在下次运行时自动重新摄取；通过 /ingest 添加的文档必须重新摄取。不会删除任何内容。更改在保存时生效，且无法撤回。",
+      "migrateBody": "它会迁移到一个新的、空的独立存储。其数据源会在下次运行时自动重新摄取；通过 /ingest 添加的文档必须重新摄取。旧存储保持原样不动。更改在保存时生效，且无法撤回。",
+      "migrateConfirm": "保存时迁移",
+      "explicit": "位置：{{value}}（在上方设置）",
+      "default": "位置：{{value}}（默认）",
+      "legacyDefault": "位置：由名称“{{name}}”派生（默认）"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -2986,8 +3063,10 @@
       "humanNeedsName_one": "{{count}} 名人类成员需要显示名称。",
       "humanNeedsName_other": "{{count}} 名人类成员需要显示名称。",
       "humanNeedsId_one": "{{count}} 名人类成员需要此人的用户 ID。",
-      "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。"
-    }
+      "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。",
+      "duplicateMember": "{{ids}} 被列出了不止一次。一个成员只占一个席位：两个席位会共用一个成员会话并看到彼此的回答。第二个席位请使用第二个智能体。"
+    },
+    "serverRefused": "服务器拒绝了此群组："
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3149,7 +3228,9 @@
     "partialBody": "智能体的其余部分已写入。这些资源保持原样，需要处理。",
     "partialCounts": "已创建 {{created}} 个，已更新 {{updated}} 个，失败 {{failed}} 个。",
     "schedulesSkipped_other": "存档中有 {{count}} 个计划任务未被导入，因为所选内容未包含它们。",
-    "schedulesSkipped_one": "存档中有 {{count}} 个计划任务未被导入，因为所选内容未包含它们。"
+    "schedulesSkipped_one": "存档中有 {{count}} 个计划任务未被导入，因为所选内容未包含它们。",
+    "mergeScopeDefaultSpace": "你的默认空间",
+    "mergeScope": "此合并只更新你在 {{space}} 中可以编辑的资源。此智能体在其他工作区中的副本永远不会被修改——导入会改为创建你自己的副本。要更新那里的副本，请先切换空间。"
   },
   "syncPage": {
     "title": "智能体同步",
@@ -3648,7 +3729,18 @@
     "failedConversations_other": "有 {{count}} 个会话无法读取，未包含在数据包中。",
     "conversationsTruncated_one": "会话已被截断 — 该用户共有 {{count}} 个。",
     "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。",
-    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。"
+    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。",
+    "auditRedacted": "已脱敏的审计条目",
+    "auditLegacy": "此 EDDI 只会替换审计账本中的用户 ID：其中记录的提示和回复会被保留。EDDI 6.6 及更高版本会将其脱敏。",
+    "auditPseudonymizeMode": "审计内容已保留：此服务器以 eddi.audit.erasure-mode=pseudonymize 运行（例如处于法律保留期间），因此只替换了审计账本中的用户 ID。",
+    "auditRedactedExplanation": "该用户的审计记录为留存需要而保留，但其提示、回复、模型详情和工具调用已被脱敏标记替换，用户 ID 已假名化。此前校验通过的记录已重新签名；已被篡改的记录仍标记为无效。",
+    "completeExplanation": "“完成”表示每一步都成功，包括最后确认该用户 ID 下没有任何审计记录仍含未脱敏内容。",
+    "failedStep": {
+      "auditRedaction": "仍有部分审计记录包含该用户的提示或回复。请再次执行擦除——可以安全重复，且只处理剩余部分。如果仍然失败，服务器日志会在本次擦除的假名下写明原因。",
+      "auditLedger": "无法替换所有审计记录中的用户 ID。请在数据库可访问后再次执行擦除。",
+      "databaseLogs": "无法对数据库日志条目进行假名化。请再次执行擦除；日志保留策略也会随时间删除它们。",
+      "generic": "此步骤未完成。请在修复服务器日志中指出的原因后再次执行擦除——可以安全重复。"
+    }
   },
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
@@ -5244,5 +5336,22 @@
     "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
     "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
     "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
+  },
+  "propertyValue": {
+    "typeLabel": "值类型",
+    "jsonOnly": "在 JSON 标签页中设置",
+    "valueLabel": "值",
+    "intRange": "超出 Integer 范围（±2,147,483,647）。请为此值选择长整数。",
+    "unsafeLong": "超过 9,007,199,254,740,991 后，浏览器无法精确保存这个整数；请在 JSON 标签页中编辑。",
+    "needs66": "长整数和小数需要 EDDI 6.6 或更高版本。",
+    "conflict": "此行设置了 {{fields}}。只会使用 {{winner}}；在此选择类型会保留这一个值并移除其余的值。",
+    "kindString": "文本 / 模板",
+    "kindInt": "整数",
+    "kindLong": "长整数",
+    "kindDouble": "小数",
+    "kindFloat": "Float（约 7 位）",
+    "kindBoolean": "布尔值",
+    "kindObject": "对象（JSON）",
+    "kindList": "列表（JSON）"
   }
 }

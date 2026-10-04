@@ -1028,7 +1028,8 @@
     "skipNone": "なし — スキップするコードはありません",
     "runSkipConflict": "{{codes}} はスキップリストにも含まれているため、この命令はそのコードでは実行されません。",
     "httpCodeFilterSkipSet": "「実行するコード」が空なら 200, 201 を使い、「スキップするコード」が空なら何もスキップしません。",
-    "useDefaultSkipCodes": "既定のスキップリストを使用"
+    "useDefaultSkipCodes": "既定のスキップリストを使用",
+    "scope": "スコープ"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失敗してもパイプラインは続行します。エラーの公開先: ",
@@ -1086,7 +1087,9 @@
     "argumentType": "引数の型",
     "argumentText": "テキスト",
     "argumentInvalidJson": "有効な JSON ではありません。最後の有効な値が保持されます",
-    "removeArgument": "引数を削除"
+    "removeArgument": "引数を削除",
+    "maxResponseSize": "保存する応答の最大サイズ（文字数）",
+    "maxResponseSizeHint": "これより長いツール結果は、会話メモリに保存される前にこの文字数に切り詰められます（警告がログに記録されます）。空欄、0 以下ではデフォルトの 2,000,000（約 2 MB）が使われます。EDDI 6.6 以降が必要です。"
   },
   "llmEditor": {
     "addCustomInstruction": "指示を追加",
@@ -1356,7 +1359,13 @@
     "compatibleEndpointOverridden": "エンドポイント: {{url}}",
     "modelType": "モデルタイプ",
     "paramName": "パラメーター名",
-    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。"
+    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。",
+    "maxToolCallsPerIteration": "1 応答あたりの最大ツール呼び出し数",
+    "maxToolCallsPerIterationDefault": "（デフォルト {{n}}）",
+    "maxToolCallsPerTurn": "1 ターンあたりの最大ツール呼び出し数",
+    "maxToolCallsPerTurnDefault": "（デフォルト {{n}}）",
+    "maxToolCallsHint": "上限を超えた呼び出しは実行されません。各呼び出しには上限に達したことをモデルに伝える NOT_EXECUTED の結果が返され、モデルは手元の情報で回答します。拒否された呼び出しが承認ゲートに届くことはありません。ターンごとのカウントには承認待ちの前の呼び出しも含まれます。-1 または 0 で上限を解除します。EDDI 6.6 以降が必要です。古いサーバーでは空欄のままにしてください。",
+    "maxToolCallsUncapped": "上限が無効になっています。モデルはそこで任意の数のツール呼び出しを実行でき、制限は Max Tool Iterations のみです。"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -1775,7 +1784,44 @@
       "reasonUncovered": "確認範囲より古い読み込み済みエントリ {{count}} 件",
       "unverifiedTitle": "完全には検証されていません",
       "unverifiedDesc": "否定された署名はありませんが、すべてを確認できたわけではありません: {{reasons}}。"
-    }
+    },
+    "adminActions": {
+      "description": "REST API を通じて行われたすべての管理変更（デプロイ、設定の書き込み、インポート、消去、拒否された呼び出し）が監査台帳に署名付きで記録されます。リクエスト本文は記録されず、対象となった人物の ID は仮名化されます。",
+      "actor": "実行者",
+      "actorPlaceholder": "プリンシパル（例: alice）",
+      "apply": "適用",
+      "method": "メソッド",
+      "allMethods": "すべてのメソッド",
+      "window": "期間",
+      "clear": "フィルターをクリア",
+      "noMatch": "このフィルターに一致する管理操作はありません",
+      "empty": "記録された管理操作はまだありません",
+      "noMatchLoadOlder": "読み込まれているのは最新の行だけです。さらに遡るには古い行を読み込んでください。",
+      "emptyHint": "EDDI はバージョン 6.6 以降で記録します（eddi.audit.admin-actions.enabled が false の場合を除く）。古いサーバーではここには何も表示されません。",
+      "caption": "管理操作（新しい順）",
+      "colTime": "日時",
+      "colActor": "実行者",
+      "colAction": "操作",
+      "colEndpoint": "エンドポイント",
+      "colStatus": "ステータス",
+      "filterByActor": "この実行者の操作だけを表示",
+      "loadOlderError": "古い行を読み込めませんでした。",
+      "loadOlder": "古い行を読み込む",
+      "forbidden": "管理操作を閲覧できるのは管理者だけです",
+      "forbiddenHint": "このログにはすべての管理者の変更が記録されるため、閲覧には eddi-admin ロールが必要です。",
+      "unsupported": "この EDDI は管理操作を記録しません",
+      "unsupportedHint": "EDDI 6.6 以降で記録されます。",
+      "loadError": "管理操作を読み込めませんでした。",
+      "shown": "読み込み済み {{loaded}} 行のうち {{shown}} 行を表示",
+      "windowAny": "すべての期間",
+      "windowHour": "直近 1 時間",
+      "windowDay": "直近 24 時間",
+      "windowWeek": "直近 7 日間",
+      "windowMonth": "直近 30 日間"
+    },
+    "views": "監査ビュー",
+    "tabTrail": "パイプライン記録",
+    "tabAdminActions": "管理操作"
   },
   "schedules": {
     "cronHelp": "5 フィールド形式: 分 時 日 月 曜日",
@@ -1906,7 +1952,16 @@
     "systemManaged": "システム",
     "systemManagedHint": "EDDI が管理しています（ナレッジベースの取り込み、メモリ統合、またはチームのケイデンス）。ここではなく、定義されている場所で変更してください。",
     "persistentConversationIdLocked": "スケジュール作成時に設定されます。サーバーは、実行が追記されてきた会話を保持します。",
-    "failedScheduleGone": "スケジュールはもう存在しません"
+    "failedScheduleGone": "スケジュールはもう存在しません",
+    "disabledByPerson": "人が無効化しました。EDDI 6.6 より前のアンデプロイで停止したスケジュールもこう表示されます。一度手動で有効にしてください。",
+    "disabledUndeployed": "エージェントがアンデプロイ済み",
+    "disabledUndeployedHint": "エージェントがアンデプロイされたときに停止しました。エージェントの次のデプロイが成功すると自動的に再開されます。操作は不要です。",
+    "disabledAccessRevoked": "アクセスが取り消されました",
+    "disabledAccessRevokedHint": "作成者がこのエージェントを使えなくなったため、実行が止まりました。作成者と再度エージェントを共有するか、エージェントを使える人としてスケジュールを作り直してから有効にしてください。",
+    "disabledOtherHint": "表示された理由により EDDI が停止しました。",
+    "serverRefusedUpdate": "サーバーがこの変更を拒否しました:",
+    "serverRefusedCreate": "サーバーがこのスケジュールを拒否しました:",
+    "disabledAccessRevokedHintBy": "作成者（{{user}}）がこのエージェントを使えなくなったため、実行が止まりました。作成者と再度エージェントを共有するか、エージェントを使える人としてスケジュールを作り直してから有効にしてください。"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",
@@ -2207,7 +2262,29 @@
     "chunkStrategyLegacy": "{{value}}（再帰として保存）",
     "saveBeforeIngest": "まず変更を保存してください。ドキュメントは画面上の編集内容ではなく、保存済みナレッジベースのストアと埋め込みモデルで取り込まれます。",
     "chunkStrategyUnsupported": "{{value}}（非対応）",
-    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。"
+    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。",
+    "location": {
+      "reference": "ストアの場所は ${…} 参照ではなく、名前をそのまま書く必要があります。場所はエージェントが誰のドキュメントを読むかを決め、参照はストア構築時（すべてのチェックの後）に、どの編集者でも変更できる変数から解決されるため、別のナレッジベースのストアや SQL を指してしまう可能性があります。参照付きで保存済みのナレッジベースは、名前をそのまま書いて一度保存し直すまで、取り込みと検索を停止します。",
+      "pgIdentifier": "pgvector のテーブル名は、スキーマ修飾も可能な単純な名前（英字、数字、_ と $）でなければなりません。ストアはそれをそのまま SQL に入れるため、引用符、空白、句読点は拒否されます。",
+      "refused": "サーバーは {{param}} = {{value}} を拒否します",
+      "reserved": "{{prefix}} で始まる名前（どの部分でも、大文字小文字を問わず）は予約されています。EDDI は各ナレッジベース固有の場所をこの接頭辞から導くため、この名前は別のナレッジベースのストアを指す可能性があります。別の名前を選ぶか、空欄にしてこのナレッジベース専用の場所を使ってください。"
+    },
+    "layout": {
+      "idTitle": "専用ストア（ID で指定）",
+      "nameTitle": "名前ベースのストア（6.5 レイアウト）",
+      "idBody": "このナレッジベースには専用のストアがあります。各チャンクにはその ID が付き、共有テーブルであっても検索では自身のチャンクしか見えません。",
+      "nameBody": "EDDI 6.6 より前に作成: ストアはナレッジベースの名前で見つけられるため、同じ名前の他のナレッジベースと共有されます。このままでも動作します。",
+      "defaultUnsaved": "場所: eddi_kbid_<id>（デフォルト、保存時に割り当て）",
+      "migrate": "専用ストアへ移動…",
+      "renameNote": "このナレッジベースの名前を変更しても同じように移動します。EDDI 6.6 以降が必要です。",
+      "migrateTitle": "このナレッジベースを専用ストアへ移動しますか？",
+      "migrateBodyExplicit": "テーブルはそのままですが、今後はその ID が付いたチャンクだけが検索されます。既存のチャンクにはこの印がないため、空の状態から始まります。ソースは次回の実行で自動的に再取り込みされますが、/ingest で追加したドキュメントは取り込み直す必要があります。何も削除されません。変更は保存時に適用され、元に戻せません。",
+      "migrateBody": "新しい空の専用ストアへ移動します。ソースは次回の実行で自動的に再取り込みされますが、/ingest で追加したドキュメントは取り込み直す必要があります。古いストアはそのまま残ります。変更は保存時に適用され、元に戻せません。",
+      "migrateConfirm": "保存時に移動",
+      "explicit": "場所: {{value}}（上で設定）",
+      "default": "場所: {{value}}（デフォルト）",
+      "legacyDefault": "場所: 名前「{{name}}」から導出（デフォルト）"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -2986,8 +3063,10 @@
       "humanNeedsName_one": "{{count}} 名の人間メンバーに表示名が必要です。",
       "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
       "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
-      "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
-    }
+      "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
+      "duplicateMember": "{{ids}} が複数回指定されています。メンバー 1 人につき席は 1 つです。2 つの席は 1 つのメンバー会話を共有し、互いの回答が見えてしまいます。2 つ目の席には別のエージェントを使ってください。"
+    },
+    "serverRefused": "サーバーがこのグループを拒否しました:"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -3149,7 +3228,9 @@
     "partialBody": "エージェントの残りの部分は書き込まれました。以下のリソースはそのまま残っており、対応が必要です。",
     "partialCounts": "{{created}} 件作成、{{updated}} 件更新、{{failed}} 件失敗。",
     "schedulesSkipped_other": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。",
-    "schedulesSkipped_one": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。"
+    "schedulesSkipped_one": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。",
+    "mergeScopeDefaultSpace": "デフォルトのスペース",
+    "mergeScope": "このマージで更新されるのは、{{space}} であなたが編集できるリソースだけです。別のワークスペースにあるこのエージェントのコピーは決して変更されず、代わりにあなた自身のコピーが作成されます。そこにあるコピーを更新するには、先にスペースを切り替えてください。"
   },
   "syncPage": {
     "title": "エージェントの同期",
@@ -3648,7 +3729,18 @@
     "failedConversations_other": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
     "conversationsTruncated_one": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
     "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
-    "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。"
+    "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。",
+    "auditRedacted": "マスクされた監査エントリ",
+    "auditLegacy": "この EDDI は監査台帳のユーザー ID を置き換えるだけで、記録されたプロンプトと応答は残ります。EDDI 6.6 以降はそれらをマスクします。",
+    "auditPseudonymizeMode": "監査内容は保持されました。このサーバーは eddi.audit.erasure-mode=pseudonymize で動作しているため（法的保存など）、監査台帳のユーザー ID だけが置き換えられました。",
+    "auditRedactedExplanation": "ユーザーの監査行は記録保持のために残りますが、プロンプト、応答、モデルの詳細、ツール呼び出しはマスク用のマーカーに置き換えられ、ユーザー ID は仮名化されました。以前に検証できていた行は再署名され、すでに改ざんされていた行は無効のままです。",
+    "completeExplanation": "「完了」とは、このユーザーの ID の監査行にマスクされていない内容が残っていないことの最終確認を含め、すべてのステップが成功したことを意味します。",
+    "failedStep": {
+      "auditRedaction": "一部の監査行にこのユーザーのプロンプトや応答がまだ残っています。消去をもう一度実行してください。安全に繰り返せ、残っている部分だけが対象です。失敗が続く場合は、サーバーログにこの消去の仮名で原因が記録されています。",
+      "auditLedger": "すべての監査行のユーザー ID を置き換えられませんでした。データベースに接続できるようになったら、消去をもう一度実行してください。",
+      "databaseLogs": "データベースのログエントリを仮名化できませんでした。消去をもう一度実行してください。ログの保持期間によっても時間とともに削除されます。",
+      "generic": "このステップは完了しませんでした。サーバーログに示された原因を解消してから、消去をもう一度実行してください。安全に繰り返せます。"
+    }
   },
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"
@@ -5244,5 +5336,22 @@
     "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
     "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
     "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
+  },
+  "propertyValue": {
+    "typeLabel": "値の型",
+    "jsonOnly": "JSON タブで設定",
+    "valueLabel": "値",
+    "intRange": "Integer の範囲（±2,147,483,647）外です。この値には長整数を選んでください。",
+    "unsafeLong": "9,007,199,254,740,991 を超えると、ブラウザーはこの整数を正確に保持できません。JSON タブで編集してください。",
+    "needs66": "長整数と小数には EDDI 6.6 以降が必要です。",
+    "conflict": "この行は {{fields}} を設定しています。使われるのは {{winner}} だけです。ここで型を選ぶと、その 1 つの値を残して他は削除されます。",
+    "kindString": "テキスト / テンプレート",
+    "kindInt": "整数",
+    "kindLong": "長整数",
+    "kindDouble": "小数",
+    "kindFloat": "Float（約 7 桁）",
+    "kindBoolean": "真偽値",
+    "kindObject": "オブジェクト（JSON）",
+    "kindList": "リスト（JSON）"
   }
 }

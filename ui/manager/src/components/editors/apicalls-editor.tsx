@@ -35,6 +35,7 @@ import { ConnectionReferenceButton } from "@/components/shared/connection-refere
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import { isValidUrl } from "@/lib/utils";
 import { EditorSection } from "./editor-section";
+import { PropertyValueField } from "./property-value-field";
 import { parseHttpCodeList } from "./editor-value-utils";
 
 // ─── Types matching HttpCallsConfiguration backend model ─────────────────────
@@ -50,7 +51,11 @@ export interface PropertyInstruction {
   valueObject?: Record<string, unknown>;
   valueList?: unknown[];
   valueInt?: number;
+  /** A whole number beyond the `int` range (EDDI 6.6+). */
+  valueLong?: number;
   valueFloat?: number;
+  /** A decimal at full precision (EDDI 6.6+). */
+  valueDouble?: number;
   valueBoolean?: boolean;
   scope?: "step" | "conversation" | "longTerm" | "secret";
   fromObjectPath?: string;
@@ -536,7 +541,7 @@ function PropertyInstructionRow({
 
   return (
     <div className="rounded-lg border border-border/60 bg-card/50 p-3 space-y-2" data-testid="property-instruction-row">
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-start gap-1.5">
         <input
           type="text"
           value={instruction.name ?? ""}
@@ -546,19 +551,30 @@ function PropertyInstructionRow({
           className="h-7 w-32 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <span className="text-xs text-muted-foreground">=</span>
-        <input
-          type="text"
-          value={instruction.valueString ?? ""}
-          onChange={(e) => onChange({ ...instruction, valueString: e.target.value })}
+        <PropertyValueField
+          value={instruction}
+          onChange={onChange}
           readOnly={readOnly}
-          placeholder={t("apiCallsEditor.propValue", "Value or template")}
-          className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          testIdPrefix="instruction-value"
+          renderText={() => (
+            <input
+              type="text"
+              value={instruction.valueString ?? ""}
+              onChange={(e) => onChange({ ...instruction, valueString: e.target.value })}
+              readOnly={readOnly}
+              placeholder={t("apiCallsEditor.propValue", "Value or template")}
+              aria-label={t("apiCallsEditor.propValue", "Value or template")}
+              className="h-7 min-w-[90px] flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          )}
         />
         <select
           value={instruction.scope ?? "conversation"}
           onChange={(e) => onChange({ ...instruction, scope: e.target.value as PropertyInstruction["scope"] })}
           disabled={readOnly}
+          aria-label={t("apiCallsEditor.scope", "Scope")}
           className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+          data-testid="instruction-scope"
         >
           {SCOPE_OPTIONS.map((s) => (
             <option key={s} value={s}>{s}</option>

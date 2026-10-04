@@ -3214,6 +3214,47 @@ export const handlers = [
         createdAt: Date.now() - 2592000000,
         updatedAt: Date.now() - 604800000,
       },
+      // EDDI 6.6 `disabledReason`: switched off by the system, not a person.
+      {
+        id: "sched-4",
+        name: "Weekly Digest",
+        triggerType: "CRON",
+        agentId: "agent2",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "0 7 * * MON",
+        message: "Send the weekly digest",
+        conversationStrategy: "new",
+        enabled: false,
+        disabledReason: "agent-undeployed",
+        lastFired: Date.now() - 604800000,
+        fireStatus: "COMPLETED",
+        failCount: 0,
+        timeZone: "UTC",
+        createdBy: "alice",
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 86400000,
+      },
+      {
+        id: "sched-5",
+        name: "Partner Sync",
+        triggerType: "CRON",
+        agentId: "agent1",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "30 6 * * *",
+        message: "Sync partner records",
+        conversationStrategy: "new",
+        enabled: false,
+        disabledReason: "access-revoked",
+        lastFired: Date.now() - 86400000,
+        fireStatus: "FAILED",
+        failCount: 1,
+        timeZone: "UTC",
+        createdBy: "bob",
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 86400000,
+      },
     ]);
   }),
 
@@ -4194,6 +4235,52 @@ function mockAuditVerification(scope: "conversation" | "agent", scopeId: string)
   };
 }
 
+/**
+ * Administrative-action rows exactly as `AdminActionAuditFilter` writes them:
+ * taskId `ai.labs.admin`, taskType `admin`, the caller in `userId`, method /
+ * path / endpoint in `input`, the status in `output`, no conversation or agent.
+ */
+function adminActionEntry(
+  id: string,
+  actor: string,
+  method: string,
+  path: string,
+  resource: string,
+  status: number,
+  minutesAgo: number,
+) {
+  return {
+    id,
+    conversationId: null,
+    agentId: null,
+    agentVersion: null,
+    userId: actor,
+    environment: null,
+    stepIndex: 0,
+    taskId: "ai.labs.admin",
+    taskType: "admin",
+    taskIndex: 0,
+    durationMs: 0,
+    input: { method, path, resource },
+    output: { status },
+    llmDetail: null,
+    toolCalls: null,
+    actions: [`ADMIN_${method}`],
+    cost: 0,
+    timestamp: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+    hmac: "hmac-placeholder",
+    agentSignature: null,
+  };
+}
+
+export const MOCK_ADMIN_ACTIONS = [
+  adminActionEntry("adm-1", "alice", "POST", "/administration/production/deploy/agent1", "RestAgentAdministration#deployAgent", 202, 5),
+  adminActionEntry("adm-2", "bob", "PUT", "/llmstore/llms/llm-1", "RestLlmStore#updateLlm", 200, 90),
+  adminActionEntry("adm-3", "alice", "DELETE", "/admin/gdpr/u-6f1c2a", "RestGdprAdmin#deleteUserData", 200, 60 * 30),
+  adminActionEntry("adm-4", "mallory", "POST", "/administration/production/deploy/agent2", "RestAgentAdministration#deployAgent", 403, 60 * 24 * 3),
+  adminActionEntry("adm-5", "bob", "PATCH", "/descriptorstore/descriptors/agent1", "RestDocumentDescriptorStore#patchDescriptor", 500, 60 * 24 * 10),
+];
+
 export const auditHandlers = [
   // Integrity verification — registered before `/:conversationId`, which would
   // otherwise never see these two-segment paths anyway, but keeps the intent plain.
@@ -4211,6 +4298,17 @@ export const auditHandlers = [
 
   http.get("*/auditstore/agent/:agentId", () => {
     return HttpResponse.json(MOCK_AUDIT_ENTRIES);
+  }),
+
+  // Administrative actions (EDDI 6.6+) — before `/:conversationId`, which would
+  // otherwise match the literal segment. `actor` is the server's only filter.
+  http.get("*/auditstore/admin-actions", ({ request }) => {
+    const url = new URL(request.url);
+    const actor = url.searchParams.get("actor");
+    const skip = Number(url.searchParams.get("skip") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    const rows = MOCK_ADMIN_ACTIONS.filter((e) => !actor || e.userId === actor);
+    return HttpResponse.json(rows.slice(skip, skip + limit));
   }),
 
   http.get("*/auditstore/:conversationId", ({ params }) => {
@@ -4598,6 +4696,8 @@ export const gdprHandlers = [
       conversationMappingsDeleted: 2,
       logsPseudonymized: 89,
       auditEntriesPseudonymized: 23,
+      // EDDI 6.6: the rows are kept, their content replaced by a redaction marker.
+      auditEntriesRedacted: 23,
       attachmentsDeleted: 4,
       journalEntriesDeleted: 1,
       checkpointsDeleted: 0,

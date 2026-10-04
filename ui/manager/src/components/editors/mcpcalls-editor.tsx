@@ -83,6 +83,12 @@ export interface McpCall {
   saveResponse?: boolean;
   responseObjectName?: string;
   continueOnError?: boolean;
+  /**
+   * How much of the tool result is kept in conversation memory, in characters
+   * (EDDI 6.6+). A longer result is truncated before it is stored. Unset or
+   * ≤ 0 means the server default, {@link DEFAULT_MCP_MAX_RESPONSE_SIZE}.
+   */
+  maxResponseSizeInBytes?: number;
   retry?: McpRetryConfiguration;
   preRequest?: McpPreRequest;
   postResponse?: McpPostResponse;
@@ -422,6 +428,55 @@ function DiscoveredToolsPanel({
 }
 
 // ─── Retry (RetryConfiguration) sub-form ─────────────────────────────────────
+
+/** Server default for `maxResponseSizeInBytes` — `McpCall.DEFAULT_MAX_RESPONSE_SIZE_IN_BYTES`, the httpcall default. */
+const DEFAULT_MCP_MAX_RESPONSE_SIZE = 2_000_000;
+
+/**
+ * The cap on how much of a rule-triggered MCP result is stored in conversation
+ * memory (EDDI 6.6+). Memory is loaded on every turn, and a call returning
+ * megabytes used to be stored whole on every step it ran. Left blank it is not
+ * written at all, so an older backend's strict parser is never handed it.
+ */
+function McpMaxResponseSize({
+  call,
+  onChange,
+  readOnly,
+}: {
+  call: McpCall;
+  onChange: (c: McpCall) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const id = useId();
+  const hintId = useId();
+  return (
+    <div className="space-y-1" data-testid="mcp-max-response-size">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={id} className="text-xs text-foreground">
+          {t("mcpcallsEditor.maxResponseSize", "Max stored response size (characters)")}
+        </label>
+        <NumberInput
+          id={id}
+          integer
+          value={call.maxResponseSizeInBytes}
+          onChange={(v) => onChange({ ...call, maxResponseSizeInBytes: v })}
+          readOnly={readOnly}
+          placeholder={String(DEFAULT_MCP_MAX_RESPONSE_SIZE)}
+          aria-describedby={hintId}
+          className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring aria-[invalid=true]:border-destructive"
+          data-testid="mcp-max-response-size-input"
+        />
+      </div>
+      <p id={hintId} className="text-[10px] text-muted-foreground">
+        {t(
+          "mcpcallsEditor.maxResponseSizeHint",
+          "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs EDDI 6.6 or later.",
+        )}
+      </p>
+    </div>
+  );
+}
 
 function McpRetryEditor({
   retry,
@@ -820,6 +875,10 @@ function McpCallEditor({
               />
             )}
           </div>
+
+          {(call.saveResponse ?? true) && (
+            <McpMaxResponseSize call={call} onChange={onChange} readOnly={readOnly} />
+          )}
 
           {/* Error handling */}
           <div>

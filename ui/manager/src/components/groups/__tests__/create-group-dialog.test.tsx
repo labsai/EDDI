@@ -25,6 +25,18 @@ describe("CreateGroupDialog", () => {
             resource: "eddi://ai.labs.agent/agentstore/agents/agent2?version=1",
             name: "Technical Support Agent",
           },
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent3?version=1",
+            name: "Billing Agent",
+          },
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent4?version=1",
+            name: "Legal Agent",
+          },
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent5?version=1",
+            name: "Sales Agent",
+          },
         ]);
       }),
       http.get("*/groupstore/groups/descriptors", () => {
@@ -186,13 +198,14 @@ describe("CreateGroupDialog", () => {
       if (el.length < 6) throw new Error("Selects not ready");
       return el;
     });
-    // Selects are: 5 member selects + 1 moderator select
+    // Selects are: 5 member selects + 1 moderator select. One agent per seat —
+    // EDDI 6.6 refuses a group listing the same agent twice.
     await user.selectOptions(selects[0]!, "agent1");
     await user.selectOptions(selects[1]!, "agent2");
-    await user.selectOptions(selects[2]!, "agent1");
-    await user.selectOptions(selects[3]!, "agent2");
-    await user.selectOptions(selects[4]!, "agent1");
-    await user.selectOptions(selects[5]!, "agent1"); // Moderator
+    await user.selectOptions(selects[2]!, "agent3");
+    await user.selectOptions(selects[3]!, "agent4");
+    await user.selectOptions(selects[4]!, "agent5");
+    await user.selectOptions(selects[5]!, "agent1"); // Moderator (not a member seat)
 
     // Go to review step
     await user.click(screen.getByRole("button", { name: /Next/i }));
@@ -271,5 +284,55 @@ describe("CreateGroupDialog", () => {
     await user.type(roleInputs[1]!, "CON");
     await user.click(screen.getByRole("button", { name: /Next/i }));
     expect(screen.queryByTestId("dialog-role-coverage-warning")).not.toBeInTheDocument();
+  });
+
+  // ── One seat per agent (EDDI 6.6 refuses a repeated member) ──────────────
+
+  async function toMembersStep() {
+    const user = userEvent.setup();
+    const { container } = renderWithProviders(<CreateGroupDialog open={true} onClose={mockOnClose} />);
+    await user.click(screen.getByTestId("template-advisory-board"));
+    await user.click(screen.getByRole("button", { name: /Next/i }));
+    const selects = await waitFor(() => {
+      const el = container.querySelectorAll("select");
+      if (el.length < 6) throw new Error("Selects not ready");
+      return el;
+    });
+    return { user, container, selects };
+  }
+
+  const optionValues = (select: Element) =>
+    [...(select as HTMLSelectElement).options].map((o) => o.value).filter(Boolean);
+
+  it("does not offer an agent another member already holds, but keeps the row's own choice", async () => {
+    const { user, container } = await toMembersStep();
+    const selects = () => container.querySelectorAll("select");
+    expect(optionValues(selects()[1]!)).toContain("agent1");
+
+    await user.selectOptions(selects()[0]!, "agent1");
+
+    expect(optionValues(selects()[1]!)).not.toContain("agent1");
+    expect(optionValues(selects()[0]!)).toContain("agent1");
+    // The moderator is not a member seat, so it may still be agent1.
+    expect(optionValues(selects()[5]!)).toContain("agent1");
+  });
+
+  it("shows the server's 400 inside the dialog when it refuses the group", async () => {
+    const refusal =
+      "members[2] repeats members[0] ('agent1') — a member can hold only one seat, because both seats would share one member conversation and see each other's answers. Use a second agent for a second seat";
+    server.use(
+      http.post("*/groupstore/groups", () => HttpResponse.json({ message: refusal }, { status: 400 })),
+    );
+    const { user, selects } = await toMembersStep();
+    for (const [i, id] of ["agent1", "agent2", "agent3", "agent4", "agent5"].entries()) {
+      await user.selectOptions(selects[i]!, id);
+    }
+    await user.click(screen.getByRole("button", { name: /Next/i }));
+    await user.click(screen.getByRole("button", { name: "Create Group" }));
+
+    const error = await screen.findByTestId("create-group-server-error");
+    expect(error).toHaveAttribute("role", "alert");
+    expect(error).toHaveTextContent("members[2] repeats members[0]");
+    expect(mockOnClose).not.toHaveBeenCalled();
   });
 });

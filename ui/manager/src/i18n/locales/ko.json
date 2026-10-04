@@ -1028,7 +1028,8 @@
     "skipNone": "없음 — 건너뛰는 코드 없음",
     "runSkipConflict": "{{codes}}이(가) 건너뛰기 목록에도 있으므로 이 명령은 해당 코드에서 실행되지 않습니다.",
     "httpCodeFilterSkipSet": "\"실행할 코드\"가 비어 있으면 200, 201을 사용하고, \"건너뛸 코드\"가 비어 있으면 아무것도 건너뛰지 않습니다.",
-    "useDefaultSkipCodes": "기본 건너뛰기 목록 사용"
+    "useDefaultSkipCodes": "기본 건너뛰기 목록 사용",
+    "scope": "범위"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "실패 시 파이프라인이 계속됩니다. 오류는 다음 위치에 노출됩니다: ",
@@ -1086,7 +1087,9 @@
     "argumentType": "인수 유형",
     "argumentText": "텍스트",
     "argumentInvalidJson": "유효한 JSON이 아닙니다. 마지막 유효한 값이 유지됩니다",
-    "removeArgument": "인수 제거"
+    "removeArgument": "인수 제거",
+    "maxResponseSize": "저장되는 최대 응답 크기(문자)",
+    "maxResponseSizeHint": "이보다 긴 도구 결과는 대화 메모리에 저장되기 전에 이 문자 수로 잘립니다(경고가 기록됨). 비워 두거나 0 이하이면 기본값 2,000,000(약 2MB)을 사용합니다. EDDI 6.6 이상이 필요합니다."
   },
   "llmEditor": {
     "addCustomInstruction": "지시 추가",
@@ -1356,7 +1359,13 @@
     "compatibleEndpointOverridden": "엔드포인트: {{url}}",
     "modelType": "모델 유형",
     "paramName": "매개변수 이름",
-    "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 '기본 제공 도구 사용'을 선택 해제하세요."
+    "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 '기본 제공 도구 사용'을 선택 해제하세요.",
+    "maxToolCallsPerIteration": "응답당 최대 도구 호출 수",
+    "maxToolCallsPerIterationDefault": "(기본값 {{n}})",
+    "maxToolCallsPerTurn": "턴당 최대 도구 호출 수",
+    "maxToolCallsPerTurnDefault": "(기본값 {{n}})",
+    "maxToolCallsHint": "한도를 넘은 호출은 실행되지 않습니다. 각 호출은 한도에 도달했음을 모델에 알리는 NOT_EXECUTED 결과를 받고, 모델은 가진 정보로 답합니다. 거부된 호출은 승인 단계에 도달하지 않습니다. 턴당 집계에는 승인 일시 정지 전의 호출도 포함됩니다. -1 또는 0은 한도를 없앱니다. EDDI 6.6 이상이 필요합니다. 이전 서버에서는 비워 두세요.",
+    "maxToolCallsUncapped": "한도가 꺼져 있습니다. 모델이 그곳에서 도구 호출을 제한 없이 실행할 수 있으며, Max Tool Iterations만 상한이 됩니다."
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",
@@ -1775,7 +1784,44 @@
       "reasonUncovered": "확인 범위보다 오래된 로드된 항목 {{count}}개",
       "unverifiedTitle": "완전히 검증되지 않음",
       "unverifiedDesc": "반증된 서명은 없지만 모든 것을 확인하지는 못했습니다: {{reasons}}."
-    }
+    },
+    "adminActions": {
+      "description": "REST API를 통한 모든 관리 변경(배포, 구성 쓰기, 가져오기, 삭제, 거부된 호출)이 감사 원장에 서명되어 기록됩니다. 요청 본문은 기록되지 않으며, 대상이 된 사람의 ID는 가명 처리됩니다.",
+      "actor": "수행자",
+      "actorPlaceholder": "주체, 예: alice",
+      "apply": "적용",
+      "method": "메서드",
+      "allMethods": "모든 메서드",
+      "window": "기간",
+      "clear": "필터 지우기",
+      "noMatch": "이 필터와 일치하는 관리 작업이 없습니다",
+      "empty": "아직 기록된 관리 작업이 없습니다",
+      "noMatchLoadOlder": "가장 최근 행만 불러왔습니다. 더 이전을 찾으려면 이전 행을 불러오세요.",
+      "emptyHint": "EDDI는 6.6 버전부터 이를 기록합니다(eddi.audit.admin-actions.enabled가 false인 경우 제외). 이전 서버에서는 여기에 아무것도 표시되지 않습니다.",
+      "caption": "관리 작업, 최신순",
+      "colTime": "시간",
+      "colActor": "수행자",
+      "colAction": "작업",
+      "colEndpoint": "엔드포인트",
+      "colStatus": "상태",
+      "filterByActor": "이 수행자의 작업만 보기",
+      "loadOlderError": "이전 행을 불러오지 못했습니다.",
+      "loadOlder": "이전 행 불러오기",
+      "forbidden": "관리자만 관리 작업을 볼 수 있습니다",
+      "forbiddenHint": "이 로그에는 모든 관리자의 변경이 기록되므로 읽으려면 eddi-admin 역할이 필요합니다.",
+      "unsupported": "이 EDDI는 관리 작업을 기록하지 않습니다",
+      "unsupportedHint": "EDDI 6.6부터 기록됩니다.",
+      "loadError": "관리 작업을 불러오지 못했습니다.",
+      "shown": "불러온 {{loaded}}개 행 중 {{shown}}개 표시",
+      "windowAny": "전체 기간",
+      "windowHour": "최근 1시간",
+      "windowDay": "최근 24시간",
+      "windowWeek": "최근 7일",
+      "windowMonth": "최근 30일"
+    },
+    "views": "감사 보기",
+    "tabTrail": "파이프라인 기록",
+    "tabAdminActions": "관리 작업"
   },
   "schedules": {
     "cronHelp": "5필드 형식: 분 시 일 월 요일",
@@ -1906,7 +1952,16 @@
     "systemManaged": "시스템",
     "systemManagedHint": "EDDI가 관리합니다(지식 베이스 수집, 메모리 통합 또는 팀 주기). 여기가 아니라 정의된 곳에서 변경하세요.",
     "persistentConversationIdLocked": "일정을 만들 때 설정됩니다. 서버는 실행이 계속 추가되어 온 대화를 유지합니다.",
-    "failedScheduleGone": "일정이 더 이상 존재하지 않습니다"
+    "failedScheduleGone": "일정이 더 이상 존재하지 않습니다",
+    "disabledByPerson": "사람이 비활성화했습니다. EDDI 6.6 이전에 배포 해제로 꺼진 일정도 이렇게 표시됩니다. 한 번 수동으로 활성화하세요.",
+    "disabledUndeployed": "에이전트 배포 해제됨",
+    "disabledUndeployedHint": "에이전트가 배포 해제될 때 꺼졌습니다. 에이전트가 다음에 성공적으로 배포되면 자동으로 다시 켜집니다. 조치가 필요 없습니다.",
+    "disabledAccessRevoked": "접근 권한 취소됨",
+    "disabledAccessRevokedHint": "생성자가 더 이상 이 에이전트를 사용할 수 없어 실행이 멈췄습니다. 에이전트를 다시 공유하거나, 사용할 수 있는 사람으로 일정을 다시 만든 뒤 활성화하세요.",
+    "disabledOtherHint": "표시된 이유로 EDDI가 껐습니다.",
+    "serverRefusedUpdate": "서버가 이 변경을 거부했습니다:",
+    "serverRefusedCreate": "서버가 이 일정을 거부했습니다:",
+    "disabledAccessRevokedHintBy": "생성자({{user}})가 더 이상 이 에이전트를 사용할 수 없어 실행이 멈췄습니다. 에이전트를 다시 공유하거나, 사용할 수 있는 사람으로 일정을 다시 만든 뒤 활성화하세요."
   },
   "cascadeTrace": {
     "title": "모델 캐스케이드",
@@ -2207,7 +2262,29 @@
     "chunkStrategyLegacy": "{{value}} (재귀로 저장됨)",
     "saveBeforeIngest": "먼저 변경 사항을 저장하세요. 문서는 화면의 편집 내용이 아니라 저장된 지식 베이스의 저장소와 임베딩 모델로 수집됩니다.",
     "chunkStrategyUnsupported": "{{value}} (지원되지 않음)",
-    "chunkStrategyUnsupportedHint": "저장할 때 서버가 이 전략을 거부합니다. 재귀를 선택하세요."
+    "chunkStrategyUnsupportedHint": "저장할 때 서버가 이 전략을 거부합니다. 재귀를 선택하세요.",
+    "location": {
+      "reference": "저장 위치는 ${…} 참조가 아니라 이름을 그대로 적어야 합니다. 위치는 에이전트가 누구의 문서를 읽을지 결정하며, 참조는 저장소를 만들 때(모든 검사 이후) 어느 편집자나 바꿀 수 있는 변수에서 해석되므로 다른 지식 베이스의 저장소나 SQL을 가리킬 수 있습니다. 이미 참조로 저장된 지식 베이스는 이름을 그대로 적어 한 번 다시 저장할 때까지 수집과 검색을 멈춥니다.",
+      "pgIdentifier": "pgvector 테이블은 스키마를 붙일 수 있는 단순한 이름(문자, 숫자, _ 및 $)이어야 합니다. 저장소가 이를 그대로 SQL에 넣으므로 따옴표, 공백, 문장 부호는 거부됩니다.",
+      "refused": "서버가 {{param}} = {{value}}을(를) 거부합니다",
+      "reserved": "{{prefix}}(으)로 시작하는 이름(어느 부분이든, 대소문자 무관)은 예약되어 있습니다. EDDI는 각 지식 베이스의 고유 위치를 이 접두사로 만들기 때문에 이 이름은 다른 지식 베이스의 저장소를 가리킬 수 있습니다. 다른 이름을 고르거나 비워 두어 이 지식 베이스만의 위치를 사용하세요."
+    },
+    "layout": {
+      "idTitle": "전용 저장소(ID로 지정)",
+      "nameTitle": "이름 기반 저장소(6.5 레이아웃)",
+      "idBody": "이 지식 베이스에는 전용 저장소가 있습니다. 모든 청크에 ID가 붙고, 공유 테이블에서도 검색은 자신의 청크만 봅니다.",
+      "nameBody": "EDDI 6.6 이전에 생성됨: 저장소를 지식 베이스 이름으로 찾으므로 같은 이름의 다른 지식 베이스와 공유됩니다. 그대로 계속 작동합니다.",
+      "defaultUnsaved": "위치: eddi_kbid_<id>(기본값, 저장 시 할당)",
+      "migrate": "전용 저장소로 이동…",
+      "renameNote": "이 지식 베이스의 이름을 바꿔도 같은 방식으로 이동합니다. EDDI 6.6 이상이 필요합니다.",
+      "migrateTitle": "이 지식 베이스를 전용 저장소로 이동할까요?",
+      "migrateBodyExplicit": "테이블은 유지되지만 이제부터는 해당 ID가 붙은 청크만 검색됩니다. 기존 청크에는 이 표시가 없으므로 비어 있는 상태로 시작합니다. 소스는 다음 실행 때 자동으로 다시 수집되며, /ingest로 추가한 문서는 다시 수집해야 합니다. 아무것도 삭제되지 않습니다. 변경은 저장할 때 적용되며 되돌릴 수 없습니다.",
+      "migrateBody": "새롭고 비어 있는 전용 저장소로 이동합니다. 소스는 다음 실행 때 자동으로 다시 수집되며, /ingest로 추가한 문서는 다시 수집해야 합니다. 이전 저장소는 그대로 남습니다. 변경은 저장할 때 적용되며 되돌릴 수 없습니다.",
+      "migrateConfirm": "저장할 때 이동",
+      "explicit": "위치: {{value}}(위에서 설정)",
+      "default": "위치: {{value}}(기본값)",
+      "legacyDefault": "위치: 이름 “{{name}}”에서 파생(기본값)"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -2986,8 +3063,10 @@
       "humanNeedsName_one": "{{count}}명의 사람 멤버에게 표시 이름이 필요합니다.",
       "humanNeedsName_other": "{{count}}명의 사람 멤버에게 표시 이름이 필요합니다.",
       "humanNeedsId_one": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다.",
-      "humanNeedsId_other": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다."
-    }
+      "humanNeedsId_other": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다.",
+      "duplicateMember": "{{ids}}이(가) 두 번 이상 나열되었습니다. 구성원은 한 자리만 차지합니다. 두 자리는 하나의 구성원 대화를 공유하여 서로의 답변을 보게 됩니다. 두 번째 자리에는 두 번째 에이전트를 사용하세요."
+    },
+    "serverRefused": "서버가 이 그룹을 거부했습니다:"
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -3149,7 +3228,9 @@
     "partialBody": "에이전트의 나머지 부분은 기록되었습니다. 아래 리소스는 그대로 남아 있으며 조치가 필요합니다.",
     "partialCounts": "{{created}}개 생성, {{updated}}개 업데이트, {{failed}}개 실패.",
     "schedulesSkipped_other": "아카이브의 일정 {{count}}개가 선택에 포함되지 않아 가져오지 않았습니다.",
-    "schedulesSkipped_one": "아카이브의 일정 {{count}}개가 선택에 포함되지 않아 가져오지 않았습니다."
+    "schedulesSkipped_one": "아카이브의 일정 {{count}}개가 선택에 포함되지 않아 가져오지 않았습니다.",
+    "mergeScopeDefaultSpace": "기본 공간",
+    "mergeScope": "이 병합은 {{space}}에서 편집할 수 있는 리소스만 업데이트합니다. 다른 작업 공간에 있는 이 에이전트의 사본은 절대 변경되지 않으며, 대신 가져오기가 내 사본을 만듭니다. 그곳의 사본을 업데이트하려면 먼저 공간을 전환하세요."
   },
   "syncPage": {
     "title": "에이전트 동기화",
@@ -3648,7 +3729,18 @@
     "failedConversations_other": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
     "conversationsTruncated_one": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
     "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
-    "deleteIncomplete": "삭제가 완료되지 않았습니다. 이 사용자의 일부 데이터가 아직 남아 있을 수 있습니다. 완료된 것으로 보고하지 마세요."
+    "deleteIncomplete": "삭제가 완료되지 않았습니다. 이 사용자의 일부 데이터가 아직 남아 있을 수 있습니다. 완료된 것으로 보고하지 마세요.",
+    "auditRedacted": "가려진 감사 항목",
+    "auditLegacy": "이 EDDI는 감사 원장의 사용자 ID만 바꿉니다. 그곳에 기록된 프롬프트와 응답은 유지됩니다. EDDI 6.6 이상은 이를 가립니다.",
+    "auditPseudonymizeMode": "감사 내용이 유지되었습니다. 이 서버는 eddi.audit.erasure-mode=pseudonymize로 실행 중이므로(예: 법적 보존) 감사 원장의 사용자 ID만 바뀌었습니다.",
+    "auditRedactedExplanation": "사용자의 감사 행은 기록 보존을 위해 유지되지만, 프롬프트, 응답, 모델 세부 정보, 도구 호출은 가림 표시로 바뀌었고 사용자 ID는 가명 처리되었습니다. 이전에 검증되던 행은 다시 서명되었고, 이미 변조된 행은 유효하지 않음으로 남습니다.",
+    "completeExplanation": "완료는 이 사용자 ID 아래의 감사 행에 가려지지 않은 내용이 남아 있지 않다는 최종 확인을 포함해 모든 단계가 성공했다는 뜻입니다.",
+    "failedStep": {
+      "auditRedaction": "일부 감사 행에 이 사용자의 프롬프트나 응답이 아직 남아 있습니다. 삭제를 다시 실행하세요. 안전하게 반복할 수 있으며 남은 부분만 처리합니다. 계속 실패하면 서버 로그에 이 삭제의 가명으로 원인이 기록됩니다.",
+      "auditLedger": "모든 감사 행의 사용자 ID를 바꾸지 못했습니다. 데이터베이스에 연결할 수 있게 되면 삭제를 다시 실행하세요.",
+      "databaseLogs": "데이터베이스 로그 항목을 가명 처리하지 못했습니다. 삭제를 다시 실행하세요. 로그 보존 기간에 따라 시간이 지나면 삭제되기도 합니다.",
+      "generic": "이 단계가 끝나지 않았습니다. 서버 로그에 나온 원인을 해결한 뒤 삭제를 다시 실행하세요. 안전하게 반복할 수 있습니다."
+    }
   },
   "mockBanner": {
     "message": "데모 모드 — 샘플 데이터를 표시합니다. 실제 데이터를 보려면 EDDI 백엔드에 연결하세요."
@@ -5244,5 +5336,22 @@
     "switchNotice": "에이전트가 v{{from}}에서 v{{to}}(으)로 이동했습니다",
     "impactFollow_one": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
     "impactStay_one": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다"
+  },
+  "propertyValue": {
+    "typeLabel": "값 유형",
+    "jsonOnly": "JSON 탭에서 설정됨",
+    "valueLabel": "값",
+    "intRange": "Integer 범위(±2,147,483,647)를 벗어났습니다. 이 값에는 긴 정수를 선택하세요.",
+    "unsafeLong": "9,007,199,254,740,991을 넘으면 브라우저가 이 정수를 정확히 보관할 수 없습니다. JSON 탭에서 편집하세요.",
+    "needs66": "긴 정수와 소수는 EDDI 6.6 이상이 필요합니다.",
+    "conflict": "이 행은 {{fields}}을(를) 설정합니다. {{winner}}만 사용됩니다. 여기서 유형을 고르면 그 값 하나만 남기고 나머지는 제거됩니다.",
+    "kindString": "텍스트 / 템플릿",
+    "kindInt": "정수",
+    "kindLong": "긴 정수",
+    "kindDouble": "소수",
+    "kindFloat": "Float(약 7자리)",
+    "kindBoolean": "불리언",
+    "kindObject": "객체(JSON)",
+    "kindList": "목록(JSON)"
   }
 }

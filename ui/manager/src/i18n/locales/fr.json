@@ -1042,7 +1042,8 @@
     "skipNone": "aucun — aucun code n'est ignoré",
     "runSkipConflict": "{{codes}} figure aussi dans la liste à ignorer : cette instruction ne s'exécute donc jamais pour ce code.",
     "httpCodeFilterSkipSet": "Un champ « Exécuter sur les codes » vide utilise 200, 201 ; un champ « Ignorer les codes » vide n'ignore rien.",
-    "useDefaultSkipCodes": "Utiliser la liste à ignorer par défaut"
+    "useDefaultSkipCodes": "Utiliser la liste à ignorer par défaut",
+    "scope": "Portée"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "En cas d'échec, le pipeline continue ; l'erreur est exposée à ",
@@ -1100,7 +1101,9 @@
     "argumentType": "Type de l'argument",
     "argumentText": "Texte",
     "argumentInvalidJson": "JSON non valide — la dernière valeur valide est conservée",
-    "removeArgument": "Supprimer l'argument"
+    "removeArgument": "Supprimer l'argument",
+    "maxResponseSize": "Taille max. de réponse stockée (caractères)",
+    "maxResponseSizeHint": "Un résultat d'outil plus long est tronqué à ce nombre de caractères avant d'être enregistré dans la mémoire de conversation (un avertissement est journalisé). Vide, 0 ou moins utilise la valeur par défaut de 2 000 000 (environ 2 Mo). Nécessite EDDI 6.6 ou plus."
   },
   "llmEditor": {
     "addCustomInstruction": "Ajouter une instruction",
@@ -1370,7 +1373,13 @@
     "compatibleEndpointOverridden": "Point d'accès : {{url}}",
     "modelType": "Type de modèle",
     "paramName": "Nom du paramètre",
-    "lastToolHint": "Au moins un outil doit rester sélectionné. Décochez « Activer les outils intégrés » pour les désactiver tous."
+    "lastToolHint": "Au moins un outil doit rester sélectionné. Décochez « Activer les outils intégrés » pour les désactiver tous.",
+    "maxToolCallsPerIteration": "Appels d'outils max. par réponse",
+    "maxToolCallsPerIterationDefault": "(par défaut {{n}})",
+    "maxToolCallsPerTurn": "Appels d'outils max. par tour",
+    "maxToolCallsPerTurnDefault": "(par défaut {{n}})",
+    "maxToolCallsHint": "Les appels au-delà d'une limite ne sont pas exécutés : chacun reçoit un résultat NOT_EXECUTED indiquant au modèle que la limite est atteinte, et le modèle répond avec ce qu'il a. Les appels refusés n'atteignent jamais la validation. Le décompte par tour inclut les appels faits avant une pause d'approbation. -1 ou 0 supprime une limite. Nécessite EDDI 6.6 ou plus — laissez vide sur un serveur plus ancien.",
+    "maxToolCallsUncapped": "Une limite est désactivée : le modèle peut y exécuter un nombre illimité d'appels d'outils, borné seulement par Max Tool Iterations."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -1797,7 +1806,44 @@
       "reasonUncovered": "{{count}} entrée(s) chargée(s) plus ancienne(s) que la plage vérifiée",
       "unverifiedTitle": "Pas entièrement vérifié",
       "unverifiedDesc": "Aucune signature n'a été invalidée, mais tout n'a pas pu être vérifié : {{reasons}}."
-    }
+    },
+    "adminActions": {
+      "description": "Chaque modification administrative faite via l'API REST — déploiements, écritures de configuration, imports, effacements et appels refusés — signée dans le registre d'audit. Les corps de requête ne sont jamais enregistrés, et l'identifiant d'une personne concernée est pseudonymisé.",
+      "actor": "Acteur",
+      "actorPlaceholder": "Principal, p. ex. alice",
+      "apply": "Appliquer",
+      "method": "Méthode",
+      "allMethods": "Toutes les méthodes",
+      "window": "Période",
+      "clear": "Effacer les filtres",
+      "noMatch": "Aucune action administrative ne correspond à ces filtres",
+      "empty": "Aucune action administrative enregistrée pour l'instant",
+      "noMatchLoadOlder": "Seules les lignes les plus récentes sont chargées — chargez les plus anciennes pour remonter plus loin.",
+      "emptyHint": "EDDI les enregistre à partir de la version 6.6, sauf si eddi.audit.admin-actions.enabled vaut false. Un serveur plus ancien n'affiche rien ici.",
+      "caption": "Actions administratives, les plus récentes d'abord",
+      "colTime": "Heure",
+      "colActor": "Acteur",
+      "colAction": "Action",
+      "colEndpoint": "Point de terminaison",
+      "colStatus": "Statut",
+      "filterByActor": "Afficher uniquement les actions de cet acteur",
+      "loadOlderError": "Le chargement des lignes plus anciennes a échoué.",
+      "loadOlder": "Charger les plus anciennes",
+      "forbidden": "Seuls les administrateurs peuvent lire les actions administratives",
+      "forbiddenHint": "Le journal contient les modifications de tous les administrateurs ; sa lecture requiert donc le rôle eddi-admin.",
+      "unsupported": "Cet EDDI n'enregistre pas les actions administratives",
+      "unsupportedHint": "Elles sont enregistrées à partir d'EDDI 6.6.",
+      "loadError": "Impossible de charger les actions administratives.",
+      "shown": "{{shown}} sur {{loaded}} lignes chargées affichées",
+      "windowAny": "N'importe quand",
+      "windowHour": "Dernière heure",
+      "windowDay": "Dernières 24 heures",
+      "windowWeek": "7 derniers jours",
+      "windowMonth": "30 derniers jours"
+    },
+    "views": "Vues d'audit",
+    "tabTrail": "Trace du pipeline",
+    "tabAdminActions": "Actions administratives"
   },
   "schedules": {
     "cronHelp": "Format à 5 champs : minute heure jour-du-mois mois jour-de-la-semaine",
@@ -1928,7 +1974,16 @@
     "systemManaged": "Système",
     "systemManagedHint": "Géré par EDDI (ingestion de base de connaissances, consolidation de la mémoire ou cadence d'équipe). Modifiez-le là où il est défini, pas ici.",
     "persistentConversationIdLocked": "Défini à la création de la planification. Le serveur conserve la conversation à laquelle les déclenchements ont été ajoutés.",
-    "failedScheduleGone": "La planification n'existe plus"
+    "failedScheduleGone": "La planification n'existe plus",
+    "disabledByPerson": "Désactivée par une personne. Une planification qu'un retrait de déploiement a coupée avant EDDI 6.6 apparaît aussi ainsi : réactivez-la une fois à la main.",
+    "disabledUndeployed": "Agent retiré du déploiement",
+    "disabledUndeployedHint": "Coupée lorsque son agent a été retiré du déploiement. Elle se réactive d'elle-même au prochain déploiement réussi de l'agent — rien à faire.",
+    "disabledAccessRevoked": "Accès révoqué",
+    "disabledAccessRevokedHint": "Son créateur ne peut plus utiliser cet agent, elle ne se déclenche donc plus. Partagez à nouveau l'agent avec lui — ou recréez la planification au nom de quelqu'un qui peut l'utiliser — puis activez-la.",
+    "disabledOtherHint": "Coupée par EDDI pour la raison indiquée.",
+    "serverRefusedUpdate": "Le serveur a refusé cette modification :",
+    "serverRefusedCreate": "Le serveur a refusé cette planification :",
+    "disabledAccessRevokedHintBy": "Son créateur ({{user}}) ne peut plus utiliser cet agent, elle ne se déclenche donc plus. Partagez à nouveau l'agent avec lui — ou recréez la planification au nom de quelqu'un qui peut l'utiliser — puis activez-la."
   },
   "cascadeTrace": {
     "title": "Cascade de modèles",
@@ -2229,7 +2284,29 @@
     "chunkStrategyLegacy": "{{value}} (enregistré comme Récursif)",
     "saveBeforeIngest": "Enregistrez d'abord vos modifications : les documents sont ingérés avec le stockage et le modèle d'embedding de la base de connaissances enregistrée, pas avec les modifications à l'écran.",
     "chunkStrategyUnsupported": "{{value}} (non pris en charge)",
-    "chunkStrategyUnsupportedHint": "Le serveur refuse cette stratégie à l'enregistrement. Choisissez Récursif."
+    "chunkStrategyUnsupportedHint": "Le serveur refuse cette stratégie à l'enregistrement. Choisissez Récursif.",
+    "location": {
+      "reference": "Un emplacement de stockage doit être écrit en toutes lettres, pas une référence ${…}. L'emplacement décide quels documents un agent lit, et une référence n'est résolue qu'à la construction du stockage — après toutes les vérifications — à partir de variables que tout éditeur peut modifier ; elle pourrait donc pointer vers le stockage d'une autre base de connaissances ou vers du SQL. Une base déjà enregistrée avec une référence cesse d'ingérer et de répondre jusqu'à ce qu'elle soit enregistrée une fois avec le nom littéral.",
+      "pgIdentifier": "Une table pgvector doit être un nom simple, éventuellement qualifié par un schéma (lettres, chiffres, _ et $). Le stockage l'insère tel quel dans le SQL ; les guillemets, espaces et signes de ponctuation sont donc refusés.",
+      "refused": "Le serveur refuse {{param}} = {{value}}",
+      "reserved": "Les noms commençant par {{prefix}} (dans n'importe quelle partie, quelle que soit la casse) sont réservés : EDDI dérive l'emplacement propre de chaque base de connaissances de ce préfixe, donc ce nom pourrait désigner le stockage d'une autre base. Choisissez un autre nom, ou laissez vide pour obtenir un emplacement propre à cette base."
+    },
+    "layout": {
+      "idTitle": "Stockage propre (adressé par id)",
+      "nameTitle": "Stockage par nom (disposition 6.5)",
+      "idBody": "Cette base de connaissances a son propre stockage : chaque fragment porte son id et la recherche ne voit que ses propres fragments, même dans une table partagée.",
+      "nameBody": "Créée avant EDDI 6.6 : son stockage est trouvé par le nom de la base, donc toute autre base portant le même nom le partage. Elle continue de fonctionner telle quelle.",
+      "defaultUnsaved": "Emplacement : eddi_kbid_<id> (par défaut, attribué à l'enregistrement)",
+      "migrate": "Déplacer vers son propre stockage…",
+      "renameNote": "Renommer cette base de connaissances la déplace de la même façon. Nécessite EDDI 6.6 ou plus.",
+      "migrateTitle": "Déplacer cette base de connaissances vers son propre stockage ?",
+      "migrateBodyExplicit": "Elle garde sa table, mais seuls les fragments portant son id sont désormais récupérés — aucun des fragments existants ne porte cette étiquette, elle démarre donc VIDE. Ses sources sont réingérées d'elles-mêmes à leur prochaine exécution ; les documents ajoutés via /ingest doivent être réingérés. Rien n'est supprimé. Le changement prend effet à l'enregistrement et ne peut pas être annulé.",
+      "migrateBody": "Elle passe à un nouveau stockage propre, VIDE. Ses sources sont réingérées d'elles-mêmes à leur prochaine exécution ; les documents ajoutés via /ingest doivent être réingérés. L'ancien stockage reste en place, intact. Le changement prend effet à l'enregistrement et ne peut pas être annulé.",
+      "migrateConfirm": "Déplacer à l'enregistrement",
+      "explicit": "Emplacement : {{value}} (défini ci-dessus)",
+      "default": "Emplacement : {{value}} (par défaut)",
+      "legacyDefault": "Emplacement : dérivé du nom « {{name}} » (par défaut)"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -3022,8 +3099,10 @@
       "humanNeedsName_other": "{{count}} membres humains ont besoin d'un nom d'affichage.",
       "humanNeedsId_many": "{{count}} membres humains ont besoin de l'identifiant utilisateur de la personne.",
       "humanNeedsId_one": "{{count}} membre humain a besoin de l'identifiant utilisateur de la personne.",
-      "humanNeedsId_other": "{{count}} membres humains ont besoin de l'identifiant utilisateur de la personne."
-    }
+      "humanNeedsId_other": "{{count}} membres humains ont besoin de l'identifiant utilisateur de la personne.",
+      "duplicateMember": "{{ids}} figure plusieurs fois. Un membre occupe un seul siège : deux sièges partageraient une même conversation de membre et verraient les réponses l'un de l'autre. Utilisez un second agent pour un second siège."
+    },
+    "serverRefused": "Le serveur a refusé ce groupe :"
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -3186,7 +3265,9 @@
     "partialCounts": "{{created}} créées, {{updated}} mises à jour, {{failed}} en échec.",
     "schedulesSkipped_one": "{{count}} planification de l’archive n’a pas été importée, car la sélection ne l’incluait pas.",
     "schedulesSkipped_other": "{{count}} planifications de l’archive n’ont pas été importées, car la sélection ne les incluait pas.",
-    "schedulesSkipped_many": "{{count}} planifications de l’archive n’ont pas été importées, car la sélection ne les incluait pas."
+    "schedulesSkipped_many": "{{count}} planifications de l’archive n’ont pas été importées, car la sélection ne les incluait pas.",
+    "mergeScopeDefaultSpace": "votre espace par défaut",
+    "mergeScope": "Cette fusion ne met à jour que les ressources que vous pouvez modifier dans {{space}}. Une copie de cet agent dans un autre espace de travail n'est jamais modifiée — l'import crée votre propre copie à la place. Changez d'abord d'espace pour mettre à jour la copie qui s'y trouve."
   },
   "syncPage": {
     "title": "Synchronisation d'agents",
@@ -3688,7 +3769,18 @@
     "failedConversations_other": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
     "conversationsTruncated_many": "Les conversations ont été plafonnées — l’utilisateur en a {{count}} au total.",
     "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
-    "deleteIncomplete": "Effacement incomplet — certaines données de cet utilisateur peuvent encore exister. Ne le déclarez pas comme accompli."
+    "deleteIncomplete": "Effacement incomplet — certaines données de cet utilisateur peuvent encore exister. Ne le déclarez pas comme accompli.",
+    "auditRedacted": "Entrées d'audit masquées",
+    "auditLegacy": "Cet EDDI ne remplace que l'identifiant utilisateur dans le registre d'audit : les prompts et réponses qui y sont enregistrés sont conservés. EDDI 6.6 et plus les masquent.",
+    "auditPseudonymizeMode": "Le contenu d'audit a été conservé : ce serveur fonctionne avec eddi.audit.erasure-mode=pseudonymize (par exemple sous conservation légale), seul l'identifiant utilisateur du registre d'audit a donc été remplacé.",
+    "auditRedactedExplanation": "Les lignes d'audit de l'utilisateur sont conservées pour la traçabilité, mais leurs prompts, réponses, détails du modèle et appels d'outils ont été remplacés par un marqueur de masquage et l'identifiant a été pseudonymisé. Les lignes vérifiées auparavant ont été re-signées ; une ligne déjà altérée reste marquée invalide.",
+    "completeExplanation": "Complet signifie que chaque étape a réussi, y compris une vérification finale qu'aucune ligne d'audit sous l'identifiant de cet utilisateur ne contient encore de contenu non masqué.",
+    "failedStep": {
+      "auditRedaction": "Certaines lignes d'audit contiennent encore des prompts ou réponses de cet utilisateur. Relancez l'effacement — c'est sans risque et ne touche que ce qui reste. Si l'échec persiste, le journal du serveur indique la cause sous le pseudonyme de cet effacement.",
+      "auditLedger": "L'identifiant utilisateur n'a pas pu être remplacé dans toutes les lignes d'audit. Relancez l'effacement une fois la base de données accessible.",
+      "databaseLogs": "Les entrées de journal en base n'ont pas pu être pseudonymisées. Relancez l'effacement ; la rétention des journaux les supprime aussi avec le temps.",
+      "generic": "Cette étape n'est pas terminée. Relancez l'effacement une fois la cause indiquée dans le journal du serveur corrigée — c'est sans risque."
+    }
   },
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend EDDI pour des données réelles."
@@ -5303,5 +5395,22 @@
     "impactReasonLegacy": "antérieure au suivi de version",
     "impactReasonBreaking": "modification incompatible",
     "switchNotice": "L’agent est passé de v{{from}} à v{{to}}"
+  },
+  "propertyValue": {
+    "typeLabel": "Type de valeur",
+    "jsonOnly": "Défini dans l'onglet JSON",
+    "valueLabel": "Valeur",
+    "intRange": "Hors de la plage Integer (±2 147 483 647). Choisissez Entier long pour cette valeur.",
+    "unsafeLong": "Au-delà de 9 007 199 254 740 991, le navigateur ne peut pas conserver exactement ce nombre entier ; modifiez-le dans l'onglet JSON.",
+    "needs66": "Entier long et Décimal nécessitent EDDI 6.6 ou plus.",
+    "conflict": "Cette ligne définit {{fields}}. Seul {{winner}} est utilisé ; choisir un type ici conserve cette seule valeur et supprime les autres.",
+    "kindString": "Texte / modèle",
+    "kindInt": "Entier",
+    "kindLong": "Entier long",
+    "kindDouble": "Décimal",
+    "kindFloat": "Float (≈7 chiffres)",
+    "kindBoolean": "Booléen",
+    "kindObject": "Objet (JSON)",
+    "kindList": "Liste (JSON)"
   }
 }

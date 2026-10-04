@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, isApiError } from "../api-client";
 
 // ==================== Types ====================
 
@@ -59,6 +59,15 @@ export interface ScheduleConfiguration {
   maxCostPerFire?: number;
   allowSelfScheduling?: boolean;
   createdBy?: string;
+
+  /**
+   * Why the SYSTEM disabled this schedule (EDDI 6.6+): {@link DISABLED_BY_UNDEPLOY}
+   * or {@link DISABLED_ACCESS_REVOKED}. Absent when it is enabled, when a person
+   * disabled it, and on every backend that predates the field — including a
+   * schedule a 6.5 undeploy switched off, which therefore needs one manual
+   * enable after the upgrade.
+   */
+  disabledReason?: string | null;
 
   // Metadata
   metadata?: Record<string, unknown>;
@@ -163,6 +172,29 @@ export function fireLogDurationMs(log: ScheduleFireLog): number | null {
   const end = parseInstant(log.completedAt);
   if (!start || !end) return null;
   return Math.max(0, end.getTime() - start.getTime());
+}
+
+// ==================== Lifecycle ====================
+
+/** `disabledReason`: the agent was undeployed; its next successful deploy re-enables the schedule. */
+export const DISABLED_BY_UNDEPLOY = "agent-undeployed";
+
+/** `disabledReason`: at fire time the creator could no longer use the agent; it stays off. */
+export const DISABLED_ACCESS_REVOKED = "access-revoked";
+
+/**
+ * The reason the server refused a schedule create or update, or null.
+ *
+ * EDDI 6.6 answers a failed validation with
+ * `400 {"error":"invalid_schedule","message":"<reason>"}` — "Cron expression must
+ * have exactly 5 fields …" rather than the bare "Invalid schedule configuration"
+ * older versions sent. `ApiClient` already lifts `message` into the error, so any
+ * 400 carries the server's sentence; older servers' generic text is shown as is.
+ */
+export function invalidScheduleReason(error: unknown): string | null {
+  if (!isApiError(error) || error.status !== 400) return null;
+  const message = error.message?.trim();
+  return message ? message : null;
 }
 
 // ==================== Scheduling constants & helpers ====================

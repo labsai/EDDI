@@ -1028,7 +1028,8 @@
     "skipNone": "keine – kein Code wird übersprungen",
     "runSkipConflict": "{{codes}} steht auch in der Überspringen-Liste – diese Anweisung wird dafür nie ausgeführt.",
     "httpCodeFilterSkipSet": "Ein leeres „Bei Codes ausführen“ verwendet 200, 201; ein leeres „Bei Codes überspringen“ überspringt nichts.",
-    "useDefaultSkipCodes": "Standard-Überspringliste verwenden"
+    "useDefaultSkipCodes": "Standard-Überspringliste verwenden",
+    "scope": "Gültigkeitsbereich"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "Bei einem Fehler wird die Pipeline fortgesetzt; der Fehler ist verfügbar unter ",
@@ -1086,7 +1087,9 @@
     "argumentType": "Argumenttyp",
     "argumentText": "Text",
     "argumentInvalidJson": "Kein gültiges JSON – der letzte gültige Wert bleibt erhalten",
-    "removeArgument": "Argument entfernen"
+    "removeArgument": "Argument entfernen",
+    "maxResponseSize": "Max. gespeicherte Antwortgröße (Zeichen)",
+    "maxResponseSizeHint": "Ein längeres Tool-Ergebnis wird auf so viele Zeichen gekürzt, bevor es im Konversationsspeicher abgelegt wird (mit einer Warnung im Log). Leer, 0 oder weniger nutzt den Standard von 2.000.000 (etwa 2 MB). Erfordert EDDI 6.6 oder neuer."
   },
   "llmEditor": {
     "addCustomInstruction": "Anweisung hinzufügen",
@@ -1356,7 +1359,13 @@
     "compatibleEndpointOverridden": "Endpunkt: {{url}}",
     "modelType": "Modelltyp",
     "paramName": "Parametername",
-    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren."
+    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren.",
+    "maxToolCallsPerIteration": "Max. Tool-Aufrufe pro Antwort",
+    "maxToolCallsPerIterationDefault": "(Standard {{n}})",
+    "maxToolCallsPerTurn": "Max. Tool-Aufrufe pro Zug",
+    "maxToolCallsPerTurnDefault": "(Standard {{n}})",
+    "maxToolCallsHint": "Aufrufe über einer Grenze werden nicht ausgeführt: Jeder erhält ein NOT_EXECUTED-Ergebnis, das dem Modell sagt, dass die Grenze erreicht ist, und das Modell antwortet mit dem, was es hat. Abgelehnte Aufrufe erreichen nie die Freigabeprüfung. Die Zählung pro Zug umfasst Aufrufe vor einer Freigabepause. -1 oder 0 hebt eine Grenze auf. Erfordert EDDI 6.6 oder neuer – auf einem älteren Server leer lassen.",
+    "maxToolCallsUncapped": "Eine Grenze ist ausgeschaltet: Das Modell kann dort beliebig viele Tool-Aufrufe ausführen, begrenzt nur durch Max Tool Iterations."
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -1775,7 +1784,44 @@
       "reasonUncovered": "{{count}} geladene Einträge älter als der geprüfte Bereich",
       "unverifiedTitle": "Nicht vollständig verifiziert",
       "unverifiedDesc": "Keine Signatur wurde widerlegt, aber nicht alles konnte geprüft werden: {{reasons}}."
-    }
+    },
+    "adminActions": {
+      "description": "Jede administrative Änderung über die REST-API – Deployments, Konfigurationsänderungen, Importe, Löschungen und abgelehnte Aufrufe – signiert im Audit-Ledger. Request-Bodys werden nie gespeichert, und die ID einer Person, um die es ging, ist pseudonymisiert.",
+      "actor": "Akteur",
+      "actorPlaceholder": "Principal, z. B. alice",
+      "apply": "Anwenden",
+      "method": "Methode",
+      "allMethods": "Alle Methoden",
+      "window": "Zeit",
+      "clear": "Filter zurücksetzen",
+      "noMatch": "Keine administrativen Aktionen entsprechen diesen Filtern",
+      "empty": "Noch keine administrativen Aktionen aufgezeichnet",
+      "noMatchLoadOlder": "Nur die neuesten Zeilen sind geladen – lade ältere, um weiter zurück zu suchen.",
+      "emptyHint": "EDDI zeichnet sie ab Version 6.6 auf, außer eddi.audit.admin-actions.enabled ist false. Ein älterer Server zeigt hier nichts.",
+      "caption": "Administrative Aktionen, neueste zuerst",
+      "colTime": "Zeit",
+      "colActor": "Akteur",
+      "colAction": "Aktion",
+      "colEndpoint": "Endpunkt",
+      "colStatus": "Status",
+      "filterByActor": "Nur die Aktionen dieses Akteurs zeigen",
+      "loadOlderError": "Ältere Zeilen konnten nicht geladen werden.",
+      "loadOlder": "Ältere laden",
+      "forbidden": "Nur Administratoren können administrative Aktionen lesen",
+      "forbiddenHint": "Das Protokoll enthält die Änderungen aller Administratoren, daher braucht das Lesen die Rolle eddi-admin.",
+      "unsupported": "Dieses EDDI zeichnet keine administrativen Aktionen auf",
+      "unsupportedHint": "Sie werden ab EDDI 6.6 aufgezeichnet.",
+      "loadError": "Die administrativen Aktionen konnten nicht geladen werden.",
+      "shown": "{{shown}} von {{loaded}} geladenen Zeilen angezeigt",
+      "windowAny": "Beliebige Zeit",
+      "windowHour": "Letzte Stunde",
+      "windowDay": "Letzte 24 Stunden",
+      "windowWeek": "Letzte 7 Tage",
+      "windowMonth": "Letzte 30 Tage"
+    },
+    "views": "Audit-Ansichten",
+    "tabTrail": "Pipeline-Verlauf",
+    "tabAdminActions": "Administrative Aktionen"
   },
   "schedules": {
     "cronHelp": "5-Felder-Format: Minute Stunde Tag-des-Monats Monat Wochentag",
@@ -1906,7 +1952,16 @@
     "systemManaged": "System",
     "systemManagedHint": "Von EDDI verwaltet (Wissensbasis-Ingestion, Gedächtniskonsolidierung oder Team-Kadenz). Ändern Sie ihn dort, wo er definiert ist, nicht hier.",
     "persistentConversationIdLocked": "Wird beim Anlegen des Zeitplans festgelegt. Der Server behält die Konversation bei, an die die Ausführungen bisher angehängt wurden.",
-    "failedScheduleGone": "Zeitplan existiert nicht mehr"
+    "failedScheduleGone": "Zeitplan existiert nicht mehr",
+    "disabledByPerson": "Von einer Person deaktiviert. Ein Zeitplan, den ein Undeploy vor EDDI 6.6 ausgeschaltet hat, erscheint ebenfalls so: Aktiviere ihn einmal von Hand.",
+    "disabledUndeployed": "Agent nicht deployt",
+    "disabledUndeployedHint": "Ausgeschaltet, als sein Agent undeployt wurde. Er schaltet sich beim nächsten erfolgreichen Deploy des Agenten von selbst wieder ein – nichts zu tun.",
+    "disabledAccessRevoked": "Zugriff entzogen",
+    "disabledAccessRevokedHint": "Sein Ersteller kann diesen Agenten nicht mehr nutzen, daher wird er nicht mehr ausgelöst. Teile den Agenten wieder mit ihm – oder lege den Zeitplan als jemand an, der den Agenten nutzen darf – und aktiviere ihn dann.",
+    "disabledOtherHint": "Von EDDI aus dem angezeigten Grund ausgeschaltet.",
+    "serverRefusedUpdate": "Der Server hat diese Änderung abgelehnt:",
+    "serverRefusedCreate": "Der Server hat diesen Zeitplan abgelehnt:",
+    "disabledAccessRevokedHintBy": "Sein Ersteller ({{user}}) kann diesen Agenten nicht mehr nutzen, daher wird er nicht mehr ausgelöst. Teile den Agenten wieder mit ihm – oder lege den Zeitplan als jemand an, der den Agenten nutzen darf – und aktiviere ihn dann."
   },
   "cascadeTrace": {
     "title": "Modellkaskade",
@@ -2207,7 +2262,29 @@
     "chunkStrategyLegacy": "{{value}} (wird als Rekursiv gespeichert)",
     "saveBeforeIngest": "Speichern Sie zuerst Ihre Änderungen – Dokumente werden mit dem Speicher und dem Embedding-Modell der gespeicherten Wissensbasis aufgenommen, nicht mit den Änderungen auf dem Bildschirm.",
     "chunkStrategyUnsupported": "{{value}} (nicht unterstützt)",
-    "chunkStrategyUnsupportedHint": "Der Server lehnt diese Strategie beim Speichern ab. Wählen Sie Rekursiv."
+    "chunkStrategyUnsupportedHint": "Der Server lehnt diese Strategie beim Speichern ab. Wählen Sie Rekursiv.",
+    "location": {
+      "reference": "Ein Speicherort muss ausgeschrieben werden, keine ${…}-Referenz. Der Ort entscheidet, wessen Dokumente ein Agent liest, und eine Referenz wird erst beim Aufbau des Speichers aufgelöst – nach allen Prüfungen – aus Variablen, die jeder Editor ändern kann; sie könnte also auf den Speicher einer anderen Wissensbasis oder auf SQL zeigen. Eine bereits mit Referenz gespeicherte Wissensbasis nimmt nichts mehr auf und liefert nichts mehr, bis sie einmal mit dem ausgeschriebenen Namen gespeichert wird.",
+      "pgIdentifier": "Eine pgvector-Tabelle muss ein einfacher Name sein, optional mit Schema (Buchstaben, Ziffern, _ und $). Der Speicher setzt ihn unverändert in SQL ein, daher werden Anführungszeichen, Leerzeichen und Satzzeichen abgelehnt.",
+      "refused": "Der Server lehnt {{param}} = {{value}} ab",
+      "reserved": "Namen, die mit {{prefix}} beginnen (in jedem Teil, jede Schreibweise), sind reserviert: EDDI leitet den eigenen Ort jeder Wissensbasis von diesem Präfix ab, daher könnte dieser Name den Speicher einer anderen Wissensbasis ansprechen. Wähle einen anderen Namen oder lass ihn leer, um einen eigenen Ort für diese Wissensbasis zu erhalten."
+    },
+    "layout": {
+      "idTitle": "Eigener Speicher (per ID adressiert)",
+      "nameTitle": "Namensbasierter Speicher (6.5-Layout)",
+      "idBody": "Diese Wissensbasis hat einen eigenen Speicher: Jeder Chunk trägt ihre ID, und die Suche sieht nur ihre eigenen Chunks, selbst in einer geteilten Tabelle.",
+      "nameBody": "Vor EDDI 6.6 angelegt: Ihr Speicher wird über den Namen der Wissensbasis gefunden, daher teilt ihn jede andere Wissensbasis mit demselben Namen. Sie funktioniert weiter wie bisher.",
+      "defaultUnsaved": "Ort: eddi_kbid_<id> (Standard, beim Speichern vergeben)",
+      "migrate": "In eigenen Speicher verschieben…",
+      "renameNote": "Das Umbenennen dieser Wissensbasis verschiebt sie auf dieselbe Weise. Erfordert EDDI 6.6 oder neuer.",
+      "migrateTitle": "Diese Wissensbasis in einen eigenen Speicher verschieben?",
+      "migrateBodyExplicit": "Sie behält ihre Tabelle, aber ab jetzt werden nur Chunks mit ihrer ID abgerufen – keiner der vorhandenen Chunks trägt diese Kennung, daher beginnt sie LEER. Ihre Quellen werden beim nächsten Lauf von selbst neu eingelesen; über /ingest hinzugefügte Dokumente müssen erneut eingelesen werden. Nichts wird gelöscht. Die Änderung wirkt beim Speichern und kann nicht rückgängig gemacht werden.",
+      "migrateBody": "Sie zieht in einen neuen, LEEREN eigenen Speicher. Ihre Quellen werden beim nächsten Lauf von selbst neu eingelesen; über /ingest hinzugefügte Dokumente müssen erneut eingelesen werden. Der alte Speicher bleibt unberührt bestehen. Die Änderung wirkt beim Speichern und kann nicht rückgängig gemacht werden.",
+      "migrateConfirm": "Beim Speichern verschieben",
+      "explicit": "Ort: {{value}} (oben gesetzt)",
+      "default": "Ort: {{value}} (Standard)",
+      "legacyDefault": "Ort: abgeleitet vom Namen „{{name}}“ (Standard)"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -2986,8 +3063,10 @@
       "humanNeedsName_one": "{{count}} menschliches Mitglied braucht einen Anzeigenamen.",
       "humanNeedsName_other": "{{count}} menschliche Mitglieder brauchen einen Anzeigenamen.",
       "humanNeedsId_one": "{{count}} menschliches Mitglied braucht die Benutzer-ID der Person.",
-      "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person."
-    }
+      "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person.",
+      "duplicateMember": "{{ids}} ist mehr als einmal aufgeführt. Ein Mitglied hat einen Platz: Zwei Plätze würden eine Mitgliedskonversation teilen und die Antworten des anderen sehen. Nutze für einen zweiten Platz einen zweiten Agenten."
+    },
+    "serverRefused": "Der Server hat diese Gruppe abgelehnt:"
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3315,7 +3394,9 @@
     "partialBody": "Der Rest des Agenten wurde geschrieben. Diese Ressourcen blieben unverändert und erfordern Aufmerksamkeit.",
     "partialCounts": "{{created}} erstellt, {{updated}} aktualisiert, {{failed}} fehlgeschlagen.",
     "schedulesSkipped_one": "{{count}} Zeitplan im Archiv wurde nicht importiert, weil die Auswahl ihn nicht enthielt.",
-    "schedulesSkipped_other": "{{count}} Zeitpläne im Archiv wurden nicht importiert, weil die Auswahl sie nicht enthielt."
+    "schedulesSkipped_other": "{{count}} Zeitpläne im Archiv wurden nicht importiert, weil die Auswahl sie nicht enthielt.",
+    "mergeScopeDefaultSpace": "deinem Standardbereich",
+    "mergeScope": "Diese Zusammenführung aktualisiert nur Ressourcen, die du in {{space}} bearbeiten darfst. Eine Kopie dieses Agenten in einem anderen Arbeitsbereich wird nie verändert – der Import legt stattdessen deine eigene Kopie an. Wechsle zuerst den Bereich, um die Kopie dort zu aktualisieren."
   },
   "syncPage": {
     "title": "Agenten-Synchronisierung",
@@ -3648,7 +3729,18 @@
     "conversationsTruncated_other": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
     "failedConversations_one": "{{count}} Gespräch konnte nicht gelesen werden und fehlt im Paket.",
     "failedConversations_other": "{{count}} Gespräche konnten nicht gelesen werden und fehlen im Paket.",
-    "deleteIncomplete": "Löschung unvollständig — einige Daten dieses Benutzers existieren möglicherweise noch. Nicht als erfüllt melden."
+    "deleteIncomplete": "Löschung unvollständig — einige Daten dieses Benutzers existieren möglicherweise noch. Nicht als erfüllt melden.",
+    "auditRedacted": "Audit-Einträge geschwärzt",
+    "auditLegacy": "Dieses EDDI ersetzt im Audit-Ledger nur die Benutzer-ID: Die dort gespeicherten Prompts und Antworten bleiben erhalten. EDDI 6.6 und neuer schwärzt sie.",
+    "auditPseudonymizeMode": "Audit-Inhalte wurden behalten: Dieser Server läuft mit eddi.audit.erasure-mode=pseudonymize (etwa wegen einer rechtlichen Aufbewahrungspflicht), daher wurde im Audit-Ledger nur die Benutzer-ID ersetzt.",
+    "auditRedactedExplanation": "Die Audit-Zeilen des Benutzers bleiben zur Nachweisführung erhalten, aber Prompts, Antworten, Modelldetails und Tool-Aufrufe wurden durch eine Schwärzungsmarke ersetzt und die Benutzer-ID pseudonymisiert. Zuvor gültig verifizierte Zeilen wurden neu signiert; eine bereits manipulierte Zeile bleibt als ungültig markiert.",
+    "completeExplanation": "Vollständig bedeutet: Jeder Schritt war erfolgreich, einschließlich einer abschließenden Prüfung, dass keine Audit-Zeile unter der ID dieses Benutzers noch ungeschwärzte Inhalte enthält.",
+    "failedStep": {
+      "auditRedaction": "Einige Audit-Zeilen enthalten noch Prompts oder Antworten dieses Benutzers. Führe die Löschung erneut aus – das ist gefahrlos wiederholbar und betrifft nur das Verbliebene. Schlägt sie weiter fehl, nennt das Server-Log die Ursache unter dem Pseudonym dieser Löschung.",
+      "auditLedger": "Die Benutzer-ID konnte nicht in jeder Audit-Zeile ersetzt werden. Führe die Löschung erneut aus, sobald die Datenbank erreichbar ist.",
+      "databaseLogs": "Datenbank-Logeinträge konnten nicht pseudonymisiert werden. Führe die Löschung erneut aus; die Log-Aufbewahrung entfernt sie mit der Zeit ebenfalls.",
+      "generic": "Dieser Schritt wurde nicht abgeschlossen. Führe die Löschung erneut aus, sobald die Ursache im Server-Log behoben ist – das ist gefahrlos wiederholbar."
+    }
   },
   "mockBanner": {
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein EDDI-Backend für echte Daten."
@@ -5244,5 +5336,22 @@
     "impactReasonLegacy": "älter als die Versionsfolge",
     "impactReasonBreaking": "inkompatible Änderung",
     "switchNotice": "Agent wechselte von v{{from}} zu v{{to}}"
+  },
+  "propertyValue": {
+    "typeLabel": "Werttyp",
+    "jsonOnly": "Im JSON-Tab gesetzt",
+    "valueLabel": "Wert",
+    "intRange": "Außerhalb des Integer-Bereichs (±2.147.483.647). Wähle Long-Ganzzahl für diesen Wert.",
+    "unsafeLong": "Jenseits von 9.007.199.254.740.991 kann der Browser diese Ganzzahl nicht exakt halten; bearbeite sie im JSON-Tab.",
+    "needs66": "Long-Ganzzahl und Dezimalzahl erfordern EDDI 6.6 oder neuer.",
+    "conflict": "Diese Zeile setzt {{fields}}. Nur {{winner}} wird verwendet; die Wahl eines Typs hier behält diesen einen Wert und entfernt die übrigen.",
+    "kindString": "Text / Vorlage",
+    "kindInt": "Ganzzahl",
+    "kindLong": "Long-Ganzzahl",
+    "kindDouble": "Dezimalzahl",
+    "kindFloat": "Float (≈7 Stellen)",
+    "kindBoolean": "Boolean",
+    "kindObject": "Objekt (JSON)",
+    "kindList": "Liste (JSON)"
   }
 }

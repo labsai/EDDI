@@ -1373,7 +1373,7 @@ describe("property instruction scope", () => {
         onChange={onChange}
       />,
     );
-    const select = within(screen.getByTestId("property-instruction-row")).getAllByRole("combobox")[0] as HTMLSelectElement;
+    const select = within(screen.getByTestId("property-instruction-row")).getByTestId("instruction-scope") as HTMLSelectElement;
     expect(select.value).toBe("secret");
     expect([...select.options].find((o) => o.value === "secret")!.disabled).toBe(true);
     expect(screen.getByTestId("property-instruction-secret-warning")).toHaveTextContent(/plain text/);

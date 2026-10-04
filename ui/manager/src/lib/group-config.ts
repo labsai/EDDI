@@ -203,6 +203,7 @@ export type GroupSaveProblem =
   | { kind: "debateRoles" }
   | { kind: "devilAdvocateRole" }
   | { kind: "memberUnassigned"; count: number }
+  | { kind: "duplicateMember"; ids: string[] }
   | { kind: "humanNeedsName"; count: number }
   | { kind: "humanNeedsId"; count: number }
   | { kind: "humanInTaskForce" }
@@ -250,6 +251,9 @@ export function groupSaveProblems(
   ).length;
   if (unassigned > 0) problems.push({ kind: "memberUnassigned", count: unassigned });
 
+  const repeated = repeatedMemberIds(members);
+  if (repeated.length > 0) problems.push({ kind: "duplicateMember", ids: repeated });
+
   if (!config.phases || config.phases.length === 0) {
     // Trimmed and upper-cased, like `presetRoleProblems`.
     const roles = new Set(members.map((m) => m.role?.trim().toUpperCase()).filter(Boolean));
@@ -282,6 +286,51 @@ export function groupSaveProblems(
   return problems;
 }
 
+/**
+ * The id a member's seat is keyed by: its trimmed `agentId`, whatever the member
+ * type. EDDI keys member conversations, display names, votes and the transcript
+ * by that string alone, so an AGENT and a GROUP member with the same id collide
+ * exactly like two AGENT seats do (`AgentGroupStore.duplicateMemberProblems`,
+ * EDDI 6.6+, which refuses the save with a 400).
+ */
+export function memberSeatKey(member: { agentId?: string | null } | null | undefined): string | null {
+  const id = member?.agentId?.trim();
+  return id ? id : null;
+}
+
+/** Seat keys that appear more than once, in first-seen order. */
+export function repeatedMemberIds(
+  members: ReadonlyArray<{ agentId?: string | null } | null | undefined>,
+): string[] {
+  const seen = new Set<string>();
+  const repeated: string[] = [];
+  for (const member of members) {
+    const key = memberSeatKey(member);
+    if (!key) continue;
+    if (seen.has(key) && !repeated.includes(key)) repeated.push(key);
+    seen.add(key);
+  }
+  return repeated;
+}
+
+/**
+ * The ids every OTHER member already holds — what an agent picker for member
+ * `index` must not offer again. The picker keeps offering the row's own current
+ * value, so a selection never disappears from under the author.
+ */
+export function idsTakenByOtherMembers(
+  members: ReadonlyArray<{ agentId?: string | null } | null | undefined>,
+  index: number,
+): Set<string> {
+  const taken = new Set<string>();
+  members.forEach((member, i) => {
+    if (i === index) return;
+    const key = memberSeatKey(member);
+    if (key) taken.add(key);
+  });
+  return taken;
+}
+
 /** The reader-facing sentence for one {@link GroupSaveProblem}. */
 export function groupSaveProblemMessage(t: TFunction, problem: GroupSaveProblem): string {
   switch (problem.kind) {
@@ -300,6 +349,12 @@ export function groupSaveProblemMessage(t: TFunction, problem: GroupSaveProblem)
         defaultValue: "{{count}} member has no agent assigned.",
         defaultValue_other: "{{count}} members have no agent assigned.",
         count: problem.count,
+      });
+    case "duplicateMember":
+      return t("groups.saveProblem.duplicateMember", {
+        defaultValue:
+          "{{ids}} is listed more than once. A member holds one seat: two seats would share one member conversation and see each other's answers. Use a second agent for a second seat.",
+        ids: problem.ids.join(", "),
       });
     case "humanNeedsName":
       return t("groups.saveProblem.humanNeedsName", {
