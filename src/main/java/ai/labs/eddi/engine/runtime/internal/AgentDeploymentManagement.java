@@ -381,7 +381,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private void undeployLocally(Environment environment, String agentId, Integer agentVersion, String why) {
         try {
             agentFactory.undeployAgent(environment, agentId, agentVersion);
-            unrecorded.remove(keyOf(environment, agentId, agentVersion));
+            // Forget the key entirely: if an unrecorded (autoDeploy=false) redeploy of
+            // the same version lands after this — its event can overtake the undeploy —
+            // only a new record may make the sweep take it for one that went away.
+            String key = keyOf(environment, agentId, agentVersion);
+            unrecorded.remove(key);
+            everRecorded.remove(key);
+            missingSince.remove(key);
             synchronized (sweepLock) {
                 deploymentInfos.removeIf(info -> info.getEnvironment() == environment && agentId.equals(info.getAgentId())
                         && agentVersion.equals(info.getAgentVersion()));

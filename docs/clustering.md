@@ -237,9 +237,13 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   dead-letter retention (7 days; they carry the entry's input and output), and paginated tool
   responses (15 min) and A2A task mappings (24 h) expire on their own TTL. Erasure requests
   that must also cover those windows should wait them out or purge the streams.
-- An audit entry written on another node by work that the erasure had not yet
-  stopped is pseudonymised only if the `gdpr.user-erased` event reached that
-  node first.
+- An erasure marks the user on every node before it pseudonymises the stored
+  audit rows: each node does so while answering the `gdpr-stop` request the
+  erasing node waits for, and from then on that node pseudonymises the user's
+  late audit entries when they are queued and again when they are written. A
+  node that does not answer `gdpr-stop` in time (it is named in the log) is
+  covered only once the `gdpr.user-erased` event reaches it, so an entry it
+  writes between the scrub and that event keeps the raw id.
 - A turn whose write the fence refuses has usually already answered its
   caller: the reply is rendered inside the pipeline, before the write. The
   conversation history does not contain that turn and it is dead-lettered —

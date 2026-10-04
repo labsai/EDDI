@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -141,5 +142,52 @@ class SharedKvCacheTest {
         users.put("k", "v");
         bus.resyncs.forEach(Runnable::run);
         assertNull(users.get("k"));
+    }
+    @Test
+    @DisplayName("a putIfAbsent that wins the bucket clears an old local-only marker: a later delete elsewhere is not answered locally")
+    void wonCreateClearsTheLocalOnlyMarker() {
+        ISharedKv kv = mock(ISharedKv.class);
+        when(kv.bucket()).thenReturn("TOOL_PAGES");
+        when(kv.get(any())).thenReturn(Optional.empty());
+        when(kv.put(any(), any())).thenThrow(new ClusterUnavailableException("down (test)"));
+        ICache<String, String> node = new SharedKvCache<>(local("marker"), kv, false);
+        node.put("k", "old"); // degraded: kept on this node only
+
+        when(kv.create(any(), any())).thenReturn(OptionalLong.of(7));
+        assertNull(node.putIfAbsent("k", "new"), "the create won");
+        // another node deletes the shared entry; the bucket is empty again
+        assertNull(node.get("k"), "the shared value is gone, so this node must not answer from its copy");
+    }
+
+    @Test
+    @DisplayName("a putIfAbsent that loses the race reports the key as present even when the stored value cannot be read (fail-closed for nonces)")
+    void lostRaceWithUnreadableValueIsStillPresent() {
+        ISharedKv kv = mock(ISharedKv.class);
+        when(kv.bucket()).thenReturn("NONCES");
+        when(kv.create(any(), any())).thenReturn(OptionalLong.empty());
+        when(kv.get(any())).thenReturn(Optional.of(new ISharedKv.Versioned("{\"t\":\"evil.Type\",\"v\":1}".getBytes(), 3)));
+        ICache<String, Boolean> nonces = new SharedKvCache<>(local("lost"), kv, true);
+        assertNotNull(nonces.putIfAbsent("nonce-1", Boolean.TRUE), "an unreadable winner is still a winner: the nonce is a replay");
+
+        when(kv.get(any())).thenReturn(Optional.empty()); // expired between the create and the read
+        assertNotNull(nonces.putIfAbsent("nonce-2", Boolean.TRUE), "a winner that expired since is still a replay");
+    }
+
+    @Test
+    @DisplayName("cluster mode: every caller of one cache gets the same shared wrapper, so a value kept node-locally is found by all of them")
+    void oneSharedWrapperPerCache() {
+        ISharedKv refusing = mock(ISharedKv.class);
+        when(refusing.bucket()).thenReturn("TOOL_PAGES");
+        when(refusing.get(any())).thenReturn(Optional.empty());
+        when(refusing.put(any(), any())).thenThrow(new ClusterUnavailableException("payload exceeds the server limit (test)"));
+        var factory = clusteredFactory(new RecordingEventBus(), refusing);
+
+        ICache<String, String> writer = factory.getCache("paginated-tool-responses", Duration.ofMinutes(15));
+        writer.put("page-1", "big");
+        ICache<String, String> reader = factory.getCache("paginated-tool-responses", Duration.ofMinutes(15));
+
+        assertSame(writer, reader);
+        assertEquals("big", reader.get("page-1"));
+        assertNotSame(writer, factory.getCache("paginated-tool-responses", Duration.ofMinutes(5)), "another TTL is another local cache");
     }
 }
