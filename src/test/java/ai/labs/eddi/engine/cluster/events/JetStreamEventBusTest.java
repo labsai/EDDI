@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
@@ -123,5 +124,26 @@ class JetStreamEventBusTest {
         assertEquals(0, bus.outboxDepth());
         assertEquals(2.0, registry.counter("eddi.cluster.events.published", "type", ClusterEvent.CONNECTION_CHANGED).count(),
                 "drained events count as published");
+    }
+    @Test
+    @DisplayName("a connected publish counts on ack and falls back to the outbox when the ack fails")
+    void connectedPublishCountsAckOrQueuesFailure() throws Exception {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        bus = new JetStreamEventBus(connections, registry);
+        bus.startCluster();
+        when(connections.isConnected()).thenReturn(true);
+        JetStream jetStream = mock(JetStream.class);
+        when(connections.jetStream()).thenReturn(jetStream);
+
+        when(jetStream.publishAsync(anyString(), any(byte[].class))).thenReturn(CompletableFuture.completedFuture(mock(PublishAck.class)));
+        bus.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
+        assertEquals(1.0, registry.counter("eddi.cluster.events.published", "type", ClusterEvent.CONNECTION_CHANGED).count());
+        assertEquals(0, bus.outboxDepth());
+
+        when(jetStream.publishAsync(anyString(), any(byte[].class))).thenReturn(CompletableFuture.failedFuture(new IllegalStateException("no ack")));
+        bus.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
+        assertEquals(1, bus.outboxDepth(), "a failed ack keeps the event for the next flush");
+        assertEquals(1.0, registry.counter("eddi.cluster.events.published", "type", ClusterEvent.CONNECTION_CHANGED).count(),
+                "a failed publish is not counted as published");
     }
 }

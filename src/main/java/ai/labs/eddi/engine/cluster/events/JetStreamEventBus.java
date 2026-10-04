@@ -39,7 +39,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -166,13 +165,13 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
         }
         try {
             JetStream js = connections.jetStream();
-            CompletableFuture<?> ack = js.publishAsync(subject, data);
-            ack.whenComplete((ignoredAck, failure) -> {
-                if (failure != null) {
-                    enqueue(subject, data);
-                } else {
-                    meterRegistry.counter("eddi.cluster.events.published", "type", type).increment();
-                }
+            var ack = js.publishAsync(subject, data);
+            // Success and failure as separate stages: the ack itself carries nothing we
+            // use.
+            ack.thenRun(() -> meterRegistry.counter("eddi.cluster.events.published", "type", type).increment());
+            ack.exceptionally(failure -> {
+                enqueue(subject, data);
+                return null;
             });
         } catch (RuntimeException e) {
             enqueue(subject, data);
