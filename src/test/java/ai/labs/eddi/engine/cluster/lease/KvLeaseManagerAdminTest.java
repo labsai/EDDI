@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
@@ -127,6 +128,35 @@ class KvLeaseManagerAdminTest {
         assertEquals(ForceReleaseOutcome.RENEWED, result.outcome());
         assertTrue(result.currentRevision() > seen);
         assertTrue(kv.get("c.conv1").isPresent(), "a renewed lease must not be deleted");
+        assertFalse(held.isLost());
+    }
+
+    @Test
+    @DisplayName("a holder that renews between the administrator's read and the delete keeps its lease: the delete is compare-and-set, not unconditional")
+    void forceReleaseLosesTheRaceToARenewal() throws Exception {
+        AtomicBoolean renewAfterNextRead = new AtomicBoolean();
+        InMemorySharedKv racing = new InMemorySharedKv("LEASES", Duration.ofSeconds(20)) {
+            @Override
+            public synchronized Optional<Versioned> getConsistent(String key) {
+                Optional<Versioned> read = super.getConsistent(key);
+                if (read.isPresent() && renewAfterNextRead.getAndSet(false)) {
+                    // the holder's heartbeat lands right after the administrator read the lease
+                    update(key, read.get().value(), read.get().revision());
+                }
+                return read;
+            }
+        };
+        view.live.put("a", "a1");
+        view.live.put("b", "b1");
+        KvLeaseManager holder = new KvLeaseManager(racing, new NodeIdentity("a", "a1"), config, scheduler, io, bus, view, new SimpleMeterRegistry());
+        KvLeaseManager admin = new KvLeaseManager(racing, new NodeIdentity("b", "b1"), config, scheduler, io, bus, view, new SimpleMeterRegistry());
+        LeaseHandle held = get(holder.acquire("conv1", Duration.ofSeconds(1)));
+
+        renewAfterNextRead.set(true);
+        KvLeaseManager.ForceRelease result = admin.forceRelease("c.conv1", null);
+
+        assertEquals(ForceReleaseOutcome.RENEWED, result.outcome());
+        assertTrue(racing.get("c.conv1").isPresent(), "the renewed lease must survive the release attempt");
         assertFalse(held.isLost());
     }
 

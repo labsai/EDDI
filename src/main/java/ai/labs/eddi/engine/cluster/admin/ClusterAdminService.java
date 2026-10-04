@@ -684,8 +684,11 @@ public class ClusterAdminService implements ClusterStartable {
         Map<String, Object> turn = e.turn() == null ? Map.of() : e.turn();
         Object agentVersion = turn.get("agentVersion");
         Object input = turn.get("input");
+        // The error text is an exception message and can quote what a user typed or a
+        // value from a configuration, so — like the input — only the admin listing has
+        // it.
         return new DeadLetterView(e.id(), e.conversationId(), str(turn.get("agentId")),
-                agentVersion instanceof Number n ? n.intValue() : null, str(turn.get("environment")), e.error(), e.timestamp(),
+                agentVersion instanceof Number n ? n.intValue() : null, str(turn.get("environment")), includeInput ? e.error() : null, e.timestamp(),
                 e.reason() == null ? DeadLetterEntry.REASON_FAILED : e.reason(), e.nodeId(), e.fence(),
                 includeInput && input != null ? input.toString() : null, Boolean.TRUE.equals(turn.get("secretInput")), e.isReplayable(),
                 e.notReplayableReason(), isLocal(e.id()));

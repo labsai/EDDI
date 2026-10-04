@@ -25,12 +25,16 @@ import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ActionResult;
 import ai.labs.eddi.engine.model.ClusterAdminModels.BulkResult;
+import ai.labs.eddi.engine.model.ClusterAdminModels.BucketView;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ClusterOverview;
 import ai.labs.eddi.engine.model.ClusterAdminModels.DeadLetterPage;
 import ai.labs.eddi.engine.model.ClusterAdminModels.DeadLetterSummary;
 import ai.labs.eddi.engine.model.ClusterAdminModels.Diagnosis;
 import ai.labs.eddi.engine.model.ClusterAdminModels.LeasePage;
 import ai.labs.eddi.engine.model.ClusterAdminModels.LeaseView;
+import ai.labs.eddi.engine.model.ClusterAdminModels.NatsView;
+import ai.labs.eddi.engine.model.ClusterAdminModels.PeerView;
+import ai.labs.eddi.engine.model.ClusterAdminModels.StreamView;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
@@ -229,6 +233,39 @@ class ClusterAdminServiceTest {
             assertEquals("STALE", overview.nodes().stream().filter(n -> n.nodeId().equals("n2")).findFirst().orElseThrow().state());
         }
 
+        private ClusterAdminService withReplicas(boolean offline, boolean current) {
+            ClusterAdminService spied = spy(service);
+            List<PeerView> peers = List.of(new PeerView("nats-1", true, false, 0, 0L), new PeerView("nats-2", current, offline, 0, null));
+            doReturn(new NatsView("CONNECTED", "nats://nats-1:4222", "nats-1", "2.11", "c1", List.of(), 0, 1,
+                    List.of(new StreamView("EDDI_EVENTS", "events", 3, 0, 0, 0, 0, 0, "nats-1", peers, List.of())),
+                    List.of(new BucketView("EDDI_LEASES", "LEASES", 3, 0, 0, null, "nats-1", peers)), null, null, null)).when(spied)
+                    .natsView(any());
+            return spied;
+        }
+
+        @Test
+        @DisplayName("a JetStream peer that is offline makes the verdict PARTITIONED, with NATS_PEER_OFFLINE")
+        void offlinePeerIsPartitioned() {
+            ClusterOverview overview = withReplicas(true, false).overview();
+            assertEquals("PARTITIONED", overview.verdict());
+            assertTrue(overview.reasons().contains("NATS_PEER_OFFLINE"));
+        }
+
+        @Test
+        @DisplayName("a replica that is only behind (not offline) is DEGRADED with NATS_REPLICA_BEHIND, never PARTITIONED")
+        void behindReplicaIsDegradedNotPartitioned() {
+            ClusterOverview overview = withReplicas(false, false).overview();
+            assertEquals("DEGRADED", overview.verdict());
+            assertTrue(overview.reasons().contains("NATS_REPLICA_BEHIND"));
+            assertFalse(overview.reasons().contains("NATS_PEER_OFFLINE"));
+        }
+
+        @Test
+        @DisplayName("every replica current: HEALTHY")
+        void currentReplicasAreHealthy() {
+            assertEquals("HEALTHY", withReplicas(false, true).overview().verdict());
+        }
+
         @Test
         @DisplayName("the HITL recovery leader is marked on its card")
         void hitlLeader() {
@@ -339,6 +376,7 @@ class ClusterAdminServiceTest {
             assertEquals(2L, summary.byNode().get("n2"));
             assertEquals(3L, summary.byAgent().get("a1"));
             assertTrue(summary.recent().stream().allMatch(e -> e.input() == null));
+            assertTrue(summary.recent().stream().allMatch(e -> e.error() == null), "an exception message can quote user content");
         }
     }
 
