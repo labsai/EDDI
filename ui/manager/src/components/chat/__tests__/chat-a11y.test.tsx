@@ -109,6 +109,22 @@ describe("ChatPanel — transcript and agent selector accessibility", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("ignores Escape and Enter during IME composition", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ChatPanel />);
+
+    await user.click(screen.getByTestId("agent-selector"));
+    const search = await screen.findByTestId("agent-search");
+    await screen.findByText("Travel Planner");
+
+    fireEvent.keyDown(search, { key: "Escape", isComposing: true });
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(search, { key: "Enter", keyCode: 229 });
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(useChatStore.getState().selectedAgentId).toBeFalsy();
+  });
+
   it("opens the list from the trigger with ArrowDown", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ChatPanel />);

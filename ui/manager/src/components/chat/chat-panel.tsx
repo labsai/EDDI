@@ -481,6 +481,8 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                   setAgentHighlight(0);
                 }}
                 onKeyDown={(e) => {
+                  // Keys that belong to an IME composition are not shortcuts.
+                  if (isImeComposing(e)) return;
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
                     setAgentHighlight((h) => Math.min(h + 1, Math.max(visibleAgents.length - 1, 0)));
