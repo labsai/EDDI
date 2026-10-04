@@ -601,7 +601,7 @@
     "reviewKeyNotNeeded": "Not needed for this provider",
     "reviewKeyNone": "None",
     "reviewKeyVault": "Vault reference {{ref}}",
-    "reviewKeyEntered": "Entered here; stored in the vault on creation",
+    "reviewKeyEntered": "Entered here",
     "reviewApiKey": "API key",
     "reviewBaseUrl": "Base URL",
     "deployTarget": "Deploy target",

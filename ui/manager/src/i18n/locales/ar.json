@@ -578,7 +578,7 @@
     "reviewKeyNotNeeded": "غير مطلوب لهذا المزوّد",
     "reviewKeyNone": "لا شيء",
     "reviewKeyVault": "مرجع الخزنة {{ref}}",
-    "reviewKeyEntered": "أُدخل هنا؛ يُخزَّن في الخزنة عند الإنشاء",
+    "reviewKeyEntered": "أُدخل هنا",
     "reviewApiKey": "مفتاح API",
     "reviewBaseUrl": "عنوان URL الأساسي",
     "deployTarget": "هدف النشر",

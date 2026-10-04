@@ -574,7 +574,7 @@
     "reviewKeyNotNeeded": "इस प्रदाता के लिए आवश्यक नहीं",
     "reviewKeyNone": "कोई नहीं",
     "reviewKeyVault": "वॉल्ट संदर्भ {{ref}}",
-    "reviewKeyEntered": "यहाँ दर्ज की गई; बनाते समय वॉल्ट में संग्रहीत होगी",
+    "reviewKeyEntered": "यहाँ दर्ज की गई",
     "reviewApiKey": "API कुंजी",
     "reviewBaseUrl": "बेस URL",
     "deployTarget": "डिप्लॉय का लक्ष्य",

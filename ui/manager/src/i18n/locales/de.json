@@ -574,7 +574,7 @@
     "reviewKeyNotNeeded": "Für diesen Anbieter nicht erforderlich",
     "reviewKeyNone": "Keiner",
     "reviewKeyVault": "Tresor-Referenz {{ref}}",
-    "reviewKeyEntered": "Hier eingegeben; wird bei der Erstellung im Tresor gespeichert",
+    "reviewKeyEntered": "Hier eingegeben",
     "reviewApiKey": "API-Schlüssel",
     "reviewBaseUrl": "Basis-URL",
     "deployTarget": "Bereitstellungsziel",

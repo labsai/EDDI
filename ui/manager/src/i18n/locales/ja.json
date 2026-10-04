@@ -574,7 +574,7 @@
     "reviewKeyNotNeeded": "このプロバイダーでは不要です",
     "reviewKeyNone": "なし",
     "reviewKeyVault": "Vault 参照 {{ref}}",
-    "reviewKeyEntered": "ここで入力済み。作成時に Vault に保存されます",
+    "reviewKeyEntered": "ここで入力済み",
     "reviewApiKey": "API キー",
     "reviewBaseUrl": "ベース URL",
     "deployTarget": "デプロイ先",

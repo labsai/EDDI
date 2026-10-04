@@ -574,7 +574,7 @@
     "reviewKeyNotNeeded": "이 제공자에는 필요하지 않음",
     "reviewKeyNone": "없음",
     "reviewKeyVault": "볼트 참조 {{ref}}",
-    "reviewKeyEntered": "여기에 입력함. 생성 시 볼트에 저장됨",
+    "reviewKeyEntered": "여기에 입력함",
     "reviewApiKey": "API 키",
     "reviewBaseUrl": "기본 URL",
     "deployTarget": "배포 대상",

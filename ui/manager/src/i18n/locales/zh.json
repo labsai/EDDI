@@ -574,7 +574,7 @@
     "reviewKeyNotNeeded": "此提供商不需要",
     "reviewKeyNone": "无",
     "reviewKeyVault": "保管库引用 {{ref}}",
-    "reviewKeyEntered": "已在此输入；创建时存入保管库",
+    "reviewKeyEntered": "已在此输入",
     "reviewApiKey": "API 密钥",
     "reviewBaseUrl": "基础 URL",
     "deployTarget": "部署目标",

@@ -574,7 +574,7 @@
     "reviewKeyNotNeeded": "ผู้ให้บริการนี้ไม่จำเป็นต้องใช้",
     "reviewKeyNone": "ไม่มี",
     "reviewKeyVault": "การอ้างอิงห้องนิรภัย {{ref}}",
-    "reviewKeyEntered": "กรอกที่นี่ และจะเก็บในห้องนิรภัยเมื่อสร้าง",
+    "reviewKeyEntered": "กรอกที่นี่แล้ว",
     "reviewApiKey": "คีย์ API",
     "reviewBaseUrl": "Base URL",
     "deployTarget": "เป้าหมายการติดตั้งใช้งาน",

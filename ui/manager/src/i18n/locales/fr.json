@@ -575,7 +575,7 @@
     "reviewKeyNotNeeded": "Inutile pour ce fournisseur",
     "reviewKeyNone": "Aucune",
     "reviewKeyVault": "Référence du coffre {{ref}}",
-    "reviewKeyEntered": "Saisie ici ; stockée dans le coffre à la création",
+    "reviewKeyEntered": "Saisie ici",
     "reviewApiKey": "Clé API",
     "reviewBaseUrl": "URL de base",
     "deployTarget": "Cible de déploiement",

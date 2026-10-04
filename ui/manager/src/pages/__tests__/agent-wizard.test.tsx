@@ -526,7 +526,7 @@ describe("AgentWizardPage", () => {
     await user.click(screen.getByTestId("wizard-next"));
     const review = screen.getByTestId("wizard-review");
     expect(within(review).getByText("API key")).toBeInTheDocument();
-    expect(within(review).getByText(/stored in the vault on creation/)).toBeInTheDocument();
+    expect(within(review).getByText(/Entered here/)).toBeInTheDocument();
     expect(review).not.toHaveTextContent("sk-key");
   });
 
@@ -564,6 +564,21 @@ describe("AgentWizardPage", () => {
     expect(screen.getByLabelText(/API Key/)).toBe(screen.getByTestId("wizard-apikey-input"));
     await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
     expect(screen.getByTestId("wizard-model")).toHaveValue("gpt-5.4");
+  });
+
+  it("keeps Next disabled for Ollama until its base URL is given", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, { initialRoute: "/manage/agents/wizard" });
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "A");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "B");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "ollama");
+    // Model is prefilled and no key is needed, so only the URL is missing.
+    expect(screen.getByTestId("wizard-next")).toBeDisabled();
+    await user.type(screen.getByTestId("wizard-baseurl"), "http://localhost:11434");
+    expect(screen.getByTestId("wizard-next")).not.toBeDisabled();
   });
 
   it("ties the API key and environment labels to their controls", async () => {

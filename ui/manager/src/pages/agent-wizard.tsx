@@ -202,6 +202,9 @@ export function AgentWizardPage() {
       case "llm": {
         const prov = getProviderConfig(state.provider);
         if (prov?.needsKey && !state.apiKey.trim()) return false;
+        // The field is marked required and the backend has no default to fall
+        // back on for a model server the deployment has to name.
+        if (isBaseUrlRequired(state.provider) && !state.baseUrl.trim()) return false;
         return state.model.trim().length > 0;
       }
       case "apispec":
@@ -1586,7 +1589,9 @@ function describeApiKey(
   if (isSecretReference(key)) {
     return t("setupWizard.reviewKeyVault", "Vault reference {{ref}}", { ref: referenceLabel(key) });
   }
-  return t("setupWizard.reviewKeyEntered", "Entered here; stored in the vault on creation");
+  // No storage promise: whether a literal key is vaulted depends on the server
+  // (see AgentSetupService.vaultApiKey); the success screen reports the reference.
+  return t("setupWizard.reviewKeyEntered", "Entered here");
 }
 
 function ReviewStep({

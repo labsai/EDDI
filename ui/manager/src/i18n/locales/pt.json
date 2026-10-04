@@ -575,7 +575,7 @@
     "reviewKeyNotNeeded": "Não necessária para este provedor",
     "reviewKeyNone": "Nenhuma",
     "reviewKeyVault": "Referência do cofre {{ref}}",
-    "reviewKeyEntered": "Inserida aqui; armazenada no cofre na criação",
+    "reviewKeyEntered": "Inserida aqui",
     "reviewApiKey": "Chave de API",
     "reviewBaseUrl": "URL base",
     "deployTarget": "Destino da implantação",

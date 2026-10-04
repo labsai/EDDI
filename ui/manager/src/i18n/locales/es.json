@@ -575,7 +575,7 @@
     "reviewKeyNotNeeded": "No necesaria para este proveedor",
     "reviewKeyNone": "Ninguna",
     "reviewKeyVault": "Referencia de la bóveda {{ref}}",
-    "reviewKeyEntered": "Introducida aquí; se guarda en la bóveda al crear",
+    "reviewKeyEntered": "Introducida aquí",
     "reviewApiKey": "Clave de API",
     "reviewBaseUrl": "URL base",
     "deployTarget": "Destino de implementación",
