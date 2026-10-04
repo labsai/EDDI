@@ -214,6 +214,17 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
 
 ## Residual limitations
 
+- **A load balancer must not eject a node for answering 503.** EDDI answers 503
+  (with `Retry-After`) for ordinary load shedding — executor full, quota
+  accounting or NATS unavailable under `degraded.*=reject`, a node shutting down
+  — and every node does so at once under a shared overload. With nginx's
+  defaults (`max_fails=1`) and `http_503` in `proxy_next_upstream`, one such
+  answer per node marks every node failed and the whole API answers 502 for
+  `fail_timeout`. The shipped configs set `max_fails=0` on the upstream servers:
+  a 503 is still retried on the next node, none is taken out of rotation. Do the
+  same (or leave `http_503` out of the retry conditions) on any proxy you put in
+  front. Kubernetes ingress-nginx retries only `error timeout` by default.
+
 - **`/mcp` needs client affinity.** An MCP (Streamable HTTP) session lives on
   the node that answered `initialize`; any other node answers a request with
   that `Mcp-Session-Id` 404, which makes a compliant client start over. Route
