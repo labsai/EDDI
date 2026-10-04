@@ -531,6 +531,7 @@ export function GroupsPage() {
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={() => void confirmDelete()}
+        lockWhilePending={!readingConfig}
         isPending={
           readingConfig || deleteMutation.isPending || deleteWithMembersMutation.isPending
         }

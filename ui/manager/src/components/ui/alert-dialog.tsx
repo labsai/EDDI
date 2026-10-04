@@ -15,6 +15,12 @@ interface AlertDialogProps {
   onConfirm: () => void;
   variant?: "destructive" | "warning";
   isPending?: boolean;
+  /**
+   * Ignore Escape, backdrop and X while `isPending` (default true). Turn it off
+   * for a pending phase that is still safe to abandon — e.g. a read that
+   * precedes the destructive call.
+   */
+  lockWhilePending?: boolean;
   /** Optional controls rendered between the description and the buttons
    *  (e.g. a "permanently delete" checkbox). */
   children?: ReactNode;
@@ -32,6 +38,7 @@ export function AlertDialog({
   onConfirm,
   variant = "destructive",
   isPending = false,
+  lockWhilePending = true,
   children,
   confirmDisabled = false,
 }: AlertDialogProps) {
@@ -41,7 +48,7 @@ export function AlertDialog({
   // would close the dialog while the request carries on — the user thinks they
   // cancelled something that is still being deleted. Ignore them until it ends.
   const guardedOpenChange = (next: boolean) => {
-    if (!next && isPending) return;
+    if (!next && isPending && lockWhilePending) return;
     onOpenChange(next);
   };
 
