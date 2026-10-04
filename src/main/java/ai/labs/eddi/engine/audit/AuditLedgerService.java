@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -68,7 +69,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @since 6.0.0
  */
 @ApplicationScoped
-public class AuditLedgerService {
+public class AuditLedgerService implements UserErasureParticipant {
 
     private static final Logger LOGGER = Logger.getLogger(AuditLedgerService.class);
     private static final int MAX_FLUSH_RETRIES = 3;
@@ -1490,6 +1491,33 @@ public class AuditLedgerService {
      * the raw id never travels between nodes.
      */
     private final ConcurrentHashMap<String, Instant> recentlyErasedUserHashes = new ConcurrentHashMap<>();
+
+    @Override
+    public String erasureStepName() {
+        return "auditLateEntries";
+    }
+
+    /**
+     * On the erasing node the cascade marks the user itself, before this step
+     * ({@link #markUserErased}); nothing more to do.
+     */
+    @Override
+    public int stopInFlightWork(String userId) {
+        return 0;
+    }
+
+    /**
+     * Cluster mode: part of the {@code gdpr-stop} the erasing node sends every node
+     * and waits for before it pseudonymises the stored audit rows. Marking the user
+     * here, before the reply, means an entry this node writes after that scrub is
+     * pseudonymised when it is queued or drained — not only once the
+     * {@code gdpr.user-erased} event happens to arrive.
+     */
+    @Override
+    public int stopInFlightWorkByHash(String userIdHash) {
+        markUserErasedHash(userIdHash);
+        return 0;
+    }
 
     /** An erasure started on another node; see {@link #markUserErased}. */
     public void markUserErasedHash(String userIdHash) {

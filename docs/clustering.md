@@ -165,6 +165,10 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
 - Paginated tool responses larger than the NATS payload limit (1 MiB by
   default) stay node-local; a page fetched through another node then fails as
   on a single node.
-- An audit entry written on another node by work that the erasure had not yet
-  stopped is pseudonymised only if the `gdpr.user-erased` event reached that
-  node first.
+- An erasure marks the user on every node before it pseudonymises the stored
+  audit rows: each node does so while answering the `gdpr-stop` request the
+  erasing node waits for, and from then on that node pseudonymises the user's
+  late audit entries when they are queued and again when they are written. A
+  node that does not answer `gdpr-stop` in time (it is named in the log) is
+  covered only once the `gdpr.user-erased` event reaches it, so an entry it
+  writes between the scrub and that event keeps the raw id.

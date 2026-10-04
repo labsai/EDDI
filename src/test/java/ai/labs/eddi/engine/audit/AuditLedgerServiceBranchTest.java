@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -562,5 +563,18 @@ class AuditLedgerServiceBranchTest {
         verify(cluster, never()).nextSequence(anyString(), any());
 
         service.shutdown();
+    }
+    @Test
+    @DisplayName("the gdpr-stop of an erasure on another node marks the user here, so later entries are pseudonymised")
+    void remoteErasureStopMarksTheUser() {
+        var service = new AuditLedgerService(auditStore, true, 60,
+                Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
+                true, 500, meterRegistry, null, null, new ObjectMapper());
+        assertEquals("user1", service.pseudonymiseIfErased(entry("1", "c1", "a1")).userId(), "nobody erased yet");
+
+        assertEquals(0, service.stopInFlightWorkByHash(KvKeys.sha256("user1")));
+
+        assertNotEquals("user1", service.pseudonymiseIfErased(entry("2", "c1", "a1")).userId());
+        assertEquals(0, service.stopInFlightWork("user1"), "on the erasing node the cascade marks the user itself");
     }
 }

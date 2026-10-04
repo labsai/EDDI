@@ -73,6 +73,18 @@ public class ClusterArchiveStore {
         return connection.objectStore(bucket());
     }
 
+    /**
+     * The bucket was checked once and is then only used: {@code objectStore()} is a
+     * handle, so a bucket deleted since (NATS lost its data, or an operator removed
+     * it) shows up as stream-not-found on {@code put} or {@code getInfo}. Forget
+     * the check, so the next call creates the bucket again.
+     */
+    private void forgetBucketIfMissing(Exception e) {
+        if (e instanceof JetStreamApiException api && JetStreamDeadLetterStore.streamMissing(api)) {
+            ensuredFor = null;
+        }
+    }
+
     /** Copies {@code file} to the shared store under {@code name}. Never throws. */
     public void publish(String name, Path file, Duration retention) {
         if (!enabled()) {
@@ -81,6 +93,7 @@ public class ClusterArchiveStore {
         try (InputStream in = Files.newInputStream(file)) {
             store(retention).put(name, in);
         } catch (Exception e) {
+            forgetBucketIfMissing(e);
             LOGGER.warnf("Archive %s stays on this node only — the shared store is unavailable: %s", name, e.getMessage());
         }
     }
@@ -122,6 +135,7 @@ public class ClusterArchiveStore {
             Thread.currentThread().interrupt();
             return false;
         } catch (Exception e) {
+            forgetBucketIfMissing(e);
             LOGGER.debugf("Archive %s not fetched from the shared store: %s", name, e.getMessage());
             try {
                 if (partial != null) {

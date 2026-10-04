@@ -64,3 +64,21 @@ to the single-node behaviour it had before.
 - Not fixed here, documented in [`clustering.md`](../clustering.md): tool-response pages are
   not bound to their conversation (the tool has no conversation context; the id is a random
   UUID), and Slack follow-ups to a group discussion running on another node are not routed.
+
+### Fixed after the PR #957 review
+
+- **Erasure marks the user on every node before the audit scrub.** `AuditLedgerService` now
+  takes part in the cluster `gdpr-stop`, so each node that answers marks the erased user
+  before the erasing node pseudonymises the stored rows. Before, a late entry from another
+  node kept the raw id unless the `gdpr.user-erased` event happened to arrive first.
+- **Shared caches:** one `SharedKvCache` wrapper per local cache, so every caller sees which
+  keys live on this node only. A `putIfAbsent` that wins the bucket clears an old
+  local-only marker. A lost race still reports the key as present when the stored value
+  cannot be read, which is the fail-closed answer for replay nonces.
+- **Archive bucket:** a bucket deleted after the first check is created again on the next
+  export or download, instead of failing every download through another node.
+- **Group lease:** a discussion that cannot take its group lease logs it. A cancel forwarded
+  to a holder that answers "not running here" now falls back to the database path instead
+  of reporting `false`.
+- **Deployment sweep:** a local undeploy forgets the version's record history, so an
+  unrecorded redeploy whose event overtook the undeploy is not undeployed again.
