@@ -1,8 +1,9 @@
 # Cluster demo
 
-Builds the cluster topology of [Clustering](../../docs/clustering.md) in Docker and runs every
-failure scenario that page describes against it, each with a PASS/FAIL verdict and the numbers
-behind it.
+Builds the cluster topology of [Clustering](../../docs/clustering.md) in Docker and runs the
+failure scenarios in the table below against it, each with a PASS/FAIL verdict and the numbers
+behind it. The page's residual limitations, such as an `autoDeploy=false` undeploy event lost
+while NATS is down, are not among them.
 
 ```
              127.0.0.1:7230  nginx, round robin, no affinity

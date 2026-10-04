@@ -66,3 +66,4 @@ cluster, and every one still refuses to run several in-memory replicas.
   refuses the demo config with `invalid parameter "resolve"`.
 - The dead-letter alert description in the monitoring guide now says what the expression
   counts. The demo's `--reuse` no longer sets a context file it never read.
+- **Docs (second #958 review):** the demo claims now cover only the scenarios its README lists. `clustering.md` and `gdpr-compliance.md` separate two retentions: the dead-letter stream expires audit dead letters after `eddi.coordinator.dead-letter.max-age` and holds their only copy, while the JSONL fallback never expires. They also name the actual subject, `eddi.<prefix>.dlq.audit`.

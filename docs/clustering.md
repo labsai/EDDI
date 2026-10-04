@@ -178,8 +178,9 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
   [cluster dashboard](monitoring/eddi-cluster-dashboard.json) charts the same series.
 - **Demo**: [`scripts/cluster-demo/`](../scripts/cluster-demo/README.md) builds
   this topology in Docker — three nodes of one build, three NATS nodes, MongoDB
-  or PostgreSQL, nginx and a mock LLM — and runs every failure scenario on this
-  page against it, each with a pass/fail verdict.
+  or PostgreSQL, nginx and a mock LLM — and runs the failure scenarios listed in
+  its README against it, each with a pass/fail verdict. The residual limitations
+  below are not among them.
 
 ## Moving from one node to a cluster, and back
 
@@ -236,11 +237,16 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   passes. An agent that was deployed with `autoDeploy=false` and whose undeploy event is lost
   (NATS down at that moment) stays deployed on the other nodes until they restart.
 - **NATS holds some personal data for a short time, and the erasure does not purge all of
-  it.** A failed turn's dead letter is purged with the user's conversation, but audit entries
-  that could not be written to the database wait in the `eddi.dlq.audit` subject for the
-  dead-letter retention (7 days; they carry the entry's input and output), and paginated tool
-  responses (15 min) and A2A task mappings (24 h) expire on their own TTL. Erasure requests
-  that must also cover those windows should wait them out or purge the streams.
+  it.** A failed turn's dead letter is purged with the user's conversation, but an audit
+  entry the database refused waits, with its input and output, on the
+  `eddi.<prefix>.dlq.audit` subject of the dead-letter stream until
+  `eddi.coordinator.dead-letter.max-age` (7 days by default) expires it. That stream is then
+  its only copy: losing NATS within that window loses the entry. Only when the stream itself
+  cannot take the entry does it go to the JSONL file at `eddi.audit.dead-letter-path`, which
+  nothing expires. Paginated tool responses (15 min) and A2A task mappings (24 h) expire on
+  their own TTL. An erasure that must also cover these should wait out the stream windows or
+  purge the streams, and handle the JSONL file separately (see
+  [GDPR](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it)).
 - An erasure marks the user on every node before it pseudonymises the stored
   audit rows: each node does so while answering the `gdpr-stop` request the
   erasing node waits for, and from then on that node pseudonymises the user's
