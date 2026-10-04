@@ -2433,7 +2433,8 @@
     "quickCreateTitle": "Création rapide de {{type}}",
     "quickCreateDesc": "Définissez un nom, puis configurez plus tard.",
     "guidedSetup": "Assistant de configuration",
-    "guidedSetupDesc": "Configuration pas à pas : fournisseur LLM, prompts et déploiement."
+    "guidedSetupDesc": "Configuration pas à pas : fournisseur LLM, prompts et déploiement.",
+    "guidedSetupDescGroup": "Assistant pas à pas pour l'équipe, le style de discussion et les approbations facultatives — il peut aussi créer les agents membres."
   },
   "groups": {
     "actionConflict": "Une autre opération est encore en cours, ou cette discussion n'accepte plus cette action. Veuillez réessayer.",
@@ -3366,10 +3367,60 @@
     "humanPrincipalIdPlaceholder": "Identifiant de connexion/principal de l'utilisateur",
     "humanTurnSettingsHint": "La discussion se met en pause et attend lorsque c'est le tour d'un membre humain de parler. Choisissez ce qui se passe s'il ne répond pas à temps.",
     "humanTurnSettingsTitle": "Paramètres du tour des membres humains",
-    "humanTurnTimeoutInvalid": "Durée ISO-8601 non valide, par exemple PT24H ou P1D.",
-    "humanTurnTimeoutLabel": "Délai du tour (durée ISO-8601)",
-    "humanTurnTimeoutPlaceholder": "ex. PT24H — laisser vide pour une attente indéfinie",
-    "memberTypeHuman": "Humain"
+    "humanTurnTimeoutInvalid": "Saisissez un nombre supérieur à zéro.",
+    "humanTurnTimeoutLabel": "Délai par tour",
+    "humanTurnTimeoutPlaceholder": "Laissez vide pour attendre indéfiniment.",
+    "memberTypeHuman": "Humain",
+    "stepTemplate": "Préréglage",
+    "stepConfig": "Configuration",
+    "stepMembers": "Membres",
+    "stepReview": "Vérification",
+    "stepsLabel": "Progression de l'assistant",
+    "stepAria": "Étape {{n}} : {{title}}",
+    "blockersTitle": "Pour continuer :",
+    "blockerName": "Saisissez un nom de groupe.",
+    "blockerHitlPhases": "Sélectionnez au moins une phase où faire une pause, ou désactivez l'approbation humaine.",
+    "blockerHitlTimeout": "Saisissez un délai d'approbation valide (par exemple PT15M) ou choisissez une autre politique de délai.",
+    "blockerStyle": "Choisissez un style de discussion pris en charge par ce serveur.",
+    "blockerMemberName": "{{member}} : ajoutez un nom d'affichage.",
+    "blockerMemberPrincipal": "{{member}} : saisissez l'identifiant principal de la personne.",
+    "blockerMemberGroup": "{{member}} : choisissez le groupe imbriqué.",
+    "blockerMemberAgent": "{{member}} : choisissez un agent existant ou passez à Créer un nouveau.",
+    "blockerMemberKey": "{{member}} : ajoutez une clé API pour {{provider}} ou choisissez un fournisseur qui n'en demande pas (par exemple Ollama).",
+    "blockerModeratorKey": "Modérateur : ajoutez une clé API pour {{provider}} ou choisissez un fournisseur qui n'en demande pas (par exemple Ollama).",
+    "blockerTurnTimeout": "Définissez le délai de tour humain sur un nombre supérieur à zéro, ou videz-le.",
+    "memberFallbackName": "Membre {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "Remue-méninges ouvert — chaque point de vue sur une question.",
+      "PEER_REVIEW": "Examiner un brouillon ou une proposition sous plusieurs angles.",
+      "DEVIL_ADVOCATE": "Mettre un plan à l'épreuve avant de s'engager.",
+      "DELPHI": "Prévisions et estimations où des avis indépendants doivent converger.",
+      "DEBATE": "Peser une décision avec deux camps opposés.",
+      "TASK_FORCE": "Planifier et mener un travail en plusieurs étapes avec des tâches attribuées.",
+      "NEGOTIATION": "Parvenir à un accord entre des parties aux intérêts différents."
+    },
+    "howItRuns": "Comment ça se déroule",
+    "roundsExplain": "Un tour correspond à une prise de parole de chaque membre. Plus de tours permettent aux membres de se répondre, mais chaque tour supplémentaire ajoute des appels LLM et des coûts.",
+    "roundsEstimate": "Estimation : environ {{calls}} appels LLM par discussion ({{members}} membres × {{rounds}} tours).",
+    "roundsEstimateModerator": "Estimation : environ {{calls}} appels LLM par discussion ({{members}} membres × {{rounds}} tours + 1 modérateur).",
+    "unitMinutes": "minutes",
+    "unitHours": "heures",
+    "unitDays": "jours",
+    "durationNoLimit": "Aucune limite",
+    "durationUnit": "Unité",
+    "defaultMemberPrompt": "Vous êtes {{name}}. Apportez des analyses claires et exploitables depuis votre domaine d'expertise.",
+    "defaultMemberPromptRole": "Vous êtes {{name}}, spécialiste de {{role}}. Apportez des analyses claires et exploitables depuis votre domaine d'expertise.",
+    "defaultMemberPromptNoName": "Vous êtes membre de ce groupe. Apportez des analyses claires et exploitables depuis votre domaine d'expertise.",
+    "defaultModeratorPrompt": "Vous êtes un modérateur expérimenté. Synthétisez la discussion du groupe en un résumé clair et équilibré qui reprend les points clés, les accords et les désaccords restants.",
+    "memberNameLabel": "Nom d'affichage",
+    "memberRoleLabel": "Rôle",
+    "memberTypeLabel": "Type de membre",
+    "bulkTitle": "Même fournisseur et même clé pour tous les nouveaux agents",
+    "bulkHint": "Chaque nouvel agent a besoin d'un fournisseur LLM et, pour la plupart, d'une clé API. Saisissez-les une fois ici et appliquez-les à tous ; vous pourrez ensuite modifier un agent individuellement.",
+    "bulkApply": "Appliquer à tous les nouveaux agents",
+    "apiKeyRequired": "{{provider}} nécessite une clé API avant de pouvoir créer cet agent.",
+    "presetsNote": "Ce sont des préréglages qui remplissent cet assistant. Pour utiliser une discussion prête à l'emploi et affecter vos agents existants à ses rôles, consultez",
+    "presetsLink": "Modèles de groupe"
   },
   "groupTemplates": {
     "advisoryBoard": "Comité consultatif",
@@ -3426,7 +3477,9 @@
     "roleCount_one": "{{count}} rôle à attribuer",
     "roleCount_other": "{{count}} rôles à attribuer",
     "empty": "Aucun modèle disponible",
-    "emptyDescription": "Ce serveur ne fournit aucun modèle de groupe. Vous pouvez tout de même créer un groupe de zéro avec l'assistant."
+    "emptyDescription": "Ce serveur ne fournit aucun modèle de groupe. Vous pouvez tout de même créer un groupe de zéro avec l'assistant.",
+    "wizardNote": "Vous préférez créer de nouveaux agents au fil de l'eau ou partir de zéro ? L'assistant de groupe propose des préréglages plus légers.",
+    "wizardLink": "Ouvrir l'assistant de groupe"
   },
   "channels": {
     "agentIdPlaceholder": "ID de l’agent pour traiter les messages",
@@ -4699,7 +4752,13 @@
     "inputTemplateTooLong": "Le modèle de prompt est limité à {{max}} caractères.",
     "cronInvalid": "Cette expression cron n'est pas valide.",
     "scheduleUnknown": "Planification indisponible",
-    "nextRun": "prochaine {{when}}"
+    "nextRun": "prochaine {{when}}",
+    "taskSubjectLabel": "Sujet",
+    "taskDescriptionLabel": "Description",
+    "inputTemplateLabel": "Modèle de prompt",
+    "priorityTitle": "Priorité {{n}} — les nombres les plus élevés passent en premier",
+    "backlogNote": "Chaque exécution de cadence prend d'abord les tâches de plus haute priorité (P5 avant P1). Une tâche ne peut être ni modifiée ni supprimée une fois ajoutée ; une exécution la termine.",
+    "priorityHint": "Les nombres les plus élevés sont pris en premier par une exécution de cadence. 0 est la valeur par défaut."
   },
   "workforceWizard": {
     "title": "Nouvelle équipe"
@@ -5258,7 +5317,9 @@
     "legacyAdminOnly": "Visibles par les administrateurs uniquement — une fois les propriétaires attribués",
     "lastChanged": "Dernière modification par {{who}}",
     "neverChanged": "Pas encore modifié ici",
-    "saved": "Paramètres enregistrés"
+    "saved": "Paramètres enregistrés",
+    "deleteVariableTitle": "Supprimer cette variable ?",
+    "deleteVariableDescription": "Les agents qui y font référence ne pourront plus la résoudre. Cette action est irréversible."
   },
   "cascadeSave": {
     "workflowChanged": "Le workflow {{workflowId}} a été modifié ailleurs (version actuelle {{current}}, cette page affiche la version {{version}}). Rechargez la page. Rien n'a été enregistré.",
@@ -5303,5 +5364,9 @@
     "impactReasonLegacy": "antérieure au suivi de version",
     "impactReasonBreaking": "modification incompatible",
     "switchNotice": "L’agent est passé de v{{from}} à v{{to}}"
+  },
+  "wizardLeave": {
+    "title": "Quitter sans créer ?",
+    "message": "La configuration de votre équipe, y compris les prompts et clés API saisis, n'a pas encore été créée et sera perdue."
   }
 }

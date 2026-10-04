@@ -2411,7 +2411,8 @@
     "quickCreateTitle": "快速创建 {{type}}",
     "quickCreateDesc": "定义名称和描述，稍后配置详细信息。",
     "guidedSetup": "配置向导",
-    "guidedSetupDesc": "使用分步向导设置LLM模型、提示词及默认规则。"
+    "guidedSetupDesc": "使用分步向导设置LLM模型、提示词及默认规则。",
+    "guidedSetupDescGroup": "按步骤设置团队、讨论方式和可选审批的向导，也可以一并创建成员智能体。"
   },
   "groups": {
     "actionConflict": "另一个操作仍在进行中，或此讨论不再接受该操作。请重试。",
@@ -3329,10 +3330,60 @@
     "humanPrincipalIdPlaceholder": "用户的登录/主体 ID",
     "humanTurnSettingsHint": "轮到人类成员发言时，讨论会暂停并等待。请选择如果他们未能及时回应会发生什么。",
     "humanTurnSettingsTitle": "人类成员发言设置",
-    "humanTurnTimeoutInvalid": "不是有效的 ISO-8601 时长，例如 PT24H 或 P1D。",
-    "humanTurnTimeoutLabel": "发言超时（ISO-8601 时长）",
-    "humanTurnTimeoutPlaceholder": "例如 PT24H——留空表示无限期等待",
-    "memberTypeHuman": "人类"
+    "humanTurnTimeoutInvalid": "请输入大于零的数字。",
+    "humanTurnTimeoutLabel": "发言超时",
+    "humanTurnTimeoutPlaceholder": "留空表示无限期等待。",
+    "memberTypeHuman": "人类",
+    "stepTemplate": "预设",
+    "stepConfig": "设置",
+    "stepMembers": "成员",
+    "stepReview": "审核",
+    "stepsLabel": "向导进度",
+    "stepAria": "第 {{n}} 步：{{title}}",
+    "blockersTitle": "要继续：",
+    "blockerName": "请输入群组名称。",
+    "blockerHitlPhases": "请至少选择一个暂停阶段，或关闭人工审批。",
+    "blockerHitlTimeout": "请输入有效的审批超时（例如 PT15M），或选择其他超时策略。",
+    "blockerStyle": "请选择此服务器支持的讨论方式。",
+    "blockerMemberName": "{{member}}：请添加显示名称。",
+    "blockerMemberPrincipal": "{{member}}：请输入此人的主体 ID。",
+    "blockerMemberGroup": "{{member}}：请选择嵌套的群组。",
+    "blockerMemberAgent": "{{member}}：请选择现有智能体，或切换为“新建”。",
+    "blockerMemberKey": "{{member}}：请为 {{provider}} 添加 API 密钥，或选择无需密钥的提供商（例如 Ollama）。",
+    "blockerModeratorKey": "主持人：请为 {{provider}} 添加 API 密钥，或选择无需密钥的提供商（例如 Ollama）。",
+    "blockerTurnTimeout": "请将人工发言超时设为大于零的数字，或清空。",
+    "memberFallbackName": "成员 {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "开放式头脑风暴——汇集对一个问题的各种视角。",
+      "PEER_REVIEW": "从多个角度评审草稿或提案。",
+      "DEVIL_ADVOCATE": "在做出承诺之前对方案进行压力测试。",
+      "DELPHI": "适用于希望独立意见趋于一致的预测与估算。",
+      "DEBATE": "在两个对立立场之间权衡决策。",
+      "TASK_FORCE": "通过分配任务来规划并完成多步骤工作。",
+      "NEGOTIATION": "在利益不同的各方之间达成一致。"
+    },
+    "howItRuns": "运行方式",
+    "roundsExplain": "一轮是指每位成员各发言一次。轮数越多，成员之间的互相回应越充分，但每多一轮就会增加 LLM 调用和成本。",
+    "roundsEstimate": "预计：每次讨论约 {{calls}} 次 LLM 调用（{{members}} 位成员 × {{rounds}} 轮）。",
+    "roundsEstimateModerator": "预计：每次讨论约 {{calls}} 次 LLM 调用（{{members}} 位成员 × {{rounds}} 轮 + 1 次主持人调用）。",
+    "unitMinutes": "分钟",
+    "unitHours": "小时",
+    "unitDays": "天",
+    "durationNoLimit": "无限制",
+    "durationUnit": "单位",
+    "defaultMemberPrompt": "你是 {{name}}。请从你的专业角度提供清晰、可执行的见解。",
+    "defaultMemberPromptRole": "你是 {{name}}，专长是 {{role}}。请从你的专业角度提供清晰、可执行的见解。",
+    "defaultMemberPromptNoName": "你是本群组的成员。请从你的专业角度提供清晰、可执行的见解。",
+    "defaultModeratorPrompt": "你是一位经验丰富的主持人。请将群组的讨论综合成一份清晰、平衡的总结，涵盖关键见解、达成一致之处和仍存在的分歧。",
+    "memberNameLabel": "显示名称",
+    "memberRoleLabel": "角色",
+    "memberTypeLabel": "成员类型",
+    "bulkTitle": "为所有新智能体使用相同的提供商和密钥",
+    "bulkHint": "每个新智能体都需要一个 LLM 提供商，大多数提供商还需要 API 密钥。在此填写一次并应用到全部；之后仍可单独修改某个智能体。",
+    "bulkApply": "应用到所有新智能体",
+    "apiKeyRequired": "创建此智能体前，{{provider}} 需要 API 密钥。",
+    "presetsNote": "这些是用于填充本向导的入门预设。如要使用经过调优的打包讨论，并把现有智能体分配到其角色，请参阅",
+    "presetsLink": "群组模板"
   },
   "groupTemplates": {
     "advisoryBoard": "顾问团",
@@ -3388,7 +3439,9 @@
     "roleCount_other": "{{count}} 个待分配角色",
     "roleCount_one": "{{count}} 个待分配角色",
     "empty": "没有可用的模板",
-    "emptyDescription": "此服务器未附带群组模板。你仍可使用向导从零创建群组。"
+    "emptyDescription": "此服务器未附带群组模板。你仍可使用向导从零创建群组。",
+    "wizardNote": "想边做边创建新智能体，或从零开始？群组向导提供更轻量的入门预设。",
+    "wizardLink": "打开群组向导"
   },
   "channels": {
     "agentIdPlaceholder": "处理消息的代理 ID",
@@ -4650,7 +4703,13 @@
     "inputTemplateTooLong": "提示模板限制为 {{max}} 个字符。",
     "cronInvalid": "这不是有效的 cron 表达式。",
     "scheduleUnknown": "无法获取排程",
-    "nextRun": "下次 {{when}}"
+    "nextRun": "下次 {{when}}",
+    "taskSubjectLabel": "主题",
+    "taskDescriptionLabel": "描述",
+    "inputTemplateLabel": "提示词模板",
+    "priorityTitle": "优先级 {{n}}——数字越大越先被选取",
+    "backlogNote": "每次节奏运行都会优先选取优先级最高的任务（P5 先于 P1）。任务添加后无法编辑或删除，由运行来完成。",
+    "priorityHint": "节奏运行会优先选取数字较大的任务。0 为默认值。"
   },
   "workforceWizard": {
     "title": "新建团队"
@@ -5201,7 +5260,9 @@
     "legacyAdminOnly": "仅管理员可见——在分配所有者之后",
     "lastChanged": "最后由 {{who}} 更改",
     "neverChanged": "尚未在此更改",
-    "saved": "设置已保存"
+    "saved": "设置已保存",
+    "deleteVariableTitle": "删除此变量？",
+    "deleteVariableDescription": "引用它的智能体将无法再解析它。此操作无法撤销。"
   },
   "cascadeSave": {
     "workflowChanged": "工作流 {{workflowId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
@@ -5244,5 +5305,9 @@
     "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
     "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
     "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
+  },
+  "wizardLeave": {
+    "title": "不创建就离开？",
+    "message": "你的团队设置（包括输入的提示词和 API 密钥）尚未创建，离开后将丢失。"
   }
 }
