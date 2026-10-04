@@ -464,14 +464,16 @@ def s4_rolling(infra, ctx):
     for t in threads:
         t.join(200)
     statuses = collections.Counter(s for _, _, s, _ in log)
-    failed = [(k, n, s) for k, n, s, ra in log if s not in (200, 409)]
+    # 409 (the lease is busy) and 503 (a draining node; nginx does not re-send a POST)
+    # are "not now" answers the client retries, so they are not failures.
+    failed = [(k, n, s) for k, n, s, ra in log if s not in (200, 409, 503)]
     no_retry_after = [(k, n) for k, n, s, ra in log if s == 409 and not ra]
     lost = []
     for k, c in enumerate(convs):
         sent_ok = {f"[s4-{kk}] turn {n}" for kk, n, s, _ in log if kk == k and s == 200}
         lost += sorted(sent_ok - set(stored_after(c, sent_ok)))
     recovery_fired = sum(l.count("Recovered stuck IN_PROGRESS") for l in [infra.logs(i) for i in range(3)])
-    record("4", "rolling restart of all nodes under load: no failed or lost turns beyond 409 Retry-After",
+    record("4", "rolling restart of all nodes under load: no failed or lost turns beyond retried 409/503",
            not failed and not lost and not no_retry_after and recovery_fired == 0,
            requests=len(log), statuses=dict(statuses), failed=failed[:10], lost=lost[:10], conflicts_without_retry_after=no_retry_after,
            hitl_recovery_on_live_conversations=recovery_fired)

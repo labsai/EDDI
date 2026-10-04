@@ -143,13 +143,25 @@ API behind it, and why each action is safe, is in
 | A node must be restarted without failed turns | Its node card | *Drain* it: no new turns reach it (409 + `Retry-After`, readiness `DOWN`), running ones finish; restart it, or *Undrain*. |
 
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
-`eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `ADMIN` (console replay claims and drain state), `NONCES`,
-`RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_*`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`;
-streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects `eddi.<prefix>.ops.>`). Subjects live
-under `eddi.<prefix>.>`, so a NATS user restricted to `eddi.>`, `$JS.API.>`,
-`$JS.ACK.>`, `$JS.FC.>`, `$KV.<prefix>_*.>`, `$O.<prefix>_ARCHIVES.>` (the exported-archive
-object store; without it archives stay on the node that made them) and `_INBOX.>` is
-sufficient — the Helm chart's in-chart NATS grants exactly that.
+`eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `ADMIN` (console
+replay claims and drain state), `NONCES`, `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_TASKS`,
+`A2A_CONTEXTS`, `A2A_STATES`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`; object store: `ARCHIVES`;
+streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects
+`eddi.<prefix>.ops.>`). EDDI's own subjects live under `eddi.<prefix>.>`.
+
+A NATS user restricted to EDDI needs:
+
+- **publish:** `eddi.>`, `$JS.API.>`, `$KV.*.>`, `$O.*.>`, `$JS.ACK.>`, `$JS.FC.>` and `_INBOX.>`;
+- **subscribe:** `eddi.>`, `$JS.API.>`, `$KV.*.>` and `_INBOX.>`.
+
+The Helm chart's in-chart NATS grants exactly this set. Without `$O` access, exported archives stay on the node that made them.
+
+A NATS wildcard matches whole tokens only, and a KV subject is
+`$KV.<bucket>.<key>` with the bucket as one token. So `$KV.EDDI_>` and
+`$KV.EDDI_*.>` match no bucket at all: every KV write is refused (verified on
+NATS 2.11). To narrow an account shared with other applications, replace
+`$KV.*.>` with one `$KV.<prefix>_<BUCKET>.>` per bucket above, and `$O.*.>` with
+`$O.<prefix>_ARCHIVES.>`.
 
 **NATS is inside the trust boundary.** Every node uses one NATS identity, and nothing on
 the wire is signed: whoever holds those credentials can publish a `deployment.changed`
@@ -224,9 +236,10 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   `fail_timeout`. The shipped configs set `max_fails=0` on the upstream servers,
   so no node is taken out of rotation. nginx still retries a 503 on the next node
   for an idempotent request (GET). A POST, which is how a turn arrives, is not
-  re-sent by default, so its client gets the 503 with `Retry-After`. Only the
-  demo config adds `non_idempotent`, and that would also re-send a turn after a
-  read timeout. A node that refuses connections is skipped at once. A node that
+  re-sent, so its client gets the 503 with `Retry-After`. Neither shipped config
+  adds `non_idempotent`: `timeout` also covers a read timeout after the turn
+  reached a node, so it would run the turn twice. A node that refuses connections
+  is skipped at once. A node that
   hangs is no longer ejected: each request that lands on it waits out
   `proxy_connect_timeout` (2 s) before it moves on. Do the same, or leave `http_503`
   out of the retry conditions, on any proxy you put in front. Kubernetes
@@ -291,9 +304,11 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   earlier is answered 409 instead (an error event on a stream, whose tokens up to
   then were already sent). Its client is expected to retry, so replay its dead
   letter only if the client did not; otherwise the turn runs twice.
-- A paginated tool response is not bound to its conversation: anyone who
-  knows the random response id can fetch its pages from any node, exactly as on
-  a single node (the tool has no conversation context to check against).
+- A paginated tool response is not bound to its conversation or its caller.
+  Anyone who can talk to an agent that has the page-fetch tool, and who knows
+  another response's random id, can fetch its pages, from any node that holds
+  them. This is the same as on a single node: the tool does not check who the
+  response belongs to.
 - On PostgreSQL, replicas that boot together run their startup one after
   another (an advisory lock around table creation and migrations), so the
   last of N replicas of a first install becomes ready later than the first.

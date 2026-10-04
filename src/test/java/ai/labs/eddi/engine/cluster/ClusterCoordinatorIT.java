@@ -577,4 +577,18 @@ class ClusterCoordinatorIT {
         assertEquals(1, won.get(), "exactly one create wins");
         assertEquals(handles.size() * perNode - 1, lost.get());
     }
+    @Test
+    @Order(10)
+    @DisplayName("the same dead letter stored twice (a retried publish, a later forward) is kept once; another one is kept")
+    void aDeadLetterStoredTwiceIsKeptOnce() {
+        JetStreamDeadLetterStore store = nodes.get(0).deadLetters;
+        String conversation = "conv-dedup-" + UUID.randomUUID();
+        String first = store.append(conversation, "LLM said 500", 7L, Map.of("input", "hi", "agentId", "a"));
+        String again = store.append(conversation, "LLM said 500", 7L, Map.of("input", "hi", "agentId", "a"));
+        String other = store.append(conversation, "LLM said 500", 8L, Map.of("input", "hi", "agentId", "a"));
+        assertEquals(first, again, "JetStream answered the duplicate with the stored entry's sequence");
+        assertNotEquals(first, other);
+        long kept = nodes.get(1).deadLetters.list(1000, null).stream().filter(e -> conversation.equals(e.conversationId())).count();
+        assertEquals(2, kept);
+    }
 }

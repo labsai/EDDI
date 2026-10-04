@@ -784,13 +784,22 @@ public class AuditLedgerService implements UserErasureParticipant {
             // Cluster mode: one shared counter per conversation, so two replicas never
             // hand out the same position (which verification grades BROKEN). NATS
             // unreachable: unsequenced — honest UNAVAILABLE, never a guessed position.
-            return clusterSupport.nextSequence(conversationId, () -> {
-                try {
-                    return seedSequence(conversationId);
-                } catch (Exception e) {
-                    throw new IllegalStateException(e);
-                }
-            }).orElse(AuditEntry.UNSEQUENCED);
+            try {
+                return clusterSupport.nextSequence(conversationId, () -> {
+                    try {
+                        return seedSequence(conversationId);
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                }).orElse(AuditEntry.UNSEQUENCED);
+            } catch (IllegalStateException e) {
+                // The seed could not be read from the store: unsequenced, exactly as the
+                // single-node path below answers a failed seed — never an exception out of
+                // submit.
+                LOGGER.warnv("Could not seed the clustered audit sequence for conversation {0}: {1}", sanitize(conversationId),
+                        e.getMessage());
+                return AuditEntry.UNSEQUENCED;
+            }
         }
 
         // Still full after eviction means every remaining counter belongs to a

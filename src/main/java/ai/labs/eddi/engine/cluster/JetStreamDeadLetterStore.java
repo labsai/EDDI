@@ -9,6 +9,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
+import io.nats.client.PublishOptions;
 import io.nats.client.PurgeOptions;
 import io.nats.client.api.MessageInfo;
 import io.nats.client.api.PublishAck;
@@ -22,6 +23,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -90,7 +92,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         ClusterConfig config = connections.config();
         StreamConfiguration desired = StreamConfiguration.builder().name(stream).subjects(subjects.deadLetterWildcard())
                 .retentionPolicy(RetentionPolicy.Limits).maxAge(config.deadLetterMaxAge()).storageType(StorageType.File)
-                .replicas(config.natsReplicas()).build();
+                .duplicateWindow(DUPLICATE_WINDOW).replicas(config.natsReplicas()).build();
         JetStreamManagement jsm = connections.jetStreamManagement();
         try {
             try {
@@ -119,11 +121,11 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
      * responders". Without the wait, the first dead letter of a new cluster failed
      * over to the node-local ring (seen live).
      */
-    private PublishAck publishOnceReady(String subject, byte[] payload) throws IOException, JetStreamApiException {
+    private PublishAck publishOnceReady(String subject, byte[] payload, PublishOptions options) throws IOException, JetStreamApiException {
         IOException last = null;
         for (int attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
             try {
-                return connections.jetStream().publish(subject, payload);
+                return connections.jetStream().publish(subject, payload, options);
             } catch (IOException notReadyYet) {
                 last = notReadyYet;
                 try {
@@ -135,6 +137,24 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             }
         }
         throw last;
+    }
+
+    /**
+     * How long the stream remembers a message id. A retried publish, or a forward
+     * of a locally kept dead letter, within it is stored once.
+     */
+    static final Duration DUPLICATE_WINDOW = Duration.ofMinutes(2);
+
+    /**
+     * The id JetStream de-duplicates one dead letter by ({@code Nats-Msg-Id}). The
+     * same for every attempt to store this dead letter — the retries after a stream
+     * creation, and a later forward from the node-local ring — because a publish
+     * the server stored but whose acknowledgement was lost would otherwise be
+     * stored twice. Built from what identifies the dead letter: the node, the
+     * conversation, the time and the error.
+     */
+    static String messageId(String node, String conversationId, long timestamp, String error) {
+        return KvKeys.sha256(node + "|" + conversationId + "|" + timestamp + "|" + error);
     }
 
     @Override
@@ -157,14 +177,16 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         try {
             byte[] payload = JSON.writeValueAsBytes(body);
             String subject = subjects.deadLetterTurn(KvKeys.safe(conversationId));
+            PublishOptions options = PublishOptions.builder()
+                    .messageId(messageId(connections.node().nodeId(), conversationId, timestamp, error)).build();
             PublishAck ack;
             try {
-                ack = connections.jetStream().publish(subject, payload);
+                ack = connections.jetStream().publish(subject, payload, options);
             } catch (IOException | JetStreamApiException noStreamYet) {
                 // The stream is provisioned asynchronously after connecting; a dead letter
                 // that arrives first creates it here rather than being lost.
                 provision();
-                ack = publishOnceReady(subject, payload);
+                ack = publishOnceReady(subject, payload, options);
             }
             return String.valueOf(ack.getSeqno());
         } catch (IOException | JetStreamApiException e) {

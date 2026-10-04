@@ -65,7 +65,7 @@ opened it (see [Clustering](../../docs/clustering.md#residual-limitations)).
 | 1 | 18 concurrent slow turns and 120 instant turns of one conversation, spread over the three nodes | The mock LLM saw no two calls of the conversation overlap, every call carried the previous call's user message, nothing stored twice or lost |
 | 2 | `docker kill` (SIGKILL) of the node running a slow turn, then a turn on another node | The next turn succeeds once the lease expires (≤ `eddi.cluster.lease.ttl`), the killed turn is not stored, the conversation is `READY` |
 | 3 | Stop one NATS node, then all three, then start them again | One node down: nothing visible. All down: every node reports `degraded`, readiness stays UP, turns keep working. Afterwards all nodes reconnect |
-| 4 | Restart the three nodes one after another (graceful, 70 s) under continuous load through nginx | No request fails other than 409 with `Retry-After`, no accepted turn is lost, HITL crash recovery never touches a live conversation |
+| 4 | Restart the three nodes one after another (graceful, 70 s) under continuous load through nginx | No request fails other than 409 (with `Retry-After`) or 503 from a draining node, both retried by the client; no accepted turn is lost, HITL crash recovery never touches a live conversation |
 | 5 | Cancel a running turn through another node; GDPR-erase a user on node 1 while their turn runs on node 2 | The turn stops on the node that runs it |
 | 6 | Undeploy on node 1 | Nodes 2 and 3 stop serving the agent within seconds; a redeploy propagates too |
 | 7 | Rotate a vault secret on node 1 | Node 3's next LLM call carries the new key (seen in the mock's `Authorization` hash) |

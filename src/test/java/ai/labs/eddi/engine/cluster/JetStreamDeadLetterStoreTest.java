@@ -9,6 +9,7 @@ import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
 import io.nats.client.KeyValue;
+import io.nats.client.PublishOptions;
 import io.nats.client.api.ApiResponse;
 import io.nats.client.api.MessageInfo;
 import io.nats.client.api.PublishAck;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 
@@ -28,6 +30,8 @@ import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -36,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -143,14 +148,33 @@ class JetStreamDeadLetterStoreTest {
         when(connections.jetStream()).thenReturn(js);
         PublishAck ack = mock(PublishAck.class);
         when(ack.getSeqno()).thenReturn(5L);
-        when(js.publish(anyString(), any(byte[].class)))
+        when(js.publish(anyString(), any(byte[].class), any(PublishOptions.class)))
                 .thenThrow(new IOException("no stream yet"))
                 .thenThrow(new IOException("Error Publishing: 503 No Responders Available For Request"))
                 .thenReturn(ack);
+        var store = new JetStreamDeadLetterStore(connections);
 
-        assertEquals("5", new JetStreamDeadLetterStore(connections).append("conv1", "boom", 1L, Map.of("input", "hi")),
+        assertEquals("5", store.append("conv1", "boom", 1L, Map.of("input", "hi")),
                 "a stream created a moment ago answers once its leader is elected; the dead letter must not fail over");
         verify(jsm).addStream(any());
+
+        // Every attempt carries one message id, so a publish the server stored but
+        // whose
+        // ack was lost is not stored a second time by the retry (JetStream
+        // de-duplicates).
+        ArgumentCaptor<PublishOptions> options = ArgumentCaptor.forClass(PublishOptions.class);
+        verify(js, times(3)).publish(anyString(), any(byte[].class), options.capture());
+        List<String> ids = options.getAllValues().stream().map(PublishOptions::getMessageId).toList();
+        assertNotNull(ids.get(0));
+        assertEquals(1, ids.stream().distinct().count(), "one id for every attempt: " + ids);
+
+        // The same dead letter forwarded later keeps its id; another one gets its own.
+        store.append("conv1", "boom", 1L, Map.of("input", "hi"));
+        store.append("conv1", "boom", 2L, Map.of("input", "hi"));
+        verify(js, times(5)).publish(anyString(), any(byte[].class), options.capture());
+        List<String> later = options.getAllValues().stream().skip(3 + 3).map(PublishOptions::getMessageId).toList();
+        assertEquals(ids.get(0), later.get(0));
+        assertNotEquals(ids.get(0), later.get(1));
     }
     // NatsSharedKv shares this class's NATS API error fixture: the codes a KV write
     // can be refused with.

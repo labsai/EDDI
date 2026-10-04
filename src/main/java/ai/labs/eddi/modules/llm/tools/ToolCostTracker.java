@@ -369,11 +369,15 @@ public class ToolCostTracker {
     public boolean isWithinBudget(String conversationId, double maxBudget) {
         var shared = sharedCost(conversationId);
         if (shared.isPresent()) {
-            boolean within = shared.getAsDouble() <= maxBudget;
+            // The larger of the two: a charge whose shared update lost every CAS attempt
+            // is in the local total only, and must still count against the budget.
+            ConversationCostMetrics local = conversationCosts.get(conversationId);
+            double total = Math.max(shared.getAsDouble(), local == null ? 0.0 : local.getTotalCost());
+            boolean within = total <= maxBudget;
             if (!within) {
                 recordMeter(() -> meterRegistry.counter("eddi.tool.budget.exceeded").increment());
                 LOGGER.warn(String.format("Conversation %s exceeded budget (cluster-wide): $%.4f > $%.4f", sanitize(conversationId),
-                        shared.getAsDouble(), maxBudget));
+                        total, maxBudget));
             }
             return within;
         }

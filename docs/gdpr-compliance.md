@@ -296,9 +296,12 @@ As the controller you must therefore:
       ledger itself.
 - [ ] Include it in the erasure procedure: either replay and truncate it once
       the store is healthy again, or pseudonymize the affected records by hand.
-      `eddi_audit_entries_dropped_total` tells you whether the sink has ever
-      been written to; a zero counter and an absent file mean there is nothing
-      to do.
+      `eddi_audit_entries_dropped_total` counts per process and starts at zero
+      on every restart, so a zero value does not prove the sink is empty. Check
+      the JSONL file on every node and, in cluster mode, the
+      `eddi.<prefix>.dlq.audit` subject of the dead-letter stream
+      (`nats stream subjects <prefix>_DEAD_LETTERS`) before concluding there is
+      nothing to do.
 - [ ] Give the JSONL file a retention period: as with the ledger, EDDI never
       expires it. The JetStream stream is different: it drops its entries after
       `eddi.coordinator.dead-letter.max-age` (default `7d`), whether or not they
