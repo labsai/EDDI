@@ -171,6 +171,8 @@ letters) turned up eight defects. Each is fixed here with a test that fails with
 
 - **A lost KV race is a conflict whichever code NATS answers with (ported from the console branch).** The loser of two concurrent creates of one key can get JetStream error 10164 as well as 10071. `NatsSharedKv` recognised only 10071, so two nodes racing for one lease could report NATS as unreachable. Create, compare-and-set and guarded delete now treat both as a lost race. `ClusterPresence.currentMembers()` reads the member list uncached and throws on a read error, for decisions that must not be taken on a stale or empty list; `members()` keeps answering from its cache.
 
+- **A dead letter is stored once (PR #956 review).** Every attempt to store one dead letter now carries one JetStream `Nats-Msg-Id`: the retries after a stream creation, and a later forward from the node-local ring. The id is derived from the node, conversation, time and error. The dead-letter stream de-duplicates within a 2-minute window, so a publish the server stored but whose acknowledgement was lost is not stored a second time. `ClusterCoordinatorIT` checks it against real NATS.
+
 ### Known and not fixed here
 
 - A fenced-out turn's caller still gets the reply it was rendered (HTTP 200), where the design
