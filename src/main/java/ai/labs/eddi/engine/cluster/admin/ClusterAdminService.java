@@ -76,6 +76,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import java.lang.management.ManagementFactory;
 
 /**
  * Everything behind the cluster console: the health verdict, the node cards,
@@ -198,7 +199,8 @@ public class ClusterAdminService implements ClusterStartable {
         long now = System.currentTimeMillis();
         Map<String, Object> settings = settings();
         if (!isClustered()) {
-            ClusterNode single = new ClusterNode("local", null, null, version(), 0, now, 0, "LIVE", true, false, false, -1,
+            ClusterNode single = new ClusterNode("local", null, null, version(), ManagementFactory.getRuntimeMXBean().getStartTime(), now, 0, "LIVE",
+                    true, false, false, -1,
                     coordinator.getQueueDepths().size(), 0, coordinator.getQueueDepths().values().stream().mapToInt(Integer::intValue).sum(),
                     coordinator.getDeadLetters().size(), false, null);
             return new ClusterOverview("single-node", "SINGLE_NODE", List.of(), "local", now, config.degradedTurns(), null, List.of(single),
@@ -216,18 +218,18 @@ public class ClusterAdminService implements ClusterStartable {
         for (Map<String, Object> member : presence.get().members()) {
             members.put(String.valueOf(member.get("node")), member);
         }
-        if (!members.containsKey(self)) {
-            // This node's own card is always shown — from its live numbers when its
-            // presence
-            // record could not be read or written (no NATS).
-            members.put(self, presence.get().selfRecord());
-        }
+        // This node's own card always shows its live numbers, not its last published
+        // record: without NATS that record is as old as the outage (and would hide, for
+        // one, the dead letters this node is keeping locally meanwhile).
+        members.put(self, presence.get().selfRecord());
         for (Map.Entry<String, Map<String, Object>> e : members.entrySet()) {
             Map<String, Object> m = e.getValue();
             long updated = num(m.get("updatedAt"));
             long age = updated > 0 ? now - updated : 0;
             boolean isSelf = self.equals(e.getKey());
-            String state = !isSelf && age > 2 * interval ? "STALE" : "LIVE";
+            // Cut off from NATS, this node only has the records it read last: whether
+            // another node is still running is unknown, not "late".
+            String state = isSelf ? "LIVE" : !connected ? "UNKNOWN" : age > 2 * interval ? "STALE" : "LIVE";
             if ("STALE".equals(state)) {
                 reasons.add("NODE_STALE");
             }
@@ -523,7 +525,7 @@ public class ClusterAdminService implements ClusterStartable {
             flags.add("HOLDER_RESTARTED");
         }
         long sinceRenewal = s.renewedAt() > 0 ? Math.max(0, now - s.renewedAt()) : -1;
-        if (sinceRenewal > config.leaseHeartbeatInterval().multipliedBy(3).toMillis()) {
+        if (sinceRenewal > config.leaseHeartbeatInterval().multipliedBy(2).toMillis()) {
             flags.add("NOT_RENEWED");
         }
         long age = s.holder().since() > 0 ? Math.max(0, now - s.holder().since()) : 0;
@@ -876,7 +878,14 @@ public class ClusterAdminService implements ClusterStartable {
     // ================================================================ recovery
     // actions
 
-    /** Thrown when an action is refused; carries the HTTP status to answer. */
+    /**
+     * Thrown when an action is refused; carries the HTTP status to answer.
+     * <p>
+     * Never a 5xx: a load balancer that retries the next node on 503 (the shipped
+     * nginx configuration does, for draining nodes) marks every node down when they
+     * all answer "NATS is unreachable" — and then refuses the whole API, turns
+     * included, for its fail timeout. Seen live during a NATS outage.
+     */
     public static class ActionRefusedException extends RuntimeException {
         private final int status;
         private final String code;
@@ -909,7 +918,7 @@ public class ClusterAdminService implements ClusterStartable {
         try {
             result = natsLeases.get().forceRelease(key, expectedRevision);
         } catch (ClusterUnavailableException e) {
-            throw new ActionRefusedException(503, "NATS_UNREACHABLE", "NATS is unreachable from this node: " + e.getMessage());
+            throw new ActionRefusedException(409, "NATS_UNREACHABLE", "NATS is unreachable from this node: " + e.getMessage());
         }
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("conversationId", conversationId);
@@ -965,7 +974,7 @@ public class ClusterAdminService implements ClusterStartable {
     public ActionResult forwardLocalDeadLetters(String actor) {
         requireCluster("Forwarding local dead letters");
         if (!connections.get().isConnected()) {
-            throw new ActionRefusedException(503, "NATS_UNREACHABLE", "NATS is unreachable from this node; local dead letters stay where they are");
+            throw new ActionRefusedException(409, "NATS_UNREACHABLE", "NATS is unreachable from this node; local dead letters stay where they are");
         }
         Map<String, Object> perNode = new TreeMap<>();
         perNode.put(connections.get().node().nodeId(), clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters).orElse(0));
@@ -1004,7 +1013,7 @@ public class ClusterAdminService implements ClusterStartable {
             applied = reply.isPresent() && reply.get().get("error") == null;
         }
         if (!applied) {
-            throw new ActionRefusedException(503, "NODE_UNREACHABLE", "Node " + sanitize(nodeId) + " did not answer; nothing was changed.");
+            throw new ActionRefusedException(409, "NODE_UNREACHABLE", "Node " + sanitize(nodeId) + " did not answer; nothing was changed.");
         }
         String outcome = drain ? "DRAINED" : "UNDRAINED";
         audit(drain ? "node.drain" : "node.undrain", actor, Map.of("nodeId", nodeId), Map.of("outcome", outcome));

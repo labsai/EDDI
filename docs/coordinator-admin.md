@@ -153,6 +153,12 @@ listing, which carries the captured input, and every action are `eddi-admin` onl
 | `POST /administration/cluster/deployments/reconcile` | admin | Runs the deployment sweep on every node now |
 | `POST /administration/cluster/nodes/{nodeId}/drain` and `/undrain` | admin | Stops (or resumes) a node taking turns |
 
+A refused action answers `409` with `{"code": …, "message": …}` — `NOT_CLUSTERED`, `LAST_NODE`,
+`NODE_UNREACHABLE` or `NATS_UNREACHABLE` (also what a read of the leases answers while the node
+is cut off from NATS). Never a `503`: the shipped nginx configuration retries the next node on
+`503`, so a `503` from every node during a NATS outage would take the whole API out of the load
+balancer for its fail timeout.
+
 ### The health verdict
 
 | Verdict | Means | Typical reason codes |
@@ -178,7 +184,7 @@ write time of the current revision) and these flags:
 |---|---|
 | `HOLDER_GONE` | The holder has no presence record — it died or is partitioned; the lease expires within `eddi.cluster.lease.ttl` |
 | `HOLDER_RESTARTED` | The holder's node is back with a new boot; its next connect sweeps the lease |
-| `NOT_RENEWED` | No renewal for three heartbeat intervals |
+| `NOT_RENEWED` | No renewal for two heartbeat intervals — the holder is hung, paused or cut off (its lease expires at the TTL) |
 | `LONG_RUNNING` | Held longer than `eddi.cluster.lease.acquire-timeout`: turns queued behind it are being answered `409` |
 | `CONTENDED` | Another node is waiting for it |
 

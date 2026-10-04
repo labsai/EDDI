@@ -46,6 +46,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The cluster activity timeline: what happened in the cluster, in the order the
@@ -78,6 +79,7 @@ public class ClusterActivityLog implements ClusterStartable {
     private static final ObjectMapper JSON = new ObjectMapper();
     static final int RING_SIZE = 500;
     static final int OUTBOX_SIZE = 200;
+    static final long OUTBOX_RETRY_SECONDS = 5;
     static final long MAX_STREAM_MESSAGES = 10_000;
     /** Live subscribers (SSE clients) per node. */
     static final int MAX_LISTENERS = 16;
@@ -245,7 +247,23 @@ public class ClusterActivityLog implements ClusterStartable {
 
     @Override
     public void startCluster() {
-        connections.get().onConnected(this::onConnected);
+        NatsConnectionManager manager = connections.get();
+        manager.onConnected(this::onConnected);
+        // Retried, not only flushed on connect: right after NATS comes back the streams
+        // may still be electing leaders, so the first publishes after a reconnect fail
+        // and
+        // go back to the outbox — where they used to stay until the next disconnection.
+        manager.scheduler().scheduleWithFixedDelay(() -> {
+            if (manager.isConnected() && pendingCount() > 0) {
+                flushOutbox();
+            }
+        }, OUTBOX_RETRY_SECONDS, OUTBOX_RETRY_SECONDS, TimeUnit.SECONDS);
+    }
+
+    int pendingCount() {
+        synchronized (outbox) {
+            return outbox.size();
+        }
     }
 
     private synchronized void onConnected() {

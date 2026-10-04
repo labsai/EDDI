@@ -183,6 +183,19 @@ class KvLeaseManagerAdminTest {
     }
 
     @Test
+    @DisplayName("a restarted node clearing its previous boot's leases reports each as a takeover")
+    void ownStaleSweepNotifies() throws Exception {
+        get(manager("a", "a1").acquire("conv1", Duration.ofSeconds(1)));
+        KvLeaseManager restarted = manager("a", "a2");
+        List<LeaseInfo> previous = new CopyOnWriteArrayList<>();
+        restarted.onTakeover((key, info) -> previous.add(info));
+        restarted.sweepOwnStaleLeases();
+        assertEquals(1, previous.size());
+        assertEquals("a1", previous.get(0).boot());
+        assertTrue(kv.get("c.conv1").isEmpty());
+    }
+
+    @Test
     @DisplayName("the snapshot lists leases with holder, renewal time and the node waiting for it; waiter markers are not leases")
     void snapshotListsLeasesAndWaiters() throws Exception {
         KvLeaseManager a = manager("a", "a1");

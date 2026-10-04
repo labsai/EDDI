@@ -54,9 +54,10 @@ public final class ClusterAdminModels {
      *
      * @param state
      *            {@code LIVE}, {@code STALE} (still listed, heartbeat late),
-     *            {@code LOST} (stopped heartbeating without leaving: killed,
-     *            crashed or partitioned from NATS) or {@code LEFT} (shut down
-     *            cleanly)
+     *            {@code UNKNOWN} (the answering node cannot reach NATS, so it
+     *            cannot tell), {@code LOST} (stopped heartbeating without leaving:
+     *            killed, crashed or partitioned from NATS) or {@code LEFT} (shut
+     *            down cleanly)
      * @param goneSince
      *            for {@code LOST}/{@code LEFT}: when the answering node noticed
      */

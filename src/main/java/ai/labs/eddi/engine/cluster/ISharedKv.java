@@ -53,6 +53,16 @@ public interface ISharedKv {
     Optional<Versioned> get(String key);
 
     /**
+     * Like {@link #get}, but answered by the bucket's stream leader rather than by
+     * whichever replica is nearest. For admin decisions taken on a revision (a
+     * force-release compares and deletes at it): a replica can answer a read with
+     * an older revision than the leader holds.
+     */
+    default Optional<Versioned> getConsistent(String key) {
+        return get(key);
+    }
+
+    /**
      * Replaces the value only while the key is still at {@code expectedRevision}.
      *
      * @return the new revision, or empty on a conflict

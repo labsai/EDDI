@@ -119,6 +119,7 @@ class ClusterAdminServiceTest {
         members.add(member("n2", "b2", NOW));
         members.add(member("n3", "b3", NOW));
         when(presence.members()).thenAnswer(i -> List.copyOf(members));
+        when(presence.selfRecord()).thenAnswer(i -> members.get(0));
         natsLeases = mock(NatsLeaseManager.class);
         eventBus = mock(JetStreamEventBus.class);
         memoryStore = mock(IConversationMemoryStore.class);
@@ -180,6 +181,22 @@ class ClusterAdminServiceTest {
             assertTrue(overview.reasons().contains("NATS_UNREACHABLE"));
             assertEquals(NOW - 30_000, overview.degradedSince());
             assertEquals("local", overview.degradedTurnsPolicy());
+            // Cut off, this node cannot tell whether the others still run: unknown, not
+            // late.
+            assertEquals("UNKNOWN", overview.nodes().stream().filter(n -> n.nodeId().equals("n2")).findFirst().orElseThrow().state());
+            assertFalse(overview.reasons().contains("NODE_STALE"));
+        }
+
+        @Test
+        @DisplayName("this node's card shows its live numbers, not its last published record (dead letters kept while NATS was down)")
+        void selfCardIsLive() {
+            Map<String, Object> live = member("n1", "b1", NOW);
+            live.put("localDeadLetters", 2);
+            when(presence.selfRecord()).thenReturn(live);
+            ClusterOverview overview = service.overview();
+            assertEquals(2, overview.nodes().stream().filter(n -> n.nodeId().equals("n1")).findFirst().orElseThrow().localDeadLetters());
+            assertTrue(overview.reasons().contains("LOCAL_DEAD_LETTERS"));
+            assertEquals(2, overview.deadLetters().local());
         }
 
         @Test
@@ -446,7 +463,7 @@ class ClusterAdminServiceTest {
 
             when(rpc.call("n3", ClusterAdminService.RPC_DRAIN, Map.of("drain", false))).thenReturn(Optional.empty());
             var unreachable = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n3", false, "a"));
-            assertEquals(503, unreachable.status());
+            assertEquals(409, unreachable.status());
 
             var missing = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n9", true, "a"));
             assertEquals(404, missing.status());

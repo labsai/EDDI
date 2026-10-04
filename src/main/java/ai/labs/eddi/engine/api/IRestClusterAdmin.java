@@ -84,8 +84,7 @@ public interface IRestClusterAdmin {
             + "RENEWED when expectedRevision is given and the holder renewed since. Safe because of the fence: a still-alive former "
             + "holder's late write is refused and dead-lettered. Audited.")
     @APIResponse(responseCode = "200", description = "RELEASED, ALREADY_RELEASED or RENEWED.")
-    @APIResponse(responseCode = "409", description = "Not in cluster mode.")
-    @APIResponse(responseCode = "503", description = "NATS unreachable.")
+    @APIResponse(responseCode = "409", description = "Not in cluster mode, or NATS unreachable from this node (code NATS_UNREACHABLE).")
     ActionResult releaseLease(@PathParam("conversationId") String conversationId, ReleaseRequest request);
 
     @GET

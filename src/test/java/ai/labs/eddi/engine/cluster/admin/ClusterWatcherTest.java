@@ -106,6 +106,38 @@ class ClusterWatcherTest {
     }
 
     @Test
+    @DisplayName("after a NATS outage, expired records are not reported as lost nodes — not this node, not the others")
+    void reconnectIsNotALoss() {
+        long now = System.currentTimeMillis();
+        members.add(member("n1", "b1", now));
+        members.add(member("n2", "b2", now));
+        watcher.pollMembers();
+        // NATS goes away; every record expires meanwhile.
+        when(connections.isConnected()).thenReturn(false);
+        watcher.pollMembers();
+        members.clear();
+        when(connections.isConnected()).thenReturn(true);
+        watcher.pollMembers(); // first poll after the reconnect: nobody has rewritten a record yet
+        members.add(member("n2", "b2", System.currentTimeMillis()));
+        watcher.pollMembers();
+        assertTrue(types().isEmpty(), "no lost/stale/joined after a reconnect: " + types());
+        assertTrue(watcher.goneNodes().isEmpty());
+    }
+
+    @Test
+    @DisplayName("this node is never reported lost or stale by itself")
+    void neverSelf() {
+        long now = System.currentTimeMillis();
+        members.add(member("n1", "b1", now));
+        watcher.pollMembers();
+        members.set(0, member("n1", "b1", now - 25_000));
+        watcher.pollMembers();
+        members.clear();
+        watcher.pollMembers();
+        assertTrue(types().isEmpty(), types().toString());
+    }
+
+    @Test
     @DisplayName("a late heartbeat is reported once as node.stale")
     void stale() {
         long now = System.currentTimeMillis();

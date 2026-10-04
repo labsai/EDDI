@@ -72,6 +72,8 @@ public class ClusterWatcher implements ClusterStartable {
     private final Map<String, Integer> cacheCounts = new TreeMap<>();
     private boolean membersInitialised;
     private boolean wasDegraded;
+    private boolean disconnectedSincePoll;
+    private long reconnectGraceUntil;
     private long degradedSince;
 
     @Inject
@@ -143,10 +145,20 @@ public class ClusterWatcher implements ClusterStartable {
     synchronized void pollMembers() {
         try {
             if (!connections.get().isConnected()) {
+                disconnectedSincePoll = true;
                 return; // nothing can be told apart while we cannot read presence
             }
             long now = System.currentTimeMillis();
             long interval = config.presenceInterval().toMillis();
+            if (disconnectedSincePoll) {
+                // Every record aged while this node (and often every node) was cut off,
+                // and some expired: what is missing now is not "lost" until the members
+                // had an interval or two to write their records again.
+                disconnectedSincePoll = false;
+                reconnectGraceUntil = now + 2 * interval + 1_000;
+            }
+            boolean grace = now < reconnectGraceUntil;
+            String self = connections.get().node().nodeId();
             Map<String, Map<String, Object>> current = new HashMap<>();
             for (Map<String, Object> member : presence.get().members()) {
                 current.put(String.valueOf(member.get("node")), member);
@@ -165,14 +177,22 @@ public class ClusterWatcher implements ClusterStartable {
                             "node.joined:" + e.getKey() + ":" + boot);
                 }
                 long updated = number(e.getValue().get("updatedAt"));
-                if (updated > 0 && now - updated > 2 * interval && !Long.valueOf(updated).equals(staleReported.get(e.getKey()))) {
+                if (!grace && !self.equals(e.getKey()) && updated > 0 && now - updated > 2 * interval
+                        && !Long.valueOf(updated).equals(staleReported.get(e.getKey()))) {
                     staleReported.put(e.getKey(), updated);
                     activity.record("node.stale", ClusterActivityLog.WARNING,
                             Map.of("nodeId", e.getKey(), "heartbeatAgeMs", now - updated), "node.stale:" + e.getKey() + ":" + updated);
                 }
             }
+            if (grace) {
+                // Keep remembering the members not seen yet; judge them after the grace.
+                for (Map.Entry<String, Map<String, Object>> e : current.entrySet()) {
+                    lastMembers.put(e.getKey(), e.getValue());
+                }
+                return;
+            }
             for (Map.Entry<String, Map<String, Object>> e : lastMembers.entrySet()) {
-                if (current.containsKey(e.getKey())) {
+                if (current.containsKey(e.getKey()) || self.equals(e.getKey())) {
                     continue;
                 }
                 long updated = number(e.getValue().get("updatedAt"));

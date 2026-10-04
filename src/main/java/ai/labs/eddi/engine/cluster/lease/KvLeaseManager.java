@@ -77,6 +77,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String WAITER_PREFIX = "w.";
     private static final long NOT_CONNECTED_RETRY_MILLIS = 250;
+    /** How many leases of an admin listing are re-read from the stream leader. */
+    static final int CONSISTENT_READS = 500;
 
     /** Core NATS release notifications. */
     public interface LeaseNotifier {
@@ -589,7 +591,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
      *             when NATS cannot be reached
      */
     public ForceRelease forceRelease(String key, Long expectedRevision) {
-        Optional<ISharedKv.Versioned> current = kv.get(key);
+        Optional<ISharedKv.Versioned> current = kv.getConsistent(key);
         if (current.isEmpty()) {
             return new ForceRelease(ForceReleaseOutcome.ALREADY_RELEASED, null, 0);
         }
@@ -598,7 +600,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
             return new ForceRelease(ForceReleaseOutcome.RENEWED, info, info.revision());
         }
         if (!kv.delete(key, info.revision())) {
-            long now = kv.get(key).map(ISharedKv.Versioned::revision).orElse(0L);
+            long now = kv.getConsistent(key).map(ISharedKv.Versioned::revision).orElse(0L);
             return now == 0
                     ? new ForceRelease(ForceReleaseOutcome.ALREADY_RELEASED, info, 0)
                     : new ForceRelease(ForceReleaseOutcome.RENEWED, info, now);
@@ -622,11 +624,11 @@ public class KvLeaseManager implements IConversationLeaseManager {
      * it.
      */
     public Optional<LeaseSnapshot> peekSnapshot(String key) {
-        Optional<ISharedKv.Versioned> current = kv.get(key);
+        Optional<ISharedKv.Versioned> current = kv.getConsistent(key);
         if (current.isEmpty()) {
             return Optional.empty();
         }
-        String waiting = kv.get(WAITER_PREFIX + key).map(m -> new String(m.value(), StandardCharsets.UTF_8)).orElse(null);
+        String waiting = kv.getConsistent(WAITER_PREFIX + key).map(m -> new String(m.value(), StandardCharsets.UTF_8)).orElse(null);
         return Optional.of(new LeaseSnapshot(key, decode(current.get()), current.get().writtenAt(), waiting));
     }
 
@@ -650,7 +652,13 @@ public class KvLeaseManager implements IConversationLeaseManager {
             if (leases.size() >= max) {
                 break;
             }
-            leases.add(new LeaseSnapshot(e.key(), decode(e.value()), e.value().writtenAt(), waitingNodes.get(e.key())));
+            // The watch lists the keys; the values are re-read from the stream leader, so a
+            // lagging replica cannot show an old holder or revision. Bounded by `max`.
+            Optional<ISharedKv.Versioned> value = leases.size() < CONSISTENT_READS ? kv.getConsistent(e.key()) : Optional.of(e.value());
+            if (value.isEmpty()) {
+                continue; // released since the watch saw it
+            }
+            leases.add(new LeaseSnapshot(e.key(), decode(value.get()), value.get().writtenAt(), waitingNodes.get(e.key())));
         }
         return leases;
     }
@@ -727,6 +735,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
                 LeaseInfo info = decode(v.get());
                 if (node.nodeId().equals(info.node()) && !node.bootId().equals(info.boot()) && kv.delete(key, info.revision())) {
                     takeovers.increment();
+                    notifyTakeover(key, info);
                     LOGGER.infof("Released lease %s left by this node's previous boot %s", sanitize(key), info.boot());
                 }
             }

@@ -237,7 +237,7 @@ public class RestClusterAdmin implements IRestClusterAdmin {
             LOGGER.infof("Cluster action refused (%s): %s", e.code(), sanitize(e.getMessage()));
             throw new WebApplicationException(Response.status(e.status()).type(MediaType.APPLICATION_JSON).entity(body).build());
         } catch (ClusterUnavailableException e) {
-            throw new WebApplicationException(Response.status(Response.Status.SERVICE_UNAVAILABLE).type(MediaType.APPLICATION_JSON)
+            throw new WebApplicationException(Response.status(Response.Status.CONFLICT).type(MediaType.APPLICATION_JSON)
                     .entity(Map.of("code", "NATS_UNREACHABLE", "message", "NATS is unreachable from this node")).build());
         }
     }

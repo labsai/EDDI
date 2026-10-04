@@ -55,6 +55,24 @@ roles see why the screen is closed. All strings in the 11 locales.
 dead-letter summary; a new prompt section explains verdicts, degraded policies and orphaned
 leases. The dead-letter listing (user input) and every recovery action stay off the allow-list.
 
+### Found on the live 3-node cluster, fixed on this branch
+
+- A refused action answered `503` while NATS was down; the shipped nginx configuration retries
+  the next node on `503`, so every node got marked down and the whole API (turns included)
+  answered `502` for the fail timeout. Refusals are `409` with a code now.
+- After a NATS outage the watcher reported every node — itself included — as lost, because their
+  presence records had expired meanwhile. It now waits two presence intervals after a reconnect
+  and never reports itself.
+- Activity entries recorded during an outage stayed in the outbox when the first publish after
+  the reconnect hit a stream still electing its leader; the outbox is now retried every 5 s.
+- Without NATS the other nodes were shown "heartbeat late"; they are `UNKNOWN` now, and this
+  node's card uses its live numbers (it hid the dead letters kept locally).
+- A paused node behind the load balancer froze the console's numbers (its requests hung for
+  the proxy's read timeout); console reads fail after 8 s and show the stale-data notice.
+- `NOT_RENEWED` now flags two missed heartbeats instead of three — with a 20 s TTL and a 5 s
+  heartbeat, three left almost no window before the lease expired by itself.
+- A restarted node's sweep of its previous boot's leases now shows up as a takeover.
+
 ### Decisions
 
 ```decision-log

@@ -53,7 +53,7 @@ class RestClusterAdminTest {
     }
 
     @Test
-    @DisplayName("a refusal answers its status with a code; NATS unreachable is 503")
+    @DisplayName("a refusal answers its status with a code; NATS unreachable is 409, never a 5xx a load balancer would take for a dead node")
     void refusals() {
         when(service.drain(anyString(), anyBoolean(), anyString()))
                 .thenThrow(new ClusterAdminService.ActionRefusedException(409, "LAST_NODE", "last node"));
@@ -62,7 +62,7 @@ class RestClusterAdminTest {
         assertEquals("LAST_NODE", ((Map<?, ?>) refused.getResponse().getEntity()).get("code"));
 
         when(service.leases(any(), anyBoolean(), anyInt())).thenThrow(new ClusterUnavailableException("down"));
-        assertEquals(503, assertThrows(WebApplicationException.class, () -> rest.getLeases(null, false, 10)).getResponse().getStatus());
+        assertEquals(409, assertThrows(WebApplicationException.class, () -> rest.getLeases(null, false, 10)).getResponse().getStatus());
     }
 
     @Test

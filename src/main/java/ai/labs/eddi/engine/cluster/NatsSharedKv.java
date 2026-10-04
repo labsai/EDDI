@@ -21,6 +21,8 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import io.nats.client.api.MessageInfo;
+import io.nats.client.impl.Headers;
 
 /**
  * {@link ISharedKv} on a NATS JetStream KV bucket.
@@ -128,6 +130,36 @@ public class NatsSharedKv implements ISharedKv {
                 return Optional.empty();
             }
             return Optional.of(versioned(entry));
+        });
+    }
+
+    /**
+     * The stream's last message for the key through the JetStream API's message
+     * get, which the stream leader answers — unlike the KV direct get, which any
+     * replica may answer. A delete or purge marker reads as absent.
+     */
+    @Override
+    public Optional<Versioned> getConsistent(String key) {
+        return run("get-consistent", kv -> {
+            MessageInfo info;
+            try {
+                info = connections.jetStreamManagement().getLastMessage("KV_" + bucket, "$KV." + bucket + "." + key);
+            } catch (JetStreamApiException e) {
+                if (JetStreamDeadLetterStore.notFound(e)) {
+                    return Optional.empty();
+                }
+                throw e;
+            }
+            if (info == null || !info.isMessage() || info.getData() == null || info.getData().length == 0) {
+                return Optional.empty();
+            }
+            Headers headers = info.getHeaders();
+            String operation = headers == null ? null : headers.getFirst("KV-Operation");
+            if (operation != null && !"PUT".equals(operation)) {
+                return Optional.empty();
+            }
+            return Optional.of(new Versioned(info.getData(), info.getSeq(),
+                    info.getTime() == null ? 0L : info.getTime().toInstant().toEpochMilli()));
         });
     }
 
