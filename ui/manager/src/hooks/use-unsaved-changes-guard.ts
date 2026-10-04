@@ -1,12 +1,11 @@
-import { useContext, useEffect, useRef } from "react";
-import { UNSAFE_DataRouterContext, useBlocker } from "react-router-dom";
+import { useEffect, useId } from "react";
 import { create } from "zustand";
 
 /**
- * A navigation the guard has held back, waiting for the user's answer.
- * Rendered by `NavigationGuardDialog`, mounted once at the app root.
+ * A navigation held back, waiting for the user's answer. Rendered by
+ * `NavigationGuardDialog`, mounted once at the app root.
  */
-interface PendingNavigation {
+export interface PendingNavigation {
   /** Let the held navigation through — the user chose to discard. */
   proceed: () => void;
   /** Cancel the held navigation — the user chose to stay. */
@@ -15,17 +14,35 @@ interface PendingNavigation {
 
 interface NavigationGuardState {
   pending: PendingNavigation | null;
+  /** Tokens of the mounted guards that currently have unsaved changes. */
+  dirtyGuards: ReadonlySet<string>;
 }
 
 export const useNavigationGuardStore = create<NavigationGuardState>(() => ({
   pending: null,
+  dirtyGuards: new Set<string>(),
 }));
+
+function setGuardDirty(token: string, dirty: boolean) {
+  useNavigationGuardStore.setState((s) => {
+    if (s.dirtyGuards.has(token) === dirty) return s;
+    const next = new Set(s.dirtyGuards);
+    if (dirty) next.add(token);
+    else next.delete(token);
+    return { dirtyGuards: next };
+  });
+}
+
+/** Whether any mounted guard has unsaved changes. Read by the single app blocker. */
+export function anyGuardDirty(): boolean {
+  return useNavigationGuardStore.getState().dirtyGuards.size > 0;
+}
 
 /** One-shot escape hatch state, see {@link allowNextNavigation}. */
 let bypassNext = false;
 
 /**
- * Let the next in-app navigation through even though the page is dirty.
+ * Let the next in-app navigation through even though a page is dirty.
  *
  * For a programmatic `navigate()` whose edits are already resolved but whose
  * `isDirty` has not re-rendered yet — navigating away right after a delete, or
@@ -41,25 +58,35 @@ export function allowNextNavigation(): void {
   }, 0);
 }
 
+/** Consume the bypass flag; true when this navigation was allowed through. */
+export function consumeNavigationBypass(): boolean {
+  if (!bypassNext) return false;
+  bypassNext = false;
+  return true;
+}
+
 /**
  * Prevent accidental data loss when there are unsaved changes.
  *
  * Two layers:
  *  - `beforeunload` covers closing the tab, reloading, and leaving for another
  *    origin — the browser shows its own native prompt.
- *  - A router blocker (`useBlocker`) covers in-app navigation: a sidebar link,
- *    the breadcrumb, the command palette, the browser's Back button. The held
- *    navigation is parked in a store and `NavigationGuardDialog` asks Stay or
- *    Discard. Only a change of PATH is held — switching a tab through a query
- *    parameter on the same page loses nothing.
+ *  - In-app navigation (a sidebar link, the breadcrumb, the command palette, the
+ *    Back button) is held by ONE router blocker, mounted by
+ *    `NavigationGuardDialog`. This hook only registers its dirty flag in a store.
+ *    It must not call `useBlocker` itself: a router supports a single blocker and
+ *    consults only the last one registered, so a clean guard mounted after a
+ *    dirty one would silently take over and leave the dirty page unprotected.
  *
- * `useBlocker` exists only under a data router (`RouterProvider`). The app runs
- * under one; isolated component tests that mount a bare `MemoryRouter` do not, and
- * for them the blocker layer is simply absent rather than a thrown error.
+ * Only a change of PATH is held — switching a tab through a query parameter on the
+ * same page loses nothing. Under a bare `MemoryRouter` (isolated component tests)
+ * there is no blocker, and only `beforeunload` applies.
  *
  * @param isDirty Whether there are unsaved changes
  */
 export function useUnsavedChangesGuard(isDirty: boolean) {
+  const token = useId();
+
   useEffect(() => {
     if (!isDirty) return;
 
@@ -73,50 +100,9 @@ export function useUnsavedChangesGuard(isDirty: boolean) {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isDirty]);
 
-  // Whether a data router is present never changes over a component's lifetime,
-  // so calling the blocker hook conditionally keeps the hook order stable.
-  const hasDataRouter = useContext(UNSAFE_DataRouterContext) != null;
-  if (hasDataRouter) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useRouteBlocker(isDirty);
-  }
-}
-
-function useRouteBlocker(isDirty: boolean) {
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
-    if (bypassNext) {
-      bypassNext = false;
-      return false;
-    }
-    return isDirty && currentLocation.pathname !== nextLocation.pathname;
-  });
-
-  // Hold the latest blocker in a ref so the unmount cleanup releases exactly the
-  // request this instance published and never one belonging to a later page.
-  const published = useRef<PendingNavigation | null>(null);
-
   useEffect(() => {
-    if (blocker.state === "blocked") {
-      const request: PendingNavigation = {
-        proceed: () => blocker.proceed(),
-        reset: () => blocker.reset(),
-      };
-      published.current = request;
-      useNavigationGuardStore.setState({ pending: request });
-    } else if (published.current) {
-      if (useNavigationGuardStore.getState().pending === published.current) {
-        useNavigationGuardStore.setState({ pending: null });
-      }
-      published.current = null;
-    }
-  }, [blocker]);
-
-  useEffect(
-    () => () => {
-      if (published.current && useNavigationGuardStore.getState().pending === published.current) {
-        useNavigationGuardStore.setState({ pending: null });
-      }
-    },
-    [],
-  );
+    if (!isDirty) return;
+    setGuardDirty(token, true);
+    return () => setGuardDirty(token, false);
+  }, [isDirty, token]);
 }

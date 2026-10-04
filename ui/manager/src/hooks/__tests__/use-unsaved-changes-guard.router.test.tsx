@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -21,11 +22,15 @@ import { NavigationGuardDialog } from "@/components/shared/navigation-guard-dial
 function Editor({ dirty }: { dirty: boolean }) {
   useUnsavedChangesGuard(dirty);
   const navigate = useNavigate();
+  // Mount the clean guard in a LATER commit, so its registration is the last one.
+  const [late, setLate] = useState(false);
+  useEffect(() => setLate(true), []);
   return (
     <div>
       <h1>editor</h1>
       <Link to="/other">go other</Link>
       <Link to="/editor?tab=2">same page</Link>
+      {late && <CleanGuard />}
       <button onClick={() => navigate("/other")}>programmatic</button>
       <button
         onClick={() => {
@@ -37,6 +42,12 @@ function Editor({ dirty }: { dirty: boolean }) {
       </button>
     </div>
   );
+}
+
+/** A second guarded component, always clean, mounted AFTER the dirty one. */
+function CleanGuard() {
+  useUnsavedChangesGuard(false);
+  return null;
 }
 
 function renderApp(dirty: boolean) {
@@ -107,6 +118,15 @@ describe("useUnsavedChangesGuard — in-app navigation", () => {
   it("holds a programmatic navigate() too", async () => {
     const router = renderApp(true);
     await userEvent.click(screen.getByText("programmatic"));
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/editor");
+  });
+
+  it("still holds navigation when a clean guard mounts after the dirty one", async () => {
+    // A router consults only the LAST registered blocker, so per-hook blockers let
+    // the clean instance silently take over and leave the dirty page unprotected.
+    const router = renderApp(true);
+    await userEvent.click(screen.getByText("go other"));
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/editor");
   });
