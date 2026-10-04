@@ -577,4 +577,19 @@ class AuditLedgerServiceBranchTest {
         assertNotEquals("user1", service.pseudonymiseIfErased(entry("2", "c1", "a1")).userId());
         assertEquals(0, service.stopInFlightWork("user1"), "on the erasing node the cascade marks the user itself");
     }
+    @Test
+    @DisplayName("cluster mode: a sequence seed that cannot be read leaves the entry unsequenced instead of failing submit")
+    void clusteredSeedFailureIsUnsequenced() throws Exception {
+        IAuditClusterSupport cluster = mock(IAuditClusterSupport.class);
+        doReturn(true).when(cluster).isClustered();
+        doThrow(new IllegalStateException("seed read failed")).when(cluster).nextSequence(anyString(), any());
+        doReturn(true).when(auditStore).supportsSequence();
+        var service = new AuditLedgerService(auditStore, true, 60,
+                Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
+                true, 500, meterRegistry, cluster, null, new ObjectMapper());
+
+        assertDoesNotThrow(() -> service.submit(entry("1", "c1", "a1")));
+        service.flush();
+        verify(auditStore).appendBatch(argThat(batch -> batch.size() == 1 && batch.get(0).sequence() == AuditEntry.UNSEQUENCED));
+    }
 }

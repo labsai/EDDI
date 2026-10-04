@@ -2530,6 +2530,7 @@ public class GroupConversationService implements IGroupConversationService, User
             return 0;
         }
         int signalled = 0;
+        IllegalStateException failure = null;
         for (String groupConversationId : List.copyOf(discussionControls.keySet())) {
             try {
                 GroupConversation gc = conversationStore.read(groupConversationId);
@@ -2537,10 +2538,22 @@ public class GroupConversationService implements IGroupConversationService, User
                         && hitlCoordinator.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_IMMEDIATE)) {
                     signalled++;
                 }
-            } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | RuntimeException e) {
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // finished and removed between the snapshot of ids and this read
+            } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                // As in the local sweep: keep signalling the rest, then report the failure,
+                // so the erasing node names the step incomplete instead of reporting success.
                 LOGGER.warnf("Could not stop running group discussion %s for an erasure on another node: %s", groupConversationId,
                         e.getMessage());
+                if (failure == null) {
+                    failure = new IllegalStateException("Could not stop running group discussion " + groupConversationId, e);
+                } else {
+                    failure.addSuppressed(e);
+                }
             }
+        }
+        if (failure != null) {
+            throw failure;
         }
         return signalled;
     }
