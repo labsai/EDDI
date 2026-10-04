@@ -323,6 +323,16 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
         }
     }
 
+    /**
+     * Administrative: flush every invalidatable cache on every node, this one
+     * included (an event from this node's own boot is ignored when it comes back,
+     * so the local flush runs here). The caches reload from the database.
+     */
+    public void requestResyncAll(String reason) {
+        publish(ClusterEvent.RESYNC_ALL, Map.of("reason", reason, "node", node.nodeId()));
+        resync(reason);
+    }
+
     void resync(String reason) {
         LOGGER.warnf("Cluster cache resync: %s — flushing every invalidatable cache on this node", reason);
         if (resyncCounter != null) {

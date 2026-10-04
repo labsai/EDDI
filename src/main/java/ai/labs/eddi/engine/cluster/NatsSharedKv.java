@@ -10,11 +10,16 @@ import io.nats.client.JetStreamApiException;
 import io.nats.client.KeyValue;
 import io.nats.client.api.KeyValueEntry;
 import io.nats.client.api.KeyValueOperation;
+import io.nats.client.api.KeyValueWatchOption;
+import io.nats.client.api.KeyValueWatcher;
+import io.nats.client.impl.NatsKeyValueWatchSubscription;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -122,8 +127,13 @@ public class NatsSharedKv implements ISharedKv {
             if (entry == null || entry.getOperation() != KeyValueOperation.PUT || entry.getValue() == null) {
                 return Optional.empty();
             }
-            return Optional.of(new Versioned(entry.getValue(), entry.getRevision()));
+            return Optional.of(versioned(entry));
         });
+    }
+
+    private static Versioned versioned(KeyValueEntry entry) {
+        return new Versioned(entry.getValue(), entry.getRevision(),
+                entry.getCreated() == null ? 0L : entry.getCreated().toInstant().toEpochMilli());
     }
 
     @Override
@@ -173,5 +183,47 @@ public class NatsSharedKv implements ISharedKv {
     @Override
     public List<String> keys() {
         return run("keys", KeyValue::keys);
+    }
+
+    /**
+     * One ordered watch over the bucket's current values instead of a request per
+     * key: the server delivers every live entry, then signals the end of the
+     * initial data. Bounded by {@code max} entries and twice the request timeout.
+     */
+    @Override
+    public List<Entry> entries(String prefix, int max) {
+        return run("entries", kv -> {
+            List<Entry> entries = new ArrayList<>();
+            CountDownLatch done = new CountDownLatch(1);
+            KeyValueWatcher watcher = new KeyValueWatcher() {
+                @Override
+                public void watch(KeyValueEntry entry) {
+                    if (entry.getOperation() == KeyValueOperation.PUT && entry.getValue() != null
+                            && (prefix == null || prefix.isEmpty() || entry.getKey().startsWith(prefix))) {
+                        synchronized (entries) {
+                            if (entries.size() < max) {
+                                entries.add(new Entry(entry.getKey(), versioned(entry)));
+                            }
+                        }
+                    }
+                }
+
+                @Override
+                public void endOfData() {
+                    done.countDown();
+                }
+            };
+            NatsKeyValueWatchSubscription subscription = kv.watchAll(watcher, KeyValueWatchOption.IGNORE_DELETE);
+            try {
+                if (!done.await(connections.config().natsRequestTimeout().toMillis() * 2, TimeUnit.MILLISECONDS)) {
+                    throw new IOException("listing " + bucket + " did not complete in time");
+                }
+            } finally {
+                subscription.unsubscribe();
+            }
+            synchronized (entries) {
+                return List.copyOf(entries);
+            }
+        });
     }
 }

@@ -244,8 +244,10 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
         // entries below the cap). pollFirst() evicts the oldest; the just-added entry
         // is at the tail, so the newest failures are always retained (for cap > 0).
         // size() on a ConcurrentLinkedDeque is O(n), so the excess is computed once.
+        DeadLetterClassifier.Classification classification = DeadLetterClassifier.classify(failure);
         synchronized (deadLetterLock) {
-            deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload, describe(task)));
+            deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload, describe(task),
+                    classification.reason(), localNodeId(), classification.fence()));
             if (maxDeadLetters >= 0) {
                 for (int excess = deadLetters.size() - maxDeadLetters; excess > 0; excess--) {
                     if (deadLetters.pollFirst() == null) {
@@ -254,6 +256,16 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
                 }
             }
         }
+    }
+
+    /** The node recorded on a ring-buffer entry; {@code null} on a single node. */
+    protected String localNodeId() {
+        return null;
+    }
+
+    /** How many entries the node-local ring holds. */
+    public int localDeadLetterCount() {
+        return deadLetters.size();
     }
 
     /**

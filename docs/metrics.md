@@ -719,7 +719,7 @@ eddi_cluster_nats_reconnects_total          # Reconnects of this node
 eddi_cluster_members                        # Members in the presence bucket (gauge)
 eddi_cluster_lease_acquire_seconds          # Lease acquisition {outcome=acquired|timeout|degraded|degraded_reject, contended} (timer)
 eddi_cluster_lease_held                     # Leases this node holds (gauge)
-eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason}
+eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released}
 eddi_cluster_lease_takeover_total           # Leases taken over from a dead or restarted holder
 eddi_cluster_lease_release_conflicts_total  # Releases that found the lease already taken over
 eddi_cluster_fence_rejected_total           # Turn writes refused by the database fence (a zombie write stopped)
@@ -736,6 +736,7 @@ eddi_cluster_ratelimit_decisions_total      # Cluster-wide tool rate-limit decis
 eddi_cluster_ratelimit_cas_retries_total    # Lost compare-and-sets on a shared rate-limit bucket (retried)
 eddi_cluster_audit_sequence_total           # Audit chain positions {outcome=allocated|unsequenced|conflict}
 eddi_agent_nonce_unavailable_total          # Signed envelopes refused: the shared nonce store was unreachable (fail closed)
+eddi_cluster_admin_actions_total            # Recovery actions from the cluster console {action, outcome}
 ```
 
 Alert on `eddi_cluster_degraded == 1` for 5 minutes, any increase of

@@ -52,6 +52,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import java.nio.charset.StandardCharsets;
+import ai.labs.eddi.engine.cluster.lease.KvLeaseManager;
 
 /**
  * Three in-JVM "nodes" — each with its own NATS connection, presence, lease
@@ -429,5 +431,58 @@ class ClusterCoordinatorIT {
         LeaseHandle second = a.leases.acquire("conv-epoch", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
         assertTrue(second.fence() > first.fence(), "after recreation " + second.fence() + " must exceed " + first.fence());
         a.leases.release(second);
+    }
+
+    @Test
+    @Order(8)
+    @DisplayName("admin: a lease listed with its renewal time on another node, force-released there, re-acquired above the old fence")
+    void adminForceReleaseAcrossNodes() throws Exception {
+        Node a = nodes.get(0);
+        Node b = nodes.get(1);
+        Node c = nodes.get(2);
+        LeaseHandle held = a.leases.acquire("conv-admin", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        AtomicReference<Boolean> lost = new AtomicReference<>(false);
+        held.onLost(() -> lost.set(true));
+
+        // The listing is one KV watch; its renewal time is the server's write time.
+        List<KvLeaseManager.LeaseSnapshot> listed = c.leases.snapshot("c.", 100);
+        KvLeaseManager.LeaseSnapshot snapshot = listed.stream().filter(s -> s.key().equals("c.conv-admin")).findFirst().orElseThrow();
+        assertEquals("n1", snapshot.holder().node());
+        assertTrue(Math.abs(System.currentTimeMillis() - snapshot.renewedAt()) < 10_000, "renewedAt from the server: " + snapshot.renewedAt());
+
+        // A stale expected revision is refused while the holder renews (heartbeat 1 s).
+        long seen = snapshot.holder().revision();
+        Thread.sleep(1_500);
+        assertEquals(KvLeaseManager.ForceReleaseOutcome.RENEWED, c.leases.forceRelease("c.conv-admin", seen).outcome());
+
+        KvLeaseManager.ForceRelease released = c.leases.forceRelease("c.conv-admin", null);
+        assertEquals(KvLeaseManager.ForceReleaseOutcome.RELEASED, released.outcome());
+        assertTrue(c.leases.peekSnapshot("c.conv-admin").isEmpty(), "gone from the bucket");
+        assertEquals(KvLeaseManager.ForceReleaseOutcome.ALREADY_RELEASED, c.leases.forceRelease("c.conv-admin", null).outcome());
+
+        LeaseHandle next = b.leases.acquire("conv-admin", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertTrue(next.fence() > held.fence(), "the next holder's token is above the released one");
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (!lost.get() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertTrue(lost.get(), "the former holder's heartbeat finds its lease gone");
+        b.leases.release(next);
+    }
+
+    @Test
+    @Order(9)
+    @DisplayName("admin: a dead letter keeps its reason, node and fence; it is counted and found by conversation on another node")
+    void deadLetterReasonRoundTrip() throws Exception {
+        Thread.sleep(500);
+        String id = nodes.get(0).deadLetters.append("conv-reason", "fenced", 3L, Map.of("input", "hi", "agentId", "a"), "fenced",
+                Map.of("token", 5, "storedFence", 9));
+        nodes.get(0).deadLetters.appendAudit("{}".getBytes(StandardCharsets.UTF_8));
+        DeadLetterEntry read = nodes.get(2).deadLetters.listConversation("conv-reason", 10).get(0);
+        assertEquals(id, read.id());
+        assertEquals("fenced", read.reason());
+        assertEquals("n1", read.nodeId());
+        assertEquals(9, ((Number) read.fence().get("storedFence")).intValue());
+        assertEquals(1, nodes.get(2).deadLetters.countTurns(), "audit entries parked in the same stream are not counted as turns");
     }
 }

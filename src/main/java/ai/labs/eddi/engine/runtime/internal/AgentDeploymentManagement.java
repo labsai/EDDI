@@ -618,6 +618,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
+    @Override
+    public void reconcileNow() {
+        checkDeployments();
+    }
+
     private void sweep() {
         if (startupMigrationsRunning.get()) {
             LOGGER.debug("Deployment sweep parked: the startup migrations are still running.");

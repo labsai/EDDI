@@ -241,12 +241,13 @@ class ClusterConversationCoordinatorTest {
         final AtomicInteger seq = new AtomicInteger();
 
         @Override
-        public String append(String conversationId, String error, long timestamp, Map<String, Object> turn) {
+        public String append(String conversationId, String error, long timestamp, Map<String, Object> turn, String reason,
+                             Map<String, Object> fence) {
             if (down) {
                 throw new ClusterUnavailableException("down");
             }
             String id = String.valueOf(seq.incrementAndGet());
-            entries.add(new DeadLetterEntry(id, conversationId, error, timestamp, "{}", turn));
+            entries.add(new DeadLetterEntry(id, conversationId, error, timestamp, "{}", turn, reason, "node-under-test", fence));
             return id;
         }
 

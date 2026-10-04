@@ -120,18 +120,28 @@ that set `degraded.turns=reject`. Security state always fails closed.
 
 ## Runbook
 
+The Manager's **Cluster** screen answers most of these at a glance: the health verdict with
+its reasons, one card per node, the leases with suspicious ones flagged, the dead letters
+filterable by reason (`fenced`, `timeout`, `failed`), node and agent, a cluster-wide activity
+timeline, a "why is this conversation stuck?" lookup, and the recovery actions — force-release
+a lease, resync caches, reconcile deployments, drain a node, forward local dead letters. The
+API behind it, and why each action is safe, is in
+[Coordinator Admin](coordinator-admin.md#the-cluster-console).
+
 | Symptom | Look at | Action |
 |---|---|---|
 | `eddi_cluster_degraded == 1` | `/q/health/ready` (`cluster` check: `nats`, `degradedSince`), node log | Restore NATS reachability; the node recovers by itself. |
 | Rising `eddi_cluster_lease_acquire_seconds_count{outcome="timeout"}` | `GET /administration/coordinator/status?scope=cluster` (queue depths per node) | A conversation is hammered from several clients at once, or turns are slower than the acquire timeout. |
 | `eddi_cluster_fence_rejected_total` increases | Dead letters | Every refusal is a turn that was dead-lettered; replay or discard it. Frequent refusals mean nodes lose leases — check GC pauses and NATS latency (`natsRtt` in presence). |
 | `eddi_coordinator_dead_letters > 0` | `GET /administration/coordinator/dead-letters` | Replay (`POST …/{id}/replay`) or discard (`DELETE …/{id}`) — see [Coordinator Admin](coordinator-admin.md). |
-| An agent still answers after undeploy | Node log ("Undeployed agent … on this node") | It is undeployed within ~1 s (event) or 10–20 s (sweep). |
+| An agent still answers after undeploy | Node log ("Undeployed agent … on this node"), `deployment.propagated` entries on the activity timeline | It is undeployed within ~1 s (event) or 10–20 s (sweep); *Reconcile deployments* runs the sweep on every node at once. |
+| A conversation answers 409 for a long time | The console's stuck-conversation lookup, the lease list (`HOLDER_GONE`, `NOT_RENEWED`, `LONG_RUNNING`) | Wait for the lease TTL, or force-release it — the fence keeps a late write of the old holder out. |
+| A node must be restarted without failed turns | Its node card | *Drain* it: no new turns reach it (409 + `Retry-After`, readiness `DOWN`), running ones finish; restart it, or *Undrain*. |
 
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `NONCES`,
 `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_*`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`;
-streams: `EVENTS` and `DEAD_LETTERS`. Subjects live
+streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects `eddi.<prefix>.ops.>`). Subjects live
 under `eddi.<prefix>.>`, so a NATS user restricted to `eddi.>`, `$JS.API.>`,
 `$JS.ACK.>`, `$JS.FC.>`, `$KV.<prefix>_*.>`, `$O.<prefix>_ARCHIVES.>` (the exported-archive
 object store; without it archives stay on the node that made them) and `_INBOX.>` is
@@ -194,7 +204,7 @@ has drained to a single pod). Conversations, configurations and audit entries ar
 database and carry over. What lives only in NATS is dropped: unreplayed dead letters (list and
 replay or discard them first), A2A task mappings and unread paginated tool pages (both
 short-lived), and the exported archives of the last retention window. The JetStream objects
-can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, and the
+can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, `<prefix>_ACTIVITY`, and the
 `<prefix>_*` KV buckets).
 
 ## Residual limitations

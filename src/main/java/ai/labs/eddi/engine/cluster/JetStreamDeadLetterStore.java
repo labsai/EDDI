@@ -27,6 +27,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import io.nats.client.api.StreamInfo;
+import io.nats.client.api.StreamInfoOptions;
 
 /**
  * Dead letters on the JetStream stream
@@ -105,12 +107,19 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
     }
 
     @Override
-    public String append(String conversationId, String error, long timestamp, Map<String, Object> turn) {
+    public String append(String conversationId, String error, long timestamp, Map<String, Object> turn, String reason,
+                         Map<String, Object> fence) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("conversationId", conversationId);
         body.put("error", error);
         body.put("timestamp", timestamp);
         body.put("failedOn", connections.node().nodeId());
+        if (reason != null) {
+            body.put("reason", reason);
+        }
+        if (fence != null) {
+            body.put("fence", fence);
+        }
         if (turn != null) {
             body.put("turn", turn);
         }
@@ -142,6 +151,35 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 MessageInfo info;
                 try {
                     info = jsm.getNextMessage(stream, seq, subjects.deadLetterTurnWildcard());
+                } catch (JetStreamApiException e) {
+                    if (notFound(e)) {
+                        break;
+                    }
+                    throw e;
+                }
+                if (info == null || !info.isMessage()) {
+                    break;
+                }
+                entries.add(toEntry(info));
+                seq = info.getSeq() + 1;
+            }
+        } catch (IOException | JetStreamApiException e) {
+            throw new ClusterUnavailableException("dead-letter list failed: " + e.getMessage(), e);
+        }
+        return entries;
+    }
+
+    @Override
+    public List<DeadLetterEntry> listConversation(String conversationId, int limit) {
+        String subject = subjects.deadLetterTurn(KvKeys.safe(conversationId));
+        List<DeadLetterEntry> entries = new ArrayList<>();
+        JetStreamManagement jsm = connections.jetStreamManagement();
+        long seq = 1;
+        try {
+            while (entries.size() < limit) {
+                MessageInfo info;
+                try {
+                    info = jsm.getNextMessage(stream, seq, subject);
                 } catch (JetStreamApiException e) {
                     if (notFound(e)) {
                         break;
@@ -253,6 +291,23 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         }
     }
 
+    @Override
+    public long countTurns() {
+        try {
+            StreamInfo info = connections.jetStreamManagement().getStreamInfo(stream,
+                    StreamInfoOptions.filterSubjects(subjects.deadLetterTurnWildcard()));
+            Map<String, Long> bySubject = info.getStreamState().getSubjectMap();
+            return bySubject == null ? 0 : bySubject.values().stream().mapToLong(Long::longValue).sum();
+        } catch (JetStreamApiException e) {
+            if (streamMissing(e)) {
+                return 0;
+            }
+            throw new ClusterUnavailableException("dead-letter count failed: " + e.getMessage(), e);
+        } catch (IOException e) {
+            throw new ClusterUnavailableException("dead-letter count failed: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * Publishes an audit entry that could not be stored (see AuditLedgerService).
      */
@@ -272,8 +327,13 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             @SuppressWarnings("unchecked")
             Map<String, Object> turn = body.get("turn") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
             Object ts = body.get("timestamp");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> fence = body.get("fence") instanceof Map<?, ?> f ? (Map<String, Object>) f : null;
+            Object reason = body.get("reason");
+            Object failedOn = body.get("failedOn");
             return new DeadLetterEntry(String.valueOf(info.getSeq()), String.valueOf(body.get("conversationId")),
-                    String.valueOf(body.get("error")), ts instanceof Number n ? n.longValue() : 0L, payload, turn);
+                    String.valueOf(body.get("error")), ts instanceof Number n ? n.longValue() : 0L, payload, turn,
+                    reason == null ? null : reason.toString(), failedOn == null ? null : failedOn.toString(), fence);
         } catch (IOException e) {
             return new DeadLetterEntry(String.valueOf(info.getSeq()), null, "unreadable entry", 0L, payload, null);
         }

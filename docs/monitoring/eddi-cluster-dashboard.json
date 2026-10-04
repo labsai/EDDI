@@ -719,6 +719,34 @@
         "overrides": []
       },
       "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 27,
+      "title": "Admin recovery actions",
+      "type": "timeseries",
+      "description": "`eddi_cluster_admin_actions_total` \u2014 recovery actions taken from the cluster console (force-release, drain, resync, reconcile, dead-letter replay/discard/forward), by action and outcome. Every one is also in the `cluster-admin` audit trail.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
+      "targets": [
+        {
+          "expr": "sum by (action, outcome) (increase(eddi_cluster_admin_actions_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "{{action}} {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
     }
   ],
   "schemaVersion": 39,
