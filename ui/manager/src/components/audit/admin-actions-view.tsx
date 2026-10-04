@@ -216,7 +216,9 @@ export function AdminActionsView() {
                         under the method (seen live on …/schedules/{id}/disable). */}
                     <div className="flex items-start gap-2">
                       <span className="w-14 shrink-0 font-mono text-[10px] font-semibold text-primary">{row.method}</span>
-                      <code className="min-w-0 break-all font-mono text-xs text-foreground">{row.path}</code>
+                      {/* A floor on the width: in a narrow pane the table scrolls
+                          sideways instead of wrapping the path a few letters a line. */}
+                      <code className="min-w-[14rem] break-all font-mono text-xs text-foreground">{row.path}</code>
                     </div>
                   </td>
                   <td className="px-4 py-2 font-mono text-[10px] text-muted-foreground">{row.endpoint ?? "—"}</td>
