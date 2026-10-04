@@ -44,8 +44,10 @@ metadata:
   labels:
     {{- include "eddi.labels" . | nindent 4 }}
 spec:
-  {{- if or .Values.autoscaling.enabled (gt (int .Values.eddi.replicas) 1) }}
-  # More than one replica: a drain may never take the last serving pod.
+  {{- /* The fewest replicas that can run: the HPA may scale down to minReplicas. */}}
+  {{- $floor := ternary (int .Values.autoscaling.minReplicas) (int .Values.eddi.replicas) .Values.autoscaling.enabled }}
+  {{- if gt $floor 1 }}
+  # Never fewer than two replicas: a drain may never take the last serving pod.
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
   {{- else }}
   # maxUnavailable at a single replica: `minAvailable: 1` against one replica

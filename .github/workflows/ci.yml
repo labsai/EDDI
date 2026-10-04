@@ -793,7 +793,8 @@ jobs:
           echo "--- cluster mode: 3 replicas, in-chart 3-node NATS"
           rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
             "${optin[@]}" --set eddi.messagingType=nats --set eddi.replicas=3 --set nats.enabled=true \
-            --set nats.auth.password=ci-placeholder-nats --set podDisruptionBudget.enabled=true)
+            --set nats.auth.password=ci-placeholder-nats --set nats.cluster.routePassword=ci-placeholder-route \
+            --set podDisruptionBudget.enabled=true)
           grep -qF 'type: RollingUpdate' <<<"$rendered" \
             || { echo "::error::cluster mode does not default to a RollingUpdate"; exit 1; }
           grep -qF 'name: EDDI_CLUSTER_NODE_ID' <<<"$rendered" \
@@ -802,12 +803,25 @@ jobs:
             || { echo "::error::the PDB of a multi-replica release must keep one pod available"; exit 1; }
           grep -qF 'routes: [' <<<"$rendered" \
             || { echo "::error::the in-chart NATS nodes are not routed into one cluster"; exit 1; }
+          grep -qF 'nats://route:ci-placeholder-route@eddi-nats-0.eddi-nats:6222' <<<"$rendered" \
+            || { echo "::error::the in-chart NATS routes do not authenticate"; exit 1; }
           echo "--- cluster mode: HPA against an external NATS"
           rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
             "${optin[@]}" --set eddi.messagingType=nats --set nats.externalUrl=nats://nats.example.com:4222 \
             --set autoscaling.enabled=true)
           grep -qF 'kind: HorizontalPodAutoscaler' <<<"$rendered" \
             || { echo "::error::autoscaling.enabled=true rendered no HPA in cluster mode"; exit 1; }
+          echo "--- autoscaling down to one pod: the PDB still lets a drain through"
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
+            "${optin[@]}" --set eddi.messagingType=nats --set nats.externalUrl=nats://nats.example.com:4222 \
+            --set autoscaling.enabled=true --set autoscaling.minReplicas=1 --set podDisruptionBudget.enabled=true)
+          grep -qE '^ *maxUnavailable: 1' <<<"$rendered" && ! grep -qE '^ *minAvailable:' <<<"$rendered" \
+            || { echo "::error::an HPA that may scale to one pod got a PDB that blocks every drain"; exit 1; }
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
+            "${optin[@]}" --set eddi.messagingType=nats --set nats.externalUrl=nats://nats.example.com:4222 \
+            --set autoscaling.enabled=true --set podDisruptionBudget.enabled=true)
+          grep -qF 'minAvailable: 1' <<<"$rendered" \
+            || { echo "::error::an HPA with minReplicas 2 must keep one pod available"; exit 1; }
           echo "--- in-memory keeps Recreate"
           rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
             "${optin[@]}")
@@ -860,10 +874,13 @@ jobs:
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.updateStrategy=RollingUpdate
           expect_failure "in-chart NATS without a password" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
-            --set nats.enabled=true
+            --set nats.enabled=true --set nats.cluster.routePassword=ci-placeholder-route
+          expect_failure "a clustered in-chart NATS without a route password" \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
+            --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats
           expect_failure "in-chart and external NATS at once" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
-            --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats \
+            --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats --set nats.cluster.routePassword=ci-placeholder-route \
             --set nats.externalUrl=nats://nats.example.com:4222
           expect_failure "a drain longer than the termination grace" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
@@ -907,7 +924,8 @@ jobs:
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
             --set nats.enabled=false
           expect_failure "NATS deployed for in-memory messaging" \
-            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set nats.enabled=true
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set nats.enabled=true \
+            --set nats.auth.password=ci-placeholder-nats --set nats.cluster.routePassword=ci-placeholder-route
           # A NULL publicUrl, not the empty-string default. The guard is a
           # truthiness test, and `toString nil` is the truthy literal "<nil>":
           # written that way this rendered with exit 0, handing the Manager SPA

@@ -44,3 +44,26 @@ cluster, and every one still refuses to run several in-memory replicas.
 - The Kustomize component carries no NATS authentication (it would need a Secret the
   operator has to create first); it restricts both NATS ports with NetworkPolicies and points
   to the Helm chart for authentication and TLS.
+
+### Fixed after the PR #958 review
+
+- **NATS routes authenticate.** The in-chart NATS cluster now gives its routes their own
+  credentials. `cluster.authorization` takes `nats.cluster.routeUsername`, default `route`,
+  and `nats.cluster.routePassword`, which is required whenever the chart runs more than one
+  NATS node. Every route URL carries those credentials, percent-encoded. Client
+  authorization never covered routes, and the chart's NetworkPolicy is off by default, so
+  anything that reached port 6222 could join the cluster. Checked on three real
+  `nats:2.11-alpine` containers running the rendered config: the routes form, and a server
+  without the credentials is refused. With the old block, the same server joined. CI renders
+  the credentials and refuses a clustered NATS without them. The chart version is unchanged
+  (2.5.0 is not released yet).
+- **PDB under autoscaling.** The PDB picks `minAvailable` only when the release never runs
+  fewer than two replicas. With autoscaling, that floor is `autoscaling.minReplicas`.
+  `minReplicas: 1` now gets `maxUnavailable`, so `kubectl drain` does not hang. CI covers
+  both cases.
+- **nginx 1.27.3.** The demo and `docker-compose.cluster.yml` now pin `nginx:1.27.3-alpine`.
+  Open-source nginx accepts `server ... resolve` in an upstream only from 1.27.3: 1.27.2
+  refuses the demo config with `invalid parameter "resolve"`.
+- The dead-letter alert description in the monitoring guide now says what the expression
+  counts. The demo's `--reuse` no longer sets a context file it never read.
+- **Docs (second #958 review):** the demo claims now cover only the scenarios its README lists. `clustering.md` and `gdpr-compliance.md` separate two retentions: the dead-letter stream expires audit dead letters after `eddi.coordinator.dead-letter.max-age` and holds their only copy, while the JSONL fallback never expires. They also name the actual subject, `eddi.<prefix>.dlq.audit`.

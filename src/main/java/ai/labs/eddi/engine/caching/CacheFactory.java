@@ -65,11 +65,19 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
 
     private final AtomicBoolean subscribed = new AtomicBoolean();
 
+    /**
+     * Cluster mode: the shared wrapper of each local cache, by the same key as the
+     * local cache. One wrapper per cache, because its record of the keys that live
+     * on this node only must be seen by every caller of that cache.
+     */
+    private final Map<String, ICache<?, ?>> sharedWrappers = new ConcurrentHashMap<>();
+
     private boolean clustered() {
         return clusterConfig != null && clusterConfig.isNats();
     }
 
-    private <K, V> ICache<K, V> clusterAware(String name, Duration ttl, ICache<K, V> local) {
+    @SuppressWarnings("unchecked")
+    private <K, V> ICache<K, V> clusterAware(String name, String localKey, Duration ttl, ICache<K, V> local) {
         if (!clustered()) {
             return local;
         }
@@ -78,7 +86,8 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             Duration bucketTtl = ttl != null ? ttl : defaultSharedTtl(name);
             boolean failClosed = "nonce-replay-protection".equals(name)
                     && ClusterConfig.REJECT.equals(clusterConfig.degradedNonces());
-            return new SharedKvCache<>(local, natsSharedState.get().bucket(new SharedBucket(bucket, bucketTtl, -1)), failClosed);
+            return (ICache<K, V>) sharedWrappers.computeIfAbsent(localKey,
+                    k -> new SharedKvCache<>(local, natsSharedState.get().bucket(new SharedBucket(bucket, bucketTtl, -1)), failClosed));
         }
         if (INVALIDATED.contains(name)) {
             subscribeOnce();
@@ -282,7 +291,7 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
                         .expireAfter(WriteExpiry.<Object, Object>never())
                         .recordStats()
                         .build());
-        return clusterAware(name, null, new CacheImpl<>(name, cache));
+        return clusterAware(name, name, null, new CacheImpl<>(name, cache));
     }
 
     @Override
@@ -315,6 +324,6 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
                         .expireAfter(WriteExpiry.<Object, Object>of(ttl))
                         .recordStats()
                         .build());
-        return clusterAware(name, ttl, new CacheImpl<>(name, cache));
+        return clusterAware(name, cacheKey, ttl, new CacheImpl<>(name, cache));
     }
 }

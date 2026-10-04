@@ -83,7 +83,9 @@ principal, not a user: erasing or exporting it is refused with 400.
    managed to write in the meantime. From this point the
    node's audit ledger also writes the user's pseudonym instead of their id for an
    hour (the keyed pseudonym v5 rows carry, whenever the ledger signs), so audit entries that cancelled work still flushes while it unwinds — or
-   that were already queued — do not land raw after step 14.
+   that were already queued — do not land raw after step 14. In cluster mode every
+   replica that answers the stop does the same before it replies, so its late
+   entries are covered too; see [Clustering](clustering.md#residual-limitations).
 1. User memories — **permanently deleted**
 2. Binary attachments of the user's conversations — **permanently deleted**
 3. HITL tool execution journal entries — **permanently deleted**
@@ -270,8 +272,9 @@ EDDI provides no application-level audit purge.
 ### The audit dead-letter sink holds personal data, and erasure does not reach it
 
 When the ledger cannot persist an entry it writes that entry to the dead-letter
-sink — NATS JetStream when a connection is available, otherwise the JSONL file
-at `eddi.audit.dead-letter-path` (default
+sink — in cluster mode the `eddi.<prefix>.dlq.audit` subject of the JetStream
+dead-letter stream while NATS takes it, otherwise the JSONL file at
+`eddi.audit.dead-letter-path` (default
 `/opt/eddi/data/eddi-audit-deadletter.jsonl`). **The record is the whole audit
 entry**: the `userId`, the verbatim prompt and response, the LLM detail and the
 tool calls, plus the HMAC and agent signature. It has to be, or a dropped entry
@@ -287,8 +290,8 @@ because preserving the entry is the whole point of the sink.
 
 As the controller you must therefore:
 
-- [ ] Treat `eddi.audit.dead-letter-path` (and the `eddi.deadletter.audit`
-      JetStream subject) as an audit-data location in your record of processing
+- [ ] Treat `eddi.audit.dead-letter-path` (and, in cluster mode, the
+      `eddi.<prefix>.dlq.audit` JetStream subject) as an audit-data location in your record of processing
       activities, with the same access controls and encryption at rest as the
       ledger itself.
 - [ ] Include it in the erasure procedure: either replay and truncate it once
@@ -296,7 +299,10 @@ As the controller you must therefore:
       `eddi_audit_entries_dropped_total` tells you whether the sink has ever
       been written to; a zero counter and an absent file mean there is nothing
       to do.
-- [ ] Give it a retention period. As with the ledger, EDDI never expires it.
+- [ ] Give the JSONL file a retention period: as with the ledger, EDDI never
+      expires it. The JetStream stream is different: it drops its entries after
+      `eddi.coordinator.dead-letter.max-age` (default `7d`), whether or not they
+      were replayed, and it is their only copy — replay within that window.
 
 A non-empty dead-letter sink is an incident, not a steady state — see
 [Incident Response](incident-response.md).

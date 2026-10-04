@@ -170,8 +170,16 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         try {
             if (shared.create(key(key), encode(value)).isPresent()) {
                 local.put(key, value);
+                // The bucket holds this value now: a marker left by an earlier degraded
+                // write must not later answer for it from the node-local copy.
+                localOnly.remove(key(key));
                 return null;
             }
+            // The create lost: the key exists in the bucket. Report it as present even
+            // when the stored value cannot be read back (expired since, or a type the
+            // decoder refuses) — the callers are replay nonces and Slack event
+            // de-duplication, for which "present" is the fail-closed answer; null would
+            // accept a replay.
             V existing = get(key);
             return existing != null ? existing : value;
         } catch (ClusterUnavailableException e) {

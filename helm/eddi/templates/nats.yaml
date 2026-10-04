@@ -50,9 +50,17 @@ stringData:
     }
     {{- end }}
     {{- if $clusterOn }}
+    {{- $routeUser := .Values.nats.cluster.routeUsername | default "route" }}
+    {{- $routePassword := required "nats.cluster.routePassword is required when the in-chart NATS runs more than one node: routes authenticate separately from clients. Generate one: openssl rand -hex 24" .Values.nats.cluster.routePassword }}
     cluster {
       name: eddi
       port: 6222
+      # Routes authenticate on their own: client authorization does not cover them.
+      authorization {
+        user: {{ $routeUser | quote }}
+        password: {{ $routePassword | quote }}
+        timeout: 2
+      }
       {{- if .Values.nats.tls.enabled }}
       tls {
         cert_file: /etc/nats-tls/tls.crt
@@ -62,7 +70,7 @@ stringData:
       {{- end }}
       routes: [
         {{- range $i := until $replicas }}
-        nats://{{ $fullname }}-nats-{{ $i }}.{{ $fullname }}-nats:6222
+        nats://{{ $routeUser | urlquery }}:{{ $routePassword | urlquery }}@{{ $fullname }}-nats-{{ $i }}.{{ $fullname }}-nats:6222
         {{- end }}
       ]
     }

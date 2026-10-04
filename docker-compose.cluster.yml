@@ -118,7 +118,8 @@ services:
       start_period: 60s
 
   lb:
-    image: nginx:1.27-alpine
+    # 1.27.3 or later: older open-source nginx refuses `server ... resolve` in an upstream.
+    image: nginx:1.27.3-alpine
     restart: unless-stopped
     volumes:
       - ./docker/cluster/nginx.conf:/etc/nginx/nginx.conf:ro

@@ -2570,8 +2570,15 @@ public class GroupConversationService implements IGroupConversationService, User
 
     void holdGroupLease(String groupConversationId) {
         if (clustered()) {
-            leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + groupConversationId)
-                    .ifPresent(lease -> groupLeases.put(groupConversationId, lease));
+            var lease = leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + groupConversationId);
+            if (lease.isPresent()) {
+                groupLeases.put(groupConversationId, lease.get());
+            } else {
+                // Held elsewhere — most likely a stale lease of a node that died, which
+                // expires with its TTL. The discussion still runs; a cancel forwarded to
+                // that holder is answered "not here" and falls back to the database path.
+                LOGGER.warnf("Group discussion %s runs without its group lease (held by another node)", groupConversationId);
+            }
         }
     }
 
@@ -2645,10 +2652,11 @@ public class GroupConversationService implements IGroupConversationService, User
             if (holder.isPresent() && nodeIdentity != null && !nodeIdentity.nodeId().equals(holder.get().node())) {
                 var reply = clusterRpc.call(holder.get().node(), IClusterRpc.GROUP_CONTROL,
                         Map.of("groupConversationId", conversationId, "op", "cancel", "mode", String.valueOf(mode)));
-                if (reply.isPresent() && reply.get().get("error") == null) {
-                    return Boolean.TRUE.equals(reply.get().get("cancelled"));
+                if (reply.isPresent() && reply.get().get("error") == null && Boolean.TRUE.equals(reply.get().get("cancelled"))) {
+                    return true;
                 }
-                // No answer: fall back to the database path below.
+                // No answer, or the holder does not run it (a stale lease of a node that
+                // restarted, or the discussion just ended): fall back to the database path.
             }
         }
         return hitlCoordinator.cancelDiscussion(conversationId, mode);

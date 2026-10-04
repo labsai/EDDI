@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -221,5 +222,32 @@ class AgentDeploymentManagementClusterTest {
         clustered(false);
         assertNull(management.awaitClusterDeployment(Environment.production, "agent1", () -> "x", Duration.ofSeconds(5)));
         verify(deploymentStore, never()).readDeploymentInfos(any());
+    }
+    @Test
+    @DisplayName("an unrecorded redeploy whose event overtook the undeploy event is not undeployed again by the sweep")
+    void undeployForgetsTheRecordHistory() throws Exception {
+        clustered(true);
+        IAgent served = mock(IAgent.class);
+        when(served.getAgentId()).thenReturn("agent1");
+        when(served.getAgentVersion()).thenReturn(1);
+        when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(List.of(served));
+        // Recorded and deployed once ...
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(deployed("agent1")));
+        Instant t0 = Instant.parse("2026-10-03T10:00:00Z");
+        sweepAt(t0);
+        // ... redeployed elsewhere with autoDeploy=false, whose event arrives first ...
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+        management.noteUnrecordedDeployment(Environment.production, "agent1", 1);
+        // ... then the undeploy event of the recorded version; the transient deploy
+        // runs again after it.
+        management.onRemoteDeploymentChange(new ClusterEvent(1, "e2", ClusterEvent.DEPLOYMENT_CHANGED, "n2", "b2", 0L, null,
+                Map.of("env", "production", "agentId", "agent1", "version", 1, "status", "undeployed")));
+        verify(agentFactory, times(1)).undeployAgent(Environment.production, "agent1", 1);
+
+        sweepAt(t0.plusSeconds(10));
+        sweepAt(t0.plusSeconds(20));
+        sweepAt(t0.plusSeconds(30));
+
+        verify(agentFactory, times(1)).undeployAgent(Environment.production, "agent1", 1);
     }
 }

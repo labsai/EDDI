@@ -321,6 +321,13 @@ nats:
   cluster:
     # Route the NATS nodes into one cluster (needed for replicas > 1).
     enabled: true
+    # Route authentication, separate from the client user below: a route is a
+    # server-to-server connection that client permissions do not restrict, so
+    # without it anything that reaches port 6222 can join the cluster.
+    routeUsername: route
+    # REQUIRED when the in-chart NATS runs more than one node (replicas > 1 and
+    # cluster.enabled) — no default is shipped. Generate: openssl rand -hex 24
+    routePassword: ""
   image:
     repository: nats
     # 2.11+: KV limit markers; 2.10 works with poll-only lease takeover.
@@ -428,8 +435,9 @@ autoscaling:
 #
 # maxUnavailable at a single replica: `minAvailable: 1` against one replica
 # means the eviction API can never succeed and `kubectl drain` hangs forever.
-# With more than one replica (or autoscaling) minAvailable is used instead, so a
-# drain never takes the last serving pod.
+# When the release never runs fewer than two replicas (eddi.replicas > 1, or
+# autoscaling with minReplicas > 1) minAvailable is used instead, so a drain
+# never takes the last serving pod.
 
 podDisruptionBudget:
   enabled: false

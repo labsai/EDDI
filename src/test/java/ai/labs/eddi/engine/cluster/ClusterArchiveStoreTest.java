@@ -23,6 +23,9 @@ import io.nats.client.Connection;
 import io.nats.client.ObjectStore;
 import io.nats.client.ObjectStoreManagement;
 import io.nats.client.api.ObjectInfo;
+import io.nats.client.api.ApiResponse;
+import io.nats.client.JetStreamApiException;
+import io.nats.client.support.JsonParser;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,6 +34,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -127,5 +132,32 @@ class ClusterArchiveStoreTest {
         String content = Files.readString(target);
         assertEquals(16, content.length());
         assertEquals(1, content.chars().distinct().count(), "the archive is one download's bytes, not a mix of two: " + content);
+    }
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("a bucket deleted after it was checked is checked (and created) again on the next call")
+    void missingBucketIsCheckedAgain(@TempDir Path dir) throws Exception {
+        ClusterConfig config = mock(ClusterConfig.class);
+        when(config.isNats()).thenReturn(true);
+        when(config.natsPrefix()).thenReturn("EDDI");
+        Connection connection = mock(Connection.class);
+        ObjectStoreManagement management = mock(ObjectStoreManagement.class);
+        when(connection.objectStoreManagement()).thenReturn(management);
+        ObjectStore objects = mock(ObjectStore.class);
+        when(connection.objectStore("EDDI_ARCHIVES")).thenReturn(objects);
+        String json = "{\"type\":\"io.nats.jetstream.api.v1.stream_msg_get_response\",\"error\":{\"code\":404,\"err_code\":10059,"
+                + "\"description\":\"stream not found\"}}";
+        when(objects.getInfo("a.zip")).thenThrow(new JetStreamApiException(new ApiResponse<Object>(JsonParser.parse(json)) {
+        }));
+        NatsConnectionManager manager = mock(NatsConnectionManager.class);
+        when(manager.requireConnected()).thenReturn(connection);
+        Instance<NatsConnectionManager> connections = mock(Instance.class);
+        when(connections.get()).thenReturn(manager);
+        var store = new ClusterArchiveStore(config, connections);
+
+        assertFalse(store.fetch("a.zip", dir.resolve("a.zip"), Duration.ofMinutes(5)));
+        assertFalse(store.fetch("a.zip", dir.resolve("a.zip"), Duration.ofMinutes(5)));
+
+        verify(management, times(2)).getStatus("EDDI_ARCHIVES");
     }
 }
