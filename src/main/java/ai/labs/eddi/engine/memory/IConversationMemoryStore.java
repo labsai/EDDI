@@ -204,6 +204,31 @@ public interface IConversationMemoryStore {
             throws IResourceStore.ResourceStoreException;
 
     /**
+     * Cluster mode: record that the lease holder carrying {@code fence} has started
+     * its turn, by raising the document's {@code _fence} to at least that value
+     * (never lowering it, never touching the revision).
+     * <p>
+     * Fenced writes refuse a token older than the stored one, but the stored one
+     * only moves when a write lands. A holder whose lease expired (a stalled JVM, a
+     * hung pipeline thread the watchdog abandoned) could therefore still write in
+     * the gap between its successor acquiring the lease and the successor's first
+     * write, interleaving a turn that never saw the successor's. Raising the fence
+     * when the successor starts closes that gap: from then on the predecessor's
+     * write is refused. No-op for stores without fencing and for a missing
+     * document.
+     *
+     * @param conversationId
+     *            the conversation
+     * @param fence
+     *            the lease's fencing token
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    default void raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
+        // single-node stores have nothing to fence
+    }
+
+    /**
      * Find all conversation IDs currently in the given state.
      *
      * @param state

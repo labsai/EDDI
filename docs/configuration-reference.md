@@ -56,21 +56,51 @@ applies in dev mode only.
 | Property | Default | Description |
 |---|---|---|
 | `eddi.datastore.type` | `mongodb` | `mongodb` or `postgres`. Selects the whole persistence layer — see [Architecture → DB-agnostic design](architecture.md) |
+| `eddi.datastore.postgres.startup-lock-timeout` | `180` | PostgreSQL only. Seconds a booting replica waits for the startup advisory lock, which runs the startup (table creation, migrations) of replicas sharing one database one after another — `CREATE TABLE IF NOT EXISTS` is not safe against a concurrent copy of itself. On expiry the node starts without the lock |
 | `eddi.datastore.postgres.substring-search-index` | `true` | PostgreSQL only. Builds `pg_trgm` trigram indexes for the descriptor listings' search box, in the background after boot (`CREATE INDEX CONCURRENTLY`, so writes are not blocked). Needs `CREATE EXTENSION pg_trgm`, which is trusted since PostgreSQL 13; if the role is refused, a warning is logged and search runs unindexed. Costs about 0.1 ms more per descriptor write. `false` builds nothing |
-| `eddi.messaging.type` | `in-memory` | `in-memory` or `nats`. `in-memory` confines the conversation coordinator to a single instance; `nats` distributes it |
+| `eddi.messaging.type` | `in-memory` | Read at runtime; one image serves both. `in-memory`: a single node, no dependencies. `nats`: any number of replicas behind a plain round-robin load balancer, coordinated through NATS JetStream — see [Clustering](clustering.md). Any other value fails the boot |
 
-### NATS JetStream (only when `eddi.messaging.type=nats`)
+### Clustering (only when `eddi.messaging.type=nats`)
+
+Every property below is inert in `in-memory` mode. The model, the degraded-mode
+contract and the operator runbook are in [Clustering](clustering.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.nats.url` | `nats://localhost:4222` | Server URL |
-| `eddi.nats.stream-name` | `EDDI_CONVERSATIONS` | JetStream stream carrying conversation work |
-| `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream that receives messages past `max-retries` |
-| `eddi.nats.max-retries` | `3` | Redelivery attempts before dead-lettering |
-| `eddi.nats.ack-wait-seconds` | `60` | How long JetStream waits for an ack before redelivering. Must exceed your slowest conversation turn, or slow turns are processed twice |
-| `eddi.nats.stream-max-age` | `1h` | Age bound of the conversation stream. Its messages are ordering markers nothing consumes, so the oldest are discarded when any of the three bounds is reached |
-| `eddi.nats.stream-max-messages` | `100000` | Message-count bound of the conversation stream |
-| `eddi.nats.stream-max-bytes` | `268435456` | Size bound of the conversation stream (256 MiB) |
+| `eddi.cluster.node-id` | host name | This replica's id. Must be unique per replica; falls back to `eddi.schedule.instance-id`, then the host name. Helm and the Kustomize overlay set it from the pod name |
+| `eddi.nats.url` | `nats://localhost:4222` | NATS servers, comma-separated — list every member of the NATS cluster |
+| `eddi.nats.prefix` | `EDDI` | Prefix of every KV bucket, stream and subject (`eddi.<prefix>.…`), so two deployments can share one NATS cluster |
+| `eddi.nats.replicas` | `1` | JetStream replicas of every bucket and stream. `3` on a three-node NATS cluster. A bucket created with another value keeps it (logged as a warning) |
+| `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream holding the dead letters of failed turns, readable, discardable and replayable from every node. While left at the default it follows `eddi.nats.prefix` (`<prefix>_DEAD_LETTERS` for any prefix other than `EDDI`), so deployments with different prefixes on one NATS cluster never share it |
+| `eddi.nats.username` / `eddi.nats.password` | — | NATS user credentials |
+| `eddi.nats.token` | — | NATS token authentication |
+| `eddi.nats.creds-file` | — | Path of a NATS `.creds` file (JWT + nkey) |
+| `eddi.nats.nkey-seed-file` | — | Path of an nkey seed file |
+| `eddi.nats.tls.enabled` | `false` | TLS to NATS |
+| `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate (`.p12`/`.pfx` read as PKCS12, anything else as the JVM default type) |
+| `eddi.nats.tls.keystore-path` / `eddi.nats.tls.keystore-password` | — | Client key store, for mutual TLS |
+| `eddi.nats.connection-timeout` | `2s` | Per-attempt connect timeout. The node never waits for NATS at boot: it connects in the background and serves in degraded mode until connected |
+| `eddi.nats.request-timeout` | `2s` | Timeout of every KV, JetStream and RPC call. While disconnected, calls fail at once instead |
+| `eddi.nats.reconnect-wait` | `1s` | Pause between reconnect attempts (plus jitter); reconnects never stop |
+| `eddi.cluster.lease.ttl` | `20s` | A conversation lease that is not refreshed expires on the NATS server after this long — the longest a crashed node can keep a conversation |
+| `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns. At most half the TTL (checked at boot) |
+| `eddi.cluster.lease.acquire-timeout` | `45s` | How long a turn waits for a lease another node holds before it is answered `409` with `Retry-After` (its input was not consumed). Keep it below `systemRuntime.agentTimeoutInSeconds` |
+| `eddi.cluster.lease.handoff-grace` | `25ms` | A node that releases a lease another node is waiting for holds back its own next acquire this long, so a busy node cannot starve the others |
+| `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
+| `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
+| `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` |
+| `eddi.cluster.degraded.nonces` | `reject` | Signed-envelope replay protection when NATS is down: `reject` refuses signed envelopes with `503` (fail closed); `local` checks node-locally only |
+| `eddi.cluster.degraded.rate-limits` | `local-share` | `local-share`: each node enforces its share of a global tool limit (limit ÷ known members, never looser than configured); `reject`: rate-limited tools are refused |
+| `eddi.cluster.readiness.require-nats` | `false` | `true` reports the node not-ready while degraded. Off by default: a NATS blip must never empty the load balancer |
+| `eddi.cluster.events.max-age` | `1h` | Retention of the cluster event stream. A node disconnected for longer, or that sees a gap, flushes every invalidatable cache |
+| `eddi.cluster.events.outbox-size` | `10000` | Events kept for publishing while NATS is unreachable; on overflow the node asks every node to resync on reconnect |
+| `eddi.cluster.local-cache-ttl` | `60s` | Backstop expiry of node-local caches that events invalidate (agent triggers, user conversations), for an event that was lost anyway |
+| `eddi.cluster.model-cache.max-age` | `15m` | A cached chat model is rebuilt at least this often even while busy, so a rotated key reaches it even if the rotation event was lost |
+| `eddi.cluster.hitl-recovery.interval` | `60s` | Period of the leader-elected sweep that recovers conversations a crashed node left `IN_PROGRESS` |
+| `eddi.cluster.hitl-recovery.min-age` | `3m` | A conversation must have been seen `IN_PROGRESS`, with no lease and an unchanged revision, for at least this long before the sweep recovers it |
+| `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
+| `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
+| `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error |
 
 ---
 

@@ -276,7 +276,13 @@ public class RestAgentEngine implements IRestAgentEngine {
                     reason = "The conversation changed while your message was queued — it was not processed;"
                             + " reload the conversation before sending it again";
                 }
-                response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason).build());
+                var conflict = Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason);
+                if (state == ConversationState.IN_PROGRESS) {
+                    // Busy: another turn (in a cluster, possibly on another node) holds the
+                    // conversation. Retrying shortly is exactly right, so say when.
+                    conflict.header("Retry-After", "2");
+                }
+                response.resume(conflict.build());
             }
         };
 

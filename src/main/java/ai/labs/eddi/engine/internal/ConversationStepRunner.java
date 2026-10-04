@@ -16,14 +16,20 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
+import ai.labs.eddi.engine.runtime.IDescribedTask;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
+import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import org.jboss.logging.Logger;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -111,6 +117,29 @@ class ConversationStepRunner {
                                              Map<String, String> loggingContext, TurnBuilder turnBuilder, boolean rebuildWhenSuperseded,
                                              Consumer<IConversationMemory> skipNotifier, ConversationService.ProcessingTurn processingTurn)
             throws Exception {
+        return processConversationStep(environment, conversationMemory, conversationId, loggingContext, turnBuilder, rebuildWhenSuperseded,
+                skipNotifier, processingTurn, null);
+    }
+
+    /**
+     * A turn the coordinator runs. Besides {@link IDiscardableTask} it is
+     * {@link ILeaseAwareTask} — in cluster mode the coordinator hands it the
+     * conversation lease, whose fencing token the turn's writes carry — and
+     * {@link IDescribedTask}, so a dead letter can be replayed.
+     */
+    interface TurnTask extends ILeaseAwareTask, IDescribedTask {
+    }
+
+    /**
+     * @param turnDescriptor
+     *            what a dead letter of this turn records so it can be replayed
+     *            (agent, environment, user, input, context), or {@code null}
+     */
+    IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
+                                             Map<String, String> loggingContext, TurnBuilder turnBuilder, boolean rebuildWhenSuperseded,
+                                             Consumer<IConversationMemory> skipNotifier, ConversationService.ProcessingTurn processingTurn,
+                                             Map<String, Object> turnDescriptor)
+            throws Exception {
         // Built here, on the request thread, so a conversation that cannot run at all
         // (ended, agent still deploying) is refused to the caller synchronously — the
         // same place it was refused before the builder existed.
@@ -141,13 +170,35 @@ class ConversationStepRunner {
                 work);
         final Callable<Void> identityBoundExecution = bindIdentity.apply(executeConversation);
 
-        return new IDiscardableTask() {
+        return new TurnTask() {
+            /**
+             * Set by the cluster coordinator before the task runs; null on a single node.
+             */
+            private volatile LeaseHandle lease;
+
             @Override
-            public Void call() {
+            public void bindLease(LeaseHandle lease) {
+                this.lease = lease;
+            }
+
+            @Override
+            public Map<String, Object> describe() {
+                return turnDescriptor;
+            }
+
+            @Override
+            public Void call() throws Exception {
                 try {
-                    return runConversationStep(environment, conversationMemory, conversationId, loggingContext,
+                    Void result = runConversationStep(environment, conversationMemory, conversationId, loggingContext,
                             identityBoundExecution,
-                            rebuildWhenSuperseded ? memory -> bindIdentity.apply(turnBuilder.build(memory)) : null, skipNotifier);
+                            rebuildWhenSuperseded ? memory -> bindIdentity.apply(turnBuilder.build(memory)) : null, skipNotifier, lease);
+                    ConversationFencedException fenced = fencedTurns.remove(conversationId);
+                    if (fenced != null) {
+                        // Surfaced so the coordinator dead-letters the turn with its input: the
+                        // write was refused because another node took the conversation over.
+                        throw fenced;
+                    }
+                    return result;
                 } finally {
                     // C11: the single guaranteed exit point of a turn. The completion
                     // consumer releases first on the happy path, but a watchdog timeout,
@@ -174,8 +225,17 @@ class ConversationStepRunner {
             public void onDiscarded(Throwable cause) {
                 try {
                     conversationService.contextLogger.setLoggingContext(loggingContext);
-                    LOGGER.errorf(cause, "Queued turn of conversation %s was dropped before it ran — reporting it as "
-                            + "skipped; the input was not consumed and can be retried", conversationId);
+                    if (cause instanceof LeaseUnavailableException busy) {
+                        // Cluster mode: another node kept the conversation's lease for the whole
+                        // wait (or NATS is down with degraded.turns=reject). Reported as "busy":
+                        // REST answers 409 with Retry-After; the input was not consumed.
+                        LOGGER.warnf("Turn of conversation %s not run: %s — reporting it as busy; the input was not consumed",
+                                sanitize(conversationId), busy.getMessage());
+                        conversationMemory.setConversationState(ConversationState.IN_PROGRESS);
+                    } else {
+                        LOGGER.errorf(cause, "Queued turn of conversation %s was dropped before it ran — reporting it as "
+                                + "skipped; the input was not consumed and can be retried", conversationId);
+                    }
                     if (skipNotifier != null) {
                         skipNotifier.accept(conversationMemory);
                     }
@@ -200,6 +260,34 @@ class ConversationStepRunner {
     Void runConversationStep(Environment environment, IConversationMemory submittedMemory, String conversationId,
                              Map<String, String> loggingContext, Callable<Void> submittedExecution, TurnBuilder rebuildTurn,
                              Consumer<IConversationMemory> skipNotifier) {
+        return runConversationStep(environment, submittedMemory, conversationId, loggingContext, submittedExecution, rebuildTurn,
+                skipNotifier, null);
+    }
+
+    /**
+     * Turns whose final write was refused by the cluster fence, keyed by
+     * conversation (a node runs at most one turn of a conversation at a time);
+     * drained by the task so the coordinator dead-letters them.
+     */
+    private final Map<String, ConversationFencedException> fencedTurns = new ConcurrentHashMap<>();
+
+    /**
+     * Conversations whose running turn was cancelled because its lease was lost:
+     * the conversation belongs to whoever holds the lease now, so the cancelled
+     * turn must not stamp a state on it (see the cancel branch of the completion
+     * callback). Keyed by conversation — a node runs at most one turn of one at a
+     * time — and cleared when the next turn of it starts.
+     */
+    private final Set<String> leaseLostConversations = ConcurrentHashMap.newKeySet();
+
+    /**
+     * @param lease
+     *            the cluster lease this turn runs under (cluster mode), or
+     *            {@code null} on a single node
+     */
+    Void runConversationStep(Environment environment, IConversationMemory submittedMemory, String conversationId,
+                             Map<String, String> loggingContext, Callable<Void> submittedExecution, TurnBuilder rebuildTurn,
+                             Consumer<IConversationMemory> skipNotifier, LeaseHandle lease) {
         // Queued-say guard: this memory copy was loaded at REST-request time;
         // a previously queued turn may have committed a pause (or a resume may
         // be executing), or the conversation may have been terminally resolved
@@ -284,6 +372,24 @@ class ConversationStepRunner {
         // #2: register the live memory so cancelConversation can signal the
         // running pipeline via setCancelled (checked at task boundaries).
         inFlightConversations.put(conversationId, conversationMemory);
+        if (lease != null && lease.fence() != null) {
+            // Cluster mode: every write of this turn carries the lease's fencing token,
+            // so the store refuses it if another node took the conversation over in the
+            // meantime; and losing the lease stops the pipeline at the next task boundary.
+            leaseLostConversations.remove(conversationId);
+            conversationMemory.setFenceToken(lease.fence());
+            raiseFence(conversationId, lease.fence());
+            final IConversationMemory leasedMemory = conversationMemory;
+            // TODO(fix/engine-runtime-hardening): once
+            // ai.labs.eddi.engine.runtime.ITurnAbandonment
+            // lands, call abandonInFlightTurn(conversationId) here instead — it raises the
+            // same
+            // cancel flag through the one public seam for abandoning a running turn.
+            lease.onLost(() -> {
+                leaseLostConversations.add(conversationId);
+                leasedMemory.setCancelled(true);
+            });
+        }
         try {
             // Carry the agent-level tool-approval config onto memory BEFORE the
             // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
@@ -301,6 +407,22 @@ class ConversationStepRunner {
             inFlightConversations.remove(conversationId, conversationMemory);
         }
         return null;
+    }
+
+    /**
+     * Cluster mode: tell the document this turn's lease has started, so a holder
+     * whose lease expired earlier (a stalled node, an abandoned pipeline thread)
+     * can no longer write — see {@link IConversationMemoryStore#raiseFence}. A
+     * failure is logged and the turn goes on: the fence still guards every write
+     * this turn makes, and a database that cannot take this update cannot take the
+     * turn's own writes either.
+     */
+    void raiseFence(String conversationId, long fence) {
+        try {
+            conversationMemoryStore.raiseFence(conversationId, fence);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not raise the fence of conversation %s to %d: %s", sanitize(conversationId), fence, e.getMessage());
+        }
     }
 
     void runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
@@ -326,6 +448,16 @@ class ConversationStepRunner {
                                 conversationService.contextLogger.setLoggingContext(loggingContext);
                                 LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
                                         + "discarding its outcome (no pause persisted/armed)", conversationId);
+                                if (leaseLostConversations.remove(conversationId)) {
+                                    // Cancelled because the lease was lost: another node holds the
+                                    // conversation now (or the next turn will), and a state written
+                                    // from here would overwrite the one its turn committed — the
+                                    // conversation reported EXECUTION_INTERRUPTED after a good turn.
+                                    LOGGER.warnf("Turn of conversation %s lost its lease — its outcome is discarded and the "
+                                            + "conversation state is left to the turn that holds it now", sanitize(conversationId));
+                                    refreshCachedState(conversationId);
+                                    return;
+                                }
                                 ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);
                                 if ((runningState == ConversationState.READY || runningState == ConversationState.IN_PROGRESS)
                                         && conversationMemoryStore.compareAndSetState(conversationId,
@@ -428,6 +560,17 @@ class ConversationStepRunner {
                                 // settles to READY/ENDED/… and persists the full snapshot.
                                 storeConversationMemory(conversationMemory, environment);
                             }
+                        } catch (ConversationFencedException e) {
+                            // Cluster mode: another node took the conversation over while this
+                            // turn ran (this node lost its lease), and has written since. The
+                            // turn's write is refused — never retried, never flipped to ERROR,
+                            // since the document belongs to the newer turn — and the turn is
+                            // dead-lettered with its input (see call()).
+                            conversationService.contextLogger.setLoggingContext(loggingContext);
+                            LOGGER.errorf("Turn of conversation %s was NOT persisted: %s", sanitize(conversationId), e.getMessage());
+                            conversationService.counterFenceRejected();
+                            fencedTurns.put(conversationId, e);
+                            refreshCachedState(conversationId);
                         } catch (ConcurrentConversationModificationException e) {
                             // The turn ran, its reply was already handed to the caller
                             // (renderOutput fires from inside the pipeline callable, before

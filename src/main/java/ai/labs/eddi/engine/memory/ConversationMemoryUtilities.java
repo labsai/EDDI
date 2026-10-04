@@ -83,6 +83,11 @@ public class ConversationMemoryUtilities {
         // append the steps this turn added instead of rewriting the whole document; see
         // IConversationMemory#getPersistedStepCount.
         snapshot.setPersistedStepCount(conversationMemory.getPersistedStepCount());
+        // Cluster fencing: the stored _fence is carried through so a full-document
+        // write keeps it, and the running turn's token becomes the write's filter.
+        // Both are null in single-node mode, which leaves the document untouched.
+        snapshot.setFence(conversationMemory.getStoredFence());
+        snapshot.setFenceToken(conversationMemory.getFenceToken());
 
         if (conversationMemory.getUserId() != null) {
             snapshot.setUserId(conversationMemory.getUserId());
@@ -164,6 +169,7 @@ public class ConversationMemoryUtilities {
         // carries it, so the store can tell "built on the current document" from
         // "built on a document someone else has since replaced".
         conversationMemory.setRevision(snapshot.getRevision());
+        conversationMemory.setStoredFence(snapshot.getFence());
         conversationMemory.setResolutionProvenance(snapshot.getResolutionProvenance());
         conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
         conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());

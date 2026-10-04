@@ -126,11 +126,6 @@ class ConfigurationReferenceCoverageTest {
      * a defect waiting to be found, not an exemption.
      */
     private static final Set<String> DECLARED_BUT_UNREAD = Set.of(
-            // Selects the messaging implementation at build time via @IfBuildProfile,
-            // so no runtime injection point reads the value itself.
-            "eddi.messaging.type",
-            // Consumed by the NATS extension's own configuration, not by EDDI code.
-            "eddi.nats.ack-wait-seconds",
             // The next three are read by Quarkus HTTP configuration through
             // ${...} expressions in application.properties, not by Java: the /chat
             // CSP filter's frame-ancestors, the application CSP's connect-src, and

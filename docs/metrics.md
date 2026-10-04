@@ -353,10 +353,14 @@ sum(rate(eddi_tenant_quota_unavailable_total[5m])) by (tenant)
 eddi_coordinator_active_conversations       # Conversations with a live queue (gauge)
 eddi_coordinator_queue_depth                # Total queued messages across all conversations (gauge)
 eddi_coordinator_total_processed_total      # Messages processed since start
+eddi_coordinator_total_dead_lettered_total  # Turns dead-lettered (failed after they started, or could not be scheduled)
+eddi_coordinator_dead_letters               # Dead letters retained right now (gauge; in cluster mode the shared stream's count)
 ```
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
-backlog: work is arriving faster than it drains.
+backlog: work is arriving faster than it drains. Both coordinators register the
+same five meters; `dead_letters > 0` means a turn failed and is waiting for an
+operator (list, replay or discard it — see [Coordinator Admin](coordinator-admin.md)).
 
 ### Pipeline Metrics
 
@@ -701,17 +705,40 @@ eddi_connection_token_refresh_claim_count_total # Refresh lease protocol; tag: o
 eddi_agents_deployed                        # Currently deployed agents (gauge)
 ```
 
-### NATS Messaging Metrics
+### Cluster Metrics
 
-> Only active when using the NATS messaging profile. Shows nothing under in-memory messaging.
+> Registered only when `eddi.messaging.type=nats` — an in-memory deployment
+> exposes none of them. Charted on the **EDDI Cluster** dashboard
+> (`docs/monitoring/eddi-cluster-dashboard.json`). The `eddi_nats_*` meters of
+> the former build-profile coordinator no longer exist.
 
 ```text
-eddi_nats_publish_count_total               # Messages published
-eddi_nats_consume_count_total               # Messages consumed
-eddi_nats_dead_letter_count_total           # Dead letters
-eddi_nats_publish_duration_seconds          # Publish latency (timer)
-eddi_nats_consume_duration_seconds          # Consume latency (timer)
+eddi_cluster_nats_connected                 # 1 while this node is connected to NATS (gauge)
+eddi_cluster_degraded                       # 1 while degraded: NATS unreachable for longer than the grace (gauge)
+eddi_cluster_nats_reconnects_total          # Reconnects of this node
+eddi_cluster_members                        # Members in the presence bucket (gauge)
+eddi_cluster_lease_acquire_seconds          # Lease acquisition {outcome=acquired|timeout|degraded|degraded_reject, contended} (timer)
+eddi_cluster_lease_held                     # Leases this node holds (gauge)
+eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason}
+eddi_cluster_lease_takeover_total           # Leases taken over from a dead or restarted holder
+eddi_cluster_lease_release_conflicts_total  # Releases that found the lease already taken over
+eddi_cluster_fence_rejected_total           # Turn writes refused by the database fence (a zombie write stopped)
+eddi_cluster_kv_seconds                     # KV calls {bucket, op, outcome} (timer)
+eddi_cluster_kv_cas_conflicts_total         # Lost compare-and-sets {bucket}
+eddi_cluster_events_published_total         # Cluster events published {type}
+eddi_cluster_events_consumed_total          # Cluster events handled from other nodes {type}
+eddi_cluster_events_publish_failed_total    # Events that went to the outbox instead
+eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
+eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
+eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
+eddi_cluster_degraded_decisions_total       # Degraded-mode decisions {area, action}
 ```
+
+Alert on `eddi_cluster_degraded == 1` for 5 minutes, any increase of
+`eddi_cluster_fence_rejected_total`, a rising
+`eddi_cluster_lease_acquire_seconds_count{outcome="timeout"}` and
+`eddi_coordinator_dead_letters > 0` — the rules ship in
+`docs/monitoring/eddi-cluster-alerts.yml`. See [Clustering](clustering.md).
 
 ### JVM & HTTP Server (auto-exposed)
 
