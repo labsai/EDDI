@@ -1616,7 +1616,6 @@
     "warnCount_many": "{{count}} d'avertissements",
     "warnCount_other": "{{count}} avertissements",
     "copied": "Entrée de journal copiée",
-    "copyFailed": "Impossible de copier dans le presse-papiers",
     "noMatches": "Aucune entrée chargée ne correspond à votre recherche.",
     "noMatchesHint": "La recherche ne porte que sur les entrées déjà chargées ici. Chargez des entrées plus anciennes ou ajustez les filtres pour remonter plus loin.",
     "searchLogsLabel": "Rechercher dans les entrées de journal chargées"
@@ -1810,7 +1809,9 @@
       "reasonUncovered": "{{count}} entrée(s) chargée(s) plus ancienne(s) que la plage vérifiée",
       "unverifiedTitle": "Pas entièrement vérifié",
       "unverifiedDesc": "Aucune signature n'a été invalidée, mais tout n'a pas pu être vérifié : {{reasons}}."
-    }
+    },
+    "agentsDeployed": "Déployés",
+    "agentsNotDeployed": "Non déployés"
   },
   "schedules": {
     "cronHelp": "Format à 5 champs : minute heure jour-du-mois mois jour-de-la-semaine",
@@ -1941,7 +1942,8 @@
     "systemManaged": "Système",
     "systemManagedHint": "Géré par EDDI (ingestion de base de connaissances, consolidation de la mémoire ou cadence d'équipe). Modifiez-le là où il est défini, pas ici.",
     "persistentConversationIdLocked": "Défini à la création de la planification. Le serveur conserve la conversation à laquelle les déclenchements ont été ajoutés.",
-    "failedScheduleGone": "La planification n'existe plus"
+    "failedScheduleGone": "La planification n'existe plus",
+    "oneTimeHelpZone": "Se déclenche une seule fois à cet instant, puis se termine. Interprété à l'heure de {{zone}} (le fuseau horaire ci-dessous)."
   },
   "cascadeTrace": {
     "title": "Cascade de modèles",
@@ -3127,7 +3129,9 @@
     "deleted": "Déclencheur supprimé",
     "deleteTitle": "Supprimer le déclencheur",
     "deleteDesc": "Supprimer définitivement le déclencheur pour l’intention « {{intent}} » ?",
-    "searchPlaceholder": "Filtrer par intention ou ID d’agent…"
+    "searchPlaceholder": "Filtrer par intention ou ID d’agent…",
+    "needIntent": "Saisissez une intention pour enregistrer.",
+    "needAgent": "Choisissez au moins un agent pour enregistrer."
   },
   "capabilities": {
     "agentCount": "Agents",
@@ -3755,7 +3759,10 @@
     "resetSuccess": "Compteurs d'usage réinitialisés",
     "saveSuccess": "Quota enregistré",
     "tenantId": "ID du locataire",
-    "title": "Quotas de locataire"
+    "title": "Quotas de locataire",
+    "limitHintEmpty": "Laissez vide ou saisissez -1 pour illimité",
+    "invalidInteger": "Saisissez un nombre entier (0 ou plus), ou laissez vide pour illimité.",
+    "invalidAmount": "Saisissez un montant (0 ou plus), ou laissez vide pour illimité."
   },
   "secretPicker": {
     "clearVault": "Effacer la référence vault",

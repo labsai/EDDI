@@ -1616,7 +1616,6 @@
     "warnCount_many": "{{count}} de advertencias",
     "warnCount_other": "{{count}} advertencias",
     "copied": "Entrada de registro copiada",
-    "copyFailed": "No se pudo copiar al portapapeles",
     "noMatches": "Ninguna entrada cargada coincide con su búsqueda.",
     "noMatchesHint": "La búsqueda solo abarca las entradas ya cargadas aquí. Cargue entradas más antiguas o ajuste los filtros para buscar más atrás.",
     "searchLogsLabel": "Buscar en las entradas de registro cargadas"
@@ -1810,7 +1809,9 @@
       "reasonUncovered": "{{count}} entrada(s) cargada(s) más antigua(s) que el intervalo verificado",
       "unverifiedTitle": "No verificado por completo",
       "unverifiedDesc": "No se refutó ninguna firma, pero no se pudo comprobar todo: {{reasons}}."
-    }
+    },
+    "agentsDeployed": "Desplegados",
+    "agentsNotDeployed": "No desplegados"
   },
   "schedules": {
     "cronHelp": "Formato de 5 campos: minuto hora día-del-mes mes día-de-la-semana",
@@ -1941,7 +1942,8 @@
     "systemManaged": "Sistema",
     "systemManagedHint": "Gestionado por EDDI (ingesta de la base de conocimiento, consolidación de memoria o cadencia de equipo). Cámbielo donde se define, no aquí.",
     "persistentConversationIdLocked": "Se establece al crear la programación. El servidor conserva la conversación a la que se han ido añadiendo las ejecuciones.",
-    "failedScheduleGone": "La programación ya no existe"
+    "failedScheduleGone": "La programación ya no existe",
+    "oneTimeHelpZone": "Se ejecuta una sola vez en este momento y luego finaliza. Se interpreta en la hora de {{zone}} (la zona horaria de abajo)."
   },
   "cascadeTrace": {
     "title": "Cascada de modelos",
@@ -3127,7 +3129,9 @@
     "deleted": "Disparador eliminado",
     "deleteTitle": "Eliminar disparador",
     "deleteDesc": "¿Eliminar permanentemente el disparador para la intención «{{intent}}»?",
-    "searchPlaceholder": "Filtrar por intención o ID de agente…"
+    "searchPlaceholder": "Filtrar por intención o ID de agente…",
+    "needIntent": "Introduzca una intención para guardar.",
+    "needAgent": "Elija al menos un agente para guardar."
   },
   "capabilities": {
     "agentCount": "Agentes",
@@ -3755,7 +3759,10 @@
     "resetSuccess": "Contadores de uso restablecidos",
     "saveSuccess": "Cuota guardada",
     "tenantId": "ID del inquilino",
-    "title": "Cuotas de inquilino"
+    "title": "Cuotas de inquilino",
+    "limitHintEmpty": "Déjelo vacío o introduzca -1 para ilimitado",
+    "invalidInteger": "Introduzca un número entero (0 o más) o déjelo vacío para ilimitado.",
+    "invalidAmount": "Introduzca un importe (0 o más) o déjelo vacío para ilimitado."
   },
   "secretPicker": {
     "clearVault": "Borrar referencia de vault",

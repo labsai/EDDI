@@ -1600,7 +1600,6 @@
     "warnCount_one": "{{count}} Warnung",
     "warnCount_other": "{{count}} Warnungen",
     "copied": "Log-Eintrag kopiert",
-    "copyFailed": "Kopieren in die Zwischenablage fehlgeschlagen",
     "noMatches": "Keine geladenen Einträge entsprechen Ihrer Suche.",
     "noMatchesHint": "Die Suche umfasst nur die hier bereits geladenen Einträge. Laden Sie ältere Einträge oder passen Sie die Filter an, um weiter zurückzusuchen.",
     "searchLogsLabel": "Geladene Log-Einträge durchsuchen"
@@ -1786,7 +1785,9 @@
       "reasonUncovered": "{{count}} geladene Einträge älter als der geprüfte Bereich",
       "unverifiedTitle": "Nicht vollständig verifiziert",
       "unverifiedDesc": "Keine Signatur wurde widerlegt, aber nicht alles konnte geprüft werden: {{reasons}}."
-    }
+    },
+    "agentsDeployed": "Bereitgestellt",
+    "agentsNotDeployed": "Nicht bereitgestellt"
   },
   "schedules": {
     "cronHelp": "5-Felder-Format: Minute Stunde Tag-des-Monats Monat Wochentag",
@@ -1917,7 +1918,8 @@
     "systemManaged": "System",
     "systemManagedHint": "Von EDDI verwaltet (Wissensbasis-Ingestion, Gedächtniskonsolidierung oder Team-Kadenz). Ändern Sie ihn dort, wo er definiert ist, nicht hier.",
     "persistentConversationIdLocked": "Wird beim Anlegen des Zeitplans festgelegt. Der Server behält die Konversation bei, an die die Ausführungen bisher angehängt wurden.",
-    "failedScheduleGone": "Zeitplan existiert nicht mehr"
+    "failedScheduleGone": "Zeitplan existiert nicht mehr",
+    "oneTimeHelpZone": "Wird einmal zu diesem Zeitpunkt ausgelöst und ist dann abgeschlossen. Wird als Zeit in {{zone}} gelesen (die Zeitzone unten)."
   },
   "cascadeTrace": {
     "title": "Modellkaskade",
@@ -3254,7 +3256,9 @@
     "deleted": "Auslöser gelöscht",
     "deleteTitle": "Auslöser löschen",
     "deleteDesc": "Auslöser für Absicht „{{intent}}“ endgültig löschen?",
-    "searchPlaceholder": "Nach Absicht oder Agenten-ID filtern…"
+    "searchPlaceholder": "Nach Absicht oder Agenten-ID filtern…",
+    "needIntent": "Geben Sie zum Speichern eine Absicht (Intent) ein.",
+    "needAgent": "Wählen Sie zum Speichern mindestens einen Agenten aus."
   },
   "capabilities": {
     "agentCount": "Agenten",
@@ -3711,7 +3715,10 @@
     "resetSuccess": "Nutzungszähler zurückgesetzt",
     "saveSuccess": "Kontingent gespeichert",
     "tenantId": "Mandanten-ID",
-    "title": "Mandanten-Kontingente"
+    "title": "Mandanten-Kontingente",
+    "limitHintEmpty": "Leer lassen oder -1 eingeben für unbegrenzt",
+    "invalidInteger": "Geben Sie eine ganze Zahl (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
+    "invalidAmount": "Geben Sie einen Betrag (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer."
   },
   "secretPicker": {
     "clearVault": "Vault-Referenz löschen",

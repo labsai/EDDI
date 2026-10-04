@@ -1616,7 +1616,6 @@
     "warnCount_many": "{{count}} de avisos",
     "warnCount_other": "{{count}} avisos",
     "copied": "Entrada de log copiada",
-    "copyFailed": "Não foi possível copiar para a área de transferência",
     "noMatches": "Nenhuma entrada carregada corresponde à sua pesquisa.",
     "noMatchesHint": "A pesquisa abrange apenas as entradas já carregadas aqui. Carregue entradas mais antigas ou ajuste os filtros para olhar mais atrás.",
     "searchLogsLabel": "Pesquisar nas entradas de log carregadas"
@@ -1810,7 +1809,9 @@
       "reasonUncovered": "{{count}} entrada(s) carregada(s) mais antiga(s) que o intervalo verificado",
       "unverifiedTitle": "Não totalmente verificado",
       "unverifiedDesc": "Nenhuma assinatura foi refutada, mas nem tudo pôde ser verificado: {{reasons}}."
-    }
+    },
+    "agentsDeployed": "Implantados",
+    "agentsNotDeployed": "Não implantados"
   },
   "schedules": {
     "cronHelp": "Formato de 5 campos: minuto hora dia-do-mês mês dia-da-semana",
@@ -1941,7 +1942,8 @@
     "systemManaged": "Sistema",
     "systemManagedHint": "Gerido pelo EDDI (ingestão da base de conhecimento, consolidação de memória ou cadência da equipa). Altere-o onde está definido, não aqui.",
     "persistentConversationIdLocked": "Definido quando o agendamento é criado. O servidor mantém a conversa à qual as execuções têm sido acrescentadas.",
-    "failedScheduleGone": "O agendamento já não existe"
+    "failedScheduleGone": "O agendamento já não existe",
+    "oneTimeHelpZone": "Dispara uma única vez neste momento e depois conclui. Interpretado no horário de {{zone}} (o fuso horário abaixo)."
   },
   "cascadeTrace": {
     "title": "Cascata de modelos",
@@ -3127,7 +3129,9 @@
     "deleted": "Gatilho eliminado",
     "deleteTitle": "Eliminar gatilho",
     "deleteDesc": "Eliminar permanentemente o gatilho para o intent «{{intent}}»?",
-    "searchPlaceholder": "Filtrar por intent ou ID do agente…"
+    "searchPlaceholder": "Filtrar por intent ou ID do agente…",
+    "needIntent": "Digite uma intenção para salvar.",
+    "needAgent": "Escolha pelo menos um agente para salvar."
   },
   "capabilities": {
     "agentCount": "Agentes",
@@ -3755,7 +3759,10 @@
     "resetSuccess": "Contadores de uso redefinidos",
     "saveSuccess": "Cota salva",
     "tenantId": "ID do locatário",
-    "title": "Cotas do locatário"
+    "title": "Cotas do locatário",
+    "limitHintEmpty": "Deixe em branco ou digite -1 para ilimitado",
+    "invalidInteger": "Digite um número inteiro (0 ou mais) ou deixe em branco para ilimitado.",
+    "invalidAmount": "Digite um valor (0 ou mais) ou deixe em branco para ilimitado."
   },
   "secretPicker": {
     "clearVault": "Limpar referência do cofre",

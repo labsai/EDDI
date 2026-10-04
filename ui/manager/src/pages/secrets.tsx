@@ -44,11 +44,13 @@ import {
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EditGrantDialog } from "@/components/secrets/edit-grant-dialog";
 import { getErrorMessage } from "@/lib/api-client";
+import { useAgentNames } from "@/hooks/use-agent-names";
 
 const DEFAULT_TENANT = "default";
 
 export function SecretsPage() {
   const { t } = useTranslation();
+  const { nameOf } = useAgentNames();
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("secrets"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
@@ -149,14 +151,17 @@ export function SecretsPage() {
         tenantId === DEFAULT_TENANT
           ? `\${vault:${keyName}}`
           : `\${vault:${tenantId}/${keyName}}`;
-      navigator.clipboard.writeText(ref).then(() => {
-        toast.success(
-          t("secrets.refCopied", {
-            ref,
-            defaultValue: `Copied: ${ref}`,
-          }),
-        );
-      });
+      navigator.clipboard.writeText(ref).then(
+        () => {
+          toast.success(
+            t("secrets.refCopied", {
+              ref,
+              defaultValue: `Copied: ${ref}`,
+            }),
+          );
+        },
+        () => toast.error(t("common.copyFailed", "Failed to copy to clipboard")),
+      );
     },
     [tenantId, t],
   );
@@ -264,11 +269,10 @@ export function SecretsPage() {
           );
           setDeleteTarget(null);
         },
-        onError: (err) =>
-          toast.error(err instanceof Error ? err.message : String(err)),
+        onError: (err) => toast.error(secretsErrorMessage(err)),
       },
     );
-  }, [deleteTarget, deleteMut, t]);
+  }, [deleteTarget, deleteMut, t, secretsErrorMessage]);
 
   /* ─── Key-lifecycle handlers ─── */
   const handleRotateDek = useCallback(() => {
@@ -597,11 +601,12 @@ export function SecretsPage() {
                                 ? "bg-warning/10 text-warning"
                                 : "bg-primary/10 text-primary"
                             }`}
+                            title={a === "*" ? undefined : a}
                           >
                             {a === "*" ? (
                               <>{t("secrets.allAgents", "All agents")}</>
                             ) : (
-                              <><Bot className="h-2.5 w-2.5" />{a.length > 16 ? a.slice(0, 16) + "…" : a}</>
+                              <><Bot className="h-2.5 w-2.5" />{(() => { const label = nameOf(a); return label.length > 16 ? label.slice(0, 16) + "…" : label; })()}</>
                             )}
                           </span>
                         ))}
@@ -1307,59 +1312,24 @@ export function SecretsPage() {
       />
 
       {/* ─── Delete confirmation dialog ─── */}
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setDeleteTarget(null)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setDeleteTarget(null);
-          }}
-        >
-          <div
-            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="delete-secret-title"
-            aria-describedby="delete-secret-desc"
-          >
-            <h2
-              id="delete-secret-title"
-              className="text-lg font-semibold text-foreground"
-            >
-              {t("secrets.confirmDeleteTitle", "Delete Secret")}
-            </h2>
-            <p
-              id="delete-secret-desc"
-              className="mt-2 text-sm text-muted-foreground"
-            >
-              {t("secrets.confirmDeleteMessage", {
-                key: deleteTarget.keyName,
-                defaultValue: `Are you sure you want to permanently delete "${deleteTarget.keyName}"? Any agent configs using this secret will fail to resolve. This cannot be undone.`,
-              })}
-            </p>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
-              >
-                {t("common.cancel", "Cancel")}
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleteMut.isPending}
-                className="inline-flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:opacity-50"
-                data-testid="confirm-delete-button"
-              >
-                {deleteMut.isPending && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                {t("common.delete", "Delete")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The shared Radix dialog: focus moves in, Escape closes, Tab stays
+          inside. The hand-rolled overlay that stood here never took focus, so
+          its Escape handler could not fire and Tab walked on into the page. */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={t("secrets.confirmDeleteTitle", "Delete Secret")}
+        description={t("secrets.confirmDeleteMessage", {
+          key: deleteTarget?.keyName ?? "",
+          defaultValue: `Are you sure you want to permanently delete "${deleteTarget?.keyName ?? ""}"? Any agent configs using this secret will fail to resolve. This cannot be undone.`,
+        })}
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={handleDelete}
+        isPending={deleteMut.isPending}
+      />
 
       {/* ─── Rotate secret dialog ─── */}
       {rotateTarget && (

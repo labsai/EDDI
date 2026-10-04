@@ -1598,7 +1598,6 @@
     "errorCount_other": "エラー {{count}} 件",
     "warnCount_other": "警告 {{count}} 件",
     "copied": "ログエントリをコピーしました",
-    "copyFailed": "クリップボードにコピーできませんでした",
     "noMatches": "読み込み済みのエントリに検索条件に一致するものはありません。",
     "noMatchesHint": "検索の対象はここに読み込み済みのエントリのみです。さらに過去を調べるには、古いエントリを読み込むか、フィルターを調整してください。",
     "searchLogsLabel": "読み込み済みのログエントリを検索",
@@ -1786,7 +1785,9 @@
       "reasonUncovered": "確認範囲より古い読み込み済みエントリ {{count}} 件",
       "unverifiedTitle": "完全には検証されていません",
       "unverifiedDesc": "否定された署名はありませんが、すべてを確認できたわけではありません: {{reasons}}。"
-    }
+    },
+    "agentsDeployed": "デプロイ済み",
+    "agentsNotDeployed": "未デプロイ"
   },
   "schedules": {
     "cronHelp": "5 フィールド形式: 分 時 日 月 曜日",
@@ -1917,7 +1918,8 @@
     "systemManaged": "システム",
     "systemManagedHint": "EDDI が管理しています（ナレッジベースの取り込み、メモリ統合、またはチームのケイデンス）。ここではなく、定義されている場所で変更してください。",
     "persistentConversationIdLocked": "スケジュール作成時に設定されます。サーバーは、実行が追記されてきた会話を保持します。",
-    "failedScheduleGone": "スケジュールはもう存在しません"
+    "failedScheduleGone": "スケジュールはもう存在しません",
+    "oneTimeHelpZone": "この時刻に一度だけ実行され、その後完了します。{{zone}} の時刻として解釈されます（下のタイムゾーン）。"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",
@@ -3088,7 +3090,9 @@
     "deleted": "トリガーを削除しました",
     "deleteTitle": "トリガーを削除",
     "deleteDesc": "インテント「{{intent}}」のトリガーを完全に削除しますか？",
-    "searchPlaceholder": "インテントまたはエージェントIDで絞り込み…"
+    "searchPlaceholder": "インテントまたはエージェントIDで絞り込み…",
+    "needIntent": "保存するにはインテントを入力してください。",
+    "needAgent": "保存するにはエージェントを1つ以上選択してください。"
   },
   "capabilities": {
     "agentCount": "エージェント",
@@ -3711,7 +3715,10 @@
     "resetSuccess": "使用カウンターをリセットしました",
     "saveSuccess": "クォータを保存しました",
     "tenantId": "テナント ID",
-    "title": "テナントクォータ"
+    "title": "テナントクォータ",
+    "limitHintEmpty": "空欄または -1 で無制限",
+    "invalidInteger": "0 以上の整数を入力するか、空欄で無制限にしてください。",
+    "invalidAmount": "0 以上の金額を入力するか、空欄で無制限にしてください。"
   },
   "secretPicker": {
     "clearVault": "Vault 参照をクリア",

@@ -1598,7 +1598,6 @@
     "errorCount_other": "오류 {{count}}개",
     "warnCount_other": "경고 {{count}}개",
     "copied": "로그 항목을 복사했습니다",
-    "copyFailed": "클립보드에 복사할 수 없습니다",
     "noMatches": "불러온 항목 중 검색과 일치하는 항목이 없습니다.",
     "noMatchesHint": "검색은 여기에 이미 불러온 항목만 대상으로 합니다. 더 이전 기록을 보려면 이전 항목을 불러오거나 필터를 조정하세요.",
     "searchLogsLabel": "불러온 로그 항목 검색",
@@ -1786,7 +1785,9 @@
       "reasonUncovered": "확인 범위보다 오래된 로드된 항목 {{count}}개",
       "unverifiedTitle": "완전히 검증되지 않음",
       "unverifiedDesc": "반증된 서명은 없지만 모든 것을 확인하지는 못했습니다: {{reasons}}."
-    }
+    },
+    "agentsDeployed": "배포됨",
+    "agentsNotDeployed": "배포되지 않음"
   },
   "schedules": {
     "cronHelp": "5필드 형식: 분 시 일 월 요일",
@@ -1917,7 +1918,8 @@
     "systemManaged": "시스템",
     "systemManagedHint": "EDDI가 관리합니다(지식 베이스 수집, 메모리 통합 또는 팀 주기). 여기가 아니라 정의된 곳에서 변경하세요.",
     "persistentConversationIdLocked": "일정을 만들 때 설정됩니다. 서버는 실행이 계속 추가되어 온 대화를 유지합니다.",
-    "failedScheduleGone": "일정이 더 이상 존재하지 않습니다"
+    "failedScheduleGone": "일정이 더 이상 존재하지 않습니다",
+    "oneTimeHelpZone": "이 시각에 한 번만 실행된 후 완료됩니다. {{zone}} 시간으로 해석됩니다(아래의 시간대)."
   },
   "cascadeTrace": {
     "title": "모델 캐스케이드",
@@ -3088,7 +3090,9 @@
     "deleted": "트리거가 삭제되었습니다",
     "deleteTitle": "트리거 삭제",
     "deleteDesc": "인텐트 「{{intent}}」의 트리거를 영구 삭제하시겠습니까?",
-    "searchPlaceholder": "인텐트 또는 에이전트 ID로 필터링…"
+    "searchPlaceholder": "인텐트 또는 에이전트 ID로 필터링…",
+    "needIntent": "저장하려면 인텐트를 입력하세요.",
+    "needAgent": "저장하려면 에이전트를 하나 이상 선택하세요."
   },
   "capabilities": {
     "agentCount": "에이전트",
@@ -3711,7 +3715,10 @@
     "resetSuccess": "사용량 카운터가 재설정되었습니다",
     "saveSuccess": "할당량이 저장되었습니다",
     "tenantId": "테넌트 ID",
-    "title": "테넌트 할당량"
+    "title": "테넌트 할당량",
+    "limitHintEmpty": "비워 두거나 -1을 입력하면 무제한",
+    "invalidInteger": "0 이상의 정수를 입력하거나 비워 두면 무제한입니다.",
+    "invalidAmount": "0 이상의 금액을 입력하거나 비워 두면 무제한입니다."
   },
   "secretPicker": {
     "clearVault": "볼트 참조 지우기",

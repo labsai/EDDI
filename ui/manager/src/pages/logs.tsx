@@ -838,7 +838,7 @@ function LogRow({
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(logLine(entry)).then(
       () => toast.success(t("logs.copied", "Log entry copied")),
-      () => toast.error(t("logs.copyFailed", "Could not copy to the clipboard")),
+      () => toast.error(t("common.copyFailed", "Failed to copy to clipboard")),
     );
   }, [entry, t]);
 

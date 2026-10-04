@@ -1,3 +1,4 @@
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -599,59 +600,24 @@ export function VariablesPage() {
       )}
 
       {/* ─── Delete confirmation dialog ─── */}
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setDeleteTarget(null)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setDeleteTarget(null);
-          }}
-        >
-          <div
-            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="delete-variable-title"
-            aria-describedby="delete-variable-desc"
-          >
-            <h2
-              id="delete-variable-title"
-              className="text-lg font-semibold text-foreground"
-            >
-              {t("variables.confirmDeleteTitle", "Delete Variable")}
-            </h2>
-            <p
-              id="delete-variable-desc"
-              className="mt-2 text-sm text-muted-foreground"
-            >
-              {t("variables.confirmDeleteMessage", {
-                key: deleteTarget.key,
-                defaultValue: `Are you sure you want to delete "${deleteTarget.key}"? Agents using \${vars:${deleteTarget.key}} will see unresolved references.`,
-              })}
-            </p>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
-              >
-                {t("common.cancel", "Cancel")}
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleteMut.isPending}
-                className="inline-flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:opacity-50"
-                data-testid="confirm-delete-button"
-              >
-                {deleteMut.isPending && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                {t("common.delete", "Delete")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Shared Radix dialog: focus moves in, Escape closes, Tab is trapped.
+          The hand-rolled overlay never took focus, so its Escape handler could
+          not fire. */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title={t("variables.confirmDeleteTitle", "Delete Variable")}
+        description={t("variables.confirmDeleteMessage", {
+          key: deleteTarget?.key ?? "",
+          defaultValue: `Are you sure you want to delete "${deleteTarget?.key ?? ""}"? Agents using \${vars:${deleteTarget?.key ?? ""}} will see unresolved references.`,
+        })}
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={handleDelete}
+        isPending={deleteMut.isPending}
+      />
     </div>
   );
 }
