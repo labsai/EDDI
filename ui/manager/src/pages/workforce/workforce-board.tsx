@@ -412,9 +412,11 @@ function WorkforceBoard() {
   }, [isStreaming, selectedConvId, selectedConversation, t]);
 
   // ─── Handlers ──────────────────────────────────────────────────
-  const [refusedDraft, setRefusedDraft] = useState<{ message: string; attachments?: GroupAttachmentRef[] }>({
-    message: "",
-  });
+  const [refusedDraft, setRefusedDraft] = useState<{
+    boardId?: string;
+    message: string;
+    attachments?: GroupAttachmentRef[];
+  }>({ message: "" });
   const handleSend = useCallback(
     (question: string, attachments?: GroupAttachmentRef[]) => {
       if (!boardId) return;
@@ -444,7 +446,7 @@ function WorkforceBoard() {
         } else {
           // The refused-start screen replaces the composer; hand the question
           // back when it returns (see `BoardInput.defaultMessage`).
-          setRefusedDraft({ message: question, attachments });
+          setRefusedDraft({ boardId, message: question, attachments });
           toast.error(streamErrorOf(boardId) ?? t("common.error", "Something went wrong"));
         }
         return ok;
@@ -1171,8 +1173,12 @@ function WorkforceBoard() {
 
       {/* Input bar */}
       <BoardInput
-        defaultMessage={refusedDraft.message}
-        defaultAttachments={refusedDraft.attachments}
+        // Keyed by board: this page stays mounted when the route moves to
+        // another board, and a draft (typed or handed back after a refused
+        // start) belongs to the board it was written for.
+        key={boardId}
+        defaultMessage={refusedDraft.boardId === boardId ? refusedDraft.message : ""}
+        defaultAttachments={refusedDraft.boardId === boardId ? refusedDraft.attachments : undefined}
         onSend={handleSend}
         disabled={inputMode === "disabled"}
         mode={inputMode === "continue" ? "continue" : "new"}

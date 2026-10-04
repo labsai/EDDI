@@ -221,13 +221,15 @@ function BoardInput({
         }
         return true;
       });
-      if (allowed.length) void addFiles(allowed);
+      // Not while a send is pending: that request does not include it, and a
+      // successful send clears the staged list, silently dropping it.
+      if (allowed.length && !sending) void addFiles(allowed);
       // Reset so re-picking the same file fires change again.
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     },
-    [t, addFiles],
+    [t, addFiles, sending],
   );
 
   return (
@@ -257,6 +259,7 @@ function BoardInput({
                 variant="ghost"
                 size="iconSm"
                 onClick={() => removeAttachment(a.id)}
+                disabled={sending}
                 className="ms-0.5 rounded-full hover:bg-muted-foreground/20"
                 aria-label={t("groups.removeAttachment", "Remove {{name}}", { name: a.fileName })}
               >
@@ -312,7 +315,7 @@ function BoardInput({
             variant="ghost"
             size="icon"
             onClick={handleFileSelect}
-            disabled={disabled || isStaging}
+            disabled={disabled || isStaging || sending}
             className="h-10 w-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
             aria-label={t("Workforce.board.attachFile", "Attach file")}
           >

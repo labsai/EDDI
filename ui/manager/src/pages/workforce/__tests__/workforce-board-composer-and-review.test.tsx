@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { render } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from "react-router-dom";
+import { ThemeProvider } from "@/components/layout/theme-provider";
+import { createTestQueryClient, renderPage, userEvent } from "@/test/test-utils";
+import { act } from "@testing-library/react";
 import { server } from "@/test/mocks/server";
 import { useGroupStreamStore } from "@/hooks/use-group-discussion-stream";
 import { WorkforceBoard } from "../workforce-board";
@@ -62,6 +67,38 @@ describe("WorkforceBoard — composer and the approval hand-off", () => {
 
     await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Ship it?"));
     expect(within(screen.getByTestId("board-attachments")).getByText("brief.txt")).toBeInTheDocument();
+  });
+
+  it("does not carry a refused draft into another board", async () => {
+    server.use(
+      http.post("*/groups/:groupId/conversations/stream", () =>
+        new HttpResponse("nope", { status: 400, headers: { "Content-Type": "text/plain" } }),
+      ),
+    );
+    const nav: { go?: NavigateFunction } = {};
+    function Handle() {
+      nav.go = useNavigate();
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={["/workforce/grp1?version=1"]}>
+        <QueryClientProvider client={createTestQueryClient()}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+            <Handle />
+            <Routes>
+              <Route path="/workforce/:boardId" element={<WorkforceBoard />} />
+            </Routes>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await userEvent.type(await screen.findByRole("textbox"), "Board A question");
+    await userEvent.click(screen.getByTestId("board-send"));
+    await screen.findByTestId("board-start-error");
+
+    act(() => void nav.go!("/workforce/grp2?version=1"));
+    await waitFor(() => expect(screen.queryByTestId("board-start-error")).not.toBeInTheDocument());
+    expect(await screen.findByRole("textbox")).toHaveValue("");
   });
 
   it("'Review it' opens the PAUSED discussion in the Manager, not the newest one", async () => {
