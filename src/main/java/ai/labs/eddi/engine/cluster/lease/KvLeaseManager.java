@@ -267,6 +267,14 @@ public class KvLeaseManager implements IConversationLeaseManager {
                 timeout(w);
                 return;
             }
+            // Re-checked here: acquireKey reads the flag before it registers the waiter,
+            // so a drain whose sweep ran in between never sees this waiter. An attempt
+            // already past this check when the drain starts is refused by the sweep, and
+            // grant() hands back the lease of a waiter that is already completed.
+            if (draining) {
+                w.future.completeExceptionally(drainingRefusal());
+                return;
+            }
             long holdBack = w.notBeforeNanos - System.nanoTime();
             if (holdBack > 0) {
                 // Yielding to another node's waiter (handoff grace): a release

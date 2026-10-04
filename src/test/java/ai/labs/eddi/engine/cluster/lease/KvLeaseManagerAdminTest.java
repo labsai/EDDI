@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -194,6 +195,30 @@ class KvLeaseManagerAdminTest {
 
         a.setDraining(false);
         assertNotNull(get(a.acquire("conv2", Duration.ofSeconds(1))));
+    }
+
+    @Test
+    @DisplayName("a waiter that registered just after the drain swept the waiters is refused by its attempt, and takes no lease")
+    void waiterMissedByTheDrainSweepIsRefused() throws Exception {
+        List<Runnable> queued = new CopyOnWriteArrayList<>();
+        view.live.put("a", "a1");
+        KvLeaseManager a = new KvLeaseManager(kv, new NodeIdentity("a", "a1"), config, scheduler, queued::add, bus, view,
+                new SimpleMeterRegistry());
+        // acquireKey read draining=false and registered the waiter; its attempt is
+        // queued.
+        CompletionStage<LeaseHandle> waiter = a.acquire("conv9", Duration.ofSeconds(2));
+        // setDraining(true) wrote the flag, but its sweep over the waiters ran before
+        // this
+        // waiter was in the set — the interleaving the sweep alone cannot catch.
+        Field draining = KvLeaseManager.class.getDeclaredField("draining");
+        draining.setAccessible(true);
+        draining.setBoolean(a, true);
+        queued.forEach(Runnable::run);
+
+        ExecutionException refused = assertThrows(ExecutionException.class, () -> waiter.toCompletableFuture().get(1, TimeUnit.SECONDS));
+        assertEquals(LeaseUnavailableException.Reason.DRAINING, ((LeaseUnavailableException) refused.getCause()).reason());
+        assertTrue(kv.get("c.conv9").isEmpty(), "a drained node must not take the lease");
+        assertEquals(0, a.heldCount());
     }
 
     @Test
