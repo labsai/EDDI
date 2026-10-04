@@ -534,10 +534,21 @@ function AuditErasureSummary({ result }: { result: GdprDeletionResult }) {
       "gdpr.auditLegacy",
       "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them.",
     );
-  } else if (redacted === 0 && result.auditEntriesPseudonymized > 0) {
+  } else if (
+    redacted === 0 &&
+    result.auditEntriesPseudonymized > 0 &&
+    // A redaction that failed also leaves the content in place and the rows
+    // pseudonymised, but that is not the legal-hold mode: the failed step says why.
+    !result.failedSteps?.includes("auditRedaction")
+  ) {
     text = t(
       "gdpr.auditPseudonymizeMode",
       "Audit content was kept: this server runs with eddi.audit.erasure-mode=pseudonymize (for example under a legal hold), so only the user id in the audit ledger was replaced.",
+    );
+  } else if (redacted === 0 && result.failedSteps?.includes("auditRedaction")) {
+    text = t(
+      "gdpr.auditRedactionFailed",
+      "No audit content was redacted: the redaction step failed (see above), so the prompts and responses recorded in the ledger are still there. Run the erasure again.",
     );
   } else {
     text = t(

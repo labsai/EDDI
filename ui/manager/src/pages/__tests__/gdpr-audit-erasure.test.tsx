@@ -82,6 +82,16 @@ describe("GDPR erasure — audit ledger", () => {
     expect(screen.queryByTestId("gdpr-complete-explanation")).not.toBeInTheDocument();
   });
 
+  it("does not blame the pseudonymize mode when the redaction itself failed", async () => {
+    // Redaction failed outright: nothing redacted, rows pseudonymised afterwards.
+    answer({ ...BASE_RESULT, auditEntriesRedacted: 0, auditEntriesPseudonymized: 6, failedSteps: ["auditRedaction"], complete: false }, 207);
+    await runErasure();
+
+    const summary = screen.getByTestId("gdpr-audit-summary");
+    expect(summary).not.toHaveTextContent(/erasure-mode=pseudonymize/);
+    expect(summary).toHaveTextContent(/redaction step failed/);
+  });
+
   it("explains an unknown failed step with the generic guidance", async () => {
     answer({ ...BASE_RESULT, auditEntriesRedacted: 6, failedSteps: ["schedules"], complete: false }, 207);
     await runErasure();

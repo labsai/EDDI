@@ -3733,6 +3733,7 @@
     "auditRedacted": "已脱敏的审计条目",
     "auditLegacy": "此 EDDI 只会替换审计账本中的用户 ID：其中记录的提示和回复会被保留。EDDI 6.6 及更高版本会将其脱敏。",
     "auditPseudonymizeMode": "审计内容已保留：此服务器以 eddi.audit.erasure-mode=pseudonymize 运行（例如处于法律保留期间），因此只替换了审计账本中的用户 ID。",
+    "auditRedactionFailed": "没有任何审计内容被涂黑：涂黑步骤失败（见上文），因此账本中记录的提示词和回复仍然存在。请重新执行删除。",
     "auditRedactedExplanation": "该用户的审计记录为留存需要而保留，但其提示、回复、模型详情和工具调用已被脱敏标记替换，用户 ID 已假名化。此前校验通过的记录已重新签名；已被篡改的记录仍标记为无效。",
     "completeExplanation": "“完成”表示每一步都成功，包括最后确认该用户 ID 下没有任何审计记录仍含未脱敏内容。",
     "failedStep": {

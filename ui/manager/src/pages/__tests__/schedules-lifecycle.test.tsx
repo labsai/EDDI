@@ -61,6 +61,20 @@ describe("SchedulesPage — why a schedule is disabled", () => {
     expect(screen.queryByTestId("disabled-reason-sched-3")).not.toBeInTheDocument();
   });
 
+  it("a finished one-shot schedule is not described as disabled by a person", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          scheduleRow({ id: "sched-done", name: "Run once", enabled: false, fireStatus: "COMPLETED", disabledReason: null }),
+        ]),
+      ),
+    );
+    renderSchedules();
+    await screen.findByText("Run once");
+    expect(screen.queryByTestId("disabled-by-person-sched-done")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("disabled-reason-sched-done")).not.toBeInTheDocument();
+  });
+
   it("an enabled schedule carries no disabled notice, even with a stale reason", async () => {
     server.use(
       http.get("*/schedulestore/schedules", () =>

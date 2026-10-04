@@ -3733,6 +3733,7 @@
     "auditRedacted": "가려진 감사 항목",
     "auditLegacy": "이 EDDI는 감사 원장의 사용자 ID만 바꿉니다. 그곳에 기록된 프롬프트와 응답은 유지됩니다. EDDI 6.6 이상은 이를 가립니다.",
     "auditPseudonymizeMode": "감사 내용이 유지되었습니다. 이 서버는 eddi.audit.erasure-mode=pseudonymize로 실행 중이므로(예: 법적 보존) 감사 원장의 사용자 ID만 바뀌었습니다.",
+    "auditRedactionFailed": "감사 내용이 가려지지 않았습니다. 가림 단계가 실패하여(위 참조) 원장에 기록된 프롬프트와 응답이 그대로 남아 있습니다. 삭제를 다시 실행하세요.",
     "auditRedactedExplanation": "사용자의 감사 행은 기록 보존을 위해 유지되지만, 프롬프트, 응답, 모델 세부 정보, 도구 호출은 가림 표시로 바뀌었고 사용자 ID는 가명 처리되었습니다. 이전에 검증되던 행은 다시 서명되었고, 이미 변조된 행은 유효하지 않음으로 남습니다.",
     "completeExplanation": "완료는 이 사용자 ID 아래의 감사 행에 가려지지 않은 내용이 남아 있지 않다는 최종 확인을 포함해 모든 단계가 성공했다는 뜻입니다.",
     "failedStep": {

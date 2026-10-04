@@ -24,6 +24,16 @@ describe("property-value-utils", () => {
     expect(effectiveValueKind({ valueString: "" })).toBe("string");
   });
 
+  it("pins the engine's whole precedence: string < object < list < int < long < float < double < boolean", () => {
+    // PropertyInstructionExecutor.authoredValue overwrites in exactly this order.
+    expect(effectiveValueKind({ valueInt: 1, valueLong: 2 })).toBe("long");
+    expect(effectiveValueKind({ valueLong: 2, valueFloat: 1.5 })).toBe("float");
+    expect(effectiveValueKind({ valueFloat: 1.5, valueDouble: 2.5 })).toBe("double");
+    expect(effectiveValueKind({ valueDouble: 2.5, valueBoolean: true })).toBe("boolean");
+    expect(effectiveValueKind({ valueObject: {}, valueList: [] })).toBe("list");
+    expect(effectiveValueKind({ valueList: [], valueInt: 1 })).toBe("int");
+  });
+
   it("lists every slot that carries a value", () => {
     expect(setValueKinds({ valueString: "a", valueInt: 1 })).toEqual(["string", "int"]);
     expect(setValueKinds({ valueString: "" })).toEqual([]);

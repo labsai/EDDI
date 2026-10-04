@@ -3733,6 +3733,7 @@
     "auditRedacted": "Audit-Einträge geschwärzt",
     "auditLegacy": "Dieses EDDI ersetzt im Audit-Ledger nur die Benutzer-ID: Die dort gespeicherten Prompts und Antworten bleiben erhalten. EDDI 6.6 und neuer schwärzt sie.",
     "auditPseudonymizeMode": "Audit-Inhalte wurden behalten: Dieser Server läuft mit eddi.audit.erasure-mode=pseudonymize (etwa wegen einer rechtlichen Aufbewahrungspflicht), daher wurde im Audit-Ledger nur die Benutzer-ID ersetzt.",
+    "auditRedactionFailed": "Es wurden keine Audit-Inhalte geschwärzt: Der Schwärzungsschritt ist fehlgeschlagen (siehe oben), daher sind die im Ledger gespeicherten Prompts und Antworten noch vorhanden. Führen Sie die Löschung erneut aus.",
     "auditRedactedExplanation": "Die Audit-Zeilen des Benutzers bleiben zur Nachweisführung erhalten, aber Prompts, Antworten, Modelldetails und Tool-Aufrufe wurden durch eine Schwärzungsmarke ersetzt und die Benutzer-ID pseudonymisiert. Zuvor gültig verifizierte Zeilen wurden neu signiert; eine bereits manipulierte Zeile bleibt als ungültig markiert.",
     "completeExplanation": "Vollständig bedeutet: Jeder Schritt war erfolgreich, einschließlich einer abschließenden Prüfung, dass keine Audit-Zeile unter der ID dieses Benutzers noch ungeschwärzte Inhalte enthält.",
     "failedStep": {
