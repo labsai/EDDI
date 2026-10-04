@@ -5354,7 +5354,10 @@
       "inFlight": "Tours actifs",
       "leases": "Baux",
       "queue": "En file",
-      "localDeadLetters": "{{n}} lettres mortes conservées localement, en attente de NATS"
+      "localDeadLetters": "{{n}} lettres mortes conservées localement, en attente de NATS",
+      "unknown": "Inconnu",
+      "unknownText": "Le nœud qui répond ne joint pas NATS : il ne peut donc pas savoir si ce nœud fonctionne encore. Voici ses dernières valeurs connues.",
+      "lostExpiredText": "A cessé d'émettre des heartbeats il y a {{ago}} sans quitter le cluster — arrêté, planté ou coupé de NATS. Ses baux ont expiré : d'autres nœuds traitent désormais ces conversations."
     },
     "leaseFlag": {
       "holderGone": "Détenteur disparu",
@@ -5364,7 +5367,7 @@
       "contended": "Un autre nœud attend",
       "holderGoneHelp": "Le nœud détenteur n’a plus d’enregistrement de présence — il est tombé ou a perdu NATS. Le bail expire dans le TTL.",
       "holderRestartedHelp": "Le nœud détenteur est revenu avec un nouveau démarrage ; il libère ses anciens baux à sa reconnexion.",
-      "notRenewedHelp": "Aucun renouvellement par heartbeat depuis trois intervalles.",
+      "notRenewedHelp": "Aucun renouvellement par heartbeat depuis deux intervalles : le détenteur est bloqué, en pause ou coupé de NATS.",
       "longRunningHelp": "Détenu plus longtemps que le délai d’acquisition : les tours en file derrière lui reçoivent 409.",
       "contendedHelp": "Un tour sur un autre nœud attend ce bail."
     },
@@ -5579,7 +5582,8 @@
       "colFence": "Fencing",
       "colFlags": "Indicateurs",
       "releaseAria": "Libérer de force le bail de {{id}}",
-      "truncated": "Seuls les 5 000 premiers baux ont été lus."
+      "truncated": "Seuls les 5 000 premiers baux ont été lus.",
+      "natsDown": "Les baux sont stockés dans NATS, que le nœud qui répond ne peut pas joindre pour l'instant. Ils réapparaissent dès qu'il se reconnecte."
     },
     "health": {
       "members": "{{live}} nœuds actifs sur {{total}}",

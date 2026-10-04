@@ -70,7 +70,8 @@ describe("Cluster console — overview", () => {
     renderConsole();
     const lost = await screen.findByTestId("cluster-node-eddi-3");
     expect(lost).toHaveAttribute("data-state", "LOST");
-    expect(screen.getByTestId("cluster-node-gone-eddi-3")).toHaveTextContent(/taken over within 20 s/);
+    // Its last heartbeat is older than the lease TTL: its leases have expired already.
+    expect(screen.getByTestId("cluster-node-gone-eddi-3")).toHaveTextContent(/Its leases have expired/);
     expect(within(screen.getByTestId("cluster-node-eddi-1")).getByText("HITL leader")).toBeInTheDocument();
     // A gone node cannot be drained.
     expect(screen.queryByTestId("cluster-drain-eddi-3")).not.toBeInTheDocument();
@@ -90,6 +91,20 @@ describe("Cluster console — overview", () => {
     expect(banner).toHaveAttribute("data-policy", "local");
     expect(screen.getByTestId("cluster-degraded-local")).toHaveTextContent(/both may process it/);
     expect(screen.queryByTestId("cluster-degraded-reject")).not.toBeInTheDocument();
+    // The other node is not "late": this node simply cannot see it. No action is offered on it.
+    expect(screen.getByTestId("cluster-node-eddi-2")).toHaveAttribute("data-state", "UNKNOWN");
+    expect(screen.getByTestId("cluster-node-unknown-eddi-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("cluster-drain-eddi-2")).not.toBeInTheDocument();
+  });
+
+  it("the lease list says why it is empty while NATS is unreachable", async () => {
+    server.use(
+      http.get("*/administration/cluster/leases", () =>
+        HttpResponse.json({ code: "NATS_UNREACHABLE", message: "NATS is unreachable from this node" }, { status: 409 }),
+      ),
+    );
+    renderConsole("/manage/coordinator?tab=leases");
+    expect(await screen.findByTestId("error-state")).toHaveTextContent(/Leases live in NATS/);
   });
 
   it("explains degraded mode with the reject policy: 409 with Retry-After", async () => {

@@ -129,6 +129,8 @@ export function nodeStateLabel(t: TFunction, state: NodeState): string {
       return t("cluster.node.lost", "Lost");
     case "LEFT":
       return t("cluster.node.left", "Left");
+    case "UNKNOWN":
+      return t("cluster.node.unknown", "Unknown");
   }
 }
 
@@ -156,7 +158,7 @@ export function leaseFlagHelp(t: TFunction, flag: LeaseFlag): string {
     case "HOLDER_RESTARTED":
       return t("cluster.leaseFlag.holderRestartedHelp", "The holding node came back with a new boot; it clears its old leases when it reconnects.");
     case "NOT_RENEWED":
-      return t("cluster.leaseFlag.notRenewedHelp", "No heartbeat renewal for three intervals.");
+      return t("cluster.leaseFlag.notRenewedHelp", "No heartbeat renewal for two intervals: the holder is hung, paused or cut off from NATS.");
     case "LONG_RUNNING":
       return t("cluster.leaseFlag.longRunningHelp", "Held longer than the acquire timeout: turns queued behind it are answered 409.");
     case "CONTENDED":
@@ -245,7 +247,7 @@ export function activityTitle(t: TFunction, e: ActivityEvent): string {
       return t("cluster.activity.degradedOff", "Node {{node}} reconnected to NATS", { node: s("nodeId") });
     case "lease.takeover":
       return t("cluster.activity.leaseTakeover", "Lease of {{conversation}} taken over from {{from}}", {
-        conversation: s("conversationId"),
+        conversation: String(p["conversationId"] ?? p["key"] ?? "?"),
         from: s("previousNode"),
       });
     case "fence.rejected":

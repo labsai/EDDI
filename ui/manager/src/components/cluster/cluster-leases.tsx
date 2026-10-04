@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
+import { ApiClientError } from "@/lib/api-client";
 
 /**
  * Every lease in the cluster, suspicious first: a holder with no presence, a
@@ -22,7 +23,7 @@ export function ClusterLeasesPanel({ canAct }: { canAct: boolean }) {
   const { t } = useTranslation();
   const [q, setQ] = useState("");
   const [flagged, setFlagged] = useState(false);
-  const { data, isLoading, isError, refetch } = useClusterLeases(q.trim(), flagged);
+  const { data, isLoading, isError, error, refetch } = useClusterLeases(q.trim(), flagged);
   const [target, setTarget] = useState<{ lease: LeaseView; renewed?: ActionResult } | null>(null);
   const release = useReleaseLease();
 
@@ -91,7 +92,15 @@ export function ClusterLeasesPanel({ canAct }: { canAct: boolean }) {
           ))}
         </div>
       ) : isError && !data ? (
-        <ErrorState message={t("common.error", "Something went wrong")} onRetry={() => refetch()} retryLabel={t("common.retry", "Retry")} />
+        <ErrorState
+          message={
+            error instanceof ApiClientError && error.status === 409
+              ? t("cluster.leases.natsDown", "Leases live in NATS, which the answering node cannot reach right now. They show again as soon as it reconnects.")
+              : t("common.error", "Something went wrong")
+          }
+          onRetry={() => refetch()}
+          retryLabel={t("common.retry", "Retry")}
+        />
       ) : !data || data.leases.length === 0 ? (
         <EmptyState
           icon={KeyRound}

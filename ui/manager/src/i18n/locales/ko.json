@@ -5295,7 +5295,10 @@
       "inFlight": "활성 턴",
       "leases": "리스",
       "queue": "대기 중",
-      "localDeadLetters": "로컬에 보관된 데드 레터 {{n}}건, NATS 대기 중"
+      "localDeadLetters": "로컬에 보관된 데드 레터 {{n}}건, NATS 대기 중",
+      "unknown": "알 수 없음",
+      "unknownText": "응답 노드가 NATS에 연결할 수 없어 이 노드가 아직 실행 중인지 알 수 없습니다. 마지막으로 알려진 값입니다.",
+      "lostExpiredText": "{{ago}} 전에 정상 종료 없이 하트비트가 끊겼습니다 — 강제 종료, 충돌 또는 NATS와 단절. 리스가 만료되어 이제 다른 노드가 이 대화를 처리합니다."
     },
     "leaseFlag": {
       "holderGone": "보유자 없음",
@@ -5305,7 +5308,7 @@
       "contended": "다른 노드가 대기 중",
       "holderGoneHelp": "보유 노드의 상태 레코드가 없습니다 — 종료되었거나 NATS 연결을 잃었습니다. 리스는 TTL 내에 만료됩니다.",
       "holderRestartedHelp": "보유 노드가 새로 부팅되어 복귀했습니다. 재연결 시 이전 리스를 정리합니다.",
-      "notRenewedHelp": "세 주기 동안 하트비트 갱신이 없었습니다.",
+      "notRenewedHelp": "두 주기 동안 하트비트 갱신이 없습니다: 보유자가 멈췄거나 일시 정지되었거나 NATS와 단절되었습니다.",
       "longRunningHelp": "획득 제한 시간보다 오래 보유됨: 뒤에 대기 중인 턴은 409로 응답됩니다.",
       "contendedHelp": "다른 노드의 턴이 이 리스를 기다리고 있습니다."
     },
@@ -5520,7 +5523,8 @@
       "colFence": "펜스",
       "colFlags": "플래그",
       "releaseAria": "{{id}}의 리스 강제 해제",
-      "truncated": "처음 5,000개의 리스만 읽었습니다."
+      "truncated": "처음 5,000개의 리스만 읽었습니다.",
+      "natsDown": "리스는 NATS에 저장되는데, 응답 노드가 지금 NATS에 연결할 수 없습니다. 다시 연결되면 곧바로 표시됩니다."
     },
     "health": {
       "members": "노드 {{total}}개 중 {{live}}개 활성",

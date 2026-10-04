@@ -35,7 +35,9 @@ export function ClusterActivityFeed({ activity, compact = false }: { activity: C
       ),
     [activity.events, groups, node, onlyProblems],
   );
-  const shown = compact ? visible.slice(0, 8) : visible;
+  // The overview's short list leaves out the per-minute cache summaries: on a busy
+  // cluster every node records one a minute, and they pushed everything else off it.
+  const shown = compact ? visible.filter((e) => activityGroup(e.type) !== "caches").slice(0, 8) : visible;
 
   const toggleGroup = (g: ActivityGroup) =>
     setGroups((prev) => {

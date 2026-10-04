@@ -12,7 +12,7 @@ import { BearerEventSource } from "../bearer-event-source";
 // ==================== Types ====================
 
 export type ClusterVerdict = "HEALTHY" | "DEGRADED" | "PARTITIONED" | "SINGLE_NODE";
-export type NodeState = "LIVE" | "STALE" | "LOST" | "LEFT";
+export type NodeState = "LIVE" | "STALE" | "LOST" | "LEFT" | "UNKNOWN";
 
 export interface ClusterNode {
   nodeId: string;

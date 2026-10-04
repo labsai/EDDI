@@ -5354,7 +5354,10 @@
       "inFlight": "Turnos ativos",
       "leases": "Leases",
       "queue": "Na fila",
-      "localDeadLetters": "{{n}} dead letters retidas localmente, aguardando o NATS"
+      "localDeadLetters": "{{n}} dead letters retidas localmente, aguardando o NATS",
+      "unknown": "Desconhecido",
+      "unknownText": "O nó que responde não alcança o NATS, então não consegue ver se este nó ainda está em execução. Estes são os últimos valores conhecidos.",
+      "lostExpiredText": "Parou de enviar heartbeats há {{ago}} sem sair — encerrado, travado ou isolado do NATS. Seus leases expiraram: outros nós executam essas conversas agora."
     },
     "leaseFlag": {
       "holderGone": "Detentor ausente",
@@ -5364,7 +5367,7 @@
       "contended": "Outro nó aguarda",
       "holderGoneHelp": "O nó detentor não tem registro de presença — ele caiu ou perdeu o NATS. O lease expira dentro do TTL.",
       "holderRestartedHelp": "O nó detentor voltou com uma nova inicialização; ele libera seus leases antigos ao se reconectar.",
-      "notRenewedHelp": "Sem renovação por heartbeat durante três intervalos.",
+      "notRenewedHelp": "Sem renovação por heartbeat há dois intervalos: o detentor está travado, pausado ou isolado do NATS.",
       "longRunningHelp": "Retido por mais tempo que o timeout de aquisição: os turnos na fila atrás dele recebem 409.",
       "contendedHelp": "Um turno em outro nó está aguardando este lease."
     },
@@ -5579,7 +5582,8 @@
       "colFence": "Fencing",
       "colFlags": "Sinalizadores",
       "releaseAria": "Liberar à força o lease de {{id}}",
-      "truncated": "Apenas os primeiros 5.000 leases foram lidos."
+      "truncated": "Apenas os primeiros 5.000 leases foram lidos.",
+      "natsDown": "Os leases ficam no NATS, que o nó que responde não alcança no momento. Eles voltam a aparecer assim que ele se reconectar."
     },
     "health": {
       "members": "{{live}} de {{total}} nós ativos",

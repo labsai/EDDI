@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 
 function FindingIcon({ severity }: { severity: Finding["severity"] }) {
   if (severity === "error") return <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />;
@@ -99,6 +100,8 @@ export function ClusterDiagnosePanel({
       ) : isError && !data ? (
         <ErrorState message={t("common.error", "Something went wrong")} onRetry={() => refetch()} retryLabel={t("common.retry", "Retry")} />
       ) : data ? (
+        <>
+        {isError && <RefetchErrorNotice onRetry={() => refetch()} />}
         <div className={cn("space-y-4 rounded-xl border p-5", verdictTone)} data-testid="cluster-diagnosis" data-verdict={data.verdict}>
           <div className="flex flex-wrap items-center gap-2">
             {data.verdict === "OK" ? (
@@ -190,6 +193,7 @@ export function ClusterDiagnosePanel({
             })}
           </ul>
         </div>
+        </>
       ) : null}
 
       <AlertDialog

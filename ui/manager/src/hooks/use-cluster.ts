@@ -31,27 +31,54 @@ export const CLUSTER_KEYS = {
 
 // ==================== Queries ====================
 
+/**
+ * How long a console read may take before it counts as failed. Behind a
+ * round-robin load balancer a hung or paused node keeps a request open for the
+ * proxy's whole read timeout (minutes); without a bound the polling query waits
+ * on it and the page silently shows numbers that stopped moving — seen live
+ * with a paused node. Failing fast shows the "last refresh failed" notice, and
+ * the next poll usually reaches a healthy node.
+ */
+export const CLUSTER_READ_TIMEOUT_MS = 8000;
+
+export function withTimeout<T>(read: () => Promise<T>, ms = CLUSTER_READ_TIMEOUT_MS): () => Promise<T> {
+  return () =>
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no answer within ${ms} ms`)), ms);
+      read().then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+}
+
 export function useClusterOverview(enabled = true) {
-  return useQuery({ queryKey: CLUSTER_KEYS.overview, queryFn: getClusterOverview, refetchInterval: 5000, enabled });
+  return useQuery({ queryKey: CLUSTER_KEYS.overview, queryFn: withTimeout(getClusterOverview), refetchInterval: 5000, enabled });
 }
 
 export function useClusterLeases(q: string, flagged: boolean, enabled = true) {
   return useQuery({
     queryKey: CLUSTER_KEYS.leases(q, flagged),
-    queryFn: () => getClusterLeases(q || undefined, flagged),
+    queryFn: withTimeout(() => getClusterLeases(q || undefined, flagged)),
     refetchInterval: 5000,
     enabled,
   });
 }
 
 export function useDeadLetterSummary(enabled = true) {
-  return useQuery({ queryKey: CLUSTER_KEYS.summary, queryFn: getDeadLetterSummary, refetchInterval: 10000, enabled });
+  return useQuery({ queryKey: CLUSTER_KEYS.summary, queryFn: withTimeout(getDeadLetterSummary), refetchInterval: 10000, enabled });
 }
 
 export function useClusterDeadLetters(filter: DeadLetterFilter, after: string | null, enabled = true) {
   return useQuery({
     queryKey: CLUSTER_KEYS.deadLetters(filter, after),
-    queryFn: () => getClusterDeadLetters(filter, after),
+    queryFn: withTimeout(() => getClusterDeadLetters(filter, after)),
     refetchInterval: 15000,
     enabled,
   });
@@ -60,7 +87,7 @@ export function useClusterDeadLetters(filter: DeadLetterFilter, after: string | 
 export function useDiagnosis(conversationId: string) {
   return useQuery({
     queryKey: CLUSTER_KEYS.diagnosis(conversationId),
-    queryFn: () => diagnoseConversation(conversationId),
+    queryFn: withTimeout(() => diagnoseConversation(conversationId)),
     enabled: conversationId.length > 0,
     refetchInterval: 5000,
   });

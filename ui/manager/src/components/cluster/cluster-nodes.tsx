@@ -96,7 +96,8 @@ function NodeCard({
 }) {
   const { t } = useTranslation();
   const gone = node.state === "LOST" || node.state === "LEFT";
-  const variant = node.state === "LIVE" ? (node.degraded ? "warning" : "success") : node.state === "LEFT" ? "secondary" : "destructive";
+  const variant =
+    node.state === "LIVE" ? (node.degraded ? "warning" : "success") : node.state === "LEFT" || node.state === "UNKNOWN" ? "secondary" : "destructive";
   const Icon = gone ? ServerOff : Server;
   return (
     <li
@@ -141,11 +142,17 @@ function NodeCard({
       {gone ? (
         <p className="mt-3 text-sm text-foreground/90" data-testid={`cluster-node-gone-${node.nodeId}`}>
           {node.state === "LOST"
-            ? t(
-                "cluster.node.lostText",
-                "Stopped heartbeating {{ago}} ago without leaving — killed, crashed or cut off from NATS. The leases it held ({{leases}}) are taken over within {{ttl}}.",
-                { ago: formatDuration(Date.now() - (node.lastHeartbeat || Date.now())), leases: node.leasesHeld, ttl: formatDuration(leaseTtlMs) },
-              )
+            ? Date.now() - (node.lastHeartbeat || Date.now()) > leaseTtlMs
+              ? t(
+                  "cluster.node.lostExpiredText",
+                  "Stopped heartbeating {{ago}} ago without leaving — killed, crashed or cut off from NATS. Its leases have expired: other nodes run those conversations now.",
+                  { ago: formatDuration(Date.now() - (node.lastHeartbeat || Date.now())) },
+                )
+              : t(
+                  "cluster.node.lostText",
+                  "Stopped heartbeating {{ago}} ago without leaving — killed, crashed or cut off from NATS. The leases it held ({{leases}}) are taken over within {{ttl}}.",
+                  { ago: formatDuration(Date.now() - (node.lastHeartbeat || Date.now())), leases: node.leasesHeld, ttl: formatDuration(leaseTtlMs) },
+                )
             : t("cluster.node.leftText", "Shut down cleanly {{ago}} ago and released its leases.", {
                 ago: formatDuration(Date.now() - (node.goneSince ?? Date.now())),
               })}
@@ -158,6 +165,11 @@ function NodeCard({
           <Metric label={t("cluster.node.inFlight", "Active turns")} value={node.activeConversations} testId={`cluster-node-active-${node.nodeId}`} />
           <Metric label={t("cluster.node.leases", "Leases")} value={node.leasesHeld} testId={`cluster-node-leases-${node.nodeId}`} />
           <Metric label={t("cluster.node.queue", "Queued")} value={node.queueDepthTotal} />
+          {node.state === "UNKNOWN" && (
+            <div className="col-span-3 text-xs text-muted-foreground" data-testid={`cluster-node-unknown-${node.nodeId}`}>
+              {t("cluster.node.unknownText", "The answering node cannot reach NATS, so it cannot see whether this node still runs. These are its last known numbers.")}
+            </div>
+          )}
           {node.localDeadLetters > 0 && (
             <div className="col-span-3 text-xs text-warning">
               {t("cluster.node.localDeadLetters", "{{n}} dead letters kept locally, waiting for NATS", { n: node.localDeadLetters })}
@@ -166,7 +178,7 @@ function NodeCard({
         </dl>
       )}
 
-      {canAct && !gone && (
+      {canAct && !gone && node.state !== "UNKNOWN" && (
         <div className="mt-3 flex justify-end">
           {node.draining ? (
             <Button size="sm" variant="outline" onClick={() => onDrain(false)} data-testid={`cluster-undrain-${node.nodeId}`}>

@@ -5295,7 +5295,10 @@
       "inFlight": "活动轮次",
       "leases": "租约",
       "queue": "排队中",
-      "localDeadLetters": "{{n}} 条死信保留在本地，等待 NATS"
+      "localDeadLetters": "{{n}} 条死信保留在本地，等待 NATS",
+      "unknown": "未知",
+      "unknownText": "应答节点无法连接 NATS，因此无法判断该节点是否仍在运行。以下是它最后已知的数据。",
+      "lostExpiredText": "{{ago}}前未经正常退出就停止了心跳——被终止、崩溃或与 NATS 断开。它的租约已过期：其他节点现在处理这些对话。"
     },
     "leaseFlag": {
       "holderGone": "持有者已消失",
@@ -5305,7 +5308,7 @@
       "contended": "其他节点在等待",
       "holderGoneHelp": "持有节点没有在线记录——它已宕机或与 NATS 断开。租约将在 TTL 内过期。",
       "holderRestartedHelp": "持有节点以新的启动实例恢复；重连时会清除其旧租约。",
-      "notRenewedHelp": "已连续三个周期未通过心跳续期。",
+      "notRenewedHelp": "已连续两个间隔未通过心跳续约：持有者卡住、被暂停或与 NATS 断开。",
       "longRunningHelp": "持有时间超过获取超时：排在其后的轮次将返回 409。",
       "contendedHelp": "另一节点上的轮次正在等待此租约。"
     },
@@ -5520,7 +5523,8 @@
       "colFence": "隔离令牌",
       "colFlags": "标记",
       "releaseAria": "强制释放 {{id}} 的租约",
-      "truncated": "仅读取了前 5,000 个租约。"
+      "truncated": "仅读取了前 5,000 个租约。",
+      "natsDown": "租约保存在 NATS 中，而应答节点目前无法连接 NATS。重新连接后将再次显示。"
     },
     "health": {
       "members": "{{total}} 个节点中 {{live}} 个在线",

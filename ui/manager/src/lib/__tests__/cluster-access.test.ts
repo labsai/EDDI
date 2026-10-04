@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { clusterAccess } from "@/lib/cluster-access";
 import { formatBytes, formatDuration, activityGroup } from "@/lib/cluster-labels";
-import { mergeActivity, ACTIVITY_LIMIT } from "@/hooks/use-cluster";
+import { mergeActivity, ACTIVITY_LIMIT, withTimeout } from "@/hooks/use-cluster";
 import type { ActivityEvent } from "@/lib/api/cluster";
 
 describe("clusterAccess", () => {
@@ -61,5 +61,27 @@ describe("mergeActivity", () => {
     const merged = mergeActivity([], many);
     expect(merged).toHaveLength(ACTIVITY_LIMIT);
     expect(merged[0]!.id).toBe(`x${ACTIVITY_LIMIT + 19}`);
+  });
+});
+
+describe("withTimeout", () => {
+  it("fails a read that a hung node never answers, so the page shows the failure instead of frozen numbers", async () => {
+    vi.useFakeTimers();
+    try {
+      const hung = withTimeout(() => new Promise<number>(() => {}), 100);
+      const result = hung().then(
+        () => "resolved",
+        (e: Error) => e.message,
+      );
+      await vi.advanceTimersByTimeAsync(150);
+      expect(await result).toMatch(/no answer within 100 ms/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("passes an answer and an error through unchanged", async () => {
+    await expect(withTimeout(() => Promise.resolve(7), 100)()).resolves.toBe(7);
+    await expect(withTimeout(() => Promise.reject(new Error("409")), 100)()).rejects.toThrow("409");
   });
 });

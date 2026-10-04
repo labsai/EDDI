@@ -5295,7 +5295,10 @@
       "inFlight": "Aktive Turns",
       "leases": "Leases",
       "queue": "Wartend",
-      "localDeadLetters": "{{n}} Dead Letters lokal zurückgehalten, warten auf NATS"
+      "localDeadLetters": "{{n}} Dead Letters lokal zurückgehalten, warten auf NATS",
+      "unknown": "Unbekannt",
+      "unknownText": "Der antwortende Knoten erreicht NATS nicht und kann daher nicht sehen, ob dieser Knoten noch läuft. Dies sind seine letzten bekannten Werte.",
+      "lostExpiredText": "Hat vor {{ago}} ohne Abmeldung aufgehört, Heartbeats zu senden — beendet, abgestürzt oder von NATS getrennt. Seine Leases sind abgelaufen: andere Knoten führen diese Konversationen jetzt aus."
     },
     "leaseFlag": {
       "holderGone": "Inhaber weg",
@@ -5305,7 +5308,7 @@
       "contended": "Anderer Knoten wartet",
       "holderGoneHelp": "Der haltende Knoten hat keinen Präsenzeintrag — er ist ausgefallen oder hat NATS verloren. Die Lease läuft innerhalb der TTL ab.",
       "holderRestartedHelp": "Der haltende Knoten ist mit einem neuen Boot zurück; er gibt seine alten Leases beim Wiederverbinden frei.",
-      "notRenewedHelp": "Seit drei Intervallen keine Erneuerung per Heartbeat.",
+      "notRenewedHelp": "Seit zwei Intervallen keine Heartbeat-Erneuerung: Der Halter hängt, ist pausiert oder von NATS getrennt.",
       "longRunningHelp": "Länger gehalten als das Acquire-Timeout: Dahinter wartende Turns erhalten 409.",
       "contendedHelp": "Ein Turn auf einem anderen Knoten wartet auf diese Lease."
     },
@@ -5520,7 +5523,8 @@
       "colFence": "Fencing",
       "colFlags": "Markierungen",
       "releaseAria": "Lease von {{id}} zwangsweise freigeben",
-      "truncated": "Nur die ersten 5.000 Leases wurden gelesen."
+      "truncated": "Nur die ersten 5.000 Leases wurden gelesen.",
+      "natsDown": "Leases liegen in NATS, das der antwortende Knoten gerade nicht erreicht. Sie erscheinen wieder, sobald er sich neu verbindet."
     },
     "health": {
       "members": "{{live}} von {{total}} Knoten aktiv",

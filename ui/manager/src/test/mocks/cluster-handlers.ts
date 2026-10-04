@@ -149,7 +149,8 @@ export function degradedOverview(policy: "local" | "reject" = "local"): ClusterO
     reasons: ["NATS_UNREACHABLE"],
     degradedTurnsPolicy: policy,
     degradedSince: Date.now() - 95_000,
-    nodes: o.nodes.slice(0, 1).map((n) => ({ ...n, degraded: true })),
+    // The others' last records, which a node without NATS cannot judge.
+    nodes: o.nodes.slice(0, 2).map((n) => (n.self ? { ...n, degraded: true } : { ...n, state: "UNKNOWN" as const })),
     nats: { ...o.nats!, status: "DEGRADED", streams: [], buckets: [], knownServers: [], leaseEpoch: null, account: null, error: "NATS is not connected from this node" },
   };
 }

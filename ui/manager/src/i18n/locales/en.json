@@ -5444,7 +5444,7 @@
       "longRunning": "Long-running",
       "longRunningHelp": "Held longer than the acquire timeout: turns queued behind it are answered 409.",
       "notRenewed": "Not renewed",
-      "notRenewedHelp": "No heartbeat renewal for three intervals."
+      "notRenewedHelp": "No heartbeat renewal for two intervals: the holder is hung, paused or cut off from NATS."
     },
     "leases": {
       "colAge": "Held for",
@@ -5462,7 +5462,8 @@
       "releaseAria": "Force-release the lease of {{id}}",
       "search": "Conversation, agent or node…",
       "title": "Conversation leases",
-      "truncated": "Only the first 5,000 leases were read."
+      "truncated": "Only the first 5,000 leases were read.",
+      "natsDown": "Leases live in NATS, which the answering node cannot reach right now. They show again as soon as it reconnects."
     },
     "metrics": {
       "raw": "Raw metrics of this node",
@@ -5520,7 +5521,10 @@
       "rtt": "NATS RTT",
       "self": "answering",
       "stale": "Heartbeat late",
-      "uptime": "Uptime"
+      "uptime": "Uptime",
+      "unknown": "Unknown",
+      "unknownText": "The answering node cannot reach NATS, so it cannot see whether this node still runs. These are its last known numbers.",
+      "lostExpiredText": "Stopped heartbeating {{ago}} ago without leaving — killed, crashed or cut off from NATS. Its leases have expired: other nodes run those conversations now."
     },
     "nodes": {
       "title": "Nodes"
