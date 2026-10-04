@@ -349,6 +349,21 @@ describe("Cluster console — actions", () => {
     expect(result).toHaveTextContent("Done");
   });
 
+  it("a bulk replay in the audit trail says how many entries it did, not a blank outcome", async () => {
+    server.use(
+      http.get("*/auditstore/cluster-admin", () =>
+        HttpResponse.json([
+          { id: "a1", timestamp: "2026-10-04T17:42:38Z", actions: ["deadletters.replay"], userId: "ops", output: { succeeded: 1, failed: 1 } },
+          { id: "a2", timestamp: "2026-10-04T17:40:00Z", actions: ["caches.resync"], userId: "ops", output: { outcome: "QUEUED" } },
+        ]),
+      ),
+    );
+    renderConsole();
+    expect(await screen.findByTestId("cluster-audit-bulk")).toHaveTextContent("1 of 2 done");
+    expect(screen.getByTestId("cluster-audit-bulk")).toHaveClass("text-warning");
+    expect(screen.getByTestId("cluster-audit-a2")).toHaveTextContent("QUEUED");
+  });
+
   it("a resync that only reached the outbox says so, and warns instead of celebrating", async () => {
     const success = vi.spyOn(toast, "success");
     const warning = vi.spyOn(toast, "warning");

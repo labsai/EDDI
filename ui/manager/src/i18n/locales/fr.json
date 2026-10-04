@@ -5660,7 +5660,8 @@
     "audit": {
       "title": "Piste d’audit des actions de récupération",
       "empty": "Aucune action de récupération n’a encore été effectuée.",
-      "hint": "Enregistré dans le registre d’audit infalsifiable sous la piste « cluster-admin », quelques secondes après chaque action."
+      "hint": "Enregistré dans le registre d’audit infalsifiable sous la piste « cluster-admin », quelques secondes après chaque action.",
+      "bulk": "{{ok}} sur {{n}} effectués"
     }
   }
 }

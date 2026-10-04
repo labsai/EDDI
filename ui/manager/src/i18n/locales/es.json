@@ -5660,7 +5660,8 @@
     "audit": {
       "title": "Registro de auditoría de las acciones de recuperación",
       "empty": "Todavía no se ha realizado ninguna acción de recuperación.",
-      "hint": "Se registra en el ledger de auditoría a prueba de manipulaciones, en el registro “cluster-admin”, unos segundos después de cada acción."
+      "hint": "Se registra en el ledger de auditoría a prueba de manipulaciones, en el registro “cluster-admin”, unos segundos después de cada acción.",
+      "bulk": "{{ok}} de {{n}} hechos"
     }
   }
 }

@@ -5601,7 +5601,8 @@
     "audit": {
       "title": "Audit-Trail der Wiederherstellungsaktionen",
       "empty": "Bisher wurde keine Wiederherstellungsaktion ausgeführt.",
-      "hint": "Wird einige Sekunden nach jeder Aktion im manipulationssicheren Audit-Ledger unter dem Trail „cluster-admin“ erfasst."
+      "hint": "Wird einige Sekunden nach jeder Aktion im manipulationssicheren Audit-Ledger unter dem Trail „cluster-admin“ erfasst.",
+      "bulk": "{{ok}} von {{n}} erledigt"
     }
   }
 }

@@ -5660,7 +5660,8 @@
     "audit": {
       "title": "Trilha de auditoria das ações de recuperação",
       "empty": "Nenhuma ação de recuperação foi realizada ainda.",
-      "hint": "Registrado no ledger de auditoria à prova de adulteração, na trilha “cluster-admin”, alguns segundos após cada ação."
+      "hint": "Registrado no ledger de auditoria à prova de adulteração, na trilha “cluster-admin”, alguns segundos após cada ação.",
+      "bulk": "{{ok}} de {{n}} concluídos"
     }
   }
 }

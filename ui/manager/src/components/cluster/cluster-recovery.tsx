@@ -126,6 +126,28 @@ export function ClusterRecoveryActions({ localDeadLetters, clustered }: { localD
   );
 }
 
+/**
+ * What an audited action came to: its outcome, or for a bulk replay or discard
+ * (which records counts, not one outcome) how many of the entries it did.
+ */
+function AuditOutcome({ output }: { output: Record<string, unknown> }) {
+  const { t } = useTranslation();
+  const outcome = output["outcome"];
+  if (outcome != null) {
+    return <span className="text-muted-foreground">{String(outcome)}</span>;
+  }
+  const ok = output["succeeded"];
+  const failed = output["failed"];
+  if (typeof ok === "number" && typeof failed === "number") {
+    return (
+      <span className={failed > 0 ? "text-warning" : "text-muted-foreground"} data-testid="cluster-audit-bulk">
+        {t("cluster.audit.bulk", "{{ok}} of {{n}} done", { ok, n: ok + failed })}
+      </span>
+    );
+  }
+  return null;
+}
+
 /** The newest entries of the `cluster-admin` audit trail: who did what, when. */
 export function ClusterAuditTrail() {
   const { t } = useTranslation();
@@ -160,7 +182,7 @@ export function ClusterAuditTrail() {
               </time>
               <span className="font-mono text-xs">{(e.actions ?? []).join(", ")}</span>
               <span className="text-foreground">{e.userId ?? "—"}</span>
-              <span className="text-muted-foreground">{String((e.output ?? {})["outcome"] ?? "")}</span>
+              <AuditOutcome output={e.output ?? {}} />
             </li>
           ))}
         </ul>

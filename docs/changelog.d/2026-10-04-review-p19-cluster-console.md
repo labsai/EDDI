@@ -50,6 +50,16 @@
   the reason only in its turn (written by a node without the classifier) is read back the same
   way. The two branches had each added a retry for the first dead letter on a new stream; the
   deploy branch's is kept, as is its 10 s forward after a local fallback.
+- **Losing a KV create race is a conflict, not an outage (found live).** The NATS server answers
+  the loser of two concurrent creates of one key with error 10164 as well as 10071; only 10071
+  was recognised, so in 8 of 15 live drain races the loser answered `409 NATS_UNREACHABLE`
+  instead of `BUSY`, and a double replay could answer `UNAVAILABLE` instead of `IN_PROGRESS`.
+  `NatsSharedKv` treats both codes as a conflict for create, compare-and-set and guarded delete,
+  which every caller of the shared KV (leases included) relies on. After the fix, 20 of 20 races
+  answered `BUSY` or ran one after the other. A failed replay claim or drain gate now logs its
+  cause.
+- **The audit trail shows what a bulk replay or discard did** ("1 of 2 done", a warning when any
+  failed) instead of a blank outcome: those entries record counts, not one outcome.
 - **Fencing tokens and lease revisions are JSON strings** in the console API, exact beyond 2^53.
 - **Cluster drawer focus:** an inline `onClose` re-ran the focus-return effect on every refresh and
   pulled focus out of the dialog; Tab no longer counts disabled controls as the last stop.

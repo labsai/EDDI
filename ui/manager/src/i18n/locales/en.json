@@ -5317,7 +5317,8 @@
     "audit": {
       "empty": "No recovery action has been taken yet.",
       "hint": "Recorded in the tamper-evident audit ledger under the trail “cluster-admin”, a few seconds after each action.",
-      "title": "Audit trail of recovery actions"
+      "title": "Audit trail of recovery actions",
+      "bulk": "{{ok}} of {{n}} done"
     },
     "colActions": "Actions",
     "degraded": {
