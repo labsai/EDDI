@@ -163,6 +163,7 @@ letters) turned up eight defects. Each is fixed here with a test that fails with
   flushed events count in `eddi.cluster.events.published`. Node RPC tolerates one unreadable
   scatter reply and logs a failed subscribe instead of throwing into the connect listener.
   `ClusterCoordinatorIT` picks a free host port instead of a fixed 4319.
+- **CodeRabbit reviews stacked PRs.** A new [`.coderabbit.yaml`](../../.coderabbit.yaml) lets auto-review run on PRs into any base branch, not only `main`, because the stacked NATS PRs were being skipped as "base/target branches other than the default branch".
 
 ### Known and not fixed here
 
