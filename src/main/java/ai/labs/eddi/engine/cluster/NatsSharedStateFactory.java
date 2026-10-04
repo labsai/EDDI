@@ -119,8 +119,25 @@ public class NatsSharedStateFactory implements ISharedStateFactory {
         return epochMillis * 1000L;
     }
 
+    /**
+     * The stream behind a bucket, with direct get turned off.
+     * <p>
+     * jnats creates a KV bucket with {@code allow_direct}, which lets <i>any</i>
+     * replica of the stream answer a get — the one on the server the client is
+     * connected to, even when it lags the leader (after a restart or a catch-up, or
+     * when the cluster is partitioned), so two nodes can read different records for
+     * one key. Every compare-and-set still goes through the leader, so a stale read
+     * can only make a CAS fail, never succeed wrongly; but the decisions made
+     * <i>on</i> the read — is this lease stale, what is the counter, who holds it —
+     * must not depend on which replica answered. With direct get off, a get is a
+     * JetStream message get, which only the stream leader answers.
+     */
+    static StreamConfiguration leaderReads(KeyValueConfiguration desired) {
+        return StreamConfiguration.builder(desired.getBackingConfig()).allowDirect(false).build();
+    }
+
     private void createAboveEveryEarlierFence(KeyValueConfiguration desired) throws IOException, JetStreamApiException {
-        StreamConfiguration backing = StreamConfiguration.builder(desired.getBackingConfig())
+        StreamConfiguration backing = StreamConfiguration.builder(leaderReads(desired))
                 .firstSequence(firstRevisionAt(System.currentTimeMillis())).build();
         connections.jetStreamManagement().addStream(backing);
     }
@@ -143,7 +160,7 @@ public class NatsSharedStateFactory implements ISharedStateFactory {
                 if (fenced(spec)) {
                     createAboveEveryEarlierFence(desired);
                 } else {
-                    kvm.create(desired);
+                    connections.jetStreamManagement().addStream(leaderReads(desired));
                 }
                 LOGGER.infof("Created KV bucket %s (ttl %s, replicas %d)", name, spec.ttl(), replicas);
                 return;
@@ -156,9 +173,10 @@ public class NatsSharedStateFactory implements ISharedStateFactory {
                                 : "Recreate the bucket to apply it.");
                 return;
             }
-            if (!spec.ttl().equals(status.getTtl())) {
-                kvm.update(desired);
-                LOGGER.infof("Updated KV bucket %s (ttl %s)", name, spec.ttl());
+            boolean direct = status.getBackingStreamInfo() == null || status.getBackingStreamInfo().getConfiguration().getAllowDirect();
+            if (!spec.ttl().equals(status.getTtl()) || direct) {
+                connections.jetStreamManagement().updateStream(leaderReads(desired));
+                LOGGER.infof("Updated KV bucket %s (ttl %s, reads answered by the stream leader only)", name, spec.ttl());
             }
         } catch (IOException | JetStreamApiException e) {
             throw new ClusterUnavailableException("Provisioning KV bucket " + name + " failed: " + e.getMessage(), e);
