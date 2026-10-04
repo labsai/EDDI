@@ -311,6 +311,22 @@ describe("LiveLogViewer", () => {
     expect(announcer.textContent).toMatch(/\d+ errors? in the log/);
   }, 15000);
 
+  it("Clear resets the announcement baseline so the next error is announced afresh", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <LiveLogViewer agentId="agent-clear" conversationId={null} />
+    );
+    const announcer = screen.getByTestId("log-error-announcer");
+    emit({ ...line(1000, "boom"), level: "ERROR" });
+    await waitFor(() => expect(announcer).toHaveTextContent("1 error in the log"), { timeout: 5000 });
+
+    await user.click(screen.getByTestId("log-clear"));
+    expect(announcer).toHaveTextContent("");
+    emit({ ...line(2000, "boom again"), level: "ERROR" });
+    // Announced as a change from the cleared baseline, not swallowed as "still 1".
+    await waitFor(() => expect(announcer).toHaveTextContent("1 error in the log"), { timeout: 5000 });
+  }, 15000);
+
   it("pause freezes the view but keeps collecting, so resume shows what arrived meanwhile", async () => {
     const user = userEvent.setup();
     renderWithProviders(

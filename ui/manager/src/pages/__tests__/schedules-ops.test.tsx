@@ -41,4 +41,29 @@ describe("SchedulesPage - operations", () => {
       expect(screen.getByTestId("lastfired-timezone-sched-1")).toHaveTextContent("UTC");
     });
   });
+
+  it("keeps the stored instant when an unchanged one-time schedule is saved (DST fall-back hour)", async () => {
+    // 06:30Z is 01:30 EST, the SECOND 01:30 in New York on 2026-11-01; the
+    // zone-local text alone would resolve to the first (05:30Z).
+    const stored = {
+      id: "ot-1", name: "Once", triggerType: "CRON", agentId: "agent1", agentVersion: 0,
+      environment: "production", oneTimeAt: "2026-11-01T06:30:00Z", message: "hi",
+      conversationStrategy: "new", enabled: true, fireStatus: "PENDING", failCount: 0,
+      timeZone: "America/New_York",
+    };
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.get("*/schedulestore/schedules", () => HttpResponse.json([stored])),
+      http.put("*/schedulestore/schedules/:id", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<SchedulesPage />, { initialRoute: "/manage/schedules" });
+    await user.click(await screen.findByTestId("edit-ot-1"));
+    await user.click(await screen.findByTestId("schedule-submit-btn"));
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(new Date(body!.oneTimeAt as string).toISOString()).toBe("2026-11-01T06:30:00.000Z");
+  });
 });

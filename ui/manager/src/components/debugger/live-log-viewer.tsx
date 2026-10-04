@@ -173,6 +173,13 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   }, [logs, paused]);
 
   const handleClear = useCallback(() => {
+    // Reset the announcement baseline too: a pending timer would otherwise
+    // write the old (already announced) count over the next new error.
+    if (announceTimer.current !== null) {
+      clearTimeout(announceTimer.current);
+      announceTimer.current = null;
+    }
+    setAnnouncedErrors(0);
     setLogs([]);
     setPausedSnapshot((s) => (s === null ? null : []));
   }, []);

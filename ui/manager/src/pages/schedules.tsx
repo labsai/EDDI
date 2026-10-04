@@ -806,7 +806,15 @@ function ScheduleFormDialog({
     if (formMode === "cron") {
       config.cronExpression = cronExpression.trim();
     } else if (formMode === "oneTime") {
-      config.oneTimeAt = zonedLocalInputToIso(oneTimeAt, timeZone) ?? undefined;
+      // An unchanged stored instant is kept as is: the zone-local text drops the
+      // offset, so across a DST fall-back hour it cannot name the same instant.
+      const unchanged =
+        latest?.oneTimeAt != null &&
+        (latest.timeZone ?? DEFAULT_TIME_ZONE) === timeZone &&
+        isoToZonedLocalInput(latest.oneTimeAt, timeZone) === oneTimeAt;
+      config.oneTimeAt = unchanged
+        ? latest.oneTimeAt
+        : (zonedLocalInputToIso(oneTimeAt, timeZone) ?? undefined);
     } else {
       config.heartbeatIntervalSeconds = heartbeatInterval;
     }
