@@ -1415,7 +1415,9 @@
     "temperaturePlaceholder": "Valor predeterminado del proveedor",
     "temperatureInvalid": "Introduce un número, por ejemplo 0.7.",
     "paramValueOf": "Valor de {{key}}",
-    "removeParam": "Quitar el parámetro {{key}}"
+    "removeParam": "Quitar el parámetro {{key}}",
+    "accessToken": "Token de acceso",
+    "authToken": "Token de Hugging Face (opcional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",

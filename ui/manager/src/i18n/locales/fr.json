@@ -1415,7 +1415,9 @@
     "temperaturePlaceholder": "Valeur par défaut du fournisseur",
     "temperatureInvalid": "Saisissez un nombre, par exemple 0.7.",
     "paramValueOf": "Valeur de {{key}}",
-    "removeParam": "Supprimer le paramètre {{key}}"
+    "removeParam": "Supprimer le paramètre {{key}}",
+    "accessToken": "Jeton d'accès",
+    "authToken": "Jeton Hugging Face (facultatif)"
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",

@@ -1401,7 +1401,9 @@
     "temperaturePlaceholder": "提供商默认值",
     "temperatureInvalid": "请输入数字，例如 0.7。",
     "paramValueOf": "{{key}} 的值",
-    "removeParam": "移除参数 {{key}}"
+    "removeParam": "移除参数 {{key}}",
+    "accessToken": "访问令牌",
+    "authToken": "Hugging Face 令牌（可选）"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",

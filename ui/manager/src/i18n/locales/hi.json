@@ -1401,7 +1401,9 @@
     "temperaturePlaceholder": "प्रदाता का डिफ़ॉल्ट",
     "temperatureInvalid": "कोई संख्या दर्ज करें, जैसे 0.7।",
     "paramValueOf": "{{key}} का मान",
-    "removeParam": "पैरामीटर {{key}} हटाएँ"
+    "removeParam": "पैरामीटर {{key}} हटाएँ",
+    "accessToken": "एक्सेस टोकन",
+    "authToken": "Hugging Face टोकन (वैकल्पिक)"
   },
   "outputEditor": {
     "labelPlaceholder": "लिंक लेबल...",

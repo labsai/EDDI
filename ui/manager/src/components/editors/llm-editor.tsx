@@ -5,6 +5,7 @@ import { ActionTags } from "./action-tags";
 import { Field } from "./editor-field";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
 import { getProviderConfig } from "@/lib/api/agent-setup";
+import { dedicatedParamKeys, modelParamSpec } from "./llm/model-params";
 import { NumberInput } from "./number-input";
 import { RenamableKeyInput } from "./renamable-key-input";
 import { hasOwnKey, nextFreeKey, renameKey } from "./editor-value-utils";
@@ -87,23 +88,6 @@ import { getDefaultBaseUrl, getProviderRegions } from "@/lib/llm-provider-catalo
 
 /** Parameter keys whose values should use SecretKeyPicker (case-insensitive match) */
 const SENSITIVE_LLM_PARAM_KEYS = new Set(["apikey", "password", "secret", "token"]);
-
-/**
- * The parameter that names the model. Azure OpenAI addresses a *deployment*
- * rather than a model id, and the backend reads `deploymentName` for it.
- */
-function modelParamKey(type: string | undefined): string {
-  return type === "azure-openai" ? "deploymentName" : "modelName";
-}
-
-/**
- * Parameters edited by the dedicated "Model" fields. They are left out of the
- * generic key/value grid so a value has one place to live, and a grid row cannot
- * be renamed onto one of them.
- */
-function dedicatedParamKeys(type: string | undefined): Set<string> {
-  return new Set([modelParamKey(type), "apiKey", "temperature"]);
-}
 
 /** The model a freshly chosen provider starts with, so a new task is never model-less. */
 function defaultModelFor(type: string | undefined): string {
@@ -233,7 +217,9 @@ function TaskEditor({
     });
   };
 
-  const modelKey = modelParamKey(task.type);
+  const spec = modelParamSpec(task.type);
+  const modelKey = spec.modelKey;
+  const credentialKey = spec.credentialKey;
   const dedicatedKeys = dedicatedParamKeys(task.type);
   const modelValue = task.parameters?.[modelKey] ?? "";
   const temperatureValue = task.parameters?.temperature ?? "";
@@ -250,14 +236,14 @@ function TaskEditor({
   const changeType = (type: string) => {
     const previousDefault = defaultModelFor(task.type);
     const swapModel = modelValue !== "" && modelValue === previousDefault;
-    const nextKey = modelParamKey(type);
+    const nextKey = modelParamSpec(type).modelKey;
     const parameters = { ...task.parameters };
     if (swapModel) {
       delete parameters[modelKey];
       const next = defaultModelFor(type);
       if (next) parameters[nextKey] = next;
     } else if (nextKey !== modelKey && modelKey in parameters) {
-      // modelName <-> deploymentName: carry the user's value to the key the
+      // modelName <-> model / modelId / deploymentName: carry the user's value to the key the
       // new provider reads rather than leaving it where nothing looks.
       parameters[nextKey] = parameters[modelKey] ?? "";
       delete parameters[modelKey];
@@ -438,34 +424,37 @@ function TaskEditor({
                   </>
                 )}
               </Field>
-              <Field
-                label={t("llmEditor.apiKey", "API key")}
-                hint={
-                  providerInfo && !providerInfo.needsKey
-                    ? t("llmEditor.apiKeyNotNeeded", "This provider usually needs no API key.")
-                    : undefined
-                }
-              >
-                {(control) => (
-                  // No `connections`: a model needs a bare credential, and the
-                  // backend refuses a connection reference in every model parameter.
-                  <>
-                    <SecretKeyPicker
-                      {...control}
-                      value={task.parameters?.apiKey ?? ""}
-                      onChange={(val) => updateParam("apiKey", val)}
-                      readOnly={readOnly}
-                      placeholder={"${vault:...}"}
-                      testId="llm-param-apiKey"
-                    />
-                    <ConnectionReferenceWarning
-                      value={task.parameters?.apiKey ?? ""}
-                      refused="model"
-                      testId="llm-param-connection-warning-apiKey"
-                    />
-                  </>
-                )}
-              </Field>
+              {credentialKey && (
+                <Field
+                  label={
+                    credentialKey === "accessToken"
+                      ? t("llmEditor.accessToken", "Access token")
+                      : credentialKey === "authToken"
+                        ? t("llmEditor.authToken", "Hugging Face token (optional)")
+                        : t("llmEditor.apiKey", "API key")
+                  }
+                >
+                  {(control) => (
+                    // No `connections`: a model needs a bare credential, and the
+                    // backend refuses a connection reference in every model parameter.
+                    <>
+                      <SecretKeyPicker
+                        {...control}
+                        value={task.parameters?.[credentialKey] ?? ""}
+                        onChange={(val) => updateParam(credentialKey, val)}
+                        readOnly={readOnly}
+                        placeholder={"${vault:...}"}
+                        testId={`llm-param-${credentialKey}`}
+                      />
+                      <ConnectionReferenceWarning
+                        value={task.parameters?.[credentialKey] ?? ""}
+                        refused="model"
+                        testId={`llm-param-connection-warning-${credentialKey}`}
+                      />
+                    </>
+                  )}
+                </Field>
+              )}
               <Field label={t("llmEditor.temperature", "Temperature")}>
                 {(control) => (
                   <>
@@ -2064,7 +2053,7 @@ export function LlmEditor({
     const newTask: LangchainTask = {
       actions: ["send_message"],
       type: "openai",
-      parameters: { systemMessage: "", modelName: defaultModelFor("openai") },
+      parameters: { systemMessage: "", [modelParamSpec("openai").modelKey]: defaultModelFor("openai") },
     };
     onChange({ ...data, tasks: [...(data.tasks ?? []), newTask] });
   }, [data, onChange]);

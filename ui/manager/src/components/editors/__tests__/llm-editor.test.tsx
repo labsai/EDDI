@@ -1298,6 +1298,47 @@ describe("LlmEditor model fields", () => {
     expect(screen.getByLabelText("Deployment name")).toBe(screen.getByTestId("llm-model-name"));
   });
 
+  // Each row is checked against the backend builder's recognised parameters.
+  it.each([
+    ["ollama", "model", null],
+    ["bedrock", "modelId", null],
+    ["gemini-vertex", "modelId", null],
+    ["huggingface", "modelId", "accessToken"],
+    ["oracle-genai", "modelName", null],
+    ["jlama", "modelName", "authToken"],
+    ["azure-openai", "deploymentName", "apiKey"],
+    ["anthropic", "modelName", "apiKey"],
+    ["deepseek", "modelName", "apiKey"],
+  ])("%s: model is written to %s, credential field is %s", async (type, modelKey, credentialKey) => {
+    const user = userEvent.setup();
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", [modelKey as string]: "m" }, type as string)} onChange={onChange} />);
+    expect(screen.getByTestId("llm-model-name")).toHaveValue("m");
+    await user.type(screen.getByTestId("llm-model-name"), "x");
+    expect(lastTask().parameters).toMatchObject({ [modelKey as string]: "mx" });
+    expect(lastTask().parameters).not.toHaveProperty(modelKey === "modelName" ? "model" : "modelName");
+    if (credentialKey) {
+      expect(screen.getByTestId(`llm-param-${credentialKey}`)).toBeInTheDocument();
+    } else {
+      expect(screen.queryByTestId("llm-param-apiKey")).not.toBeInTheDocument();
+    }
+    expect(screen.getByTestId("llm-temperature")).toBeInTheDocument();
+  });
+
+  it("keeps a stray apiKey visible in the grid on a provider that ignores it", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", model: "llama3", apiKey: "leftover" }, "ollama")} onChange={onChange} />);
+    await openSection(user, "Model Parameters");
+    expect(screen.getByDisplayValue("apiKey")).toBeInTheDocument();
+  });
+
+  it("carries the model value to the key the new provider reads", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "my-model" }, "openai")} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("model-type-select"), "ollama");
+    expect(lastTask().parameters).toMatchObject({ model: "my-model" });
+    expect(lastTask().parameters).not.toHaveProperty("modelName");
+  });
+
   it("commits an action typed but not yet added when focus leaves the box", async () => {
     const user = userEvent.setup();
     renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "m" })} onChange={onChange} />);

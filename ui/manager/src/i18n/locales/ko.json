@@ -1401,7 +1401,9 @@
     "temperaturePlaceholder": "제공자 기본값",
     "temperatureInvalid": "숫자를 입력하세요(예: 0.7).",
     "paramValueOf": "{{key}}의 값",
-    "removeParam": "매개변수 {{key}} 제거"
+    "removeParam": "매개변수 {{key}} 제거",
+    "accessToken": "액세스 토큰",
+    "authToken": "Hugging Face 토큰(선택)"
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",

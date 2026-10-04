@@ -1457,7 +1457,9 @@
     "temperaturePlaceholder": "الافتراضي للمزوّد",
     "temperatureInvalid": "أدخل رقمًا، مثل 0.7.",
     "paramValueOf": "قيمة {{key}}",
-    "removeParam": "إزالة المعامل {{key}}"
+    "removeParam": "إزالة المعامل {{key}}",
+    "accessToken": "رمز الوصول",
+    "authToken": "رمز Hugging Face (اختياري)"
   },
   "outputEditor": {
     "labelPlaceholder": "تسمية الرابط...",

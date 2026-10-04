@@ -1401,7 +1401,9 @@
     "temperaturePlaceholder": "プロバイダーの既定値",
     "temperatureInvalid": "数値を入力してください（例: 0.7）。",
     "paramValueOf": "{{key}} の値",
-    "removeParam": "パラメーター {{key}} を削除"
+    "removeParam": "パラメーター {{key}} を削除",
+    "accessToken": "アクセストークン",
+    "authToken": "Hugging Face トークン（任意）"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",

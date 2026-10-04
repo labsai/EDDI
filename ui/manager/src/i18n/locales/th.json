@@ -1401,7 +1401,9 @@
     "temperaturePlaceholder": "ค่าเริ่มต้นของผู้ให้บริการ",
     "temperatureInvalid": "กรอกตัวเลข เช่น 0.7",
     "paramValueOf": "ค่าของ {{key}}",
-    "removeParam": "ลบพารามิเตอร์ {{key}}"
+    "removeParam": "ลบพารามิเตอร์ {{key}}",
+    "accessToken": "โทเคนการเข้าถึง",
+    "authToken": "โทเคน Hugging Face (ไม่บังคับ)"
   },
   "outputEditor": {
     "labelPlaceholder": "ป้ายลิงก์...",

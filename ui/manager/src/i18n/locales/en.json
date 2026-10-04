@@ -1441,7 +1441,9 @@
     "temperaturePlaceholder": "Provider default",
     "temperatureInvalid": "Enter a number, for example 0.7.",
     "paramValueOf": "Value of {{key}}",
-    "removeParam": "Remove parameter {{key}}"
+    "removeParam": "Remove parameter {{key}}",
+    "accessToken": "Access token",
+    "authToken": "Hugging Face token (optional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
