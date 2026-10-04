@@ -96,6 +96,7 @@ export async function sendMessage(
   message: string,
   userId?: string,
   context?: ContextMap,
+  signal?: AbortSignal,
 ): Promise<ConversationSnapshot> {
   const params = new URLSearchParams({
     returnDetailed: "false",
@@ -115,6 +116,7 @@ export async function sendMessage(
       body: hasContext
         ? JSON.stringify({ input: message, context })
         : message,
+      signal,
     },
     "Failed to send message",
   );
@@ -253,6 +255,7 @@ export async function sendManagedAgentMessage(
   userId: string,
   message: string,
   context?: ContextMap,
+  signal?: AbortSignal,
 ): Promise<ConversationSnapshot> {
   const body: Record<string, unknown> = { input: message };
   if (context && Object.keys(context).length > 0) body.context = context;
@@ -263,6 +266,7 @@ export async function sendManagedAgentMessage(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     },
     "Failed to send message",
   );

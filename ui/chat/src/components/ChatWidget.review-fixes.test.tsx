@@ -372,7 +372,7 @@ describe("the agent name", () => {
 
     expect(await screen.findByText("Hello there")).toBeInTheDocument();
     expect(container.querySelector(".chat-header__agent-name")).toBeNull();
-    expect(screen.getByAltText("Help Desk")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-title")).toHaveTextContent("Help Desk");
     // Neither the raw agent id nor an error stands in for the name.
     expect(screen.queryByText("agent-1")).not.toBeInTheDocument();
     expect(calls.some((c) => c.url.includes("/descriptorstore/"))).toBe(false);

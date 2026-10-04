@@ -75,13 +75,19 @@ export interface ChatState {
   restoreDraft: string | null;
 }
 
+/** The title a header shows when nobody overrode it. */
+export const DEFAULT_TITLE = "EDDI";
+
+/** The composer placeholder when nobody overrode it (shown translated). */
+export const DEFAULT_PLACEHOLDER = "Type a message...";
+
 const defaultConfig: ChatConfig = {
   theme: "dark",
   accentColor: "#113B92",
   showLogo: true,
   logoUrl: "/img/logo_eddi.png",
-  title: "EDDI",
-  placeholder: "Type a message...",
+  title: DEFAULT_TITLE,
+  placeholder: DEFAULT_PLACEHOLDER,
   enableStreaming: true,
   enableQuickReplies: true,
   enableMarkdown: true,
