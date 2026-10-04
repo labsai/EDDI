@@ -3774,7 +3774,7 @@
     "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
     "deleteIncomplete": "Borrado incompleto: algunos datos de este usuario pueden seguir existiendo. No lo notifiques como cumplido.",
     "auditRedacted": "Entradas de auditoría ocultadas",
-    "auditLegacy": "Este EDDI solo sustituye el id de usuario en el registro de auditoría: los prompts y respuestas guardados allí se conservan. EDDI 6.6 y posteriores los ocultan.",
+    "auditLegacy": "Este EDDI solo sustituye el id de usuario en el registro de auditoría: los prompts y respuestas guardados allí se conservan. EDDI 6.6 y posteriores también los ocultan, salvo que el servidor se ejecute con eddi.audit.erasure-mode=pseudonymize.",
     "auditPseudonymizeMode": "El contenido de auditoría se conservó: este servidor se ejecuta con eddi.audit.erasure-mode=pseudonymize (por ejemplo, por una retención legal), así que solo se sustituyó el id de usuario en el registro de auditoría.",
     "auditRedactionFailed": "No se redactó ningún contenido de auditoría: el paso de redacción falló (ver arriba), por lo que los prompts y respuestas registrados en el libro siguen ahí. Vuelva a ejecutar el borrado.",
     "auditRedactedExplanation": "Las filas de auditoría del usuario se conservan para el registro, pero sus prompts, respuestas, detalles del modelo y llamadas a herramientas se sustituyeron por una marca de ocultación y el id de usuario se seudonimizó. Las filas que se verificaban antes se volvieron a firmar; una fila ya manipulada sigue marcada como no válida.",

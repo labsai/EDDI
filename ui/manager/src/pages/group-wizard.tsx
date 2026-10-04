@@ -36,7 +36,13 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
-import { groupSaveProblems, idsTakenByOtherMembers, uncoveredRolePhases, type GroupSaveProblem } from "@/lib/group-config";
+import {
+  groupSaveProblems,
+  idsTakenByOtherMembers,
+  optionsOfferedTo,
+  uncoveredRolePhases,
+  type GroupSaveProblem,
+} from "@/lib/group-config";
 import { GroupSaveProblems } from "@/components/groups/group-save-problems";
 import { getErrorMessage } from "@/lib/api-client";
 import {
@@ -1218,7 +1224,7 @@ function MembersStep({
             index={idx}
             // An agent seated in another slot is not offered again: both seats
             // would share one member conversation, and EDDI 6.6 refuses the save.
-            agents={agents.filter((a) => !idsTakenByOtherMembers(state.members, idx).has(a.id))}
+            agents={optionsOfferedTo(agents, state.members, idx)}
             takenIds={idsTakenByOtherMembers(state.members, idx)}
             styleColors={styleColors}
             onUpdate={(updates) => updateMember(idx, updates)}

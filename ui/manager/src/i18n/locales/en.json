@@ -3775,7 +3775,7 @@
     "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
     "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled.",
     "auditRedacted": "Audit Entries Redacted",
-    "auditLegacy": "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them.",
+    "auditLegacy": "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
     "auditPseudonymizeMode": "Audit content was kept: this server runs with eddi.audit.erasure-mode=pseudonymize (for example under a legal hold), so only the user id in the audit ledger was replaced.",
     "auditRedactionFailed": "No audit content was redacted: the redaction step failed (see above), so the prompts and responses recorded in the ledger are still there. Run the erasure again.",
     "auditRedactedExplanation": "The user's audit rows are kept for record-keeping, but their prompts, responses, model details and tool calls were replaced by a redaction marker and the user id was pseudonymised. Rows that verified before were re-signed; a row that had already been tampered with stays marked invalid.",

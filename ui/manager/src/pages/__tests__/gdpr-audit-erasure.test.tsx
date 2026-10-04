@@ -68,6 +68,10 @@ describe("GDPR erasure — audit ledger", () => {
 
     expect(screen.queryByTestId("gdpr-audit-redacted")).not.toBeInTheDocument();
     expect(screen.getByTestId("gdpr-audit-summary")).toHaveTextContent(/only replaces the user id/);
+    // Upgrading is no promise of redaction: the legal-hold mode keeps content.
+    expect(screen.getByTestId("gdpr-audit-summary")).toHaveTextContent(
+      /unless the server runs with eddi\.audit\.erasure-mode=pseudonymize/,
+    );
     // `complete` from an older server is not dressed up with the 6.6 meaning.
     expect(screen.queryByTestId("gdpr-complete-explanation")).not.toBeInTheDocument();
   });

@@ -3774,7 +3774,7 @@
     "failedConversations_many": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
     "deleteIncomplete": "Eliminação incompleta — alguns dados deste utilizador podem ainda existir. Não a comunique como cumprida.",
     "auditRedacted": "Entradas de auditoria ocultadas",
-    "auditLegacy": "Este EDDI só substitui o id do usuário no registro de auditoria: os prompts e respostas gravados ali são mantidos. O EDDI 6.6 e posteriores os ocultam.",
+    "auditLegacy": "Este EDDI só substitui o id do usuário no registro de auditoria: os prompts e respostas gravados ali são mantidos. O EDDI 6.6 e posteriores também os ocultam, a menos que o servidor rode com eddi.audit.erasure-mode=pseudonymize.",
     "auditPseudonymizeMode": "O conteúdo de auditoria foi mantido: este servidor roda com eddi.audit.erasure-mode=pseudonymize (por exemplo, sob retenção legal), então só o id do usuário no registro de auditoria foi substituído.",
     "auditRedactionFailed": "Nenhum conteúdo de auditoria foi ocultado: a etapa de ocultação falhou (veja acima), portanto os prompts e as respostas registrados no livro ainda estão lá. Execute o apagamento novamente.",
     "auditRedactedExplanation": "As linhas de auditoria do usuário são mantidas para registro, mas os prompts, respostas, detalhes do modelo e chamadas de ferramentas foram substituídos por uma marca de ocultação e o id do usuário foi pseudonimizado. Linhas que eram verificadas antes foram reassinadas; uma linha já adulterada continua marcada como inválida.",

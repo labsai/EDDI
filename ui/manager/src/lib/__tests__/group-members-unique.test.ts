@@ -5,6 +5,7 @@ import {
   groupSaveProblems,
   idsTakenByOtherMembers,
   memberSeatKey,
+  optionsOfferedTo,
   repeatedMemberIds,
 } from "@/lib/group-config";
 
@@ -43,6 +44,18 @@ describe("one seat per agent", () => {
     const members = [{ agentId: "a1" }, { agentId: "a2" }, { agentId: "" }];
     expect([...idsTakenByOtherMembers(members, 0)]).toEqual(["a2"]);
     expect([...idsTakenByOtherMembers(members, 2)].sort()).toEqual(["a1", "a2"]);
+  });
+
+  it("offers each row every option no other row holds, plus its own choice", () => {
+    const options = [{ id: "a1" }, { id: "a2" }, { id: "a3" }];
+    const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
+    expect(ids(optionsOfferedTo(options, [{ agentId: "a1" }, { agentId: "" }], 1))).toEqual(["a2", "a3"]);
+    expect(ids(optionsOfferedTo(options, [{ agentId: "a1" }, { agentId: "" }], 0))).toEqual(["a1", "a2", "a3"]);
+    // An existing duplicate stays visible in both rows, so the select does not
+    // fall back to "Select agent…" while the state still holds the id.
+    const dup = [{ agentId: "a1" }, { agentId: " a1 " }];
+    expect(ids(optionsOfferedTo(options, dup, 0))).toEqual(["a1", "a2", "a3"]);
+    expect(ids(optionsOfferedTo(options, dup, 1))).toEqual(["a1", "a2", "a3"]);
   });
 
   it("groupSaveProblems reports a duplicate member — an AGENT and a GROUP with the same id included", () => {

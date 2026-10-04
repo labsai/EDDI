@@ -3774,7 +3774,7 @@
     "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
     "deleteIncomplete": "Effacement incomplet — certaines données de cet utilisateur peuvent encore exister. Ne le déclarez pas comme accompli.",
     "auditRedacted": "Entrées d'audit masquées",
-    "auditLegacy": "Cet EDDI ne remplace que l'identifiant utilisateur dans le registre d'audit : les prompts et réponses qui y sont enregistrés sont conservés. EDDI 6.6 et plus les masquent.",
+    "auditLegacy": "Cet EDDI ne remplace que l'identifiant utilisateur dans le registre d'audit : les prompts et réponses qui y sont enregistrés sont conservés. EDDI 6.6 et plus les masquent aussi, sauf si le serveur fonctionne avec eddi.audit.erasure-mode=pseudonymize.",
     "auditPseudonymizeMode": "Le contenu d'audit a été conservé : ce serveur fonctionne avec eddi.audit.erasure-mode=pseudonymize (par exemple sous conservation légale), seul l'identifiant utilisateur du registre d'audit a donc été remplacé.",
     "auditRedactionFailed": "Aucun contenu d'audit n'a été masqué : l'étape de masquage a échoué (voir ci-dessus), donc les prompts et réponses enregistrés dans le registre sont toujours présents. Relancez l'effacement.",
     "auditRedactedExplanation": "Les lignes d'audit de l'utilisateur sont conservées pour la traçabilité, mais leurs prompts, réponses, détails du modèle et appels d'outils ont été remplacés par un marqueur de masquage et l'identifiant a été pseudonymisé. Les lignes vérifiées auparavant ont été re-signées ; une ligne déjà altérée reste marquée invalide.",

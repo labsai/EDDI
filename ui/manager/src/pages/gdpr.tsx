@@ -532,7 +532,7 @@ function AuditErasureSummary({ result }: { result: GdprDeletionResult }) {
   if (typeof redacted !== "number") {
     text = t(
       "gdpr.auditLegacy",
-      "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them.",
+      "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
     );
   } else if (
     redacted === 0 &&

@@ -331,6 +331,24 @@ export function idsTakenByOtherMembers(
   return taken;
 }
 
+/**
+ * The options a member's agent picker offers: every option no OTHER member
+ * holds, plus the member's own current choice even when another member holds
+ * it too. Without that exception a duplicate that already exists (a stored
+ * group, a type switch that kept the id) made the select show "Select agent…"
+ * while the state still held the id — the duplicate became invisible exactly
+ * when the save-problem list was asking the author to fix it.
+ */
+export function optionsOfferedTo<T extends { id: string }>(
+  options: ReadonlyArray<T>,
+  members: ReadonlyArray<{ agentId?: string | null } | null | undefined>,
+  index: number,
+): T[] {
+  const taken = idsTakenByOtherMembers(members, index);
+  const own = memberSeatKey(members[index]);
+  return options.filter((option) => option.id === own || !taken.has(option.id));
+}
+
 /** The reader-facing sentence for one {@link GroupSaveProblem}. */
 export function groupSaveProblemMessage(t: TFunction, problem: GroupSaveProblem): string {
   switch (problem.kind) {

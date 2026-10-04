@@ -3734,7 +3734,7 @@
     "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
     "deleteIncomplete": "삭제가 완료되지 않았습니다. 이 사용자의 일부 데이터가 아직 남아 있을 수 있습니다. 완료된 것으로 보고하지 마세요.",
     "auditRedacted": "가려진 감사 항목",
-    "auditLegacy": "이 EDDI는 감사 원장의 사용자 ID만 바꿉니다. 그곳에 기록된 프롬프트와 응답은 유지됩니다. EDDI 6.6 이상은 이를 가립니다.",
+    "auditLegacy": "이 EDDI는 감사 원장의 사용자 ID만 바꿉니다. 그곳에 기록된 프롬프트와 응답은 유지됩니다. EDDI 6.6 이상은 이것들도 가립니다. 단, 서버가 eddi.audit.erasure-mode=pseudonymize로 실행되는 경우는 예외입니다.",
     "auditPseudonymizeMode": "감사 내용이 유지되었습니다. 이 서버는 eddi.audit.erasure-mode=pseudonymize로 실행 중이므로(예: 법적 보존) 감사 원장의 사용자 ID만 바뀌었습니다.",
     "auditRedactionFailed": "감사 내용이 가려지지 않았습니다. 가림 단계가 실패하여(위 참조) 원장에 기록된 프롬프트와 응답이 그대로 남아 있습니다. 삭제를 다시 실행하세요.",
     "auditRedactedExplanation": "사용자의 감사 행은 기록 보존을 위해 유지되지만, 프롬프트, 응답, 모델 세부 정보, 도구 호출은 가림 표시로 바뀌었고 사용자 ID는 가명 처리되었습니다. 이전에 검증되던 행은 다시 서명되었고, 이미 변조된 행은 유효하지 않음으로 남습니다.",

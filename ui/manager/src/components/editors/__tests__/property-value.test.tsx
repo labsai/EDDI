@@ -59,6 +59,31 @@ describe("property-value-utils", () => {
     expect(convertValue({ valueString: "hello" }, "long")).toBeUndefined();
   });
 
+  it("carries over only decimal text — never hex, binary, octal or exponent text into a whole number", () => {
+    for (const text of ["0x1F", "0b11", "0o17", "1e3", "Infinity", "", "  ", "12abc", "1_000"]) {
+      expect(convertValue({ valueString: text }, "int")).toBeUndefined();
+      expect(convertValue({ valueString: text }, "long")).toBeUndefined();
+    }
+    expect(convertValue({ valueString: " 12 " }, "int")).toBe(12);
+    expect(convertValue({ valueString: "-7" }, "long")).toBe(-7);
+    expect(convertValue({ valueString: "+7" }, "int")).toBe(7);
+  });
+
+  it("does not round a whole number past 2^53 while converting", () => {
+    expect(convertValue({ valueString: "9007199254740991" }, "long")).toBe(9007199254740991);
+    expect(convertValue({ valueString: "9007199254740993" }, "long")).toBeUndefined();
+  });
+
+  it("carries decimals with an optional exponent, but no hex, binary or non-finite text", () => {
+    expect(convertValue({ valueString: "19.99" }, "double")).toBe(19.99);
+    expect(convertValue({ valueString: ".5" }, "double")).toBe(0.5);
+    expect(convertValue({ valueString: "2.5e-4" }, "double")).toBe(0.00025);
+    for (const text of ["0x1F", "0b11", "Infinity", "NaN", "1.2.3", ""]) {
+      expect(convertValue({ valueString: text }, "double")).toBeUndefined();
+      expect(convertValue({ valueString: text }, "float")).toBeUndefined();
+    }
+  });
+
   it("flags an int out of range and a long the browser cannot hold", () => {
     expect(numericProblem("int", 2147483647)).toBeNull();
     expect(numericProblem("int", 2147483648)).toBe("intRange");

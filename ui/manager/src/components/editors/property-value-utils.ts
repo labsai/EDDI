@@ -85,6 +85,9 @@ export function withValue<T extends TypedPropertyValue>(p: T, kind: PropertyValu
   return next as T;
 }
 
+const DECIMAL_INTEGER = /^[+-]?\d+$/;
+const DECIMAL_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+
 /**
  * The value carried over when the author switches the type, so "42" typed as
  * text becomes 42 as an integer rather than an empty field. `undefined` when it
@@ -100,13 +103,22 @@ export function convertValue(p: TypedPropertyValue, to: PropertyValueKind): unkn
       return typeof current === "string" ? current : text;
     case "int":
     case "long": {
+      // Plain signed decimal digits only. `Number()` also reads "0x1F", "0b11",
+      // "0o17" and "1e3", so a text value such as "0x1F" became 31 — a value the
+      // author never typed. And past 2^53 it rounds, so such text is not carried
+      // over either: the field stays empty for the author to fill.
+      if (!DECIMAL_INTEGER.test(text)) return undefined;
       const n = Number(text);
-      return text !== "" && Number.isInteger(n) ? n : undefined;
+      return Number.isSafeInteger(n) ? n : undefined;
     }
     case "float":
     case "double": {
+      // Decimal notation, with an optional exponent ("2.5e-4"): that is a
+      // decimal, and JSON (what the engine parses) writes it the same way.
+      // Hex, binary, octal, "Infinity" and "NaN" are not.
+      if (!DECIMAL_NUMBER.test(text)) return undefined;
       const n = Number(text);
-      return text !== "" && Number.isFinite(n) ? n : undefined;
+      return Number.isFinite(n) ? n : undefined;
     }
     case "boolean":
       return text === "true" ? true : text === "false" ? false : undefined;

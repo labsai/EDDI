@@ -24,6 +24,7 @@ import {
   groupSaveProblems,
   idsTakenByOtherMembers,
   memberPolicyLabel,
+  optionsOfferedTo,
   uncoveredRolePhases,
   type GroupSaveProblem,
 } from "@/lib/group-config";
@@ -646,13 +647,11 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                           {/* An agent already seated in another row is not
                               offered again: both seats would share one member
                               conversation, and EDDI 6.6 refuses the save. */}
-                          {agents
-                            .filter((agent) => !idsTakenByOtherMembers(members, idx).has(agent.id))
-                            .map((agent) => (
-                              <option key={agent.id} value={agent.id}>
-                                {agent.name || agent.id.slice(0, 12)}
-                              </option>
-                            ))}
+                          {optionsOfferedTo(agents, members, idx).map((agent) => (
+                            <option key={agent.id} value={agent.id}>
+                              {agent.name || agent.id.slice(0, 12)}
+                            </option>
+                          ))}
                         </select>
                       )}
                     </div>
