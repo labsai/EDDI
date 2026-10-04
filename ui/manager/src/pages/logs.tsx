@@ -452,6 +452,7 @@ function HistoryTab() {
     data: logs,
     isLoading,
     isError,
+    error,
     refetch,
     hasMore,
     loadMore,
@@ -632,6 +633,7 @@ function HistoryTab() {
             {/* A failed fetch used to fall through to the empty state below, which
                 told the user there is no data when the request never landed. */}
             <ErrorState
+              error={error}
               message={t("common.error")}
               onRetry={() => refetch()}
               retryLabel={t("common.retry")}

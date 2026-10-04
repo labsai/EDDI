@@ -568,6 +568,7 @@ export function AuditPage() {
   // Without this a 500 rendered the "No audit entries found" empty state — the
   // most misleading possible result on a compliance screen.
   const isError = mode === "conversation" ? convQuery.isError : agentQuery.isError;
+  const error = mode === "conversation" ? convQuery.error : agentQuery.error;
   const refetch = () => (mode === "conversation" ? convQuery.refetch() : agentQuery.refetch());
   const isFetching = mode === "conversation" ? convQuery.isFetching : agentQuery.isFetching;
   const hasSearched = mode === "conversation" ? !!searchValue : !!activeAgentId;
@@ -978,6 +979,7 @@ export function AuditPage() {
       {/* Empty state - no results */}
       {hasSearched && !isLoading && isError && entries.length === 0 && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}

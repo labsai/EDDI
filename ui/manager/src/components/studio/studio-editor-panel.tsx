@@ -111,7 +111,7 @@ export function StudioEditorPanel({
   }, [resourceVersion]);
 
   // Fetch resource data
-  const { data, isLoading, isError, refetch } = useResource(
+  const { data, isLoading, isError, error, refetch } = useResource(
     slug,
     resourceId,
     currentVersion,
@@ -247,6 +247,7 @@ export function StudioEditorPanel({
     return (
       <div className="flex-1 p-6">
         <ErrorState
+          error={error}
           message={t("common.error", "An error occurred")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry", "Retry")}

@@ -8,7 +8,6 @@ import {
   Bot,
   Gauge,
   Tag,
-  ExternalLink,
   ChevronDown,
   ChevronRight,
   Blocks,
@@ -16,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useSkills, useCapabilitySearch, useSkillRegistry } from "@/hooks/use-capabilities";
+import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 
 const confidenceColors = CONFIDENCE_COLORS;
@@ -36,6 +36,17 @@ export function CapabilitiesPage() {
     strategy,
   );
   const { registry, isLoading: registryLoading, isError: registryError, refetchMatches } = useSkillRegistry();
+
+  // Matches carry only the agent id (24 hex characters); show the agent's name.
+  const { data: agentDescriptors } = useAgentDescriptors(200);
+  const agentNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const a of groupAgentsByName(agentDescriptors ?? [])) {
+      if (a.name) map.set(a.id, a.name);
+    }
+    return map;
+  }, [agentDescriptors]);
+  const agentLabel = (agentId: string) => agentNames.get(agentId) ?? agentId;
 
   const filteredSkills = useMemo(() => {
     if (!allSkills) return [];
@@ -78,6 +89,7 @@ export function CapabilitiesPage() {
               setSelectedSkill("");
             }}
             placeholder={t("capabilities.searchPlaceholder", "Search skills...")}
+            aria-label={t("capabilities.searchLabel", "Search skills")}
             className="h-10 w-full rounded-lg border border-input bg-background ps-9 pe-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             data-testid="capability-search"
           />
@@ -85,6 +97,7 @@ export function CapabilitiesPage() {
         <select
           value={strategy}
           onChange={(e) => setStrategy(e.target.value)}
+          aria-label={t("capabilities.strategyLabel", "Match strategy")}
           className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           data-testid="capability-strategy"
         >
@@ -154,6 +167,7 @@ export function CapabilitiesPage() {
                     type="button"
                     onClick={() => setExpandedSkill(isExpanded ? null : entry.skill)}
                     className="grid w-full grid-cols-[1fr_100px_120px] gap-2 px-4 py-3 text-start transition-colors hover:bg-secondary/50"
+                    aria-expanded={isExpanded}
                     data-testid={`registry-row-${entry.skill}`}
                   >
                     <div className="flex items-center gap-2">
@@ -200,8 +214,7 @@ export function CapabilitiesPage() {
                               to={`/manage/agentview/${match.agentId}`}
                               className="text-xs font-medium text-foreground hover:text-primary transition-colors flex items-center gap-1"
                             >
-                              {match.agentId}
-                              <ExternalLink className="h-3 w-3 opacity-40" />
+                              {agentLabel(match.agentId)}
                             </Link>
                             <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-semibold ms-auto", confidenceColors[match.confidence] ?? "bg-muted text-muted-foreground")}>
                               {match.confidence}
@@ -223,6 +236,24 @@ export function CapabilitiesPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {!skillsLoading && !registryLoading && !skillsError && allSkills && allSkills.length === 0 && !searchSkill.trim() && (
+          <div
+            className="rounded-xl border border-dashed border-border px-6 py-10 text-center"
+            data-testid="registry-empty"
+          >
+            <Blocks className="mx-auto h-8 w-8 text-muted-foreground/50" />
+            <p className="mt-3 text-sm font-medium text-foreground">
+              {t("capabilities.emptyTitle", "No capabilities registered yet")}
+            </p>
+            <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+              {t(
+                "capabilities.emptyDesc",
+                "Agents appear here once they declare capabilities (skills) in their configuration. Add a capability to an agent and it shows up in this registry.",
+              )}
+            </p>
           </div>
         )}
 
@@ -317,8 +348,7 @@ export function CapabilitiesPage() {
                         to={`/manage/agentview/${match.agentId}`}
                         className="text-sm font-medium text-foreground hover:text-primary transition-colors truncate flex items-center gap-1"
                       >
-                        {match.agentId}
-                        <ExternalLink className="h-3 w-3 opacity-40" />
+                        {agentLabel(match.agentId)}
                       </Link>
                     </div>
                     <div className="flex items-center gap-2">

@@ -217,7 +217,7 @@ export function ChannelDetailPage() {
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
-  const { data: config, isLoading, isError, refetch } = useChannel(id!, version);
+  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
@@ -355,6 +355,7 @@ export function ChannelDetailPage() {
     return (
       <div data-testid="channel-detail-error">
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}

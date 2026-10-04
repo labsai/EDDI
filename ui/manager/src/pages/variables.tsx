@@ -45,7 +45,7 @@ export function VariablesPage() {
   const [existingKey, setExistingKey] = useState<string | null>(null);
 
   /* ─── Queries ─── */
-  const { data: variables, isLoading, isError, refetch } = useVariables();
+  const { data: variables, isLoading, isError, error, refetch } = useVariables();
   const upsertMut = useUpsertVariable();
   const deleteMut = useDeleteVariable();
 
@@ -254,6 +254,7 @@ export function VariablesPage() {
           panel *in addition to* the still-populated search bar and table. */}
       {isError && !isLoading && !variables && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}

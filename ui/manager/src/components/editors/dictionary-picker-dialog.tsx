@@ -254,6 +254,7 @@ export function DictionaryPickerDialog({
 
           {descriptors.isError && (
             <ErrorState
+              error={descriptors.error}
               message={t("common.loadError", "Failed to load data")}
               onRetry={() => void descriptors.refetch()}
             />

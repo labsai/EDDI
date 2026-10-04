@@ -25,7 +25,13 @@
     "profile": "Perfil",
     "guest": "Invitado",
     "userMenu": "Menú de usuario",
-    "signedIn": "Sesión iniciada"
+    "signedIn": "Sesión iniciada",
+    "authenticating": "Autenticando…",
+    "initFailedTitle": "Error al iniciar sesión",
+    "initFailedBody": "El Manager no pudo completar el inicio de sesión. Puede que el servicio de acceso no esté disponible o que se haya rechazado tu sesión.",
+    "signInAgain": "Iniciar sesión de nuevo",
+    "sessionExpiredTitle": "Tu sesión ha caducado.",
+    "sessionExpiredBody": "Los cambios sin guardar siguen en esta página: copia lo que necesites antes de volver a iniciar sesión."
   },
   "nav": {
     "dashboard": "Panel",
@@ -218,7 +224,13 @@
     "removeItem": "Quitar {{item}}",
     "stepOf": "Paso {{current}} de {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "Redimensionar {{panel}}"
+    "resizePanel": "Redimensionar {{panel}}",
+    "errors": {
+      "network": "No se puede conectar con EDDI. Comprueba tu conexión e inténtalo de nuevo.",
+      "unauthorized": "Tu sesión ha caducado. Vuelve a iniciar sesión.",
+      "forbidden": "No tienes permiso para ver esto.",
+      "notFound": "No encontrado: puede que se haya eliminado."
+    }
   },
   "agents": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El agente y todos sus datos se eliminarán permanentemente.",
@@ -3127,7 +3139,11 @@
     "registeredSkills": "Habilidades registradas",
     "noSkills": "No se encontraron habilidades",
     "matchingAgents": "Agentes coincidentes",
-    "noMatches": "No se encontraron agentes para esta habilidad"
+    "noMatches": "No se encontraron agentes para esta habilidad",
+    "searchLabel": "Buscar habilidades",
+    "strategyLabel": "Estrategia de coincidencia",
+    "emptyTitle": "Aún no hay capacidades registradas",
+    "emptyDesc": "Los agentes aparecen aquí cuando declaran capacidades (habilidades) en su configuración. Añade una capacidad a un agente y aparecerá en este registro."
   },
   "exportDialog": {
     "title": "Exportar agente",
@@ -3628,7 +3644,18 @@
     "secretVault": "Bóveda de secretos",
     "vaultDown": "Vault no disponible",
     "vaultUp": "Vault listo",
-    "viewLogs": "Ver registros"
+    "viewLogs": "Ver registros",
+    "vaultChecking": "Comprobando la bóveda…",
+    "statsPartial": "Algunos recuentos no se pudieron cargar: se muestran como no disponibles, no como cero.",
+    "countUnavailable": "No se pudo cargar",
+    "convState": {
+      "READY": "Listo",
+      "IN_PROGRESS": "En curso",
+      "ENDED": "Finalizada",
+      "EXECUTION_INTERRUPTED": "Interrumpida",
+      "ERROR": "Error",
+      "AWAITING_HUMAN": "Esperando a una persona"
+    }
   },
   "errorBoundary": {
     "retry": "Reintentar",
@@ -3712,7 +3739,11 @@
     "found_other": "{{count}} huérfanos encontrados",
     "scanIncomplete": "Este análisis no finalizó",
     "scanIncompleteBody": "Puede que aparezcan como huérfanos recursos que siguen en uso. La purga está bloqueada hasta que un análisis se complete.",
-    "confirmPurge": "¿Eliminar permanentemente los {{count}} recursos huérfanos? Esta acción no se puede deshacer."
+    "confirmPurge": "¿Eliminar permanentemente los {{count}} recursos huérfanos? Esta acción no se puede deshacer.",
+    "scanFailed": "El análisis falló",
+    "rescanFailed": "El último análisis falló: se muestran los resultados anteriores.",
+    "reviewHint": "Abre un recurso de la lista para inspeccionarlo antes; se eliminan todos los huérfanos de la lista.",
+    "typeToConfirm": "Escribe {{count}} para confirmar"
   },
   "quotas": {
     "apiCallsMinute": "Llamadas API / minuto",

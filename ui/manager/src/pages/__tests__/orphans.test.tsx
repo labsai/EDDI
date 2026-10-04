@@ -4,6 +4,12 @@ import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { OrphansPage } from "@/pages/orphans";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
+import { toast } from "sonner";
+
+vi.mock("sonner", async (orig) => {
+  const actual = await orig<typeof import("sonner")>();
+  return { ...actual, toast: { ...actual.toast, error: vi.fn(), success: vi.fn() } };
+});
 
 // Mock the onboarding store so maybeAutoStart is a no-op
 vi.mock("@/hooks/use-onboarding", () => ({
@@ -119,8 +125,76 @@ describe("OrphansPage", () => {
     expect(
       screen.getByText(/Permanently delete all 5 orphaned resources/),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("confirm-purge-button")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-dialog-confirm")).toBeInTheDocument();
     expect(screen.getByText("Cancel")).toBeInTheDocument();
+  });
+
+  it("requires typing the orphan count before the purge can be confirmed", async () => {
+    renderOrphans();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("scan-button"));
+    await waitFor(() => expect(screen.getByTestId("purge-button")).toBeInTheDocument());
+    await user.click(screen.getByTestId("purge-button"));
+
+    const confirm = screen.getByTestId("alert-dialog-confirm");
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByTestId("orphans-purge-confirm-input"), "4");
+    expect(confirm).toBeDisabled();
+    await user.clear(screen.getByTestId("orphans-purge-confirm-input"));
+    await user.type(screen.getByTestId("orphans-purge-confirm-input"), "5");
+    expect(confirm).toBeEnabled();
+  });
+
+  it("shows the server's reason when a purge is refused", async () => {
+    server.use(
+      http.delete("*/administration/orphans", () =>
+        HttpResponse.json({ error: "incomplete_scan: reverse lookup failed" }, { status: 409 }),
+      ),
+    );
+    renderOrphans();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("scan-button"));
+    await waitFor(() => expect(screen.getByTestId("purge-button")).toBeInTheDocument());
+    await user.click(screen.getByTestId("purge-button"));
+    await user.type(screen.getByTestId("orphans-purge-confirm-input"), "5");
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("incomplete_scan: reverse lookup failed"),
+      ),
+    );
+  });
+
+  it("links each orphan to its detail page so it can be inspected before purging", async () => {
+    renderOrphans();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("scan-button"));
+    await waitFor(() => expect(screen.getByText("Deprecated Greeting Rules")).toBeInTheDocument());
+
+    expect(screen.getByText("Deprecated Greeting Rules").closest("a")).toHaveAttribute(
+      "href",
+      "/manage/resources/rules/orphan2",
+    );
+    expect(screen.getByText("Legacy Support Workflow (v1)").closest("a")).toHaveAttribute(
+      "href",
+      "/manage/workflowview/orphan1",
+    );
+  });
+
+  it("shows an error, not the empty 'scan your platform' state, when the scan fails", async () => {
+    server.use(
+      http.get("*/administration/orphans", () =>
+        HttpResponse.json({ message: "Reference scan unavailable" }, { status: 503 }),
+      ),
+    );
+    renderOrphans();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("scan-button"));
+
+    await waitFor(() => expect(screen.getByTestId("error-state")).toBeInTheDocument());
+    expect(screen.getByTestId("error-state-detail")).toHaveTextContent("Reference scan unavailable");
+    expect(screen.queryByTestId("pre-scan-state")).not.toBeInTheDocument();
   });
 
   // Regression: DELETE /administration/orphans has no selection parameter — it

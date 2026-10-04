@@ -58,6 +58,7 @@ export function WorkflowsPage() {
     data,
     isLoading,
     isError,
+    error,
     refetch,
     fetchNextPage,
     hasNextPage,
@@ -182,6 +183,7 @@ export function WorkflowsPage() {
 
       {isError && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}

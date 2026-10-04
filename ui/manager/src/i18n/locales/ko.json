@@ -25,7 +25,13 @@
     "profile": "프로필",
     "guest": "게스트",
     "userMenu": "사용자 메뉴",
-    "signedIn": "로그인됨"
+    "signedIn": "로그인됨",
+    "authenticating": "인증 중…",
+    "initFailedTitle": "로그인 실패",
+    "initFailedBody": "Manager가 로그인을 완료하지 못했습니다. 로그인 서비스에 연결할 수 없거나 세션이 거부되었을 수 있습니다.",
+    "signInAgain": "다시 로그인",
+    "sessionExpiredTitle": "세션이 만료되었습니다.",
+    "sessionExpiredBody": "저장하지 않은 변경 내용이 이 페이지에 남아 있습니다. 다시 로그인하기 전에 필요한 내용을 복사하세요."
   },
   "nav": {
     "dashboard": "대시보드",
@@ -218,7 +224,13 @@
     "removeItem": "{{item}} 제거",
     "stepOf": "{{total}}단계 중 {{current}}단계",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} 크기 조절"
+    "resizePanel": "{{panel}} 크기 조절",
+    "errors": {
+      "network": "EDDI에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요.",
+      "unauthorized": "세션이 만료되었습니다. 다시 로그인하세요.",
+      "forbidden": "이 항목을 볼 권한이 없습니다.",
+      "notFound": "찾을 수 없음 — 삭제되었을 수 있습니다."
+    }
   },
   "agents": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 에이전트와 모든 데이터가 영구적으로 제거됩니다.",
@@ -3091,7 +3103,11 @@
     "registeredSkills": "등록된 스킬",
     "noSkills": "스킬을 찾을 수 없습니다",
     "matchingAgents": "일치하는 에이전트",
-    "noMatches": "이 스킬에 일치하는 에이전트가 없습니다"
+    "noMatches": "이 스킬에 일치하는 에이전트가 없습니다",
+    "searchLabel": "스킬 검색",
+    "strategyLabel": "매칭 전략",
+    "emptyTitle": "등록된 기능이 아직 없습니다",
+    "emptyDesc": "에이전트가 구성에서 기능(스킬)을 선언하면 여기에 표시됩니다. 에이전트에 기능을 추가하면 이 레지스트리에 나타납니다."
   },
   "exportDialog": {
     "title": "에이전트 내보내기",
@@ -3590,7 +3606,18 @@
     "secretVault": "시크릿 저장소",
     "vaultDown": "볼트 사용 불가",
     "vaultUp": "볼트 준비됨",
-    "viewLogs": "로그 보기"
+    "viewLogs": "로그 보기",
+    "vaultChecking": "볼트 확인 중…",
+    "statsPartial": "일부 수치를 불러오지 못했습니다. 0이 아니라 사용 불가로 표시됩니다.",
+    "countUnavailable": "불러올 수 없음",
+    "convState": {
+      "READY": "준비됨",
+      "IN_PROGRESS": "진행 중",
+      "ENDED": "종료됨",
+      "EXECUTION_INTERRUPTED": "중단됨",
+      "ERROR": "오류",
+      "AWAITING_HUMAN": "사람 응답 대기 중"
+    }
   },
   "errorBoundary": {
     "retry": "다시 시도",
@@ -3671,7 +3698,11 @@
     "found_one": "{{count}}개의 고아 항목을 찾았습니다",
     "scanIncomplete": "이 스캔이 완료되지 않았습니다",
     "scanIncompleteBody": "아직 사용 중인 리소스가 고아로 표시될 수 있습니다. 스캔이 완료될 때까지 정리가 차단됩니다.",
-    "confirmPurge": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다."
+    "confirmPurge": "고아 리소스 {{count}}개를 모두 영구 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "scanFailed": "스캔 실패",
+    "rescanFailed": "마지막 스캔에 실패했습니다. 이전 결과를 표시합니다.",
+    "reviewHint": "먼저 목록에서 리소스를 열어 확인하세요. 목록의 모든 고아 리소스가 삭제됩니다.",
+    "typeToConfirm": "확인하려면 {{count}}을(를) 입력하세요"
   },
   "quotas": {
     "apiCallsMinute": "API 호출 / 분",

@@ -254,6 +254,7 @@ export function ConnectionsPage() {
             </div>
           ) : loadFailed ? (
             <ErrorState
+              error={error}
               message={t("common.error", "Something went wrong")}
               onRetry={() => void refetch()}
               retryLabel={t("common.retry", "Retry")}

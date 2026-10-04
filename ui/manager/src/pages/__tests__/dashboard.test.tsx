@@ -240,14 +240,14 @@ describe("DashboardPage", () => {
 
   it("shows conversation state badges", () => {
     renderWithProviders(<DashboardPage />);
-    expect(screen.getByText("READY")).toBeInTheDocument();
-    expect(screen.getByText("IN_PROGRESS")).toBeInTheDocument();
-    expect(screen.getByText("ERROR")).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
+    expect(screen.getByText("Error")).toBeInTheDocument();
   });
 
   it("shows ENDED conversation state badge", () => {
     renderWithProviders(<DashboardPage />);
-    expect(screen.getByText("ENDED")).toBeInTheDocument();
+    expect(screen.getByText("Ended")).toBeInTheDocument();
   });
 
   it("conversations link to conversation view", () => {
@@ -372,7 +372,7 @@ describe("DashboardPage", () => {
 
   it("renders ENDED state badge with correct styling class", () => {
     renderWithProviders(<DashboardPage />);
-    const endedBadge = screen.getByText("ENDED");
+    const endedBadge = screen.getByText("Ended");
     expect(endedBadge).toBeInTheDocument();
     expect(endedBadge.className).toContain("bg-gray-500");
   });
@@ -631,5 +631,62 @@ describe("DashboardPage", () => {
     renderWithProviders(<DashboardPage />);
 
     expect(screen.queryByTestId("update-check-card")).not.toBeInTheDocument();
+  });
+});
+
+describe("DashboardPage — failure and loading states", () => {
+  beforeEach(() => {
+    setDefaultMocks();
+  });
+
+  it("shows a failed count as unavailable, never as zero, and offers a retry", () => {
+    const refetch = vi.fn();
+    mockUseDashboardStats.mockReturnValue({
+      data: { agentCount: 5, workflowCount: 0, conversationCount: 42, resourceCount: 0, failed: ["workflows"] },
+      isLoading: false,
+      refetch,
+    });
+    renderWithProviders(<DashboardPage />);
+
+    expect(screen.getByTestId("stat-value-workflows")).toHaveTextContent("—");
+    expect(screen.getByTestId("stat-value-workflows")).not.toHaveTextContent("0");
+    expect(screen.getByTestId("refetch-error-notice")).toBeInTheDocument();
+  });
+
+  it("renders the error, with its cause, when every count failed", () => {
+    mockUseDashboardStats.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: Object.assign(new Error("denied"), { status: 403 }),
+      refetch: vi.fn(),
+    });
+    renderWithProviders(<DashboardPage />);
+
+    expect(screen.getByTestId("error-state")).toHaveTextContent("You don't have permission");
+    expect(screen.queryByTestId("stat-value-agents")).not.toBeInTheDocument();
+  });
+
+  it("does not call the vault unavailable while its health is still loading", () => {
+    mockUseVaultHealth.mockReturnValue({ data: undefined, isLoading: true });
+    renderWithProviders(<DashboardPage />);
+
+    expect(screen.queryByText("Vault unavailable")).not.toBeInTheDocument();
+    expect(screen.getByText("Vault checking…")).toBeInTheDocument();
+  });
+
+  it("draws as many skeleton cards as will render", () => {
+    mockUseDashboardStats.mockReturnValue({ data: undefined, isLoading: true });
+    renderWithProviders(<DashboardPage />);
+
+    const grid = document.querySelector("[data-tour='dashboard-stats']")!;
+    expect(grid.children).toHaveLength(3);
+  });
+
+  it("translates the conversation state instead of printing the raw enum", () => {
+    renderWithProviders(<DashboardPage />);
+    const list = screen.getByTestId("recent-conversations");
+    expect(list).not.toHaveTextContent("IN_PROGRESS");
+    expect(within(list).getAllByText("In progress").length).toBeGreaterThan(0);
   });
 });

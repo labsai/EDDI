@@ -358,7 +358,7 @@ function FailedFiresPanel({
   schedules?: ScheduleConfiguration[];
 }) {
   const { t } = useTranslation();
-  const { data: failed, isLoading, isError, refetch } = useFailedFires();
+  const { data: failed, isLoading, isError, error, refetch } = useFailedFires();
   const retryMutation = useRetryDeadLetter();
   const dismissMutation = useDismissDeadLetter();
 
@@ -463,6 +463,7 @@ function FailedFiresPanel({
               "No failed fires" — telling an operator nothing is broken at the
               exact moment the check for broken things failed. */}
           <ErrorState
+            error={error}
             message={t("common.error")}
             onRetry={() => refetch()}
             retryLabel={t("common.retry")}
@@ -1273,7 +1274,7 @@ export function SchedulesPage() {
     return () => clearTimeout(timer);
   }, [maybeAutoStart]);
 
-  const { data: schedules, isLoading, isError, refetch } = useSchedules();
+  const { data: schedules, isLoading, isError, error, refetch } = useSchedules();
   const { data: failedFires } = useFailedFires();
   const deleteMutation = useDeleteSchedule();
   const toggleMutation = useToggleSchedule();
@@ -1591,6 +1592,7 @@ export function SchedulesPage() {
                   Gated on having no rows: once rows are loaded a failed 10s poll
                   shows the inline stale notice above instead of wiping them. */}
               <ErrorState
+                error={error}
                 message={t("common.error")}
                 onRetry={() => refetch()}
                 retryLabel={t("common.retry")}

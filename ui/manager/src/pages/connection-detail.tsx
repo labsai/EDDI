@@ -92,7 +92,7 @@ export function ConnectionDetailPage() {
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
-  const { data: config, isLoading, isError, refetch } = useConnection(id!, version);
+  const { data: config, isLoading, isError, error, refetch } = useConnection(id!, version);
   const updateMutation = useUpdateConnection();
   const deleteMutation = useDeleteConnection();
 
@@ -428,6 +428,7 @@ export function ConnectionDetailPage() {
     return (
       <div data-testid="connection-detail-error">
         <ErrorState
+          error={error}
           message={t("common.error", "Something went wrong")}
           onRetry={() => void refetch()}
           retryLabel={t("common.retry", "Retry")}

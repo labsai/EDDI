@@ -70,7 +70,7 @@ function TemplateGalleryView({
   onSelect: (id: string) => void;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
-  const { data: templates, isLoading, isError, refetch } = useGroupTemplates();
+  const { data: templates, isLoading, isError, error, refetch } = useGroupTemplates();
 
   return (
     <div className="space-y-6">
@@ -101,7 +101,7 @@ function TemplateGalleryView({
       )}
 
       {isError && (
-        <ErrorState message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
+        <ErrorState error={error} message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
       )}
 
       {/* The list is packaged with the backend, so an empty one means the server
@@ -151,7 +151,7 @@ function TemplateGalleryView({
 function TemplateInstantiateView({ templateId, onBack }: { templateId: string; onBack: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data: detail, isLoading, isError, refetch } = useGroupTemplate(templateId);
+  const { data: detail, isLoading, isError, error, refetch } = useGroupTemplate(templateId);
   const { data: agentDescriptors } = useAgentDescriptors(200);
   const agents = agentDescriptors ? groupAgentsByName(agentDescriptors) : [];
   const instantiate = useInstantiateGroupTemplate();
@@ -175,7 +175,7 @@ function TemplateInstantiateView({ templateId, onBack }: { templateId: string; o
     return (
       <div className="space-y-4">
         <BackLink to="/manage/groups/templates" label={t("common.back", "Back")} />
-        <ErrorState message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
+        <ErrorState error={error} message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
       </div>
     );
   }

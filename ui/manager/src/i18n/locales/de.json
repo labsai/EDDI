@@ -25,7 +25,13 @@
     "profile": "Profil",
     "guest": "Gast",
     "userMenu": "Benutzermenü",
-    "signedIn": "Angemeldet"
+    "signedIn": "Angemeldet",
+    "authenticating": "Authentifizierung läuft…",
+    "initFailedTitle": "Anmeldung fehlgeschlagen",
+    "initFailedBody": "Der Manager konnte die Anmeldung nicht abschließen. Der Anmeldedienst ist möglicherweise nicht erreichbar oder Ihre Sitzung wurde abgelehnt.",
+    "signInAgain": "Erneut anmelden",
+    "sessionExpiredTitle": "Ihre Sitzung ist abgelaufen.",
+    "sessionExpiredBody": "Nicht gespeicherte Änderungen sind noch auf dieser Seite – kopieren Sie, was Sie brauchen, bevor Sie sich erneut anmelden."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -218,7 +224,13 @@
     "removeItem": "{{item}} entfernen",
     "stepOf": "Schritt {{current}} von {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} in der Größe ändern"
+    "resizePanel": "{{panel}} in der Größe ändern",
+    "errors": {
+      "network": "EDDI ist nicht erreichbar. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+      "unauthorized": "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an.",
+      "forbidden": "Sie haben keine Berechtigung, dies anzuzeigen.",
+      "notFound": "Nicht gefunden – möglicherweise wurde es gelöscht."
+    }
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",
@@ -3257,7 +3269,11 @@
     "registeredSkills": "Registrierte Fähigkeiten",
     "noSkills": "Keine Fähigkeiten gefunden",
     "matchingAgents": "Passende Agenten",
-    "noMatches": "Keine Agenten für diese Fähigkeit gefunden"
+    "noMatches": "Keine Agenten für diese Fähigkeit gefunden",
+    "searchLabel": "Fähigkeiten durchsuchen",
+    "strategyLabel": "Zuordnungsstrategie",
+    "emptyTitle": "Noch keine Fähigkeiten registriert",
+    "emptyDesc": "Agenten erscheinen hier, sobald sie Fähigkeiten (Skills) in ihrer Konfiguration deklarieren. Fügen Sie einem Agenten eine Fähigkeit hinzu, und sie erscheint in dieser Registry."
   },
   "exportDialog": {
     "title": "Agent exportieren",
@@ -3590,7 +3606,18 @@
     "secretVault": "Geheimnistresor",
     "vaultDown": "Vault nicht verfügbar",
     "vaultUp": "Vault bereit",
-    "viewLogs": "Protokolle anzeigen"
+    "viewLogs": "Protokolle anzeigen",
+    "vaultChecking": "Tresor wird geprüft…",
+    "statsPartial": "Einige Zahlen konnten nicht geladen werden – sie werden als nicht verfügbar angezeigt, nicht als null.",
+    "countUnavailable": "Konnte nicht geladen werden",
+    "convState": {
+      "READY": "Bereit",
+      "IN_PROGRESS": "In Bearbeitung",
+      "ENDED": "Beendet",
+      "EXECUTION_INTERRUPTED": "Unterbrochen",
+      "ERROR": "Fehler",
+      "AWAITING_HUMAN": "Wartet auf Mensch"
+    }
   },
   "errorBoundary": {
     "retry": "Erneut versuchen",
@@ -3671,7 +3698,11 @@
     "found_other": "{{count}} verwaiste Ressourcen gefunden",
     "scanIncomplete": "Dieser Scan wurde nicht abgeschlossen",
     "scanIncompleteBody": "Ressourcen, die noch verwendet werden, können als verwaist aufgeführt sein. Das Bereinigen ist gesperrt, bis ein Scan vollständig durchläuft.",
-    "confirmPurge": "Alle {{count}} verwaisten Ressourcen endgültig löschen? Dies kann nicht rückgängig gemacht werden."
+    "confirmPurge": "Alle {{count}} verwaisten Ressourcen endgültig löschen? Dies kann nicht rückgängig gemacht werden.",
+    "scanFailed": "Der Scan ist fehlgeschlagen",
+    "rescanFailed": "Der letzte Scan ist fehlgeschlagen – die vorherigen Ergebnisse werden angezeigt.",
+    "reviewHint": "Öffnen Sie vorab eine Ressource aus der Liste, um sie zu prüfen; jede verwaiste Ressource in der Liste wird gelöscht.",
+    "typeToConfirm": "Zur Bestätigung {{count}} eingeben"
   },
   "quotas": {
     "apiCallsMinute": "API-Aufrufe / Minute",

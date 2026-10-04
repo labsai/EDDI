@@ -75,7 +75,7 @@ export function GroupWorkspacePage() {
   // its original name in this page's header and back-link.
   const version = Number(searchParams.get("version")) || 1;
   const { data: groupConfig } = useGroup(groupId || "", version);
-  const { data: workspace, isLoading, isError, refetch } = useGroupWorkspace(groupId);
+  const { data: workspace, isLoading, isError, error, refetch } = useGroupWorkspace(groupId);
 
   /**
    * The schedule rows the cadences point at.
@@ -201,7 +201,7 @@ export function GroupWorkspacePage() {
     return (
       <div className="space-y-4">
         <BackLink to={`/manage/groups/${groupId}?version=${version}`} label={t("groupWorkspace.backToGroup", "Back to group")} />
-        <ErrorState message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
+        <ErrorState error={error} message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
       </div>
     );
   }

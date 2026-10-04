@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { AlertTriangle, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
 
@@ -26,21 +27,31 @@ export function AlertDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Delete",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   onConfirm,
   variant = "destructive",
   isPending = false,
   children,
   confirmDisabled = false,
 }: AlertDialogProps) {
+  const { t } = useTranslation();
+
+  // While the confirmed action is running, Escape, a backdrop click and the X
+  // would close the dialog while the request carries on — the user thinks they
+  // cancelled something that is still being deleted. Ignore them until it ends.
+  const guardedOpenChange = (next: boolean) => {
+    if (!next && isPending) return;
+    onOpenChange(next);
+  };
+
   const iconColor =
     variant === "destructive" ? "text-destructive" : "text-warning";
   const iconBg =
     variant === "destructive" ? "bg-destructive/10" : "bg-warning/10";
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <DialogPrimitive.Root open={open} onOpenChange={guardedOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content
@@ -76,7 +87,7 @@ export function AlertDialog({
               disabled={isPending}
               data-testid="alert-dialog-cancel"
             >
-              {cancelLabel}
+              {cancelLabel ?? t("common.cancel", "Cancel")}
             </Button>
             <Button
               variant={variant === "destructive" ? "destructive" : "warning"}
@@ -87,13 +98,13 @@ export function AlertDialog({
               disabled={isPending || confirmDisabled}
               data-testid="alert-dialog-confirm"
             >
-              {isPending ? "…" : confirmLabel}
+              {isPending ? "…" : (confirmLabel ?? t("common.delete", "Delete"))}
             </Button>
           </div>
 
           <DialogPrimitive.Close className="absolute inset-e-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
             <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("common.close", "Close")}</span>
           </DialogPrimitive.Close>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

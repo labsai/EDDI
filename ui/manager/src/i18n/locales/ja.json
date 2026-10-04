@@ -25,7 +25,13 @@
     "profile": "プロフィール",
     "guest": "ゲスト",
     "userMenu": "ユーザーメニュー",
-    "signedIn": "サインイン済み"
+    "signedIn": "サインイン済み",
+    "authenticating": "認証中…",
+    "initFailedTitle": "サインインに失敗しました",
+    "initFailedBody": "Manager はサインインを完了できませんでした。ログインサービスに接続できないか、セッションが拒否された可能性があります。",
+    "signInAgain": "もう一度サインイン",
+    "sessionExpiredTitle": "セッションの有効期限が切れました。",
+    "sessionExpiredBody": "未保存の変更はこのページに残っています。再度サインインする前に、必要な内容をコピーしてください。"
   },
   "nav": {
     "dashboard": "ダッシュボード",
@@ -218,7 +224,13 @@
     "removeItem": "{{item}} を削除",
     "stepOf": "ステップ {{current}} / {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} のサイズを変更"
+    "resizePanel": "{{panel}} のサイズを変更",
+    "errors": {
+      "network": "EDDI に接続できません。接続を確認してもう一度お試しください。",
+      "unauthorized": "セッションの有効期限が切れました。もう一度サインインしてください。",
+      "forbidden": "これを表示する権限がありません。",
+      "notFound": "見つかりません。削除された可能性があります。"
+    }
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",
@@ -3091,7 +3103,11 @@
     "registeredSkills": "登録済みスキル",
     "noSkills": "スキルが見つかりません",
     "matchingAgents": "一致するエージェント",
-    "noMatches": "このスキルに一致するエージェントはありません"
+    "noMatches": "このスキルに一致するエージェントはありません",
+    "searchLabel": "スキルを検索",
+    "strategyLabel": "マッチ戦略",
+    "emptyTitle": "登録された機能はまだありません",
+    "emptyDesc": "エージェントが設定で機能（スキル）を宣言すると、ここに表示されます。エージェントに機能を追加すると、このレジストリに表示されます。"
   },
   "exportDialog": {
     "title": "エージェントをエクスポート",
@@ -3590,7 +3606,18 @@
     "secretVault": "シークレット保管庫",
     "vaultDown": "Vault 利用不可",
     "vaultUp": "Vault 準備完了",
-    "viewLogs": "ログを表示"
+    "viewLogs": "ログを表示",
+    "vaultChecking": "Vault を確認中…",
+    "statsPartial": "一部の件数を読み込めませんでした。0 ではなく「利用不可」と表示しています。",
+    "countUnavailable": "読み込めませんでした",
+    "convState": {
+      "READY": "準備完了",
+      "IN_PROGRESS": "進行中",
+      "ENDED": "終了",
+      "EXECUTION_INTERRUPTED": "中断",
+      "ERROR": "エラー",
+      "AWAITING_HUMAN": "人の対応待ち"
+    }
   },
   "errorBoundary": {
     "retry": "再試行",
@@ -3671,7 +3698,11 @@
     "found_one": "{{count}} 件の孤立項目が見つかりました",
     "scanIncomplete": "このスキャンは完了しませんでした",
     "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。",
-    "confirmPurge": "孤立したリソース {{count}} 件をすべて完全に削除しますか？この操作は元に戻せません。"
+    "confirmPurge": "孤立したリソース {{count}} 件をすべて完全に削除しますか？この操作は元に戻せません。",
+    "scanFailed": "スキャンに失敗しました",
+    "rescanFailed": "前回のスキャンに失敗しました。以前の結果を表示しています。",
+    "reviewHint": "先に一覧のリソースを開いて内容を確認してください。一覧のすべての孤立リソースが削除されます。",
+    "typeToConfirm": "確認のため {{count}} と入力してください"
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",

@@ -25,7 +25,13 @@
     "profile": "Profile",
     "guest": "Guest",
     "userMenu": "User menu",
-    "signedIn": "Signed in"
+    "signedIn": "Signed in",
+    "authenticating": "Authenticating…",
+    "initFailedTitle": "Sign-in failed",
+    "initFailedBody": "The Manager could not complete sign-in. The login service may be unreachable or your session may have been rejected.",
+    "signInAgain": "Sign in again",
+    "sessionExpiredTitle": "Your session has expired.",
+    "sessionExpiredBody": "Unsaved changes are still on this page — copy anything you need before signing in again."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -218,7 +224,13 @@
     "removeItem": "Remove {{item}}",
     "stepOf": "Step {{current}} of {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "Resize {{panel}}"
+    "resizePanel": "Resize {{panel}}",
+    "errors": {
+      "network": "Can't reach EDDI. Check your connection and try again.",
+      "unauthorized": "Your session has expired. Sign in again.",
+      "forbidden": "You don't have permission to view this.",
+      "notFound": "Not found — it may have been deleted."
+    }
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -3311,7 +3323,11 @@
     "registeredSkills": "Registered Skills",
     "noSkills": "No skills found",
     "matchingAgents": "Matching Agents",
-    "noMatches": "No agents found for this skill"
+    "noMatches": "No agents found for this skill",
+    "searchLabel": "Search skills",
+    "strategyLabel": "Match strategy",
+    "emptyTitle": "No capabilities registered yet",
+    "emptyDesc": "Agents appear here once they declare capabilities (skills) in their configuration. Add a capability to an agent and it shows up in this registry."
   },
   "exportDialog": {
     "title": "Export Agent",
@@ -3631,7 +3647,18 @@
     "secretVault": "Secret Vault",
     "vaultDown": "Vault unavailable",
     "vaultUp": "Vault ready",
-    "viewLogs": "View Logs"
+    "viewLogs": "View Logs",
+    "vaultChecking": "Vault checking…",
+    "statsPartial": "Some counts could not be loaded — they are shown as unavailable, not zero.",
+    "countUnavailable": "Could not be loaded",
+    "convState": {
+      "READY": "Ready",
+      "IN_PROGRESS": "In progress",
+      "ENDED": "Ended",
+      "EXECUTION_INTERRUPTED": "Interrupted",
+      "ERROR": "Error",
+      "AWAITING_HUMAN": "Awaiting human"
+    }
   },
   "errorBoundary": {
     "retry": "Try Again",
@@ -3712,7 +3739,11 @@
     "found_other": "{{count}} orphans found",
     "scanIncomplete": "This scan did not finish",
     "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
-    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone."
+    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
+    "scanFailed": "The scan failed",
+    "rescanFailed": "The last scan failed — showing the previous results.",
+    "reviewHint": "Open a resource from the list to inspect it first; every orphan on the list is deleted.",
+    "typeToConfirm": "Type {{count}} to confirm"
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",

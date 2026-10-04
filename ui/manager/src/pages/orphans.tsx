@@ -12,9 +12,15 @@ import {
   Link2Off,
   CheckCircle2,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useOrphanScan, usePurgeOrphans } from "@/hooks/use-orphans";
 import { isScanComplete, type OrphanInfo } from "@/lib/api/orphans";
-import { getExtensionTypeConfig } from "@/lib/api/extensions";
+import { getExtensionTypeConfig, getResourceSlugForExtension } from "@/lib/api/extensions";
+import { RESOURCE_TYPES } from "@/lib/api/resources";
+import { getErrorMessage } from "@/lib/api-client";
+import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 
 /** Extract resource ID from a URI like eddi://ai.labs.rules/rulestore/rulesets/abc123?version=1 */
 function extractIdFromUri(uri: string): string {
@@ -47,6 +53,24 @@ function extractVersionFromUri(uri: string): string | null {
   }
 }
 
+/**
+ * Where an orphan can be inspected, or null when it has no detail page.
+ *
+ * The store segment of the URI is authoritative (`/rulestore/rulesets/<id>`);
+ * the extension type is the fallback, because a renamed step type carries the
+ * old spelling in `type` while its URI still names the real store.
+ */
+function detailPath(orphan: OrphanInfo, id: string): string | null {
+  const store = /\/([a-z]+store)\//i.exec(orphan.resourceUri)?.[1]?.toLowerCase();
+  if (store === "workflowstore") return `/manage/workflowview/${id}`;
+  // The wire type is "ai.labs.rules"; the extension table is keyed "eddi://ai.labs.rules".
+  const extension = orphan.type.startsWith("eddi://") ? orphan.type : `eddi://${orphan.type}`;
+  const slug =
+    RESOURCE_TYPES.find((rt) => rt.store === store)?.slug ??
+    getResourceSlugForExtension(extension);
+  return slug ? `/manage/resources/${slug}/${id}` : null;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function OrphansPage() {
@@ -57,12 +81,15 @@ export function OrphansPage() {
 
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
+  const [purgeConfirmText, setPurgeConfirmText] = useState("");
 
   const {
     data: report,
     isFetching: isScanning,
     refetch: scan,
     dataUpdatedAt,
+    isError: scanFailed,
+    error: scanError,
   } = useOrphanScan(includeDeleted);
 
   const purge = usePurgeOrphans();
@@ -81,9 +108,12 @@ export function OrphansPage() {
           })
         );
         setShowPurgeConfirm(false);
+        setPurgeConfirmText("");
         scan();
       },
-      onError: () => toast.error(t("common.error")),
+      // The server says why a purge was refused (409 incomplete_scan, a resource
+      // that became referenced, …) — "Something went wrong" threw that away.
+      onError: (err) => toast.error(getErrorMessage(err)),
     });
   }, [purge, includeDeleted, t, scan]);
 
@@ -156,7 +186,18 @@ export function OrphansPage() {
       </div>
 
       {/* Pre-scan empty state */}
-      {!report && !isScanning && (
+      {/* A failed scan must not fall back to the empty "scan your platform"
+          state: that reads as though nothing was ever attempted. */}
+      {scanFailed && !report && !isScanning && (
+        <ErrorState
+          error={scanError}
+          message={t("orphans.scanFailed", "The scan failed")}
+          onRetry={handleScan}
+          retryLabel={t("orphans.scan", "Scan")}
+        />
+      )}
+
+      {!report && !isScanning && !scanFailed && (
         <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-card/50 px-6 py-16 text-center" data-testid="pre-scan-state">
           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
             <ScanSearch className="h-8 w-8 text-primary" />
@@ -195,6 +236,12 @@ export function OrphansPage() {
       {/* Results */}
       {report && (
         <div className="space-y-4">
+          {scanFailed && (
+            <RefetchErrorNotice
+              onRetry={handleScan}
+              message={t("orphans.rescanFailed", "The last scan failed — showing the previous results.")}
+            />
+          )}
           {/* An incomplete reference scan makes MORE resources look
               unreferenced, never fewer, so the list below is a set of false
               positives rather than a shorter true one. EDDI refuses to purge on
@@ -266,42 +313,14 @@ export function OrphansPage() {
                     re-check, so the selection is gone rather than faked. */}
                 {report.totalOrphans > 0 && isScanComplete(report) && (
                   <>
-                    {/* Purge all */}
-                    {showPurgeConfirm ? (
-                      <div className="flex items-center gap-2">
-                        <span className="max-w-md text-sm font-medium text-destructive">
-                          {t("orphans.confirmPurge", {
-                            count: report.orphans.length,
-                            defaultValue:
-                              "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
-                          })}
-                        </span>
-                        <button
-                          onClick={handlePurge}
-                          disabled={purge.isPending}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:opacity-50"
-                          data-testid="confirm-purge-button"
-                        >
-                          {purge.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                          {t("orphans.purge", "Purge All")}
-                        </button>
-                        <button
-                          onClick={() => setShowPurgeConfirm(false)}
-                          className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-                        >
-                          {t("common.cancel", "Cancel")}
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setShowPurgeConfirm(true)}
-                        className="inline-flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
-                        data-testid="purge-button"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        {t("orphans.purge", "Purge All")}
-                      </button>
-                    )}
+                    <button
+                      onClick={() => setShowPurgeConfirm(true)}
+                      className="inline-flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90"
+                      data-testid="purge-button"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {t("orphans.purge", "Purge All")}
+                    </button>
                   </>
                 )}
               </div>
@@ -337,6 +356,7 @@ export function OrphansPage() {
                     {orphans.map((orphan, idx) => {
                       const resourceId = extractIdFromUri(orphan.resourceUri);
                       const version = extractVersionFromUri(orphan.resourceUri);
+                      const detail = detailPath(orphan, resourceId);
 
                       return (
                         <div
@@ -348,9 +368,19 @@ export function OrphansPage() {
 
                           {/* Name + URI */}
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-foreground">
-                              {orphan.name || resourceId}
-                            </p>
+                            {detail ? (
+                              <Link
+                                to={detail}
+                                className="block truncate text-sm font-medium text-foreground hover:text-primary hover:underline"
+                                data-testid="orphan-detail-link"
+                              >
+                                {orphan.name || resourceId}
+                              </Link>
+                            ) : (
+                              <p className="truncate text-sm font-medium text-foreground">
+                                {orphan.name || resourceId}
+                              </p>
+                            )}
                             <div className="mt-0.5 flex items-center gap-2">
                               <span className="truncate font-mono text-[11px] text-muted-foreground">
                                 {resourceId}
@@ -359,6 +389,7 @@ export function OrphansPage() {
                                 onClick={() => copyUri(orphan.resourceUri)}
                                 className="shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-muted-foreground transition-colors"
                                 title={t("common.copy", "Copy")}
+                                aria-label={t("common.copy", "Copy")}
                               >
                                 <Copy className="h-3 w-3" />
                               </button>
@@ -387,6 +418,53 @@ export function OrphansPage() {
             })}
         </div>
       )}
+
+      <AlertDialog
+        open={showPurgeConfirm}
+        onOpenChange={(open) => {
+          setShowPurgeConfirm(open);
+          if (!open) setPurgeConfirmText("");
+        }}
+        variant="destructive"
+        title={t("orphans.purge", "Purge All")}
+        description={t("orphans.confirmPurge", {
+          count: report?.orphans.length ?? 0,
+          defaultValue:
+            "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
+        })}
+        confirmLabel={t("orphans.purge", "Purge All")}
+        onConfirm={handlePurge}
+        isPending={purge.isPending}
+        confirmDisabled={purgeConfirmText.trim() !== String(report?.orphans.length ?? 0)}
+      >
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            {t(
+              "orphans.reviewHint",
+              "Open a resource from the list to inspect it first; every orphan on the list is deleted.",
+            )}
+          </p>
+          <label
+            htmlFor="orphans-purge-confirm"
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            {t("orphans.typeToConfirm", {
+              count: report?.orphans.length ?? 0,
+              defaultValue: "Type {{count}} to confirm",
+            })}
+          </label>
+          <input
+            id="orphans-purge-confirm"
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            value={purgeConfirmText}
+            onChange={(e) => setPurgeConfirmText(e.target.value)}
+            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-destructive/50"
+            data-testid="orphans-purge-confirm-input"
+          />
+        </div>
+      </AlertDialog>
     </div>
   );
 }
