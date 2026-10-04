@@ -157,7 +157,9 @@ describe("LlmEditor", () => {
         tasks: [
           expect.objectContaining({
             type: "openai",
-            actions: [],
+            // A task that never fires or has no model was the old default.
+            actions: ["send_message"],
+            parameters: expect.objectContaining({ modelName: expect.any(String) }),
           }),
         ],
       })
@@ -1156,12 +1158,12 @@ describe("LlmEditor model parameter names", () => {
     await openSection(user, "Model Parameters");
     const name = screen.getByDisplayValue("param1");
     await user.clear(name);
-    await user.type(name, "temperature");
+    await user.type(name, "topP");
     expect(onChange).not.toHaveBeenCalled();
     await user.tab();
     expect(Object.entries(lastParams())).toEqual([
       ["systemMessage", "hi"],
-      ["temperature", "0.2"],
+      ["topP", "0.2"],
       ["modelName", "gpt-4o"],
     ]);
   });
@@ -1199,5 +1201,108 @@ describe("LlmEditor model parameter names", () => {
     await openSection(user, "Model Parameters");
     await user.click(screen.getByText("Add Parameter"));
     expect(lastParams()).toEqual({ systemMessage: "", param2: "keep", param1: "" });
+  });
+});
+
+describe("LlmEditor model fields", () => {
+  const onChange = vi.fn();
+  beforeEach(() => vi.clearAllMocks());
+  const task = (parameters: Record<string, string>, type = "openai", actions: string[] = ["send_message"]): LlmConfig => ({
+    tasks: [{ type, actions, parameters }],
+  });
+  const lastTask = () => (onChange.mock.lastCall![0] as LlmConfig).tasks[0]!;
+
+  it("shows model, API key and temperature without opening any section", () => {
+    renderWithProviders(
+      <LlmEditor data={task({ systemMessage: "", modelName: "gpt-5.4", temperature: "0.3" })} onChange={onChange} />,
+    );
+    expect(screen.getByTestId("llm-model-name")).toHaveValue("gpt-5.4");
+    expect(screen.getByTestId("llm-temperature")).toHaveValue("0.3");
+    expect(screen.getByTestId("llm-param-apiKey")).toBeInTheDocument();
+  });
+
+  it("ties a visible label to each field", () => {
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "m" })} onChange={onChange} />);
+    expect(screen.getByLabelText("Model")).toBe(screen.getByTestId("llm-model-name"));
+    expect(screen.getByLabelText("Temperature")).toBe(screen.getByTestId("llm-temperature"));
+    expect(screen.getByLabelText("API key")).toBeInTheDocument();
+  });
+
+  it("edits the model and temperature in place", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "m" })} onChange={onChange} />);
+    await user.type(screen.getByTestId("llm-model-name"), "x");
+    expect(lastTask().parameters).toMatchObject({ modelName: "mx" });
+    await user.type(screen.getByTestId("llm-temperature"), "1");
+    expect(lastTask().parameters).toMatchObject({ temperature: "1" });
+  });
+
+  it("removes temperature when the field is cleared, instead of storing an empty string", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "m", temperature: "0.5" })} onChange={onChange} />);
+    await user.clear(screen.getByTestId("llm-temperature"));
+    expect(lastTask().parameters).not.toHaveProperty("temperature");
+  });
+
+  it("flags a temperature that is not a number", () => {
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "m", temperature: "hot" })} onChange={onChange} />);
+    expect(screen.getByTestId("llm-temperature")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("no longer repeats those parameters in the generic grid", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <LlmEditor data={task({ systemMessage: "", modelName: "m", temperature: "0.5", topP: "0.9" })} onChange={onChange} />,
+    );
+    await openSection(user, "Model Parameters");
+    expect(screen.getByDisplayValue("topP")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("modelName")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("temperature")).not.toBeInTheDocument();
+  });
+
+  it("warns when there is no model", () => {
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "" })} onChange={onChange} />);
+    expect(screen.getByTestId("llm-model-missing")).toBeInTheDocument();
+  });
+
+  it("warns when the task has no trigger action", () => {
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "m" }, "openai", [])} onChange={onChange} />);
+    expect(screen.getByTestId("llm-no-actions-warning")).toBeInTheDocument();
+  });
+
+  it("does not warn when an action is set", () => {
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "m" })} onChange={onChange} />);
+    expect(screen.queryByTestId("llm-no-actions-warning")).not.toBeInTheDocument();
+  });
+
+  it("swaps the model for the new provider's default only when it was the old default", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <LlmEditor data={task({ systemMessage: "", modelName: "gpt-5.4" })} onChange={onChange} />,
+    );
+    await user.selectOptions(screen.getByTestId("model-type-select"), "anthropic");
+    expect(lastTask().parameters).toMatchObject({ modelName: "claude-sonnet-5-5" });
+
+    // A model the user chose is theirs.
+    onChange.mockClear();
+    rerender(<LlmEditor data={task({ systemMessage: "", modelName: "my-finetune" })} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("model-type-select"), "anthropic");
+    expect(lastTask().parameters).toMatchObject({ modelName: "my-finetune" });
+  });
+
+  it("uses deploymentName for Azure OpenAI", () => {
+    renderWithProviders(
+      <LlmEditor data={task({ systemMessage: "", deploymentName: "prod-gpt" }, "azure-openai")} onChange={onChange} />,
+    );
+    expect(screen.getByTestId("llm-model-name")).toHaveValue("prod-gpt");
+    expect(screen.getByLabelText("Deployment name")).toBe(screen.getByTestId("llm-model-name"));
+  });
+
+  it("commits an action typed but not yet added when focus leaves the box", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: "m" })} onChange={onChange} />);
+    await user.type(screen.getByRole("textbox", { name: "Trigger Actions" }), "chat");
+    await user.tab();
+    expect(lastTask().actions).toEqual(["send_message", "chat"]);
   });
 });

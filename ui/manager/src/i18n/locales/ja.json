@@ -477,7 +477,7 @@
     "backToAgents": "Agents に戻る",
     "next": "次へ",
     "back": "戻る",
-    "createOnly": "作成のみ",
+    "createOnly": "デプロイせずに作成",
     "createAndDeploy": "作成してデプロイ",
     "typeTitle": "Agent のタイプは？",
     "typeDesc": "作成する Agent のタイプを選択",
@@ -567,7 +567,25 @@
     "specUrlScheme": "http:// と https:// の URL のみサポートされています",
     "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには組み込みツールをオフにしてください。",
     "hfToken": "Hugging Face トークン",
-    "hfTokenHint": "アクセス制限付きまたはプライベートのリポジトリでのみ必要です。API キーと同様に保管庫に保存されます。"
+    "hfTokenHint": "アクセス制限付きまたはプライベートのリポジトリでのみ必要です。API キーと同様に保管庫に保存されます。",
+    "stepLabel": "ステップ {{n}}/{{total}}: {{name}}",
+    "createAndDeployProduction": "作成して本番にデプロイ",
+    "createAndDeployTest": "作成してテストにデプロイ",
+    "reviewKeyNotNeeded": "このプロバイダーでは不要です",
+    "reviewKeyNone": "なし",
+    "reviewKeyVault": "Vault 参照 {{ref}}",
+    "reviewKeyEntered": "ここで入力済み。作成時に Vault に保存されます",
+    "reviewApiKey": "API キー",
+    "reviewBaseUrl": "ベース URL",
+    "deployTarget": "デプロイ先",
+    "deployNoteProduction": "「作成してデプロイ」を選ぶと、エージェントはすぐに本番で稼働します。",
+    "deployNoteTest": "「作成してデプロイ」はエージェントをテスト環境で起動します。問題なければ本番へ昇格させてください。",
+    "step_type": "種類",
+    "step_info": "アイデンティティ",
+    "step_llm": "モデル",
+    "step_apispec": "API 仕様",
+    "step_features": "機能",
+    "step_review": "確認"
   },
   "packages": {
     "confirmDeleteDescription": "この操作は元に戻せません。ワークフローとそのすべてのデータが完全に削除されます。",
@@ -918,7 +936,21 @@
     "noRules": "このグループにルールはありません",
     "noConditions": "条件なし",
     "sizeNoBound": "制限なし",
-    "sizeBoundInvalid": "-2147483648 から 2147483647 までの整数を入力するか、制限なしの場合は空欄にしてください。"
+    "sizeBoundInvalid": "-2147483648 から 2147483647 までの整数を入力するか、制限なしの場合は空欄にしてください。",
+    "moveUp": "{{name}} を上へ移動",
+    "moveDown": "{{name}} を下へ移動",
+    "configValueOf": "{{key}} の値",
+    "removeConfig": "{{key}} を削除",
+    "toggleCondition": "条件の詳細を表示または非表示",
+    "commaActionsWarning": "ここでカンマ区切りのリストは AND を意味します。列挙したすべてのアクションがその順序で発生している必要があります。複数のアクションのいずれかに一致させるには、OR コネクターの下にアクションごとに条件を追加するか、共通のアクションを出力してください。",
+    "changeTypeTitle": "条件の種類を変更しますか？",
+    "changeTypeDescription": "{{type}} に切り替えると、この条件の設定はその種類の既定値に置き換えられ、入力した値は失われます。",
+    "changeTypeConfirm": "種類を変更",
+    "toggleRule": "ルールの詳細を表示または非表示",
+    "thisRule": "このルール",
+    "noLastStepWarning": "lastStep に actionmatcher がありません。このルールは想定したアクションの後だけでなく、会話のどのステップでも発火する可能性があります。occurrence が lastStep の actionmatcher 条件を追加してください。",
+    "toggleGroup": "グループを表示または非表示",
+    "thisGroup": "このグループ"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "仕様にエンドポイントが見つかりません",
@@ -1356,7 +1388,20 @@
     "compatibleEndpointOverridden": "エンドポイント: {{url}}",
     "modelType": "モデルタイプ",
     "paramName": "パラメーター名",
-    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。"
+    "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。",
+    "toggleTask": "タスクの詳細を表示または非表示",
+    "noActionsWarning": "このタスクにはトリガーとなるアクションがないため、実行されません。振る舞いルールが出力するアクション（例: send_message）を追加してください。",
+    "model": "モデル",
+    "deploymentName": "デプロイメント名",
+    "modelName": "モデル",
+    "modelMissing": "モデルが設定されていません。プロバイダーはすべてのリクエストを拒否します。",
+    "apiKey": "API キー",
+    "apiKeyNotNeeded": "このプロバイダーは通常 API キーを必要としません。",
+    "temperature": "温度",
+    "temperaturePlaceholder": "プロバイダーの既定値",
+    "temperatureInvalid": "数値を入力してください（例: 0.7）。",
+    "paramValueOf": "{{key}} の値",
+    "removeParam": "パラメーター {{key}} を削除"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -1397,7 +1442,14 @@
     "maxLength": "最大長",
     "maxLengthShort": "最大",
     "validationMsgPlaceholder": "検証エラーメッセージ...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "保存されていません。修正するか、フィールドを空にしてください",
+    "itemType": "出力タイプ",
+    "removeItem": "出力項目を削除",
+    "removeQuickReply": "クイック返信を削除",
+    "toggleOutput": "出力の詳細を表示または非表示",
+    "timesOccurredLabel": "発生回数",
+    "removeAlternativeGroup": "代替グループ {{n}} を削除"
   },
   "propertySetterEditor": {
     "setters": "プロパティセッター",
@@ -1421,7 +1473,10 @@
     "visibilityTitle": "この longTerm プロパティを表示できる Agent",
     "editValue": "値を編集",
     "toggleGroup": "プロパティグループを切り替え",
-    "secretFromPathWarning": "シークレットがボールトに保存されるのは値フィールドから来た場合だけです。「取得元パス」から読み取る場合やその他の方法で指定した場合は平文で保存されます。値フィールドに入力するか、別のスコープを選んでください。"
+    "secretFromPathWarning": "シークレットがボールトに保存されるのは値フィールドから来た場合だけです。「取得元パス」から読み取る場合やその他の方法で指定した場合は平文で保存されます。値フィールドに入力するか、別のスコープを選んでください。",
+    "scope": "スコープ",
+    "visibility": "公開範囲",
+    "removeProperty": "プロパティを削除"
   },
   "dictionaryEditor": {
     "language": "言語",
@@ -5244,5 +5299,11 @@
     "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
     "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
     "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
+  },
+  "actionTags": {
+    "remove": "{{action}} を削除",
+    "none": "アクションなし",
+    "inputLabel": "新しいアクション",
+    "add": "アクションを追加"
   }
 }

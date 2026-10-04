@@ -462,20 +462,115 @@ describe("AgentWizardPage", () => {
     expect(screen.getByText("Available Tools")).toBeInTheDocument();
   });
 
-  it("shows deploy toggle and environment selector", async () => {
+  it("does not hide a second deploy switch on the Features step", async () => {
+    // Deploying is decided by the Create buttons on the Review step; a separate
+    // Auto-Deploy toggle on an earlier step could disagree with them.
     const user = userEvent.setup();
     await navigateToFeaturesStep(user);
-    expect(screen.getByTestId("wizard-toggle-deploy")).toBeInTheDocument();
-    // Deploy is enabled by default → env selector should be visible
-    expect(screen.getByTestId("wizard-environment")).toBeInTheDocument();
-    expect(screen.getByTestId("wizard-environment")).toHaveValue("production");
+    expect(screen.queryByTestId("wizard-toggle-deploy")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wizard-environment")).not.toBeInTheDocument();
   });
 
-  it("changes environment to test", async () => {
+  it("defaults the deploy target to test, not production", async () => {
     const user = userEvent.setup();
     await navigateToFeaturesStep(user);
-    await user.selectOptions(screen.getByTestId("wizard-environment"), "test");
+    await user.click(screen.getByTestId("wizard-next"));
     expect(screen.getByTestId("wizard-environment")).toHaveValue("test");
+    expect(screen.getByTestId("wizard-create-deploy")).toHaveTextContent(/test/i);
+  });
+
+  it("names the production target on the button once it is chosen", async () => {
+    const user = userEvent.setup();
+    await navigateToFeaturesStep(user);
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.selectOptions(screen.getByTestId("wizard-environment"), "production");
+    expect(screen.getByTestId("wizard-create-deploy")).toHaveTextContent(/production/i);
+    expect(screen.getByTestId("wizard-deploy-note")).toHaveTextContent(/production/i);
+  });
+
+  it("sends deploy=true with the chosen environment from Create & deploy, and deploy=false from Create only", async () => {
+    const bodies: { deploy?: boolean; environment?: string }[] = [];
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        bodies.push((await request.json()) as { deploy?: boolean; environment?: string });
+        return HttpResponse.json({ agentId: "a", agentName: "My Agent", provider: "anthropic", model: "m", deployed: false, deploymentStatus: null });
+      }),
+    );
+    const user = userEvent.setup();
+    await navigateToFeaturesStep(user);
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-deploy"));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ deploy: true, environment: "test" });
+  });
+
+  it("sends deploy=false from Create without deploying", async () => {
+    const bodies: { deploy?: boolean }[] = [];
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        bodies.push((await request.json()) as { deploy?: boolean });
+        return HttpResponse.json({ agentId: "a", agentName: "My Agent", provider: "anthropic", model: "m", deployed: false, deploymentStatus: null });
+      }),
+    );
+    const user = userEvent.setup();
+    await navigateToFeaturesStep(user);
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-only"));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]!.deploy).toBe(false);
+  });
+
+  it("review lists the credential without ever showing a pasted key", async () => {
+    const user = userEvent.setup();
+    await navigateToFeaturesStep(user); // typed sk-key into the picker
+    await user.click(screen.getByTestId("wizard-next"));
+    const review = screen.getByTestId("wizard-review");
+    expect(within(review).getByText("API key")).toBeInTheDocument();
+    expect(within(review).getByText(/stored in the vault on creation/)).toBeInTheDocument();
+    expect(review).not.toHaveTextContent("sk-key");
+  });
+
+  it("review shows a vault reference as such", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, { initialRoute: "/manage/agents/wizard" });
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "A");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "B");
+    await user.click(screen.getByTestId("wizard-next"));
+    fireEvent.change(screen.getByTestId("wizard-apikey-input"), { target: { value: "${vault:my-key}" } });
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    expect(screen.getByTestId("wizard-review")).toHaveTextContent(/Vault reference my-key/);
+  });
+
+  it("step buttons have an accessible name and the current one is marked", () => {
+    renderWithProviders(<AgentWizardPage />, { initialRoute: "/manage/agents/wizard" });
+    const current = screen.getByRole("button", { name: /Step 1 of 5: Type/ });
+    expect(current).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("button", { name: /Step 2 of 5: Identity/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("prefills the model with the provider default so Next is not blocked on a blank", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, { initialRoute: "/manage/agents/wizard" });
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "A");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "B");
+    await user.click(screen.getByTestId("wizard-next"));
+    expect(screen.getByTestId("wizard-model")).toHaveValue("claude-sonnet-5-5");
+    // The key field is reachable by its label, not just by its placeholder.
+    expect(screen.getByLabelText(/API Key/)).toBe(screen.getByTestId("wizard-apikey-input"));
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    expect(screen.getByTestId("wizard-model")).toHaveValue("gpt-5.4");
+  });
+
+  it("ties the API key and environment labels to their controls", async () => {
+    const user = userEvent.setup();
+    await navigateToFeaturesStep(user);
+    await user.click(screen.getByTestId("wizard-next"));
+    expect(screen.getByLabelText("Deploy target")).toBe(screen.getByTestId("wizard-environment"));
   });
 
   // ── API spec paste mode ───────────────────────────────────────────
@@ -528,6 +623,7 @@ describe("AgentWizardPage", () => {
     await user.type(screen.getByTestId("wizard-agent-name"), "Review Agent");
     await user.type(screen.getByTestId("wizard-system-prompt"), "Be smart");
     await user.click(screen.getByTestId("wizard-next"));
+    await user.clear(screen.getByTestId("wizard-model"));
     await user.type(screen.getByTestId("wizard-model"), "gpt-5");
     await user.type(screen.getByTestId("wizard-apikey-input"), "sk-key");
     await user.click(screen.getByTestId("wizard-next"));

@@ -481,7 +481,7 @@
     "backToAgents": "العودة إلى Agents",
     "next": "التالي",
     "back": "رجوع",
-    "createOnly": "إنشاء فقط",
+    "createOnly": "إنشاء دون نشر",
     "createAndDeploy": "إنشاء ونشر",
     "typeTitle": "ما نوع Agent؟",
     "typeDesc": "اختر نوع Agent الذي تريد إنشاءه",
@@ -571,7 +571,25 @@
     "specUrlScheme": "يتم دعم عناوين http:// و https:// فقط",
     "lastToolHint": "يجب أن تبقى أداة واحدة على الأقل محددة. أوقف تشغيل الأدوات المدمجة لتعطيلها جميعًا.",
     "hfToken": "رمز Hugging Face",
-    "hfTokenHint": "مطلوب فقط للمستودعات المقيّدة أو الخاصة. يُخزَّن في الخزنة مثل مفتاح API."
+    "hfTokenHint": "مطلوب فقط للمستودعات المقيّدة أو الخاصة. يُخزَّن في الخزنة مثل مفتاح API.",
+    "stepLabel": "الخطوة {{n}} من {{total}}: {{name}}",
+    "createAndDeployProduction": "إنشاء ونشر في الإنتاج",
+    "createAndDeployTest": "إنشاء ونشر في الاختبار",
+    "reviewKeyNotNeeded": "غير مطلوب لهذا المزوّد",
+    "reviewKeyNone": "لا شيء",
+    "reviewKeyVault": "مرجع الخزنة {{ref}}",
+    "reviewKeyEntered": "أُدخل هنا؛ يُخزَّن في الخزنة عند الإنشاء",
+    "reviewApiKey": "مفتاح API",
+    "reviewBaseUrl": "عنوان URL الأساسي",
+    "deployTarget": "هدف النشر",
+    "deployNoteProduction": "يؤدي «إنشاء ونشر» إلى تشغيل الوكيل في الإنتاج فورًا.",
+    "deployNoteTest": "يبدأ «إنشاء ونشر» الوكيل في بيئة الاختبار؛ انقله إلى الإنتاج عندما تكون راضيًا عنه.",
+    "step_type": "النوع",
+    "step_info": "الهوية",
+    "step_llm": "النموذج",
+    "step_apispec": "مواصفات API",
+    "step_features": "الميزات",
+    "step_review": "المراجعة"
   },
   "packages": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة مسار العمل وجميع بياناته نهائياً.",
@@ -974,7 +992,21 @@
     "noRules": "لا توجد قواعد في هذه المجموعة",
     "noConditions": "لا توجد شروط",
     "sizeNoBound": "بلا حد",
-    "sizeBoundInvalid": "يجب أن يكون عددًا صحيحًا بين -2147483648 و2147483647، أو فارغًا لعدم وجود حد."
+    "sizeBoundInvalid": "يجب أن يكون عددًا صحيحًا بين -2147483648 و2147483647، أو فارغًا لعدم وجود حد.",
+    "moveUp": "نقل {{name}} للأعلى",
+    "moveDown": "نقل {{name}} للأسفل",
+    "configValueOf": "قيمة {{key}}",
+    "removeConfig": "إزالة {{key}}",
+    "toggleCondition": "إظهار تفاصيل الشرط أو إخفاؤها",
+    "commaActionsWarning": "تعني القائمة المفصولة بفواصل هنا «و»: يجب أن تكون كل الإجراءات المذكورة قد حدثت، بهذا الترتيب. لمطابقة أي إجراء من عدة إجراءات، أضف شرطًا لكل إجراء ضمن موصّل «أو»، أو أصدر إجراءً مشتركًا.",
+    "changeTypeTitle": "تغيير نوع الشرط؟",
+    "changeTypeDescription": "سيؤدي التبديل إلى {{type}} إلى استبدال إعدادات هذا الشرط بالقيم الافتراضية لذلك النوع. ستفقد القيم التي أدخلتها.",
+    "changeTypeConfirm": "تغيير النوع",
+    "toggleRule": "إظهار تفاصيل القاعدة أو إخفاؤها",
+    "thisRule": "هذه القاعدة",
+    "noLastStepWarning": "لا يوجد actionmatcher على lastStep: قد تُنفَّذ هذه القاعدة في أي خطوة من المحادثة، وليس فقط بعد الإجراء المتوقع. أضف شرط actionmatcher مع occurrence بقيمة lastStep.",
+    "toggleGroup": "إظهار المجموعة أو إخفاؤها",
+    "thisGroup": "هذه المجموعة"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "لم يتم العثور على نقاط نهاية في المواصفة",
@@ -1412,7 +1444,20 @@
     "compatibleEndpointOverridden": "نقطة النهاية: {{url}}",
     "modelType": "نوع النموذج",
     "paramName": "اسم المعامل",
-    "lastToolHint": "يجب أن تبقى أداة واحدة على الأقل محددة. ألغِ تحديد «تمكين الأدوات المدمجة» لتعطيلها جميعًا."
+    "lastToolHint": "يجب أن تبقى أداة واحدة على الأقل محددة. ألغِ تحديد «تمكين الأدوات المدمجة» لتعطيلها جميعًا.",
+    "toggleTask": "إظهار تفاصيل المهمة أو إخفاؤها",
+    "noActionsWarning": "ليس لهذه المهمة إجراء تشغيل، لذلك لن تُنفَّذ أبدًا. أضف الإجراء الذي تُصدره قواعد السلوك لديك، مثل send_message.",
+    "model": "النموذج",
+    "deploymentName": "اسم النشر",
+    "modelName": "النموذج",
+    "modelMissing": "لم يتم تحديد نموذج: سيرفض المزوّد كل الطلبات.",
+    "apiKey": "مفتاح API",
+    "apiKeyNotNeeded": "لا يحتاج هذا المزوّد عادةً إلى مفتاح API.",
+    "temperature": "درجة الحرارة",
+    "temperaturePlaceholder": "الافتراضي للمزوّد",
+    "temperatureInvalid": "أدخل رقمًا، مثل 0.7.",
+    "paramValueOf": "قيمة {{key}}",
+    "removeParam": "إزالة المعامل {{key}}"
   },
   "outputEditor": {
     "labelPlaceholder": "تسمية الرابط...",
@@ -1453,7 +1498,14 @@
     "maxLength": "الحد الأقصى للطول",
     "maxLengthShort": "الأقصى",
     "validationMsgPlaceholder": "رسالة خطأ التحقق...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "لم يُحفظ؛ صحّحه أو امسح الحقل",
+    "itemType": "نوع المخرج",
+    "removeItem": "إزالة عنصر المخرج",
+    "removeQuickReply": "إزالة الرد السريع",
+    "toggleOutput": "إظهار تفاصيل المخرج أو إخفاؤها",
+    "timesOccurredLabel": "عدد مرات الحدوث",
+    "removeAlternativeGroup": "إزالة مجموعة البدائل {{n}}"
   },
   "propertySetterEditor": {
     "setters": "معيني الخصائص",
@@ -1477,7 +1529,10 @@
     "visibilityTitle": "الوكلاء الذين يمكنهم رؤية خاصية longTerm هذه",
     "editValue": "تعديل القيمة",
     "toggleGroup": "تبديل مجموعة الخصائص",
-    "secretFromPathWarning": "لا يُحفَظ السر في الخزنة إلا إذا جاء من حقل القيمة. إذا قُرئ من «من المسار» أو أُعطي بأي طريقة أخرى فإنه يُخزَّن كنص صريح — أدخله في حقل القيمة أو اختر نطاقًا آخر."
+    "secretFromPathWarning": "لا يُحفَظ السر في الخزنة إلا إذا جاء من حقل القيمة. إذا قُرئ من «من المسار» أو أُعطي بأي طريقة أخرى فإنه يُخزَّن كنص صريح — أدخله في حقل القيمة أو اختر نطاقًا آخر.",
+    "scope": "النطاق",
+    "visibility": "الرؤية",
+    "removeProperty": "إزالة الخاصية"
   },
   "dictionaryEditor": {
     "language": "اللغة",
@@ -5480,5 +5535,11 @@
     "impactReasonLegacy": "أقدم من تتبّع الإصدارات",
     "impactReasonBreaking": "تغيير غير متوافق",
     "switchNotice": "انتقل الوكيل من v{{from}} إلى v{{to}}"
+  },
+  "actionTags": {
+    "remove": "إزالة {{action}}",
+    "none": "لا توجد إجراءات",
+    "inputLabel": "إجراء جديد",
+    "add": "إضافة إجراء"
   }
 }

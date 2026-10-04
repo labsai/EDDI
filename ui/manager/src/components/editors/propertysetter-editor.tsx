@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { ActionTags } from "./action-tags";
 import {
   ChevronDown,
   ChevronRight,
@@ -68,52 +69,6 @@ const VISIBILITIES = ["self", "group", "global"] as const;
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function ActionTags({
-  actions, onChange, readOnly,
-}: {
-  actions: string[]; onChange: (a: string[]) => void; readOnly?: boolean;
-}) {
-  const { t } = useTranslation();
-  const [input, setInput] = useState("");
-  const addAction = () => {
-    const trimmed = input.trim();
-    if (trimmed && !actions.includes(trimmed)) { onChange([...actions, trimmed]); setInput(""); }
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap gap-1.5">
-        {actions.map((a, i) => (
-          <span key={i} className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-            {a}
-            {!readOnly && (
-              <button type="button" onClick={() => onChange(actions.filter((_, j) => j !== i))}
-                className="rounded p-0.5 hover:bg-primary/20 transition-colors" aria-label={`Remove ${a}`}>
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </span>
-        ))}
-        {actions.length === 0 && (
-          <span className="text-xs text-muted-foreground italic">{t("propertySetterEditor.noActions", "No actions")}</span>
-        )}
-      </div>
-      {!readOnly && (
-        <div className="flex gap-1.5">
-          <input type="text" value={input} onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAction(); } }}
-            placeholder={t("propertySetterEditor.actionPlaceholder", "e.g. greet, fallback")}
-            className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-          <button type="button" onClick={addAction}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
-            <Plus className="h-3 w-3" />
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function PropertyRow({
   prop, onChange, onRemove, readOnly,
 }: {
@@ -128,18 +83,19 @@ function PropertyRow({
     <>
       <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card p-2" data-testid="property-row">
         <input type="text" value={prop.name ?? ""} onChange={(e) => onChange({ ...prop, name: e.target.value })}
-          readOnly={readOnly} placeholder={t("propertySetterEditor.propName", "Property name")}
+          readOnly={readOnly} placeholder={t("propertySetterEditor.propName", "Property name")} aria-label={t("propertySetterEditor.propName", "Property name")}
           className="h-7 w-40 rounded border border-input bg-background px-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         <span className="text-xs text-muted-foreground">=</span>
         <div className="flex flex-1 min-w-[120px] items-center gap-1">
           <input type="text" value={value} onChange={(e) => onChange({ ...prop, valueString: e.target.value })}
-            readOnly={readOnly} placeholder={t("propertySetterEditor.propValue", "Value / expression")}
+            readOnly={readOnly} placeholder={t("propertySetterEditor.propValue", "Value / expression")} aria-label={t("propertySetterEditor.propValue", "Value / expression")}
             title={value}
             className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
           {!readOnly && (
             <button type="button" onClick={() => setShowEditor(true)}
               className="shrink-0 rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              title={t("propertySetterEditor.openEditor", "Edit in editor")}>
+              title={t("propertySetterEditor.openEditor", "Edit in editor")}
+              aria-label={t("propertySetterEditor.openEditor", "Edit in editor")}>
               <Maximize2 className="h-3.5 w-3.5" />
             </button>
           )}
@@ -147,6 +103,7 @@ function PropertyRow({
         <select value={prop.scope ?? "conversation"} onChange={(e) => onChange({ ...prop, scope: e.target.value as PropertyInstruction["scope"] })}
           disabled={readOnly}
           className="h-7 rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+          aria-label={t("propertySetterEditor.scope", "Scope")}
           data-testid="scope-select">
           {SCOPES.map((s) => (<option key={s} value={s}>{s}</option>))}
         </select>
@@ -154,13 +111,14 @@ function PropertyRow({
           <select value={prop.visibility ?? "self"} onChange={(e) => onChange({ ...prop, visibility: e.target.value as PropertyInstruction["visibility"] })}
             disabled={readOnly}
             className="h-7 rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            aria-label={t("propertySetterEditor.visibility", "Visibility")}
             data-testid="visibility-select"
             title={t("propertySetterEditor.visibilityTitle", "Which agents can see this longTerm property")}>
             {VISIBILITIES.map((v) => (<option key={v} value={v}>{v}</option>))}
           </select>
         )}
         <input type="text" value={prop.fromObjectPath ?? ""} onChange={(e) => onChange({ ...prop, fromObjectPath: e.target.value })}
-          readOnly={readOnly} placeholder={t("propertySetterEditor.fromPath", "From path")}
+          readOnly={readOnly} placeholder={t("propertySetterEditor.fromPath", "From path")} aria-label={t("propertySetterEditor.fromObjectPath", "fromObjectPath")}
           className="h-7 w-28 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           title={t("propertySetterEditor.fromObjectPath", "fromObjectPath")} />
         <label className="inline-flex items-center gap-1 text-xs text-foreground cursor-pointer">
@@ -171,8 +129,9 @@ function PropertyRow({
         </label>
         {!readOnly && (
           <button type="button" onClick={onRemove}
+            aria-label={t("propertySetterEditor.removeProperty", "Remove property")}
             className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors">
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3 w-3" aria-hidden="true" />
           </button>
         )}
       </div>
@@ -289,10 +248,12 @@ function MonacoValueEditor({
 }
 
 function SetterEditor({
-  setter, onChange, onRemove, readOnly,
+  setter, onChange, onRemove, readOnly, actionSuggestions,
 }: {
   setter: SetOnActions; onChange: (s: SetOnActions) => void;
   onRemove: () => void; readOnly?: boolean;
+  /** Actions other setters in this config already listen for. */
+  actionSuggestions?: readonly string[];
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
@@ -328,7 +289,11 @@ function SetterEditor({
             <h5 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {t("propertySetterEditor.triggerActions", "Trigger Actions")}
             </h5>
-            <ActionTags actions={setter.actions ?? []} onChange={(a) => onChange({ ...setter, actions: a })} readOnly={readOnly} />
+            <ActionTags actions={setter.actions ?? []} onChange={(a) => onChange({ ...setter, actions: a })} readOnly={readOnly}
+              suggestions={actionSuggestions}
+              placeholder={t("propertySetterEditor.actionPlaceholder", "e.g. greet, fallback")}
+              emptyLabel={t("propertySetterEditor.noActions", "No actions")}
+              ariaLabel={t("propertySetterEditor.triggerActions", "Trigger Actions")} />
           </div>
           <div>
             <h5 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -400,6 +365,7 @@ export function PropertySetterEditor({ data, onChange, readOnly }: PropertySette
 
         {(data.setOnActions ?? []).map((setter, si) => (
           <SetterEditor key={si} setter={setter}
+            actionSuggestions={[...new Set((data.setOnActions ?? []).flatMap((s) => s.actions ?? []))]}
             onChange={(updated) => { const s = [...(data.setOnActions ?? [])]; s[si] = updated; onChange({ ...data, setOnActions: s }); }}
             onRemove={() => onChange({ ...data, setOnActions: (data.setOnActions ?? []).filter((_, j) => j !== si) })}
             readOnly={readOnly} />

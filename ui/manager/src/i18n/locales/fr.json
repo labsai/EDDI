@@ -478,7 +478,7 @@
     "backToAgents": "Retour aux Agents",
     "next": "Suivant",
     "back": "Retour",
-    "createOnly": "Créer uniquement",
+    "createOnly": "Créer sans déployer",
     "createAndDeploy": "Créer & Déployer",
     "typeTitle": "Quel type d'agent ?",
     "typeDesc": "Choisissez le type d'agent que vous souhaitez créer",
@@ -568,7 +568,25 @@
     "specUrlScheme": "Seules les URL http:// et https:// sont prises en charge",
     "lastToolHint": "Au moins un outil doit rester sélectionné. Désactivez les outils intégrés pour les désactiver tous.",
     "hfToken": "Jeton Hugging Face",
-    "hfTokenHint": "Nécessaire uniquement pour les dépôts restreints ou privés. Il est stocké dans le coffre comme une clé API."
+    "hfTokenHint": "Nécessaire uniquement pour les dépôts restreints ou privés. Il est stocké dans le coffre comme une clé API.",
+    "stepLabel": "Étape {{n}} sur {{total}} : {{name}}",
+    "createAndDeployProduction": "Créer et déployer en production",
+    "createAndDeployTest": "Créer et déployer en test",
+    "reviewKeyNotNeeded": "Inutile pour ce fournisseur",
+    "reviewKeyNone": "Aucune",
+    "reviewKeyVault": "Référence du coffre {{ref}}",
+    "reviewKeyEntered": "Saisie ici ; stockée dans le coffre à la création",
+    "reviewApiKey": "Clé API",
+    "reviewBaseUrl": "URL de base",
+    "deployTarget": "Cible de déploiement",
+    "deployNoteProduction": "« Créer et déployer » met l'agent en ligne en production immédiatement.",
+    "deployNoteTest": "« Créer et déployer » démarre l'agent dans l'environnement de test ; passez-le en production quand vous en êtes satisfait.",
+    "step_type": "Type",
+    "step_info": "Identité",
+    "step_llm": "Modèle",
+    "step_apispec": "Spécification d'API",
+    "step_features": "Fonctionnalités",
+    "step_review": "Récapitulatif"
   },
   "packages": {
     "confirmDeleteDescription": "Cette action est irréversible. Le workflow et toutes ses données seront définitivement supprimés.",
@@ -932,7 +950,21 @@
     "noRules": "Aucune règle dans ce groupe",
     "noConditions": "Aucune condition",
     "sizeNoBound": "aucune limite",
-    "sizeBoundInvalid": "Doit être un nombre entier entre -2147483648 et 2147483647, ou vide pour aucune limite."
+    "sizeBoundInvalid": "Doit être un nombre entier entre -2147483648 et 2147483647, ou vide pour aucune limite.",
+    "moveUp": "Monter {{name}}",
+    "moveDown": "Descendre {{name}}",
+    "configValueOf": "Valeur de {{key}}",
+    "removeConfig": "Supprimer {{key}}",
+    "toggleCondition": "Afficher ou masquer les détails de la condition",
+    "commaActionsWarning": "Une liste séparée par des virgules signifie ET : toutes les actions listées doivent s'être produites, dans cet ordre. Pour correspondre à l'une de plusieurs actions, ajoutez une condition par action sous un connecteur OU, ou émettez une action commune.",
+    "changeTypeTitle": "Changer le type de condition ?",
+    "changeTypeDescription": "Passer à {{type}} remplace les paramètres de cette condition par les valeurs par défaut de ce type. Les valeurs saisies seront perdues.",
+    "changeTypeConfirm": "Changer le type",
+    "toggleRule": "Afficher ou masquer les détails de la règle",
+    "thisRule": "cette règle",
+    "noLastStepWarning": "Aucun actionmatcher sur lastStep : cette règle peut se déclencher à n'importe quelle étape de la conversation, pas seulement après l'action attendue. Ajoutez une condition actionmatcher avec occurrence lastStep.",
+    "toggleGroup": "Afficher ou masquer le groupe",
+    "thisGroup": "ce groupe"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Aucun endpoint trouvé dans la spécification",
@@ -1370,7 +1402,20 @@
     "compatibleEndpointOverridden": "Point d'accès : {{url}}",
     "modelType": "Type de modèle",
     "paramName": "Nom du paramètre",
-    "lastToolHint": "Au moins un outil doit rester sélectionné. Décochez « Activer les outils intégrés » pour les désactiver tous."
+    "lastToolHint": "Au moins un outil doit rester sélectionné. Décochez « Activer les outils intégrés » pour les désactiver tous.",
+    "toggleTask": "Afficher ou masquer les détails de la tâche",
+    "noActionsWarning": "Cette tâche n'a aucune action déclencheuse et ne s'exécute donc jamais. Ajoutez l'action émise par vos règles de comportement, par exemple send_message.",
+    "model": "Modèle",
+    "deploymentName": "Nom du déploiement",
+    "modelName": "Modèle",
+    "modelMissing": "Aucun modèle défini : le fournisseur rejettera chaque requête.",
+    "apiKey": "Clé API",
+    "apiKeyNotNeeded": "Ce fournisseur n'a généralement pas besoin de clé API.",
+    "temperature": "Température",
+    "temperaturePlaceholder": "Valeur par défaut du fournisseur",
+    "temperatureInvalid": "Saisissez un nombre, par exemple 0.7.",
+    "paramValueOf": "Valeur de {{key}}",
+    "removeParam": "Supprimer le paramètre {{key}}"
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -1411,7 +1456,14 @@
     "maxLength": "Longueur max.",
     "maxLengthShort": "max",
     "validationMsgPlaceholder": "Message d'erreur de validation...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "non enregistré ; corrigez-le ou videz le champ",
+    "itemType": "Type de sortie",
+    "removeItem": "Supprimer l'élément de sortie",
+    "removeQuickReply": "Supprimer la réponse rapide",
+    "toggleOutput": "Afficher ou masquer les détails de la sortie",
+    "timesOccurredLabel": "Nombre d'occurrences",
+    "removeAlternativeGroup": "Supprimer le groupe d'alternatives {{n}}"
   },
   "propertySetterEditor": {
     "setters": "Définisseurs de propriétés",
@@ -1435,7 +1487,10 @@
     "visibilityTitle": "Quels agents peuvent voir cette propriété longTerm",
     "editValue": "Modifier la valeur",
     "toggleGroup": "Basculer le groupe de propriétés",
-    "secretFromPathWarning": "Un secret n'est stocké dans le coffre que s'il provient du champ valeur. Lu depuis un « Chemin source » ou fourni autrement, il est enregistré en clair : saisissez-le dans le champ valeur ou choisissez une autre portée."
+    "secretFromPathWarning": "Un secret n'est stocké dans le coffre que s'il provient du champ valeur. Lu depuis un « Chemin source » ou fourni autrement, il est enregistré en clair : saisissez-le dans le champ valeur ou choisissez une autre portée.",
+    "scope": "Portée",
+    "visibility": "Visibilité",
+    "removeProperty": "Supprimer la propriété"
   },
   "dictionaryEditor": {
     "language": "Langue",
@@ -5303,5 +5358,11 @@
     "impactReasonLegacy": "antérieure au suivi de version",
     "impactReasonBreaking": "modification incompatible",
     "switchNotice": "L’agent est passé de v{{from}} à v{{to}}"
+  },
+  "actionTags": {
+    "remove": "Supprimer {{action}}",
+    "none": "Aucune action",
+    "inputLabel": "Nouvelle action",
+    "add": "Ajouter l'action"
   }
 }

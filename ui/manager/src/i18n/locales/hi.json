@@ -477,7 +477,7 @@
     "backToAgents": "Agents पर वापस जाएं",
     "next": "अगला",
     "back": "पीछे",
-    "createOnly": "केवल बनाएं",
+    "createOnly": "बिना डिप्लॉय किए बनाएँ",
     "createAndDeploy": "बनाएं और Deploy करें",
     "typeTitle": "किस प्रकार का Agent?",
     "typeDesc": "बनाने के लिए Agent का प्रकार चुनें",
@@ -567,7 +567,25 @@
     "specUrlScheme": "केवल http:// और https:// URL समर्थित हैं",
     "lastToolHint": "कम से कम एक टूल चयनित रहना चाहिए। सभी को अक्षम करने के लिए अंतर्निहित टूल बंद करें।",
     "hfToken": "Hugging Face टोकन",
-    "hfTokenHint": "केवल प्रतिबंधित या निजी रिपॉज़िटरी के लिए आवश्यक। इसे API कुंजी की तरह वॉल्ट में संग्रहीत किया जाता है।"
+    "hfTokenHint": "केवल प्रतिबंधित या निजी रिपॉज़िटरी के लिए आवश्यक। इसे API कुंजी की तरह वॉल्ट में संग्रहीत किया जाता है।",
+    "stepLabel": "चरण {{n}}/{{total}}: {{name}}",
+    "createAndDeployProduction": "बनाएँ और प्रोडक्शन में डिप्लॉय करें",
+    "createAndDeployTest": "बनाएँ और टेस्ट में डिप्लॉय करें",
+    "reviewKeyNotNeeded": "इस प्रदाता के लिए आवश्यक नहीं",
+    "reviewKeyNone": "कोई नहीं",
+    "reviewKeyVault": "वॉल्ट संदर्भ {{ref}}",
+    "reviewKeyEntered": "यहाँ दर्ज की गई; बनाते समय वॉल्ट में संग्रहीत होगी",
+    "reviewApiKey": "API कुंजी",
+    "reviewBaseUrl": "बेस URL",
+    "deployTarget": "डिप्लॉय का लक्ष्य",
+    "deployNoteProduction": "“बनाएँ और डिप्लॉय करें” एजेंट को तुरंत प्रोडक्शन में लाइव कर देता है।",
+    "deployNoteTest": "“बनाएँ और डिप्लॉय करें” एजेंट को टेस्ट एनवायरनमेंट में शुरू करता है; संतुष्ट होने पर उसे प्रोडक्शन में प्रमोट करें।",
+    "step_type": "प्रकार",
+    "step_info": "पहचान",
+    "step_llm": "मॉडल",
+    "step_apispec": "API विनिर्देश",
+    "step_features": "सुविधाएँ",
+    "step_review": "समीक्षा"
   },
   "packages": {
     "confirmDeleteDescription": "इस क्रिया को पूर्ववत नहीं किया जा सकता। Workflow और इसका सारा डेटा स्थायी रूप से हटा दिया जाएगा।",
@@ -918,7 +936,21 @@
     "noRules": "इस समूह में कोई नियम नहीं",
     "noConditions": "कोई शर्तें नहीं",
     "sizeNoBound": "कोई सीमा नहीं",
-    "sizeBoundInvalid": "-2147483648 से 2147483647 के बीच पूर्ण संख्या होनी चाहिए, या कोई सीमा न हो तो खाली छोड़ें।"
+    "sizeBoundInvalid": "-2147483648 से 2147483647 के बीच पूर्ण संख्या होनी चाहिए, या कोई सीमा न हो तो खाली छोड़ें।",
+    "moveUp": "{{name}} को ऊपर ले जाएँ",
+    "moveDown": "{{name}} को नीचे ले जाएँ",
+    "configValueOf": "{{key}} का मान",
+    "removeConfig": "{{key}} हटाएँ",
+    "toggleCondition": "शर्त का विवरण दिखाएँ या छिपाएँ",
+    "commaActionsWarning": "यहाँ अल्पविराम से अलग की गई सूची का अर्थ AND है: सूचीबद्ध सभी क्रियाएँ उसी क्रम में घटित हुई होनी चाहिए। कई क्रियाओं में से किसी एक से मेल करने के लिए, OR कनेक्टर के अंतर्गत प्रत्येक क्रिया के लिए एक शर्त जोड़ें, या एक साझा क्रिया उत्सर्जित करें।",
+    "changeTypeTitle": "शर्त का प्रकार बदलें?",
+    "changeTypeDescription": "{{type}} पर स्विच करने से इस शर्त की सेटिंग उस प्रकार के डिफ़ॉल्ट से बदल जाएँगी। आपके द्वारा दर्ज किए गए मान खो जाएँगे।",
+    "changeTypeConfirm": "प्रकार बदलें",
+    "toggleRule": "नियम का विवरण दिखाएँ या छिपाएँ",
+    "thisRule": "यह नियम",
+    "noLastStepWarning": "lastStep पर कोई actionmatcher नहीं है: यह नियम बातचीत के किसी भी चरण पर चल सकता है, केवल अपेक्षित क्रिया के बाद ही नहीं। occurrence के रूप में lastStep वाली actionmatcher शर्त जोड़ें।",
+    "toggleGroup": "समूह दिखाएँ या छिपाएँ",
+    "thisGroup": "यह समूह"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "स्पेक में कोई एंडपॉइंट नहीं मिला",
@@ -1356,7 +1388,20 @@
     "compatibleEndpointOverridden": "एंडपॉइंट: {{url}}",
     "modelType": "मॉडल प्रकार",
     "paramName": "पैरामीटर का नाम",
-    "lastToolHint": "कम से कम एक टूल चयनित रहना चाहिए। सभी को अक्षम करने के लिए \"अंतर्निहित टूल सक्षम करें\" को अनचेक करें।"
+    "lastToolHint": "कम से कम एक टूल चयनित रहना चाहिए। सभी को अक्षम करने के लिए \"अंतर्निहित टूल सक्षम करें\" को अनचेक करें।",
+    "toggleTask": "कार्य का विवरण दिखाएँ या छिपाएँ",
+    "noActionsWarning": "इस कार्य में कोई ट्रिगर क्रिया नहीं है, इसलिए यह कभी नहीं चलेगा। अपने व्यवहार नियमों द्वारा उत्सर्जित क्रिया जोड़ें, जैसे send_message।",
+    "model": "मॉडल",
+    "deploymentName": "डिप्लॉयमेंट का नाम",
+    "modelName": "मॉडल",
+    "modelMissing": "कोई मॉडल सेट नहीं है: प्रदाता हर अनुरोध अस्वीकार कर देगा।",
+    "apiKey": "API कुंजी",
+    "apiKeyNotNeeded": "इस प्रदाता को आमतौर पर API कुंजी की आवश्यकता नहीं होती।",
+    "temperature": "तापमान",
+    "temperaturePlaceholder": "प्रदाता का डिफ़ॉल्ट",
+    "temperatureInvalid": "कोई संख्या दर्ज करें, जैसे 0.7।",
+    "paramValueOf": "{{key}} का मान",
+    "removeParam": "पैरामीटर {{key}} हटाएँ"
   },
   "outputEditor": {
     "labelPlaceholder": "लिंक लेबल...",
@@ -1397,7 +1442,14 @@
     "maxLength": "अधिकतम लंबाई",
     "maxLengthShort": "अधिक",
     "validationMsgPlaceholder": "सत्यापन त्रुटि संदेश...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "सहेजा नहीं गया; इसे ठीक करें या फ़ील्ड साफ़ करें",
+    "itemType": "आउटपुट प्रकार",
+    "removeItem": "आउटपुट आइटम हटाएँ",
+    "removeQuickReply": "त्वरित उत्तर हटाएँ",
+    "toggleOutput": "आउटपुट का विवरण दिखाएँ या छिपाएँ",
+    "timesOccurredLabel": "घटित होने की संख्या",
+    "removeAlternativeGroup": "विकल्प समूह {{n}} हटाएँ"
   },
   "propertySetterEditor": {
     "setters": "संपत्ति सेटिंग",
@@ -1421,7 +1473,10 @@
     "visibilityTitle": "कौन से Agent इस longTerm प्रॉपर्टी को देख सकते हैं",
     "editValue": "मान संपादित करें",
     "toggleGroup": "प्रॉपर्टी समूह टॉगल करें",
-    "secretFromPathWarning": "सीक्रेट केवल तभी वॉल्ट में रखा जाता है जब वह मान फ़ील्ड से आता है। \"पाथ से\" पढ़े जाने या किसी अन्य तरीके से दिए जाने पर वह सादे टेक्स्ट में संग्रहीत होता है — उसे मान फ़ील्ड में दर्ज करें या कोई अन्य स्कोप चुनें।"
+    "secretFromPathWarning": "सीक्रेट केवल तभी वॉल्ट में रखा जाता है जब वह मान फ़ील्ड से आता है। \"पाथ से\" पढ़े जाने या किसी अन्य तरीके से दिए जाने पर वह सादे टेक्स्ट में संग्रहीत होता है — उसे मान फ़ील्ड में दर्ज करें या कोई अन्य स्कोप चुनें।",
+    "scope": "स्कोप",
+    "visibility": "दृश्यता",
+    "removeProperty": "प्रॉपर्टी हटाएँ"
   },
   "dictionaryEditor": {
     "language": "भाषा",
@@ -5244,5 +5299,11 @@
     "impactReasonLegacy": "संस्करण-अनुसरण से पहले का",
     "impactReasonBreaking": "असंगत बदलाव",
     "switchNotice": "एजेंट v{{from}} से v{{to}} पर चला गया"
+  },
+  "actionTags": {
+    "remove": "{{action}} हटाएँ",
+    "none": "कोई क्रिया नहीं",
+    "inputLabel": "नई क्रिया",
+    "add": "क्रिया जोड़ें"
   }
 }
