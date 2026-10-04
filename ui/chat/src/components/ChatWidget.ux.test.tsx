@@ -83,7 +83,10 @@ function install(b: Partial<Backend> = {}): Backend {
     if (url.includes("/undo") || url.includes("/redo")) {
       return backend.history ? backend.history() : new Response(null, { status: 200 });
     }
-    if (method === "POST" && (url.includes("/stream") || /\/agents\/[^/?]+\?/.test(url))) {
+    if (
+      method === "POST" &&
+      (url.includes("/stream") || url.includes("/agents/managed/") || /\/agents\/[^/?]+\?/.test(url))
+    ) {
       if (backend.send) return backend.send(url, init);
     }
     return new Response(JSON.stringify(backend.snapshot ?? READY_WITH_GREETING), {
@@ -253,6 +256,40 @@ describe("Stop", () => {
     await act(async () => reply());
 
     expect(screen.queryByText("LATE REPLY")).toBeNull();
+  });
+});
+
+describe("Stop on the managed route", () => {
+  it("aborts the POST and ignores a late reply", async () => {
+    let release: (r: Response) => void = () => {};
+    const backend = install({
+      snapshot: { ...READY_WITH_GREETING, conversationId: "m-1", agentId: "agent-1" },
+      // Ignores the abort on purpose: the reply arrives late and must not show.
+      send: () => new Promise<Response>((resolve) => (release = resolve)),
+    });
+    renderAt("/chat/managed/support/user-1");
+    await screen.findByText("Hello there");
+
+    await typeAndSend("managed question");
+    fireEvent.click(await screen.findByTestId("chat-stop"));
+
+    const post = backend.calls.find((c) => c.method === "POST");
+    expect(post?.signal?.aborted).toBe(true);
+
+    await act(async () => {
+      release(
+        new Response(
+          JSON.stringify({
+            conversationId: "m-1",
+            conversationState: "READY",
+            conversationOutputs: [{ output: [{ type: "text", text: "LATE MANAGED REPLY" }] }],
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+    expect(screen.queryByText("LATE MANAGED REPLY")).toBeNull();
+    expect(screen.queryByTestId("message-notice")).toBeNull();
   });
 });
 
