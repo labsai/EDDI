@@ -31,6 +31,8 @@ import java.util.Map;
 import java.util.Optional;
 import io.nats.client.api.StreamInfo;
 import io.nats.client.api.StreamInfoOptions;
+import io.nats.client.api.StreamState;
+import io.nats.client.api.Subject;
 
 /**
  * Dead letters on the JetStream stream
@@ -349,8 +351,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         try {
             StreamInfo info = connections.jetStreamManagement().getStreamInfo(stream,
                     StreamInfoOptions.filterSubjects(subjects.deadLetterTurnWildcard()));
-            Map<String, Long> bySubject = info.getStreamState().getSubjectMap();
-            return bySubject == null ? 0 : bySubject.values().stream().mapToLong(Long::longValue).sum();
+            return sumSubjects(info.getStreamState());
         } catch (JetStreamApiException e) {
             if (streamMissing(e)) {
                 return 0;
@@ -359,6 +360,20 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         } catch (IOException e) {
             throw new ClusterUnavailableException("dead-letter count failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The messages on every subject the stream info listed. The server sends the
+     * subjects in pages (100,000 per page on NATS 2.11); jnats requests the later
+     * pages but appends them only to {@code getSubjects()}, while
+     * {@code getSubjectMap()} keeps the first page. Summing the map undercounted
+     * once more than one page of conversations had dead letters.
+     */
+    static long sumSubjects(StreamState state) {
+        if (state == null || state.getSubjects() == null) {
+            return 0;
+        }
+        return state.getSubjects().stream().mapToLong(Subject::getCount).sum();
     }
 
     /**

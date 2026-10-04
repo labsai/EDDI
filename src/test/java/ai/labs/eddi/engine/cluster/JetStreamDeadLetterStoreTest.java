@@ -13,6 +13,11 @@ import io.nats.client.PublishOptions;
 import io.nats.client.api.ApiResponse;
 import io.nats.client.api.MessageInfo;
 import io.nats.client.api.PublishAck;
+import java.util.ArrayList;
+import io.nats.client.api.Subject;
+import io.nats.client.api.StreamState;
+import io.nats.client.api.StreamInfoOptions;
+import io.nats.client.api.StreamInfo;
 import io.nats.client.support.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -89,6 +94,21 @@ class JetStreamDeadLetterStoreTest {
         when(jsm.getMessage("EDDI_DEAD_LETTERS", 9L)).thenReturn(entry);
         assertFalse(store(jsm).delete("9"));
         verify(jsm, never()).deleteMessage(anyString(), anyLong());
+    }
+
+    @Test
+    void theTurnCountIncludesSubjectsFromLaterPages() throws Exception {
+        // jnats appends the subjects of later stream-info pages to getSubjects() only;
+        // getSubjectMap() keeps the first page.
+        StreamState state = mock(StreamState.class);
+        when(state.getSubjects())
+                .thenReturn(new ArrayList<>(List.of(new Subject("eddi.EDDI.dlq.turn.a", 2), new Subject("eddi.EDDI.dlq.turn.b", 3))));
+        when(state.getSubjectMap()).thenReturn(Map.of("eddi.EDDI.dlq.turn.a", 2L));
+        StreamInfo info = mock(StreamInfo.class);
+        when(info.getStreamState()).thenReturn(state);
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        when(jsm.getStreamInfo(anyString(), any(StreamInfoOptions.class))).thenReturn(info);
+        assertEquals(5, store(jsm).countTurns());
     }
 
     @Test

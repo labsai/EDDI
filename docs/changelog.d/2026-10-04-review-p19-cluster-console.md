@@ -80,6 +80,11 @@
     last entry, which under concurrent failures could be another one.
   - `lease-lost` is listed among the reasons in `clustering.md`, the Platform Operator prompt
     (revision 4) and the feature fragment; two `ClusterCoordinatorIT` tests got unique `@Order`s.
+- **The shared dead-letter count no longer stops at 100,000 conversations** (PR #970 review,
+  round 2). NATS sends a stream's subjects in pages of 100,000; jnats 2.26.3 requests the later
+  pages but appends them only to `StreamState.getSubjects()`, while `getSubjectMap()` keeps the
+  first page. `countTurns` summed the map; it sums the list now. Checked against NATS 2.11 with
+  100,050 subjects: the list holds 100,050, the map 100,000.
 - **The audit trail shows what a bulk replay or discard did** ("1 of 2 done", a warning when any
   failed) instead of a blank outcome: those entries record counts, not one outcome.
 - **Fencing tokens and lease revisions are JSON strings** in the console API, exact beyond 2^53.
