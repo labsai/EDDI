@@ -14,7 +14,9 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -88,13 +90,21 @@ public class ClusterControlHandlers implements ClusterStartable {
     private Map<String, Object> gdprStop(Map<String, Object> request) {
         String userIdHash = String.valueOf(request.get("userIdHash"));
         int stopped = 0;
+        List<String> failed = new ArrayList<>();
         for (UserErasureParticipant participant : erasureParticipants) {
             try {
                 stopped += participant.stopInFlightWorkByHash(userIdHash);
             } catch (RuntimeException e) {
                 LOGGER.warnf("GDPR stop step %s failed for a remote erasure: %s", participant.erasureStepName(), e.getMessage());
+                failed.add(participant.erasureStepName());
             }
         }
-        return Map.of("stopped", stopped);
+        Map<String, Object> reply = new LinkedHashMap<>();
+        reply.put("stopped", stopped);
+        if (!failed.isEmpty()) {
+            // Reported, so the erasing node records its cluster stop as incomplete.
+            reply.put("error", "stop step(s) failed: " + String.join(", ", failed));
+        }
+        return reply;
     }
 }

@@ -582,13 +582,20 @@ public class ConversationService implements IConversationService, UserErasurePar
         if (deploymentManagement == null || !deploymentManagement.isResolvable() || leaseManager == null || !leaseManager.isClustered()) {
             return null;
         }
-        return deploymentManagement.get().awaitClusterDeployment(environment, agentId, () -> {
-            try {
-                return lookup.find();
-            } catch (Exception e) {
-                return null;
-            }
-        }, CLUSTER_DEPLOY_WAIT);
+        try {
+            return deploymentManagement.get().awaitClusterDeployment(environment, agentId, () -> {
+                try {
+                    return lookup.find();
+                } catch (Exception e) {
+                    return null;
+                }
+            }, CLUSTER_DEPLOY_WAIT);
+        } catch (RuntimeException e) {
+            // The deployment store could not be read (or the deploy failed): the caller's
+            // own not-ready handling answers, as it does when nothing is deployed.
+            LOGGER.warnf("On-demand deployment of agent %s failed: %s", sanitize(agentId), e.getMessage());
+            return null;
+        }
     }
 
     /**

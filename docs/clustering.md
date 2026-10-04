@@ -134,12 +134,23 @@ that set `degraded.turns=reject`. Security state always fails closed.
 
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `NONCES`,
-`RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_*`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`;
-streams: `EVENTS` and `DEAD_LETTERS`. Subjects live
-under `eddi.<prefix>.>`, so a NATS user restricted to `eddi.>`, `$JS.API.>`,
-`$JS.ACK.>`, `$JS.FC.>`, `$KV.<prefix>_*.>`, `$O.<prefix>_ARCHIVES.>` (the exported-archive
-object store; without it archives stay on the node that made them) and `_INBOX.>` is
-sufficient — the Helm chart's in-chart NATS grants exactly that.
+`RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_TASKS`, `A2A_CONTEXTS`, `A2A_STATES`,
+`TOOL_PAGES`, `DEDUP` and `CHANNEL`; object store: `ARCHIVES`; streams: `EVENTS` and
+`DEAD_LETTERS`. EDDI's own subjects live under `eddi.<prefix>.>`.
+
+A NATS user restricted to EDDI needs:
+
+- **publish:** `eddi.>`, `$JS.API.>`, `$KV.*.>`, `$O.*.>`, `$JS.ACK.>`, `$JS.FC.>` and `_INBOX.>`;
+- **subscribe:** `eddi.>`, `$JS.API.>`, `$KV.*.>` and `_INBOX.>`.
+
+The Helm chart's in-chart NATS grants exactly this set. Without `$O` access, exported archives stay on the node that made them.
+
+A NATS wildcard matches whole tokens only, and a KV subject is
+`$KV.<bucket>.<key>` with the bucket as one token. So `$KV.EDDI_>` and
+`$KV.EDDI_*.>` match no bucket at all: every KV write is refused (verified on
+NATS 2.11). To narrow an account shared with other applications, replace
+`$KV.*.>` with one `$KV.<prefix>_<BUCKET>.>` per bucket above, and `$O.*.>` with
+`$O.<prefix>_ARCHIVES.>`.
 
 **NATS is inside the trust boundary.** Every node uses one NATS identity, and nothing on
 the wire is signed: whoever holds those credentials can publish a `deployment.changed`

@@ -441,9 +441,15 @@ public class GdprComplianceService {
         if (clusterRpc != null && clusterRpc.isClustered()) {
             try {
                 var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, Map.of("userIdHash", KvKeys.sha256(userId)));
-                for (var reply : replies.values()) {
-                    if (reply.get("stopped") instanceof Number stopped) {
+                for (var reply : replies.entrySet()) {
+                    if (reply.getValue().get("stopped") instanceof Number stopped) {
                         inFlightWorkStopped += stopped.intValue();
+                    }
+                    if (reply.getValue().get("error") != null) {
+                        // A node could not stop all of the user's work: the cascade still runs,
+                        // but reports the step incomplete rather than a clean erasure.
+                        recordFailure(failedSteps, "clusterStop",
+                                new IllegalStateException("node " + reply.getKey() + ": " + reply.getValue().get("error")), pseudonym);
                     }
                 }
                 LOGGER.infof("[GDPR] Cluster stop answered by node(s) %s [%s]", replies.keySet(), pseudonym);

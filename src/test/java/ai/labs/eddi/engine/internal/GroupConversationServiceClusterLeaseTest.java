@@ -17,34 +17,49 @@ import ai.labs.eddi.engine.cluster.NodeIdentity;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.cluster.lease.LeaseInfo;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Function;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -162,5 +177,69 @@ class GroupConversationServiceClusterLeaseTest {
 
         assertTrue(service.cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
         verify(conversationStore, never()).read(anyString());
+    }
+    @SuppressWarnings("unchecked")
+    private void running(String id) throws Exception {
+        Field field = GroupConversationService.class.getDeclaredField("discussionControls");
+        field.setAccessible(true);
+        ((Map<String, DiscussionControlToken>) field.get(service)).put(id, new DiscussionControlToken());
+    }
+
+    @Test
+    @DisplayName("a remote erasure stop that cannot read a running discussion reports it; one that finished meanwhile is not a failure")
+    void remoteStopFailureIsReported() throws Exception {
+        running("gc-unreadable");
+        running("gc-finished");
+        when(conversationStore.read("gc-unreadable")).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        when(conversationStore.read("gc-finished")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        assertThrows(IllegalStateException.class, () -> service.stopInFlightWorkByHash("hash"),
+                "the erasing node must learn that this node could not stop the user's work");
+
+        doThrow(new IResourceStore.ResourceNotFoundException("gone")).when(conversationStore).read("gc-unreadable");
+        assertEquals(0, service.stopInFlightWorkByHash("hash"), "discussions that just finished are not a failure");
+    }
+
+    @Test
+    @DisplayName("the gdpr-stop reply names a stop step that failed, so the erasing node records the cluster stop incomplete")
+    @SuppressWarnings("unchecked")
+    void gdprStopReplyCarriesTheFailure() {
+        IClusterRpc rpc = mock(IClusterRpc.class);
+        UserErasureParticipant failing = mock(UserErasureParticipant.class);
+        when(failing.erasureStepName()).thenReturn("runningGroupDiscussions");
+        when(failing.stopInFlightWorkByHash("hash")).thenThrow(new IllegalStateException("db down"));
+        UserErasureParticipant fine = mock(UserErasureParticipant.class);
+        when(fine.stopInFlightWorkByHash("hash")).thenReturn(2);
+        Instance<UserErasureParticipant> participants = mock(Instance.class);
+        when(participants.iterator()).thenAnswer(inv -> List.of(failing, fine).iterator());
+        new ClusterControlHandlers(rpc, mock(ConversationService.class), service, participants, mock(IConversationCoordinator.class))
+                .startCluster();
+        ArgumentCaptor<Function<Map<String, Object>, Map<String, Object>>> handler = ArgumentCaptor.forClass(Function.class);
+        verify(rpc).handle(eq(IClusterRpc.GDPR_STOP), handler.capture());
+
+        Map<String, Object> reply = handler.getValue().apply(Map.of("userIdHash", "hash"));
+
+        assertEquals(2, reply.get("stopped"));
+        assertTrue(String.valueOf(reply.get("error")).contains("runningGroupDiscussions"), String.valueOf(reply));
+    }
+
+    @Test
+    @DisplayName("an on-demand deployment that fails answers 'not ready' to the caller, not an exception")
+    @SuppressWarnings("unchecked")
+    void failingOnDemandDeploymentIsNotReady() throws Exception {
+        ConversationService conversations = mock(ConversationService.class, CALLS_REAL_METHODS);
+        IAgentDeploymentManagement management = mock(IAgentDeploymentManagement.class);
+        when(management.awaitClusterDeployment(any(), anyString(), any(), any())).thenThrow(new IllegalStateException("store unreadable"));
+        Instance<IAgentDeploymentManagement> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(management);
+        Field deployments = ConversationService.class.getDeclaredField("deploymentManagement");
+        deployments.setAccessible(true);
+        deployments.set(conversations, instance);
+        Field leases = ConversationService.class.getDeclaredField("leaseManager");
+        leases.setAccessible(true);
+        leases.set(conversations, leaseManager);
+
+        assertNull(assertDoesNotThrow(() -> conversations.awaitClusterDeployment(Environment.production, "agent1", () -> "agent")));
     }
 }
