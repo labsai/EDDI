@@ -4,20 +4,25 @@
  */
 package ai.labs.eddi.engine.cluster;
 
+import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
 import io.nats.client.api.ApiResponse;
 import io.nats.client.api.MessageInfo;
+import io.nats.client.api.PublishAck;
 import io.nats.client.support.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -102,5 +107,26 @@ class JetStreamDeadLetterStoreTest {
     @CsvSource({"10037,true", "10057,true", "10043,true", "10059,true", "10077,false", "10008,false"})
     void classifiesNotFound(int code, boolean expected) throws Exception {
         assertEquals(expected, JetStreamDeadLetterStore.notFound(error(code)));
+    }
+    @Test
+    void theFirstDeadLetterWaitsForTheStreamItCreatedToElectItsLeader() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        when(jsm.getStreamInfo("EDDI_DEAD_LETTERS")).thenThrow(error(10059));
+        NatsConnectionManager connections = mock(NatsConnectionManager.class);
+        when(connections.config()).thenReturn(ClusterConfig.defaults());
+        when(connections.jetStreamManagement()).thenReturn(jsm);
+        when(connections.node()).thenReturn(new NodeIdentity("n1", "b1"));
+        JetStream js = mock(JetStream.class);
+        when(connections.jetStream()).thenReturn(js);
+        PublishAck ack = mock(PublishAck.class);
+        when(ack.getSeqno()).thenReturn(5L);
+        when(js.publish(anyString(), any(byte[].class)))
+                .thenThrow(new IOException("no stream yet"))
+                .thenThrow(new IOException("Error Publishing: 503 No Responders Available For Request"))
+                .thenReturn(ack);
+
+        assertEquals("5", new JetStreamDeadLetterStore(connections).append("conv1", "boom", 1L, Map.of("input", "hi")),
+                "a stream created a moment ago answers once its leader is elected; the dead letter must not fail over");
+        verify(jsm).addStream(any());
     }
 }
