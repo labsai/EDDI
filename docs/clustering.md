@@ -225,9 +225,10 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   `fail_timeout`. The shipped configs set `max_fails=0` on the upstream servers,
   so no node is taken out of rotation. nginx still retries a 503 on the next node
   for an idempotent request (GET). A POST, which is how a turn arrives, is not
-  re-sent by default, so its client gets the 503 with `Retry-After`. Only the
-  demo config adds `non_idempotent`, and that would also re-send a turn after a
-  read timeout. A node that refuses connections is skipped at once. A node that
+  re-sent, so its client gets the 503 with `Retry-After`. Neither shipped config
+  adds `non_idempotent`: `timeout` also covers a read timeout after the turn
+  reached a node, so it would run the turn twice. A node that refuses connections
+  is skipped at once. A node that
   hangs is no longer ejected: each request that lands on it waits out
   `proxy_connect_timeout` (2 s) before it moves on. Do the same, or leave `http_503`
   out of the retry conditions, on any proxy you put in front. Kubernetes
@@ -292,9 +293,11 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   earlier is answered 409 instead (an error event on a stream, whose tokens up to
   then were already sent). Its client is expected to retry, so replay its dead
   letter only if the client did not; otherwise the turn runs twice.
-- A paginated tool response is not bound to its conversation: anyone who
-  knows the random response id can fetch its pages from any node, exactly as on
-  a single node (the tool has no conversation context to check against).
+- A paginated tool response is not bound to its conversation or its caller.
+  Anyone who can talk to an agent that has the page-fetch tool, and who knows
+  another response's random id, can fetch its pages, from any node that holds
+  them. This is the same as on a single node: the tool does not check who the
+  response belongs to.
 - On PostgreSQL, replicas that boot together run their startup one after
   another (an advisory lock around table creation and migrations), so the
   last of N replicas of a first install becomes ready later than the first.
