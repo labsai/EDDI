@@ -74,10 +74,13 @@ principal, not a user: erasing or exporting it is refused with 400.
    running conversation turns are cancelled (they then skip their write-back to
    user memory and their snapshot is discarded) and running group discussions are
    cancelled immediately. Without this, a turn or discussion still running wrote
-   the data back seconds after the erasure reported success. Work running on
-   another replica is not reachable from here; it is stopped by the stores
-   refusing to recreate a deleted conversation or group discussion, and step 12
-   removes any memory it managed to write in the meantime. From this point the
+   the data back seconds after the erasure reported success. In cluster mode
+   (`eddi.messaging.type=nats`, see [Clustering](clustering.md)) the stop is also
+   sent to every other replica — keyed by a hash of the user id, never the id
+   itself — and the user's dead letters are removed. Work a replica cannot be
+   reached for (NATS down) is stopped by the stores refusing to recreate a
+   deleted conversation or group discussion, and step 12 removes any memory it
+   managed to write in the meantime. From this point the
    node's audit ledger also writes the user's pseudonym instead of their id for an
    hour (the keyed pseudonym v5 rows carry, whenever the ledger signs), so audit entries that cancelled work still flushes while it unwinds — or
    that were already queued — do not land raw after step 14.
@@ -192,13 +195,14 @@ The cost of that default is one indexed lookup per turn.
 
 Setting the property above `0` switches on a **node-local** cache with that TTL.
 `restrict`/`unrestrict` publish through it, so the node serving the admin call applies the
-change on the very next turn — but there is no cross-node invalidation, so **any other node
-keeps answering "not restricted" from its own cache until the TTL expires**, and for the same
-reason keeps answering from cache during a store outage instead of failing closed. A cached
-negative verdict is a suspended Art. 18 legal control, which is why it is not the default.
+change on the very next turn. In cluster mode the eviction is also sent to every other node, but
+an event can be lost while NATS is unreachable, and then **another node keeps answering "not
+restricted" from its own cache until the TTL expires** — and every node keeps answering from
+cache during a store outage instead of failing closed. A cached negative verdict is a suspended
+Art. 18 legal control, which is why it is not the default.
 
-- **Multi-replica without conversation affinity** — keep the default (`0`). This is the only
-  safe setting there until cluster-wide invalidation exists.
+- **Several replicas** — keep the default (`0`), cluster mode included: cross-node invalidation
+  is best-effort while NATS is unreachable.
 - **Single node, or a cluster with conversation affinity** — every turn of a conversation and
   every admin call reach the same node, which is what makes the explicit invalidation
   sufficient. Setting e.g. `eddi.gdpr.restriction-cache-ttl-seconds=30` there buys back the

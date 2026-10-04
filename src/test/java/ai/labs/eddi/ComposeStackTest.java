@@ -73,7 +73,8 @@ class ComposeStackTest {
     private static final Set<String> STANDALONE_STACKS = Set.of(
             "docker-compose.yml",
             "docker-compose.postgres-only.yml",
-            "docker-compose.openwebui.yml");
+            "docker-compose.openwebui.yml",
+            "docker-compose.cluster.yml");
 
     /**
      * A {@code mongo:<tag>} image reference. Anchored on a non-word character so

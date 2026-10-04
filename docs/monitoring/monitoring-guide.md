@@ -131,15 +131,16 @@ can reach EDDI.
 | `eddi_vault_cache_misses` | Counter | Vault cache misses |
 | `eddi_vault_resolve_time` | Timer | End-to-end resolve time (incl. cache) |
 
-### NATS (when `eddi.messaging.type=nats`)
+### Cluster mode (when `eddi.messaging.type=nats`)
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `eddi_nats_publish_count` | Counter | Messages published to NATS |
-| `eddi_nats_publish_duration` | Timer | Publish latency |
-| `eddi_nats_consume_count` | Counter | Messages consumed from NATS |
-| `eddi_nats_consume_duration` | Timer | Consume/processing latency |
-| `eddi_nats_dead_letter_count` | Counter | Messages sent to dead-letter stream |
+Cluster mode registers the `eddi_cluster_*` family — NATS connection and degraded state,
+conversation leases and fencing, KV latency, cluster events and RPCs, degraded-mode decisions,
+shared rate limits and audit sequences. The full list is in
+[Metrics → Cluster mode](../metrics.md); the
+[EDDI Cluster dashboard](eddi-cluster-dashboard.json) charts it, and
+[`eddi-cluster-alerts.yml`](eddi-cluster-alerts.yml) holds alerting rules for it. None of these
+series exists in the default in-memory mode. Dead letters are counted by
+`eddi_coordinator_total_dead_lettered_total` and `eddi_coordinator_dead_letters` in both modes.
 
 ## Distributed Tracing
 
@@ -244,7 +245,7 @@ groups:
           description: "Secret resolution errors at {{ $value }}/s — LLM calls may fail"
 
       - alert: EddiDeadLetterAccumulation
-        expr: increase(eddi_nats_dead_letter_count_total[10m]) > 0
+        expr: increase(eddi_coordinator_total_dead_lettered_total[10m]) > 0
         for: 10m
         labels:
           severity: warning

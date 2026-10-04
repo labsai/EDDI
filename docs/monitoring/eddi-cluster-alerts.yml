@@ -1,0 +1,53 @@
+# Prometheus alerting rules for EDDI cluster mode (eddi.messaging.type=nats).
+#
+# Load it with `rule_files:` in your prometheus.yml. It is not wired into the
+# bundled docker-compose.monitoring.yml stack. Every series here exists only in
+# cluster mode, except the dead-letter gauge, which both coordinators register.
+# What each alert means and what to do about it: docs/clustering.md (runbook).
+groups:
+  - name: eddi-cluster
+    rules:
+      - alert: EddiClusterDegraded
+        expr: max by (instance) (eddi_cluster_degraded) == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EDDI node {{ $labels.instance }} cannot reach NATS"
+          description: >-
+            The node has been running degraded for 5 minutes: turns run under a
+            node-local lock only, replay-protected envelopes are refused and rate
+            limits are local. Check the NATS cluster and the network path to it.
+
+      - alert: EddiClusterFenceRejected
+        expr: increase(eddi_cluster_fence_rejected_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "A turn write was refused by the cluster fence"
+          description: >-
+            A node lost its conversation lease while a turn ran (GC pause, network
+            partition) and the database refused its write. The turn was
+            dead-lettered: replay or discard it. Frequent refusals mean leases
+            expire under load — check GC pauses and NATS latency.
+
+      - alert: EddiClusterLeaseTimeouts
+        expr: increase(eddi_cluster_lease_acquire_seconds_count{outcome="timeout"}[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Turns waited too long for a conversation lease"
+          description: >-
+            Callers received 409 + Retry-After because another turn of the same
+            conversation held the lease past eddi.cluster.lease.acquire-timeout.
+
+      - alert: EddiDeadLetters
+        expr: max(eddi_coordinator_dead_letters) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead-lettered conversation turns are waiting"
+          description: >-
+            GET /administration/coordinator/dead-letters lists them; replay or
+            discard each (docs/coordinator-admin.md).
