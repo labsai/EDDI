@@ -228,9 +228,9 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
         } catch (ClusterUnavailableException e) {
             LOGGER.warnf("Dead letter of conversation %s kept node-locally: NATS unavailable (%s)", sanitize(conversationId),
                     e.getMessage());
-            recordLocalDeadLetter(conversationId, failure, task);
-            List<DeadLetterEntry> locals = super.getDeadLetters();
-            id = locals.isEmpty() ? null : locals.get(locals.size() - 1).id();
+            // The id this call recorded: reading the ring's last entry back could name
+            // another failure's entry under concurrent dead letters.
+            id = recordLocalDeadLetter(conversationId, failure, task);
             scheduleForward();
         }
         DeadLetterEntry created = new DeadLetterEntry(id, conversationId, error, timestamp, null, turn, classification.reason(),

@@ -85,8 +85,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Everything behind the cluster console: the health verdict, the node cards,
@@ -211,10 +215,7 @@ public class ClusterAdminService implements ClusterStartable {
             applyDrainLocally(drain);
             return Map.of("draining", drain);
         });
-        rpc.handle(RPC_RECONCILE, request -> {
-            deployments.reconcileNow();
-            return Map.of("reconciled", true);
-        });
+        rpc.handle(RPC_RECONCILE, request -> reconcileWithin(config.natsRequestTimeout().dividedBy(2)));
         rpc.handle(RPC_FORWARD, request -> Map.of("forwarded",
                 clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters).orElse(0), "remaining",
                 clusterCoordinator().map(ClusterConversationCoordinator::localDeadLetterCount).orElse(0)));
@@ -676,8 +677,49 @@ public class ClusterAdminService implements ClusterStartable {
         return new DeadLetterPage(entries, next, scanned);
     }
 
+    /**
+     * How long a summary is reused. Every open console polls it every 10 s and a
+     * summary scans up to {@link #SUMMARY_SCAN_BUDGET} entries, so the consoles of
+     * several administrators share one scan; replay, discard and forward on this
+     * node drop it at once.
+     */
+    static final long SUMMARY_CACHE_MILLIS = 12_000;
+    private final Object summaryLock = new Object();
+    private final AtomicLong summaryGeneration = new AtomicLong();
+    private volatile DeadLetterSummary cachedSummary;
+    private volatile long cachedSummaryAt;
+
     /** Counts without content — safe for a read-only role. */
     public DeadLetterSummary deadLetterSummary() {
+        DeadLetterSummary cached = cachedSummary;
+        if (cached != null && System.currentTimeMillis() - cachedSummaryAt < SUMMARY_CACHE_MILLIS) {
+            return cached;
+        }
+        synchronized (summaryLock) {
+            // Concurrent callers wait for the one scan instead of each running their own.
+            cached = cachedSummary;
+            if (cached != null && System.currentTimeMillis() - cachedSummaryAt < SUMMARY_CACHE_MILLIS) {
+                return cached;
+            }
+            long generation = summaryGeneration.get();
+            DeadLetterSummary fresh = scanDeadLetterSummary();
+            // A replay or discard that finished during the scan may not be in it: keep it
+            // uncached, so the next poll reads again.
+            if (summaryGeneration.get() == generation) {
+                cachedSummary = fresh;
+                cachedSummaryAt = System.currentTimeMillis();
+            }
+            return fresh;
+        }
+    }
+
+    /** Drops the cached summary after this node changed the dead letters. */
+    void invalidateDeadLetterSummary() {
+        summaryGeneration.incrementAndGet();
+        cachedSummary = null;
+    }
+
+    private DeadLetterSummary scanDeadLetterSummary() {
         Map<String, Long> byReason = new TreeMap<>();
         Map<String, Long> byNode = new TreeMap<>();
         Map<String, Long> byAgent = new TreeMap<>();
@@ -747,6 +789,7 @@ public class ClusterAdminService implements ClusterStartable {
             results.add(replayOne(id));
         }
         BulkResult result = summarize(results, "REPLAYED");
+        invalidateDeadLetterSummary();
         audit("deadletters.replay", actor, Map.of("ids", unique), Map.of("succeeded", result.succeeded(), "failed", result.failed(),
                 "outcomes", outcomeMap(results)));
         activity.record("admin.deadletters.replay", ClusterActivityLog.INFO, Map.of("actor", actor, "count", unique.size(), "succeeded",
@@ -856,6 +899,7 @@ public class ClusterAdminService implements ClusterStartable {
             }
         }
         BulkResult result = summarize(results, "DISCARDED");
+        invalidateDeadLetterSummary();
         audit("deadletters.discard", actor, Map.of("ids", unique), Map.of("succeeded", result.succeeded(), "failed", result.failed(),
                 "outcomes", outcomeMap(results)));
         activity.record("admin.deadletters.discard", ClusterActivityLog.INFO, Map.of("actor", actor, "count", unique.size(), "succeeded",
@@ -1072,25 +1116,67 @@ public class ClusterAdminService implements ClusterStartable {
         deployments.reconcileNow();
         List<String> answered = new ArrayList<>();
         answered.add(isClustered() ? connections.get().node().nodeId() : "local");
+        List<String> running = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         if (isClustered()) {
             Map<String, Map<String, Object>> replies = rpc.callAll(RPC_RECONCILE, Map.of());
             replies.forEach((node, reply) -> {
-                if (reply.get("error") == null) {
+                if (reply.get("error") != null) {
+                    return;
+                }
+                if (Boolean.TRUE.equals(reply.get("running"))) {
+                    running.add(node);
+                } else {
                     answered.add(node);
                 }
             });
-            missing.addAll(otherMembers().stream().filter(n -> !answered.contains(n)).toList());
+            missing.addAll(otherMembers().stream().filter(n -> !answered.contains(n) && !running.contains(n)).toList());
         }
-        String outcome = missing.isEmpty() ? DONE : PARTIAL;
-        audit("deployments.reconcile", actor, Map.of(), Map.of("outcome", outcome, "nodes", answered, "missing", missing));
+        // A node whose sweep outlasts the RPC answers "running": it has started and
+        // finishes on its own — not done yet, but not a node that failed to answer.
+        String outcome = !missing.isEmpty() ? PARTIAL : !running.isEmpty() ? STARTED : DONE;
+        audit("deployments.reconcile", actor, Map.of(),
+                Map.of("outcome", outcome, "nodes", answered, "running", running, "missing", missing));
         activity.record("admin.deployments.reconcile", ClusterActivityLog.INFO, Map.of("actor", actor, "nodes", answered, "outcome", outcome),
                 null);
         count("deployments.reconcile", outcome.toLowerCase(Locale.ROOT));
-        String message = missing.isEmpty()
-                ? "The deployment sweep ran on " + answered.size() + " node(s)."
-                : "The deployment sweep ran on " + answered + "; " + missing + " did not answer (their own sweep still runs every 10 s).";
-        return new ActionResult("deployments.reconcile", outcome, message, Map.of("nodes", answered, "missing", missing));
+        StringBuilder message = new StringBuilder();
+        if (running.isEmpty() && missing.isEmpty()) {
+            message.append("The deployment sweep ran on ").append(answered.size()).append(" node(s).");
+        } else {
+            message.append("The deployment sweep ran on ").append(answered).append('.');
+            if (!running.isEmpty()) {
+                message.append(" It is still running on ").append(running).append(" and finishes on its own.");
+            }
+            if (!missing.isEmpty()) {
+                message.append(' ').append(missing).append(" did not answer (their own sweep still runs every 10 s).");
+            }
+        }
+        return new ActionResult("deployments.reconcile", outcome, message.toString(),
+                Map.of("nodes", answered, "running", running, "missing", missing));
+    }
+
+    /**
+     * The other end of a reconcile request: runs the sweep and answers within
+     * {@code wait}, well inside the RPC timeout. A sweep waits for one already in
+     * progress and can deploy agents, so it may take longer; it then answers
+     * {@code running} instead of letting the caller count this node as one that did
+     * not answer.
+     */
+    Map<String, Object> reconcileWithin(Duration wait) {
+        CompletableFuture<Void> sweep = CompletableFuture.runAsync(deployments::reconcileNow,
+                task -> Thread.ofVirtual().name("eddi-admin-reconcile").start(task));
+        try {
+            sweep.get(wait.toMillis(), TimeUnit.MILLISECONDS);
+            return Map.of("reconciled", true);
+        } catch (TimeoutException stillRunning) {
+            return Map.of("running", true);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return Map.of("error", "interrupted");
+        } catch (ExecutionException e) {
+            return Map.of("error", String.valueOf(e.getCause() == null ? e.getMessage() : e.getCause().getMessage()));
+        }
     }
 
     /** The other members this node can see, by id. */
@@ -1104,6 +1190,8 @@ public class ClusterAdminService implements ClusterStartable {
     static final String QUEUED = "QUEUED";
     /** Applied on some nodes only — the details name the rest. */
     static final String PARTIAL = "PARTIAL";
+    /** Started everywhere, still running on some nodes — the details name them. */
+    static final String STARTED = "STARTED";
 
     public ActionResult forwardLocalDeadLetters(String actor) {
         requireCluster("Forwarding local dead letters");
@@ -1127,6 +1215,7 @@ public class ClusterAdminService implements ClusterStartable {
         // not answer forwarded nothing: either way entries are still local, so not
         // DONE.
         String outcome = missing.isEmpty() && left == 0 ? DONE : PARTIAL;
+        invalidateDeadLetterSummary();
         audit("deadletters.forward-local", actor, Map.of(),
                 Map.of("outcome", outcome, "forwarded", perNode, "remaining", remaining, "missing", missing));
         activity.record("admin.deadletters.forward", ClusterActivityLog.INFO, Map.of("actor", actor, "forwarded", total, "outcome", outcome),

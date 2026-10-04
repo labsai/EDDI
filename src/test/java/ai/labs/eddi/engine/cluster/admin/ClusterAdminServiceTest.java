@@ -60,6 +60,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import ai.labs.eddi.engine.cluster.LocalSharedStateFactory;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ItemOutcome;
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -396,6 +397,44 @@ class ClusterAdminServiceTest {
         }
 
         @Test
+        @DisplayName("consoles polling the summary share one scan until a replay, discard or forward changes the dead letters")
+        void summaryIsSharedUntilChanged() {
+            service.deadLetterSummary();
+            service.deadLetterSummary();
+            verify(coordinator, times(1)).getDeadLetters(anyInt(), isNull());
+            when(coordinator.discardDeadLetter("1")).thenReturn(true);
+            service.discard(List.of("1"), "a");
+            service.deadLetterSummary();
+            verify(coordinator, times(2)).getDeadLetters(anyInt(), isNull());
+        }
+
+        @Test
+        @DisplayName("concurrent summary requests wait for one scan instead of each running their own")
+        void concurrentSummariesCoalesce() throws Exception {
+            CountDownLatch scanning = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            List<DeadLetterEntry> one = List.of(entry("1", "fenced", "n1", turn("a1", "hello")));
+            when(coordinator.getDeadLetters(anyInt(), isNull())).thenAnswer(i -> {
+                scanning.countDown();
+                release.await(5, TimeUnit.SECONDS);
+                return one;
+            });
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<DeadLetterSummary> first = pool.submit(() -> service.deadLetterSummary());
+                assertTrue(scanning.await(5, TimeUnit.SECONDS));
+                Future<DeadLetterSummary> second = pool.submit(() -> service.deadLetterSummary());
+                Thread.sleep(100);
+                release.countDown();
+                assertEquals(1, first.get(5, TimeUnit.SECONDS).total());
+                assertEquals(1, second.get(5, TimeUnit.SECONDS).total());
+                verify(coordinator, times(1)).getDeadLetters(anyInt(), isNull());
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
         @DisplayName("the summary counts by reason, node and agent and never carries input")
         void summaryWithoutInput() {
             DeadLetterSummary summary = service.deadLetterSummary();
@@ -670,6 +709,34 @@ class ClusterAdminServiceTest {
             assertEquals("QUEUED", result.outcome());
             assertTrue(result.message().contains("outbox"));
             verify(audit).submit(argThat(e -> "QUEUED".equals(e.output().get("outcome"))));
+        }
+
+        @Test
+        @DisplayName("a reconcile still running on a node is STARTED and names it — not PARTIAL, it did answer")
+        void reconcileStillRunning() {
+            when(rpc.callAll(ClusterAdminService.RPC_RECONCILE, Map.of())).thenReturn(Map.of("n2", Map.of(), "n3", Map.of("running", true)));
+            ActionResult result = service.reconcileDeployments("a");
+            assertEquals("STARTED", result.outcome());
+            assertEquals(List.of("n3"), result.details().get("running"));
+            assertEquals(List.of(), result.details().get("missing"));
+            assertTrue(result.message().contains("still running on [n3]"));
+        }
+
+        @Test
+        @DisplayName("the reconcile handler answers within its bound: done when the sweep finished, running when it did not")
+        void reconcileHandlerAnswersInTime() {
+            assertEquals(Map.of("reconciled", true), service.reconcileWithin(Duration.ofSeconds(2)));
+            CountDownLatch release = new CountDownLatch(1);
+            doAnswer(i -> {
+                release.await(5, TimeUnit.SECONDS);
+                return null;
+            }).when(deployments).reconcileNow();
+            try {
+                Map<String, Object> reply = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> service.reconcileWithin(Duration.ofMillis(100)));
+                assertEquals(Map.of("running", true), reply);
+            } finally {
+                release.countDown();
+            }
         }
 
         @Test

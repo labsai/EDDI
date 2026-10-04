@@ -474,7 +474,7 @@ class ClusterCoordinatorIT {
     }
 
     @Test
-    @Order(9)
+    @Order(11)
     @DisplayName("admin: a dead letter keeps its reason, node and fence; it is counted and found by conversation on another node")
     void deadLetterReasonRoundTrip() throws Exception {
         Thread.sleep(500);
@@ -490,7 +490,7 @@ class ClusterCoordinatorIT {
     }
 
     @Test
-    @Order(10)
+    @Order(12)
     @DisplayName("a bucket an older build left with direct get is switched to leader reads in place; open handles recover on their next call")
     void directGetIsSwitchedOffInPlace() throws Exception {
         Node a = nodes.get(0);

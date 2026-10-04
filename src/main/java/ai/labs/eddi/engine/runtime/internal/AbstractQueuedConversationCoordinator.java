@@ -229,8 +229,10 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
 
     /**
      * The in-memory ring buffer; also the cluster coordinator's degraded fallback.
+     *
+     * @return the id of the entry recorded
      */
-    protected final void recordLocalDeadLetter(String conversationId, Throwable failure, Callable<Void> task) {
+    protected final String recordLocalDeadLetter(String conversationId, Throwable failure, Callable<Void> task) {
         String id = nextLocalDeadLetterId(deadLetterIdCounter.incrementAndGet());
         String error = failure.getMessage() != null ? failure.getMessage() : "unknown";
         long timestamp = System.currentTimeMillis();
@@ -257,6 +259,7 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
                 }
             }
         }
+        return id;
     }
 
     /** The node recorded on a ring-buffer entry; {@code null} on a single node. */

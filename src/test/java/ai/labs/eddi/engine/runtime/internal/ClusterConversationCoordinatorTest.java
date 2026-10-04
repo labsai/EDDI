@@ -454,6 +454,30 @@ class ClusterConversationCoordinatorTest {
     }
 
     @Test
+    @DisplayName("a dead letter kept locally is announced with the id it was recorded under, not read back from the ring")
+    void localDeadLetterAnnouncedWithItsOwnId() throws Exception {
+        // A ring that keeps nothing: reading the last entry back finds none (or, under
+        // concurrent failures, another one), while the id recorded is still the right
+        // one.
+        var noRing = new ClusterConversationCoordinator(runtime, new SimpleMeterRegistry(), leases, store, connections,
+                mock(ClusterPresence.class), 10_000, 0, Duration.ofSeconds(45));
+        List<DeadLetterEntry> announced = new CopyOnWriteArrayList<>();
+        noRing.onDeadLetter(announced::add);
+        store.down = true;
+        Turn t = new Turn("boom", log);
+        t.failWith = new IllegalStateException("x");
+        noRing.submitInOrder("conv1", t);
+        await(t);
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (announced.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, announced.size());
+        assertNotNull(announced.get(0).id());
+        assertTrue(announced.get(0).id().startsWith("local-"));
+    }
+
+    @Test
     @DisplayName("dead letters fall back to the node-local ring while the stream is unavailable")
     void deadLetterFallsBackWhenStreamDown() throws Exception {
         store.down = true;
