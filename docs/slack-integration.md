@@ -314,7 +314,8 @@ Notes and current limits:
   to an LLM accrues `$0.00` and is bounded by `maxDailyResponses`. Same
   quantity, and the same caveat, as the cost a scheduled fire logs.
 - **Every limit is per node.** The counters live in the engine's in-process
-  Caffeine cache, which is not shared between replicas. Three replicas behind a
+  Caffeine cache, which is not shared between replicas — in cluster mode
+  (`eddi.messaging.type=nats`) too. Three replicas behind a
   load balancer therefore allow three times `maxDailyResponses`, three times
   `maxCostPerDay`, and three replies inside one cooldown — one per node. Size
   the numbers per node, or run observers on a single replica if the ceiling has
@@ -539,13 +540,15 @@ Active group discussion contexts use EDDI's `ICache` infrastructure with **TTL-b
 
 When running EDDI as a multi-instance cluster behind a load balancer:
 
-1. **Webhook Delivery**: Slack sends each event to ONE URL. The load balancer routes to one EDDI instance. Event dedup is per-instance (ICache), which is fine — Slack only delivers to one endpoint.
+Run several replicas in cluster mode (`eddi.messaging.type=nats`, see [Clustering](clustering.md)); with the default in-memory messaging EDDI is single-replica.
 
-2. **Conversation State**: Conversations are stored in MongoDB, so any instance can handle follow-up messages. The `IConversationService` load-balances naturally.
+1. **Webhook Delivery**: Slack sends each event to ONE URL, and the load balancer routes it to any replica. Slack retries an event it considers undelivered, possibly to another replica, so event deduplication is cluster-wide: the event id is claimed with one atomic `putIfAbsent` on a NATS JetStream KV bucket, and only the replica that claims it processes the event. The per-channel thread locks are shared the same way.
 
-3. **Group Discussion Affinity**: A group discussion runs on the instance that received the trigger. Since the `SlackGroupDiscussionListener` streams directly to Slack API, this is instance-local and correct. Follow-up context is cached per-instance in ICache — if a follow-up routes to a different instance, it gracefully falls back to a standard conversation (no context injection, but no error).
+2. **Conversation State**: Conversations are stored in the database and every turn takes the conversation's cluster-wide lease, so any replica handles a follow-up message, in order.
 
-4. **NATS Integration**: When `eddi.messaging.type=nats`, conversation processing is ordered via NATS JetStream subjects. The Slack webhook handler still handles event dispatch locally (Slack only talks to one instance), but conversation execution benefits from NATS-backed ordering, retry (3 attempts), and dead-letter queuing.
+3. **Group Discussion Affinity**: A group discussion runs on the replica that received the trigger, and `SlackGroupDiscussionListener` streams from there directly to the Slack API. Follow-up context is cached on that replica: a follow-up routed to a different replica falls back to a standard conversation (no context injection, but no error). Routing follow-ups to the discussion's replica is not implemented.
+
+4. **When NATS is unreachable**: deduplication degrades to the replica's own cache, so a Slack retry that lands on another replica may be answered twice; the rest keeps working as described in [Clustering](clustering.md).
 
 ---
 

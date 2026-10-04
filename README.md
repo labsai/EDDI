@@ -145,9 +145,14 @@ docker compose -f docker-compose.yml -f docker-compose.ollama.yml \
 # Auth + monitoring + NATS together (overlays stack in any combination)
 docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
+
+# A cluster: three EDDI replicas behind a round-robin load balancer, a
+# three-node NATS JetStream cluster and MongoDB — a whole stack, run on its own
+EDDI_VAULT_MASTER_KEY=$(openssl rand -base64 24) NATS_PASSWORD=$(openssl rand -base64 24) \
+  docker compose -f docker-compose.cluster.yml up -d
 ```
 
-Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.ollama.yml` (local LLM; add `docker-compose.ollama-nvidia.yml` on top for NVIDIA GPU access), `docker-compose.chroma.yml` (vector store), `docker-compose.mcp-sidecar.yml` (reach a stdio-only MCP server through a bridge sidecar — read the [MCP Client](docs/mcp-client.md#stdio-servers-via-a-bridge-sidecar) guide first), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`; so is `docker-compose.openwebui.yml`, a runnable [Open WebUI](docs/open-webui-integration.md) demo of the OpenAI-compatible API.
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (cluster mode with one replica and one NATS server), `docker-compose.ollama.yml` (local LLM; add `docker-compose.ollama-nvidia.yml` on top for NVIDIA GPU access), `docker-compose.chroma.yml` (vector store), `docker-compose.mcp-sidecar.yml` (reach a stdio-only MCP server through a bridge sidecar — read the [MCP Client](docs/mcp-client.md#stdio-servers-via-a-bridge-sidecar) guide first), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`; so is `docker-compose.openwebui.yml`, a runnable [Open WebUI](docs/open-webui-integration.md) demo of the OpenAI-compatible API, and `docker-compose.cluster.yml`, the multi-replica stack above (see [Clustering](docs/clustering.md)).
 
 The compose files publish EDDI (and Keycloak) on `127.0.0.1` only. To reach them from another host, set `EDDI_BIND=0.0.0.0` (and `KEYCLOAK_BIND` for Keycloak) in `.env` — with authentication on.
 
@@ -446,12 +451,13 @@ EDDI implements open standards — not proprietary APIs:
 ### 🚀 Cloud-Native & Observable
 
 - 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database via Docker
-- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, PDB, NetworkPolicy (no HPA: EDDI is single-writer per conversation, so both delivery paths pin one replica)
+- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, PDB, NetworkPolicy, and an HPA in cluster mode
+- 🧩 **Horizontal scaling** — `eddi.messaging.type=nats` runs any number of replicas of the published image behind a plain round-robin load balancer: cluster-wide conversation leases with fencing, shared security and tool state in NATS JetStream KV, cross-node cancel/GDPR/undeploy, rolling updates without lost turns. See [Clustering](docs/clustering.md)
 - 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations). Pre-built [Grafana dashboard](docs/monitoring/eddi-grafana-dashboard.json) included
 - 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits a span named `eddi.pipeline.task` carrying `eddi.task.id`, `eddi.task.type`, `eddi.task.index`, `eddi.conversation.id` and `eddi.agent.id`. The equivalent *metric* tags are un-prefixed (`task.id`, `task.type`)
 - 🤖 **LLM Telemetry** — Every model call, on every provider, streaming or not, is timed and counted (`eddi.llm.request.duration`, `eddi.llm.tokens`, `eddi.llm.request.errors`) and traced as a `gen_ai.client.inference` span
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
-- 🔄 **NATS JetStream** — Async event bus for distributed processing
+- 🔄 **NATS JetStream** — Cluster coordination: leases, shared KV state, cache-invalidation events and durable dead letters
 - 🛟 **Error Handling & Recovery** — Automatic retry with exponential backoff, MCP circuit breakers (open after 3 failures within 60 s), LLM response validation (`onEmpty` / `onTruncation` / `onRefusal`), streaming timeout retry, and admin endpoint to reset stuck conversations
 - ⚡ **Virtual Threads** — Java 25 virtual threads for true OS-level concurrency (no Python GIL or Node.js event loop bottleneck)
 - 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL; switch with one env var. Single Docker image for both
@@ -679,7 +685,7 @@ helm install eddi ./helm/eddi \
   --namespace eddi --create-namespace
 ```
 
-Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), NATS messaging, Ingress, and production hardening (PDB, NetworkPolicy — deliberately no HPA).
+Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), cluster mode (a three-node NATS JetStream cluster and three EDDI replicas), Ingress, and production hardening (PDB, NetworkPolicy).
 See the [Kubernetes Guide](docs/kubernetes.md) for details, including the Keycloak upgrade note for existing installs.
 
 ---

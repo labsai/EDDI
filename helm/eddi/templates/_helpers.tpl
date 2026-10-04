@@ -89,3 +89,53 @@ Service account name
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Deployment update strategy type: eddi.updateStrategy, or by messaging type when
+it is empty or null — Recreate for in-memory (one JVM against the database at a
+time), RollingUpdate for nats (replicas coordinate through NATS). The value is
+either a plain string ("Recreate" / "RollingUpdate") or the Deployment's own
+strategy object ({type: ..., rollingUpdate: {...}}), so a values file written
+for either shape renders.
+*/}}
+{{- define "eddi.updateStrategy" -}}
+{{- $value := .Values.eddi.updateStrategy }}
+{{- $configured := "" }}
+{{- if kindIs "map" $value }}{{ $configured = toString (default "" $value.type) }}{{ else }}{{ $configured = toString (default "" $value) }}{{ end }}
+{{- if $configured }}{{ $configured }}{{ else if eq (include "eddi.messagingType" .) "nats" }}RollingUpdate{{ else }}Recreate{{ end }}
+{{- end }}
+
+{{/*
+Termination grace: eddi.terminationGracePeriodSeconds, else 75 s in cluster
+mode (drain 65 s + readiness grace + margin) and 30 s otherwise.
+*/}}
+{{- define "eddi.terminationGracePeriodSeconds" -}}
+{{- $configured := toString (default "" .Values.eddi.terminationGracePeriodSeconds) }}
+{{- if $configured }}{{ $configured }}{{ else if eq (include "eddi.messagingType" .) "nats" }}75{{ else }}30{{ end }}
+{{- end }}
+
+{{/*
+Shutdown drain timeout: eddi.shutdownDrainTimeoutSeconds, else 65 s in cluster
+mode; empty (the application default) otherwise.
+*/}}
+{{- define "eddi.shutdownDrainTimeoutSeconds" -}}
+{{- $configured := toString (default "" .Values.eddi.shutdownDrainTimeoutSeconds) }}
+{{- if $configured }}{{ $configured }}{{ else if eq (include "eddi.messagingType" .) "nats" }}65{{ end }}
+{{- end }}
+
+{{/*
+NATS servers for EDDI: the in-chart StatefulSet's pods (all of them, so the
+client fails over without DNS) or nats.externalUrl.
+*/}}
+{{- define "eddi.natsUrl" -}}
+{{- if .Values.nats.enabled -}}
+{{- $fullname := include "eddi.fullname" . -}}
+{{- $urls := list -}}
+{{- range $i := until (int .Values.nats.replicas) -}}
+{{- $urls = append $urls (printf "nats://%s-nats-%d.%s-nats:4222" $fullname $i $fullname) -}}
+{{- end -}}
+{{- join "," $urls -}}
+{{- else -}}
+{{- .Values.nats.externalUrl -}}
+{{- end -}}
+{{- end }}

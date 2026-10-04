@@ -51,7 +51,8 @@ one node. NATS adds:
 | A turn that lost its lease does not vanish | Losing the lease cancels the turn at its next task boundary. It stores nothing, stamps no state, and is dead-lettered with its input (`reason: lease-lost`, its fencing token, `failedOn` the node). If its reply has not gone out yet, its caller is told it was not processed: 409 with `Retry-After` over REST, an error event on a stream. |
 | A crashed node does not block a conversation | Its lease expires (≤ `lease.ttl`), or is taken over at once when the node's presence record is gone or shows a new boot. |
 | Caches stay coherent | Cluster events on the `<prefix>_EVENTS` stream: secrets, global variables, connections, deployments, deleted workflows, agent triggers, user conversations, conversation states, GDPR restriction verdicts. A node that missed events (gap, long disconnect, outbox overflow) flushes everything. |
-| Undeploy reaches every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. |
+| Deploy and undeploy reach every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. A deploy with `autoDeploy=false` (deliberately not recorded) is announced the same way and deployed, unrecorded, on every node. A request that reaches a node before its sweep has caught up deploys the agent there on demand and waits for it (at most 15 s) instead of answering 404. |
+| Exported agent archives download through any node | The archive is also copied to the `<prefix>_ARCHIVES` object store for the export retention; a node without the file fetches it from there. |
 | Cancel/end/GDPR stop reach the running turn | Node-addressed RPC to the lease holder; GDPR stop is a scatter to every node (the user travels as a hash). Group-discussion cancel is forwarded to the node holding the discussion's `g.<id>` lease. |
 | Security and tool state is cluster-wide | KV buckets: replay nonces (`NONCES`), tool rate limits (`RATELIMIT`), per-conversation cost totals (`COSTS`), A2A task mappings (`A2A_*`), paginated tool responses (`TOOL_PAGES`), Slack event de-duplication (`DEDUP`), channel thread locks (`CHANNEL`), audit chain positions (`AUDIT_SEQ`). |
 | Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. |
@@ -80,7 +81,7 @@ out. Longer, each area applies its policy:
 | Area | Default | Alternative |
 |---|---|---|
 | Turns | run with node-local ordering only, **unfenced** (no loss — appends merge — but concurrent turns on different nodes may miss each other's context) | `degraded.turns=reject`: 409 + `Retry-After` |
-| Replay nonces | **reject** (fail closed: signed envelopes are not accepted) | `degraded.nonces=local` |
+| Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide, so a signature that needs a fresh one is refused. Inter-agent signing in group discussions then records the entry **unsigned** (the discussion carries on); nothing else uses nonces | `degraded.nonces=local` |
 | Tool rate limits | `local-share`: this node enforces the global limit ÷ known members, the per-conversation limit in full | `degraded.rate-limits=reject` |
 | Cost budgets | local total | — |
 | A2A mappings, tool pages, Slack dedup, thread locks | node-local copy | — |
@@ -142,12 +143,21 @@ A NATS user restricted to EDDI needs:
 - **publish:** `eddi.>`, `$JS.API.>`, `$KV.*.>`, `$O.*.>`, `$JS.ACK.>`, `$JS.FC.>` and `_INBOX.>`;
 - **subscribe:** `eddi.>`, `$JS.API.>`, `$KV.*.>` and `_INBOX.>`.
 
+The Helm chart's in-chart NATS grants exactly this set. Without `$O` access, exported archives stay on the node that made them.
+
 A NATS wildcard matches whole tokens only, and a KV subject is
 `$KV.<bucket>.<key>` with the bucket as one token. So `$KV.EDDI_>` and
 `$KV.EDDI_*.>` match no bucket at all: every KV write is refused (verified on
 NATS 2.11). To narrow an account shared with other applications, replace
 `$KV.*.>` with one `$KV.<prefix>_<BUCKET>.>` per bucket above, and `$O.*.>` with
 `$O.<prefix>_ARCHIVES.>`.
+
+**NATS is inside the trust boundary.** Every node uses one NATS identity, and nothing on
+the wire is signed: whoever holds those credentials can publish a `deployment.changed`
+event (undeploy an agent everywhere), a cancel or GDPR-stop request, or write the nonce,
+rate-limit and audit-position buckets. Keep the NATS credentials in a Secret, restrict
+NATS ports with a NetworkPolicy (the Helm chart and the `nats` overlay do), and turn on
+`nats.tls` when pod traffic is not already encrypted.
 
 ### Upgrading from the build-profile NATS coordinator
 
@@ -162,17 +172,75 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
 
 ## Deployment
 
-- **Helm**: `eddi.messagingType=nats` with `nats.enabled=true` (a 3-node
-  JetStream StatefulSet with auth and optional TLS) or `nats.externalUrl`;
-  then `replicaCount > 1`, `autoscaling.enabled` and a PodDisruptionBudget are
-  allowed. See [Kubernetes](kubernetes.md#horizontal-scaling).
-- **Kustomize**: the `nats` and `cluster` overlays.
-- **Docker Compose**: `docker-compose.cluster.yml` (three EDDI replicas, a
-  three-node NATS cluster and an nginx load balancer).
-- **Demo**: `scripts/cluster-demo/` runs the failure scenarios listed in its
-  README against three local jars and records the results.
+- **Helm** (chart 2.5.0+): `eddi.messagingType=nats` with `nats.enabled=true`
+  (a three-node JetStream StatefulSet with client and route authentication and
+  optional TLS) or
+  `nats.externalUrl`; then `eddi.replicas > 1`, `autoscaling.enabled` and a
+  `RollingUpdate` are allowed, and the chart sets the drain, the termination
+  grace, the node ids and a topology spread. See
+  [Kubernetes](kubernetes.md#cluster-mode-horizontal-scaling).
+- **Kustomize**: the `k8s/overlays/nats` component (three NATS nodes, three EDDI
+  replicas), composed in `k8s/examples/postgres-ha`.
+- **Docker Compose**: `docker-compose.cluster.yml` — three EDDI replicas, a
+  three-node NATS cluster with a password, MongoDB and an nginx load balancer
+  (`docker/cluster/nginx.conf`). `docker-compose.nats.yml` is a one-replica
+  overlay for trying cluster mode next to the base file.
+- **Alerts**: [`monitoring/eddi-cluster-alerts.yml`](monitoring/eddi-cluster-alerts.yml)
+  holds Prometheus rules for the runbook above; the
+  [cluster dashboard](monitoring/eddi-cluster-dashboard.json) charts the same series.
+- **Demo**: [`scripts/cluster-demo/`](../scripts/cluster-demo/README.md) builds
+  this topology in Docker — three nodes of one build, three NATS nodes, MongoDB
+  or PostgreSQL, nginx and a mock LLM — and runs the failure scenarios listed in
+  its README against it, each with a pass/fail verdict. The residual limitations
+  below are not among them.
+
+## Moving from one node to a cluster, and back
+
+**To a cluster.** Start NATS first (`nats.enabled=true`, or your own cluster), then switch
+`eddi.messaging.type` to `nats`. Do the **first** switch with a `Recreate` rollout
+(`--set eddi.updateStrategy=Recreate` for that one `helm upgrade`, then remove it): with the
+default `RollingUpdate` the old single-node pod, whose conversation lock, nonces and caches
+live in its JVM, would run next to the new cluster pod for as long as the new one takes to
+boot. Afterwards scale `eddi.replicas` (or enable the HPA). Nothing in the database changes:
+existing conversations and audit chains continue — each chain position counter is seeded from
+the highest stored position the first time a conversation is written in cluster mode.
+
+**Back to one node.** Set `eddi.replicas=1`, disable the HPA and the PDB, and switch
+`eddi.messaging.type` back to `in-memory` (again with `Recreate`, and only once the cluster
+has drained to a single pod). Conversations, configurations and audit entries are in the
+database and carry over. What lives only in NATS is dropped: unreplayed dead letters (list and
+replay or discard them first), A2A task mappings and unread paginated tool pages (both
+short-lived), and the exported archives of the last retention window. The JetStream objects
+can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, and the
+`<prefix>_*` KV buckets).
 
 ## Residual limitations
+
+- **A load balancer must not eject a node for answering 503.** EDDI answers 503
+  (with `Retry-After`) for ordinary load shedding — executor full, quota
+  accounting or NATS unavailable under `degraded.*=reject`, a node shutting down
+  — and every node does so at once under a shared overload. With nginx's
+  defaults (`max_fails=1`) and `http_503` in `proxy_next_upstream`, one such
+  answer per node marks every node failed and the whole API answers 502 for
+  `fail_timeout`. The shipped configs set `max_fails=0` on the upstream servers,
+  so no node is taken out of rotation. nginx still retries a 503 on the next node
+  for an idempotent request (GET). A POST, which is how a turn arrives, is not
+  re-sent, so its client gets the 503 with `Retry-After`. Neither shipped config
+  adds `non_idempotent`: `timeout` also covers a read timeout after the turn
+  reached a node, so it would run the turn twice. A node that refuses connections
+  is skipped at once. A node that
+  hangs is no longer ejected: each request that lands on it waits out
+  `proxy_connect_timeout` (2 s) before it moves on. Do the same, or leave `http_503`
+  out of the retry conditions, on any proxy you put in front. Kubernetes
+  ingress-nginx retries only `error timeout` by default.
+
+- **`/mcp` needs client affinity.** An MCP (Streamable HTTP) session lives on
+  the node that answered `initialize`; any other node answers a request with
+  that `Mcp-Session-Id` 404, which makes a compliant client start over. Route
+  `/mcp` so a client stays on one node: by client address
+  (`docker/cluster/nginx.conf` does `hash $remote_addr consistent`), with
+  `sessionAffinity: ClientIP` on a Kubernetes Service that only serves `/mcp`,
+  or with your ingress's cookie affinity. Every other path needs none.
 
 - A Slack follow-up in the thread of a group discussion is routed only by the
   node that ran the discussion (the listener holds live state); on another
@@ -180,6 +248,35 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
 - Paginated tool responses larger than the NATS payload limit (1 MiB by
   default) stay node-local; a page fetched through another node then fails as
   on a single node.
+- **A node that crashes can leave a gap in an audit chain.** A chain position is taken from
+  the shared counter when an entry is queued, and the queue is flushed to the database every
+  few seconds; the entries still queued when the node dies were never stored, and their
+  positions are not handed out again. Verification then reports that conversation `BROKEN`
+  (a missing position is indistinguishable from a deleted row), although every stored entry
+  verifies. On a single node the same crash loses the same entries but leaves no gap, because
+  the positions are re-seeded from the store. Lower `eddi.audit.flush-interval-seconds` to
+  shrink the window.
+- **Cache coherence is event-driven with a time backstop.** A node that misses an event (NATS
+  down, restarting) serves stale data for at most: 60 s (agent triggers, user conversations),
+  30 s (conversation state), 15 min (a rotated key in an already built chat model), 5 min
+  (prompt snippets, which have no event of their own), 30 s (the A2A agent roster). A NATS
+  outage longer than the event retention flushes everything on reconnect.
+- **An agent undeployed on one node can answer on another for up to ~20 s** if a request
+  deployed it there on demand at the very moment of the undeploy (the deployment was started
+  from a record that was already being retired); the reconciliation sweep removes it after two
+  passes. An agent that was deployed with `autoDeploy=false` and whose undeploy event is lost
+  (NATS down at that moment) stays deployed on the other nodes until they restart.
+- **NATS holds some personal data for a short time, and the erasure does not purge all of
+  it.** A failed turn's dead letter is purged with the user's conversation, but an audit
+  entry the database refused waits, with its input and output, on the
+  `eddi.<prefix>.dlq.audit` subject of the dead-letter stream until
+  `eddi.coordinator.dead-letter.max-age` (7 days by default) expires it. That stream is then
+  its only copy: losing NATS within that window loses the entry. Only when the stream itself
+  cannot take the entry does it go to the JSONL file at `eddi.audit.dead-letter-path`, which
+  nothing expires. Paginated tool responses (15 min) and A2A task mappings (24 h) expire on
+  their own TTL. An erasure that must also cover these should wait out the stream windows or
+  purge the streams, and handle the JSONL file separately (see
+  [GDPR](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it)).
 - An erasure marks the user on every node before it pseudonymises the stored
   audit rows: each node does so while answering the `gdpr-stop` request the
   erasing node waits for, and from then on that node pseudonymises the user's
@@ -187,3 +284,20 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
   node that does not answer `gdpr-stop` in time (it is named in the log) is
   covered only once the `gdpr.user-erased` event reaches it, so an entry it
   writes between the scrub and that event keeps the raw id.
+- A turn whose write the fence refuses has usually already answered its
+  caller: the reply is rendered inside the pipeline, before the write. The
+  conversation history does not contain that turn and it is dead-lettered —
+  replay it if the answer should count. The same holds for a turn whose lease
+  is lost after its reply went out but before it was stored: the client has its
+  200, the turn is dead-lettered (`lease-lost`). A turn that loses its lease
+  earlier is answered 409 instead (an error event on a stream, whose tokens up to
+  then were already sent). Its client is expected to retry, so replay its dead
+  letter only if the client did not; otherwise the turn runs twice.
+- A paginated tool response is not bound to its conversation or its caller.
+  Anyone who can talk to an agent that has the page-fetch tool, and who knows
+  another response's random id, can fetch its pages, from any node that holds
+  them. This is the same as on a single node: the tool does not check who the
+  response belongs to.
+- On PostgreSQL, replicas that boot together run their startup one after
+  another (an advisory lock around table creation and migrations), so the
+  last of N replicas of a first install becomes ready later than the first.

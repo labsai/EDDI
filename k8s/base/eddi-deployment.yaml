@@ -8,21 +8,20 @@ metadata:
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: eddi
 spec:
-  # ⚠️  MUST stay 1 — do NOT scale this Deployment horizontally.
+  # ⚠️  1 with the base's in-memory messaging — do NOT scale this Deployment
+  # horizontally on its own.
   #
-  # EDDI serialises the turns of a single conversation with a JVM-LOCAL lock
-  # (InMemoryConversationCoordinator keeps one BlockingQueue per conversation
-  # and guards it with synchronized(queue)). The NATS coordinator is not a way
-  # out either: it uses JetStream purely as an ordering primitive and still
-  # executes the Callable in the JVM that published it.
+  # With EDDI_MESSAGING_TYPE=in-memory EDDI serialises the turns of a
+  # conversation with a JVM-LOCAL lock, and keeps replay nonces, rate limits and
+  # caches in the JVM. Two replicas would run two turns of one conversation at
+  # once in different JVMs, and the slower writer would overwrite the other's
+  # turn.
   #
-  # With two replicas and no sticky sessions, two turns of the same
-  # conversation run concurrently in different JVMs, each replaceOne()s the
-  # whole conversation document, and the slower writer SILENTLY DISCARDS the
-  # other turn. Signed-envelope replay nonces are in-memory too, so a replayed
-  # envelope routed to a different pod is not detected.
-  #
-  # Scale vertically (resources) until a distributed coordinator ships.
+  # To run more than one replica, add the cluster-mode component
+  # (../overlays/nats): it deploys a three-node NATS JetStream cluster, switches
+  # EDDI to EDDI_MESSAGING_TYPE=nats and sets 3 replicas. In cluster mode every
+  # replica takes a cluster-wide lease per conversation, so any pod may serve any
+  # conversation behind this plain round-robin Service. See docs/clustering.md.
   replicas: 1
   strategy:
     type: RollingUpdate

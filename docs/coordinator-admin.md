@@ -1,63 +1,91 @@
 # Coordinator & Dead Letters
 
-The conversation coordinator serialises work per conversation. A turn that fails past its retries
-is **dead-lettered**: kept with its payload and error rather than dropped, so an operator can look
-at it and decide whether to replay or discard it.
+The conversation coordinator serialises work per conversation. A turn that fails is
+**dead-lettered**: kept with its error and a description of the turn rather than dropped, so an
+operator can look at it and decide whether to replay or discard it.
 
-The meter `eddi_nats_dead_letter_count` tells you it happened. Micrometer's Prometheus
-exposition appends `_total` to a counter, so the series you query is
-`eddi_nats_dead_letter_count_total` — see [Metrics & Monitoring](metrics.md). This page is the
-API that lets you do something about it.
+The counter `eddi_coordinator_total_dead_lettered` (exposed as
+`eddi_coordinator_total_dead_lettered_total`) tells you it happened, and the gauge
+`eddi_coordinator_dead_letters` how many entries are waiting — see
+[Metrics & Monitoring](metrics.md). This page is the API that lets you do something about it.
 
-All operations sit under `/administration/coordinator` and require the `eddi-admin` role.
+All operations sit under `/administration/coordinator` and require the `eddi-admin` role. They
+behave the same with both coordinators; in cluster mode (`eddi.messaging.type=nats`, see
+[Clustering](clustering.md)) every node answers for the whole cluster's dead letters.
 
 ## Status
 
 ```http
 GET /administration/coordinator/status
+GET /administration/coordinator/status?scope=cluster
 ```
 
 ```json
 {
-  "coordinatorType": "in-memory",
+  "coordinatorType": "nats",
   "connected": true,
   "connectionStatus": "CONNECTED",
   "activeConversations": 12,
   "totalProcessed": 48213,
   "totalDeadLettered": 3,
-  "queueDepths": { "default": 0 }
+  "queueDepths": { "68b1f0c2d4e5a60012ab34cd": 1 },
+  "nodeId": "eddi-7c9f8d6b5-x2k4q",
+  "cluster": {
+    "members": [ { "nodeId": "eddi-7c9f8d6b5-x2k4q", "version": "6.6.0", "natsRtt": 1 } ],
+    "leasesHeld": 1,
+    "natsStatus": "CONNECTED",
+    "degraded": false
+  }
 }
 ```
 
-`coordinatorType` is `in-memory` or `nats`, following `eddi.messaging.type`. For the in-memory
-coordinator `connected` is always true — there is nothing to connect to — so read it as meaningful
-only under NATS.
+`coordinatorType` is `in-memory` or `nats`, following `eddi.messaging.type`. The numbers and
+`queueDepths` are those of the node that answered. In cluster mode `nodeId` names that node and
+`cluster` adds the members the node can see, the leases it holds, its NATS connection and whether
+it is running degraded (`degradedSince` when it is); `?scope=cluster` also asks every member for
+its queue depths. In-memory mode leaves `nodeId` and `cluster` out, and `connected` is always true
+there — there is nothing to connect to.
 
 ## Listing dead letters
 
 ```http
-GET /administration/coordinator/dead-letters
+GET /administration/coordinator/dead-letters?limit=100&after=<id>
 ```
 
 ```json
 [
   {
-    "id": "dl-9f3c1a",
+    "id": "17",
     "conversationId": "68b1f0c2d4e5a60012ab34cd",
     "error": "LifecycleException: Cannot store property 'api_token' with scope 'secret'...",
     "timestamp": 1757251920000,
-    "payload": "{\"input\":\"my key is ...\"}"
+    "payload": "...",
+    "turn": {
+      "conversationId": "68b1f0c2d4e5a60012ab34cd",
+      "agentId": "68b1e9a0d4e5a60012ab0001",
+      "agentVersion": 3,
+      "environment": "production",
+      "userId": "user-42",
+      "rerun": false,
+      "input": "my key is ..."
+    }
   }
 ]
 ```
 
-Retention is bounded by `eddi.coordinator.max-dead-letters` (default `1000`; `-1` unbounded, `0`
-retains none). The oldest entries are evicted first, so a flood of failures can push an older
-entry out before anyone looks at it.
+Oldest first. `limit` caps a page (default `100`); pass the last `id` of a page as `after` to read
+the next one.
 
-> The `payload` is the turn's input. It can contain whatever the user typed, including material
-> they would not expect an administrator to read. Treat this endpoint as carrying conversation
-> content, not just diagnostics.
+Retention: in-memory, `eddi.coordinator.max-dead-letters` (default `1000`; `-1` unbounded, `0`
+retains none), oldest evicted first. In cluster mode the entries live in the JetStream stream
+`<prefix>_DEAD_LETTERS`, shared by every node and kept for `eddi.coordinator.dead-letter.max-age`
+(default `7d`); while NATS is unreachable a node keeps its new entries locally (ids `local-…`) under
+the same in-memory cap. GDPR erasure removes a user's entries.
+
+> `turn.input` (and `turn.context`) is what the user sent. It can contain material they would not
+> expect an administrator to read, so treat this endpoint as carrying conversation content. Set
+> `eddi.coordinator.dead-letter.capture-input=false` to keep the input out of dead letters — such
+> entries can then only be discarded, not replayed.
 
 ## Replaying one entry
 
@@ -65,10 +93,18 @@ entry out before anyone looks at it.
 POST /administration/coordinator/dead-letters/{entryId}/replay
 ```
 
-Re-injects the entry into the processing pipeline. Answers `200` on success and `404` if the entry
-is gone — which it will be if retention evicted it in the meantime. Replaying re-runs the turn's
-side effects, so replay a failure whose cause you have actually fixed, not one you are still
-diagnosing.
+Submits the captured input as a **new turn** of the same conversation, as the calling admin, with
+the context entry `replayOf=<entryId>`, and removes the entry once the turn was accepted. The
+failed task itself is never re-run.
+
+| Status | Meaning |
+|---|---|
+| `204` | Replay submitted; the entry is gone. |
+| `404` | No such entry — discarded, purged or expired. |
+| `409` | Not replayable (no captured input: a HITL resume, a group member's turn, or capture switched off), or the conversation cannot take a turn right now. The entry is kept. |
+
+Replaying re-runs the turn's side effects, so replay a failure whose cause you have actually fixed,
+not one you are still diagnosing.
 
 ## Discarding
 
@@ -77,19 +113,18 @@ DELETE /administration/coordinator/dead-letters/{entryId}     → 204, or 404
 DELETE /administration/coordinator/dead-letters               → 200, count purged
 ```
 
-Both are permanent. The bulk form returns the number of entries it removed.
+Both are permanent, and in cluster mode act on the shared stream, so every node sees the result.
 
-## Live tail
+## Live status
 
 ```http
 GET /administration/coordinator/stream        (text/event-stream)
 ```
 
-Server-sent events for `task_submitted`, `task_completed`, `task_failed` and
-`task_dead_lettered`. Useful while reproducing a failure; it is a tail, not a backlog, so it shows
-only what happens after you connect.
+Emits a `status` event — the same object as `GET /status` — when you connect and every 2 seconds.
 
 ## See also
 
-- [Configuration Reference](configuration-reference.md) — `eddi.coordinator.*`
+- [Configuration Reference](configuration-reference.md) — `eddi.coordinator.*`, `eddi.cluster.*`
+- [Clustering](clustering.md) — when a turn is dead-lettered in cluster mode: a fenced write (`reason: fenced`) or a turn stopped by a lost lease (`reason: lease-lost`)
 - [Metrics & Monitoring](metrics.md) — the coordinator gauges and the dead-letter alert

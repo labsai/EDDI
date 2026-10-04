@@ -1,31 +1,32 @@
-# NATS JetStream component
+# Cluster mode component: a three-node NATS JetStream cluster, and EDDI patched
+# to run three replicas coordinated through it.
 #
 # ⚠️  This is a kustomize COMPONENT, not a standalone overlay. `kubectl apply -k`
 # on this directory does not work by design. Reference it from a kustomization
-# that already includes the base:
+# that already includes the base — and list it AFTER the production component,
+# whose replicas patch (1) it overrides:
 #
 #   resources:
 #     - ../../overlays/postgres
 #   components:
+#     - ../../overlays/production
 #     - ../../overlays/nats
 #
-# It used to be `kind: Kustomization`, which made the patch below a silent
-# no-op: a directory under `resources:` is built as its own root first, so the
-# patch targeted a resource set with no eddi-config in it — and kustomize exits
-# 0 on a patch that matches nothing.
+# k8s/examples/postgres-ha is exactly that composition.
 #
-# ⚠️  THE TWO VARIABLES BELOW ARE READ BY NOTHING IN THE PUBLISHED IMAGE.
-# NatsConversationCoordinator is gated on @IfBuildProfile("nats") — a BUILD-time
-# switch — and labsai/eddi is published without it. `eddi.messaging.type` exists
-# in application.properties but no Java code reads it, so setting it to "nats"
-# does not swap the coordinator. Applying this component against a stock image
-# gets you a JetStream StatefulSet with a 5Gi PVC that EDDI never connects to,
-# and in-memory queues anyway. Use it only with an image you built yourself with
-# `-Dquarkus.profile=nats`.
+# The published labsai/eddi image selects cluster mode at RUNTIME from
+# EDDI_MESSAGING_TYPE; no special build is needed. Every replica takes a
+# cluster-wide lease per conversation from NATS, so the turns of a conversation
+# never overlap whichever pod receives them, and a pod that lost its lease cannot
+# overwrite the turn that ran after it (fencing). The plain round-robin Service
+# from the base is all the load balancing it needs. Operator guide:
+# docs/clustering.md.
 #
-# NATS is a durability/ordering primitive either way: it does NOT enable more
-# than one EDDI replica — see the comment on spec.replicas in
-# k8s/base/eddi-deployment.yaml.
+# Security: the NATS client port accepts the EDDI pods only (NetworkPolicy),
+# and the routes port only the other NATS pods. On a CNI that does not enforce
+# NetworkPolicy, or to add defence in depth, run NATS with authentication and
+# TLS — the Helm chart does both (nats.auth, nats.tls) — and set EDDI_NATS_USERNAME
+# / EDDI_NATS_PASSWORD (or EDDI_NATS_CREDS_FILE) in eddi-secrets.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
@@ -33,8 +34,8 @@ resources:
   - nats-statefulset.yaml
   - nats-service.yaml
   - nats-networkpolicy.yaml
+  - nats-pdb.yaml
 
-# Patch EDDI to use NATS instead of in-memory messaging
 patches:
   - target:
       kind: ConfigMap
@@ -43,6 +44,54 @@ patches:
       - op: replace
         path: /data/EDDI_MESSAGING_TYPE
         value: "nats"
+      # All three servers: the client fails over without waiting for DNS.
       - op: add
         path: /data/EDDI_NATS_URL
-        value: "nats://nats:4222"
+        value: "nats://nats-0.nats:4222,nats://nats-1.nats:4222,nats://nats-2.nats:4222"
+      # R3 buckets and streams: they survive the loss of one NATS node.
+      - op: add
+        path: /data/EDDI_NATS_REPLICAS
+        value: "3"
+      # A terminating pod lets its running turns finish (65 s), inside the
+      # 75 s termination grace set below.
+      - op: add
+        path: /data/EDDI_SHUTDOWN_DRAIN_TIMEOUT_SECONDS
+        value: "65"
+  - target:
+      kind: Deployment
+      name: eddi
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      # A rolling update is safe in cluster mode: the old and the new pod
+      # coordinate through NATS like any two replicas.
+      - op: replace
+        path: /spec/strategy
+        value:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+      - op: replace
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 75
+      # Each replica's node id is its pod name: unique, and stable for the
+      # pod's lifetime.
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: EDDI_CLUSTER_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+      - op: add
+        path: /spec/template/spec/topologySpreadConstraints
+        value:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: eddi
+                app.kubernetes.io/component: server

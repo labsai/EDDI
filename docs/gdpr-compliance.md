@@ -74,13 +74,18 @@ principal, not a user: erasing or exporting it is refused with 400.
    running conversation turns are cancelled (they then skip their write-back to
    user memory and their snapshot is discarded) and running group discussions are
    cancelled immediately. Without this, a turn or discussion still running wrote
-   the data back seconds after the erasure reported success. Work running on
-   another replica is not reachable from here; it is stopped by the stores
-   refusing to recreate a deleted conversation or group discussion, and step 12
-   removes any memory it managed to write in the meantime. From this point the
+   the data back seconds after the erasure reported success. In cluster mode
+   (`eddi.messaging.type=nats`, see [Clustering](clustering.md)) the stop is also
+   sent to every other replica — keyed by a hash of the user id, never the id
+   itself — and the user's dead letters are removed. Work a replica cannot be
+   reached for (NATS down) is stopped by the stores refusing to recreate a
+   deleted conversation or group discussion, and step 12 removes any memory it
+   managed to write in the meantime. From this point the
    node's audit ledger also writes the user's pseudonym instead of their id for an
    hour (the keyed pseudonym v5 rows carry, whenever the ledger signs), so audit entries that cancelled work still flushes while it unwinds — or
-   that were already queued — do not land raw after step 14.
+   that were already queued — do not land raw after step 14. In cluster mode every
+   replica that answers the stop does the same before it replies, so its late
+   entries are covered too; see [Clustering](clustering.md#residual-limitations).
 1. User memories — **permanently deleted**
 2. Binary attachments of the user's conversations — **permanently deleted**
 3. HITL tool execution journal entries — **permanently deleted**
@@ -192,13 +197,14 @@ The cost of that default is one indexed lookup per turn.
 
 Setting the property above `0` switches on a **node-local** cache with that TTL.
 `restrict`/`unrestrict` publish through it, so the node serving the admin call applies the
-change on the very next turn — but there is no cross-node invalidation, so **any other node
-keeps answering "not restricted" from its own cache until the TTL expires**, and for the same
-reason keeps answering from cache during a store outage instead of failing closed. A cached
-negative verdict is a suspended Art. 18 legal control, which is why it is not the default.
+change on the very next turn. In cluster mode the eviction is also sent to every other node, but
+an event can be lost while NATS is unreachable, and then **another node keeps answering "not
+restricted" from its own cache until the TTL expires** — and every node keeps answering from
+cache during a store outage instead of failing closed. A cached negative verdict is a suspended
+Art. 18 legal control, which is why it is not the default.
 
-- **Multi-replica without conversation affinity** — keep the default (`0`). This is the only
-  safe setting there until cluster-wide invalidation exists.
+- **Several replicas** — keep the default (`0`), cluster mode included: cross-node invalidation
+  is best-effort while NATS is unreachable.
 - **Single node, or a cluster with conversation affinity** — every turn of a conversation and
   every admin call reach the same node, which is what makes the explicit invalidation
   sufficient. Setting e.g. `eddi.gdpr.restriction-cache-ttl-seconds=30` there buys back the
@@ -266,8 +272,9 @@ EDDI provides no application-level audit purge.
 ### The audit dead-letter sink holds personal data, and erasure does not reach it
 
 When the ledger cannot persist an entry it writes that entry to the dead-letter
-sink — NATS JetStream when a connection is available, otherwise the JSONL file
-at `eddi.audit.dead-letter-path` (default
+sink — in cluster mode the `eddi.<prefix>.dlq.audit` subject of the JetStream
+dead-letter stream while NATS takes it, otherwise the JSONL file at
+`eddi.audit.dead-letter-path` (default
 `/opt/eddi/data/eddi-audit-deadletter.jsonl`). **The record is the whole audit
 entry**: the `userId`, the verbatim prompt and response, the LLM detail and the
 tool calls, plus the HMAC and agent signature. It has to be, or a dropped entry
@@ -283,16 +290,22 @@ because preserving the entry is the whole point of the sink.
 
 As the controller you must therefore:
 
-- [ ] Treat `eddi.audit.dead-letter-path` (and the `eddi.deadletter.audit`
-      JetStream subject) as an audit-data location in your record of processing
+- [ ] Treat `eddi.audit.dead-letter-path` (and, in cluster mode, the
+      `eddi.<prefix>.dlq.audit` JetStream subject) as an audit-data location in your record of processing
       activities, with the same access controls and encryption at rest as the
       ledger itself.
 - [ ] Include it in the erasure procedure: either replay and truncate it once
       the store is healthy again, or pseudonymize the affected records by hand.
-      `eddi_audit_entries_dropped_total` tells you whether the sink has ever
-      been written to; a zero counter and an absent file mean there is nothing
-      to do.
-- [ ] Give it a retention period. As with the ledger, EDDI never expires it.
+      `eddi_audit_entries_dropped_total` counts per process and starts at zero
+      on every restart, so a zero value does not prove the sink is empty. Check
+      the JSONL file on every node and, in cluster mode, the
+      `eddi.<prefix>.dlq.audit` subject of the dead-letter stream
+      (`nats stream subjects <prefix>_DEAD_LETTERS`) before concluding there is
+      nothing to do.
+- [ ] Give the JSONL file a retention period: as with the ledger, EDDI never
+      expires it. The JetStream stream is different: it drops its entries after
+      `eddi.coordinator.dead-letter.max-age` (default `7d`), whether or not they
+      were replayed, and it is their only copy — replay within that window.
 
 A non-empty dead-letter sink is an incident, not a steady state — see
 [Incident Response](incident-response.md).

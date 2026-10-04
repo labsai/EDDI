@@ -198,7 +198,7 @@ on one does not work by design — and are composed with a database overlay.
 | Component | Description | Helm Values |
 |---|---|---|
 | **Keycloak Auth** | OIDC authentication — ⚠️ Kustomize needs the `keycloak-admin` Secret created first, see [Authentication](#authentication-keycloak) | `--set keycloak.enabled=true --set eddi.oidc.enabled=true --set eddi.oidc.publicUrl=http://localhost:8080 --set keycloak.adminPassword=…` |
-| **NATS JetStream** | Durable, ordered messaging | ⚠️ needs an image built with `-Dquarkus.profile=nats` — see [Durable Messaging](#durable-messaging-production) |
+| **NATS JetStream** | Cluster mode: 3-node JetStream cluster + 3 EDDI replicas — see [Scaling](#scaling) | `--set eddi.messagingType=nats --set eddi.replicas=3 --set nats.enabled=true --set nats.auth.password=… --set nats.cluster.routePassword=…` |
 | **Monitoring** | Prometheus + Grafana | — (Kustomize only: `k8s/overlays/monitoring/`) |
 | **Ingress** | External HTTPS access | `--set ingress.enabled=true --set ingress.hosts[0].host=eddi.example.com` |
 | **Production** | PDB, NetworkPolicy | `--set podDisruptionBudget.enabled=true --set networkPolicy.enabled=true` |
@@ -291,12 +291,12 @@ kubectl apply -k k8s/examples/postgres-ha/
     │  (labsai/eddi:6.4.0) │    │ StatefulSet │
     │                      │    └─────────────┘
     │  replicas: 1         │    ┌─────────────┐
-    │  (single-writer)     │───▶│ PostgreSQL  │
+    │  (N with NATS)       │───▶│ PostgreSQL  │
     └──────────────────────┘    │ StatefulSet │
                │                └─────────────┘
     ┌──────────▼──────────┐
-    │   NATS JetStream     │  (optional, durable ordering)
-    │   StatefulSet        │
+    │   NATS JetStream     │  (cluster mode: leases, shared
+    │   StatefulSet (×3)   │   state, events, dead letters)
     └──────────────────────┘
 ```
 
@@ -398,10 +398,11 @@ than coming up with a known password. Helm asks for the same value as
 `keycloak.adminPassword`, which `required` refuses to default.
 
 **2. Give the `eddi` account a password after the first boot.** The realm seeds
-it with the `eddi-admin` and `eddi-editor` roles and **no credential**, so it
-cannot be logged into until you set one: admin console → *Users* → `eddi` →
-*Credentials* → *Set password*. Or grant those two realm roles to an account you
-create yourself and leave `eddi` unused.
+it with the `eddi-admin`, `eddi-editor` and `eddi-viewer` roles and **no
+credential**, so it cannot be logged into until you set one: admin console →
+*Users* → `eddi` → *Credentials* → *Set password*. Or grant those realm roles to
+an account you create yourself and leave `eddi` unused. The realm also seeds
+`viewer` (`eddi-viewer`) and `user` (`eddi-user`), likewise without credentials.
 
 The unprivileged fixtures `viewer` (`eddi-viewer`) and `user` (`eddi-user`) are
 opt-in the same way: they ship with their roles and **no password**, so they
@@ -563,46 +564,75 @@ The datastores carry their own ingress policies — see
 
 ## Scaling
 
-### Single Replica (default)
+### Single replica (default)
 
-Default configuration uses in-memory messaging — suitable for development and low-traffic deployments.
+The default, `eddi.messaging.type=in-memory`, runs **exactly one replica**: the turns
+of a conversation are serialised with a JVM-local lock, and replay nonces, rate limits
+and caches live in the JVM. The Helm chart refuses `eddi.replicas` above 1,
+`autoscaling.enabled=true` and `eddi.updateStrategy=RollingUpdate` in this mode, and
+rolls out with `Recreate` so two JVMs never share the database. Scale **vertically**
+via `eddi.resources`.
 
-### Durable Messaging (production)
+### Cluster mode (horizontal scaling)
 
-EDDI runs at **exactly one replica**. It serialises the turns of a conversation with
-a JVM-local lock, so a second replica silently drops turns — the Helm chart refuses
-to render with `eddi.replicas` above 1 or `autoscaling.enabled=true`, and every
-shipped manifest pins `replicas: 1`. NATS JetStream is a durable ordering and
-dead-lettering primitive, not a scale-out enabler: the Callable still executes in
-the JVM that published it. Scale **vertically** via `eddi.resources`.
+With `eddi.messaging.type=nats` the **published image** runs as a cluster: any number
+of replicas behind the plain round-robin Service, sharing the database and a NATS
+JetStream cluster. Every replica takes a cluster-wide lease per conversation, so the
+turns of one conversation never overlap whichever pod receives them; a pod that lost
+its lease cannot overwrite the turn that ran after it (fencing). Shared security and
+tool state lives in JetStream KV, caches are invalidated on every pod, and cancel,
+GDPR erasure, undeploy and HITL reach the pod that runs the work. When NATS is
+unreachable every pod keeps serving in a documented degraded mode — readiness stays
+UP. The guarantees, the failure modes and the runbook are in
+[Clustering](clustering.md).
 
-> ⚠️ **NATS needs a purpose-built image.** `NatsConversationCoordinator` is gated
-> on `@IfBuildProfile("nats")` — a *build-time* switch — and the published
-> `labsai/eddi` image is built without it. No Java code reads
-> `eddi.messaging.type` at runtime either, so setting it does not swap the
-> coordinator: you get a JetStream StatefulSet with a PVC that EDDI never
-> connects to, and in-memory queues anyway. The Helm chart now refuses to render
-> `eddi.messagingType` other than `in-memory` unless you also set
-> `nats.buildProfileImage=true` to confirm you built the image yourself with
-> `-Dquarkus.profile=nats`; the Kustomize component carries the same warning.
-
-**Kustomize** — production hardening with PostgreSQL (still one replica):
+**Kustomize** — PostgreSQL, production hardening and cluster mode (three EDDI
+replicas, three NATS nodes):
 ```bash
 kubectl apply -k k8s/examples/postgres-ha/
 ```
 
-Add NATS on top only with a `-Dquarkus.profile=nats` image, by listing
-`- ../../overlays/nats` under that example's `components:`.
+The cluster part is the `k8s/overlays/nats` component; list it **after**
+`../../overlays/production`, whose replicas patch it overrides. It restricts the
+NATS ports with NetworkPolicies; for authentication and TLS on NATS itself use the
+Helm chart (or add them to the StatefulSet yourself).
 
-**Helm** — with an image you built with `-Dquarkus.profile=nats`:
+**Helm** — three replicas, an in-chart three-node NATS cluster with authentication,
+and a PodDisruptionBudget:
 ```bash
 helm install eddi ./helm/eddi \
-  --set eddi.image.repository=your-registry/eddi-nats \
-  --set nats.enabled=true \
-  --set nats.buildProfileImage=true \
   --set eddi.messagingType=nats \
+  --set eddi.replicas=3 \
+  --set nats.enabled=true \
+  --set nats.auth.password="$(openssl rand -base64 24)" \
+  --set nats.cluster.routePassword="$(openssl rand -hex 24)" \
+  --set podDisruptionBudget.enabled=true \
   --namespace eddi --create-namespace
 ```
+
+| Value | Default | In cluster mode |
+|---|---|---|
+| `eddi.replicas` | `1` | Any number; omitted while `autoscaling.enabled=true` |
+| `autoscaling.enabled` | `false` | Renders an HPA (`minReplicas` 2, `maxReplicas` 6, CPU 70 %, memory 80 %) |
+| `eddi.updateStrategy` | `""` | Empty picks `RollingUpdate` (maxSurge 1, maxUnavailable 0); in-memory picks `Recreate`. A string, or the Deployment's own strategy object (`{type: RollingUpdate, rollingUpdate: {...}}`) |
+| `networkPolicy.natsEgressTo` | `[]` | With `networkPolicy.enabled` and `nats.externalUrl` the chart opens egress to the URL's port; this narrows the destination (NetworkPolicyPeers) |
+| `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the drain plus 3 s |
+| `eddi.shutdownDrainTimeoutSeconds` | `""` | 65 s: a terminating pod lets its running turns finish |
+| `podDisruptionBudget.*` | off | `minAvailable: 1` when the release never runs fewer than two replicas (`eddi.replicas`, or `autoscaling.minReplicas` while autoscaling), so a drain never takes the last pod; `maxUnavailable: 1` otherwise |
+| `nats.enabled` / `nats.externalUrl` | off / `""` | One of the two is required; both at once is refused |
+| `nats.replicas`, `nats.cluster.enabled` | `3`, `true` | Three routed nodes, R3 buckets and streams |
+| `nats.cluster.routeUsername` / `routePassword` | `route` / `""` | The routes between the NATS nodes authenticate with their own credentials, which client permissions do not cover; `routePassword` is required whenever the in-chart NATS runs more than one node |
+| `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects |
+| `nats.tls.*` | off | Client and route TLS from a `kubernetes.io/tls` Secret you provide |
+
+The first switch of an existing release from in-memory to `nats` should roll out with
+`Recreate` — see [Clustering → Moving from one node to a cluster, and back](clustering.md#moving-from-one-node-to-a-cluster-and-back).
+
+Each replica's node id is its pod name (`EDDI_CLUSTER_NODE_ID`), and the pods are
+spread over nodes and zones. Every path balances freely except `/mcp`: an MCP session
+lives on the replica that opened it, so route `/mcp` with client or cookie affinity on
+your ingress (see [Clustering → Residual limitations](clustering.md#residual-limitations)). `nats.buildProfileImage` from charts before 2.5.0 is no
+longer read — the published image selects cluster mode at runtime.
 
 ## Monitoring
 
@@ -666,7 +696,7 @@ k8s/
 ├── overlays/
 │   ├── mongodb/             # MongoDB backend, authenticated (standalone)
 │   ├── postgres/            # PostgreSQL backend (standalone; postgres-secret.yaml.example)
-│   ├── nats/                # NATS JetStream (component)
+│   ├── nats/                # Cluster mode: 3-node NATS + 3 EDDI replicas (component)
 │   ├── auth/                # Keycloak + realm import (component)
 │   ├── monitoring/          # Prometheus + Grafana (component)
 │   ├── ingress/             # Ingress resource (component)
@@ -700,7 +730,7 @@ helm/
 This is the most likely first-run symptom. `kubectl describe pod` shows:
 
 ```
-MountVolume.SetUp failed for volume "secrets" :
+MountVolume.SetUp failed for volume "eddi-secrets" :
   secret "eddi-secrets" not found
 ```
 
