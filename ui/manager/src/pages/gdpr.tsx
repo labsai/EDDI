@@ -28,6 +28,11 @@ export function GdprPage() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
+  // The id erasure was requested for, frozen when the dialog opens: it is what
+  // the admin types back to confirm and what is deleted, whatever the lookup
+  // field says afterwards.
+  const [confirmUserId, setConfirmUserId] = useState("");
+  const [confirmTyped, setConfirmTyped] = useState("");
   const [result, setResult] = useState<GdprDeletionResult | null>(null);
   const [exportSummary, setExportSummary] = useState<UserDataExport | null>(null);
 
@@ -86,15 +91,22 @@ export function GdprPage() {
   }, [userId, exportMutation, t]);
 
   const handleDelete = useCallback(() => {
-    if (!userId.trim()) return;
-    deleteMutation.mutate(userId.trim(), {
+    if (!confirmUserId || confirmTyped !== confirmUserId) return;
+    deleteMutation.mutate(confirmUserId, {
       onSuccess: (data) => {
         setResult(data);
         setShowConfirm(false);
+        setConfirmTyped("");
         // A 207 is inside 2xx, so this runs for a partial erasure too — and a
         // green "deleted successfully" over a panel listing failed steps is
         // the message someone repeats to the data subject.
-        if (data.complete) {
+        if (data.complete && isNothingFound(data)) {
+          // A mistyped id "succeeds" with every counter at zero: say so rather
+          // than announcing an erasure that deleted nothing.
+          toast.info(
+            t("gdpr.noDataFoundToast", "No data found for this user id — nothing was deleted."),
+          );
+        } else if (data.complete) {
           toast.success(
             t("gdpr.deleteSuccess", "User data deleted successfully"),
           );
@@ -112,7 +124,7 @@ export function GdprPage() {
         toast.error(error.message);
       },
     });
-  }, [userId, deleteMutation, t]);
+  }, [confirmUserId, confirmTyped, deleteMutation, t]);
 
   const handleToggleRestriction = useCallback(() => {
     if (!userId.trim()) return;
@@ -224,7 +236,11 @@ export function GdprPage() {
 
             <Button
               variant="destructive"
-              onClick={() => setShowConfirm(true)}
+              onClick={() => {
+                setConfirmUserId(userId.trim());
+                setConfirmTyped("");
+                setShowConfirm(true);
+              }}
               disabled={!userId.trim() || deleteMutation.isPending}
               className="gap-2"
               data-testid="gdpr-delete-btn"
@@ -364,7 +380,26 @@ export function GdprPage() {
       )}
 
       {/* Results */}
-      {result && (
+      {result && result.complete && isNothingFound(result) && (
+        <div
+          className="rounded-xl border border-border bg-muted/40 p-6"
+          data-testid="gdpr-no-data"
+        >
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <FileSearch className="h-4 w-4 text-muted-foreground" />
+            {t("gdpr.noDataFoundTitle", "No data found for this user id")}
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(
+              "gdpr.noDataFoundBody",
+              'Nothing was deleted for "{{userId}}". Check the id for typos, then try again.',
+              { userId: result.userId || confirmUserId },
+            )}
+          </p>
+        </div>
+      )}
+
+      {result && !(result.complete && isNothingFound(result)) && (
         <div
           className={`rounded-xl border p-6 space-y-4 ${
             result.complete
@@ -463,20 +498,65 @@ export function GdprPage() {
       {/* Confirm Dialog */}
       <AlertDialog
         open={showConfirm}
-        onOpenChange={setShowConfirm}
+        onOpenChange={(open) => {
+          setShowConfirm(open);
+          if (!open) setConfirmTyped("");
+        }}
         title={t("gdpr.confirmTitle", "Confirm Data Deletion")}
         description={t(
           "gdpr.confirmDesc",
           'This will permanently delete ALL data for user "{{userId}}". This action cannot be undone.',
-          { userId: userId.trim() },
+          { userId: confirmUserId },
         )}
         confirmLabel={t("gdpr.confirmDelete", "Yes, Delete All Data")}
         variant="destructive"
         onConfirm={handleDelete}
         isPending={deleteMutation.isPending}
-      />
+        confirmDisabled={confirmTyped !== confirmUserId}
+      >
+        <div className="space-y-2">
+          <label
+            htmlFor="gdpr-confirm-id"
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            {t("gdpr.confirmTypeLabel", {
+              userId: confirmUserId,
+              defaultValue: `Type the user id "${confirmUserId}" to confirm`,
+            })}
+          </label>
+          <input
+            id="gdpr-confirm-id"
+            type="text"
+            value={confirmTyped}
+            onChange={(e) => setConfirmTyped(e.target.value)}
+            placeholder={confirmUserId}
+            autoComplete="off"
+            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/50"
+            data-testid="gdpr-confirm-input"
+          />
+        </div>
+      </AlertDialog>
     </div>
   );
+}
+
+/** True when the erasure cascade found nothing for the id — every counter it
+ *  reported is zero. Counters an older EDDI omits are ignored, not read as 0. */
+function isNothingFound(r: GdprDeletionResult): boolean {
+  const counters = [
+    r.memoriesDeleted,
+    r.conversationsDeleted,
+    r.conversationMappingsDeleted,
+    r.logsPseudonymized,
+    r.auditEntriesPseudonymized,
+    r.attachmentsDeleted,
+    r.journalEntriesDeleted,
+    r.checkpointsDeleted,
+    r.groupConversationsDeleted,
+    r.sharedArtifactsDeleted,
+    r.schedulesDeleted,
+  ].filter((v): v is number => typeof v === "number");
+  return counters.length > 0 && counters.every((v) => v === 0);
 }
 
 /**

@@ -114,6 +114,7 @@ describe("GDPR Privacy Admin Page", () => {
       expect(screen.getByText(/Confirm Data Deletion/i)).toBeInTheDocument();
     });
 
+    await user.type(screen.getByTestId("gdpr-confirm-input"), "user-123");
     const confirmBtn = screen.getByText(/Yes, Delete All Data/i);
     await user.click(confirmBtn);
 
@@ -231,6 +232,7 @@ describe("GDPR Privacy Admin Page", () => {
       expect(screen.getByText(/Confirm Data Deletion/i)).toBeInTheDocument();
     });
 
+    await user.type(screen.getByTestId("gdpr-confirm-input"), "user-123");
     const confirmBtn = screen.getByText(/Yes, Delete All Data/i);
     await user.click(confirmBtn);
 
@@ -258,6 +260,7 @@ describe("GDPR Privacy Admin Page", () => {
     await waitFor(() => {
       expect(screen.getByText(/Confirm Data Deletion/i)).toBeInTheDocument();
     });
+    await user.type(screen.getByTestId("gdpr-confirm-input"), userId);
     await user.click(screen.getByText(/Yes, Delete All Data/i));
     await waitFor(() => {
       expect(screen.getByTestId("gdpr-results")).toBeInTheDocument();
@@ -562,6 +565,7 @@ describe("GDPR Privacy Admin Page", () => {
       expect(screen.getByText(/Confirm Data Deletion/i)).toBeInTheDocument();
     });
 
+    await user.type(screen.getByTestId("gdpr-confirm-input"), "user-123");
     await user.click(screen.getByText(/Yes, Delete All Data/i));
 
     await waitFor(() => {
@@ -588,8 +592,60 @@ describe("GDPR Privacy Admin Page", () => {
     await user.click(screen.getByTestId("gdpr-delete-btn"));
 
     await waitFor(() => {
-      expect(screen.getByText(/test-user-abc/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/permanently delete ALL data for user "test-user-abc"/)
+      ).toBeInTheDocument();
     });
+  });
+
+  it("keeps the erasure button disabled until the user id is typed back, and deletes the confirmed id", async () => {
+    let deletedId = "";
+    server.use(
+      http.delete("*/admin/gdpr/:userId", ({ params }) => {
+        deletedId = String(params.userId);
+        return HttpResponse.json({ userId: params.userId, memoriesDeleted: 2, failedSteps: [], complete: true });
+      })
+    );
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("gdpr-user-id"), "test-user-abc");
+    await user.click(screen.getByTestId("gdpr-delete-btn"));
+
+    const confirm = await screen.findByRole("button", { name: /Yes, Delete All Data/i });
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByTestId("gdpr-confirm-input"), "test-user-ab");
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByTestId("gdpr-confirm-input"), "c");
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+
+    await waitFor(() => expect(deletedId).toBe("test-user-abc"));
+  });
+
+  it("shows a neutral 'no data found' panel, not 'Erasure Complete', when every counter is zero", async () => {
+    server.use(
+      http.delete("*/admin/gdpr/:userId", ({ params }) =>
+        HttpResponse.json({
+          userId: params.userId,
+          memoriesDeleted: 0,
+          conversationsDeleted: 0,
+          conversationMappingsDeleted: 0,
+          logsPseudonymized: 0,
+          auditEntriesPseudonymized: 0,
+          failedSteps: [],
+          complete: true,
+        })
+      )
+    );
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("gdpr-user-id"), "typo-user");
+    await user.click(screen.getByTestId("gdpr-delete-btn"));
+    await user.type(await screen.findByTestId("gdpr-confirm-input"), "typo-user");
+    await user.click(screen.getByRole("button", { name: /Yes, Delete All Data/i }));
+
+    expect(await screen.findByTestId("gdpr-no-data")).toBeInTheDocument();
+    expect(screen.queryByText("Erasure Complete")).not.toBeInTheDocument();
   });
 
   // ─── Restriction status could not be read ───────────────────────────────
