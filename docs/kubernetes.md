@@ -198,7 +198,7 @@ on one does not work by design — and are composed with a database overlay.
 | Component | Description | Helm Values |
 |---|---|---|
 | **Keycloak Auth** | OIDC authentication — ⚠️ Kustomize needs the `keycloak-admin` Secret created first, see [Authentication](#authentication-keycloak) | `--set keycloak.enabled=true --set eddi.oidc.enabled=true --set eddi.oidc.publicUrl=http://localhost:8080 --set keycloak.adminPassword=…` |
-| **NATS JetStream** | Cluster mode: 3-node JetStream cluster + 3 EDDI replicas — see [Scaling](#scaling) | `--set eddi.messagingType=nats --set eddi.replicas=3 --set nats.enabled=true --set nats.auth.password=…` |
+| **NATS JetStream** | Cluster mode: 3-node JetStream cluster + 3 EDDI replicas — see [Scaling](#scaling) | `--set eddi.messagingType=nats --set eddi.replicas=3 --set nats.enabled=true --set nats.auth.password=… --set nats.cluster.routePassword=…` |
 | **Monitoring** | Prometheus + Grafana | — (Kustomize only: `k8s/overlays/monitoring/`) |
 | **Ingress** | External HTTPS access | `--set ingress.enabled=true --set ingress.hosts[0].host=eddi.example.com` |
 | **Production** | PDB, NetworkPolicy | `--set podDisruptionBudget.enabled=true --set networkPolicy.enabled=true` |
@@ -605,6 +605,7 @@ helm install eddi ./helm/eddi \
   --set eddi.replicas=3 \
   --set nats.enabled=true \
   --set nats.auth.password="$(openssl rand -base64 24)" \
+  --set nats.cluster.routePassword="$(openssl rand -hex 24)" \
   --set podDisruptionBudget.enabled=true \
   --namespace eddi --create-namespace
 ```
@@ -617,9 +618,10 @@ helm install eddi ./helm/eddi \
 | `networkPolicy.natsEgressTo` | `[]` | With `networkPolicy.enabled` and `nats.externalUrl` the chart opens egress to the URL's port; this narrows the destination (NetworkPolicyPeers) |
 | `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the drain plus 3 s |
 | `eddi.shutdownDrainTimeoutSeconds` | `""` | 65 s: a terminating pod lets its running turns finish |
-| `podDisruptionBudget.*` | off | `minAvailable: 1` with more than one replica, so a drain never takes the last pod |
+| `podDisruptionBudget.*` | off | `minAvailable: 1` when the release never runs fewer than two replicas (`eddi.replicas`, or `autoscaling.minReplicas` while autoscaling), so a drain never takes the last pod; `maxUnavailable: 1` otherwise |
 | `nats.enabled` / `nats.externalUrl` | off / `""` | One of the two is required; both at once is refused |
 | `nats.replicas`, `nats.cluster.enabled` | `3`, `true` | Three routed nodes, R3 buckets and streams |
+| `nats.cluster.routeUsername` / `routePassword` | `route` / `""` | The routes between the NATS nodes authenticate with their own credentials, which client permissions do not cover; `routePassword` is required whenever the in-chart NATS runs more than one node |
 | `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects |
 | `nats.tls.*` | off | Client and route TLS from a `kubernetes.io/tls` Secret you provide |
 

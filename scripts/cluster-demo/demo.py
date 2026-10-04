@@ -223,7 +223,7 @@ class Infra:
         conf = os.path.join(HERE, "nginx-demo.conf")
         sh("docker", "rm", "-f", f"{P}-lb")
         sh("docker", "run", "-d", "--name", f"{P}-lb", "--network", NET, "--memory", "64m",
-           "-p", f"127.0.0.1:{LB_PORT}:7230", "-v", f"{conf}:/etc/nginx/nginx.conf:ro", "nginx:1.27-alpine", check=True)
+           "-p", f"127.0.0.1:{LB_PORT}:7230", "-v", f"{conf}:/etc/nginx/nginx.conf:ro", "nginx:1.27.3-alpine", check=True)
 
     def start_mock(self):
         if os.path.exists(MOCK_LOG):
@@ -806,7 +806,7 @@ def main():
     ap.add_argument("--baseline", action="store_true", help="stock image, no cluster mode (scenario 14)")
     ap.add_argument("--keep", action="store_true", help="leave the stack running")
     ap.add_argument("--external-mock", action="store_true", help="the mock LLM is already running on 18210")
-    ap.add_argument("--reuse", action="store_true", help="run against a stack left by --keep (mock LLM started separately)")
+    ap.add_argument("--reuse", action="store_true", help="run against the stack left by --keep instead of starting one; a fresh agent is set up, and the mock LLM must already run")
     args = ap.parse_args()
     if not args.baseline and not args.app:
         ap.error("--app (or EDDI_APP) is required: without it the nodes would run the stock image")
@@ -815,9 +815,7 @@ def main():
     suffix = "-baseline" if args.baseline else ("-s" + args.only.replace(",", "_") if args.only else "")
     out = os.path.join(HERE, f"results-{args.db}{suffix}.json")
     try:
-        if args.reuse:
-            ctx_file = os.path.join(HERE, "ctx.json")
-        else:
+        if not args.reuse:
             infra.up()
         ctx = {"llm": setup_llm_agent(NODES[0], f"p11-llm-{int(time.time())}", "sk-demo-0123456789")}
         wait_ready_everywhere(ctx["llm"])

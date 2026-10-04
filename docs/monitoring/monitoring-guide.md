@@ -251,7 +251,7 @@ groups:
           severity: warning
         annotations:
           summary: "Dead-lettered conversation tasks detected"
-          description: "{{ $value }} tasks have been dead-lettered after exhausting retries"
+          description: "{{ $value }} conversation turns were dead-lettered in the last 10 minutes"
 
       - alert: EddiHighToolFailureRate
         expr: rate(eddi_tool_execution_failure_total[5m]) > 1

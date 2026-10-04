@@ -22,7 +22,7 @@ the shipped runtime. Nothing is published beyond `127.0.0.1`.
 ## Run it
 
 Needs Docker, Python 3.10+ and a build of this checkout. It pulls `labsai/eddi:6.5.0`,
-`nats:2.11-alpine`, `natsio/nats-box:0.16.0`, `nginx:1.27-alpine` and `mongo:7.0.14` or
+`nats:2.11-alpine`, `natsio/nats-box:0.16.0`, `nginx:1.27.3-alpine` (1.27.3 or later: older nginx refuses the `resolve` upstreams) and `mongo:7.0.14` or
 `postgres:16-alpine`; the host needs about 5 GB of free memory.
 
 ```bash

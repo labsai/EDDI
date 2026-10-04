@@ -83,7 +83,9 @@ principal, not a user: erasing or exporting it is refused with 400.
    managed to write in the meantime. From this point the
    node's audit ledger also writes the user's pseudonym instead of their id for an
    hour (the keyed pseudonym v5 rows carry, whenever the ledger signs), so audit entries that cancelled work still flushes while it unwinds — or
-   that were already queued — do not land raw after step 14.
+   that were already queued — do not land raw after step 14. In cluster mode every
+   replica that answers the stop does the same before it replies, so its late
+   entries are covered too; see [Clustering](clustering.md#residual-limitations).
 1. User memories — **permanently deleted**
 2. Binary attachments of the user's conversations — **permanently deleted**
 3. HITL tool execution journal entries — **permanently deleted**
