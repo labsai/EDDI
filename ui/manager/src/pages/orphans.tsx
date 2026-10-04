@@ -311,7 +311,7 @@ export function OrphansPage() {
                     opened the purge-ALL confirmation — a selection the server never
                     receives. A client-side per-resource delete would skip that
                     re-check, so the selection is gone rather than faked. */}
-                {report.totalOrphans > 0 && isScanComplete(report) && (
+                {report.totalOrphans > 0 && isScanComplete(report) && !scanFailed && (
                   <>
                     <button
                       onClick={() => setShowPurgeConfirm(true)}
@@ -435,7 +435,9 @@ export function OrphansPage() {
         confirmLabel={t("orphans.purge", "Purge All")}
         onConfirm={handlePurge}
         isPending={purge.isPending}
-        confirmDisabled={purgeConfirmText.trim() !== String(report?.orphans.length ?? 0)}
+        confirmDisabled={
+          scanFailed || purgeConfirmText.trim() !== String(report?.orphans.length ?? 0)
+        }
       >
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">

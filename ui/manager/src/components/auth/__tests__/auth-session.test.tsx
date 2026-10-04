@@ -80,4 +80,32 @@ describe("AuthProvider — failure handling", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Sign in again" })).toBeEnabled());
   });
+
+  it("takes the banner down once a refresh succeeds again", async () => {
+    const url = `${window.location.origin}/agentstore/agents`;
+    let fail = true;
+    server.use(
+      http.get(url, () =>
+        fail ? new HttpResponse(null, { status: 401 }) : HttpResponse.json({}),
+      ),
+    );
+    let refreshOk = false;
+    kc.updateToken.mockImplementation(async (minValidity: number) => {
+      if (minValidity === -1 && !refreshOk) throw new Error("transient");
+      return true;
+    });
+    renderProvider();
+    await screen.findByTestId("app");
+    await expect(api.get("/agentstore/agents")).rejects.toMatchObject({ status: 401 });
+    await screen.findByTestId("session-expired-banner");
+
+    fail = false;
+    refreshOk = true;
+    await api.get("/agentstore/agents");
+    await api.get("/agentstore/agents");
+    // a successful pre-flight refresh (updateToken(30)) clears it
+    await waitFor(() =>
+      expect(screen.queryByTestId("session-expired-banner")).not.toBeInTheDocument(),
+    );
+  });
 });

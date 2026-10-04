@@ -653,6 +653,27 @@ describe("DashboardPage — failure and loading states", () => {
     expect(screen.getByTestId("refetch-error-notice")).toBeInTheDocument();
   });
 
+  it("announces a failed count as unavailable, not zero", () => {
+    mockUseDashboardStats.mockReturnValue({
+      data: { agentCount: 5, workflowCount: 0, conversationCount: 42, resourceCount: 0, failed: ["workflows"] },
+      isLoading: false,
+    });
+    renderWithProviders(<DashboardPage />);
+    expect(screen.getByRole("link", { name: "Workflows: Could not be loaded" })).toBeInTheDocument();
+  });
+
+  it("flags a failed refetch while the last counts stay on screen", () => {
+    mockUseDashboardStats.mockReturnValue({
+      data: { agentCount: 5, workflowCount: 3, conversationCount: 42, resourceCount: 0 },
+      isLoading: false,
+      isError: true,
+      refetch: vi.fn(),
+    });
+    renderWithProviders(<DashboardPage />);
+    expect(screen.getByTestId("refetch-error-notice")).toBeInTheDocument();
+    expect(screen.getByTestId("stat-value-agents")).toHaveTextContent("5");
+  });
+
   it("renders the error, with its cause, when every count failed", () => {
     mockUseDashboardStats.mockReturnValue({
       data: undefined,

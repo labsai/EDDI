@@ -91,7 +91,7 @@ export function AlertDialog({
               variant="outline"
               className="flex-1"
               onClick={() => onOpenChange(false)}
-              disabled={isPending}
+              disabled={isPending && lockWhilePending}
               data-testid="alert-dialog-cancel"
             >
               {cancelLabel ?? t("common.cancel", "Cancel")}

@@ -224,7 +224,7 @@ export function DashboardPage() {
       <OperatorDiscoveryCard />
 
       {/* Stats cards */}
-      {stats?.failed && stats.failed.length > 0 && (
+      {stats?.failed && stats.failed.length > 0 ? (
         <RefetchErrorNotice
           onRetry={() => void refetchStats?.()}
           message={t(
@@ -232,6 +232,9 @@ export function DashboardPage() {
             "Some counts could not be loaded — they are shown as unavailable, not zero.",
           )}
         />
+      ) : (
+        // A failed refetch keeps the last good counts on screen; say they are stale.
+        statsError && stats && <RefetchErrorNotice onRetry={() => void refetchStats?.()} />
       )}
       {statsError && !stats ? (
         <div data-tour="dashboard-stats">
@@ -260,7 +263,7 @@ export function DashboardPage() {
               // rather than presenting the page size as the total.
               const shown = `${stat.value.toLocaleString()}${stat.capped ? "+" : ""}`;
               return (
-              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${shown}`}>
+              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${stat.failed ? t("dashboard.countUnavailable", "Could not be loaded") : shown}`}>
                 <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0">
                   {/* Gradient background */}
                   <div className={cn("absolute inset-0 bg-linear-to-br opacity-0 transition-opacity group-hover:opacity-100", stat.gradient)} />

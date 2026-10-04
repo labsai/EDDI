@@ -32,6 +32,22 @@ describe("AlertDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("keeps Cancel usable while pending when the dialog opted out of locking", () => {
+    renderWithProviders(
+      <AlertDialog
+        open
+        onOpenChange={vi.fn()}
+        title="t"
+        description="d"
+        onConfirm={vi.fn()}
+        isPending
+        lockWhilePending={false}
+      />,
+    );
+    expect(screen.getByTestId("alert-dialog-cancel")).toBeEnabled();
+    expect(screen.getByTestId("alert-dialog-confirm")).toBeDisabled();
+  });
+
   it("ignores Escape and the X while the action is pending", async () => {
     const user = userEvent.setup();
     const onOpenChange = renderDialog({ isPending: true });

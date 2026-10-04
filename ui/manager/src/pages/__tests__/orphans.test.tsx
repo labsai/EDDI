@@ -182,6 +182,23 @@ describe("OrphansPage", () => {
     );
   });
 
+  it("withdraws Purge All when a rescan fails, so a stale report cannot be purged", async () => {
+    renderOrphans();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("scan-button"));
+    await waitFor(() => expect(screen.getByTestId("purge-button")).toBeInTheDocument());
+
+    server.use(
+      http.get("*/administration/orphans", () =>
+        HttpResponse.json({ message: "down" }, { status: 503 }),
+      ),
+    );
+    await user.click(screen.getByTestId("scan-button"));
+
+    await waitFor(() => expect(screen.getByTestId("refetch-error-notice")).toBeInTheDocument());
+    expect(screen.queryByTestId("purge-button")).not.toBeInTheDocument();
+  });
+
   it("shows an error, not the empty 'scan your platform' state, when the scan fails", async () => {
     server.use(
       http.get("*/administration/orphans", () =>

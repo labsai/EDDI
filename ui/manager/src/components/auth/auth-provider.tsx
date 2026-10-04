@@ -101,6 +101,9 @@ function KeycloakAuthProvider({
           if (keycloak.idToken) {
             idTokenRef.current = keycloak.idToken;
           }
+          // A refresh that works again (a transient failure, a retry) means the
+          // session is alive: take the expired banner down.
+          setSessionExpired(false);
           return true;
         };
         const refresh = async (force: boolean) => {
