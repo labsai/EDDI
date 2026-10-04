@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -24,9 +23,15 @@ import { toast } from "sonner";
  *    records the most recent pick; an older completion is discarded rather
  *    than applied.
  */
+/**
+ * The most recent pick, shared by EVERY instance of the hook. The top bar and the
+ * mobile drawer each call it, so a per-instance ref let a slow older request from
+ * one surface apply after a newer pick made on the other.
+ */
+const latestLanguageRequest: { current: string | null } = { current: null };
+
 export function useLanguageSwitcher() {
   const { t, i18n } = useTranslation();
-  const latestLanguageRequest = useRef<string | null>(null);
 
   /**
    * Switch to `code`, throwing if its bundle did not actually arrive.

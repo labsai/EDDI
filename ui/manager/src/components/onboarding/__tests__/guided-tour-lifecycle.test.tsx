@@ -132,14 +132,25 @@ describe("GuidedTour lifecycle", () => {
     expect(document.body.style.overflow).toBe("");
   });
 
-  it("gives up on a target that never appears instead of staying parked", () => {
+  it("skips a step whose target never appears, and gives up only after the last one", () => {
     vi.useFakeTimers();
     useOnboarding.getState().startChapter("dashboard");
     renderTour();
 
+    // First step (a sidebar target, absent on a phone with the drawer closed):
+    // skipped, not fatal to the whole chapter.
     act(() => {
       vi.advanceTimersByTime(8001);
     });
+    expect(useOnboarding.getState().activeChapter).toBe("dashboard");
+    expect(useOnboarding.getState().currentStep).toBe(1);
+
+    // With every target missing it walks off the end and abandons, not completes.
+    for (let i = 0; i < 40 && useOnboarding.getState().activeChapter; i++) {
+      act(() => {
+        vi.advanceTimersByTime(8001);
+      });
+    }
     expect(useOnboarding.getState().activeChapter).toBeNull();
     expect(useOnboarding.getState().completedChapters.has("dashboard")).toBe(false);
   });

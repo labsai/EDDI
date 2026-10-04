@@ -230,12 +230,11 @@ export function ConnectionDetailPage() {
     pendingScope.trim() !== "" ||
     pendingOrigin.trim() !== "";
 
-  // Covers tab close and reload. In-app navigation is guarded explicitly below
-  // — on this page's own two exits, the back link and the linked-accounts link
-  // — because the app uses <BrowserRouter> and React Router's blocker needs the
-  // data router. Leaving by the sidebar or the command palette is not guarded,
-  // here or anywhere else in the app; that is a gap in the router setup rather
-  // than in this page.
+  // Covers tab close and reload (`beforeunload`) AND in-app navigation: the
+  // app-level blocker in NavigationGuardDialog holds any path change, from the
+  // sidebar, the command palette or Back, while this page is dirty. The explicit
+  // `leaveFor` prompt below remains for this page's own two exits (the back link
+  // and the linked-accounts link), where the page confirms before navigating.
   useUnsavedChangesGuard(isDirty);
 
   /** Leave for `to`, asking first when there are unsaved edits. */

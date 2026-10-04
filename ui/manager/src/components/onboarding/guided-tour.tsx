@@ -70,13 +70,17 @@ export function GuidedTour() {
   }, [activeChapter, pathname, abandonChapter]);
 
   // A target that never shows up (a step for a section the page does not render)
-  // must not leave a tour parked invisibly forever. Wait for it, then give up.
+  // must not leave a tour parked invisibly forever. Wait for it, then move on.
   const targetMissing = !!(activeChapter && chapter && step && !targetRect);
   useEffect(() => {
     if (!targetMissing) return;
-    const timer = setTimeout(abandonChapter, TARGET_WAIT_MS);
+    // Skip the step rather than ending the chapter: the first dashboard step
+    // points at the sidebar, which is not rendered on a phone while the drawer
+    // is closed, and abandoning there made the whole tour unavailable on mobile.
+    // Only the last step has nothing left to skip to.
+    const timer = setTimeout(isLastStep ? abandonChapter : nextStep, TARGET_WAIT_MS);
     return () => clearTimeout(timer);
-  }, [targetMissing, safeStep, activeChapter, abandonChapter]);
+  }, [targetMissing, safeStep, activeChapter, isLastStep, nextStep, abandonChapter]);
 
   // Keyboard navigation
   useEffect(() => {
