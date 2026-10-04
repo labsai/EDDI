@@ -19,7 +19,7 @@ const MAX_LOG_ENTRIES = 500;
 const SEED_LIMIT = 50;
 
 const ERROR_LEVELS = new Set(["ERROR", "SEVERE", "FATAL"]);
-/** Minimum quiet time before the error count is read out to assistive tech. */
+/** Longest an unannounced error-count change waits before it is read out to assistive tech. */
 const ERROR_ANNOUNCE_MS = 3000;
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -143,11 +143,25 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
     [logs],
   );
   const [announcedErrors, setAnnouncedErrors] = useState(0);
+  // A trailing throttle, not a debounce: the timer is NOT restarted by further
+  // errors, so a sustained stream is still reported every ERROR_ANNOUNCE_MS
+  // rather than never. It reads the newest count when it fires.
+  const latestErrors = useRef(errorCount);
+  latestErrors.current = errorCount;
+  const announceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (errorCount === announcedErrors) return;
-    const id = setTimeout(() => setAnnouncedErrors(errorCount), ERROR_ANNOUNCE_MS);
-    return () => clearTimeout(id);
+    if (errorCount === announcedErrors || announceTimer.current !== null) return;
+    announceTimer.current = setTimeout(() => {
+      announceTimer.current = null;
+      setAnnouncedErrors(latestErrors.current);
+    }, ERROR_ANNOUNCE_MS);
   }, [errorCount, announcedErrors]);
+  useEffect(
+    () => () => {
+      if (announceTimer.current !== null) clearTimeout(announceTimer.current);
+    },
+    [],
+  );
 
   // Auto-scroll
   useEffect(() => {

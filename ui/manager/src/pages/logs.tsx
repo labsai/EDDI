@@ -152,7 +152,16 @@ export function LogsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab: Tab = searchParams.get("tab") === "history" ? "history" : "live";
   const setActiveTab = (tab: Tab) =>
-    setSearchParams(tab === "history" ? { tab } : {}, { replace: true });
+    setSearchParams(
+      (prev) => {
+        // Only the tab key: the History filters must survive a trip to Live.
+        const next = new URLSearchParams(prev);
+        if (tab === "history") next.set("tab", "history");
+        else next.delete("tab");
+        return next;
+      },
+      { replace: true },
+    );
 
   return (
     <div className="flex h-full flex-col" data-testid="logs-page">
@@ -836,9 +845,14 @@ function LogRow({
   const frameCount = isStacktrace ? countFrames(frames) : 0;
 
   const handleCopy = useCallback(() => {
+    const failed = () => toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
+    if (!navigator.clipboard?.writeText) {
+      failed();
+      return;
+    }
     navigator.clipboard.writeText(logLine(entry)).then(
       () => toast.success(t("logs.copied", "Log entry copied")),
-      () => toast.error(t("common.copyFailed", "Failed to copy to clipboard")),
+      failed,
     );
   }, [entry, t]);
 

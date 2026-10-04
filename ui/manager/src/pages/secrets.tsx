@@ -151,6 +151,13 @@ export function SecretsPage() {
         tenantId === DEFAULT_TENANT
           ? `\${vault:${keyName}}`
           : `\${vault:${tenantId}/${keyName}}`;
+      const failed = () => toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
+      // `navigator.clipboard` is undefined on insecure origins, so writeText can
+      // throw before it returns a promise.
+      if (!navigator.clipboard?.writeText) {
+        failed();
+        return;
+      }
       navigator.clipboard.writeText(ref).then(
         () => {
           toast.success(
@@ -160,7 +167,7 @@ export function SecretsPage() {
             }),
           );
         },
-        () => toast.error(t("common.copyFailed", "Failed to copy to clipboard")),
+        failed,
       );
     },
     [tenantId, t],

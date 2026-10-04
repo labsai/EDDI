@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, render, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
+
+function LocationProbe() {
+  return <span data-testid="loc">{useLocation().search}</span>;
+}
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { LogsPage } from "@/pages/logs";
 import { useLogStream } from "@/hooks/use-logs";
@@ -287,6 +291,25 @@ describe("LogsPage", () => {
     renderLogs();
     await userEvent.setup().type(screen.getByTestId("text-search"), "zzz-nothing");
     expect(screen.getByTestId("live-no-matches")).toBeInTheDocument();
+  });
+
+  it("keeps History filters in the URL when switching tabs", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/manage/logs?tab=history&level=ERROR&agent=agent1"]}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+            <LogsPage />
+            <LocationProbe />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByTestId("tab-live"));
+    expect(screen.getByTestId("loc").textContent).toBe("?level=ERROR&agent=agent1");
+    await user.click(screen.getByTestId("tab-history"));
+    expect(screen.getByTestId("loc").textContent).toContain("tab=history");
+    expect(screen.getByTestId("loc").textContent).toContain("level=ERROR");
   });
 
   it("counts errors and warnings with proper plurals", () => {

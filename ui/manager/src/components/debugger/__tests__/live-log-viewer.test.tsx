@@ -296,6 +296,21 @@ describe("LiveLogViewer", () => {
     });
   });
 
+  it("still announces during a sustained error stream (throttle, not debounce)", async () => {
+    renderWithProviders(
+      <LiveLogViewer agentId="agent-sustained" conversationId={null} />
+    );
+    const announcer = screen.getByTestId("log-error-announcer");
+    // An error every 1s, i.e. never a 3s quiet gap.
+    for (let i = 1; i <= 4; i++) {
+      emit({ ...line(i * 1000, `e${i}`), level: "ERROR" });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 1000));
+      });
+    }
+    expect(announcer.textContent).toMatch(/\d+ errors? in the log/);
+  }, 15000);
+
   it("pause freezes the view but keeps collecting, so resume shows what arrived meanwhile", async () => {
     const user = userEvent.setup();
     renderWithProviders(
