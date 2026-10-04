@@ -124,6 +124,32 @@ export const READ_ENDPOINTS: readonly string[] = [
   // Operations
   "GET /administration/{environment}/deploymentstatus/{agentId}",
   "GET /administration/coordinator/status",
+  // The cluster console's read side (EDDI 6.6+): the health verdict and node
+  // cards, the lease list, the activity timeline, the stuck-conversation
+  // diagnosis and the dead-letter COUNTS. All of them carry ids, counts, states
+  // and timings only — the backend opens them to eddi-viewer for that reason.
+  //
+  // Deliberately NOT granted:
+  // - `GET /administration/cluster/dead-letters` (and the coordinator's
+  //   `/dead-letters` listing): each entry carries the failed turn's captured
+  //   input, i.e. what a user typed. The summary answers "how many, why, where"
+  //   without it.
+  // - Every recovery action (`POST …/leases/{id}/release`, `…/nodes/{id}/drain`
+  //   and `/undrain`, `…/caches/resync`, `…/deployments/reconcile`,
+  //   `…/dead-letters/replay|discard|forward-local`). They are not in
+  //   `planning/operator-write-scope-plan.md`'s write set, and each acts on the
+  //   live cluster rather than on a reviewable config document: the operator
+  //   explains what is wrong and which action the admin should take in the
+  //   console; the admin takes it.
+  //
+  // Like the docs entries below, these raise the backend floor: activation
+  // refuses a spec without them, i.e. an EDDI older than 6.6. The Manager ships
+  // inside the same jar as its backend, so the two move together.
+  "GET /administration/cluster/overview",
+  "GET /administration/cluster/leases",
+  "GET /administration/cluster/activity",
+  "GET /administration/cluster/diagnose/{conversationId}",
+  "GET /administration/cluster/dead-letters/summary",
   "GET /administration/logs",
   "GET /administration/quotas",
   // EDDI's own documentation, served read-only over REST since EDDI 6.2.0
