@@ -38,6 +38,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import java.util.HashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Leases on a shared KV bucket ({@code <prefix>_LEASES} in NATS mode).
@@ -75,12 +77,60 @@ public class KvLeaseManager implements IConversationLeaseManager {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String WAITER_PREFIX = "w.";
     private static final long NOT_CONNECTED_RETRY_MILLIS = 250;
+    /** How many leases of an admin listing are re-read from the stream leader. */
+    static final int CONSISTENT_READS = 500;
 
     /** Core NATS release notifications. */
     public interface LeaseNotifier {
         void publishReleased(String key);
 
         void onReleased(Consumer<String> listener);
+    }
+
+    /** A lease taken over from a holder that had died or restarted. */
+    public interface TakeoverListener {
+        void tookOver(String key, LeaseInfo previousHolder);
+    }
+
+    /** What an admin force-release did. */
+    public enum ForceReleaseOutcome {
+        /** The lease was deleted; the next turn acquires a newer fencing token. */
+        RELEASED,
+        /** Nobody held it (any more). Nothing was changed. */
+        ALREADY_RELEASED,
+        /**
+         * The holder renewed it after the caller looked (it is alive). Nothing was
+         * changed; the current revision is in {@link ForceRelease#currentRevision}.
+         */
+        RENEWED
+    }
+
+    /**
+     * Result of {@link #forceRelease}.
+     *
+     * @param holder
+     *            the holder the lease had, or {@code null}
+     * @param currentRevision
+     *            the revision found ({@code 0} when absent)
+     */
+    public record ForceRelease(ForceReleaseOutcome outcome, LeaseInfo holder, long currentRevision) {
+    }
+
+    /**
+     * A lease as the admin listing shows it.
+     *
+     * @param key
+     *            full lease key ({@code c.<conversationId>}, {@code g.<id>},
+     *            {@code leader.<role>})
+     * @param holder
+     *            holder node, boot, revision and acquisition time
+     * @param renewedAt
+     *            when the current revision was written (server clock), {@code 0}
+     *            when unknown
+     * @param waitingNode
+     *            a node that is waiting for this lease, or {@code null}
+     */
+    public record LeaseSnapshot(String key, LeaseInfo holder, long renewedAt, String waitingNode) {
     }
 
     /** What the lease manager needs to know about the node and its peers. */
@@ -118,6 +168,12 @@ public class KvLeaseManager implements IConversationLeaseManager {
     private record Observation(long revision, long sinceNanos) {
     }
     private volatile boolean shuttingDown;
+    /**
+     * Set by an administrator: no new leases until undrained. Unlike
+     * {@link #shuttingDown} it can be reversed.
+     */
+    private volatile boolean draining;
+    private final List<TakeoverListener> takeoverListeners = new CopyOnWriteArrayList<>();
 
     private final Counter takeovers;
     private final Counter releaseConflicts;
@@ -160,6 +216,10 @@ public class KvLeaseManager implements IConversationLeaseManager {
         if (shuttingDown) {
             waiter.future.completeExceptionally(
                     new LeaseUnavailableException(LeaseUnavailableException.Reason.SHUTTING_DOWN, null, "node is shutting down"));
+            return waiter.future;
+        }
+        if (draining) {
+            waiter.future.completeExceptionally(drainingRefusal());
             return waiter.future;
         }
         waiters.computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet()).add(waiter);
@@ -207,6 +267,14 @@ public class KvLeaseManager implements IConversationLeaseManager {
                 timeout(w);
                 return;
             }
+            // Re-checked here: acquireKey reads the flag before it registers the waiter,
+            // so a drain whose sweep ran in between never sees this waiter. An attempt
+            // already past this check when the drain starts is refused by the sweep, and
+            // grant() hands back the lease of a waiter that is already completed.
+            if (draining) {
+                w.future.completeExceptionally(drainingRefusal());
+                return;
+            }
             long holdBack = w.notBeforeNanos - System.nanoTime();
             if (holdBack > 0) {
                 // Yielding to another node's waiter (handoff grace): a release
@@ -240,6 +308,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
             if (isStale(w.key, info) && kv.delete(w.key, info.revision())) {
                 observed.remove(w.key);
                 takeovers.increment();
+                notifyTakeover(w.key, info);
                 w.takenOver = true;
                 LOGGER.infof("Took over lease %s from %s/%s (holder gone)", sanitize(w.key), info.node(), info.boot());
                 reschedule(w, 0);
@@ -381,7 +450,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
     @Override
     public Optional<LeaseHandle> tryAcquireKey(String key) {
-        if (shuttingDown || !view.isConnected()) {
+        if (shuttingDown || draining || !view.isConnected()) {
             return Optional.empty();
         }
         Held existing = held.get(key);
@@ -397,6 +466,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
                     if (isStale(key, info) && kv.delete(key, info.revision())) {
                         observed.remove(key);
                         takeovers.increment();
+                        notifyTakeover(key, info);
                         revision = kv.create(key, encode(System.currentTimeMillis()));
                     }
                 }
@@ -472,6 +542,136 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
     }
 
+    /**
+     * Drains (or undrains) this node: while draining it acquires no lease — a turn
+     * that arrives here is answered 409 with {@code Retry-After} at once, so the
+     * client retries on another node — and does not lead the HITL recovery. Leases
+     * already held stay held until their turns finish. Turns still waiting for a
+     * lease when the drain starts are answered the same way.
+     */
+    public void setDraining(boolean drain) {
+        draining = drain;
+        if (drain) {
+            for (Set<Waiter> set : new ArrayList<>(waiters.values())) {
+                for (Waiter w : new ArrayList<>(set)) {
+                    w.future.completeExceptionally(drainingRefusal());
+                }
+            }
+        }
+    }
+
+    public boolean isDraining() {
+        return draining;
+    }
+
+    private static LeaseUnavailableException drainingRefusal() {
+        return new LeaseUnavailableException(LeaseUnavailableException.Reason.DRAINING, null,
+                "node is drained by an administrator and takes no new turns");
+    }
+
+    /** Called after every takeover (fast path or expiry-based) this node made. */
+    public void onTakeover(TakeoverListener listener) {
+        takeoverListeners.add(listener);
+    }
+
+    private void notifyTakeover(String key, LeaseInfo previous) {
+        for (TakeoverListener listener : takeoverListeners) {
+            try {
+                listener.tookOver(key, previous);
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Takeover listener failed: %s", e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Administrative release of a lease held by any node.
+     * <p>
+     * Deletes the key by compare-and-set at the revision found (and, when
+     * {@code expectedRevision} is given, only if it still is that one), then wakes
+     * the waiters. Safe because of the fence: the next holder's lease has a higher
+     * revision, which it raises on the conversation before its turn runs, so a
+     * still-alive former holder's late write is refused by the database and
+     * dead-lettered — and that holder's next heartbeat finds the lease gone and
+     * cancels its turn at the next task boundary. Idempotent: an absent lease is
+     * {@link ForceReleaseOutcome#ALREADY_RELEASED}.
+     *
+     * @throws ClusterUnavailableException
+     *             when NATS cannot be reached
+     */
+    public ForceRelease forceRelease(String key, Long expectedRevision) {
+        Optional<ISharedKv.Versioned> current = kv.getConsistent(key);
+        if (current.isEmpty()) {
+            return new ForceRelease(ForceReleaseOutcome.ALREADY_RELEASED, null, 0);
+        }
+        LeaseInfo info = decode(current.get());
+        if (expectedRevision != null && expectedRevision != info.revision()) {
+            return new ForceRelease(ForceReleaseOutcome.RENEWED, info, info.revision());
+        }
+        if (!kv.delete(key, info.revision())) {
+            long now = kv.getConsistent(key).map(ISharedKv.Versioned::revision).orElse(0L);
+            return now == 0
+                    ? new ForceRelease(ForceReleaseOutcome.ALREADY_RELEASED, info, 0)
+                    : new ForceRelease(ForceReleaseOutcome.RENEWED, info, now);
+        }
+        Held local = held.get(key);
+        if (local != null && local.revision == info.revision()) {
+            // Held by this very node: stop its turn now instead of at the next heartbeat.
+            lose(local, "force_released");
+        }
+        try {
+            notifier.publishReleased(key);
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Release notification for %s not sent: %s", sanitize(key), e.getMessage());
+        }
+        LOGGER.warnf("Lease %s of node %s (revision %d) force-released by an administrator", sanitize(key), info.node(), info.revision());
+        return new ForceRelease(ForceReleaseOutcome.RELEASED, info, info.revision());
+    }
+
+    /**
+     * One lease with its renewal time and waiting node, or empty when nobody holds
+     * it.
+     */
+    public Optional<LeaseSnapshot> peekSnapshot(String key) {
+        Optional<ISharedKv.Versioned> current = kv.getConsistent(key);
+        if (current.isEmpty()) {
+            return Optional.empty();
+        }
+        String waiting = kv.getConsistent(WAITER_PREFIX + key).map(m -> new String(m.value(), StandardCharsets.UTF_8)).orElse(null);
+        return Optional.of(new LeaseSnapshot(key, decode(current.get()), current.get().writtenAt(), waiting));
+    }
+
+    /**
+     * Every lease currently in the bucket whose key starts with {@code prefix}, at
+     * most {@code max}, with the node waiting for it where one left a marker.
+     */
+    public List<LeaseSnapshot> snapshot(String prefix, int max) {
+        List<ISharedKv.Entry> all = kv.entries("", Math.max(max, 1) * 2 + 16);
+        Map<String, String> waitingNodes = new HashMap<>();
+        for (ISharedKv.Entry e : all) {
+            if (e.key().startsWith(WAITER_PREFIX)) {
+                waitingNodes.put(e.key().substring(WAITER_PREFIX.length()), new String(e.value().value(), StandardCharsets.UTF_8));
+            }
+        }
+        List<LeaseSnapshot> leases = new ArrayList<>();
+        for (ISharedKv.Entry e : all) {
+            if (e.key().startsWith(WAITER_PREFIX) || (prefix != null && !e.key().startsWith(prefix))) {
+                continue;
+            }
+            if (leases.size() >= max) {
+                break;
+            }
+            // The watch lists the keys; the values are re-read from the stream leader, so a
+            // lagging replica cannot show an old holder or revision. Bounded by `max`.
+            Optional<ISharedKv.Versioned> value = leases.size() < CONSISTENT_READS ? kv.getConsistent(e.key()) : Optional.of(e.value());
+            if (value.isEmpty()) {
+                continue; // released since the watch saw it
+            }
+            leases.add(new LeaseSnapshot(e.key(), decode(value.get()), value.get().writtenAt(), waitingNodes.get(e.key())));
+        }
+        return leases;
+    }
+
     @Override
     public void releaseAll() {
         stopAcquiring();
@@ -544,6 +744,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
                 LeaseInfo info = decode(v.get());
                 if (node.nodeId().equals(info.node()) && !node.bootId().equals(info.boot()) && kv.delete(key, info.revision())) {
                     takeovers.increment();
+                    notifyTakeover(key, info);
                     LOGGER.infof("Released lease %s left by this node's previous boot %s", sanitize(key), info.boot());
                 }
             }

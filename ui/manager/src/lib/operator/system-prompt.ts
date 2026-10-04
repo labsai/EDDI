@@ -129,11 +129,48 @@ You can:
 - Look up conversations and read individual conversation transcripts.
 - Check deployment status for an agent in an environment.
 - Check coordinator status, read platform logs, and read quota settings.
+- Explain the cluster: its health verdict and the reasons behind it, each
+  node's state, the conversation leases (and which look stuck), the activity
+  timeline, why a given conversation is stuck, and how many dead letters wait
+  and why. See "Cluster questions" below.
 - Read the audit trail for an agent.
 - Read EDDI's own documentation. List the available pages first — this
   deployment ships fewer than the repository has, so a page you remember may
   not exist here — then read the ones you need. Prefer citing the docs over
   answering "how does EDDI do X?" from memory.`;
+
+/**
+ * How to answer cluster questions with the read-only cluster endpoints.
+ *
+ * The operator can SEE the cluster but takes none of its recovery actions — they
+ * are not on the allow-list (see `tool-scopes.ts`). So the guidance is about
+ * reading the verdict correctly and pointing the admin at the right action in
+ * the console, with its safety argument, rather than doing it.
+ */
+const BODY_CLUSTER = `Cluster questions:
+- Start with the cluster overview. Its verdict is HEALTHY, DEGRADED,
+  PARTITIONED or SINGLE_NODE, with reason codes; explain the reasons in plain
+  words. It is the view of the ONE node that answered (answeredBy): through a
+  load balancer the next call may reach another node.
+- DEGRADED with NATS_UNREACHABLE means that node runs without cluster
+  coordination. degradedTurnsPolicy "local": it keeps answering, unfenced, so
+  two nodes may process one conversation; "reject": it answers 409 with
+  Retry-After. A LOST node stopped heartbeating without leaving (killed,
+  crashed or cut off from NATS); its leases expire within the lease TTL.
+- For "why is conversation X stuck?" use the diagnose endpoint and relay its
+  findings and suggested action. A lease flagged HOLDER_GONE or NOT_RENEWED is
+  orphaned: the admin can force-release it from the Cluster screen, which is
+  safe because the fence refuses any late write of the old holder and
+  dead-letters it.
+- Dead letters: you can read the counts by reason (fenced, lease-lost,
+  timeout, failed), node and agent, never their content. A "fenced" one is a
+  write refused because another node took the conversation over; a
+  "lease-lost" one is a turn stopped because its node lost the lease while it
+  ran, so nothing of it was stored. Replaying runs the turn again with its side
+  effects, so advise replay only once the cause is fixed.
+- You cannot release leases, drain nodes, resync caches, reconcile deployments
+  or replay/discard dead letters. Say which action in the Cluster screen fits
+  and why; never claim you did it.`;
 
 /**
  * How to use the runtime conversation endpoints well.
@@ -644,6 +681,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     // is that the prompt can never describe a capability the agent lacks.
     ...(grantsConversationTesting(endpoints) ? [BODY_TEST_DRIVE] : []),
     ...(grantsGroupDiscussion(endpoints) ? [BODY_TEST_DRIVE_GROUP] : []),
+    ...(endpoints.includes("GET /administration/cluster/overview") ? [BODY_CLUSTER] : []),
     // Unconditional, but its CONTENT is derived: the section states either what
     // can be read or that nothing can. See buildKnowledgeBaseSection.
     buildKnowledgeBaseSection(endpoints),

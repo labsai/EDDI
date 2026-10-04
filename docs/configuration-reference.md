@@ -93,6 +93,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.degraded.rate-limits` | `local-share` | `local-share`: each node enforces its share of a global tool limit (limit ÷ known members, never looser than configured); `reject`: rate-limited tools are refused |
 | `eddi.cluster.readiness.require-nats` | `false` | `true` reports the node not-ready while degraded. Off by default: a NATS blip must never empty the load balancer |
 | `eddi.cluster.events.max-age` | `1h` | Retention of the cluster event stream. A node disconnected for longer, or that sees a gap, flushes every invalidatable cache |
+| `eddi.cluster.activity.max-age` | `24h` | Retention of the cluster activity timeline (`<prefix>_ACTIVITY` stream, at most 10,000 entries) the cluster console shows: nodes joining and getting lost, lease takeovers, fenced writes, degraded mode, deployments and admin actions |
 | `eddi.cluster.events.outbox-size` | `10000` | Events kept for publishing while NATS is unreachable; on overflow the node asks every node to resync on reconnect |
 | `eddi.cluster.local-cache-ttl` | `60s` | Backstop expiry of node-local caches that events invalidate (agent triggers, user conversations), for an event that was lost anyway |
 | `eddi.cluster.model-cache.max-age` | `15m` | A cached chat model is rebuilt at least this often even while busy, so a rotated key reaches it even if the rotation event was lost |

@@ -23,6 +23,8 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Who is in the cluster right now.
@@ -40,12 +42,14 @@ public class ClusterPresence {
     private static final Logger LOGGER = Logger.getLogger(ClusterPresence.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String KEY_PREFIX = "n.";
+    private static final String LEFT_PREFIX = "left.";
     private static final long MEMBER_CACHE_MILLIS = 3_000;
 
     private final NatsConnectionManager connections;
     private final ISharedKv nodes;
     private final MeterRegistry meterRegistry;
     private final long startedAt = System.currentTimeMillis();
+    private final String host = resolveHost();
     private final List<Supplier<Map<String, Object>>> contributors = new CopyOnWriteArrayList<>();
     private volatile List<Map<String, Object>> cachedMembers = List.of();
     private volatile long cachedAt;
@@ -92,6 +96,7 @@ public class ClusterPresence {
         record.put("node", connections.node().nodeId());
         record.put("boot", connections.node().bootId());
         record.put("version", Optional.ofNullable(ClusterPresence.class.getPackage().getImplementationVersion()).orElse("dev"));
+        record.put("host", host);
         record.put("startedAt", startedAt);
         record.put("updatedAt", System.currentTimeMillis());
         record.put("natsRtt", connections.rttMillis());
@@ -104,6 +109,14 @@ public class ClusterPresence {
             }
         }
         return record;
+    }
+
+    /**
+     * This node's record as it would publish it now, whether or not NATS is
+     * reachable.
+     */
+    public Map<String, Object> selfRecord() {
+        return record();
     }
 
     /**
@@ -177,13 +190,52 @@ public class ClusterPresence {
         });
     }
 
+    /**
+     * Writes this node's record now instead of at the next interval — after a
+     * change an admin should see at once (a drain).
+     */
+    public void publishNow() {
+        connections.scheduler().execute(this::publishSafely);
+    }
+
+    private static String resolveHost() {
+        String env = System.getenv("HOSTNAME");
+        if (env != null && !env.isBlank()) {
+            return env;
+        }
+        try {
+            return InetAddress.getLocalHost().getHostName();
+        } catch (IOException | RuntimeException e) {
+            return "unknown";
+        }
+    }
+
     /** The member count last observed; never below 1 (this node). */
     public int lastKnownMembers() {
         return lastKnownMembers;
     }
 
+    /**
+     * Whether {@code nodeId} in boot {@code boot} announced a clean shutdown (the
+     * marker lives for the bucket's TTL). Unknown — NATS unreachable — is false.
+     */
+    public boolean leftCleanly(String nodeId, String boot) {
+        try {
+            return nodes.get(LEFT_PREFIX + nodeId).map(v -> new String(v.value(), StandardCharsets.UTF_8).equals(boot)).orElse(false);
+        } catch (ClusterUnavailableException e) {
+            return false;
+        }
+    }
+
     /** Removes this node's record — part of a clean shutdown. */
     public void leave() {
+        try {
+            // Said explicitly, so nobody has to guess it from timing: a node whose record
+            // disappears with this marker beside it shut down; without it, it was lost.
+            nodes.put(LEFT_PREFIX + connections.node().nodeId(), connections.node().bootId().getBytes(StandardCharsets.UTF_8));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Leave marker not written: %s", e.getMessage());
+        }
         try {
             nodes.delete(KEY_PREFIX + connections.node().nodeId());
         } catch (RuntimeException e) {

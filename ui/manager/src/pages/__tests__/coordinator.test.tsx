@@ -1,669 +1,568 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { CoordinatorPage } from "@/pages/coordinator";
 import { server } from "@/test/mocks/server";
-import { http, HttpResponse } from "msw";
-import { BearerEventSource } from "@/lib/bearer-event-source";
+import { toast } from "sonner";
+import { addDeadLetter, degradedOverview, resetClusterFixture, SINGLE_NODE_OVERVIEW } from "@/test/mocks/cluster-handlers";
+import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
 
-// Mock BearerEventSource for SSE
+/**
+ * The SSE source is replaced by a handle the test can push events through —
+ * jsdom has no streaming fetch body, and a source that never opens would leave
+ * the "live" behaviour untested.
+ */
+type Listener = (event: MessageEvent) => void;
+const sources: { listeners: Record<string, Listener[]>; onopen: (() => void) | null; onerror: (() => void) | null; close: () => void }[] = [];
 vi.mock("@/lib/bearer-event-source", () => ({
-  BearerEventSource: vi.fn().mockImplementation(() => ({
-    addEventListener: vi.fn(),
-    close: vi.fn(),
-    onmessage: null,
-    onerror: null,
-    onopen: null,
-  })),
+  BearerEventSource: vi.fn().mockImplementation(function () {
+    const source = {
+      listeners: {} as Record<string, Listener[]>,
+      onopen: null as (() => void) | null,
+      onerror: null as (() => void) | null,
+      onexhausted: null as (() => void) | null,
+      addEventListener(type: string, l: Listener) {
+        (this.listeners[type] ??= []).push(l);
+      },
+      close: vi.fn(),
+    };
+    sources.push(source);
+    return source;
+  }),
 }));
 
-function renderCoordinator() {
-  return renderWithProviders(<CoordinatorPage />, {
-    initialRoute: "/manage/coordinator",
+function emit(type: string, data: unknown) {
+  const source = sources[sources.length - 1]!;
+  act(() => {
+    for (const l of source.listeners[type] ?? []) l(new MessageEvent(type, { data: JSON.stringify(data) }));
   });
 }
 
-describe("CoordinatorPage", () => {
-  it("renders the page title", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByText("Coordinator Dashboard")).toBeInTheDocument();
-    });
+const ADMIN: AuthContextValue = { ...GUEST_CONTEXT, method: "keycloak", roles: ["eddi-admin"] };
+const VIEWER: AuthContextValue = { ...GUEST_CONTEXT, method: "keycloak", roles: ["eddi-viewer"] };
+const EDITOR: AuthContextValue = { ...GUEST_CONTEXT, method: "keycloak", roles: ["eddi-editor"] };
+
+function renderConsole(route = "/manage/coordinator", auth: AuthContextValue = ADMIN) {
+  return renderWithProviders(
+    <AuthContext.Provider value={auth}>
+      <CoordinatorPage />
+    </AuthContext.Provider>,
+    { initialRoute: route },
+  );
+}
+
+beforeEach(() => {
+  resetClusterFixture();
+  sources.length = 0;
+});
+
+describe("Cluster console — overview", () => {
+  it("states the verdict in words with its reasons and the next step", async () => {
+    renderConsole();
+    const verdict = await screen.findByTestId("cluster-verdict");
+    expect(verdict).toHaveAttribute("data-verdict", "DEGRADED");
+    expect(screen.getByTestId("cluster-reason-NODE_LOST")).toBeInTheDocument();
+    expect(screen.getByTestId("cluster-next-step")).toHaveTextContent(/lost node/i);
+    expect(screen.getByTestId("cluster-member-count")).toHaveTextContent("2 of 3");
   });
 
-  it("renders page subtitle", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByText(/Monitor conversation processing/)).toBeInTheDocument();
-    });
+  it("marks a lost node and explains what happens to its leases; the leader carries its badge", async () => {
+    renderConsole();
+    const lost = await screen.findByTestId("cluster-node-eddi-3");
+    expect(lost).toHaveAttribute("data-state", "LOST");
+    // Its last heartbeat is older than the lease TTL: its leases have expired already.
+    expect(screen.getByTestId("cluster-node-gone-eddi-3")).toHaveTextContent(/Its leases have expired/);
+    expect(within(screen.getByTestId("cluster-node-eddi-1")).getByText("HITL leader")).toBeInTheDocument();
+    // A gone node cannot be drained.
+    expect(screen.queryByTestId("cluster-drain-eddi-3")).not.toBeInTheDocument();
   });
 
-  it("renders coordinator type card showing NATS JetStream", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByTestId("coordinator-type-card")).toBeInTheDocument();
-      expect(screen.getByText("NATS JetStream")).toBeInTheDocument();
-    });
+  it("shows NATS streams and buckets with their replicas, and the lease epoch", async () => {
+    renderConsole();
+    expect(await screen.findByTestId("cluster-stream-EDDI_DEAD_LETTERS")).toBeInTheDocument();
+    expect(screen.getByTestId("cluster-bucket-LEASES")).toHaveTextContent("20 s");
+    expect(screen.getByTestId("cluster-lease-epoch")).toHaveTextContent("1791045643000000");
   });
 
-  it("renders connection status card with CONNECTED", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByTestId("coordinator-connection-card")).toBeInTheDocument();
-      expect(screen.getByText(/CONNECTED/)).toBeInTheDocument();
-    });
+  it("explains degraded mode with the local policy: unfenced, may overlap", async () => {
+    server.use(http.get("*/administration/cluster/overview", () => HttpResponse.json(degradedOverview("local"))));
+    renderConsole();
+    const banner = await screen.findByTestId("cluster-degraded-banner");
+    expect(banner).toHaveAttribute("data-policy", "local");
+    expect(screen.getByTestId("cluster-degraded-local")).toHaveTextContent(/both may process it/);
+    expect(screen.queryByTestId("cluster-degraded-reject")).not.toBeInTheDocument();
+    // The other node is not "late": this node simply cannot see it. No action is offered on it.
+    expect(screen.getByTestId("cluster-node-eddi-2")).toHaveAttribute("data-state", "UNKNOWN");
+    expect(screen.getByTestId("cluster-node-unknown-eddi-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("cluster-drain-eddi-2")).not.toBeInTheDocument();
   });
 
-  it("renders tasks processed card with count", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      const card = screen.getByTestId("coordinator-processed-card");
-      expect(card).toBeInTheDocument();
-      // The number 142897 is formatted with toLocaleString() — locale-dependent separator
-      expect(within(card).getByText(/142/)).toBeInTheDocument();
-    });
-  });
-
-  it("renders dead-lettered card with count", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      const card = screen.getByTestId("coordinator-dead-letter-card");
-      expect(card).toBeInTheDocument();
-      expect(within(card).getByText("7")).toBeInTheDocument();
-    });
-  });
-
-  it("renders success rate card with percentage", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      const card = screen.getByTestId("coordinator-success-rate-card");
-      expect(card).toBeInTheDocument();
-      expect(card).toHaveTextContent(/%/);
-    });
-  });
-
-  it("renders success rate bar", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByTestId("success-rate-bar")).toBeInTheDocument();
-    });
-  });
-
-  // --- Dead-letter table ---
-
-  it("renders dead-letter table with entries", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByTestId("dead-letters-table")).toBeInTheDocument();
-    });
-  });
-
-  it("renders dead-letter table column headers", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByText("ID")).toBeInTheDocument();
-      expect(screen.getByText("Conversation")).toBeInTheDocument();
-      expect(screen.getByText("Error")).toBeInTheDocument();
-      expect(screen.getByText("Time")).toBeInTheDocument();
-      expect(screen.getByText("Actions")).toBeInTheDocument();
-    });
-  });
-
-  it("shows dead-letter error messages", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      // These match the actual DEAD_LETTERS_MOCK data in handlers.ts
-      expect(screen.getByText("Connection timeout to external API")).toBeInTheDocument();
-    });
-  });
-
-  it("shows dead-letter conversation IDs", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByText("conv-fail-001")).toBeInTheDocument();
-      expect(screen.getByText("conv-fail-002")).toBeInTheDocument();
-    });
-  });
-
-  // --- Replay button verifies API called ---
-
-  it("calls replay API when replay button is clicked", async () => {
-    let replayCalled = false;
+  it("the lease list says why it is empty while NATS is unreachable", async () => {
     server.use(
-      http.post("*/administration/coordinator/dead-letters/:id/replay", () => {
-        replayCalled = true;
-        return new HttpResponse(null, { status: 200 });
-      })
+      http.get("*/administration/cluster/leases", () =>
+        HttpResponse.json({ code: "NATS_UNREACHABLE", message: "NATS is unreachable from this node" }, { status: 409 }),
+      ),
     );
-
-    renderCoordinator();
-    const user = userEvent.setup();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("replay-1")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId("replay-1"));
-
-    await waitFor(() => {
-      expect(replayCalled).toBe(true);
-    });
+    renderConsole("/manage/coordinator?tab=leases");
+    expect(await screen.findByTestId("error-state")).toHaveTextContent(/Leases live in NATS/);
   });
 
-  // --- Discard button now gated behind a confirmation dialog ---
+  it("explains degraded mode with the reject policy: 409 with Retry-After", async () => {
+    server.use(http.get("*/administration/cluster/overview", () => HttpResponse.json(degradedOverview("reject"))));
+    renderConsole();
+    expect(await screen.findByTestId("cluster-degraded-reject")).toHaveTextContent(/409/);
+  });
 
-  it("discard button opens a confirmation dialog and only fires on confirm", async () => {
-    let discardCalled = false;
+  it("single node: says so, explains cluster mode, offers no lease tab and no NATS panel", async () => {
+    server.use(http.get("*/administration/cluster/overview", () => HttpResponse.json(SINGLE_NODE_OVERVIEW)));
+    renderConsole();
+    expect(await screen.findByTestId("cluster-verdict")).toHaveAttribute("data-verdict", "SINGLE_NODE");
+    expect(screen.getByTestId("cluster-single-node")).toBeInTheDocument();
+    expect(screen.getByTestId("cluster-docs-link")).toHaveAttribute("href", expect.stringContaining("clustering"));
+    expect(screen.queryByTestId("cluster-tab-leases")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cluster-nats")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cluster-drain-local")).not.toBeInTheDocument();
+  });
+
+  it("a failed first load is an error, not an empty cluster", async () => {
+    server.use(http.get("*/administration/cluster/overview", () => new HttpResponse(null, { status: 500 })));
+    renderConsole();
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+    expect(screen.queryByTestId("cluster-verdict")).not.toBeInTheDocument();
+  });
+});
+
+describe("Cluster console — roles", () => {
+  it("eddi-viewer sees insights but no action and no dead-letter content", async () => {
+    renderConsole("/manage/coordinator", VIEWER);
+    expect(await screen.findByTestId("cluster-read-only")).toBeInTheDocument();
+    await screen.findByTestId("cluster-node-eddi-2");
+    expect(screen.queryByTestId("cluster-drain-eddi-2")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cluster-recovery")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cluster-audit")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("cluster-tab-deadLetters"));
+    expect(await screen.findByTestId("cluster-dl-admin-only")).toBeInTheDocument();
+    expect(screen.queryByTestId("dead-letters-table")).not.toBeInTheDocument();
+  });
+
+  it("a role without access sees why, and nothing is requested", async () => {
+    let requested = false;
     server.use(
-      http.delete("*/administration/coordinator/dead-letters/:id", () => {
-        discardCalled = true;
-        return new HttpResponse(null, { status: 204 });
-      })
+      http.get("*/administration/cluster/overview", () => {
+        requested = true;
+        return HttpResponse.json({});
+      }),
     );
+    renderConsole("/manage/coordinator", EDITOR);
+    expect(await screen.findByText(/eddi-admin or eddi-viewer/)).toBeInTheDocument();
+    expect(requested).toBe(false);
+    expect(sources).toHaveLength(0);
+  });
+});
 
-    renderCoordinator();
-    const user = userEvent.setup();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("discard-1")).toBeInTheDocument();
-    });
-
-    // Clicking discard opens a confirmation dialog — it must NOT fire yet.
-    await user.click(screen.getByTestId("discard-1"));
-
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/cannot be undone/i)).toBeInTheDocument();
-    expect(discardCalled).toBe(false);
-
-    // Confirm inside the dialog fires the discard.
-    await user.click(within(dialog).getByRole("button", { name: /Discard/i }));
-
-    await waitFor(() => {
-      expect(discardCalled).toBe(true);
-    });
+describe("Cluster console — leases", () => {
+  it("lists the suspicious lease first with its flags and a conversation link", async () => {
+    renderConsole("/manage/coordinator?tab=leases");
+    const table = await screen.findByTestId("cluster-leases-table");
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveAttribute("data-testid", "cluster-lease-c.68b1f0c2d4e5a60012ab34cd");
+    expect(within(rows[0]!).getByTestId("cluster-lease-flag-HOLDER_GONE")).toBeInTheDocument();
+    expect(within(rows[0]!).getByRole("link")).toHaveAttribute("href", "/manage/conversationview/68b1f0c2d4e5a60012ab34cd");
   });
 
-  it("cancelling the discard confirmation does not fire the discard", async () => {
-    let discardCalled = false;
+  it("force-release sends the revision the admin saw, and a renewed lease asks again before releasing", async () => {
+    const bodies: unknown[] = [];
+    let calls = 0;
     server.use(
-      http.delete("*/administration/coordinator/dead-letters/:id", () => {
-        discardCalled = true;
-        return new HttpResponse(null, { status: 204 });
-      })
+      http.post("*/administration/cluster/leases/:id/release", async ({ request }) => {
+        bodies.push(await request.json());
+        calls++;
+        return calls === 1
+          ? HttpResponse.json({ action: "lease.release", outcome: "RENEWED", message: "renewed", details: { currentRevision: "99" } })
+          : HttpResponse.json({ action: "lease.release", outcome: "RELEASED", message: "released", details: {} });
+      }),
     );
-
-    renderCoordinator();
-    const user = userEvent.setup();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("discard-1")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId("discard-1"));
-
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: /Cancel/i }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-    expect(discardCalled).toBe(false);
+    renderConsole("/manage/coordinator?tab=leases");
+    await userEvent.click(await screen.findByTestId("cluster-release-68b1f0c2d4e5a60012ab9911"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    // The second confirmation names the danger: the holder is alive.
+    expect(await screen.findByText("The holder is alive — release anyway?")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    await waitFor(() => expect(calls).toBe(2));
+    expect(bodies[0]).toEqual({ expectedRevision: "1791045643049537" });
+    expect(bodies[1]).toEqual({ expectedRevision: "99" });
   });
 
-  // --- Payload toggle ---
-
-  it("toggles payload visibility when payload button is clicked", async () => {
-    renderCoordinator();
-    const user = userEvent.setup();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("toggle-payload-1")).toBeInTheDocument();
-    });
-
-    // Initially payload content should not be visible
-    expect(screen.queryByText(/conv-fail-001/i)).toBeInTheDocument(); // The conversation ID shows in table
-    // But the JSON payload expansion is not visible
-    expect(screen.queryByTestId("payload-content-1")).not.toBeInTheDocument();
-
-    await user.click(screen.getByTestId("toggle-payload-1"));
-
-    // After toggle, payload JSON should be visible
-    await waitFor(() => {
-      expect(screen.getByTestId("payload-content-1")).toBeInTheDocument();
-    });
-
-    // Toggle again to hide
-    await user.click(screen.getByTestId("toggle-payload-1"));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("payload-content-1")).not.toBeInTheDocument();
-    });
+  it("filters to suspicious leases only", async () => {
+    renderConsole("/manage/coordinator?tab=leases");
+    await screen.findByTestId("cluster-leases-table");
+    await userEvent.click(screen.getByTestId("cluster-leases-flagged"));
+    await waitFor(() => expect(within(screen.getByTestId("cluster-leases-table")).getAllByRole("row")).toHaveLength(2));
   });
+});
 
-  // --- Purge all flow ---
-
-  it("shows purge button and purge confirmation flow", async () => {
-    renderCoordinator();
-    const user = userEvent.setup();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("purge-dead-letters-btn")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId("purge-dead-letters-btn"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Purge all?")).toBeInTheDocument();
-      expect(screen.getByText("Yes")).toBeInTheDocument();
-      expect(screen.getByText("Cancel")).toBeInTheDocument();
-    });
-  });
-
-  it("hides purge confirmation when cancel is clicked", async () => {
-    renderCoordinator();
-    const user = userEvent.setup();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("purge-dead-letters-btn")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId("purge-dead-letters-btn"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Purge all?")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("Cancel"));
-
-    await waitFor(() => {
-      expect(screen.queryByText("Purge all?")).not.toBeInTheDocument();
-      expect(screen.getByTestId("purge-dead-letters-btn")).toBeInTheDocument();
-    });
-  });
-
-  it("calls purge API when Yes is confirmed", async () => {
-    let purgeCalled = false;
+describe("Cluster console — dead letters", () => {
+  it("filters by reason on the server", async () => {
+    const reasons: (string | null)[] = [];
     server.use(
-      http.delete("*/administration/coordinator/dead-letters", () => {
-        purgeCalled = true;
-        return HttpResponse.json(3);
-      })
+      http.get("*/administration/cluster/dead-letters", ({ request }) => {
+        reasons.push(new URL(request.url).searchParams.get("reason"));
+        return HttpResponse.json({ entries: [], nextCursor: null, scanned: 0 });
+      }),
     );
-
-    renderCoordinator();
-    const user = userEvent.setup();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("purge-dead-letters-btn")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId("purge-dead-letters-btn"));
-
-    await waitFor(() => {
-      expect(screen.getByText("Yes")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("Yes"));
-
-    await waitFor(() => {
-      expect(purgeCalled).toBe(true);
-    });
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    await screen.findByTestId("dead-letters-empty");
+    await userEvent.selectOptions(screen.getByTestId("cluster-dl-filter-reason"), "fenced");
+    await waitFor(() => expect(reasons).toContain("fenced"));
   });
 
-  // --- Refresh interval ---
-
-  it("renders refresh interval selector with 10s default", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      const select = screen.getByTestId("refresh-interval") as HTMLSelectElement;
-      expect(select.value).toBe("10");
-    });
+  it("counts a lease-lost turn under its name and an unknown reason under its own code", async () => {
+    addDeadLetter({ id: "21", reason: "lease-lost" });
+    addDeadLetter({ id: "22", reason: "quota-exceeded" });
+    renderConsole();
+    expect(await screen.findByTestId("cluster-dl-reason-lease-lost")).toHaveTextContent("Lease lost: 1");
+    // An unknown reason is shown as recorded, never relabelled as something it is not.
+    expect(screen.getByTestId("cluster-dl-reason-quota-exceeded")).toHaveTextContent("quota-exceeded: 1");
+    expect(screen.getByTestId("cluster-dl-reason-quota-exceeded")).not.toHaveTextContent("Failed");
   });
 
-  it("changing refresh interval updates selector value", async () => {
-    renderCoordinator();
-    const user = userEvent.setup();
+  it("names a lease-lost turn, filters by it, and shows an unknown reason as its own code", async () => {
+    addDeadLetter({ id: "21", reason: "lease-lost", error: "lease lost while the turn ran" });
+    addDeadLetter({ id: "22", reason: "quota-exceeded", error: "the tenant ran out of quota" });
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    const filter = await screen.findByTestId("cluster-dl-filter-reason");
+    expect(within(filter).getByRole("option", { name: "Lease lost" })).toHaveValue("lease-lost");
 
-    await waitFor(() => {
-      expect(screen.getByTestId("refresh-interval")).toBeInTheDocument();
-    });
+    await userEvent.click(await screen.findByTestId("cluster-dl-open-21"));
+    expect(within(await screen.findByTestId("cluster-dl-drawer")).getByTestId("cluster-dl-why")).toHaveTextContent(/stopped before its result was stored/);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("cluster-dl-drawer")).not.toBeInTheDocument());
 
-    const select = screen.getByTestId("refresh-interval") as HTMLSelectElement;
-    await user.selectOptions(select, "30");
-    expect(select.value).toBe("30");
-
-    await user.selectOptions(select, "5");
-    expect(select.value).toBe("5");
+    await userEvent.click(screen.getByTestId("cluster-dl-open-22"));
+    expect(within(await screen.findByTestId("cluster-dl-drawer")).getByTestId("cluster-dl-why")).toHaveTextContent('Recorded with the reason "quota-exceeded"');
   });
 
-  // --- Active queues ---
-
-  it("shows active queues section with queue entries", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      const queuesSection = screen.getByTestId("coordinator-queues");
-      expect(queuesSection).toBeInTheDocument();
-      expect(screen.getByText("Active Queues")).toBeInTheDocument();
-      // Mock has 12 queue entries including conv-abc123
-      expect(within(queuesSection).getByText("conv-abc123")).toBeInTheDocument();
-    });
+  it("the drawer explains a fenced write with both tokens and shows the input", async () => {
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    await userEvent.click(await screen.findByTestId("cluster-dl-open-14"));
+    const drawer = await screen.findByTestId("cluster-dl-drawer");
+    expect(within(drawer).getByTestId("cluster-dl-fence")).toHaveTextContent("1791045643049531");
+    expect(within(drawer).getByTestId("cluster-dl-why")).toHaveTextContent(/lost the conversation's lease/);
+    expect(within(drawer).getByTestId("cluster-dl-input")).toHaveTextContent("Friday");
+    expect(within(drawer).getByTestId("cluster-dl-conversation-link")).toHaveAttribute("href", "/manage/conversationview/68b1f0c2d4e5a60012ab34cd");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("cluster-dl-drawer")).not.toBeInTheDocument());
+    // Focus returns to the row that opened it.
+    expect(screen.getByTestId("cluster-dl-open-14")).toHaveFocus();
   });
 
-  it("shows pending count in active queues", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      // 3+1+2+4+1+2+1+3+2+1+2+1 = 23 total pending
-      const queuesSection = screen.getByTestId("coordinator-queues");
-      expect(within(queuesSection).getByText(/pending/)).toBeInTheDocument();
-    });
+  it("a secret entry is masked and says why it cannot be replayed, instead of failing with 409", async () => {
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    await userEvent.click(await screen.findByTestId("cluster-dl-open-17"));
+    const drawer = await screen.findByTestId("cluster-dl-drawer");
+    expect(within(drawer).getByTestId("cluster-dl-input-secret")).toBeInTheDocument();
+    expect(within(drawer).queryByTestId("cluster-dl-input")).not.toBeInTheDocument();
+    expect(within(drawer).getByTestId("cluster-dl-not-replayable")).toHaveTextContent(/marked the input secret/);
+    expect(within(drawer).getByTestId("cluster-dl-replay")).toBeDisabled();
   });
 
-  // --- Dead-letter section title ---
-
-  it("shows dead-letter queue section title", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      expect(screen.getByText("Dead-Letter Queue")).toBeInTheDocument();
-    });
-  });
-
-  // --- Empty dead-letter state ---
-
-  it("shows empty dead-letter state when no entries", async () => {
+  it("bulk replay sends only the replayable entries and reports each outcome", async () => {
+    let sent: string[] = [];
     server.use(
-      http.get("*/administration/coordinator/dead-letters", () => {
-        return HttpResponse.json([]);
-      })
+      http.post("*/administration/cluster/dead-letters/replay", async ({ request }) => {
+        sent = ((await request.json()) as { ids: string[] }).ids;
+        return HttpResponse.json({ results: [{ id: "14", outcome: "REPLAYED", message: null }], succeeded: 1, failed: 0 });
+      }),
     );
-
-    renderCoordinator();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("dead-letters-empty")).toBeInTheDocument();
-      expect(screen.getByText("No dead-letter entries")).toBeInTheDocument();
-    });
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    await userEvent.click(await screen.findByTestId("cluster-dl-select-14"));
+    await userEvent.click(screen.getByTestId("cluster-dl-select-17"));
+    expect(screen.getByTestId("cluster-dl-bulk-replay")).toHaveTextContent("1");
+    await userEvent.click(screen.getByTestId("cluster-dl-bulk-replay"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    expect(await screen.findByTestId("cluster-dl-outcome-14")).toHaveAttribute("data-outcome", "REPLAYED");
+    expect(sent).toEqual(["14"]);
   });
 
-  // --- No active queues ---
-
-  it("shows no active queues message when empty", async () => {
+  it("a replay another admin is already running is reported, not run twice", async () => {
     server.use(
-      http.get("*/administration/coordinator/status", () => {
-        return HttpResponse.json({
-          coordinatorType: "inMemory",
-          connected: true,
-          connectionStatus: "CONNECTED",
-          activeConversations: 0,
-          totalProcessed: 0,
-          totalDeadLettered: 0,
-          queueDepths: {},
-        });
-      })
+      http.post("*/administration/cluster/dead-letters/replay", () =>
+        HttpResponse.json({ results: [{ id: "14", outcome: "IN_PROGRESS", message: "another administrator is replaying this entry right now" }], succeeded: 0, failed: 1 }),
+      ),
     );
-
-    renderCoordinator();
-
-    await waitFor(() => {
-      expect(screen.getByText(/No active conversations being processed/)).toBeInTheDocument();
-    });
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    await userEvent.click(await screen.findByTestId("cluster-dl-select-14"));
+    await userEvent.click(screen.getByTestId("cluster-dl-bulk-replay"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const row = await screen.findByTestId("cluster-dl-outcome-14");
+    expect(row).toHaveAttribute("data-outcome", "IN_PROGRESS");
+    expect(row).toHaveTextContent(/not run twice/);
   });
 
-  // --- In-Memory coordinator type ---
-
-  it("shows In-Memory when coordinator type is inMemory", async () => {
+  it("bulk discard reports a per-item outcome, including one already gone", async () => {
     server.use(
-      http.get("*/administration/coordinator/status", () => {
-        return HttpResponse.json({
-          coordinatorType: "inMemory",
-          connected: false,
-          connectionStatus: "DISCONNECTED",
-          activeConversations: 0,
-          totalProcessed: 50,
-          totalDeadLettered: 3,
-          queueDepths: {},
-        });
-      })
-    );
-
-    renderCoordinator();
-
-    await waitFor(() => {
-      expect(screen.getByText("In-Memory")).toBeInTheDocument();
-    });
-  });
-
-  // --- No coordinator data ---
-
-  // This test used to assert the opposite — that a failed status fetch renders
-  // the empty state. That was the bug: "No coordinator data available / the
-  // service may still be starting up" tells the operator to wait for data that
-  // is never coming. The empty state is for a reachable coordinator with nothing
-  // to report; a failed fetch gets ErrorState and a retry.
-  it("shows an error state, not 'starting up', when the status fetch fails", async () => {
-    server.use(
-      http.get("*/administration/coordinator/status", () => {
-        return new HttpResponse(null, { status: 500 });
-      })
-    );
-
-    renderCoordinator();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("error-state")).toBeInTheDocument();
-    });
-
-    expect(
-      screen.queryByText(/No coordinator data available/),
-    ).not.toBeInTheDocument();
-  });
-
-  // --- Error categories (based on actual dead letter data) ---
-
-  it("shows error category breakdown with rate-related category", async () => {
-    renderCoordinator();
-    await waitFor(() => {
-      // DEAD_LETTERS_MOCK has "rate limit" in entry 2 → "Rate Limited" category
-      expect(screen.getByText(/Rate Limited/)).toBeInTheDocument();
-    });
-  });
-
-  // --- DISCONNECTED status ---
-
-  it("shows disconnected status badge", async () => {
-    server.use(
-      http.get("*/administration/coordinator/status", () => {
-        return HttpResponse.json({
-          coordinatorType: "nats",
-          connected: false,
-          connectionStatus: "DISCONNECTED",
-          activeConversations: 0,
-          totalProcessed: 100,
-          totalDeadLettered: 0,
-          queueDepths: {},
-        });
-      })
-    );
-
-    renderCoordinator();
-
-    await waitFor(() => {
-      expect(screen.getByText("DISCONNECTED")).toBeInTheDocument();
-    });
-  });
-
-
-  // ── Regressions ──────────────────────────────────────────────────────
-
-  it("shows an error, not the green empty check, when the dead-letter read fails", async () => {
-    server.use(
-      http.get("*/administration/coordinator/dead-letters", () =>
-        new HttpResponse(null, { status: 500 })
-      )
-    );
-
-    renderCoordinator();
-
-    await waitFor(() =>
-      expect(screen.getByTestId("dead-letters-error")).toBeInTheDocument()
-    );
-    expect(screen.queryByTestId("dead-letters-empty")).not.toBeInTheDocument();
-    expect(screen.queryByText("No dead-letter entries")).not.toBeInTheDocument();
-  });
-
-  it("falls back to the polled status once the SSE stream drops", async () => {
-    server.use(
-      http.get("*/administration/coordinator/status", () =>
+      http.post("*/administration/cluster/dead-letters/discard", () =>
         HttpResponse.json({
-          coordinatorType: "nats",
-          connected: false,
-          connectionStatus: "DISCONNECTED",
-          activeConversations: 0,
-          totalProcessed: 1,
-          totalDeadLettered: 0,
-          queueDepths: {},
-        })
-      )
+          results: [
+            { id: "14", outcome: "DISCARDED", message: null },
+            { id: "15", outcome: "NOT_FOUND", message: "already replayed" },
+          ],
+          succeeded: 1,
+          failed: 1,
+        }),
+      ),
     );
+    renderConsole("/manage/coordinator?tab=deadLetters");
+    await userEvent.click(await screen.findByTestId("cluster-dl-select-all"));
+    await userEvent.click(screen.getByTestId("cluster-dl-bulk-discard"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    expect(await screen.findByTestId("cluster-dl-outcome-15")).toHaveAttribute("data-outcome", "NOT_FOUND");
+    expect(screen.getByTestId("cluster-dl-outcome-14")).toHaveAttribute("data-outcome", "DISCARDED");
+  });
+});
 
-    const es = {
-      addEventListener: vi.fn(),
-      close: vi.fn(),
-      onmessage: null,
-      onerror: null as (() => void) | null,
-      onopen: null as (() => void) | null,
-    };
-    vi.mocked(BearerEventSource).mockImplementation(function () {
-      return es;
-    } as never);
-
-    renderCoordinator();
-    await waitFor(() => expect(es.addEventListener).toHaveBeenCalled());
-    const onStatus = es.addEventListener.mock.calls.find(
-      (c) => c[0] === "status"
-    )![1] as (e: MessageEvent) => void;
-
-    // A live snapshot says CONNECTED…
-    act(() =>
-      onStatus(
-        new MessageEvent("status", {
-          data: JSON.stringify({
-            coordinatorType: "nats",
-            connected: true,
-            connectionStatus: "CONNECTED",
-            activeConversations: 0,
-            totalProcessed: 1,
-            totalDeadLettered: 0,
-            queueDepths: {},
-          }),
-        })
-      )
+describe("Cluster console — actions", () => {
+  it("drain asks first, then calls the node's drain endpoint", async () => {
+    let called = "";
+    server.use(
+      http.post("*/administration/cluster/nodes/:nodeId/drain", ({ params }) => {
+        called = `${String(params.nodeId)}/drain`;
+        return HttpResponse.json({ action: "node.drain", outcome: "DRAINED", message: "drained", details: {} });
+      }),
     );
-    await waitFor(() => expect(screen.getByText("CONNECTED")).toBeInTheDocument());
-
-    // …then the stream drops. The polled status (DISCONNECTED) must take over
-    // instead of the last snapshot being shown forever.
-    act(() => es.onerror?.());
-    await waitFor(() => expect(screen.getByText("DISCONNECTED")).toBeInTheDocument());
+    renderConsole();
+    await userEvent.click(await screen.findByTestId("cluster-drain-eddi-2"));
+    expect(called).toBe("");
+    expect(screen.getByRole("dialog")).toHaveTextContent(/409 with Retry-After/);
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    await waitFor(() => expect(called).toBe("eddi-2/drain"));
   });
 
-  // TanStack keeps the last good data next to a refetch error. The page read
-  // `dlError && !deadLetters`, so a successful empty read followed by a failed
-  // poll kept showing the green "No dead-letter entries" check.
-  it("shows the dead-letter error on a failed refetch even with a cached empty list", async () => {
+  it("a cache resync is confirmed with its consequence and reports the result", async () => {
+    renderConsole();
+    await userEvent.click(await screen.findByTestId("cluster-action-resync"));
+    expect(screen.getByRole("dialog")).toHaveTextContent(/No data changes/);
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const result = await screen.findByTestId("cluster-action-result");
+    expect(result).toHaveAttribute("data-outcome", "DONE");
+    expect(result).toHaveTextContent("Done");
+  });
+
+  it("a bulk replay in the audit trail says how many entries it did, not a blank outcome", async () => {
+    server.use(
+      http.get("*/auditstore/cluster-admin", () =>
+        HttpResponse.json([
+          { id: "a1", timestamp: "2026-10-04T17:42:38Z", actions: ["deadletters.replay"], userId: "ops", output: { succeeded: 1, failed: 1 } },
+          { id: "a2", timestamp: "2026-10-04T17:40:00Z", actions: ["caches.resync"], userId: "ops", output: { outcome: "QUEUED" } },
+        ]),
+      ),
+    );
+    renderConsole();
+    expect(await screen.findByTestId("cluster-audit-bulk")).toHaveTextContent("1 of 2 done");
+    expect(screen.getByTestId("cluster-audit-bulk")).toHaveClass("text-warning");
+    expect(screen.getByTestId("cluster-audit-a2")).toHaveTextContent("QUEUED");
+  });
+
+  it("a resync that only reached the outbox says so, and warns instead of celebrating", async () => {
+    const success = vi.spyOn(toast, "success");
+    const warning = vi.spyOn(toast, "warning");
+    server.use(
+      http.post("*/administration/cluster/caches/resync", () =>
+        HttpResponse.json({
+          action: "caches.resync",
+          outcome: "QUEUED",
+          message: "This node flushed its caches. NATS is unreachable, so the request to the other nodes waits in the outbox and goes out when this node reconnects.",
+          details: {},
+        }),
+      ),
+    );
+    renderConsole();
+    await userEvent.click(await screen.findByTestId("cluster-action-resync"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const result = await screen.findByTestId("cluster-action-result");
+    expect(result).toHaveAttribute("data-outcome", "QUEUED");
+    expect(result).toHaveTextContent("Queued — goes out when NATS is back");
+    expect(result).toHaveClass("text-warning");
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("outbox"));
+    expect(success).not.toHaveBeenCalled();
+    success.mockRestore();
+    warning.mockRestore();
+  });
+
+  it("a reconcile still running on a node is reported as started, not as a failure", async () => {
+    server.use(
+      http.post("*/administration/cluster/deployments/reconcile", () =>
+        HttpResponse.json({
+          action: "deployments.reconcile",
+          outcome: "STARTED",
+          message: "The deployment sweep ran on [eddi-1]. It is still running on [eddi-2] and finishes on its own.",
+          details: { nodes: ["eddi-1"], running: ["eddi-2"], missing: [] },
+        }),
+      ),
+    );
+    renderConsole();
+    await userEvent.click(await screen.findByTestId("cluster-action-reconcile"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const result = await screen.findByTestId("cluster-action-result");
+    expect(result).toHaveAttribute("data-outcome", "STARTED");
+    expect(result).toHaveTextContent("Started — still running on some nodes");
+  });
+
+  it("a reconcile some nodes missed is reported as partly done, naming them", async () => {
+    const warning = vi.spyOn(toast, "warning");
+    server.use(
+      http.post("*/administration/cluster/deployments/reconcile", () =>
+        HttpResponse.json({
+          action: "deployments.reconcile",
+          outcome: "PARTIAL",
+          message: "The deployment sweep ran on [eddi-1]; [eddi-2] did not answer (their own sweep still runs every 10 s).",
+          details: { nodes: ["eddi-1"], missing: ["eddi-2"] },
+        }),
+      ),
+    );
+    renderConsole();
+    await userEvent.click(await screen.findByTestId("cluster-action-reconcile"));
+    await userEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    const result = await screen.findByTestId("cluster-action-result");
+    expect(result).toHaveTextContent("Partly done");
+    expect(result).toHaveTextContent("[eddi-2] did not answer");
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  });
+});
+
+describe("Cluster console — activity", () => {
+  it("shows the cluster timeline and adds live entries from the stream", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    expect(await screen.findByTestId("cluster-activity-node.lost")).toHaveTextContent("eddi-3");
+    emit("activity", { id: "live-1", type: "lease.takeover", severity: "warning", node: "eddi-2", ts: Date.now(), payload: { conversationId: "c-9", previousNode: "eddi-3" } });
+    expect(await screen.findByTestId("cluster-activity-lease.takeover")).toHaveTextContent("c-9");
+  });
+
+  it("a dead letter in the timeline names its reason in words", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    emit("activity", { id: "live-3", type: "deadletter.created", severity: "warning", node: "eddi-2", ts: Date.now(), payload: { conversationId: "c-77", reason: "lease-lost" } });
+    await waitFor(() => expect(screen.getAllByTestId("cluster-activity-deadletter.created").some((el) => /c-77.*Lease lost/.test(el.textContent ?? ""))).toBe(true));
+  });
+
+  it("a queued resync reads as reaching this node only, until NATS is back", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    emit("activity", { id: "live-2", type: "admin.caches.resync", severity: "info", node: "eddi-2", ts: Date.now(), payload: { actor: "ops", outcome: "QUEUED" } });
+    const entry = await screen.findByTestId("cluster-activity-admin.caches.resync");
+    expect(entry).toHaveTextContent("ops resynced the caches of eddi-2; the other nodes get it when NATS is back");
+    expect(entry).not.toHaveTextContent("resynced every cache");
+  });
+
+  it("pausing keeps what is shown and loses nothing: entries that arrive meanwhile appear on resume", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    await userEvent.click(screen.getByTestId("cluster-activity-pause"));
+    emit("activity", { id: "live-2", type: "degraded.on", severity: "error", node: "eddi-2", ts: Date.now(), payload: { nodeId: "eddi-2", turnsPolicy: "local" } });
+    expect(screen.queryByTestId("cluster-activity-degraded.on")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cluster-activity-pending")).toHaveTextContent("1");
+    await userEvent.click(screen.getByTestId("cluster-activity-pause"));
+    expect(await screen.findByTestId("cluster-activity-degraded.on")).toBeInTheDocument();
+  });
+
+  it("after the stream reconnects, the history is read again so nothing missed meanwhile is lost", async () => {
     let reads = 0;
     server.use(
-      http.get("*/administration/coordinator/dead-letters", () => {
+      http.get("*/administration/cluster/activity", () => {
         reads++;
-        return reads === 1
-          ? HttpResponse.json([])
-          : new HttpResponse(null, { status: 500 });
-      })
+        return HttpResponse.json(
+          reads === 1
+            ? []
+            : [{ id: "missed", type: "node.lost", severity: "error", node: "eddi-1", ts: Date.now(), payload: { nodeId: "eddi-2" } }],
+        );
+      }),
     );
-
-    const { queryClient } = renderCoordinator();
-    await waitFor(() =>
-      expect(screen.getByTestId("dead-letters-empty")).toBeInTheDocument()
-    );
-
-    await act(async () => {
-      await queryClient.refetchQueries({ queryKey: ["coordinator", "dead-letters"] });
-    });
-
-    await waitFor(() =>
-      expect(screen.getByTestId("dead-letters-error")).toBeInTheDocument()
-    );
-    expect(screen.queryByTestId("dead-letters-empty")).not.toBeInTheDocument();
+    renderConsole("/manage/coordinator?tab=activity");
+    await waitFor(() => expect(reads).toBe(1));
+    const source = sources[sources.length - 1]!;
+    act(() => source.onerror?.());
+    act(() => source.onopen?.());
+    expect(await screen.findByTestId("cluster-activity-node.lost")).toHaveTextContent("eddi-2");
+    expect(reads).toBe(2);
   });
 
-  it("hides the cached dead-letter table and Purge All while the read is failing", async () => {
-    const { queryClient } = renderCoordinator();
-    await waitFor(() =>
-      expect(screen.getByTestId("dead-letters-table")).toBeInTheDocument()
-    );
-    expect(screen.getByTestId("purge-dead-letters-btn")).toBeInTheDocument();
-
-    server.use(
-      http.get("*/administration/coordinator/dead-letters", () =>
-        new HttpResponse(null, { status: 500 })
-      )
-    );
-    await act(async () => {
-      await queryClient.refetchQueries({ queryKey: ["coordinator", "dead-letters"] });
-    });
-
-    await waitFor(() =>
-      expect(screen.getByTestId("dead-letters-error")).toBeInTheDocument()
-    );
-    expect(screen.queryByTestId("dead-letters-table")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("purge-dead-letters-btn")).not.toBeInTheDocument();
+  it("re-opens the stream when the server closes it because the token expired", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    const before = sources.length;
+    emit("expired", "token expired");
+    await waitFor(() => expect(sources.length).toBe(before + 1));
+    expect(sources[before - 1]!.close).toHaveBeenCalled();
   });
 
-  // Status read failed, an SSE snapshot arrived, then the stream dropped: the
-  // snapshot was the last fallback, so the page kept showing it as the current
-  // state and the status error never rendered.
-  it("shows the status error, not a dropped stream's snapshot, when polling has no status", async () => {
-    server.use(
-      http.get("*/administration/coordinator/status", () =>
-        new HttpResponse(null, { status: 500 })
-      )
-    );
+  it("a feed refused as busy, or given up after retries, is opened again 30 s later and recovers", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const before = sources.length;
+      emit("busy", "too many live feeds");
+      expect(await screen.findByTestId("cluster-activity-offline")).toBeInTheDocument();
+      expect(sources[before - 1]!.close).toHaveBeenCalled();
+      expect(sources.length).toBe(before);
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      await waitFor(() => expect(sources.length).toBe(before + 1));
+      act(() => sources[sources.length - 1]!.onopen?.());
+      await waitFor(() => expect(screen.queryByTestId("cluster-activity-offline")).not.toBeInTheDocument());
 
-    const es = {
-      addEventListener: vi.fn(),
-      close: vi.fn(),
-      onmessage: null,
-      onerror: null as (() => void) | null,
-      onopen: null as (() => void) | null,
-    };
-    vi.mocked(BearerEventSource).mockImplementation(function () {
-      return es;
-    } as never);
+      const reopened = sources.length;
+      act(() => (sources[reopened - 1] as unknown as { onexhausted: (() => void) | null }).onexhausted?.());
+      expect(await screen.findByTestId("cluster-activity-offline")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      await waitFor(() => expect(sources.length).toBe(reopened + 1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-    renderCoordinator();
-    await waitFor(() => expect(es.addEventListener).toHaveBeenCalled());
-    const onStatus = es.addEventListener.mock.calls.find(
-      (c) => c[0] === "status"
-    )![1] as (e: MessageEvent) => void;
+  it("filters by kind", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    await userEvent.click(screen.getByTestId("cluster-activity-group-nodes"));
+    expect(screen.queryByTestId("cluster-activity-node.lost")).not.toBeInTheDocument();
+    expect(screen.getByTestId("cluster-activity-fence.rejected")).toBeInTheDocument();
+  });
+});
 
-    act(() =>
-      onStatus(
-        new MessageEvent("status", {
-          data: JSON.stringify({
-            coordinatorType: "nats",
-            connected: true,
-            connectionStatus: "CONNECTED",
-            activeConversations: 0,
-            totalProcessed: 1,
-            totalDeadLettered: 0,
-            queueDepths: {},
-          }),
-        })
-      )
-    );
-    await waitFor(() => expect(screen.getByText("CONNECTED")).toBeInTheDocument());
+describe("Cluster console — stuck conversation", () => {
+  it("finds an orphaned lease, suggests releasing it, and links the dead letters", async () => {
+    renderConsole("/manage/coordinator?tab=diagnose");
+    await userEvent.type(await screen.findByTestId("cluster-diagnose-input"), "68b1f0c2d4e5a60012ab34cd");
+    await userEvent.click(screen.getByTestId("cluster-diagnose-submit"));
+    expect(await screen.findByTestId("cluster-diagnosis")).toHaveAttribute("data-verdict", "STUCK");
+    expect(screen.getByTestId("cluster-finding-LEASE_ORPHANED")).toHaveTextContent("eddi-3");
+    expect(screen.getByTestId("cluster-diagnosis-release")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("cluster-diagnosis-replay"));
+    // Switches to the dead letters, filtered to this conversation.
+    expect(await screen.findByTestId("cluster-dl-filter-conversation")).toHaveValue("68b1f0c2d4e5a60012ab34cd");
+  });
 
-    act(() => es.onerror?.());
-    await waitFor(() => expect(screen.getByTestId("error-state")).toBeInTheDocument());
-    expect(screen.queryByText("CONNECTED")).not.toBeInTheDocument();
+  it("an unknown id is reported as not found", async () => {
+    renderConsole("/manage/coordinator?tab=diagnose&conversation=nope");
+    expect(await screen.findByTestId("cluster-diagnosis")).toHaveAttribute("data-verdict", "NOT_FOUND");
+  });
+});
+
+describe("Cluster console — keyboard", () => {
+  it("tabs move with the arrow keys", async () => {
+    renderConsole();
+    const overview = await screen.findByTestId("cluster-tab-overview");
+    overview.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(screen.getByTestId("cluster-tab-leases")).toHaveFocus();
+    expect(screen.getByTestId("cluster-tab-leases")).toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{End}");
+    expect(screen.getByTestId("cluster-tab-diagnose")).toHaveFocus();
   });
 });

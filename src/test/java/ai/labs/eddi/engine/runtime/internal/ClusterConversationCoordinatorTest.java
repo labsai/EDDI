@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -200,6 +201,8 @@ class ClusterConversationCoordinatorTest {
         final AtomicReference<Throwable> discarded = new AtomicReference<>();
         final CountDownLatch done = new CountDownLatch(1);
         volatile RuntimeException failWith;
+        /** What the step runner adds when it stops a turn: reason and tokens. */
+        volatile Map<String, Object> why = Map.of();
 
         Turn(String name, List<String> log) {
             this.name = name;
@@ -213,7 +216,9 @@ class ClusterConversationCoordinatorTest {
 
         @Override
         public Map<String, Object> describe() {
-            return Map.of("input", name, "agentId", "agent1");
+            Map<String, Object> described = new LinkedHashMap<>(Map.of("input", name, "agentId", "agent1"));
+            described.putAll(why);
+            return described;
         }
 
         @Override
@@ -243,12 +248,13 @@ class ClusterConversationCoordinatorTest {
         final AtomicInteger seq = new AtomicInteger();
 
         @Override
-        public String append(String conversationId, String error, long timestamp, Map<String, Object> turn) {
+        public String append(String conversationId, String error, long timestamp, Map<String, Object> turn, String reason,
+                             Map<String, Object> fence) {
             if (down) {
                 throw new ClusterUnavailableException("down");
             }
             String id = String.valueOf(seq.incrementAndGet());
-            entries.add(new DeadLetterEntry(id, conversationId, error, timestamp, "{}", turn));
+            entries.add(new DeadLetterEntry(id, conversationId, error, timestamp, "{}", turn, reason, "node-under-test", fence));
             return id;
         }
 
@@ -421,6 +427,54 @@ class ClusterConversationCoordinatorTest {
         assertEquals(1, leases.released.size());
         assertEquals(1, coordinator.getTotalDeadLettered());
         assertTrue(store.entries.get(0).isReplayable());
+    }
+
+    @Test
+    @DisplayName("a turn stopped by a lost lease is dead-lettered as lease-lost with its token — shared and node-local alike")
+    void leaseLostReasonComesFromTheTurn() throws Exception {
+        Turn t = new Turn("lost", log);
+        t.why = Map.of("reason", "lease-lost", "fence", 41L);
+        t.failWith = new IllegalStateException("lease-lost: this node lost the lease");
+        coordinator.submitInOrder("conv1", t);
+        await(t);
+        awaitIdle();
+        assertEquals(DeadLetterEntry.REASON_LEASE_LOST, store.entries.get(0).reason());
+        assertEquals(Map.of("token", 41L), store.entries.get(0).fence());
+
+        store.down = true;
+        Turn local = new Turn("lost2", log);
+        local.why = Map.of("reason", "fenced", "fence", 5L, "storedFence", 9L);
+        local.failWith = new IllegalStateException("refused");
+        coordinator.submitInOrder("conv2", local);
+        await(local);
+        awaitIdle();
+        DeadLetterEntry kept = coordinator.getDeadLetters().stream().filter(e -> e.id().startsWith("local-")).findFirst().orElseThrow();
+        assertEquals(DeadLetterEntry.REASON_FENCED, kept.reason());
+        assertEquals(Map.of("token", 5L, "storedFence", 9L), kept.fence());
+    }
+
+    @Test
+    @DisplayName("a dead letter kept locally is announced with the id it was recorded under, not read back from the ring")
+    void localDeadLetterAnnouncedWithItsOwnId() throws Exception {
+        // A ring that keeps nothing: reading the last entry back finds none (or, under
+        // concurrent failures, another one), while the id recorded is still the right
+        // one.
+        var noRing = new ClusterConversationCoordinator(runtime, new SimpleMeterRegistry(), leases, store, connections,
+                mock(ClusterPresence.class), 10_000, 0, Duration.ofSeconds(45));
+        List<DeadLetterEntry> announced = new CopyOnWriteArrayList<>();
+        noRing.onDeadLetter(announced::add);
+        store.down = true;
+        Turn t = new Turn("boom", log);
+        t.failWith = new IllegalStateException("x");
+        noRing.submitInOrder("conv1", t);
+        await(t);
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (announced.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10);
+        }
+        assertEquals(1, announced.size());
+        assertNotNull(announced.get(0).id());
+        assertTrue(announced.get(0).id().startsWith("local-"));
     }
 
     @Test

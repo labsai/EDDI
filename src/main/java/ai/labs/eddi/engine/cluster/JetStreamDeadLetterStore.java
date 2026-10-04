@@ -29,6 +29,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import io.nats.client.api.StreamInfo;
+import io.nats.client.api.StreamInfoOptions;
+import io.nats.client.api.StreamState;
+import io.nats.client.api.Subject;
 
 /**
  * Dead letters on the JetStream stream
@@ -156,12 +160,19 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
     }
 
     @Override
-    public String append(String conversationId, String error, long timestamp, Map<String, Object> turn) {
+    public String append(String conversationId, String error, long timestamp, Map<String, Object> turn, String reason,
+                         Map<String, Object> fence) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("conversationId", conversationId);
         body.put("error", error);
         body.put("timestamp", timestamp);
         body.put("failedOn", connections.node().nodeId());
+        if (reason != null) {
+            body.put("reason", reason);
+        }
+        if (fence != null) {
+            body.put("fence", fence);
+        }
         if (turn != null) {
             body.put("turn", turn);
         }
@@ -195,6 +206,35 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 MessageInfo info;
                 try {
                     info = jsm.getNextMessage(stream, seq, subjects.deadLetterTurnWildcard());
+                } catch (JetStreamApiException e) {
+                    if (notFound(e)) {
+                        break;
+                    }
+                    throw e;
+                }
+                if (info == null || !info.isMessage()) {
+                    break;
+                }
+                entries.add(toEntry(info));
+                seq = info.getSeq() + 1;
+            }
+        } catch (IOException | JetStreamApiException e) {
+            throw new ClusterUnavailableException("dead-letter list failed: " + e.getMessage(), e);
+        }
+        return entries;
+    }
+
+    @Override
+    public List<DeadLetterEntry> listConversation(String conversationId, int limit) {
+        String subject = subjects.deadLetterTurn(KvKeys.safe(conversationId));
+        List<DeadLetterEntry> entries = new ArrayList<>();
+        JetStreamManagement jsm = connections.jetStreamManagement();
+        long seq = 1;
+        try {
+            while (entries.size() < limit) {
+                MessageInfo info;
+                try {
+                    info = jsm.getNextMessage(stream, seq, subject);
                 } catch (JetStreamApiException e) {
                     if (notFound(e)) {
                         break;
@@ -306,6 +346,36 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         }
     }
 
+    @Override
+    public long countTurns() {
+        try {
+            StreamInfo info = connections.jetStreamManagement().getStreamInfo(stream,
+                    StreamInfoOptions.filterSubjects(subjects.deadLetterTurnWildcard()));
+            return sumSubjects(info.getStreamState());
+        } catch (JetStreamApiException e) {
+            if (streamMissing(e)) {
+                return 0;
+            }
+            throw new ClusterUnavailableException("dead-letter count failed: " + e.getMessage(), e);
+        } catch (IOException e) {
+            throw new ClusterUnavailableException("dead-letter count failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The messages on every subject the stream info listed. The server sends the
+     * subjects in pages (100,000 per page on NATS 2.11); jnats requests the later
+     * pages but appends them only to {@code getSubjects()}, while
+     * {@code getSubjectMap()} keeps the first page. Summing the map undercounted
+     * once more than one page of conversations had dead letters.
+     */
+    static long sumSubjects(StreamState state) {
+        if (state == null || state.getSubjects() == null) {
+            return 0;
+        }
+        return state.getSubjects().stream().mapToLong(Subject::getCount).sum();
+    }
+
     /**
      * Publishes an audit entry that could not be stored (see AuditLedgerService).
      */
@@ -325,8 +395,24 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             @SuppressWarnings("unchecked")
             Map<String, Object> turn = body.get("turn") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
             Object ts = body.get("timestamp");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> fence = body.get("fence") instanceof Map<?, ?> f ? (Map<String, Object>) f : null;
+            Object reason = body.get("reason");
+            if (reason == null && turn != null) {
+                // written by a node that records why only in the turn descriptor
+                reason = turn.get("reason");
+                if (fence == null && turn.get("fence") != null) {
+                    fence = new LinkedHashMap<>();
+                    fence.put("token", turn.get("fence"));
+                    if (turn.get("storedFence") != null) {
+                        fence.put("storedFence", turn.get("storedFence"));
+                    }
+                }
+            }
+            Object failedOn = body.get("failedOn");
             return new DeadLetterEntry(String.valueOf(info.getSeq()), String.valueOf(body.get("conversationId")),
-                    String.valueOf(body.get("error")), ts instanceof Number n ? n.longValue() : 0L, payload, turn);
+                    String.valueOf(body.get("error")), ts instanceof Number n ? n.longValue() : 0L, payload, turn,
+                    reason == null ? null : reason.toString(), failedOn == null ? null : failedOn.toString(), fence);
         } catch (IOException e) {
             return new DeadLetterEntry(String.valueOf(info.getSeq()), null, "unreadable entry", 0L, payload, null);
         }

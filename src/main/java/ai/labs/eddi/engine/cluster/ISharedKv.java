@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.cluster;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -24,8 +25,20 @@ import java.util.OptionalLong;
  */
 public interface ISharedKv {
 
-    /** A value with the revision that wrote it. */
-    record Versioned(byte[] value, long revision) {
+    /**
+     * A value with the revision that wrote it and, where the store knows it, when
+     * that revision was written (epoch millis, the server's clock; {@code 0} when
+     * unknown).
+     */
+    record Versioned(byte[] value, long revision, long writtenAt) {
+
+        public Versioned(byte[] value, long revision) {
+            this(value, revision, 0L);
+        }
+    }
+
+    /** A live key with its value, as listed by {@link #entries}. */
+    record Entry(String key, Versioned value) {
     }
 
     String bucket();
@@ -38,6 +51,16 @@ public interface ISharedKv {
     OptionalLong create(String key, byte[] value);
 
     Optional<Versioned> get(String key);
+
+    /**
+     * Like {@link #get}, but answered by the bucket's stream leader rather than by
+     * whichever replica is nearest. For admin decisions taken on a revision (a
+     * force-release compares and deletes at it): a replica can answer a read with
+     * an older revision than the leader holds.
+     */
+    default Optional<Versioned> getConsistent(String key) {
+        return get(key);
+    }
 
     /**
      * Replaces the value only while the key is still at {@code expectedRevision}.
@@ -61,4 +84,24 @@ public interface ISharedKv {
 
     /** The current keys (live values only). */
     List<String> keys();
+
+    /**
+     * The live entries whose key starts with {@code prefix} (every key for an empty
+     * prefix), at most {@code max} of them, in no particular order. For admin
+     * listings only — never on a turn's path.
+     * <p>
+     * The default reads key by key; the NATS bucket overrides it with one watch.
+     */
+    default List<Entry> entries(String prefix, int max) {
+        List<Entry> entries = new ArrayList<>();
+        for (String key : keys()) {
+            if (entries.size() >= max) {
+                break;
+            }
+            if (prefix == null || key.startsWith(prefix)) {
+                get(key).ifPresent(v -> entries.add(new Entry(key, v)));
+            }
+        }
+        return entries;
+    }
 }

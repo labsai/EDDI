@@ -24,7 +24,28 @@ public interface IDeadLetterStore {
      *
      * @return the entry id (the stream sequence)
      */
-    String append(String conversationId, String error, long timestamp, Map<String, Object> turn);
+    default String append(String conversationId, String error, long timestamp, Map<String, Object> turn) {
+        return append(conversationId, error, timestamp, turn, null, null);
+    }
+
+    /**
+     * Stores an entry with why it was dead-lettered.
+     *
+     * @param reason
+     *            {@code fenced}, {@code timeout} or {@code failed}
+     * @param fence
+     *            the fencing tokens of a fenced write, else {@code null}
+     * @return the entry id (the stream sequence)
+     */
+    String append(String conversationId, String error, long timestamp, Map<String, Object> turn, String reason, Map<String, Object> fence);
+
+    /**
+     * The entries of one conversation, oldest first — read through the
+     * conversation's own subject, so it does not scan the others.
+     */
+    default List<DeadLetterEntry> listConversation(String conversationId, int limit) {
+        return list(Integer.MAX_VALUE, null).stream().filter(e -> conversationId.equals(e.conversationId())).limit(limit).toList();
+    }
 
     /**
      * Entries in id order.
@@ -45,4 +66,12 @@ public interface IDeadLetterStore {
     int purgeConversation(String conversationId);
 
     long count();
+
+    /**
+     * Turn dead letters only — {@link #count()} also counts audit entries parked in
+     * the same stream, which cannot be listed, replayed or discarded here.
+     */
+    default long countTurns() {
+        return count();
+    }
 }

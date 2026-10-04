@@ -1,4 +1,5 @@
 import { http, HttpResponse } from "msw";
+import { clusterHandlers } from "./cluster-handlers";
 
 const AGENTS_MOCK = [
   {
@@ -3505,6 +3506,9 @@ const DEAD_LETTERS_MOCK = [
 ];
 
 export const coordinatorHandlers = [
+  // The cluster console (/administration/cluster/*): fixtures and handlers in
+  // cluster-handlers.ts.
+  ...clusterHandlers,
   http.get("*/administration/coordinator/status", () => {
     return HttpResponse.json(COORDINATOR_STATUS_MOCK);
   }),
