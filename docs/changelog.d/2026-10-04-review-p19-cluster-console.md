@@ -85,6 +85,15 @@
   pages but appends them only to `StreamState.getSubjects()`, while `getSubjectMap()` keeps the
   first page. `countTurns` summed the map; it sums the list now. Checked against NATS 2.11 with
   100,050 subjects: the list holds 100,050, the map 100,000.
+- **A node that answers a cluster action with an error is named as failed** (PR #970 review,
+  round 3). Reconcile skipped such a reply, so the node was reported as "did not answer", or not
+  at all (and the action as `DONE`) when presence did not list it. Forward-local counted it as
+  having forwarded nothing. Both now report `PARTIAL` with `details.failed` (node and error), in
+  the audit entry and the message too, and keep the node out of `missing`. Drain answers
+  `409 NODE_FAILED` with the error for such a reply instead of `NODE_UNREACHABLE`.
+- **A drained node rewrites its drain key at least every 20 s** (round-3 review body), not only
+  every presence interval: an interval configured near or above the 60 s bucket TTL let the key
+  expire, and the last-node guard then counted the drained node as serving.
 - **The audit trail shows what a bulk replay or discard did** ("1 of 2 done", a warning when any
   failed) instead of a blank outcome: those entries record counts, not one outcome.
 - **Fencing tokens and lease revisions are JSON strings** in the console API, exact beyond 2^53.

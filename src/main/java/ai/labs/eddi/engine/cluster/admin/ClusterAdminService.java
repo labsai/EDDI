@@ -208,7 +208,7 @@ public class ClusterAdminService implements ClusterStartable {
         // UNAVAILABLE (seen live).
         claims();
         manager.onConnected(this::syncOwnDrainKey);
-        long every = config.presenceInterval().toMillis();
+        long every = drainKeyRefreshMillis(config.presenceInterval());
         manager.scheduler().scheduleWithFixedDelay(this::syncOwnDrainKey, every, every, TimeUnit.MILLISECONDS);
         rpc.handle(RPC_DRAIN, request -> {
             boolean drain = Boolean.parseBoolean(String.valueOf(request.get("drain")));
@@ -1118,10 +1118,13 @@ public class ClusterAdminService implements ClusterStartable {
         answered.add(isClustered() ? connections.get().node().nodeId() : "local");
         List<String> running = new ArrayList<>();
         List<String> missing = new ArrayList<>();
+        Map<String, Object> failed = new TreeMap<>();
         if (isClustered()) {
             Map<String, Map<String, Object>> replies = rpc.callAll(RPC_RECONCILE, Map.of());
             replies.forEach((node, reply) -> {
                 if (reply.get("error") != null) {
+                    // It answered, so it is not missing — but its sweep did not run.
+                    failed.put(node, String.valueOf(reply.get("error")));
                     return;
                 }
                 if (Boolean.TRUE.equals(reply.get("running"))) {
@@ -1130,30 +1133,35 @@ public class ClusterAdminService implements ClusterStartable {
                     answered.add(node);
                 }
             });
-            missing.addAll(otherMembers().stream().filter(n -> !answered.contains(n) && !running.contains(n)).toList());
+            missing.addAll(otherMembers().stream()
+                    .filter(n -> !answered.contains(n) && !running.contains(n) && !failed.containsKey(n)).toList());
         }
         // A node whose sweep outlasts the RPC answers "running": it has started and
         // finishes on its own — not done yet, but not a node that failed to answer.
-        String outcome = !missing.isEmpty() ? PARTIAL : !running.isEmpty() ? STARTED : DONE;
+        String outcome = !missing.isEmpty() || !failed.isEmpty() ? PARTIAL : !running.isEmpty() ? STARTED : DONE;
         audit("deployments.reconcile", actor, Map.of(),
-                Map.of("outcome", outcome, "nodes", answered, "running", running, "missing", missing));
+                Map.of("outcome", outcome, "nodes", answered, "running", running, "missing", missing, "failed", failed));
         activity.record("admin.deployments.reconcile", ClusterActivityLog.INFO, Map.of("actor", actor, "nodes", answered, "outcome", outcome),
                 null);
         count("deployments.reconcile", outcome.toLowerCase(Locale.ROOT));
         StringBuilder message = new StringBuilder();
-        if (running.isEmpty() && missing.isEmpty()) {
+        if (running.isEmpty() && missing.isEmpty() && failed.isEmpty()) {
             message.append("The deployment sweep ran on ").append(answered.size()).append(" node(s).");
         } else {
             message.append("The deployment sweep ran on ").append(answered).append('.');
             if (!running.isEmpty()) {
                 message.append(" It is still running on ").append(running).append(" and finishes on its own.");
             }
+            if (!failed.isEmpty()) {
+                message.append(" It failed on ").append(failed.keySet()).append(": ").append(failed.values())
+                        .append(" (their own sweep still runs every 10 s).");
+            }
             if (!missing.isEmpty()) {
                 message.append(' ').append(missing).append(" did not answer (their own sweep still runs every 10 s).");
             }
         }
         return new ActionResult("deployments.reconcile", outcome, message.toString(),
-                Map.of("nodes", answered, "running", running, "missing", missing));
+                Map.of("nodes", answered, "running", running, "missing", missing, "failed", failed));
     }
 
     /**
@@ -1203,29 +1211,36 @@ public class ClusterAdminService implements ClusterStartable {
         String self = connections.get().node().nodeId();
         perNode.put(self, clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters).orElse(0));
         remaining.put(self, clusterCoordinator().map(ClusterConversationCoordinator::localDeadLetterCount).orElse(0));
+        Map<String, Object> failed = new TreeMap<>();
         rpc.callAll(RPC_FORWARD, Map.of()).forEach((node, reply) -> {
+            if (reply.get("error") != null) {
+                // It answered, but did not forward: what it keeps locally is unknown.
+                failed.put(node, String.valueOf(reply.get("error")));
+                return;
+            }
             perNode.put(node, reply.getOrDefault("forwarded", 0));
             remaining.put(node, reply.getOrDefault("remaining", 0));
         });
-        List<String> missing = otherMembers().stream().filter(n -> !perNode.containsKey(n)).toList();
+        List<String> missing = otherMembers().stream().filter(n -> !perNode.containsKey(n) && !failed.containsKey(n)).toList();
         int total = sum(perNode);
         int left = sum(remaining);
         // Forwarding stops at the first entry that cannot be appended, and a node that
         // did
         // not answer forwarded nothing: either way entries are still local, so not
         // DONE.
-        String outcome = missing.isEmpty() && left == 0 ? DONE : PARTIAL;
+        String outcome = missing.isEmpty() && failed.isEmpty() && left == 0 ? DONE : PARTIAL;
         invalidateDeadLetterSummary();
         audit("deadletters.forward-local", actor, Map.of(),
-                Map.of("outcome", outcome, "forwarded", perNode, "remaining", remaining, "missing", missing));
+                Map.of("outcome", outcome, "forwarded", perNode, "remaining", remaining, "missing", missing, "failed", failed));
         activity.record("admin.deadletters.forward", ClusterActivityLog.INFO, Map.of("actor", actor, "forwarded", total, "outcome", outcome),
                 null);
         count("deadletters.forward-local", outcome.toLowerCase(Locale.ROOT));
         String message = total + " dead letter(s) moved to the shared stream."
                 + (left > 0 ? " " + left + " are still kept locally (the shared stream refused them for now)." : "")
+                + (failed.isEmpty() ? "" : " It failed on " + failed.keySet() + ": " + failed.values() + ".")
                 + (missing.isEmpty() ? "" : " " + missing + " did not answer.");
         return new ActionResult("deadletters.forward-local", outcome, message,
-                Map.of("perNode", perNode, "total", total, "remaining", remaining, "missing", missing));
+                Map.of("perNode", perNode, "total", total, "remaining", remaining, "missing", missing, "failed", failed));
     }
 
     public ActionResult drain(String nodeId, boolean drain, String actor) {
@@ -1280,19 +1295,22 @@ public class ClusterAdminService implements ClusterStartable {
                 }
                 kv.put(DRAIN_PREFIX + nodeId, "1".getBytes(StandardCharsets.UTF_8));
             }
-            boolean applied;
+            Optional<Map<String, Object>> reply = Optional.of(Map.of());
             if (self.equals(nodeId)) {
                 applyDrainLocally(drain);
-                applied = true;
             } else {
-                Optional<Map<String, Object>> reply = rpc.call(nodeId, RPC_DRAIN, Map.of("drain", drain));
-                applied = reply.isPresent() && reply.get().get("error") == null;
+                reply = rpc.call(nodeId, RPC_DRAIN, Map.of("drain", drain));
             }
-            if (!applied) {
+            if (reply.isEmpty() || reply.get().get("error") != null) {
                 if (drain) {
                     kv.delete(DRAIN_PREFIX + nodeId);
                 }
-                throw new ActionRefusedException(409, "NODE_UNREACHABLE", "Node " + sanitize(nodeId) + " did not answer; nothing was changed.");
+                if (reply.isEmpty()) {
+                    throw new ActionRefusedException(409, "NODE_UNREACHABLE", "Node " + sanitize(nodeId) + " did not answer; nothing was changed.");
+                }
+                throw new ActionRefusedException(409, "NODE_FAILED",
+                        "Node " + sanitize(nodeId) + " answered with an error (" + sanitize(String.valueOf(reply.get().get("error")))
+                                + "); nothing was changed.");
             }
             if (!drain) {
                 kv.delete(DRAIN_PREFIX + nodeId);
@@ -1336,6 +1354,16 @@ public class ClusterAdminService implements ClusterStartable {
      * behind.
      */
     static final SharedBucket ADMIN_BUCKET = new SharedBucket("ADMIN", Duration.ofSeconds(CLAIM_TTL_SECONDS), 1024);
+
+    /**
+     * How often a drained node rewrites its drain key: with the presence records,
+     * but at least three times per bucket TTL. A presence interval configured near
+     * or above the TTL would otherwise let the key expire, and the last-node guard
+     * would count that drained node as serving.
+     */
+    static long drainKeyRefreshMillis(Duration presenceInterval) {
+        return Math.min(presenceInterval.toMillis(), TimeUnit.SECONDS.toMillis(CLAIM_TTL_SECONDS) / 3);
+    }
 
     private ISharedKv claims() {
         ISharedKv kv = claims;

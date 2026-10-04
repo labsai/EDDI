@@ -154,7 +154,8 @@ listing, which carries the captured input, and every action are `eddi-admin` onl
 | `POST /administration/cluster/nodes/{nodeId}/drain` and `/undrain` | admin | Stops (or resumes) a node taking turns |
 
 A refused action answers `409` with `{"code": …, "message": …}` — `NOT_CLUSTERED`, `LAST_NODE`,
-`NODE_UNREACHABLE` or `NATS_UNREACHABLE` (also what a read of the leases answers while the node
+`NODE_UNREACHABLE` (the node did not answer), `NODE_FAILED` (it answered with an error), `BUSY` or
+`NATS_UNREACHABLE` (also what a read of the leases answers while the node
 is cut off from NATS). Never a `503`: the shipped nginx configuration retries the next node on
 `503`, so a `503` from every node during a NATS outage would take the whole API out of the load
 balancer for its fail timeout.
@@ -162,7 +163,8 @@ balancer for its fail timeout.
 An action that ran answers `200` with an `outcome` saying how far it got: `DONE` (it reached
 every node), `QUEUED` (a cache resync while this node is cut off from NATS: this node flushed,
 and the request to the others waits in the outbox until it reconnects) or `PARTIAL` (a reconcile
-or forward that some nodes did not answer, named in `details.missing`, or a forward that left
+or forward that some nodes did not answer, named in `details.missing`, or answered with an error,
+named with it in `details.failed`, or a forward that left
 entries kept locally, counted in `details.remaining`) or `STARTED` (a reconcile that every node
 answered, but whose sweep was still running on some — named in `details.running` — when the
 answer was due; it finishes on its own). The console shows anything but `DONE` as

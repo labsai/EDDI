@@ -686,6 +686,14 @@ class ClusterAdminServiceTest {
 
             var missing = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n9", true, "a"));
             assertEquals(404, missing.status());
+
+            // a node that answers with an error did answer: NODE_FAILED, naming the error
+            when(rpc.call("n3", ClusterAdminService.RPC_DRAIN, Map.of("drain", true))).thenReturn(Optional.of(Map.of("error", "handler failed")));
+            var failed = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n3", true, "a"));
+            assertEquals("NODE_FAILED", failed.code());
+            assertTrue(failed.getMessage().contains("handler failed"));
+            assertTrue(shared.bucket(ClusterAdminService.ADMIN_BUCKET).get(ClusterAdminService.DRAIN_PREFIX + "n3").isEmpty(),
+                    "the drain key of a failed drain is removed again");
         }
 
         @Test
@@ -737,6 +745,41 @@ class ClusterAdminServiceTest {
             } finally {
                 release.countDown();
             }
+        }
+
+        @Test
+        @DisplayName("a node that answers a reconcile or forward with an error is PARTIAL and named as failed, not missing")
+        void errorRepliesAreFailedNotMissing() {
+            when(rpc.callAll(ClusterAdminService.RPC_RECONCILE, Map.of()))
+                    .thenReturn(Map.of("n2", Map.of(), "n3", Map.of("error", "sweep failed: store unreachable")));
+            ActionResult reconcile = service.reconcileDeployments("a");
+            assertEquals("PARTIAL", reconcile.outcome());
+            assertEquals(Map.of("n3", "sweep failed: store unreachable"), reconcile.details().get("failed"));
+            assertEquals(List.of(), reconcile.details().get("missing"));
+            assertTrue(reconcile.message().contains("It failed on [n3]"));
+            assertFalse(reconcile.message().contains("did not answer"));
+            verify(audit).submit(argThat(e -> e.output().get("failed") instanceof Map<?, ?> m && m.containsKey("n3")));
+
+            // presence does not list the failing node: still PARTIAL, never DONE
+            members.removeIf(m -> m.get("node").equals("n3"));
+            assertEquals("PARTIAL", service.reconcileDeployments("a").outcome());
+
+            when(coordinator.forwardLocalDeadLetters()).thenReturn(0);
+            when(coordinator.localDeadLetterCount()).thenReturn(0);
+            when(rpc.callAll(ClusterAdminService.RPC_FORWARD, Map.of()))
+                    .thenReturn(Map.of("n2", Map.of("forwarded", 0, "remaining", 0), "n3", Map.of("error", "no handler for admin-forward")));
+            ActionResult forward = service.forwardLocalDeadLetters("a");
+            assertEquals("PARTIAL", forward.outcome());
+            assertEquals(Map.of("n3", "no handler for admin-forward"), forward.details().get("failed"));
+            assertFalse(((Map<?, ?>) forward.details().get("perNode")).containsKey("n3"), "a failed node forwarded nothing it can vouch for");
+        }
+
+        @Test
+        @DisplayName("a drained node rewrites its drain key well inside the bucket TTL, whatever the presence interval")
+        void drainKeyRefreshStaysInsideTheTtl() {
+            assertEquals(10_000, ClusterAdminService.drainKeyRefreshMillis(Duration.ofSeconds(10)));
+            assertEquals(20_000, ClusterAdminService.drainKeyRefreshMillis(Duration.ofSeconds(90)));
+            assertTrue(ClusterAdminService.drainKeyRefreshMillis(Duration.ofSeconds(60)) < ClusterAdminService.CLAIM_TTL_SECONDS * 1000);
         }
 
         @Test
