@@ -49,6 +49,7 @@ import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
+import { allowNextNavigation } from "@/hooks/use-unsaved-changes-guard";
 import { deployAgent } from "@/lib/api/agents";
 
 /**
@@ -477,6 +478,8 @@ export function ResourceDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
           setShowDeleteDialog(false);
+          // The document is gone — nothing left for the unsaved-changes guard to protect.
+          allowNextNavigation();
           navigate(`/manage/resources/${type}`);
         },
         onError: (err) => toast.error(getErrorMessage(err)),

@@ -30,9 +30,15 @@ export function ThemeProvider({
   defaultTheme?: Theme;
   storageKey?: string;
 }) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
-  );
+  const [theme, setTheme] = useState<Theme>(() => {
+    // Storage can throw (private mode, blocked site data) and this provider sits
+    // above every ErrorBoundary, so an unguarded read would white-screen the app.
+    try {
+      return (localStorage.getItem(storageKey) as Theme) || defaultTheme;
+    } catch {
+      return defaultTheme;
+    }
+  });
   const [systemTheme, setSystemTheme] = useState<"dark" | "light">(getSystemTheme);
 
   // Listen for OS theme changes so "system" mode reacts in real time
@@ -53,7 +59,11 @@ export function ThemeProvider({
   }, [resolvedTheme]);
 
   const handleSetTheme = useCallback((newTheme: Theme) => {
-    localStorage.setItem(storageKey, newTheme);
+    try {
+      localStorage.setItem(storageKey, newTheme);
+    } catch {
+      /* storage unavailable — the choice still applies for this session */
+    }
     setTheme(newTheme);
   }, [storageKey]);
 

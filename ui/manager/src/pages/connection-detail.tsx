@@ -32,7 +32,7 @@ import {
   useUpdateConnection,
   useDeleteConnection,
 } from "@/hooks/use-connections";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { getErrorMessage } from "@/lib/api-client";
 import { commitPending } from "@/lib/chip-values";
 import { authTypeLabel } from "@/lib/connection-labels";
@@ -390,6 +390,7 @@ export function ConnectionDetailPage() {
       await deleteMutation.mutateAsync({ id, version });
       // Deliberately `navigate`, not `leaveFor`: the document is gone, so there
       // is nothing left for an "unsaved changes" prompt to protect.
+      allowNextNavigation();
       navigate("/manage/connections");
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -841,7 +842,11 @@ export function ConnectionDetailPage() {
         onConfirm={() => {
           const to = pendingExit;
           setPendingExit(null);
-          if (to) navigate(to);
+          if (to) {
+            // Discard was just confirmed here; the route guard must not ask again.
+            allowNextNavigation();
+            navigate(to);
+          }
         }}
         onCancel={() => setPendingExit(null)}
       />
