@@ -196,9 +196,10 @@ public class ClusterWatcher implements ClusterStartable {
                     continue;
                 }
                 long updated = number(e.getValue().get("updatedAt"));
-                // A clean shutdown deletes the record within an interval of its last write;
-                // an expired one was last written at least the TTL (3 intervals) ago.
-                boolean clean = updated > 0 && now - updated < 2 * interval;
+                // A clean shutdown writes a leave marker before it deletes its record;
+                // a record that vanished without one expired: the node was lost. (Timing
+                // alone misread a clean shutdown as lost under scheduler jitter.)
+                boolean clean = presence.get().leftCleanly(e.getKey(), String.valueOf(e.getValue().get("boot")));
                 gone.put(e.getKey(), new GoneNode(e.getValue(), now, clean));
                 staleReported.remove(e.getKey());
                 String boot = String.valueOf(e.getValue().get("boot"));
@@ -224,7 +225,7 @@ public class ClusterWatcher implements ClusterStartable {
         payload.put("conversationId", key.startsWith("c.") ? key.substring(2) : null);
         payload.put("previousNode", previous.node());
         payload.put("previousBoot", previous.boot());
-        payload.put("previousRevision", previous.revision());
+        payload.put("previousRevision", String.valueOf(previous.revision()));
         activity.record("lease.takeover", ClusterActivityLog.WARNING, payload, "lease.takeover:" + key + ":" + previous.revision());
     }
 
@@ -235,7 +236,9 @@ public class ClusterWatcher implements ClusterStartable {
         payload.put("agentId", entry.turn() == null ? null : entry.turn().get("agentId"));
         payload.put("reason", entry.reason());
         if (entry.fence() != null) {
-            payload.put("fence", entry.fence());
+            Map<String, Object> fence = new LinkedHashMap<>();
+            entry.fence().forEach((k, v) -> fence.put(k, String.valueOf(v)));
+            payload.put("fence", fence);
         }
         String type = DeadLetterEntry.REASON_FENCED.equals(entry.reason()) ? "fence.rejected" : "deadletter.created";
         activity.record(type, ClusterActivityLog.WARNING, payload, null);

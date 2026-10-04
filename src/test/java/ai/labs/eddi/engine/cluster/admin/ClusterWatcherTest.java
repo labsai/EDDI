@@ -92,6 +92,7 @@ class ClusterWatcherTest {
         members.add(member("n2", "b2", now - 1_000));
         members.add(member("n3", "b3", now - 35_000));
         watcher.pollMembers();
+        when(presence.leftCleanly("n2", "b2")).thenReturn(true); // n2 wrote its leave marker
         members.removeIf(m -> !m.get("node").equals("n1"));
         watcher.pollMembers();
         List<ActivityEvent> events = activity.recent(100, List.of());
@@ -138,6 +139,19 @@ class ClusterWatcherTest {
     }
 
     @Test
+    @DisplayName("a record that vanished without a leave marker is lost, however fresh its last heartbeat looked")
+    void freshButUnmarkedIsLost() {
+        long now = System.currentTimeMillis();
+        members.add(member("n1", "b1", now));
+        members.add(member("n2", "b2", now));
+        watcher.pollMembers();
+        members.removeIf(m -> m.get("node").equals("n2"));
+        watcher.pollMembers();
+        assertEquals(List.of("node.lost"), types());
+        assertFalse(watcher.goneNodes().get("n2").clean());
+    }
+
+    @Test
     @DisplayName("a late heartbeat is reported once as node.stale")
     void stale() {
         long now = System.currentTimeMillis();
@@ -180,10 +194,11 @@ class ClusterWatcherTest {
     void deadLetters() {
         watcher.onDeadLetter(new DeadLetterEntry("7", "conv1", "fenced", 1, null, Map.of("agentId", "a1"), "fenced", "n1",
                 Map.of("token", 5L, "storedFence", 9L)));
+        // tokens travel as strings
         watcher.onDeadLetter(new DeadLetterEntry("8", "conv2", "boom", 1, null, null, "failed", "n1", null));
         List<ActivityEvent> events = activity.recent(10, List.of());
         assertEquals("fence.rejected", events.get(0).type());
-        assertEquals(Map.of("token", 5L, "storedFence", 9L), events.get(0).payload().get("fence"));
+        assertEquals(Map.of("token", "5", "storedFence", "9"), events.get(0).payload().get("fence"));
         assertEquals("a1", events.get(0).payload().get("agentId"));
         assertEquals("deadletter.created", events.get(1).type());
     }

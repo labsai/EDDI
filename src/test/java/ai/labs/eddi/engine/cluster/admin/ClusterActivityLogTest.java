@@ -75,20 +75,37 @@ class ClusterActivityLogTest {
     void listenersAreBounded() {
         List<ActivityEvent> received = new ArrayList<>();
         Consumer<ActivityEvent> first = received::add;
-        assertTrue(log.addListener(first));
+        assertTrue(log.addListener(first, true));
         for (int i = 1; i < ClusterActivityLog.MAX_LISTENERS; i++) {
             assertTrue(log.addListener(e -> {
-            }));
+            }, true));
         }
         assertFalse(log.addListener(e -> {
-        }), "the 17th subscriber must be refused");
+        }, true), "the 17th subscriber must be refused");
         log.record("node.joined", ClusterActivityLog.INFO, Map.of(), null);
         assertEquals(1, received.size());
         log.removeListener(first);
         assertTrue(log.addListener(e -> {
-        }));
+        }, true));
         log.record("node.joined", ClusterActivityLog.INFO, Map.of(), null);
         assertEquals(1, received.size());
+    }
+
+    @Test
+    @DisplayName("viewers cannot take every slot: four stay reserved for administrators")
+    void slotsReservedForAdmins() {
+        for (int i = 0; i < ClusterActivityLog.MAX_VIEWER_LISTENERS; i++) {
+            assertTrue(log.addListener(e -> {
+            }, false));
+        }
+        assertFalse(log.addListener(e -> {
+        }, false), "a 13th viewer is refused");
+        for (int i = ClusterActivityLog.MAX_VIEWER_LISTENERS; i < ClusterActivityLog.MAX_LISTENERS; i++) {
+            assertTrue(log.addListener(e -> {
+            }, true), "an administrator still gets a slot");
+        }
+        assertFalse(log.addListener(e -> {
+        }, true));
     }
 
     @Test
@@ -97,8 +114,8 @@ class ClusterActivityLogTest {
         List<ActivityEvent> received = new ArrayList<>();
         log.addListener(e -> {
             throw new IllegalStateException("closed");
-        });
-        log.addListener(received::add);
+        }, true);
+        log.addListener(received::add, true);
         log.record("node.joined", ClusterActivityLog.INFO, Map.of(), null);
         assertEquals(1, received.size());
     }

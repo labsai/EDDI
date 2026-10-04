@@ -83,6 +83,12 @@ public class ClusterActivityLog implements ClusterStartable {
     static final long MAX_STREAM_MESSAGES = 10_000;
     /** Live subscribers (SSE clients) per node. */
     static final int MAX_LISTENERS = 16;
+    /**
+     * Read-only subscribers may take at most this many of the
+     * {@value #MAX_LISTENERS}: the rest stay free for administrators, so viewers
+     * cannot lock the people who act out of the live feed.
+     */
+    static final int MAX_VIEWER_LISTENERS = 12;
 
     public static final String INFO = "info";
     public static final String WARNING = "warning";
@@ -97,6 +103,7 @@ public class ClusterActivityLog implements ClusterStartable {
     private final Set<String> seen = new LinkedHashSet<>();
     private final Deque<ActivityEvent> outbox = new ArrayDeque<>();
     private final List<Consumer<ActivityEvent>> listeners = new CopyOnWriteArrayList<>();
+    private final List<Consumer<ActivityEvent>> viewerListeners = new CopyOnWriteArrayList<>();
     private volatile Connection subscribedOn;
 
     @Inject
@@ -173,21 +180,29 @@ public class ClusterActivityLog implements ClusterStartable {
     /**
      * Subscribes a live listener (an SSE client).
      *
-     * @return false when {@value #MAX_LISTENERS} are already subscribed on this
-     *         node
+     * @param admin
+     *            an administrator's subscription; a viewer's counts against
+     *            {@value #MAX_VIEWER_LISTENERS}
+     * @return false when this node has no slot left for the caller
      */
-    public boolean addListener(Consumer<ActivityEvent> listener) {
+    public boolean addListener(Consumer<ActivityEvent> listener, boolean admin) {
         synchronized (listeners) {
-            if (listeners.size() >= MAX_LISTENERS) {
+            if (listeners.size() >= MAX_LISTENERS || (!admin && viewerListeners.size() >= MAX_VIEWER_LISTENERS)) {
                 return false;
             }
             listeners.add(listener);
+            if (!admin) {
+                viewerListeners.add(listener);
+            }
             return true;
         }
     }
 
     public void removeListener(Consumer<ActivityEvent> listener) {
-        listeners.remove(listener);
+        synchronized (listeners) {
+            listeners.remove(listener);
+            viewerListeners.remove(listener);
+        }
     }
 
     int listenerCount() {

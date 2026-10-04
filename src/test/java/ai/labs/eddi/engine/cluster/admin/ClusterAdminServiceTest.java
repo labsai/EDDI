@@ -58,6 +58,15 @@ import java.util.stream.IntStream;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.engine.cluster.LocalSharedStateFactory;
+import ai.labs.eddi.engine.model.ClusterAdminModels.ItemOutcome;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 @DisplayName("ClusterAdminService")
 class ClusterAdminServiceTest {
@@ -83,6 +92,11 @@ class ClusterAdminServiceTest {
     private IAgentDeploymentManagement deployments;
     private AuditLedgerService audit;
     private ClusterAdminService service;
+    /**
+     * One shared bucket per test: two services built on it are two nodes of one
+     * cluster.
+     */
+    private LocalSharedStateFactory shared;
     private final List<Map<String, Object>> members = new ArrayList<>();
 
     @SuppressWarnings("unchecked")
@@ -130,12 +144,14 @@ class ClusterAdminServiceTest {
         conversationService = mock(IConversationService.class);
         deployments = mock(IAgentDeploymentManagement.class);
         audit = mock(AuditLedgerService.class);
+        shared = new LocalSharedStateFactory();
         service = newService(config);
     }
 
     private ClusterAdminService newService(ClusterConfig cfg) {
         return new ClusterAdminService(cfg, activity, watcher, coordinator, leaseManager, rpc, instance(connections), instance(presence),
-                instance(natsLeases), instance(eventBus), memoryStore, conversationService, deployments, audit, new SimpleMeterRegistry());
+                instance(natsLeases), instance(eventBus), memoryStore, conversationService, deployments, audit, new SimpleMeterRegistry(),
+                shared);
     }
 
     private static DeadLetterEntry entry(String id, String reason, String node, Map<String, Object> turn) {
@@ -164,7 +180,7 @@ class ClusterAdminServiceTest {
             when(inMemory.getDeadLetters()).thenReturn(List.of());
             ClusterAdminService single = new ClusterAdminService(ClusterConfig.defaults(), activity, watcher, inMemory, leaseManager, rpc,
                     instance(null), instance(null), instance(null), instance(null), memoryStore, conversationService, deployments, audit,
-                    new SimpleMeterRegistry());
+                    new SimpleMeterRegistry(), new LocalSharedStateFactory());
             ClusterOverview overview = single.overview();
             assertEquals("SINGLE_NODE", overview.verdict());
             assertEquals("single-node", overview.mode());
@@ -421,6 +437,53 @@ class ClusterAdminServiceTest {
         }
 
         @Test
+        @DisplayName("two administrators replaying one entry at the same moment: the turn runs once, the other is told IN_PROGRESS")
+        void concurrentReplayRunsOnce() throws Exception {
+            AtomicBoolean present = new AtomicBoolean(true);
+            when(coordinator.getDeadLetter("7")).thenAnswer(i -> present.get()
+                    ? Optional.of(entry("7", "fenced", "n1", turn("a1", "hi")))
+                    : Optional.empty());
+            when(coordinator.replayDeadLetter("7")).thenAnswer(i -> {
+                present.set(false);
+                return true;
+            });
+            CountDownLatch inSay = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            doAnswer(i -> {
+                inSay.countDown();
+                release.await(5, TimeUnit.SECONDS);
+                return null;
+            }).when(conversationService).say(eq("conv-7"), any(), any(), any(), any(), anyBoolean(), any());
+            ClusterAdminService other = newService(config);
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<ItemOutcome> a = pool.submit(() -> service.replayOne("7"));
+                assertTrue(inSay.await(5, TimeUnit.SECONDS));
+                ItemOutcome b = pool.submit(() -> other.replayOne("7")).get(5, TimeUnit.SECONDS);
+                release.countDown();
+                assertEquals("REPLAYED", a.get(5, TimeUnit.SECONDS).outcome());
+                assertEquals("IN_PROGRESS", b.outcome());
+                // the claim is gone and so is the entry: a late third replay finds nothing to
+                // run
+                assertEquals("NOT_FOUND", other.replayOne("7").outcome());
+                verify(conversationService, times(1)).say(eq("conv-7"), any(), any(), any(), any(), anyBoolean(), any());
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("a rejected replay keeps the entry and releases the claim, so it can be replayed once the cause is fixed")
+        void rejectedReplayCanBeRetried() throws Exception {
+            when(coordinator.getDeadLetter("8")).thenReturn(Optional.of(entry("8", "failed", "n1", turn("a1", "x"))));
+            doThrow(new IllegalStateException("conversation ended")).doNothing().when(conversationService).say(eq("conv-8"), any(), any(),
+                    any(), any(), anyBoolean(), any());
+            assertEquals("REJECTED", service.replayOne("8").outcome());
+            verify(coordinator, never()).replayDeadLetter("8");
+            assertEquals("REPLAYED", service.replayOne("8").outcome());
+        }
+
+        @Test
         @DisplayName("discard reports DISCARDED and NOT_FOUND per id")
         void discardOutcomes() {
             when(coordinator.discardDeadLetter("1")).thenReturn(true);
@@ -464,7 +527,7 @@ class ClusterAdminServiceTest {
                     .thenReturn(new ForceRelease(ForceReleaseOutcome.RENEWED, new LeaseInfo("n2", "b2", 5, NOW), 5));
             ActionResult result = service.forceRelease("conv1", 1L, "admin-1");
             assertEquals("RENEWED", result.outcome());
-            assertEquals(5L, result.details().get("currentRevision"));
+            assertEquals("5", result.details().get("currentRevision"), "tokens travel as strings: a browser would round them");
         }
 
         @Test
@@ -481,11 +544,62 @@ class ClusterAdminServiceTest {
         @Test
         @DisplayName("draining the last node that takes turns is refused")
         void lastNodeNotDrained() {
-            members.get(1).put("draining", true);
-            members.get(2).put("draining", true);
+            drainKey("n2");
+            drainKey("n3");
             var e = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n1", true, "a"));
             assertEquals("LAST_NODE", e.code());
             verify(natsLeases, never()).setDraining(anyBoolean());
+        }
+
+        private void drainKey(String node) {
+            shared.bucket(ClusterAdminService.ADMIN_BUCKET).put(ClusterAdminService.DRAIN_PREFIX + node, new byte[]{1});
+        }
+
+        @Test
+        @DisplayName("the guard counts drains from the shared drain keys, not from presence records that may be 5 s old")
+        void lastNodeGuardDoesNotTrustStalePresence() {
+            when(rpc.call(anyString(), eq(ClusterAdminService.RPC_DRAIN), anyMap())).thenReturn(Optional.of(Map.of("draining", true)));
+            members.removeIf(m -> m.get("node").equals("n1")); // n1 answers but is not a member: two nodes take turns
+            // Another admin drained n2 a moment ago; no presence record says so yet.
+            assertEquals("DRAINED", newService(config).drain("n2", true, "admin-b").outcome());
+            var e = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n3", true, "admin-a"));
+            assertEquals("LAST_NODE", e.code());
+        }
+
+        @Test
+        @DisplayName("two administrators draining the last two nodes at the same moment: exactly one succeeds")
+        void concurrentDrainOfTheLastTwoNodes() throws Exception {
+            drainKey("n1");
+            CountDownLatch inRpc = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            when(rpc.call(anyString(), eq(ClusterAdminService.RPC_DRAIN), anyMap())).thenAnswer(i -> {
+                inRpc.countDown();
+                release.await(5, TimeUnit.SECONDS);
+                return Optional.of(Map.of("draining", true));
+            });
+            ClusterAdminService other = newService(config);
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<String> a = pool.submit(() -> outcome(() -> service.drain("n2", true, "admin-a")));
+                assertTrue(inRpc.await(5, TimeUnit.SECONDS));
+                Future<String> b = pool.submit(() -> outcome(() -> other.drain("n3", true, "admin-b")));
+                String second = b.get(5, TimeUnit.SECONDS); // decided while the first is still applying
+                release.countDown();
+                assertEquals("DRAINED", a.get(5, TimeUnit.SECONDS));
+                assertEquals("BUSY", second);
+                // and once the first finished, the second is refused for the right reason
+                assertEquals("LAST_NODE", outcome(() -> other.drain("n3", true, "admin-b")));
+            } finally {
+                pool.shutdownNow();
+            }
+        }
+
+        private String outcome(Supplier<ActionResult> action) {
+            try {
+                return action.get().outcome();
+            } catch (ClusterAdminService.ActionRefusedException e) {
+                return e.code();
+            }
         }
 
         @Test

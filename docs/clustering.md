@@ -142,7 +142,7 @@ API behind it, and why each action is safe, is in
 | A node must be restarted without failed turns | Its node card | *Drain* it: no new turns reach it (409 + `Retry-After`, readiness `DOWN`), running ones finish; restart it, or *Undrain*. |
 
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
-`eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `NONCES`,
+`eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `ADMIN` (console replay claims and drain state), `NONCES`,
 `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_*`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`;
 streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects `eddi.<prefix>.ops.>`). Subjects live
 under `eddi.<prefix>.>`, so a NATS user restricted to `eddi.>`, `$JS.API.>`,

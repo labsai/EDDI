@@ -165,13 +165,14 @@ balancer for its fail timeout.
 |---|---|---|
 | `HEALTHY` | NATS reachable, every node heartbeating | — (`DEAD_LETTERS_WAITING`, `NODE_DRAINING` may still be listed: they need attention, not repair) |
 | `DEGRADED` | The answering node cannot reach NATS — degraded mode, see [Clustering](clustering.md#degraded-mode-nats-unreachable) — or a node was lost, is late or reports itself degraded | `NATS_UNREACHABLE`, `NATS_RECONNECTING`, `NODE_LOST`, `NODE_STALE`, `MEMBER_DEGRADED`, `NATS_REPLICA_BEHIND`, `LOCAL_DEAD_LETTERS` |
-| `PARTITIONED` | NATS is reachable, but a JetStream replica of a stream or bucket is offline: the NATS cluster itself is split | `NATS_PEER_OFFLINE` |
+| `PARTITIONED` | NATS is reachable, but a JetStream replica of a stream or bucket is offline: the NATS cluster itself is split. A NATS server restarted on purpose shows the same way until it is back — the verdict cannot tell a planned restart from an outage | `NATS_PEER_OFFLINE` |
 | `SINGLE_NODE` | `eddi.messaging.type=in-memory` | — |
 
 The answer is the view of the node that served the request. Through a load balancer the next
 request can reach another node — which is why a node cut off from NATS answers `DEGRADED`
 about itself rather than guessing about the others. A node card is `LIVE`, `STALE` (heartbeat
-more than two presence intervals old), `LOST` (its record expired: killed, crashed or
+more than two presence intervals old), `LOST` (its record vanished without the leave marker a
+clean shutdown writes: killed, crashed or
 partitioned from NATS) or `LEFT` (it shut down cleanly); a lost or departed node stays on the
 screen for 15 minutes.
 
@@ -196,7 +197,9 @@ Every entry now records **why** it was dead-lettered (`reason`: `fenced`, `timeo
 had). An entry that cannot be replayed says why (`notReplayableReason`): `SECRET_INPUT` (the
 client flagged the turn `secretInput`, so its input was never stored), `INPUT_NOT_CAPTURED`
 (`eddi.coordinator.dead-letter.capture-input=false`) or `NOT_A_TURN` (a HITL resume or a group
-member's turn). Bulk replay and discard report one outcome per id — `REPLAYED`, `DISCARDED`,
+member's turn). A replay claims its entry first (`replay.<id>` in the `<prefix>_ADMIN` KV bucket,
+TTL 60 s), so two administrators replaying one entry run its turn once; the other gets
+`IN_PROGRESS`. Bulk replay and discard report one outcome per id — `REPLAYED`, `DISCARDED`, `IN_PROGRESS`,
 `NOT_FOUND`, `NOT_REPLAYABLE`, `REJECTED` (the conversation would not take the turn; the entry
 is kept) or `UNAVAILABLE` (NATS unreachable).
 
@@ -208,7 +211,10 @@ whichever node answers shows the same history. Entry types: `node.joined`, `node
 `node.lost`, `node.stale`, `degraded.on`/`degraded.off`, `lease.takeover`, `fence.rejected`,
 `deadletter.created`, `deployment.propagated` (one per receiving node, with the delay),
 `cache.invalidations` (counts per cache, once a minute) and `admin.*` for every recovery action.
-Payloads carry ids, counts and reasons only. The SSE stream sends an `activity` event per entry
+Payloads carry ids, counts and reasons only; a read-only caller sees `an administrator` in place
+of the acting admin's name. The SSE stream keeps at most 12 of its 16 per-node slots for
+read-only callers (the rest stay free for administrators), closes with an `expired` event when the
+caller's access token expires, and sends an `activity` event per entry
 and a `ping` every 15 seconds, and admits 16 subscribers per node (the 17th gets one `busy`
 event).
 
@@ -223,7 +229,7 @@ timeline, and counted on `eddi_cluster_admin_actions_total{action,outcome}`.
 | Force-release a lease | A compare-and-set delete at the revision found — or refused as `RENEWED` when `expectedRevision` no longer matches, which means the holder is alive and renewing. The next holder's lease has a higher revision, which it raises on the conversation before its turn runs, so a still-alive former holder's late write is **refused by the fence and dead-lettered**; its next heartbeat finds the lease gone and cancels its turn at the next task boundary. A lease nobody holds answers `ALREADY_RELEASED`. |
 | Resync caches | The flush a node already does by itself after missing events; caches reload from the database. Costs a short burst of reads, changes no data. |
 | Reconcile deployments | Runs the 10-second deployment sweep now on every node. |
-| Drain / undrain a node | The node takes no new leases — turns that reach it are answered `409` with `Retry-After` and retried elsewhere — and its readiness check reports `DOWN` (`draining: true`), so a Kubernetes Service stops routing to it; running turns finish. Refused (`409 LAST_NODE`) for the last node still taking turns. Lasts until undrain or restart. |
+| Drain / undrain a node | The node takes no new leases — turns that reach it are answered `409` with `Retry-After` and retried elsewhere — and its readiness check reports `DOWN` (`draining: true`), so a Kubernetes Service stops routing to it; running turns finish. Refused (`409 LAST_NODE`) for the last node still taking turns — decided under a cluster-wide `gate.drain` (a concurrent decision answers `409 BUSY`) and counted from the `drain.<node>` keys every drained node keeps in the `<prefix>_ADMIN` bucket, not from presence. Lasts until undrain or restart. |
 | Forward local dead letters | Each node appends the entries it kept while NATS was down to the shared stream, then removes its copy; serialised per node, so two runs never forward an entry twice. Refused while the answering node has no NATS. |
 
 Not offered, on purpose: deleting a stream or bucket, purging every dead letter from the console

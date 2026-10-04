@@ -77,6 +77,16 @@ import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.lang.management.ManagementFactory;
+import ai.labs.eddi.engine.cluster.ISharedKv;
+import ai.labs.eddi.engine.cluster.ISharedStateFactory;
+import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.engine.cluster.SharedBucket;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Everything behind the cluster console: the health verdict, the node cards,
@@ -142,6 +152,13 @@ public class ClusterAdminService implements ClusterStartable {
     private final AuditLedgerService auditLedger;
     private final MeterRegistry meterRegistry;
 
+    private final ISharedStateFactory sharedState;
+    private volatile ISharedKv claims;
+    /**
+     * Replay claims of node-local dead letters ({@code local-…}): those exist on
+     * this node only, so a claim in this JVM is the whole cluster's.
+     */
+    private final Set<String> localReplayClaims = ConcurrentHashMap.newKeySet();
     private volatile NatsView cachedNats;
     private volatile long cachedNatsAt;
 
@@ -150,8 +167,9 @@ public class ClusterAdminService implements ClusterStartable {
             IConversationLeaseManager leaseManager, IClusterRpc rpc, Instance<NatsConnectionManager> connections,
             Instance<ClusterPresence> presence, Instance<NatsLeaseManager> natsLeases, Instance<JetStreamEventBus> eventBus,
             IConversationMemoryStore memoryStore, IConversationService conversationService, IAgentDeploymentManagement deployments,
-            AuditLedgerService auditLedger, MeterRegistry meterRegistry) {
+            AuditLedgerService auditLedger, MeterRegistry meterRegistry, ISharedStateFactory sharedState) {
         this.config = config;
+        this.sharedState = sharedState;
         this.activity = activity;
         this.watcher = watcher;
         this.coordinator = coordinator;
@@ -172,6 +190,14 @@ public class ClusterAdminService implements ClusterStartable {
     @Override
     public void startCluster() {
         presence.get().contribute(() -> Map.of("draining", natsLeases.get().isDraining()));
+        NatsConnectionManager manager = connections.get();
+        // The drain key lives in a bucket with a TTL: a drained node keeps rewriting
+        // it,
+        // and a node that is not drained (a restart ends a drain) removes a leftover
+        // one.
+        manager.onConnected(this::syncOwnDrainKey);
+        long every = config.presenceInterval().toMillis();
+        manager.scheduler().scheduleWithFixedDelay(this::syncOwnDrainKey, every, every, TimeUnit.MILLISECONDS);
         rpc.handle(RPC_DRAIN, request -> {
             boolean drain = Boolean.parseBoolean(String.valueOf(request.get("drain")));
             applyDrainLocally(drain);
@@ -709,7 +735,63 @@ public class ClusterAdminService implements ClusterStartable {
         return result;
     }
 
+    /**
+     * Replays one entry exactly once, even when two administrators (on any nodes)
+     * replay it at the same moment.
+     * <p>
+     * The entry is <b>claimed</b> before anything is read: a create of
+     * {@code replay.<id>} in the shared {@code ADMIN} bucket, which only one caller
+     * can win (the bucket's leader decides). The winner then reads the entry —
+     * after the claim, so a replay that finished in the meantime, which deletes the
+     * entry before it drops its claim, is seen as gone — submits the turn, deletes
+     * the entry and only then drops the claim. Whoever loses gets
+     * {@code IN_PROGRESS} and nothing runs.
+     * <p>
+     * Nothing is lost: the entry stays in the stream until its turn was accepted; a
+     * rejected turn drops the claim and keeps the entry; a node that dies while
+     * holding a claim leaves the entry in place, and the claim expires with the
+     * bucket's TTL ({@value #CLAIM_TTL_SECONDS} s). The one window left is a node
+     * dying between the turn being accepted and the entry being deleted — then the
+     * entry is listed again after the TTL; the replayed turn carries
+     * {@code replayOf=<id>} in its context, which tells the two apart.
+     */
     ItemOutcome replayOne(String id) {
+        boolean local = isLocal(id);
+        String claimKey = "replay." + KvKeys.safe(id);
+        if (local) {
+            if (!localReplayClaims.add(id)) {
+                return new ItemOutcome(id, "IN_PROGRESS", "another administrator is replaying this entry right now");
+            }
+        } else {
+            try {
+                if (claims().create(claimKey, nodeName().getBytes(StandardCharsets.UTF_8)).isEmpty()) {
+                    return new ItemOutcome(id, "IN_PROGRESS", "another administrator is replaying this entry right now");
+                }
+            } catch (ClusterUnavailableException e) {
+                return new ItemOutcome(id, "UNAVAILABLE", "NATS is unreachable — try again when the cluster is connected");
+            }
+        }
+        boolean releaseClaim = true;
+        try {
+            ItemOutcome outcome = replayClaimed(id);
+            // Submitted but the entry could not be deleted: keep the claim, so nobody
+            // replays it again until the claim expires (and someone may delete it).
+            releaseClaim = !("REPLAYED".equals(outcome.outcome()) && outcome.message() != null);
+            return outcome;
+        } finally {
+            if (local) {
+                localReplayClaims.remove(id);
+            } else if (releaseClaim) {
+                try {
+                    claims().delete(claimKey);
+                } catch (ClusterUnavailableException e) {
+                    LOGGER.debugf("Replay claim %s not released (expires with the TTL): %s", sanitize(id), e.getMessage());
+                }
+            }
+        }
+    }
+
+    private ItemOutcome replayClaimed(String id) {
         Optional<DeadLetterEntry> found;
         try {
             found = coordinator.getDeadLetter(id);
@@ -827,7 +909,7 @@ public class ClusterAdminService implements ClusterStartable {
             details.put("holderNode", lease.holderNode());
             details.put("ageMs", lease.ageMs());
             details.put("sinceRenewalMs", lease.sinceRenewalMs());
-            details.put("revision", lease.revision());
+            details.put("revision", String.valueOf(lease.revision()));
             if (lease.flags().contains("HOLDER_GONE") || lease.flags().contains("HOLDER_RESTARTED") || lease.flags().contains("NOT_RENEWED")) {
                 findings.add(new Finding("LEASE_ORPHANED", "error", "FORCE_RELEASE", details));
             } else if (lease.flags().contains("LONG_RUNNING")) {
@@ -925,7 +1007,7 @@ public class ClusterAdminService implements ClusterStartable {
         }
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("conversationId", conversationId);
-        details.put("currentRevision", result.currentRevision());
+        details.put("currentRevision", String.valueOf(result.currentRevision()));
         if (result.holder() != null) {
             details.put("holderNode", result.holder().node());
             details.put("holderBoot", result.holder().boot());
@@ -998,25 +1080,63 @@ public class ClusterAdminService implements ClusterStartable {
         if (!self.equals(nodeId) && !members.containsKey(nodeId)) {
             throw new ActionRefusedException(404, "NODE_NOT_FOUND", "No live node " + sanitize(nodeId));
         }
-        if (drain) {
-            long others = members.entrySet().stream().filter(e -> !e.getKey().equals(nodeId))
-                    .filter(e -> !(e.getKey().equals(self) ? natsLeases.get().isDraining() : Boolean.TRUE.equals(e.getValue().get("draining"))))
-                    .count();
-            if (others == 0) {
-                throw new ActionRefusedException(409, "LAST_NODE",
-                        "Refused: " + sanitize(nodeId) + " is the last node taking turns — draining it would stop the whole cluster.");
+        // One drain decision at a time, cluster-wide: the guard below counts the
+        // drained
+        // nodes from the shared drain keys (leader reads), and the key of this decision
+        // is
+        // written before the gate opens again — so two administrators draining the last
+        // two nodes at once cannot both pass it.
+        ISharedKv kv = claims();
+        try {
+            if (kv.create(DRAIN_GATE, self.getBytes(StandardCharsets.UTF_8)).isEmpty()) {
+                throw new ActionRefusedException(409, "BUSY",
+                        "Another drain or undrain is being applied right now — try again in a moment.");
             }
+        } catch (ClusterUnavailableException e) {
+            throw new ActionRefusedException(409, "NATS_UNREACHABLE", "NATS is unreachable from this node; nothing was changed.");
         }
-        boolean applied;
-        if (self.equals(nodeId)) {
-            applyDrainLocally(drain);
-            applied = true;
-        } else {
-            Optional<Map<String, Object>> reply = rpc.call(nodeId, RPC_DRAIN, Map.of("drain", drain));
-            applied = reply.isPresent() && reply.get().get("error") == null;
-        }
-        if (!applied) {
-            throw new ActionRefusedException(409, "NODE_UNREACHABLE", "Node " + sanitize(nodeId) + " did not answer; nothing was changed.");
+        try {
+            if (drain) {
+                Set<String> drained = drainedNodes(kv);
+                long now = System.currentTimeMillis();
+                long staleAfter = 2 * config.presenceInterval().toMillis();
+                long others = members.entrySet().stream().filter(e -> !e.getKey().equals(nodeId))
+                        .filter(e -> !drained.contains(e.getKey()))
+                        .filter(e -> !(e.getKey().equals(self) && natsLeases.get().isDraining()))
+                        // A record that stopped being rewritten is a node that may be gone.
+                        .filter(e -> e.getKey().equals(self) || now - num(e.getValue().get("updatedAt")) <= staleAfter)
+                        .count();
+                if (others == 0) {
+                    throw new ActionRefusedException(409, "LAST_NODE",
+                            "Refused: " + sanitize(nodeId) + " is the last node taking turns — draining it would stop the whole cluster.");
+                }
+                kv.put(DRAIN_PREFIX + nodeId, "1".getBytes(StandardCharsets.UTF_8));
+            }
+            boolean applied;
+            if (self.equals(nodeId)) {
+                applyDrainLocally(drain);
+                applied = true;
+            } else {
+                Optional<Map<String, Object>> reply = rpc.call(nodeId, RPC_DRAIN, Map.of("drain", drain));
+                applied = reply.isPresent() && reply.get().get("error") == null;
+            }
+            if (!applied) {
+                if (drain) {
+                    kv.delete(DRAIN_PREFIX + nodeId);
+                }
+                throw new ActionRefusedException(409, "NODE_UNREACHABLE", "Node " + sanitize(nodeId) + " did not answer; nothing was changed.");
+            }
+            if (!drain) {
+                kv.delete(DRAIN_PREFIX + nodeId);
+            }
+        } catch (ClusterUnavailableException e) {
+            throw new ActionRefusedException(409, "NATS_UNREACHABLE", "NATS is unreachable from this node: " + e.getMessage());
+        } finally {
+            try {
+                kv.delete(DRAIN_GATE);
+            } catch (ClusterUnavailableException e) {
+                LOGGER.debugf("Drain gate not released (expires with the TTL): %s", e.getMessage());
+            }
         }
         String outcome = drain ? "DRAINED" : "UNDRAINED";
         audit(drain ? "node.drain" : "node.undrain", actor, Map.of("nodeId", nodeId), Map.of("outcome", outcome));
@@ -1032,8 +1152,62 @@ public class ClusterAdminService implements ClusterStartable {
 
     private void applyDrainLocally(boolean drain) {
         natsLeases.get().setDraining(drain);
+        syncOwnDrainKey();
         presence.get().publishNow();
         LOGGER.warnf("Node %s %s by an administrator", connections.get().node().nodeId(), drain ? "DRAINED" : "undrained");
+    }
+
+    // ================================================================ shared admin
+    // state
+
+    static final String DRAIN_GATE = "gate.drain";
+    static final String DRAIN_PREFIX = "drain.";
+    static final long CLAIM_TTL_SECONDS = 60;
+    /**
+     * Replay claims, the drain gate and drain keys; expires what a dead node left
+     * behind.
+     */
+    static final SharedBucket ADMIN_BUCKET = new SharedBucket("ADMIN", Duration.ofSeconds(CLAIM_TTL_SECONDS), 1024);
+
+    private ISharedKv claims() {
+        ISharedKv kv = claims;
+        if (kv == null) {
+            kv = sharedState.bucket(ADMIN_BUCKET);
+            claims = kv;
+        }
+        return kv;
+    }
+
+    private String nodeName() {
+        return isClustered() ? connections.get().node().nodeId() : "local";
+    }
+
+    /** The nodes with a drain key, read from the bucket's leader. */
+    private static Set<String> drainedNodes(ISharedKv kv) {
+        Set<String> drained = new HashSet<>();
+        for (String key : kv.keys()) {
+            if (key.startsWith(DRAIN_PREFIX) && kv.getConsistent(key).isPresent()) {
+                drained.add(key.substring(DRAIN_PREFIX.length()));
+            }
+        }
+        return drained;
+    }
+
+    /** Keeps this node's drain key in step with its drain flag. */
+    void syncOwnDrainKey() {
+        if (!isClustered()) {
+            return;
+        }
+        try {
+            String key = DRAIN_PREFIX + connections.get().node().nodeId();
+            if (natsLeases.get().isDraining()) {
+                claims().put(key, "1".getBytes(StandardCharsets.UTF_8));
+            } else if (claims().get(key).isPresent()) {
+                claims().delete(key);
+            }
+        } catch (ClusterUnavailableException e) {
+            LOGGER.debugf("Drain key not synced: %s", e.getMessage());
+        }
     }
 
     // ================================================================ audit &

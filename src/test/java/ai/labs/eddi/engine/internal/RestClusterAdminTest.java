@@ -24,6 +24,12 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import org.eclipse.microprofile.jwt.JsonWebToken;
+import jakarta.ws.rs.sse.OutboundSseEvent;
+import jakarta.ws.rs.sse.Sse;
+import jakarta.ws.rs.sse.SseEventSink;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 @DisplayName("RestClusterAdmin")
 class RestClusterAdminTest {
@@ -92,5 +98,36 @@ class RestClusterAdminTest {
         assertSame(drained, RestClusterAdmin.forCaller(drained, true));
         ClusterAdminModels.ActivityEvent noActor = new ClusterAdminModels.ActivityEvent("2", "node.lost", "error", "n1", 6L, Map.of("nodeId", "n3"));
         assertSame(noActor, RestClusterAdmin.forCaller(noActor, false));
+    }
+
+    @Test
+    @DisplayName("the activity stream does not outlive the access token it was opened with")
+    @SuppressWarnings("unchecked")
+    void streamClosesWhenTheTokenExpires() {
+        SecurityIdentity identity = mock(SecurityIdentity.class);
+        JsonWebToken jwt = mock(JsonWebToken.class);
+        long exp = System.currentTimeMillis() / 1000 + 60;
+        when(jwt.getExpirationTime()).thenReturn(exp);
+        when(identity.getPrincipal()).thenReturn(jwt);
+        when(identity.hasRole("eddi-viewer")).thenReturn(true);
+        ClusterActivityLog activity = mock(ClusterActivityLog.class);
+        when(activity.addListener(any(), anyBoolean())).thenReturn(true);
+        RestClusterAdmin stream = new RestClusterAdmin(service, activity, identity);
+        assertEquals(exp * 1000, stream.tokenExpiry());
+
+        Sse sse = mock(Sse.class);
+        OutboundSseEvent.Builder builder = mock(OutboundSseEvent.Builder.class, RETURNS_SELF);
+        when(builder.build()).thenReturn(mock(OutboundSseEvent.class));
+        when(sse.newEventBuilder()).thenReturn(builder);
+        SseEventSink sink = mock(SseEventSink.class);
+        when(sink.send(any())).thenReturn((CompletionStage) CompletableFuture.completedFuture(null));
+        stream.streamActivity(sink, sse);
+        verify(activity).addListener(any(), eq(false));
+
+        assertEquals(0, stream.expireStreams(exp * 1000 - 1), "still valid");
+        verify(sink, never()).close();
+        assertEquals(1, stream.expireStreams(exp * 1000));
+        verify(sink).close();
+        verify(activity).removeListener(any());
     }
 }

@@ -43,6 +43,7 @@ import java.util.function.Consumer;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 
 /**
  * REST adapter of the cluster console. The logic is in
@@ -61,6 +62,7 @@ public class RestClusterAdmin implements IRestClusterAdmin {
     private final ClusterActivityLog activity;
     private final SecurityIdentity identity;
     private final Map<SseEventSink, Consumer<ActivityEvent>> streams = new ConcurrentHashMap<>();
+    private final Map<SseEventSink, Long> expiries = new ConcurrentHashMap<>();
     private final ScheduledExecutorService pinger = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "cluster-activity-sse-ping");
         t.setDaemon(true);
@@ -121,12 +123,16 @@ public class RestClusterAdmin implements IRestClusterAdmin {
         boolean admin = isAdmin();
         Consumer<ActivityEvent> listener = event -> send(sink, sse.newEventBuilder().name("activity").mediaType(MediaType.APPLICATION_JSON_TYPE)
                 .data(ActivityEvent.class, forCaller(event, admin)).build());
-        if (!activity.addListener(listener)) {
+        if (!activity.addListener(listener, admin)) {
             sink.send(sse.newEventBuilder().name("busy").data("too many subscribers on this node").build())
                     .whenComplete((v, t) -> sink.close());
             return;
         }
         streams.put(sink, listener);
+        long expiresAt = tokenExpiry();
+        if (expiresAt > 0) {
+            expiries.put(sink, expiresAt);
+        }
         startPinger(sse);
         send(sink, sse.newEventBuilder().name("ping").data(String.valueOf(System.currentTimeMillis())).build());
     }
@@ -143,6 +149,7 @@ public class RestClusterAdmin implements IRestClusterAdmin {
     }
 
     private void drop(SseEventSink sink) {
+        expiries.remove(sink);
         Consumer<ActivityEvent> listener = streams.remove(sink);
         if (listener != null) {
             activity.removeListener(listener);
@@ -155,14 +162,51 @@ public class RestClusterAdmin implements IRestClusterAdmin {
         }
         pingSse = sse;
         pinger.scheduleAtFixedRate(() -> {
+            long now = System.currentTimeMillis();
             for (SseEventSink sink : Set.copyOf(streams.keySet())) {
                 try {
-                    send(sink, pingSse.newEventBuilder().name("ping").data(String.valueOf(System.currentTimeMillis())).build());
+                    Long expiresAt = expiries.get(sink);
+                    if (expiresAt != null && now >= expiresAt) {
+                        // The stream must not outlive the access token it was opened with: a
+                        // revoked or downgraded user keeps nothing. The client reconnects
+                        // with its refreshed token, which is checked again.
+                        expire(sink);
+                        continue;
+                    }
+                    send(sink, pingSse.newEventBuilder().name("ping").data(String.valueOf(now)).build());
                 } catch (RuntimeException e) {
                     drop(sink);
                 }
             }
         }, PING_SECONDS, PING_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private void expire(SseEventSink sink) {
+        drop(sink);
+        if (!sink.isClosed()) {
+            sink.send(pingSse.newEventBuilder().name("expired").data("token expired").build()).whenComplete((v, t) -> sink.close());
+        }
+    }
+
+    /** When the caller's access token expires (epoch millis), or 0 without one. */
+    long tokenExpiry() {
+        if (identity != null && identity.getPrincipal() instanceof JsonWebToken jwt && jwt.getExpirationTime() > 0) {
+            return jwt.getExpirationTime() * 1000L;
+        }
+        return 0;
+    }
+
+    /** For tests: closes every stream whose token has expired by {@code now}. */
+    int expireStreams(long now) {
+        int closed = 0;
+        for (Map.Entry<SseEventSink, Long> e : Map.copyOf(expiries).entrySet()) {
+            if (now >= e.getValue()) {
+                drop(e.getKey());
+                e.getKey().close();
+                closed++;
+            }
+        }
+        return closed;
     }
 
     @PreDestroy

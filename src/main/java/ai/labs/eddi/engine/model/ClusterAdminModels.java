@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.model;
 
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 
 /**
  * The shapes of the cluster console API ({@code /administration/cluster}).
@@ -17,6 +19,11 @@ import java.util.Map;
  * look.
  */
 public final class ClusterAdminModels {
+
+    // Fencing tokens and lease revisions go out as JSON strings: they are ~1.8e15
+    // today, and a browser's number loses integers above 2^53, so a token copied
+    // from
+    // the console (or sent back as an expected revision) must not be rounded.
 
     private ClusterAdminModels() {
     }
@@ -101,7 +108,8 @@ public final class ClusterAdminModels {
      * creation time in microseconds, so every fencing token handed out by this
      * bucket is above every token of an earlier one.
      */
-    public record LeaseEpoch(long firstRevision, Long createdAt, long lastRevision) {
+    public record LeaseEpoch(@JsonSerialize(using = ToStringSerializer.class) long firstRevision, Long createdAt,
+            @JsonSerialize(using = ToStringSerializer.class) long lastRevision) {
     }
 
     /** JetStream usage of the NATS account. */
@@ -129,7 +137,8 @@ public final class ClusterAdminModels {
      *            {@code LONG_RUNNING}, {@code CONTENDED}
      */
     public record LeaseView(String key, String kind, String conversationId, String agentId, String conversationState, String holderNode,
-            String holderBoot, long revision, long since, long ageMs, long renewedAt, long sinceRenewalMs, String holderStatus,
+            String holderBoot, @JsonSerialize(using = ToStringSerializer.class) long revision, long since, long ageMs, long renewedAt,
+            long sinceRenewalMs, String holderStatus,
             List<String> flags, String waitingNode) {
     }
 
@@ -160,7 +169,8 @@ public final class ClusterAdminModels {
      *            kept on a node that could not reach NATS (id {@code local-…})
      */
     public record DeadLetterView(String id, String conversationId, String agentId, Integer agentVersion, String environment, String error,
-            long timestamp, String reason, String nodeId, Map<String, Object> fence, String input, boolean secretInput, boolean replayable,
+            long timestamp, String reason, String nodeId, @JsonSerialize(contentUsing = ToStringSerializer.class) Map<String, Object> fence,
+            String input, boolean secretInput, boolean replayable,
             String notReplayableReason, boolean local) {
     }
 

@@ -24,6 +24,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Who is in the cluster right now.
@@ -41,6 +42,7 @@ public class ClusterPresence {
     private static final Logger LOGGER = Logger.getLogger(ClusterPresence.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String KEY_PREFIX = "n.";
+    private static final String LEFT_PREFIX = "left.";
     private static final long MEMBER_CACHE_MILLIS = 3_000;
 
     private final NatsConnectionManager connections;
@@ -200,8 +202,27 @@ public class ClusterPresence {
         return lastKnownMembers;
     }
 
+    /**
+     * Whether {@code nodeId} in boot {@code boot} announced a clean shutdown (the
+     * marker lives for the bucket's TTL). Unknown — NATS unreachable — is false.
+     */
+    public boolean leftCleanly(String nodeId, String boot) {
+        try {
+            return nodes.get(LEFT_PREFIX + nodeId).map(v -> new String(v.value(), StandardCharsets.UTF_8).equals(boot)).orElse(false);
+        } catch (ClusterUnavailableException e) {
+            return false;
+        }
+    }
+
     /** Removes this node's record — part of a clean shutdown. */
     public void leave() {
+        try {
+            // Said explicitly, so nobody has to guess it from timing: a node whose record
+            // disappears with this marker beside it shut down; without it, it was lost.
+            nodes.put(LEFT_PREFIX + connections.node().nodeId(), connections.node().bootId().getBytes(StandardCharsets.UTF_8));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Leave marker not written: %s", e.getMessage());
+        }
         try {
             nodes.delete(KEY_PREFIX + connections.node().nodeId());
         } catch (RuntimeException e) {
