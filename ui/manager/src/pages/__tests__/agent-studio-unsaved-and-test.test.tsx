@@ -136,6 +136,35 @@ describe("Agent Studio — unsaved edits when switching stages", () => {
   });
 });
 
+describe("Agent Studio — leaving the editor on mobile", () => {
+  it("asks before the tab bar unmounts an edited editor, and Cancel keeps it", async () => {
+    renderStudio();
+    const user = userEvent.setup();
+    await dirtyLlmEditor(user);
+    await user.click(screen.getByTestId("mobile-tab-chat"));
+    await user.click(await screen.findByTestId("unsaved-cancel"));
+    expect(screen.getAllByTestId("model-type-select")[0]).toHaveValue("azure-openai");
+  });
+
+  it("discards and leaves on confirm", async () => {
+    renderStudio();
+    const user = userEvent.setup();
+    await dirtyLlmEditor(user);
+    await user.click(screen.getByTestId("mobile-tab-chat"));
+    await user.click(await screen.findByTestId("unsaved-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("unsaved-confirm")).not.toBeInTheDocument());
+  });
+
+  it("changes tab instantly when the editor is clean", async () => {
+    renderStudio();
+    const user = userEvent.setup();
+    await selectStage(user, LLM_STAGE);
+    await screen.findAllByTestId("model-type-select");
+    await user.click(screen.getByTestId("mobile-tab-chat"));
+    expect(screen.queryByTestId("unsaved-confirm")).not.toBeInTheDocument();
+  });
+});
+
 describe("Agent Studio — Save & Test", () => {
   it("offers Save & Test beside Save on an editable stage", async () => {
     renderStudio();
@@ -197,6 +226,17 @@ describe("Agent Studio — workflow switcher", () => {
 
     await user.selectOptions(switcher, "0");
     await waitFor(() => expect(screen.getAllByTestId("stage-1").length).toBeGreaterThan(0));
+  });
+
+  it("gives the desktop and mobile selectors their own ids, each labelled by its own label", async () => {
+    twoWorkflows();
+    renderStudio();
+    const selects = await screen.findAllByTestId("studio-workflow-switcher");
+    expect(selects).toHaveLength(2);
+    expect(selects[0]!.id).not.toBe(selects[1]!.id);
+    for (const select of selects) {
+      expect(document.querySelector(`label[for="${select.id}"]`)).not.toBeNull();
+    }
   });
 
   it("is not shown for an agent with a single workflow", async () => {

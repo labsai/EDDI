@@ -367,17 +367,18 @@ export function AgentStudioPage() {
     );
   }
 
-  const workflowSwitcher =
-    agentWorkflows.length > 1 ? (
+  const renderWorkflowSwitcher = (idSuffix: string) => {
+    const selectId = workflowSelectId + idSuffix;
+    return agentWorkflows.length > 1 ? (
       <div className="px-3 pb-2">
         <label
-          htmlFor={workflowSelectId}
+          htmlFor={selectId}
           className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60"
         >
           {t("studio.workflow", "Workflow")}
         </label>
         <select
-          id={workflowSelectId}
+          id={selectId}
           value={Math.min(selectedWorkflowIndex, agentWorkflows.length - 1)}
           onChange={(e) => handleSelectWorkflow(Number(e.target.value))}
           className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -394,6 +395,7 @@ export function AgentStudioPage() {
         </select>
       </div>
     ) : null;
+  };
 
   const selectedStep = selectedStageIndex !== null ? workflowSteps[selectedStageIndex] : null;
   const selectedResourceId = resourceIdOf(selectedStep?.config?.uri);
@@ -455,7 +457,7 @@ export function AgentStudioPage() {
               {t("studio.pipeline", "Pipeline")}
             </h2>
           </div>
-          {workflowSwitcher}
+          {renderWorkflowSwitcher("-desktop")}
           <PipelineRailroad
             workflowSteps={workflowSteps}
             selectedIndex={selectedStageIndex}
@@ -511,7 +513,7 @@ export function AgentStudioPage() {
                     {t("studio.pipeline", "Pipeline")}
                   </h2>
                 </div>
-                {workflowSwitcher}
+                {renderWorkflowSwitcher("-mobile")}
                 <PipelineRailroad
                   workflowSteps={workflowSteps}
                   selectedIndex={selectedStageIndex}
@@ -602,7 +604,11 @@ export function AgentStudioPage() {
         ]).map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setMobileTab(tab.id)}
+            onClick={() => {
+              // Leaving the editor tab unmounts the editor: ask about unsaved edits first.
+              if (mobileTab === "editor" && tab.id !== "editor") guardUnsaved(() => setMobileTab(tab.id));
+              else setMobileTab(tab.id);
+            }}
             className={cn(
               "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition-colors",
               mobileTab === tab.id
