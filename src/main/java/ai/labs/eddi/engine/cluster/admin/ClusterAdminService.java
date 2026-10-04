@@ -788,6 +788,7 @@ public class ClusterAdminService implements ClusterStartable {
                     return new ItemOutcome(id, "IN_PROGRESS", "another administrator is replaying this entry right now");
                 }
             } catch (ClusterUnavailableException e) {
+                LOGGER.warnf("Replay claim of dead letter %s failed: %s", sanitize(id), e.getMessage());
                 return new ItemOutcome(id, "UNAVAILABLE", "NATS is unreachable — try again when the cluster is connected");
             }
         }
@@ -1159,6 +1160,7 @@ public class ClusterAdminService implements ClusterStartable {
                         "Another drain or undrain is being applied right now — try again in a moment.");
             }
         } catch (ClusterUnavailableException e) {
+            LOGGER.warnf("Drain gate for %s failed: %s", sanitize(nodeId), e.getMessage());
             throw new ActionRefusedException(409, "NATS_UNREACHABLE", "NATS is unreachable from this node; nothing was changed.");
         }
         try {

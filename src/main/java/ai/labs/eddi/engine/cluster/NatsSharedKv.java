@@ -28,15 +28,27 @@ import io.nats.client.impl.Headers;
  * {@link ISharedKv} on a NATS JetStream KV bucket.
  * <p>
  * The bucket handle is opened lazily and re-opened after a reconnect. A "wrong
- * last sequence" answer (API error 10071) is the server telling us a create
- * found the key or a compare-and-set lost — returned as a conflict, not thrown.
- * Every other failure is a {@link ClusterUnavailableException}, so a caller can
- * apply its degraded policy at once.
+ * last sequence" answer (API error 10071, or 10164 when the write expected the
+ * key not to exist yet) is the server telling us a create found the key or a
+ * compare-and-set lost — returned as a conflict, not thrown. Every other
+ * failure is a {@link ClusterUnavailableException}, so a caller can apply its
+ * degraded policy at once.
  */
 public class NatsSharedKv implements ISharedKv {
 
     /** JetStream "wrong last sequence": the key exists, or the revision moved. */
     static final int WRONG_LAST_SEQUENCE = 10071;
+    /**
+     * The same answer to a write that expected the key not to exist yet (a create).
+     * Seen live as the loser of two concurrent creates of one key: before it was
+     * recognised, losing that race was reported as NATS being unreachable.
+     */
+    static final int WRONG_LAST_SEQUENCE_CONSTANT = 10164;
+
+    /** Whether the server refused a write because the key or its revision moved. */
+    static boolean isConflict(JetStreamApiException e) {
+        return e.getApiErrorCode() == WRONG_LAST_SEQUENCE || e.getApiErrorCode() == WRONG_LAST_SEQUENCE_CONSTANT;
+    }
 
     private final NatsConnectionManager connections;
     private final String bucket;
@@ -127,7 +139,7 @@ public class NatsSharedKv implements ISharedKv {
             try {
                 return OptionalLong.of(kv.create(key, value));
             } catch (JetStreamApiException e) {
-                if (e.getApiErrorCode() == WRONG_LAST_SEQUENCE) {
+                if (isConflict(e)) {
                     countConflict();
                     return OptionalLong.empty();
                 }
@@ -188,7 +200,7 @@ public class NatsSharedKv implements ISharedKv {
             try {
                 return OptionalLong.of(kv.update(key, value, expectedRevision));
             } catch (JetStreamApiException e) {
-                if (e.getApiErrorCode() == WRONG_LAST_SEQUENCE) {
+                if (isConflict(e)) {
                     countConflict();
                     return OptionalLong.empty();
                 }
@@ -209,7 +221,7 @@ public class NatsSharedKv implements ISharedKv {
                 kv.delete(key, expectedRevision);
                 return true;
             } catch (JetStreamApiException e) {
-                if (e.getApiErrorCode() == WRONG_LAST_SEQUENCE) {
+                if (isConflict(e)) {
                     countConflict();
                     return false;
                 }
