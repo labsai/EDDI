@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.admin.ClusterActivityLog;
 import ai.labs.eddi.engine.cluster.admin.ClusterAdminService;
+import ai.labs.eddi.engine.model.ClusterAdminModels;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ActionResult;
 import ai.labs.eddi.engine.model.ClusterAdminModels.BulkRequest;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ReleaseRequest;
@@ -78,5 +79,18 @@ class RestClusterAdminTest {
     void listingIncludesInput() {
         rest.getDeadLetters(50, null, "fenced", null, null, null, null, null);
         verify(service).deadLetters(eq(50), isNull(), any(), eq(true));
+    }
+
+    @Test
+    @DisplayName("the read-only viewer sees that an administrator acted, not who; an administrator sees the name")
+    void actorIsHiddenFromTheViewer() {
+        ClusterAdminModels.ActivityEvent drained = new ClusterAdminModels.ActivityEvent("1", "admin.node.drain", "warning", "n1", 5L,
+                Map.of("actor", "ops-alice@example.com", "nodeId", "n2"));
+        ClusterAdminModels.ActivityEvent viewerSees = RestClusterAdmin.forCaller(drained, false);
+        assertEquals("an administrator", viewerSees.payload().get("actor"));
+        assertEquals("n2", viewerSees.payload().get("nodeId"));
+        assertSame(drained, RestClusterAdmin.forCaller(drained, true));
+        ClusterAdminModels.ActivityEvent noActor = new ClusterAdminModels.ActivityEvent("2", "node.lost", "error", "n1", 6L, Map.of("nodeId", "n3"));
+        assertSame(noActor, RestClusterAdmin.forCaller(noActor, false));
     }
 }

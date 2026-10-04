@@ -55,6 +55,7 @@ public class RestClusterAdmin implements IRestClusterAdmin {
 
     private static final Logger LOGGER = Logger.getLogger(RestClusterAdmin.class);
     private static final long PING_SECONDS = 15;
+    private static final String ADMIN_ROLE = "eddi-admin";
 
     private final ClusterAdminService service;
     private final ClusterActivityLog activity;
@@ -92,13 +93,34 @@ public class RestClusterAdmin implements IRestClusterAdmin {
 
     @Override
     public List<ActivityEvent> getActivity(int limit, List<String> types) {
-        return activity.recent(limit, types);
+        boolean admin = isAdmin();
+        return activity.recent(limit, types).stream().map(e -> forCaller(e, admin)).toList();
+    }
+
+    private boolean isAdmin() {
+        return identity != null && identity.hasRole(ADMIN_ROLE);
+    }
+
+    /**
+     * An administrator's name is a person's identifier (often an e-mail address):
+     * the read-only viewer sees that an administrator acted, not who.
+     */
+    static ActivityEvent forCaller(ActivityEvent event, boolean admin) {
+        if (admin || event.payload() == null || !event.payload().containsKey("actor")) {
+            return event;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>(event.payload());
+        payload.put("actor", "an administrator");
+        return new ActivityEvent(event.id(), event.type(), event.severity(), event.node(), event.ts(), payload);
     }
 
     @Override
     public void streamActivity(SseEventSink sink, Sse sse) {
+        // Read here: the identity is bound to the request, not to the event threads
+        // below.
+        boolean admin = isAdmin();
         Consumer<ActivityEvent> listener = event -> send(sink, sse.newEventBuilder().name("activity").mediaType(MediaType.APPLICATION_JSON_TYPE)
-                .data(ActivityEvent.class, event).build());
+                .data(ActivityEvent.class, forCaller(event, admin)).build());
         if (!activity.addListener(listener)) {
             sink.send(sse.newEventBuilder().name("busy").data("too many subscribers on this node").build())
                     .whenComplete((v, t) -> sink.close());
