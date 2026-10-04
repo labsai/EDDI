@@ -91,7 +91,7 @@ describe("useDocumentTitle", () => {
     expect(titleFor("/manage/agentsview")).toBe("Agents — EDDI Manager");
   });
 
-  it("falls back to the raw segment for a genuinely unknown path", () => {
-    expect(titleFor("/manage/unknown-page")).toBe("unknown-page — EDDI Manager");
+  it("titles a genuinely unknown path as not found rather than echoing the segment", () => {
+    expect(titleFor("/manage/unknown-page")).toBe("Page not found — EDDI Manager");
   });
 });

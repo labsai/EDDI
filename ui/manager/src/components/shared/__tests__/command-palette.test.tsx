@@ -84,8 +84,8 @@ describe("CommandPalette", () => {
     const user = userEvent.setup();
     renderWithProviders(<CommandPalette />);
 
-    // Click the backdrop
-    const backdrop = document.querySelector("[aria-hidden='true']") as HTMLElement;
+    // Click the backdrop (the dialog's overlay)
+    const backdrop = document.querySelector("[cmdk-overlay]") as HTMLElement;
     expect(backdrop).not.toBeNull();
     await user.click(backdrop!);
 

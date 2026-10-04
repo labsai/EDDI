@@ -76,7 +76,11 @@
     "monitoring": "会話モニタリング",
     "analytics": "分析",
     "connections": "接続",
-    "workspaces": "ワークスペース"
+    "workspaces": "ワークスペース",
+    "breadcrumb": "パンくずリスト",
+    "checkingVersion": "バージョンを確認中...",
+    "expandSidebar": "サイドバーを展開",
+    "collapseSidebar": "サイドバーを折りたたむ"
   },
   "theme": {
     "light": "ライト",
@@ -883,7 +887,8 @@
     "savedNotLive": "保存しました — まだ反映されていません",
     "savedNotLiveDescription": "実行中のエージェントはデプロイ済みのバージョンを使用しています。この変更を反映するにはデプロイしてください。",
     "deployNow": "デプロイ",
-    "deployStarted": "デプロイを開始しました"
+    "deployStarted": "デプロイを開始しました",
+    "stay": "とどまる"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2378,7 +2383,8 @@
       "title": "ヘルプとツアー",
       "platformTour": "プラットフォーム ツアー",
       "resetAll": "すべてのツアーをリセット",
-      "resetConfirm": "すべてのツアーの進捗をリセットしますか？"
+      "resetConfirm": "すべてのツアーの進捗をリセットしますか？",
+      "completed": "完了"
     },
     "offer": {
       "message": "初めての方へ：{{page}}ツアーを見る",
@@ -5244,5 +5250,12 @@
     "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
     "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
     "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
+  },
+  "notFound": {
+    "title": "ページが見つかりません",
+    "description": "このアドレスには何もありません。移動されたか、リンクが間違っている可能性があります。",
+    "backToDashboard": "ダッシュボードに戻る",
+    "backToWorkforce": "Workforce に戻る",
+    "chooseWorkspace": "ワークスペースを選択"
   }
 }

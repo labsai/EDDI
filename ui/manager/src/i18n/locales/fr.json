@@ -76,7 +76,11 @@
     "monitoring": "Suivi des conversations",
     "analytics": "Analyses",
     "connections": "Connexions",
-    "workspaces": "Espaces de travail"
+    "workspaces": "Espaces de travail",
+    "breadcrumb": "Fil d'Ariane",
+    "checkingVersion": "Vérification de la version...",
+    "expandSidebar": "Développer la barre latérale",
+    "collapseSidebar": "Réduire la barre latérale"
   },
   "theme": {
     "light": "Clair",
@@ -897,7 +901,8 @@
     "savedNotLive": "Enregistré — pas encore actif",
     "savedNotLiveDescription": "L'agent en cours d'exécution sert toujours la version déployée. Déployez pour appliquer ce changement.",
     "deployNow": "Déployer",
-    "deployStarted": "Déploiement lancé"
+    "deployStarted": "Déploiement lancé",
+    "stay": "Rester"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2400,7 +2405,8 @@
       "title": "Aide & Visite",
       "platformTour": "Démarrer la visite guidée",
       "resetAll": "Réinitialiser les visites",
-      "resetConfirm": "Remettre à zéro l'historique des visites guidées ?"
+      "resetConfirm": "Remettre à zéro l'historique des visites guidées ?",
+      "completed": "Terminé"
     },
     "offer": {
       "message": "Nouveau par ici ? Suivez la {{page}}",
@@ -5303,5 +5309,12 @@
     "impactReasonLegacy": "antérieure au suivi de version",
     "impactReasonBreaking": "modification incompatible",
     "switchNotice": "L’agent est passé de v{{from}} à v{{to}}"
+  },
+  "notFound": {
+    "title": "Page introuvable",
+    "description": "Il n'y a rien à cette adresse. Elle a peut-être été déplacée, ou le lien contient une faute de frappe.",
+    "backToDashboard": "Retour au tableau de bord",
+    "backToWorkforce": "Retour à Workforce",
+    "chooseWorkspace": "Choisir un espace de travail"
   }
 }

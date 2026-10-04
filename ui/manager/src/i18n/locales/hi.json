@@ -76,7 +76,11 @@
     "monitoring": "वार्तालाप निगरानी",
     "analytics": "विश्लेषण",
     "connections": "कनेक्शन",
-    "workspaces": "कार्यक्षेत्र"
+    "workspaces": "कार्यक्षेत्र",
+    "breadcrumb": "ब्रेडक्रम्ब",
+    "checkingVersion": "संस्करण जाँचा जा रहा है...",
+    "expandSidebar": "साइडबार फैलाएँ",
+    "collapseSidebar": "साइडबार समेटें"
   },
   "theme": {
     "light": "लाइट",
@@ -883,7 +887,8 @@
     "savedNotLive": "सहेजा गया — अभी लाइव नहीं",
     "savedNotLiveDescription": "चल रहा एजेंट अब भी तैनात संस्करण ही दे रहा है। यह बदलाव प्रभावी करने के लिए तैनात करें।",
     "deployNow": "तैनात करें",
-    "deployStarted": "तैनाती शुरू हुई"
+    "deployStarted": "तैनाती शुरू हुई",
+    "stay": "यहीं रुकें"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2378,7 +2383,8 @@
       "title": "सहायता और टूर",
       "platformTour": "प्लेटफ़ॉर्म टूर",
       "resetAll": "सभी टूर रीसेट करें",
-      "resetConfirm": "क्या आप सभी टुर प्रगति को रीसेट करना चाहते हैं?"
+      "resetConfirm": "क्या आप सभी टुर प्रगति को रीसेट करना चाहते हैं?",
+      "completed": "पूर्ण"
     },
     "offer": {
       "message": "क्या आप नए हैं? {{page}} लें",
@@ -5244,5 +5250,12 @@
     "impactReasonLegacy": "संस्करण-अनुसरण से पहले का",
     "impactReasonBreaking": "असंगत बदलाव",
     "switchNotice": "एजेंट v{{from}} से v{{to}} पर चला गया"
+  },
+  "notFound": {
+    "title": "पृष्ठ नहीं मिला",
+    "description": "इस पते पर कुछ नहीं है। हो सकता है कि इसे स्थानांतरित कर दिया गया हो, या लिंक गलत लिखा गया हो।",
+    "backToDashboard": "डैशबोर्ड पर वापस जाएँ",
+    "backToWorkforce": "Workforce पर वापस जाएँ",
+    "chooseWorkspace": "कार्यक्षेत्र चुनें"
   }
 }

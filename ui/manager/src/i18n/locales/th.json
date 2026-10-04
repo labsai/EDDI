@@ -76,7 +76,11 @@
     "monitoring": "การติดตามการสนทนา",
     "analytics": "การวิเคราะห์",
     "connections": "การเชื่อมต่อ",
-    "workspaces": "พื้นที่ทำงาน"
+    "workspaces": "พื้นที่ทำงาน",
+    "breadcrumb": "เส้นทางนำทาง",
+    "checkingVersion": "กำลังตรวจสอบเวอร์ชัน...",
+    "expandSidebar": "ขยายแถบด้านข้าง",
+    "collapseSidebar": "ย่อแถบด้านข้าง"
   },
   "theme": {
     "light": "สว่าง",
@@ -883,7 +887,8 @@
     "savedNotLive": "บันทึกแล้ว — ยังไม่มีผล",
     "savedNotLiveDescription": "เอเจนต์ที่ทำงานอยู่ยังใช้เวอร์ชันที่ปรับใช้ไว้ ปรับใช้เพื่อให้การเปลี่ยนแปลงนี้มีผล",
     "deployNow": "ปรับใช้",
-    "deployStarted": "เริ่มการปรับใช้แล้ว"
+    "deployStarted": "เริ่มการปรับใช้แล้ว",
+    "stay": "อยู่ต่อ"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2378,7 +2383,8 @@
       "title": "ตัวช่วย & ทัวร์",
       "platformTour": "ทัวร์แพลตฟอร์ม",
       "resetAll": "รีเซ็ตการทัวร์ทั้งหมด",
-      "resetConfirm": "คุณต้องการรีเซ็ตสถานะการทัวร์ให้กลับไปเริ่มใหม่ทั้งหมด หรือไม่?"
+      "resetConfirm": "คุณต้องการรีเซ็ตสถานะการทัวร์ให้กลับไปเริ่มใหม่ทั้งหมด หรือไม่?",
+      "completed": "เสร็จสิ้นแล้ว"
     },
     "offer": {
       "message": "มือใหม่ใช่หรือไม่ลองดูใน {{page}}",
@@ -5244,5 +5250,12 @@
     "switchNotice": "เอเจนต์ย้ายจาก v{{from}} ไป v{{to}}",
     "impactFollow_one": "บทสนทนาที่ใช้งานอยู่ {{count}} รายการบน v{{from}} จะดำเนินต่อบน v{{to}}",
     "impactStay_one": "บทสนทนาที่ใช้งานอยู่ {{count}} รายการบน v{{from}} จะอยู่บน v{{from}} ต่อไป"
+  },
+  "notFound": {
+    "title": "ไม่พบหน้า",
+    "description": "ไม่มีเนื้อหาที่ที่อยู่นี้ อาจถูกย้ายไปแล้ว หรือพิมพ์ลิงก์ผิด",
+    "backToDashboard": "กลับไปที่แดชบอร์ด",
+    "backToWorkforce": "กลับไปที่ Workforce",
+    "chooseWorkspace": "เลือกพื้นที่ทำงาน"
   }
 }

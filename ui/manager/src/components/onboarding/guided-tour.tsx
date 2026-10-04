@@ -1,10 +1,14 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTargetRect } from "@/hooks/use-target-rect";
 import { TOUR_CHAPTERS } from "./tour-chapters";
 import { SpotlightOverlay } from "./spotlight-overlay";
 import { TourTooltip } from "./tour-tooltip";
+
+/** How long to wait for a step's target to appear before abandoning the chapter. */
+const TARGET_WAIT_MS = 8000;
 
 /**
  * Main tour orchestrator. Rendered once in AppLayout.
@@ -18,6 +22,8 @@ export function GuidedTour() {
   const prevStep = useOnboarding((s) => s.prevStep);
   const skipChapter = useOnboarding((s) => s.skipChapter);
   const completeChapter = useOnboarding((s) => s.completeChapter);
+  const abandonChapter = useOnboarding((s) => s.abandonChapter);
+  const { pathname } = useLocation();
 
   // Get current chapter and step data
   const chapter = activeChapter ? TOUR_CHAPTERS[activeChapter] : null;
@@ -44,18 +50,55 @@ export function GuidedTour() {
     }
   }, [isLastStep, completeChapter, nextStep]);
 
+  // The tour is only "live" while its target is on screen. Everything below that
+  // hijacks the page — the global keys, the scroll lock — is attached only then.
+  // It used to attach whenever a chapter was active, so a tour whose target was
+  // not rendered (the user navigated away mid-tour, or the page is still loading)
+  // was invisible yet still swallowed Enter app-wide and froze body scroll.
+  const visible = !!(activeChapter && chapter && step && targetRect);
+
+  // A chapter belongs to the page it started on: leave it and the tour ends,
+  // without being recorded as completed.
+  const startPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeChapter) {
+      startPathRef.current = null;
+      return;
+    }
+    if (startPathRef.current === null) startPathRef.current = pathname;
+    else if (startPathRef.current !== pathname) abandonChapter();
+  }, [activeChapter, pathname, abandonChapter]);
+
+  // A target that never shows up (a step for a section the page does not render)
+  // must not leave a tour parked invisibly forever. Wait for it, then give up.
+  const targetMissing = !!(activeChapter && chapter && step && !targetRect);
+  useEffect(() => {
+    if (!targetMissing) return;
+    const timer = setTimeout(abandonChapter, TARGET_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [targetMissing, safeStep, activeChapter, abandonChapter]);
+
   // Keyboard navigation
   useEffect(() => {
-    if (!activeChapter) return;
+    if (!visible) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept if user is typing in an input/textarea
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
+      // Enter on a focused button or link must do what that control says — on
+      // the tooltip's Back and Skip it used to advance instead.
+      const onControl =
+        tag === "BUTTON" || tag === "A" || el?.getAttribute("role") === "button";
 
       switch (e.key) {
         case "ArrowRight":
+          e.preventDefault();
+          handleNext();
+          break;
         case "Enter":
+          if (onControl) return;
           e.preventDefault();
           handleNext();
           break;
@@ -72,17 +115,17 @@ export function GuidedTour() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [activeChapter, handleNext, isFirstStep, prevStep, skipChapter]);
+  }, [visible, handleNext, isFirstStep, prevStep, skipChapter]);
 
-  // Prevent body scroll while tour is active
+  // Prevent body scroll while the tour is on screen
   useEffect(() => {
-    if (!activeChapter) return;
+    if (!visible) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [activeChapter]);
+  }, [visible]);
 
   // Don't render anything if no tour is active or target element not found
   if (!activeChapter || !chapter || !step || !targetRect) return null;

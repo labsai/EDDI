@@ -78,12 +78,13 @@ describe("Sidebar — collapsible sections", () => {
     const stored = localStorage.getItem("eddi-sidebar-sections");
     expect(stored).toBeTruthy();
     const parsed = JSON.parse(stored!);
-    expect(parsed).toContain(3); // Admin is index 3
+    // Keyed by the section's stable id, not its position.
+    expect(parsed).toContain("admin");
   });
 
   it("restores collapsed state from localStorage", () => {
     // Pre-set collapsed state: Admin (index 3) collapsed
-    localStorage.setItem("eddi-sidebar-sections", JSON.stringify([3]));
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["admin"]));
 
     renderWithProviders(
       <Sidebar collapsed={false} onToggle={() => {}} />,
@@ -95,9 +96,19 @@ describe("Sidebar — collapsible sections", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
+  it("still understands collapse state saved by position before ids existed", () => {
+    // Older saves held section INDEXES; 3 was Admin.
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify([3]));
+
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+
+    expect(screen.queryByText("Secrets")).not.toBeInTheDocument();
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  });
+
   it("shows all items in icon mode even when sections are collapsed", () => {
     // Pre-set collapsed state
-    localStorage.setItem("eddi-sidebar-sections", JSON.stringify([3]));
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["admin"]));
 
     renderWithProviders(
       <Sidebar collapsed={true} onToggle={() => {}} />,

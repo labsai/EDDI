@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, ArrowRight, X, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -121,9 +122,29 @@ export function TourTooltip({
   const { top, left, resolved } = computePosition(targetRect, placement);
   const progressPct = ((currentStep + 1) / totalSteps) * 100;
 
+  // Take focus so keyboard and screen-reader users land in the tour and hear the
+  // step — it is a dialog, but nothing ever moved focus to it. Handed back on
+  // close when the page has not put it somewhere deliberate.
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    return () => {
+      const target = returnFocusRef.current;
+      const active = document.activeElement;
+      if (target?.isConnected && (!active || active === document.body)) target.focus();
+    };
+  }, []);
+  useEffect(() => {
+    tooltipRef.current?.focus({ preventScroll: true });
+  }, [currentStep]);
+
   return (
     <div
+      ref={tooltipRef}
+      tabIndex={-1}
       className={cn(
+        "outline-none",
         "tour-tooltip fixed z-9999",
         resolved === "top" && "-translate-y-full"
       )}

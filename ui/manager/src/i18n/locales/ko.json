@@ -76,7 +76,11 @@
     "monitoring": "대화 모니터링",
     "analytics": "분석",
     "connections": "연결",
-    "workspaces": "작업 공간"
+    "workspaces": "작업 공간",
+    "breadcrumb": "이동 경로",
+    "checkingVersion": "버전 확인 중...",
+    "expandSidebar": "사이드바 펼치기",
+    "collapseSidebar": "사이드바 접기"
   },
   "theme": {
     "light": "라이트",
@@ -883,7 +887,8 @@
     "savedNotLive": "저장됨 — 아직 반영되지 않음",
     "savedNotLiveDescription": "실행 중인 에이전트는 여전히 배포된 버전을 제공합니다. 이 변경을 적용하려면 배포하세요.",
     "deployNow": "배포",
-    "deployStarted": "배포를 시작했습니다"
+    "deployStarted": "배포를 시작했습니다",
+    "stay": "머무르기"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2378,7 +2383,8 @@
       "title": "도움말 및 투어",
       "platformTour": "플랫폼 투어",
       "resetAll": "모든 투어 초기화",
-      "resetConfirm": "모든 투어 진행 상황을 초기화하시겠습니까?"
+      "resetConfirm": "모든 투어 진행 상황을 초기화하시겠습니까?",
+      "completed": "완료됨"
     },
     "offer": {
       "message": "처음이신가요? {{page}}을(를) 확인해 보세요",
@@ -5244,5 +5250,12 @@
     "switchNotice": "에이전트가 v{{from}}에서 v{{to}}(으)로 이동했습니다",
     "impactFollow_one": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
     "impactStay_one": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다"
+  },
+  "notFound": {
+    "title": "페이지를 찾을 수 없습니다",
+    "description": "이 주소에는 아무것도 없습니다. 이동되었거나 링크가 잘못 입력되었을 수 있습니다.",
+    "backToDashboard": "대시보드로 돌아가기",
+    "backToWorkforce": "Workforce로 돌아가기",
+    "chooseWorkspace": "워크스페이스 선택"
   }
 }
