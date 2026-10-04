@@ -39,6 +39,13 @@ import { getErrorMessage, isApiError } from "@/lib/api-client";
  */
 
 export interface OperatorChatState {
+  /**
+   * The composer's unsent text. Kept here, not in `OperatorChat`'s own state:
+   * the drawer unmounts the chat when it closes, which discarded a half-written
+   * message along with it. Survives close/open, and a move between the drawer
+   * and the full page (only one of which is ever interactive).
+   */
+  draft: string;
   messages: ChatMessage[];
   /** Pipeline events for the turn in flight, fed straight to `ChatActivity`. */
   events: PipelineEvent[];
@@ -157,6 +164,8 @@ interface OperatorChatActions {
    *  which calls this on open so an hour-old failure from a different surface
    *  is not the first thing shown. */
   clearError: () => void;
+  /** Update the composer's unsent text — see {@link OperatorChatState.draft}. */
+  setDraft: (draft: string) => void;
   /**
    * Restore the transcript of the conversation this tab was last working in.
    *
@@ -714,6 +723,7 @@ async function followExecutingTurn(
 }
 
 export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
+  draft: "",
   messages: [],
   events: [],
   liveToolCalls: [],
@@ -740,6 +750,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
   hydrateAbortController: null,
 
   clearError: () => set({ error: null }),
+  setDraft: (draft) => set({ draft }),
 
   reset: () => {
     get().abortController?.abort();
@@ -1731,6 +1742,8 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
   const isHydrating = useOperatorChatStore((s) => s.isHydrating);
   const isReadOnly = useOperatorChatStore((s) => s.isReadOnly);
   const conversationState = useOperatorChatStore((s) => s.conversationState);
+  const draft = useOperatorChatStore((s) => s.draft);
+  const setDraft = useOperatorChatStore((s) => s.setDraft);
 
   const rawSend = useOperatorChatStore((s) => s.send);
   const rawEnsureConversation = useOperatorChatStore((s) => s.ensureConversation);
@@ -1772,6 +1785,8 @@ export function useOperatorChat(config: OperatorConfig | null | undefined) {
     isHydrating,
     isReadOnly,
     conversationState,
+    draft,
+    setDraft,
     send,
     ensureConversation,
     hydrate,
