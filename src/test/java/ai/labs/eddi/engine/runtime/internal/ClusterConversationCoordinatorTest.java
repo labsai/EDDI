@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -45,6 +46,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -198,6 +201,8 @@ class ClusterConversationCoordinatorTest {
         final AtomicReference<Throwable> discarded = new AtomicReference<>();
         final CountDownLatch done = new CountDownLatch(1);
         volatile RuntimeException failWith;
+        /** What the step runner adds when it stops a turn: reason and tokens. */
+        volatile Map<String, Object> why = Map.of();
 
         Turn(String name, List<String> log) {
             this.name = name;
@@ -211,7 +216,9 @@ class ClusterConversationCoordinatorTest {
 
         @Override
         public Map<String, Object> describe() {
-            return Map.of("input", name, "agentId", "agent1");
+            Map<String, Object> described = new LinkedHashMap<>(Map.of("input", name, "agentId", "agent1"));
+            described.putAll(why);
+            return described;
         }
 
         @Override
@@ -287,6 +294,7 @@ class ClusterConversationCoordinatorTest {
     }
 
     private ScriptedLeases leases;
+    private NatsConnectionManager connections;
     private PoolRuntime runtime;
     private ListStore store;
     private ClusterConversationCoordinator coordinator;
@@ -297,7 +305,7 @@ class ClusterConversationCoordinatorTest {
         leases = new ScriptedLeases();
         runtime = new PoolRuntime();
         store = new ListStore();
-        NatsConnectionManager connections = mock(NatsConnectionManager.class);
+        connections = mock(NatsConnectionManager.class);
         when(connections.isConnected()).thenReturn(true);
         coordinator = new ClusterConversationCoordinator(runtime, new SimpleMeterRegistry(), leases, store, connections,
                 mock(ClusterPresence.class), 10_000, 1000, Duration.ofSeconds(45));
@@ -422,6 +430,30 @@ class ClusterConversationCoordinatorTest {
     }
 
     @Test
+    @DisplayName("a turn stopped by a lost lease is dead-lettered as lease-lost with its token — shared and node-local alike")
+    void leaseLostReasonComesFromTheTurn() throws Exception {
+        Turn t = new Turn("lost", log);
+        t.why = Map.of("reason", "lease-lost", "fence", 41L);
+        t.failWith = new IllegalStateException("lease-lost: this node lost the lease");
+        coordinator.submitInOrder("conv1", t);
+        await(t);
+        awaitIdle();
+        assertEquals(DeadLetterEntry.REASON_LEASE_LOST, store.entries.get(0).reason());
+        assertEquals(Map.of("token", 41L), store.entries.get(0).fence());
+
+        store.down = true;
+        Turn local = new Turn("lost2", log);
+        local.why = Map.of("reason", "fenced", "fence", 5L, "storedFence", 9L);
+        local.failWith = new IllegalStateException("refused");
+        coordinator.submitInOrder("conv2", local);
+        await(local);
+        awaitIdle();
+        DeadLetterEntry kept = coordinator.getDeadLetters().stream().filter(e -> e.id().startsWith("local-")).findFirst().orElseThrow();
+        assertEquals(DeadLetterEntry.REASON_FENCED, kept.reason());
+        assertEquals(Map.of("token", 5L, "storedFence", 9L), kept.fence());
+    }
+
+    @Test
     @DisplayName("dead letters fall back to the node-local ring while the stream is unavailable")
     void deadLetterFallsBackWhenStreamDown() throws Exception {
         store.down = true;
@@ -538,5 +570,28 @@ class ClusterConversationCoordinatorTest {
 
         assertTrue(coordinator.discardDeadLetter(cursor));
         assertEquals(second, coordinator.getDeadLetters(2, cursor), "a discarded cursor still pages from where it was");
+    }
+    @Test
+    @DisplayName("a dead letter that fails over locally while NATS is connected is forwarded shortly, not only at the next reconnect")
+    void localDeadLetterIsRetriedWhileConnected() throws Exception {
+        ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+        List<Runnable> scheduled = new CopyOnWriteArrayList<>();
+        when(scheduler.schedule(any(Runnable.class), anyLong(), any(TimeUnit.class))).thenAnswer(inv -> {
+            scheduled.add(inv.getArgument(0));
+            return null;
+        });
+        when(connections.scheduler()).thenReturn(scheduler);
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-retry", failing);
+        await(failing);
+        awaitIdle();
+        assertEquals(1, scheduled.size(), "a retry is scheduled when a dead letter stays local");
+
+        store.down = false;
+        scheduled.forEach(Runnable::run);
+        assertEquals(1, store.entries.size(), "forwarded to the shared stream without waiting for a reconnect");
+        assertTrue(coordinator.getDeadLetters().stream().noneMatch(e -> e.id().startsWith("local-")));
     }
 }

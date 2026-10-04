@@ -30,15 +30,18 @@ import java.util.Map;
  *            input can be replayed.
  * @param reason
  *            why the turn was dead-lettered: {@link #REASON_FENCED},
- *            {@link #REASON_TIMEOUT} or {@link #REASON_FAILED}; {@code null}
- *            for an entry written before the reason was recorded
+ *            {@link #REASON_LEASE_LOST}, {@link #REASON_TIMEOUT} or
+ *            {@link #REASON_FAILED}; {@code null} for an entry written before
+ *            the reason was recorded
  * @param nodeId
  *            the node the turn failed on, {@code null} on a single node and for
  *            older entries
  * @param fence
  *            for a {@link #REASON_FENCED} entry: {@code token} (what the
  *            refused write carried) and {@code storedFence} (what the
- *            conversation already had); {@code null} otherwise
+ *            conversation already had); for {@link #REASON_LEASE_LOST}:
+ *            {@code token}, the lease the turn ran under; {@code null}
+ *            otherwise
  */
 public record DeadLetterEntry(String id, String conversationId, String error, long timestamp, String payload, Map<String, Object> turn,
         String reason, String nodeId, Map<String, Object> fence) {
@@ -48,6 +51,11 @@ public record DeadLetterEntry(String id, String conversationId, String error, lo
      * conversation over.
      */
     public static final String REASON_FENCED = "fenced";
+    /**
+     * The node lost the conversation's lease while the turn ran, so the turn was
+     * stopped before anything of it was stored.
+     */
+    public static final String REASON_LEASE_LOST = "lease-lost";
     /** The turn ran out of time. */
     public static final String REASON_TIMEOUT = "timeout";
     /** Any other failure. */

@@ -4,16 +4,23 @@
  */
 package ai.labs.eddi.engine.cluster;
 
+import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
 import io.nats.client.api.ApiResponse;
 import io.nats.client.api.MessageInfo;
+import io.nats.client.api.PublishAck;
 import io.nats.client.support.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import ai.labs.eddi.engine.model.DeadLetterEntry;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,10 +32,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import io.nats.client.JetStream;
-import io.nats.client.api.PublishAck;
-import java.io.IOException;
-import java.util.Map;
 
 /**
  * Which JetStream errors mean "that dead letter is gone". A single-server
@@ -78,6 +81,19 @@ class JetStreamDeadLetterStoreTest {
     }
 
     @Test
+    void aReasonRecordedOnlyInTheTurnIsReadBack() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        MessageInfo entry = message("eddi.EDDI.dlq.turn.abc");
+        when(entry.getSeq()).thenReturn(7L);
+        when(entry.getData()).thenReturn(("{\"conversationId\":\"c1\",\"error\":\"lost\",\"timestamp\":1,"
+                + "\"turn\":{\"input\":\"hi\",\"reason\":\"lease-lost\",\"fence\":41}}").getBytes(StandardCharsets.UTF_8));
+        when(jsm.getMessage("EDDI_DEAD_LETTERS", 7L)).thenReturn(entry);
+        DeadLetterEntry read = store(jsm).get("7").orElseThrow();
+        assertEquals("lease-lost", read.reason());
+        assertEquals(Map.of("token", 41), read.fence());
+    }
+
+    @Test
     void discardingTwiceIsNotFoundTheSecondTime() throws Exception {
         JetStreamManagement jsm = mock(JetStreamManagement.class);
         when(jsm.getMessage("EDDI_DEAD_LETTERS", 7L)).thenThrow(error(10043));
@@ -110,22 +126,24 @@ class JetStreamDeadLetterStoreTest {
     }
 
     @Test
-    void aStreamStillElectingItsLeaderIsWaitedFor() throws Exception {
+    void theFirstDeadLetterWaitsForTheStreamItCreatedToElectItsLeader() throws Exception {
         JetStreamManagement jsm = mock(JetStreamManagement.class);
-        JetStream js = mock(JetStream.class);
+        when(jsm.getStreamInfo("EDDI_DEAD_LETTERS")).thenThrow(error(10059));
         NatsConnectionManager connections = mock(NatsConnectionManager.class);
         when(connections.config()).thenReturn(ClusterConfig.defaults());
         when(connections.jetStreamManagement()).thenReturn(jsm);
-        when(connections.jetStream()).thenReturn(js);
         when(connections.node()).thenReturn(new NodeIdentity("n1", "b1"));
-        when(jsm.getStreamInfo(anyString())).thenThrow(error(10059));
+        JetStream js = mock(JetStream.class);
+        when(connections.jetStream()).thenReturn(js);
         PublishAck ack = mock(PublishAck.class);
-        when(ack.getSeqno()).thenReturn(42L);
-        // missing stream, then "no responders" twice while the new stream elects a
-        // leader
-        when(js.publish(anyString(), any(byte[].class))).thenThrow(new IOException("503 No Responders Available For Request"))
-                .thenThrow(new IOException("503 No Responders Available For Request"))
-                .thenThrow(new IOException("503 No Responders Available For Request")).thenReturn(ack);
-        assertEquals("42", new JetStreamDeadLetterStore(connections).append("c1", "boom", 1L, Map.of()));
+        when(ack.getSeqno()).thenReturn(5L);
+        when(js.publish(anyString(), any(byte[].class)))
+                .thenThrow(new IOException("no stream yet"))
+                .thenThrow(new IOException("Error Publishing: 503 No Responders Available For Request"))
+                .thenReturn(ack);
+
+        assertEquals("5", new JetStreamDeadLetterStore(connections).append("conv1", "boom", 1L, Map.of("input", "hi")),
+                "a stream created a moment ago answers once its leader is elected; the dead letter must not fail over");
+        verify(jsm).addStream(any());
     }
 }

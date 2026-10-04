@@ -287,7 +287,7 @@ export function activityTitle(t: TFunction, e: ActivityEvent): string {
     case "deadletter.created":
       return t("cluster.activity.deadLetter", "Turn of {{conversation}} dead-lettered ({{reason}})", {
         conversation: s("conversationId"),
-        reason: s("reason"),
+        reason: deadLetterReasonLabel(t, s("reason")),
       });
     case "deployment.propagated":
       return t("cluster.activity.deployment", "Agent {{agent}} v{{version}} {{status}} on {{origin}} — reached {{node}} after {{ms}} ms", {

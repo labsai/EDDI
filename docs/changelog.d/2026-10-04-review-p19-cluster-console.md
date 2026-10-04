@@ -41,8 +41,15 @@
   rather than half-doing it. The console shows the outcome in words and warns, instead of a
   success toast, for anything but `DONE`; audit and activity carry the same outcome.
 - **Dead-letter reasons the console does not know** are shown by their code with a generic
-  explanation, no longer as "Failed". `lease-lost` (a turn stopped when its node lost the lease,
-  from the deploy branch's lease-path fix) has its label, help text and filter option already.
+  explanation, no longer as "Failed". `lease-lost` has its label, help text, filter option and
+  timeline wording.
+- **Merged the deploy branch's lease-lost fix** (`4f221dd9d`). The step runner records why it
+  stopped a turn in the turn descriptor (`reason`, `fence`, `storedFence`); the coordinator now
+  classifies from that first, so a lease-lost turn is stored with `reason: lease-lost` and its
+  token in `fence`, shared or node-local, rather than as `failed`. A stream entry that carries
+  the reason only in its turn (written by a node without the classifier) is read back the same
+  way. The two branches had each added a retry for the first dead letter on a new stream; the
+  deploy branch's is kept, as is its 10 s forward after a local fallback.
 - **Fencing tokens and lease revisions are JSON strings** in the console API, exact beyond 2^53.
 - **Cluster drawer focus:** an inline `onClose` re-ran the focus-return effect on every refresh and
   pulled focus out of the dialog; Tab no longer counts disabled controls as the last stop.

@@ -27,6 +27,22 @@ class DeadLetterClassifierTest {
     }
 
     @Test
+    @DisplayName("what the turn recorded wins over the failure's type; a lease-lost failure alone still says so")
+    void turnRecordedReason() {
+        var c = DeadLetterClassifier.classify(new IllegalStateException("x"), Map.of("input", "hi", "reason", "lease-lost", "fence", 7L));
+        assertEquals(DeadLetterEntry.REASON_LEASE_LOST, c.reason());
+        assertEquals(Map.of("token", 7L), c.fence());
+        assertEquals(DeadLetterEntry.REASON_FAILED, DeadLetterClassifier.classify(new IllegalStateException("x"), Map.of("input", "hi")).reason());
+        assertEquals(DeadLetterEntry.REASON_LEASE_LOST, DeadLetterClassifier.classify(new TurnLeaseLostException(), null).reason());
+    }
+
+    /**
+     * Stands in for the step runner's package-private exception, matched by name.
+     */
+    static final class TurnLeaseLostException extends RuntimeException {
+    }
+
+    @Test
     @DisplayName("a timeout is 'timeout'; anything else 'failed'")
     void timeoutAndFailed() {
         assertEquals(DeadLetterEntry.REASON_TIMEOUT, DeadLetterClassifier.classify(new RuntimeException(new TimeoutException())).reason());

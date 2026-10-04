@@ -406,6 +406,13 @@ describe("Cluster console — activity", () => {
     expect(await screen.findByTestId("cluster-activity-lease.takeover")).toHaveTextContent("c-9");
   });
 
+  it("a dead letter in the timeline names its reason in words", async () => {
+    renderConsole("/manage/coordinator?tab=activity");
+    await screen.findByTestId("cluster-activity-node.lost");
+    emit("activity", { id: "live-3", type: "deadletter.created", severity: "warning", node: "eddi-2", ts: Date.now(), payload: { conversationId: "c-77", reason: "lease-lost" } });
+    await waitFor(() => expect(screen.getAllByTestId("cluster-activity-deadletter.created").some((el) => /c-77.*Lease lost/.test(el.textContent ?? ""))).toBe(true));
+  });
+
   it("a queued resync reads as reaching this node only, until NATS is back", async () => {
     renderConsole("/manage/coordinator?tab=activity");
     await screen.findByTestId("cluster-activity-node.lost");

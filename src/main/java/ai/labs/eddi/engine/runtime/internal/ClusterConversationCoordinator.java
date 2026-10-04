@@ -35,12 +35,14 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import ai.labs.eddi.engine.cluster.NodeIdentity;
-import java.util.concurrent.TimeUnit;
 
 /**
  * The cluster-mode coordinator ({@code eddi.messaging.type=nats}).
@@ -215,9 +217,9 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     @Override
     protected void routeToDeadLetter(String conversationId, Throwable failure, Callable<Void> task) {
         String error = failure.getMessage() != null ? failure.getMessage() : failure.getClass().getSimpleName();
-        DeadLetterClassifier.Classification classification = DeadLetterClassifier.classify(failure);
         long timestamp = System.currentTimeMillis();
         Map<String, Object> turn = describe(task);
+        DeadLetterClassifier.Classification classification = DeadLetterClassifier.classify(failure, turn);
         String id;
         try {
             id = deadLetterStore.append(conversationId, error, timestamp, turn, classification.reason(), classification.fence());
@@ -229,6 +231,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             recordLocalDeadLetter(conversationId, failure, task);
             List<DeadLetterEntry> locals = super.getDeadLetters();
             id = locals.isEmpty() ? null : locals.get(locals.size() - 1).id();
+            scheduleForward();
         }
         DeadLetterEntry created = new DeadLetterEntry(id, conversationId, error, timestamp, null, turn, classification.reason(),
                 localNodeId(), classification.fence());
@@ -238,6 +241,31 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             } catch (RuntimeException e) {
                 LOGGER.debugf("Dead-letter listener failed: %s", e.getMessage());
             }
+        }
+    }
+
+    /** How soon a dead letter kept locally while still connected is tried again. */
+    static final long FORWARD_RETRY_SECONDS = 10;
+
+    /**
+     * A dead letter can fail over to the local ring while NATS is connected, for
+     * example when the stream is momentarily unavailable. Forwarding only on the
+     * next reconnect would then keep it on this node indefinitely, invisible to the
+     * others and lost on a restart, so it is tried again shortly as well.
+     */
+    private void scheduleForward() {
+        ScheduledExecutorService scheduler = connections.scheduler();
+        if (scheduler == null) {
+            return;
+        }
+        try {
+            scheduler.schedule(() -> {
+                if (connections.isConnected()) {
+                    forwardLocalDeadLetters();
+                }
+            }, FORWARD_RETRY_SECONDS, TimeUnit.SECONDS);
+        } catch (RejectedExecutionException shuttingDown) {
+            // the reconnect path forwards them when this node comes back
         }
     }
 

@@ -106,6 +106,37 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         }
     }
 
+    /**
+     * How long a dead letter waits for a stream it has just created to elect its
+     * leader.
+     */
+    static final int READY_ATTEMPTS = 10;
+    static final long READY_BACKOFF_MILLIS = 200;
+
+    /**
+     * Publishes to a stream that was created a moment ago. A replicated stream
+     * answers only once its leader is elected: until then a publish fails with "no
+     * responders". Without the wait, the first dead letter of a new cluster failed
+     * over to the node-local ring (seen live).
+     */
+    private PublishAck publishOnceReady(String subject, byte[] payload) throws IOException, JetStreamApiException {
+        IOException last = null;
+        for (int attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
+            try {
+                return connections.jetStream().publish(subject, payload);
+            } catch (IOException notReadyYet) {
+                last = notReadyYet;
+                try {
+                    Thread.sleep(READY_BACKOFF_MILLIS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("interrupted while the dead-letter stream elected its leader", e);
+                }
+            }
+        }
+        throw last;
+    }
+
     @Override
     public String append(String conversationId, String error, long timestamp, Map<String, Object> turn, String reason,
                          Map<String, Object> fence) {
@@ -133,39 +164,13 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 // The stream is provisioned asynchronously after connecting; a dead letter
                 // that arrives first creates it here rather than being lost.
                 provision();
-                ack = publishWhileTheStreamSettles(subject, payload);
+                ack = publishOnceReady(subject, payload);
             }
             return String.valueOf(ack.getSeqno());
         } catch (IOException | JetStreamApiException e) {
             throw new ClusterUnavailableException("dead-letter publish failed: " + e.getMessage(), e);
         }
     }
-
-    /**
-     * A stream created a moment ago has no leader yet: its first publishes answer
-     * "no responders". Seen live on a fresh cluster — the first fenced turn's dead
-     * letter landed in the node-local fallback. Retried briefly instead.
-     */
-    private PublishAck publishWhileTheStreamSettles(String subject, byte[] payload) throws IOException, JetStreamApiException {
-        IOException last = null;
-        for (int attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
-            try {
-                return connections.jetStream().publish(subject, payload);
-            } catch (IOException e) {
-                last = e;
-                try {
-                    Thread.sleep(SETTLE_PAUSE_MILLIS);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
-        throw last != null ? last : new IOException("dead-letter publish interrupted");
-    }
-
-    static final int SETTLE_ATTEMPTS = 10;
-    static final long SETTLE_PAUSE_MILLIS = 200;
 
     @Override
     public List<DeadLetterEntry> list(int limit, String after) {
@@ -356,6 +361,17 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             @SuppressWarnings("unchecked")
             Map<String, Object> fence = body.get("fence") instanceof Map<?, ?> f ? (Map<String, Object>) f : null;
             Object reason = body.get("reason");
+            if (reason == null && turn != null) {
+                // written by a node that records why only in the turn descriptor
+                reason = turn.get("reason");
+                if (fence == null && turn.get("fence") != null) {
+                    fence = new LinkedHashMap<>();
+                    fence.put("token", turn.get("fence"));
+                    if (turn.get("storedFence") != null) {
+                        fence.put("storedFence", turn.get("storedFence"));
+                    }
+                }
+            }
             Object failedOn = body.get("failedOn");
             return new DeadLetterEntry(String.valueOf(info.getSeq()), String.valueOf(body.get("conversationId")),
                     String.valueOf(body.get("error")), ts instanceof Number n ? n.longValue() : 0L, payload, turn,

@@ -47,7 +47,8 @@ one node. NATS adds:
 | Concern | Mechanism |
 |---|---|
 | Turns of one conversation never overlap anywhere | A conversation **lease** in the `<prefix>_LEASES` KV bucket (create = acquire, heartbeat every `lease.heartbeat-interval`, server-side TTL `lease.ttl`). Turns on one node stay FIFO. |
-| A node that lost its lease cannot overwrite newer turns | The lease revision is a **fencing token**; both conversation stores refuse a write older than the `_fence` the document carries. The refused turn is dead-lettered with its input. |
+| A node that lost its lease cannot overwrite newer turns | The lease revision is a **fencing token**; both conversation stores refuse a write older than the `_fence` the document carries. The refused turn is dead-lettered with its input (`reason: fenced`, both tokens). |
+| A turn that lost its lease does not vanish | Losing the lease cancels the turn at its next task boundary. It stores nothing, stamps no state, and is dead-lettered with its input (`reason: lease-lost`, its fencing token, `failedOn` the node). If its reply has not gone out yet, its caller is told it was not processed: 409 with `Retry-After` over REST, an error event on a stream. |
 | A crashed node does not block a conversation | Its lease expires (≤ `lease.ttl`), or is taken over at once when the node's presence record is gone or shows a new boot. |
 | Caches stay coherent | Cluster events on the `<prefix>_EVENTS` stream: secrets, global variables, connections, deployments, deleted workflows, agent triggers, user conversations, conversation states, GDPR restriction verdicts. A node that missed events (gap, long disconnect, outbox overflow) flushes everything. |
 | Deploy and undeploy reach every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. A deploy with `autoDeploy=false` (deliberately not recorded) is announced the same way and deployed, unrecorded, on every node. A request that reaches a node before its sweep has caught up deploys the agent there on demand and waits for it (at most 15 s) instead of answering 404. |
@@ -107,7 +108,7 @@ that set `degraded.turns=reject`. Security state always fails closed.
 | One NATS node lost (R3) | Nothing visible: JetStream keeps quorum. |
 | All NATS lost | Degraded mode as above; automatic recovery and resync when NATS returns. |
 | Rolling update | Readiness goes DOWN first, the node drains (`eddi.shutdown.drain-timeout-seconds`), releases its leases and leaves presence; queued turns that never got a lease are answered 409 + `Retry-After` and retried by clients on another node. |
-| Lease lost while a turn runs (long GC pause, partition) | The turn is cancelled at the next task boundary; if it still tries to write, the fence refuses it and the turn is dead-lettered. |
+| Lease lost while a turn runs (long GC pause, partition, an administrator releasing it) | The turn is cancelled at the next task boundary and dead-lettered (`lease-lost`). Its caller gets 409 + `Retry-After` unless the reply had already gone out. If it still reaches a write, the fence refuses it and it is dead-lettered (`fenced`). |
 
 ## Sizing
 
@@ -284,7 +285,12 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
 - A turn whose write the fence refuses has usually already answered its
   caller: the reply is rendered inside the pipeline, before the write. The
   conversation history does not contain that turn and it is dead-lettered —
-  replay it if the answer should count.
+  replay it if the answer should count. The same holds for a turn whose lease
+  is lost after its reply went out but before it was stored: the client has its
+  200, the turn is dead-lettered (`lease-lost`). A turn that loses its lease
+  earlier is answered 409 instead (an error event on a stream, whose tokens up to
+  then were already sent). Its client is expected to retry, so replay its dead
+  letter only if the client did not; otherwise the turn runs twice.
 - A paginated tool response is not bound to its conversation: anyone who
   knows the random response id can fetch its pages from any node, exactly as on
   a single node (the tool has no conversation context to check against).

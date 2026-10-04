@@ -198,8 +198,9 @@ write time of the current revision) and these flags:
 
 ### Dead letters in the console
 
-Every entry now records **why** it was dead-lettered (`reason`: `fenced`, `timeout` or
-`failed`; the console also knows `lease-lost`, and shows any other reason by its code), the node it failed on (`nodeId`) and, for a fenced write, both tokens (`fence`:
+Every entry now records **why** it was dead-lettered (`reason`: `fenced`, `lease-lost` (the
+node lost the lease while the turn ran, so the turn was stopped before it was stored), `timeout`
+or `failed`; the console shows any other reason by its code), the node it failed on (`nodeId`) and, for a fenced write, both tokens (`fence`:
 `token` — what the refused write carried — and `storedFence`, what the conversation already
 had). An entry that cannot be replayed says why (`notReplayableReason`): `SECRET_INPUT` (the
 client flagged the turn `secretInput`, so its input was never stored), `INPUT_NOT_CAPTURED`
@@ -246,5 +247,5 @@ handing a lease to a chosen node — each could lose data or bypass fencing.
 ## See also
 
 - [Configuration Reference](configuration-reference.md) — `eddi.coordinator.*`, `eddi.cluster.*`
-- [Clustering](clustering.md) — when a turn is dead-lettered in cluster mode (a fenced write)
+- [Clustering](clustering.md) — when a turn is dead-lettered in cluster mode: a fenced write (`reason: fenced`) or a turn stopped by a lost lease (`reason: lease-lost`)
 - [Metrics & Monitoring](metrics.md) — the coordinator gauges and the dead-letter alert

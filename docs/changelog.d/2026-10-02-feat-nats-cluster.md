@@ -165,6 +165,10 @@ letters) turned up eight defects. Each is fixed here with a test that fails with
   `ClusterCoordinatorIT` picks a free host port instead of a fixed 4319.
 - **CodeRabbit reviews stacked PRs.** A new [`.coderabbit.yaml`](../../.coderabbit.yaml) lets auto-review run on PRs into any base branch, not only `main`, because the stacked NATS PRs were being skipped as "base/target branches other than the default branch".
 
+- **A turn stopped by a lost lease is dead-lettered and its caller told (console live re-check).** When a node lost a conversation's lease mid-turn, whether through a partition, a long pause, a NATS blip or an administrator force-releasing it, the turn was cancelled at its next task boundary. The client still got HTTP 200, but the turn was neither stored nor dead-lettered: it never reached a write. Now it is dead-lettered with its input (none for a `secretInput` turn), with `reason: lease-lost` and its fencing token added to the dead letter's turn record, and `failedOn` naming the node. If the reply has not gone out yet, the caller is answered as not processed: 409 with `Retry-After` over REST, an error event on a stream. The turn still stamps no state.
+
+- **The first dead letter of a new cluster reaches the shared stream.** It was seen live while checking the lease-lost fix. The dead-letter stream is created by the first dead letter that needs it, and a publish right after the creation got "no responders" while the replicated stream elected its leader. The entry fell back to the node-local ring, and that ring was forwarded only on a reconnect, so it stayed on one node. Now the publish after a creation retries for up to 2 s, and a dead letter kept locally while NATS is connected is forwarded again after 10 s.
+
 ### Known and not fixed here
 
 - A fenced-out turn's caller still gets the reply it was rendered (HTTP 200), where the design
