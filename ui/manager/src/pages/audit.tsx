@@ -539,7 +539,9 @@ export function AuditPage() {
     const v = parseInt(searchParams.get("version") ?? "", 10);
     return {
       mode: m,
-      agent: searchParams.get("agent") ?? "",
+      // `agentId` is the older name other pages still link with (the Workforce
+      // agent panel); `agent` wins and the URL is normalised to it on sync.
+      agent: searchParams.get("agent") ?? searchParams.get("agentId") ?? "",
       version: searchParams.get("version") ?? "",
       activeVersion: isNaN(v) ? undefined : v,
       conversation: searchParams.get("conversation") ?? "",

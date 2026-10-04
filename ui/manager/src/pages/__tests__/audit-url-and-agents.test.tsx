@@ -50,4 +50,31 @@ describe("AuditPage - agent list and URL state", () => {
     });
     expect((screen.getByTestId("conversation-input") as HTMLInputElement).value).toBe("conv-42");
   });
+
+  it("applies a legacy ?agentId= link, and prefers ?agent= when both are present", async () => {
+    const requested: string[] = [];
+    server.use(
+      http.get("*/auditstore/agent/:agentId", ({ params }) => {
+        requested.push(String(params.agentId));
+        return HttpResponse.json([]);
+      }),
+    );
+    renderWithProviders(<AuditPage />, { initialRoute: "/manage/audit?agentId=agentX" });
+    await waitFor(() => expect(requested).toContain("agentX"));
+    // The URL sync must not have dropped the filter.
+    expect(requested.every((r) => r === "agentX")).toBe(true);
+  });
+
+  it("agent wins over agentId", async () => {
+    const requested: string[] = [];
+    server.use(
+      http.get("*/auditstore/agent/:agentId", ({ params }) => {
+        requested.push(String(params.agentId));
+        return HttpResponse.json([]);
+      }),
+    );
+    renderWithProviders(<AuditPage />, { initialRoute: "/manage/audit?agent=agentA&agentId=agentB" });
+    await waitFor(() => expect(requested).toContain("agentA"));
+    expect(requested).not.toContain("agentB");
+  });
 });
