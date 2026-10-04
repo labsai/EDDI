@@ -219,7 +219,7 @@ describe("LiveLogViewer", () => {
     renderWithProviders(
       <LiveLogViewer agentId="agent-123" conversationId={null} />
     );
-    const status = screen.getByRole("status");
+    const status = screen.getByRole("status", { name: "Disconnected" });
     expect(status).toHaveAttribute("aria-label", "Disconnected");
   });
 
@@ -275,6 +275,25 @@ describe("LiveLogViewer", () => {
     expect(messages[0]).toContain("first");
     expect(messages[1]).toContain("second");
     expect(messages[2]).toContain("live line");
+  });
+
+  it("does not make the 500-line stream a live region; announces a throttled error count instead", async () => {
+    renderWithProviders(
+      <LiveLogViewer agentId="agent-aria" conversationId={null} />
+    );
+    expect(screen.getByRole("log")).toHaveAttribute("aria-live", "off");
+    const announcer = screen.getByTestId("log-error-announcer");
+    expect(announcer).toHaveTextContent("");
+
+    emit(line(1000, "info line"));
+    emit({ ...line(2000, "boom"), level: "ERROR" });
+    emit({ ...line(3000, "boom 2"), level: "ERROR" });
+    // Throttled: nothing is read out per line…
+    expect(announcer).toHaveTextContent("");
+    // …the count arrives once, after the burst settles.
+    await waitFor(() => expect(announcer).toHaveTextContent("2 errors in the log"), {
+      timeout: 5000,
+    });
   });
 
   it("pause freezes the view but keeps collecting, so resume shows what arrived meanwhile", async () => {

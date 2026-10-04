@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
@@ -21,6 +23,7 @@ import {
   Clock,
   X,
   Check,
+  RefreshCw,
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
@@ -30,6 +33,8 @@ import type { HistoryFilters } from "@/lib/api/logs";
 import { useDeployedAgents } from "@/hooks/use-chat";
 import { getConversationDescriptors, parseConversationUri } from "@/lib/api/conversations";
 import { useQuery } from "@tanstack/react-query";
+import { useAgentNames } from "@/hooks/use-agent-names";
+import { toIsoWithOffset, formatDateTimeWithZone } from "@/lib/date-format";
 
 // ==================== Level badge config ====================
 
@@ -98,20 +103,38 @@ function LevelBadge({ level }: { level: string }) {
   );
 }
 
-function formatTimestamp(ts: number | string | undefined): string {
+/**
+ * Row timestamp. The live tail is minutes old, so time-of-day is enough there;
+ * history spans days, where a bare HH:MM:SS made rows from different days
+ * indistinguishable, so it also shows the date (year only when not this one).
+ * The full ISO-8601 time with offset is always in the row's title.
+ */
+function formatTimestamp(ts: number | string | undefined, withDate = false): string {
   if (!ts) return "—";
-  const d = typeof ts === "string" ? new Date(ts) : new Date(ts);
-  // Use Intl.DateTimeFormat directly to access fractionalSecondDigits
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "—";
   try {
     return new Intl.DateTimeFormat(undefined, {
+      ...(withDate
+        ? {
+            month: "short",
+            day: "numeric",
+            ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+          }
+        : {}),
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
       fractionalSecondDigits: 3,
     } as Intl.DateTimeFormatOptions).format(d);
   } catch {
-    return d.toLocaleTimeString();
+    return withDate ? d.toLocaleString() : d.toLocaleTimeString();
   }
+}
+
+/** Plain-text line used by export and per-row copy: unambiguous date + zone. */
+function logLine(entry: { timestamp?: number | string; level?: string; message?: string }): string {
+  return `[${toIsoWithOffset(entry.timestamp)}] [${entry.level}] ${entry.message}`;
 }
 
 // ==================== Tab type ====================
@@ -126,7 +149,10 @@ export function LogsPage() {
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("logs"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
-  const [activeTab, setActiveTab] = useState<Tab>("live");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab: Tab = searchParams.get("tab") === "history" ? "history" : "live";
+  const setActiveTab = (tab: Tab) =>
+    setSearchParams(tab === "history" ? { tab } : {}, { replace: true });
 
   return (
     <div className="flex h-full flex-col" data-testid="logs-page">
@@ -197,8 +223,17 @@ function LiveTab() {
     [agentFilter, levelFilter]
   );
 
-  const { entries, sseConnected, seeded, paused, setPaused, clearEntries } =
-    useLogStream(filters);
+  const {
+    entries,
+    sseConnected,
+    exhausted,
+    reconnect,
+    seeded,
+    paused,
+    setPaused,
+    clearEntries,
+  } = useLogStream(filters);
+  const { nameOf } = useAgentNames();
   const { data: instanceInfo } = useInstanceId();
   const [textSearch, setTextSearch] = useState("");
 
@@ -230,7 +265,7 @@ function LiveTab() {
   const handleExportLogs = useCallback(() => {
     if (filteredEntries.length === 0) return;
     const text = filteredEntries
-      .map((e) => `[${formatTimestamp(e.timestamp)}] [${e.level}] ${e.message}`)
+      .map(logLine)
       .join("\n");
     const blob = new Blob([text], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
@@ -253,7 +288,17 @@ function LiveTab() {
       {/* Toolbar */}
       <div className="mb-3 flex flex-wrap items-center gap-2" data-tour="logs-filters">
         {/* SSE stream status */}
-        <StreamBadge connected={sseConnected} />
+        <StreamBadge connected={sseConnected} exhausted={exhausted} />
+        {exhausted && (
+          <button
+            onClick={reconnect}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            data-testid="reconnect-button"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            {t("logs.reconnect", "Reconnect")}
+          </button>
+        )}
 
         {/* Instance badge */}
         {instanceInfo && (
@@ -333,11 +378,11 @@ function LiveTab() {
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2" data-testid="level-stats">
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-400">
             <span className="h-2 w-2 rounded-full bg-red-500" />
-            {levelStats.error} {t("logs.errors", "errors")}
+            {t("logs.errorCount", "{{count}} errors", { count: levelStats.error })}
           </span>
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
             <span className="h-2 w-2 rounded-full bg-amber-500" />
-            {levelStats.warn} {t("logs.warnings", "warns")}
+            {t("logs.warnCount", "{{count}} warns", { count: levelStats.warn })}
           </span>
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400">
             <span className="h-2 w-2 rounded-full bg-blue-500" />
@@ -355,9 +400,10 @@ function LiveTab() {
               type="text"
               value={textSearch}
               onChange={(e) => setTextSearch(e.target.value)}
-              placeholder={t("logs.searchLogs", "Search logs…")}
+              placeholder={t("logs.searchLogs", "Search loaded entries…")}
               className="h-7 w-48 max-w-full rounded-md border border-input bg-background ps-7 pe-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               data-testid="text-search"
+              aria-label={t("logs.searchLogsLabel", "Search the loaded log entries")}
             />
           </div>
         </div>
@@ -375,7 +421,22 @@ function LiveTab() {
       >
         {entries.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8" data-testid="live-empty">
-            {!sseConnected ? (
+            {exhausted ? (
+              <>
+                <Radio className="h-10 w-10 text-muted-foreground/40" />
+                <p className="text-sm font-medium text-muted-foreground">
+                  {t("logs.streamDisconnected", "Disconnected from the log stream.")}
+                </p>
+                <button
+                  onClick={reconnect}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+                  data-testid="reconnect-empty-button"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {t("logs.reconnect", "Reconnect")}
+                </button>
+              </>
+            ) : !sseConnected ? (
               <>
                 <Loader2 className="h-10 w-10 text-muted-foreground/40 animate-spin" />
                 <p className="text-sm font-medium text-muted-foreground">
@@ -401,13 +462,15 @@ function LiveTab() {
               </>
             )}
           </div>
+        ) : filteredEntries.length === 0 ? (
+          <NoLoadedMatches testId="live-no-matches" />
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
             {/* Keyed by the line's identity, not its index: with index keys every
                 new line shifted every key, so React remounted the whole list
                 (and reset every expanded stack trace) once per log line. */}
             {keyedOldestFirst([...filteredEntries].reverse(), logEntryKey).map(({ item: entry, key }) => (
-              <LogRow key={key} entry={entry} />
+              <LogRow key={key} entry={entry} agentLabel={nameOf(entry.agentId)} />
             ))}
           </div>
         )}
@@ -444,8 +507,37 @@ function LiveTab() {
 
 function HistoryTab() {
   const { t } = useTranslation();
-  const [filters, setFilters] = useState<HistoryFilters>({ limit: 100 });
-  const [levelFilter, setLevelFilter] = useState("");
+  // Filters live in the URL so a filtered view survives reload and can be
+  // shared. Keys are `agent`, `conversation`, `instance`, `level`.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters = useMemo<HistoryFilters>(
+    () => ({
+      limit: 100,
+      agentId: searchParams.get("agent") || undefined,
+      conversationId: searchParams.get("conversation") || undefined,
+      instanceId: searchParams.get("instance") || undefined,
+    }),
+    [searchParams],
+  );
+  const levelFilter = searchParams.get("level") ?? "";
+  const patchParams = useCallback(
+    (patch: Record<string, string | undefined>) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const [k, v] of Object.entries(patch)) {
+            if (v) next.set(k, v);
+            else next.delete(k);
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const setLevelFilter = (v: string) => patchParams({ level: v || undefined });
+  const { nameOf } = useAgentNames();
   const [textSearch, setTextSearch] = useState("");
 
   const {
@@ -459,27 +551,18 @@ function HistoryTab() {
   } = useHistoryLogs(filters);
 
   const updateFilter = useCallback(
-    (key: keyof HistoryFilters, value: string) => {
-      setFilters((prev) => ({
-        ...prev,
-        [key]: value || undefined,
-        skip: 0,
-      }));
+    (key: "conversationId" | "instanceId", value: string) => {
+      patchParams({ [key === "conversationId" ? "conversation" : "instance"]: value || undefined });
     },
-    []
+    [patchParams]
   );
 
   // Reset conversation when agent changes
   const handleAgentChange = useCallback(
     (v: string) => {
-      setFilters((prev) => ({
-        ...prev,
-        agentId: v || undefined,
-        conversationId: undefined,
-        skip: 0,
-      }));
+      patchParams({ agent: v || undefined, conversation: undefined });
     },
-    []
+    [patchParams]
   );
 
   // Client-side level + text filtering
@@ -584,11 +667,11 @@ function HistoryTab() {
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border bg-card px-3 py-2" data-testid="history-level-stats">
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-400">
             <span className="h-2 w-2 rounded-full bg-red-500" />
-            {levelStats.error} {t("logs.errors", "errors")}
+            {t("logs.errorCount", "{{count}} errors", { count: levelStats.error })}
           </span>
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
             <span className="h-2 w-2 rounded-full bg-amber-500" />
-            {levelStats.warn} {t("logs.warnings", "warns")}
+            {t("logs.warnCount", "{{count}} warns", { count: levelStats.warn })}
           </span>
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400">
             <span className="h-2 w-2 rounded-full bg-blue-500" />
@@ -605,9 +688,10 @@ function HistoryTab() {
               type="text"
               value={textSearch}
               onChange={(e) => setTextSearch(e.target.value)}
-              placeholder={t("logs.searchLogs", "Search logs…")}
+              placeholder={t("logs.searchLogs", "Search loaded entries…")}
               className="h-7 w-48 max-w-full rounded-md border border-input bg-background ps-7 pe-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               data-testid="history-text-search"
+              aria-label={t("logs.searchLogsLabel", "Search the loaded log entries")}
             />
           </div>
         </div>
@@ -652,8 +736,9 @@ function HistoryTab() {
           </div>
         ) : (
           <div className="divide-y divide-border/50 font-mono text-xs">
+            {filteredLogs.length === 0 && <NoLoadedMatches testId="history-no-matches" />}
             {keyedOldestFirst([...filteredLogs].reverse(), historyEntryKey).reverse().map(({ item: entry, key }) => (
-              <LogRow key={key} entry={entry} />
+              <LogRow key={key} entry={entry} showDate agentLabel={nameOf(entry.agentId)} />
             ))}
             {hasMore && (
               <div className="flex justify-center p-3">
@@ -706,9 +791,42 @@ function countFrames(frames: string): number {
   return (frames.match(/(\n\s+at |\nCaused by:)/g) || []).length;
 }
 
+// ==================== Empty search result ====================
+
+/** Shown when a text search matches nothing. The search runs over the entries
+ * already loaded in the browser, not the whole log, and says so. */
+function NoLoadedMatches({ testId }: { testId: string }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center"
+      data-testid={testId}
+    >
+      <Search className="h-8 w-8 text-muted-foreground/40" />
+      <p className="text-sm font-medium text-muted-foreground">
+        {t("logs.noMatches", "No loaded entries match your search.")}
+      </p>
+      <p className="text-xs text-muted-foreground/60">
+        {t(
+          "logs.noMatchesHint",
+          "Search only covers the entries already loaded here. Load older entries or adjust the filters to look further back.",
+        )}
+      </p>
+    </div>
+  );
+}
+
 // ==================== Log Row Component ====================
 
-function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
+function LogRow({
+  entry,
+  showDate = false,
+  agentLabel,
+}: {
+  entry: LogEntry | DatabaseLogEntry;
+  showDate?: boolean;
+  agentLabel?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
   const isStacktrace = entry.message ? hasStacktrace(entry.message) : false;
@@ -718,9 +836,11 @@ function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
   const frameCount = isStacktrace ? countFrames(frames) : 0;
 
   const handleCopy = useCallback(() => {
-    const text = `[${formatTimestamp(entry.timestamp)}] [${entry.level}] ${entry.message}`;
-    navigator.clipboard.writeText(text);
-  }, [entry]);
+    navigator.clipboard.writeText(logLine(entry)).then(
+      () => toast.success(t("logs.copied", "Log entry copied")),
+      () => toast.error(t("logs.copyFailed", "Could not copy to the clipboard")),
+    );
+  }, [entry, t]);
 
   return (
     <div className="group px-3 py-2 hover:bg-muted/30 transition-colors">
@@ -728,13 +848,19 @@ function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
           than a phone screen; wrapping drops the message to its own line
           instead of pushing the page into horizontal overflow. */}
       <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-        <span className="shrink-0 text-muted-foreground">
-          {formatTimestamp(entry.timestamp)}
+        <span
+          className="shrink-0 text-muted-foreground"
+          title={toIsoWithOffset(entry.timestamp)}
+        >
+          {formatTimestamp(entry.timestamp, showDate)}
         </span>
         <LevelBadge level={entry.level ?? "INFO"} />
         {entry.agentId && (
-          <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-            {entry.agentId}
+          <span
+            className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
+            title={entry.agentId}
+          >
+            {agentLabel || entry.agentId}
           </span>
         )}
         {entry.conversationId && (
@@ -745,11 +871,13 @@ function LogRow({ entry }: { entry: LogEntry | DatabaseLogEntry }) {
         <span className="min-w-[12rem] flex-1 break-all text-foreground">
           {main}
         </span>
-        {/* Copy button — visible on hover */}
+        {/* Copy button: shown on hover, and always on keyboard focus and touch
+            (no hover there), so it is reachable without a mouse. */}
         <button
           onClick={handleCopy}
-          className="shrink-0 opacity-0 group-hover:opacity-100 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+          className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
           title={t("logs.copyEntry", "Copy log entry")}
+          aria-label={t("logs.copyEntry", "Copy log entry")}
           data-testid="copy-log-btn"
         >
           <Copy className="h-3 w-3" />
@@ -863,8 +991,7 @@ function formatRelativeTime(ts: number | string | undefined): string {
 
 function formatAbsoluteTime(ts: number | string | undefined): string {
   if (!ts) return "";
-  const d = typeof ts === "string" ? new Date(ts) : new Date(ts);
-  return d.toLocaleString();
+  return formatDateTimeWithZone(ts);
 }
 
 // ==================== Rich Conversation Picker ====================

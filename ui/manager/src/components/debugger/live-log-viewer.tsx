@@ -18,6 +18,10 @@ import {
 const MAX_LOG_ENTRIES = 500;
 const SEED_LIMIT = 50;
 
+const ERROR_LEVELS = new Set(["ERROR", "SEVERE", "FATAL"]);
+/** Minimum quiet time before the error count is read out to assistive tech. */
+const ERROR_ANNOUNCE_MS = 3000;
+
 const LEVEL_COLORS: Record<string, string> = {
   ERROR: "text-destructive",
   WARN: "text-amber-500",
@@ -130,6 +134,20 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   }, [agentId, conversationId]);
 
   const shown = pausedSnapshot ?? logs;
+
+  // Screen readers: the log region itself is NOT live (a 500-line stream that
+  // announces every line is unusable). A separate status region reports the
+  // error count instead, throttled so a burst is read out once.
+  const errorCount = useMemo(
+    () => logs.filter((l) => ERROR_LEVELS.has((l.level ?? "").toUpperCase())).length,
+    [logs],
+  );
+  const [announcedErrors, setAnnouncedErrors] = useState(0);
+  useEffect(() => {
+    if (errorCount === announcedErrors) return;
+    const id = setTimeout(() => setAnnouncedErrors(errorCount), ERROR_ANNOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [errorCount, announcedErrors]);
 
   // Auto-scroll
   useEffect(() => {
@@ -249,10 +267,15 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
       </div>
 
       {/* Log entries */}
+      <div role="status" aria-live="polite" className="sr-only" data-testid="log-error-announcer">
+        {announcedErrors > 0
+          ? t("logViewer.errorsAnnounce", "{{count}} errors in the log", { count: announcedErrors })
+          : ""}
+      </div>
       <div
         ref={scrollRef}
         role="log"
-        aria-live="polite"
+        aria-live="off"
         aria-label={t("logViewer.logOutput", "Log output")}
         className="overflow-y-auto font-mono text-[10px] leading-relaxed"
         style={{ maxHeight: "35vh" }}

@@ -1580,7 +1580,7 @@
     "stepsCount": "{{count}} Schritte",
     "noConversationsFound": "Keine Konversationen gefunden",
     "useConversationId": "ID verwenden: {{id}}",
-    "searchLogs": "Logs durchsuchen…",
+    "searchLogs": "Geladene Einträge durchsuchen…",
     "errors": "Fehler",
     "warnings": "Warnungen",
     "infos": "Info",
@@ -1592,7 +1592,18 @@
     "stateActive": "Aktiv",
     "stateError": "Fehler",
     "stateEnded": "Beendet",
-    "loadOlder": "Ältere Einträge laden"
+    "loadOlder": "Ältere Einträge laden",
+    "reconnect": "Erneut verbinden",
+    "streamDisconnected": "Die Verbindung zum Log-Stream wurde getrennt.",
+    "errorCount_one": "{{count}} Fehler",
+    "errorCount_other": "{{count}} Fehler",
+    "warnCount_one": "{{count}} Warnung",
+    "warnCount_other": "{{count}} Warnungen",
+    "copied": "Log-Eintrag kopiert",
+    "copyFailed": "Kopieren in die Zwischenablage fehlgeschlagen",
+    "noMatches": "Keine geladenen Einträge entsprechen Ihrer Suche.",
+    "noMatchesHint": "Die Suche umfasst nur die hier bereits geladenen Einträge. Laden Sie ältere Einträge oder passen Sie die Filter an, um weiter zurückzusuchen.",
+    "searchLogsLabel": "Geladene Log-Einträge durchsuchen"
   },
   "secrets": {
     "loadError": "Secrets konnten nicht geladen werden",
@@ -1999,7 +2010,9 @@
     "connected": "Verbunden",
     "disconnected": "Getrennt",
     "logOutput": "Log-Ausgabe",
-    "noMatch": "Keine Logs entsprechen Ihrem Filter"
+    "noMatch": "Keine Logs entsprechen Ihrem Filter",
+    "errorsAnnounce_one": "{{count}} Fehler im Log",
+    "errorsAnnounce_other": "{{count}} Fehler im Log"
   },
   "promptViewer": {
     "error": "Prompt-Daten konnten nicht geladen werden",
@@ -2401,7 +2414,8 @@
   },
   "stream": {
     "live": "Live",
-    "reconnecting": "Verbindung wird wiederhergestellt…"
+    "reconnecting": "Verbindung wird wiederhergestellt…",
+    "disconnected": "Getrennt"
   },
   "createOrWizard": {
     "title": "Neue {{type}}",
@@ -4991,7 +5005,9 @@
     "bindingCallerSuppliedBody": "Das aufrufende System übergibt mit der Anfrage die Zugangsdaten des jeweiligen Nutzers, und EDDI speichert nichts. Der Agent kann nur tun, was dieser Nutzer im Zielsystem tun darf, und diese Verbindung wird bei der MCP- und A2A-Erkennung zurückgehalten.",
     "confirmAuthChange": "Ändern, wie sich diese Verbindung authentifiziert?",
     "confirmAuthChangeDesc": "Über diese Verbindung verknüpfte Konten werden nicht mehr aufgelöst – eine Berechtigung gehört zu dem Ablauf, der sie erzeugt hat. EDDI lehnt die Änderung ab, solange noch ein Konto verknüpft ist, und nennt die Anzahl; heben Sie die Verknüpfungen zuerst auf, oder legen Sie eine neue Verbindung an und lassen Sie die Leute stattdessen diese verknüpfen.",
-    "confirmAuthChangeAccept": "Ändern"
+    "confirmAuthChangeAccept": "Ändern",
+    "deleted": "Verbindung \"{{name}}\" gelöscht",
+    "confirmDeleteNamed": "Verbindung \"{{name}}\" löschen?"
   },
   "extensionTypes": {
     "parser": "Eingabe-Parser",

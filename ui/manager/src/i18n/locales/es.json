@@ -1594,7 +1594,7 @@
     "stepsCount": "{{count}} pasos",
     "noConversationsFound": "No se encontraron conversaciones",
     "useConversationId": "Usar ID: {{id}}",
-    "searchLogs": "Buscar logs…",
+    "searchLogs": "Buscar en las entradas cargadas…",
     "errors": "errores",
     "warnings": "advertencias",
     "infos": "info",
@@ -1606,7 +1606,20 @@
     "stateActive": "Activo",
     "stateError": "Error",
     "stateEnded": "Finalizado",
-    "loadOlder": "Cargar entradas anteriores"
+    "loadOlder": "Cargar entradas anteriores",
+    "reconnect": "Reconectar",
+    "streamDisconnected": "Desconectado del flujo de registros.",
+    "errorCount_one": "{{count}} error",
+    "errorCount_many": "{{count}} de errores",
+    "errorCount_other": "{{count}} errores",
+    "warnCount_one": "{{count}} advertencia",
+    "warnCount_many": "{{count}} de advertencias",
+    "warnCount_other": "{{count}} advertencias",
+    "copied": "Entrada de registro copiada",
+    "copyFailed": "No se pudo copiar al portapapeles",
+    "noMatches": "Ninguna entrada cargada coincide con su búsqueda.",
+    "noMatchesHint": "La búsqueda solo abarca las entradas ya cargadas aquí. Cargue entradas más antiguas o ajuste los filtros para buscar más atrás.",
+    "searchLogsLabel": "Buscar en las entradas de registro cargadas"
   },
   "secrets": {
     "loadError": "No se pudieron cargar los secretos",
@@ -2021,7 +2034,10 @@
     "connected": "Conectado",
     "disconnected": "Desconectado",
     "logOutput": "Salida de registro",
-    "noMatch": "Ningún registro coincide con tu filtro"
+    "noMatch": "Ningún registro coincide con tu filtro",
+    "errorsAnnounce_one": "{{count}} error en el registro",
+    "errorsAnnounce_many": "{{count}} de errores en el registro",
+    "errorsAnnounce_other": "{{count}} errores en el registro"
   },
   "promptViewer": {
     "error": "Error al cargar los datos del prompt",
@@ -2423,7 +2439,8 @@
   },
   "stream": {
     "live": "En vivo",
-    "reconnecting": "Reconectando…"
+    "reconnecting": "Reconectando…",
+    "disconnected": "Desconectado"
   },
   "createOrWizard": {
     "title": "Nuevo {{type}}",
@@ -5040,7 +5057,9 @@
     "bindingCallerSuppliedBody": "El sistema que llama entrega la credencial de cada usuario con la solicitud y EDDI no almacena nada. El agente solo puede hacer lo que ese usuario puede hacer en el destino, y esta conexión se excluye del descubrimiento MCP y A2A.",
     "confirmAuthChange": "¿Cambiar cómo se autentica esta conexión?",
     "confirmAuthChangeDesc": "Las cuentas vinculadas a través de esta conexión dejarán de resolverse: una concesión pertenece al flujo que la produjo. EDDI rechaza el cambio mientras quede alguna cuenta vinculada e indica cuántas; desvincúlelas primero, o cree una conexión nueva y deje que la gente vincule esa.",
-    "confirmAuthChangeAccept": "Cambiar"
+    "confirmAuthChangeAccept": "Cambiar",
+    "deleted": "Conexión \"{{name}}\" eliminada",
+    "confirmDeleteNamed": "¿Eliminar la conexión \"{{name}}\"?"
   },
   "extensionTypes": {
     "parser": "Analizador de entrada",

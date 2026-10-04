@@ -1636,7 +1636,7 @@
     "stepsCount": "{{count}} خطوات",
     "noConversationsFound": "لم يتم العثور على محادثات",
     "useConversationId": "استخدام المعرف: {{id}}",
-    "searchLogs": "بحث في السجلات…",
+    "searchLogs": "ابحث في الإدخالات المحمّلة…",
     "errors": "أخطاء",
     "warnings": "تحذيرات",
     "infos": "معلومات",
@@ -1648,7 +1648,26 @@
     "stateActive": "نشط",
     "stateError": "خطأ",
     "stateEnded": "منتهي",
-    "loadOlder": "تحميل الإدخالات الأقدم"
+    "loadOlder": "تحميل الإدخالات الأقدم",
+    "reconnect": "إعادة الاتصال",
+    "streamDisconnected": "تم قطع الاتصال بتدفق السجلات.",
+    "errorCount_zero": "{{count}} أخطاء",
+    "errorCount_one": "{{count}} خطأ",
+    "errorCount_two": "{{count}} خطآن",
+    "errorCount_few": "{{count}} أخطاء",
+    "errorCount_many": "{{count}} خطأً",
+    "errorCount_other": "{{count}} خطأ",
+    "warnCount_zero": "{{count}} تحذيرات",
+    "warnCount_one": "{{count}} تحذير",
+    "warnCount_two": "{{count}} تحذيران",
+    "warnCount_few": "{{count}} تحذيرات",
+    "warnCount_many": "{{count}} تحذيرًا",
+    "warnCount_other": "{{count}} تحذير",
+    "copied": "تم نسخ إدخال السجل",
+    "copyFailed": "تعذر النسخ إلى الحافظة",
+    "noMatches": "لا توجد إدخالات محمّلة تطابق بحثك.",
+    "noMatchesHint": "يشمل البحث الإدخالات المحمّلة هنا فقط. حمّل إدخالات أقدم أو عدّل المرشحات للبحث في فترة أبعد.",
+    "searchLogsLabel": "البحث في إدخالات السجل المحمّلة"
   },
   "secrets": {
     "loadError": "تعذّر تحميل الأسرار",
@@ -2087,7 +2106,13 @@
     "connected": "متصل",
     "disconnected": "غير متصل",
     "logOutput": "مخرجات السجل",
-    "noMatch": "لا توجد سجلات تطابق عامل التصفية"
+    "noMatch": "لا توجد سجلات تطابق عامل التصفية",
+    "errorsAnnounce_zero": "{{count}} أخطاء في السجل",
+    "errorsAnnounce_one": "{{count}} خطأ في السجل",
+    "errorsAnnounce_two": "{{count}} خطآن في السجل",
+    "errorsAnnounce_few": "{{count}} أخطاء في السجل",
+    "errorsAnnounce_many": "{{count}} خطأً في السجل",
+    "errorsAnnounce_other": "{{count}} خطأ في السجل"
   },
   "promptViewer": {
     "error": "فشل تحميل بيانات الموجه",
@@ -2489,7 +2514,8 @@
   },
   "stream": {
     "live": "مباشر",
-    "reconnecting": "إعادة الاتصال…"
+    "reconnecting": "إعادة الاتصال…",
+    "disconnected": "غير متصل"
   },
   "createOrWizard": {
     "title": "جديد {{type}}",
@@ -5187,7 +5213,9 @@
     "bindingCallerSuppliedBody": "يسلّم النظام المتصل بيانات اعتماد كل مستخدم مع الطلب ولا يخزّن EDDI شيئًا. لا يستطيع الوكيل فعل سوى ما يستطيعه ذلك المستخدم في النظام الهدف، ويُحجب هذا الاتصال عن اكتشاف MCP وA2A.",
     "confirmAuthChange": "تغيير طريقة مصادقة هذا الاتصال؟",
     "confirmAuthChangeDesc": "ستتوقف الحسابات المرتبطة عبر هذا الاتصال عن العمل — فالمنحة تنتمي إلى التدفق الذي أنتجها. يرفض EDDI التغيير ما دام أي حساب مرتبطًا ويذكر عددها؛ افصل الحسابات أولًا، أو أنشئ اتصالًا جديدًا ودع الأشخاص يربطون به بدلًا من ذلك.",
-    "confirmAuthChangeAccept": "تغيير"
+    "confirmAuthChangeAccept": "تغيير",
+    "deleted": "تم حذف الاتصال \"{{name}}\"",
+    "confirmDeleteNamed": "هل تريد حذف الاتصال \"{{name}}\"؟"
   },
   "extensionTypes": {
     "parser": "محلّل الإدخال",

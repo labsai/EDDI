@@ -1580,7 +1580,7 @@
     "stepsCount": "{{count}} 步骤",
     "noConversationsFound": "未找到对话",
     "useConversationId": "使用ID: {{id}}",
-    "searchLogs": "搜索日志…",
+    "searchLogs": "搜索已加载的条目…",
     "errors": "错误",
     "warnings": "警告",
     "infos": "信息",
@@ -1592,7 +1592,18 @@
     "stateActive": "活跃",
     "stateError": "错误",
     "stateEnded": "已结束",
-    "loadOlder": "加载更早的条目"
+    "loadOlder": "加载更早的条目",
+    "reconnect": "重新连接",
+    "streamDisconnected": "已与日志流断开连接。",
+    "errorCount_other": "{{count}} 个错误",
+    "warnCount_other": "{{count}} 个警告",
+    "copied": "日志条目已复制",
+    "copyFailed": "无法复制到剪贴板",
+    "noMatches": "已加载的条目中没有与搜索匹配的内容。",
+    "noMatchesHint": "搜索仅覆盖此处已加载的条目。请加载更早的条目或调整筛选条件以查看更早的内容。",
+    "searchLogsLabel": "搜索已加载的日志条目",
+    "errorCount_one": "{{count}} 个错误",
+    "warnCount_one": "{{count}} 个警告"
   },
   "secrets": {
     "loadError": "无法加载密钥",
@@ -1999,7 +2010,9 @@
     "connected": "已连接",
     "disconnected": "已断开",
     "logOutput": "日志输出",
-    "noMatch": "没有日志符合您的筛选条件"
+    "noMatch": "没有日志符合您的筛选条件",
+    "errorsAnnounce_one": "日志中有 {{count}} 个错误",
+    "errorsAnnounce_other": "日志中有 {{count}} 个错误"
   },
   "promptViewer": {
     "error": "加载提示词数据失败",
@@ -2401,7 +2414,8 @@
   },
   "stream": {
     "live": "实时",
-    "reconnecting": "重新连接中…"
+    "reconnecting": "重新连接中…",
+    "disconnected": "已断开"
   },
   "createOrWizard": {
     "title": "新 {{type}}",
@@ -4991,7 +5005,9 @@
     "bindingCallerSuppliedBody": "调用系统随请求交付各用户自己的凭据，EDDI 不存储任何内容。代理只能做该用户在目标系统能做的事，并且此连接不会出现在 MCP 和 A2A 发现中。",
     "confirmAuthChange": "更改此连接的认证方式？",
     "confirmAuthChangeDesc": "通过此连接关联的账户将无法再解析——授权属于产生它的流程。只要仍有账户关联，EDDI 就会拒绝更改并说明数量；请先取消关联，或新建一个连接并让用户改为关联它。",
-    "confirmAuthChangeAccept": "更改"
+    "confirmAuthChangeAccept": "更改",
+    "deleted": "连接“{{name}}”已删除",
+    "confirmDeleteNamed": "删除连接“{{name}}”？"
   },
   "extensionTypes": {
     "parser": "输入解析器",

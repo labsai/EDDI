@@ -3,6 +3,7 @@ import {
   useSessionLogStore,
   _connectForTesting,
   connect,
+  reconnect,
   disconnect,
   subscriberCount,
   isStreamOpen,
@@ -37,6 +38,7 @@ describe("useSessionLogStore", () => {
       entries: [],
       connected: false,
       seeded: false,
+      exhausted: false,
     });
   });
 
@@ -130,6 +132,23 @@ describe("useSessionLogStore", () => {
     }));
 
     expect(useSessionLogStore.getState().entries).toHaveLength(1000);
+  });
+
+  it("flags the stream exhausted when retries are spent, and Reconnect starts over", () => {
+    const connection = _connectForTesting();
+    const first = connection.getEventSource()!;
+    first.onexhausted?.();
+    expect(useSessionLogStore.getState().exhausted).toBe(true);
+    expect(useSessionLogStore.getState().connected).toBe(false);
+
+    reconnect();
+    const second = connection.getEventSource()!;
+    expect(second).not.toBe(first);
+    expect(useSessionLogStore.getState().exhausted).toBe(false);
+    second.onexhausted?.();
+    second.onopen?.();
+    expect(useSessionLogStore.getState().exhausted).toBe(false);
+    connection.close();
   });
 
   it("can connect to SSE stream and buffer entries", () => {

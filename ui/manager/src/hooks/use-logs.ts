@@ -11,7 +11,11 @@ import {
   type DatabaseLogEntry,
 } from "@/lib/api/logs";
 import type { BearerEventSource } from "@/lib/bearer-event-source";
-import { useSessionLogStore, connect as connectSessionLogStream } from "@/hooks/session-log-store";
+import {
+  useSessionLogStore,
+  connect as connectSessionLogStream,
+  reconnect as reconnectSessionLogStream,
+} from "@/hooks/session-log-store";
 import { historyEntryKey, mergeNewestFirst, newByMultiplicity } from "@/lib/log-entries";
 
 // ==================== Query Keys ====================
@@ -120,6 +124,7 @@ export function useLogStream(filters: LogFilters = {}) {
   const sessionEntries = useSessionLogStore((s) => s.entries);
   const sessionConnected = useSessionLogStore((s) => s.connected);
   const sessionSeeded = useSessionLogStore((s) => s.seeded);
+  const sessionExhausted = useSessionLogStore((s) => s.exhausted);
 
   /*
    * Hold the unfiltered stream open only while this hook is mounted AND
@@ -138,6 +143,7 @@ export function useLogStream(filters: LogFilters = {}) {
   // ── Filtered SSE path ────────────────────────────────────────
   const [filteredEntries, setFilteredEntries] = useState<LogEntry[]>([]);
   const [filteredConnected, setFilteredConnected] = useState(false);
+  const [filteredExhausted, setFilteredExhausted] = useState(false);
   const eventSourceRef = useRef<BearerEventSource | null>(null);
   const filterKey = JSON.stringify(filters);
 
@@ -175,8 +181,14 @@ export function useLogStream(filters: LogFilters = {}) {
         setFilteredConnected(false);
       };
 
+      es.onexhausted = () => {
+        setFilteredConnected(false);
+        setFilteredExhausted(true);
+      };
+
       es.onopen = () => {
         setFilteredConnected(true);
+        setFilteredExhausted(false);
         // Same gap as the session store: what was logged while the stream was
         // down never arrives on it, so re-fetch the ring buffer on every open.
         getRecentLogs({ ...filters, limit: FILTERED_RESEED_LIMIT })
@@ -200,6 +212,7 @@ export function useLogStream(filters: LogFilters = {}) {
     if (!filtered) return;
     setFilteredEntries([]); // reset on filter change
     setFilteredConnected(false); // reset connection state before reconnecting
+    setFilteredExhausted(false);
     connect();
     return () => {
       eventSourceRef.current?.close();
@@ -250,9 +263,24 @@ export function useLogStream(filters: LogFilters = {}) {
     setPausedSnapshot((s) => (s === null ? null : []));
   }, [filtered]);
 
+  /** Start a fresh connection once the retry budget is spent. */
+  const reconnect = useCallback(() => {
+    if (filtered) {
+      eventSourceRef.current?.close();
+      setFilteredExhausted(false);
+      connect();
+    } else {
+      reconnectSessionLogStream();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, filterKey]);
+
   return {
     entries: pausedSnapshot ?? liveEntries,
     sseConnected: filtered ? filteredConnected : sessionConnected,
+    /** True once automatic reconnects have all failed — the tail is dead until {@link reconnect}. */
+    exhausted: filtered ? filteredExhausted : sessionExhausted,
+    reconnect,
     seeded: filtered ? true : sessionSeeded,
     paused,
     setPaused,

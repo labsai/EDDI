@@ -1580,7 +1580,7 @@
     "stepsCount": "{{count}} ステップ",
     "noConversationsFound": "会話が見つかりません",
     "useConversationId": "IDを使用: {{id}}",
-    "searchLogs": "ログを検索…",
+    "searchLogs": "読み込み済みのエントリを検索…",
     "errors": "エラー",
     "warnings": "警告",
     "infos": "情報",
@@ -1592,7 +1592,18 @@
     "stateActive": "アクティブ",
     "stateError": "エラー",
     "stateEnded": "終了",
-    "loadOlder": "古いエントリを読み込む"
+    "loadOlder": "古いエントリを読み込む",
+    "reconnect": "再接続",
+    "streamDisconnected": "ログストリームから切断されました。",
+    "errorCount_other": "エラー {{count}} 件",
+    "warnCount_other": "警告 {{count}} 件",
+    "copied": "ログエントリをコピーしました",
+    "copyFailed": "クリップボードにコピーできませんでした",
+    "noMatches": "読み込み済みのエントリに検索条件に一致するものはありません。",
+    "noMatchesHint": "検索の対象はここに読み込み済みのエントリのみです。さらに過去を調べるには、古いエントリを読み込むか、フィルターを調整してください。",
+    "searchLogsLabel": "読み込み済みのログエントリを検索",
+    "errorCount_one": "エラー {{count}} 件",
+    "warnCount_one": "警告 {{count}} 件"
   },
   "secrets": {
     "loadError": "シークレットを読み込めませんでした",
@@ -1999,7 +2010,9 @@
     "connected": "接続済み",
     "disconnected": "切断されました",
     "logOutput": "ログ出力",
-    "noMatch": "フィルターに一致するログがありません"
+    "noMatch": "フィルターに一致するログがありません",
+    "errorsAnnounce_one": "ログにエラーが {{count}} 件あります",
+    "errorsAnnounce_other": "ログにエラーが {{count}} 件あります"
   },
   "promptViewer": {
     "error": "プロンプトデータの読み込みに失敗しました",
@@ -2401,7 +2414,8 @@
   },
   "stream": {
     "live": "ライブ",
-    "reconnecting": "再接続中…"
+    "reconnecting": "再接続中…",
+    "disconnected": "切断されました"
   },
   "createOrWizard": {
     "title": "新規 {{type}}",
@@ -4991,7 +5005,9 @@
     "bindingCallerSuppliedBody": "呼び出し元システムがリクエストと一緒に各ユーザー自身の資格情報を渡し、EDDI は何も保存しません。エージェントは送信先でそのユーザーができることしかできず、この接続は MCP と A2A の検出からは除外されます。",
     "confirmAuthChange": "この接続の認証方法を変更しますか？",
     "confirmAuthChangeDesc": "この接続を通じてリンクされたアカウントは解決されなくなります。付与された権限はそれを生んだフローに属するためです。アカウントがリンクされている間、EDDI は変更を拒否し、その数を伝えます。先にリンクを解除するか、新しい接続を作成してそちらをリンクしてもらってください。",
-    "confirmAuthChangeAccept": "変更する"
+    "confirmAuthChangeAccept": "変更する",
+    "deleted": "接続「{{name}}」を削除しました",
+    "confirmDeleteNamed": "接続「{{name}}」を削除しますか？"
   },
   "extensionTypes": {
     "parser": "入力パーサー",

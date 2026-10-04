@@ -111,6 +111,9 @@ export function ConnectionsPage() {
     [connections],
   );
 
+  const deleteTargetName =
+    connections?.find((c) => c.id === deleteTarget?.id)?.connectionName ?? "";
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     try {
@@ -118,6 +121,11 @@ export function ConnectionsPage() {
         id: deleteTarget.id,
         version: deleteTarget.version,
       });
+      toast.success(
+        t("connections.deleted", "Connection \"{{name}}\" deleted", {
+          name: deleteTargetName,
+        }),
+      );
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
@@ -380,7 +388,13 @@ export function ConnectionsPage() {
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={() => setDeleteTarget(null)}
-        title={t("connections.confirmDelete", "Delete this connection?")}
+        title={
+          deleteTargetName
+            ? t("connections.confirmDeleteNamed", "Delete connection \"{{name}}\"?", {
+                name: deleteTargetName,
+              })
+            : t("connections.confirmDelete", "Delete this connection?")
+        }
         description={t(
           "connections.confirmDeleteDesc",
           "Every account linked through it is unlinked at the same time — tokens must not outlive the connection that produced them. Agents referring to it by name will stop being able to authenticate.",

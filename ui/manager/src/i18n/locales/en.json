@@ -245,7 +245,8 @@
   },
   "stream": {
     "live": "Live",
-    "reconnecting": "Reconnecting…"
+    "reconnecting": "Reconnecting…",
+    "disconnected": "Disconnected"
   },
   "agents": {
     "confirmDeleteDescription": "This action cannot be undone. The agent and all its data will be permanently removed.",
@@ -1620,7 +1621,7 @@
     "stepsCount": "{{count}} steps",
     "noConversationsFound": "No conversations found",
     "useConversationId": "Use ID: {{id}}",
-    "searchLogs": "Search logs…",
+    "searchLogs": "Search loaded entries…",
     "errors": "errors",
     "warnings": "warns",
     "infos": "info",
@@ -1632,7 +1633,18 @@
     "stateActive": "Active",
     "stateError": "Error",
     "stateEnded": "Ended",
-    "loadOlder": "Load older entries"
+    "loadOlder": "Load older entries",
+    "reconnect": "Reconnect",
+    "streamDisconnected": "Disconnected from the log stream.",
+    "errorCount_one": "{{count}} error",
+    "errorCount_other": "{{count}} errors",
+    "warnCount_one": "{{count}} warning",
+    "warnCount_other": "{{count}} warnings",
+    "copied": "Log entry copied",
+    "copyFailed": "Could not copy to the clipboard",
+    "noMatches": "No loaded entries match your search.",
+    "noMatchesHint": "Search only covers the entries already loaded here. Load older entries or adjust the filters to look further back.",
+    "searchLogsLabel": "Search the loaded log entries"
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -2080,7 +2092,9 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "logOutput": "Log output",
-    "noMatch": "No logs match your filter"
+    "noMatch": "No logs match your filter",
+    "errorsAnnounce_one": "{{count}} error in the log",
+    "errorsAnnounce_other": "{{count}} errors in the log"
   },
   "promptViewer": {
     "error": "Failed to load prompt data",
@@ -4991,7 +5005,9 @@
     "bindingCallerSuppliedBody": "The calling system hands over each user's own credential with the request and EDDI stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
     "confirmAuthChange": "Change how this connection authenticates?",
     "confirmAuthChangeDesc": "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. EDDI refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
-    "confirmAuthChangeAccept": "Change it"
+    "confirmAuthChangeAccept": "Change it",
+    "deleted": "Connection \"{{name}}\" deleted",
+    "confirmDeleteNamed": "Delete connection \"{{name}}\"?"
   },
   "extensionTypes": {
     "parser": "Input Parser",

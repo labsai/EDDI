@@ -1594,7 +1594,7 @@
     "stepsCount": "{{count}} étapes",
     "noConversationsFound": "Aucune conversation trouvée",
     "useConversationId": "Utiliser l'ID: {{id}}",
-    "searchLogs": "Rechercher les logs…",
+    "searchLogs": "Rechercher dans les entrées chargées…",
     "errors": "erreurs",
     "warnings": "avertissements",
     "infos": "info",
@@ -1606,7 +1606,20 @@
     "stateActive": "Actif",
     "stateError": "Erreur",
     "stateEnded": "Terminé",
-    "loadOlder": "Charger les entrées plus anciennes"
+    "loadOlder": "Charger les entrées plus anciennes",
+    "reconnect": "Se reconnecter",
+    "streamDisconnected": "Déconnecté du flux de journaux.",
+    "errorCount_one": "{{count}} erreur",
+    "errorCount_many": "{{count}} d'erreurs",
+    "errorCount_other": "{{count}} erreurs",
+    "warnCount_one": "{{count}} avertissement",
+    "warnCount_many": "{{count}} d'avertissements",
+    "warnCount_other": "{{count}} avertissements",
+    "copied": "Entrée de journal copiée",
+    "copyFailed": "Impossible de copier dans le presse-papiers",
+    "noMatches": "Aucune entrée chargée ne correspond à votre recherche.",
+    "noMatchesHint": "La recherche ne porte que sur les entrées déjà chargées ici. Chargez des entrées plus anciennes ou ajustez les filtres pour remonter plus loin.",
+    "searchLogsLabel": "Rechercher dans les entrées de journal chargées"
   },
   "secrets": {
     "loadError": "Impossible de charger les secrets",
@@ -2021,7 +2034,10 @@
     "connected": "Connecté",
     "disconnected": "Déconnecté",
     "logOutput": "Sortie du journal",
-    "noMatch": "Aucun journal ne correspond à votre filtre"
+    "noMatch": "Aucun journal ne correspond à votre filtre",
+    "errorsAnnounce_one": "{{count}} erreur dans le journal",
+    "errorsAnnounce_many": "{{count}} d'erreurs dans le journal",
+    "errorsAnnounce_other": "{{count}} erreurs dans le journal"
   },
   "promptViewer": {
     "error": "Échec du chargement des données du prompt",
@@ -2423,7 +2439,8 @@
   },
   "stream": {
     "live": "En direct",
-    "reconnecting": "Reconnexion…"
+    "reconnecting": "Reconnexion…",
+    "disconnected": "Déconnecté"
   },
   "createOrWizard": {
     "title": "Nouveau {{type}}",
@@ -5040,7 +5057,9 @@
     "bindingCallerSuppliedBody": "Le système appelant transmet l'identifiant de chaque utilisateur avec la requête et EDDI ne stocke rien. L'agent ne peut faire que ce que cet utilisateur peut faire sur la cible, et cette connexion est exclue de la découverte MCP et A2A.",
     "confirmAuthChange": "Changer la façon dont cette connexion s'authentifie ?",
     "confirmAuthChangeDesc": "Les comptes liés via cette connexion cesseront de se résoudre — une autorisation appartient au flux qui l'a produite. EDDI refuse le changement tant qu'un compte reste lié et indique combien ; déliez-les d'abord, ou créez une nouvelle connexion et laissez les gens lier celle-ci.",
-    "confirmAuthChangeAccept": "Changer"
+    "confirmAuthChangeAccept": "Changer",
+    "deleted": "Connexion \"{{name}}\" supprimée",
+    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?"
   },
   "extensionTypes": {
     "parser": "Analyseur d’entrée",
