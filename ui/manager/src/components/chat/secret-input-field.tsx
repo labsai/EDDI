@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Eye, EyeOff, Lock, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/ime";
 
 /**
  * The input a backend `inputField` output item asks for (e.g. a password).
@@ -73,7 +74,7 @@ export function SecretInputField({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
                 e.preventDefault();
                 handleSubmit();
               }
@@ -96,6 +97,8 @@ export function SecretInputField({
             onClick={() => setVisible(!visible)}
             className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             title={visible ? t("chat.hide", "Hide") : t("chat.show", "Show")}
+            aria-label={visible ? t("chat.hide", "Hide") : t("chat.show", "Show")}
+            aria-pressed={visible}
             data-testid="secret-input-eye"
           >
             {visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}

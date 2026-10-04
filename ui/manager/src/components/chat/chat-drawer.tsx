@@ -22,6 +22,7 @@ import { SecretInputField } from "./secret-input-field";
 import type { InputField } from "@/lib/api/conversations";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/ime";
 import {
   ArrowDown,
   Bot,
@@ -502,7 +503,7 @@ function DrawerChatInput({
             handleInput();
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
               e.preventDefault();
               handleSend();
             }
