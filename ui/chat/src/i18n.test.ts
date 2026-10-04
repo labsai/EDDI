@@ -38,6 +38,14 @@ describe("i18n", () => {
     expect(t("start.retry")).toBe("Try again");
   });
 
+  it("leaves a placeholder literal when no value is supplied for it", () => {
+    // (Object.hasOwn guards against inherited names like {constructor}; no shipped string uses one, so only the literal-kept path is observable.)
+    expect(t("attach.done", {} as Record<string, string>)).toBe("{file} attached.");
+    expect(t("attach.done", { file: "a.pdf" })).toBe("a.pdf attached.");
+    const text = t("attach.maxFiles", { max: 3 });
+    expect(text).toContain("3");
+  });
+
   it("every translation defines only real keys and keeps the English placeholders", () => {
     const placeholders = (text: string) => (text.match(/\{\w+\}/g) ?? []).sort().join(",");
     const english = TRANSLATIONS.en as Record<string, string>;

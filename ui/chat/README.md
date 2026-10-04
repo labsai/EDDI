@@ -41,7 +41,7 @@ EDDI Chat UI is a standalone, themeable React chat widget that connects to any E
 - 🔧 **Fully Configurable** — Every feature togglable via URL query parameters or typed `ChatConfig`
 - 📱 **Responsive** — Mobile-first design with adaptive breakpoints
 - 🎭 **Demo Mode** — Full showcase without a running backend (`/chat/demo/showcase`)
-- 🌍 **Translated** — English, German, French and Spanish widget text, chosen by `?lang=` or the browser language (see [Language](#-language))
+- 🌍 **Translated** — English, German, French and Spanish widget text, chosen by `?lang=` or the browser language (see [Language](#language))
 - 📋 **Copy** — a copy button on every agent message and code block
 - 🏷️ **Agent Name Display** — Auto-fetches and shows the agent's display name from the backend
 

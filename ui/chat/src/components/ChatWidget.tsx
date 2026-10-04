@@ -1526,6 +1526,7 @@ export function ChatWidget() {
     abortRef.current?.abort();
     abortRef.current = null;
     generationRef.current += 1;
+    pendingTurnsRef.current.clear();
     dispatch({ type: "CLEAR_MESSAGES" });
     await openConversation(false);
   }, [dispatch, openConversation]);

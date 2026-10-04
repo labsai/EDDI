@@ -11,7 +11,7 @@ import {
   useState,
   type ComponentPropsWithoutRef,
 } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -91,7 +91,9 @@ function CopyButton({
   label: string;
   className: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  // Last outcome, shown for a moment: a refused copy must not look like a
+  // button that did nothing.
+  const [status, setStatus] = useState<"idle" | "done" | "failed">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -100,21 +102,22 @@ function CopyButton({
     [],
   );
   const onClick = useCallback(async () => {
-    if (!(await copyText(getText()))) return;
-    setCopied(true);
+    const ok = await copyText(getText());
+    setStatus(ok ? "done" : "failed");
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopied(false), 1500);
+    timer.current = setTimeout(() => setStatus("idle"), 1500);
   }, [getText]);
   return (
     <button
       type="button"
       className={className}
       onClick={onClick}
-      aria-label={copied ? t("copy.done") : label}
-      title={copied ? t("copy.done") : label}
+      aria-label={status === "done" ? t("copy.done") : status === "failed" ? t("copy.failed") : label}
+      title={status === "done" ? t("copy.done") : status === "failed" ? t("copy.failed") : label}
+      data-copy-status={status}
       data-testid="copy-button"
     >
-      {copied ? <Check size="1em" /> : <Copy size="1em" />}
+      {status === "done" ? <Check size="1em" /> : status === "failed" ? <X size="1em" /> : <Copy size="1em" />}
     </button>
   );
 }

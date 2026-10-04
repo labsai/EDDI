@@ -26,6 +26,7 @@ const en = {
   "copy.message": "Copy message",
   "copy.code": "Copy code",
   "copy.done": "Copied",
+  "copy.failed": "Could not copy",
   "theme.toggle": "Toggle theme",
 
   // Starting
@@ -175,6 +176,7 @@ const de: Table = {
   "copy.message": "Nachricht kopieren",
   "copy.code": "Code kopieren",
   "copy.done": "Kopiert",
+  "copy.failed": "Kopieren fehlgeschlagen",
   "theme.toggle": "Design wechseln",
   "start.retry": "Erneut versuchen",
   "start.notFoundEnv":
@@ -312,6 +314,7 @@ const fr: Table = {
   "copy.message": "Copier le message",
   "copy.code": "Copier le code",
   "copy.done": "Copié",
+  "copy.failed": "Échec de la copie",
   "theme.toggle": "Changer de thème",
   "start.retry": "Réessayer",
   "start.notFoundEnv":
@@ -450,6 +453,7 @@ const es: Table = {
   "copy.message": "Copiar mensaje",
   "copy.code": "Copiar código",
   "copy.done": "Copiado",
+  "copy.failed": "No se pudo copiar",
   "theme.toggle": "Cambiar tema",
   "start.retry": "Reintentar",
   "start.notFoundEnv":
@@ -632,6 +636,6 @@ export function t(
   const template = LOCALES[current]?.[key] ?? en[key];
   if (!params) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    name in params ? String(params[name]) : match,
+    Object.hasOwn(params, name) ? String(params[name]) : match,
   );
 }

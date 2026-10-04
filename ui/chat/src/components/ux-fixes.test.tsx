@@ -122,6 +122,21 @@ describe("MessageBubble", () => {
     expect(await screen.findByLabelText("Copied")).toBeInTheDocument();
   });
 
+  it("says so when the browser refuses the copy", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(
+      <ChatProvider>
+        <MessageBubble message={{ id: "a", role: "agent", content: "copy **me**", timestamp: 0 }} />
+      </ChatProvider>,
+    );
+
+    fireEvent.click(screen.getByLabelText("Copy message"));
+
+    expect(await screen.findByLabelText("Could not copy")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Copied")).not.toBeInTheDocument();
+  });
+
   it("offers no copy button on user bubbles or while streaming", () => {
     const { rerender } = render(
       <ChatProvider>
