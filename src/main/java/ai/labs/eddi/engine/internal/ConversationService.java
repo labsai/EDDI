@@ -793,6 +793,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                             SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                     returnDetailed, returnCurrentStepOnly, returningFields);
                             memorySnapshot.setEnvironment(environment);
+                            if (stoppedByLeaseLoss(conversationId, returnConversationMemory, memorySnapshot)) {
+                                recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                                processingTurn.release();
+                                responseHandler.onSkipped(memorySnapshot);
+                                return;
+                            }
                             cacheConversationState(conversationId, memorySnapshot.getConversationState());
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
@@ -1024,6 +1030,15 @@ public class ConversationService implements IConversationService, UserErasurePar
                             SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                     returnDetailed, returnCurrentStepOnly, returningFields);
                             memorySnapshot.setEnvironment(environment);
+                            if (stoppedByLeaseLoss(conversationId, returnConversationMemory, memorySnapshot)) {
+                                recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                                processingTurn.release();
+                                // Tokens of the discarded turn may already be on the wire: end the
+                                // stream with an error, not with a done event for a turn that is not stored.
+                                streamingHandler.onError(
+                                        new ConversationStepRunner.TurnLeaseLostException(conversationId, returnConversationMemory.getFenceToken()));
+                                return;
+                            }
                             cacheConversationState(conversationId, memorySnapshot.getConversationState());
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
@@ -1854,6 +1869,24 @@ public class ConversationService implements IConversationService, UserErasurePar
         var context = inputData.getContext();
         Context flag = context == null ? null : context.get("secretInput");
         return flag != null && "true".equals(String.valueOf(flag.getValue()));
+    }
+
+    /**
+     * Cluster mode: the turn was stopped because this node lost the conversation's
+     * lease while it ran. It is never stored (another node holds the conversation)
+     * and is dead-lettered, so its caller must not get the reply of a turn that
+     * will not exist: it is answered as not processed, busy (409 with
+     * {@code Retry-After} over REST), like a turn that never got the lease; a
+     * stream ends with an error event instead of {@code done}. The snapshot is
+     * marked {@code IN_PROGRESS} for that, and the conversation state is not cached
+     * from it.
+     */
+    boolean stoppedByLeaseLoss(String conversationId, IConversationMemory memory, SimpleConversationMemorySnapshot snapshot) {
+        if (!memory.isCancelled() || !conversationStepRunner.isLeaseLost(conversationId)) {
+            return false;
+        }
+        snapshot.setConversationState(ConversationState.IN_PROGRESS);
+        return true;
     }
 
     /** A turn's write was refused by the cluster fence (cluster mode only). */

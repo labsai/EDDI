@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import org.jboss.logging.Logger;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -176,6 +177,12 @@ class ConversationStepRunner {
              */
             private volatile LeaseHandle lease;
 
+            /**
+             * Why the turn failed, added to its dead letter: {@code reason}
+             * ({@code lease-lost} or {@code fenced}) and the fencing tokens involved.
+             */
+            private volatile Map<String, Object> failure;
+
             @Override
             public void bindLease(LeaseHandle lease) {
                 this.lease = lease;
@@ -183,7 +190,13 @@ class ConversationStepRunner {
 
             @Override
             public Map<String, Object> describe() {
-                return turnDescriptor;
+                Map<String, Object> why = failure;
+                if (why == null || turnDescriptor == null) {
+                    return turnDescriptor;
+                }
+                Map<String, Object> described = new LinkedHashMap<>(turnDescriptor);
+                described.putAll(why);
+                return described;
             }
 
             @Override
@@ -192,10 +205,19 @@ class ConversationStepRunner {
                     Void result = runConversationStep(environment, conversationMemory, conversationId, loggingContext,
                             identityBoundExecution,
                             rebuildWhenSuperseded ? memory -> bindIdentity.apply(turnBuilder.build(memory)) : null, skipNotifier, lease);
+                    TurnLeaseLostException lost = leaseLostTurns.remove(conversationId);
+                    if (lost != null) {
+                        // Stopped at a task boundary because this node lost the lease: nothing
+                        // was stored. Surfaced so the coordinator dead-letters it with its input —
+                        // it must not vanish without a trace.
+                        failure = failureDetail(TurnLeaseLostException.REASON, lost.getFence(), null);
+                        throw lost;
+                    }
                     ConversationFencedException fenced = fencedTurns.remove(conversationId);
                     if (fenced != null) {
                         // Surfaced so the coordinator dead-letters the turn with its input: the
                         // write was refused because another node took the conversation over.
+                        failure = failureDetail("fenced", fenced.getToken(), fenced.getStoredFence());
                         throw fenced;
                     }
                     return result;
@@ -279,6 +301,54 @@ class ConversationStepRunner {
      * time — and cleared when the next turn of it starts.
      */
     private final Set<String> leaseLostConversations = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Lease-lost turns whose outcome was discarded, keyed by conversation; drained
+     * by the task, which dead-letters them (see {@code call()}).
+     */
+    private final Map<String, TurnLeaseLostException> leaseLostTurns = new ConcurrentHashMap<>();
+
+    /**
+     * Whether the running turn of {@code conversationId} was cancelled because this
+     * node lost its lease. The reply path asks before answering, so the client of
+     * such a turn is told the message was not processed instead of getting a 200
+     * for a turn that is never stored.
+     */
+    boolean isLeaseLost(String conversationId) {
+        return leaseLostConversations.contains(conversationId);
+    }
+
+    private static Map<String, Object> failureDetail(String reason, Long fence, Long storedFence) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("reason", reason);
+        if (fence != null) {
+            detail.put("fence", fence);
+        }
+        if (storedFence != null) {
+            detail.put("storedFence", storedFence);
+        }
+        return detail;
+    }
+
+    /**
+     * A turn stopped because this node lost the conversation's lease while it ran —
+     * a partition, a long pause, a NATS outage, or an administrator releasing the
+     * lease. Nothing of it was stored; it is dead-lettered with its input.
+     */
+    static final class TurnLeaseLostException extends RuntimeException {
+        static final String REASON = "lease-lost";
+        private final Long fence;
+
+        TurnLeaseLostException(String conversationId, Long fence) {
+            super(REASON + ": this node lost the lease of conversation '" + conversationId + "' while its turn ran"
+                    + (fence != null ? " (fencing token " + fence + ")" : "") + " — the turn was stopped and nothing of it was stored");
+            this.fence = fence;
+        }
+
+        Long getFence() {
+            return fence;
+        }
+    }
 
     /**
      * @param lease
@@ -453,8 +523,11 @@ class ConversationStepRunner {
                                     // conversation now (or the next turn will), and a state written
                                     // from here would overwrite the one its turn committed — the
                                     // conversation reported EXECUTION_INTERRUPTED after a good turn.
-                                    LOGGER.warnf("Turn of conversation %s lost its lease — its outcome is discarded and the "
-                                            + "conversation state is left to the turn that holds it now", sanitize(conversationId));
+                                    LOGGER.warnf("Turn of conversation %s lost its lease — its outcome is discarded, the "
+                                            + "conversation state is left to the turn that holds it now, and the turn is "
+                                            + "dead-lettered", sanitize(conversationId));
+                                    leaseLostTurns.put(conversationId,
+                                            new TurnLeaseLostException(conversationId, conversationMemory.getFenceToken()));
                                     refreshCachedState(conversationId);
                                     return;
                                 }
