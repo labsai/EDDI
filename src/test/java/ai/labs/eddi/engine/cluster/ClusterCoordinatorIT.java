@@ -72,6 +72,19 @@ class ClusterCoordinatorIT {
      */
     private static final int NATS_HOST_PORT = freePort();
 
+    /**
+     * The {@code n} of a turn id {@code <nodeId>-<n>}; fails the test, not the
+     * parse, on anything else.
+     */
+    private static int turnNumber(String turnId, String nodeId) {
+        String digits = turnId.substring(nodeId.length() + 1);
+        try {
+            return Integer.parseInt(digits);
+        } catch (NumberFormatException e) {
+            throw new AssertionError("turn id " + turnId + " does not end in a turn number after " + nodeId + "-", e);
+        }
+    }
+
     private static int freePort() {
         try (ServerSocket socket = new ServerSocket(0)) {
             socket.setReuseAddress(true);
@@ -290,7 +303,7 @@ class ClusterCoordinatorIT {
         // FIFO per node: each node's turns ran in its own submission order
         for (Node node : nodes) {
             List<Integer> mine = order.stream().filter(s -> s.startsWith(node.id + "-"))
-                    .map(s -> Integer.parseInt(s.substring(node.id.length() + 1))).toList();
+                    .map(s -> turnNumber(s, node.id)).toList();
             List<Integer> sorted = new ArrayList<>(mine);
             Collections.sort(sorted);
             assertEquals(sorted, mine, node.id + " ran its own turns out of order");
