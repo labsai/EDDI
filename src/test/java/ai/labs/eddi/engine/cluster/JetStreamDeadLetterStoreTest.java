@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.engine.cluster;
 
+import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
+import io.nats.client.KeyValue;
 import io.nats.client.api.ApiResponse;
 import io.nats.client.api.MessageInfo;
 import io.nats.client.api.PublishAck;
@@ -14,17 +16,21 @@ import io.nats.client.support.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -128,5 +134,35 @@ class JetStreamDeadLetterStoreTest {
         assertEquals("5", new JetStreamDeadLetterStore(connections).append("conv1", "boom", 1L, Map.of("input", "hi")),
                 "a stream created a moment ago answers once its leader is elected; the dead letter must not fail over");
         verify(jsm).addStream(any());
+    }
+    // NatsSharedKv shares this class's NATS API error fixture: the codes a KV write
+    // can be refused with.
+
+    private static NatsSharedKv sharedKv(KeyValue handle) {
+        NatsConnectionManager connections = mock(NatsConnectionManager.class);
+        when(connections.requireConnected()).thenReturn(mock(Connection.class));
+        when(connections.keyValue("T_LEASES")).thenReturn(handle);
+        return new NatsSharedKv(connections, "T_LEASES", null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {10071, 10164})
+    void aLostCreateCasOrGuardedDeleteIsAConflictWhicheverCodeTheServerUses(int code) throws Exception {
+        KeyValue handle = mock(KeyValue.class);
+        when(handle.create(anyString(), any(byte[].class))).thenThrow(error(code));
+        when(handle.update(anyString(), any(byte[].class), anyLong())).thenThrow(error(code));
+        doThrow(error(code)).when(handle).delete(anyString(), anyLong());
+        NatsSharedKv kv = sharedKv(handle);
+        assertEquals(OptionalLong.empty(), kv.create("c.conv1", new byte[]{1}), "two nodes racing for one lease: the loser lost, NATS is fine");
+        assertEquals(OptionalLong.empty(), kv.update("c.conv1", new byte[]{1}, 4L));
+        assertFalse(kv.delete("c.conv1", 4L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {10008, 10058})
+    void anyOtherRefusalOfAKvWriteIsStillAnOutage(int code) throws Exception {
+        KeyValue handle = mock(KeyValue.class);
+        when(handle.create(anyString(), any(byte[].class))).thenThrow(error(code));
+        assertThrows(ClusterUnavailableException.class, () -> sharedKv(handle).create("c.conv1", new byte[]{1}));
     }
 }

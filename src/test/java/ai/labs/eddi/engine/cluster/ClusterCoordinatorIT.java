@@ -44,6 +44,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -476,5 +477,48 @@ class ClusterCoordinatorIT {
         LeaseHandle after = a.leases.acquire("conv-direct", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
         assertTrue(after.fence() > before.fence(), "leases keep working and fences keep rising");
         a.leases.release(after);
+    }
+
+    @Test
+    @Order(9)
+    @DisplayName("concurrent creates of one lease key from three nodes: exactly one wins, every loser sees a conflict, none an outage")
+    void concurrentCreatesOfOneKeyAreConflictsNotOutages() throws Exception {
+        String key = "c.race-" + UUID.randomUUID();
+        List<NatsSharedKv> handles = nodes.stream().map(n -> new NatsSharedKv(n.connections, prefix + "_LEASES", null)).toList();
+        int perNode = 10;
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger won = new AtomicInteger();
+        AtomicInteger lost = new AtomicInteger();
+        List<Throwable> outages = new CopyOnWriteArrayList<>();
+        ExecutorService racers = Executors.newFixedThreadPool(handles.size() * perNode);
+        try {
+            List<Future<?>> all = new ArrayList<>();
+            for (NatsSharedKv kv : handles) {
+                for (int i = 0; i < perNode; i++) {
+                    all.add(racers.submit(() -> {
+                        start.await();
+                        try {
+                            if (kv.create(key, "x".getBytes()).isPresent()) {
+                                won.incrementAndGet();
+                            } else {
+                                lost.incrementAndGet();
+                            }
+                        } catch (ClusterUnavailableException e) {
+                            outages.add(e);
+                        }
+                        return null;
+                    }));
+                }
+            }
+            start.countDown();
+            for (Future<?> f : all) {
+                f.get(30, TimeUnit.SECONDS);
+            }
+        } finally {
+            racers.shutdownNow();
+        }
+        assertEquals(List.of(), outages.stream().map(Throwable::getMessage).toList(), "a lost race is not NATS being unreachable");
+        assertEquals(1, won.get(), "exactly one create wins");
+        assertEquals(handles.size() * perNode - 1, lost.get());
     }
 }
