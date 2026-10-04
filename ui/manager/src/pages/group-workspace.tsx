@@ -18,6 +18,7 @@ import {
   describeCron,
   formatInstantInZone,
   isValidCron,
+  listTimeZones,
   type ScheduleConfiguration,
 } from "@/lib/api/schedules";
 import {
@@ -67,13 +68,7 @@ function browserTimeZone(): string {
 
 /** Every zone the runtime knows, with UTC and the viewer's own always present. */
 function timeZoneOptions(current: string): string[] {
-  let zones: string[];
-  try {
-    zones = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.("timeZone") ?? [];
-  } catch {
-    zones = [];
-  }
-  return [...new Set(["UTC", browserTimeZone(), current, ...zones])].sort((a, b) =>
+  return [...new Set(["UTC", browserTimeZone(), current, ...listTimeZones()])].sort((a, b) =>
     a === "UTC" ? -1 : b === "UTC" ? 1 : a.localeCompare(b),
   );
 }
