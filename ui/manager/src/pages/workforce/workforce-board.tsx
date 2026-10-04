@@ -412,7 +412,9 @@ function WorkforceBoard() {
   }, [isStreaming, selectedConvId, selectedConversation, t]);
 
   // ─── Handlers ──────────────────────────────────────────────────
-  const [refusedDraft, setRefusedDraft] = useState("");
+  const [refusedDraft, setRefusedDraft] = useState<{ message: string; attachments?: GroupAttachmentRef[] }>({
+    message: "",
+  });
   const handleSend = useCallback(
     (question: string, attachments?: GroupAttachmentRef[]) => {
       if (!boardId) return;
@@ -438,11 +440,11 @@ function WorkforceBoard() {
       void startStream(boardId, question, attachments);
       return whenStreamAccepted(boardId).then((ok) => {
         if (ok) {
-          setRefusedDraft("");
+          setRefusedDraft({ message: "" });
         } else {
           // The refused-start screen replaces the composer; hand the question
           // back when it returns (see `BoardInput.defaultMessage`).
-          setRefusedDraft(question);
+          setRefusedDraft({ message: question, attachments });
           toast.error(streamErrorOf(boardId) ?? t("common.error", "Something went wrong"));
         }
         return ok;
@@ -1169,7 +1171,8 @@ function WorkforceBoard() {
 
       {/* Input bar */}
       <BoardInput
-        defaultMessage={refusedDraft}
+        defaultMessage={refusedDraft.message}
+        defaultAttachments={refusedDraft.attachments}
         onSend={handleSend}
         disabled={inputMode === "disabled"}
         mode={inputMode === "continue" ? "continue" : "new"}

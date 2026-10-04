@@ -63,6 +63,8 @@ interface BoardInputProps {
    * the question; the board hands it back here when the composer returns.
    */
   defaultMessage?: string;
+  /** The files that went with `defaultMessage`, re-staged on mount. */
+  defaultAttachments?: GroupAttachmentRef[];
 }
 
 // ─── Send Icon ───────────────────────────────────────────────────
@@ -95,6 +97,7 @@ function BoardInput({
   mode = "new",
   disabledMessage,
   defaultMessage = "",
+  defaultAttachments,
 }: BoardInputProps) {
   const { t } = useTranslation();
   const [message, setMessage] = useState(defaultMessage);
@@ -118,8 +121,14 @@ function BoardInput({
     addFiles,
     remove: removeAttachment,
     clear: clearAttachments,
+    restore: restoreAttachments,
     toRefs: attachmentRefs,
   } = useGroupAttachmentStaging(canAttach);
+  // Once, on mount: the board hands a refused start's files back with its text.
+  useEffect(() => {
+    if (defaultAttachments?.length) restoreAttachments(defaultAttachments);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const trimmed = message.trim();
   // The backend caps the question and fans it out to every member in every

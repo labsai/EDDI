@@ -67,6 +67,8 @@ export interface GroupAttachmentStaging {
   addFiles: (files: File[]) => Promise<void>;
   remove: (id: string) => void;
   clear: () => void;
+  /** Re-stage attachments previously taken out with `toRefs` (a refused send handed back). */
+  restore: (refs: GroupAttachmentRef[]) => void;
   /** The wire shape, or `null` when nothing is staged. */
   toRefs: () => GroupAttachmentRef[] | null;
 }
@@ -246,10 +248,26 @@ export function useGroupAttachmentStaging(enabled: boolean): GroupAttachmentStag
     setAttachments([]);
   }, []);
 
+  const restore = useCallback((refs: GroupAttachmentRef[]) => {
+    const next: PendingGroupAttachment[] = refs.map((r, i) => {
+      const data = r.data ?? "";
+      const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+      return {
+        ...r,
+        id: `restored-${i}-${r.fileName ?? ""}`,
+        // The refs carry the base64 payload, not the original size: derive it.
+        sizeBytes: Math.max(0, Math.floor((data.length * 3) / 4) - padding),
+      };
+    });
+    generationRef.current++;
+    stagedRef.current = next;
+    setAttachments(next);
+  }, []);
+
   const toRefs = useCallback((): GroupAttachmentRef[] | null => {
     if (!enabled || attachments.length === 0) return null;
     return attachments.map(({ fileName, mimeType, data }) => ({ fileName, mimeType, data }));
   }, [enabled, attachments]);
 
-  return { attachments, isStaging, addFiles, remove, clear, toRefs };
+  return { attachments, isStaging, addFiles, remove, clear, restore, toRefs };
 }

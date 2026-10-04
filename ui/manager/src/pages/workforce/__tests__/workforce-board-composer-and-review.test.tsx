@@ -40,6 +40,30 @@ describe("WorkforceBoard — composer and the approval hand-off", () => {
     expect(success).not.toHaveBeenCalledWith(expect.stringMatching(/streaming live/i));
   });
 
+  it("hands the attached files back with the question after a refused start", async () => {
+    server.use(
+      http.post("*/groups/:groupId/conversations/stream", () =>
+        new HttpResponse("nope", { status: 400, headers: { "Content-Type": "text/plain" } }),
+      ),
+    );
+    renderPage("/workforce/grp1?version=1", <WorkforceBoard />, "/workforce/:boardId");
+    const fileInput = await waitFor(() => {
+      const el = document.querySelector<HTMLInputElement>('input[type="file"]');
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    await userEvent.upload(fileInput, new File(["hello"], "brief.txt", { type: "text/plain" }));
+    await waitFor(() => expect(screen.getByTestId("board-attachments")).toBeInTheDocument());
+    await userEvent.type(screen.getByRole("textbox"), "Ship it?");
+    await userEvent.click(screen.getByTestId("board-send"));
+
+    await screen.findByTestId("board-start-error");
+    await userEvent.click(screen.getByTestId("board-error-start-over"));
+
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Ship it?"));
+    expect(within(screen.getByTestId("board-attachments")).getByText("brief.txt")).toBeInTheDocument();
+  });
+
   it("'Review it' opens the PAUSED discussion in the Manager, not the newest one", async () => {
     server.use(
       http.get("*/groups/:groupId/conversations/:gcId", ({ params }) =>
