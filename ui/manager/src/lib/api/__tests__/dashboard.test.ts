@@ -73,7 +73,7 @@ describe("dashboard API", () => {
       expect(result.conversationCountCapped).toBe(false);
     });
 
-    it("handles partial failure gracefully (catch → [])", async () => {
+    it("rejects when every count fails, instead of reporting zeros", async () => {
       server.use(
         http.get("*/agentstore/agents/descriptors", () =>
           HttpResponse.json({ message: "Error" }, { status: 500 })
@@ -85,10 +85,18 @@ describe("dashboard API", () => {
           HttpResponse.json({ message: "Error" }, { status: 500 })
         )
       );
+      await expect(getDashboardStats()).rejects.toMatchObject({ status: 500 });
+    });
+
+    it("reports which counts failed on a partial failure", async () => {
+      server.use(
+        http.get("*/workflowstore/workflows/descriptors", () =>
+          HttpResponse.json({ message: "Error" }, { status: 500 })
+        )
+      );
       const result = await getDashboardStats();
-      expect(result.agentCount).toBe(0);
-      expect(result.workflowCount).toBe(0);
-      expect(result.conversationCount).toBe(0);
+      expect(result.failed).toEqual(["workflows"]);
+      expect(result.agentCount).toBeGreaterThan(0);
     });
   });
 });

@@ -54,11 +54,12 @@ export function CoordinatorPage() {
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("coordinator"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
-  const { data: status, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } = useCoordinatorStatus();
+  const { data: status, isLoading: statusLoading, isError: statusError, error: statusErr, refetch: refetchStatus } = useCoordinatorStatus();
   const {
     data: deadLetters,
     isLoading: dlLoading,
     isError: dlError,
+    error: dlErr,
     refetch: refetchDL,
   } = useDeadLetters();
   const { liveStatus, sseConnected, eventHistory } = useCoordinatorSSE();
@@ -230,6 +231,7 @@ export function CoordinatorPage() {
         // Distinct from the empty state below: that one tells the user to wait for
         // data that is still coming, which is the wrong advice after a failed fetch.
         <ErrorState
+          error={statusErr}
           message={t("common.error", "Something went wrong")}
           onRetry={() => refetchStatus()}
           retryLabel={t("common.retry", "Retry")}
@@ -474,6 +476,7 @@ export function CoordinatorPage() {
           // empty one) alongside the error, and showing it hid the failure.
           <div className="p-8" data-testid="dead-letters-error">
             <ErrorState
+              error={dlErr}
               message={t("common.error")}
               onRetry={() => refetchDL()}
               retryLabel={t("common.retry")}

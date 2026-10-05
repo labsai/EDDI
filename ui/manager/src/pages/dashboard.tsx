@@ -34,6 +34,8 @@ import { useVaultHealth } from "@/hooks/use-secrets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/shared/error-state";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { parseConversationUri } from "@/lib/api/conversations";
@@ -54,12 +56,18 @@ const STATE_COLORS: Record<string, string> = {
 
 export function DashboardPage() {
   const { t } = useTranslation();
-  const { data: stats, isLoading: statsLoading } = useDashboardStats();
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    isError: statsError,
+    error: statsErr,
+    refetch: refetchStats,
+  } = useDashboardStats();
   const { data: recentAgentsRaw, isLoading: agentsLoading } = useRecentAgents();
   const { data: recentConversations, isLoading: convsLoading } = useRecentConversations(5);
   const { data: coordinatorStatus } = useCoordinatorStatusLight();
   const platformStatus = usePlatformStatus();
-  const { data: vaultHealth } = useVaultHealth();
+  const { data: vaultHealth, isLoading: vaultLoading } = useVaultHealth();
   const { data: agentDescriptors = [] } = useAgentDescriptors(50);
 
   const recentAgents = useMemo(
@@ -89,6 +97,7 @@ export function DashboardPage() {
   const statCards = [
     {
       label: t("pages.dashboard.activeAgents"),
+      failed: stats?.failed?.includes("agents") ?? false,
       value: stats?.agentCount ?? 0,
       capped: stats?.agentCountCapped ?? false,
       icon: Bot,
@@ -98,6 +107,7 @@ export function DashboardPage() {
     },
     {
       label: t("pages.dashboard.totalWorkflows"),
+      failed: stats?.failed?.includes("workflows") ?? false,
       value: stats?.workflowCount ?? 0,
       capped: stats?.workflowCountCapped ?? false,
       icon: Workflow,
@@ -107,6 +117,7 @@ export function DashboardPage() {
     },
     {
       label: t("pages.dashboard.totalConversations"),
+      failed: stats?.failed?.includes("conversations") ?? false,
       value: stats?.conversationCount ?? 0,
       capped: stats?.conversationCountCapped ?? false,
       icon: MessageSquare,
@@ -116,6 +127,7 @@ export function DashboardPage() {
     },
     {
       label: t("pages.dashboard.totalResources"),
+      failed: false,
       value: stats?.resourceCount ?? 0,
       capped: false,
       icon: FileCode,
@@ -191,15 +203,19 @@ export function DashboardPage() {
 
         {/* Vault */}
         <div className="flex items-center gap-2 text-xs">
-          {vaultHealth?.available ? (
+          {vaultLoading ? (
+            <Network className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : vaultHealth?.available ? (
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           ) : (
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
           )}
           <span className="text-muted-foreground">
-            {vaultHealth?.available
-              ? t("dashboard.vaultUp", "Vault ready")
-              : t("dashboard.vaultDown", "Vault unavailable")}
+            {vaultLoading
+              ? t("dashboard.vaultChecking", "Vault checking…")
+              : vaultHealth?.available
+                ? t("dashboard.vaultUp", "Vault ready")
+                : t("dashboard.vaultDown", "Vault unavailable")}
           </span>
         </div>
       </div>
@@ -208,9 +224,30 @@ export function DashboardPage() {
       <OperatorDiscoveryCard />
 
       {/* Stats cards */}
+      {stats?.failed && stats.failed.length > 0 && (
+        <RefetchErrorNotice
+          onRetry={() => void refetchStats?.()}
+          message={t(
+            "dashboard.statsPartial",
+            "Some counts could not be loaded — they are shown as unavailable, not zero.",
+          )}
+        />
+      )}
+      {/* A failed refetch keeps the last good counts on screen; say they are stale.
+          Independent of the partial notice: both can be true at once. */}
+      {statsError && stats && <RefetchErrorNotice onRetry={() => void refetchStats?.()} />}
+      {statsError && !stats ? (
+        <div data-tour="dashboard-stats">
+          <ErrorState
+            error={statsErr}
+            message={t("common.error")}
+            onRetry={() => void refetchStats?.()}
+          />
+        </div>
+      ) : (
       <div className="cq-stat-grid" data-tour="dashboard-stats">
         {statsLoading
-          ? Array.from({ length: 4 }).map((_, i) => (
+          ? Array.from({ length: 3 }).map((_, i) => (
               <Card key={i}>
                 <CardContent className="flex items-center gap-4">
                   <Skeleton className="h-12 w-12 rounded-lg" />
@@ -226,7 +263,7 @@ export function DashboardPage() {
               // rather than presenting the page size as the total.
               const shown = `${stat.value.toLocaleString()}${stat.capped ? "+" : ""}`;
               return (
-              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${shown}`}>
+              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${stat.failed ? t("dashboard.countUnavailable", "Could not be loaded") : shown}`}>
                 <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0">
                   {/* Gradient background */}
                   <div className={cn("absolute inset-0 bg-linear-to-br opacity-0 transition-opacity group-hover:opacity-100", stat.gradient)} />
@@ -239,7 +276,15 @@ export function DashboardPage() {
                         {stat.label}
                       </p>
                       <p className="text-2xl font-bold text-foreground tabular-nums" data-testid={`stat-value-${stat.to.split("/").pop()}`}>
-                        {stat.value > 0 ? shown : (
+                        {stat.failed ? (
+                          <span
+                            className="flex items-center gap-1 text-amber-500"
+                            title={t("dashboard.countUnavailable", "Could not be loaded")}
+                          >
+                            —
+                            <AlertTriangle className="h-4 w-4" aria-label={t("dashboard.countUnavailable", "Could not be loaded")} />
+                          </span>
+                        ) : stat.value > 0 ? shown : (
                           <span className="flex items-center gap-1 text-muted-foreground/50">
                             0 <Plus className="h-3 w-3" />
                           </span>
@@ -252,6 +297,7 @@ export function DashboardPage() {
               );
             })}
       </div>
+      )}
 
       {/* Quick Actions */}
       <div>
@@ -359,7 +405,7 @@ export function DashboardPage() {
                         "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                         STATE_COLORS[conv.conversationState] ?? STATE_COLORS.ENDED,
                       )}>
-                        {conv.conversationState}
+                        {t(`dashboard.convState.${conv.conversationState}`, conv.conversationState)}
                       </span>
                       <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                         {conv.lastModifiedOn ? formatRelativeTime(conv.lastModifiedOn) : "—"}

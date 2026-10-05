@@ -510,6 +510,12 @@ document *and* its entire version history.
 Pass the **same** `includeDeleted` value you used for the scan, so the purge acts on the set you
 reviewed.
 
+In the Manager (**Orphans** page) each listed resource links to its detail page so you can inspect it
+before purging, and **Purge All** opens a confirmation dialog that requires typing the number of
+orphans. A failed scan is shown as an error with the server's message (it never falls back to the
+empty "Scan your platform" state), and a refused purge shows the server's reason, such as the 409
+above.
+
 > **Changed in 6.1.x:** `includeDeleted` was previously an *equality* filter — `true` matched only
 > soft-deleted resources instead of adding them to the live ones — and this endpoint defaulted to
 > `true` while the scan defaulted to `false`, so a scan followed by a purge operated on **disjoint**

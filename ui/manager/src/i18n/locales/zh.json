@@ -25,7 +25,13 @@
     "profile": "个人资料",
     "guest": "访客",
     "userMenu": "用户菜单",
-    "signedIn": "已登录"
+    "signedIn": "已登录",
+    "authenticating": "正在验证身份…",
+    "initFailedTitle": "登录失败",
+    "initFailedBody": "Manager 无法完成登录。登录服务可能无法访问，或您的会话已被拒绝。",
+    "signInAgain": "重新登录",
+    "sessionExpiredTitle": "您的会话已过期。",
+    "sessionExpiredBody": "未保存的更改仍保留在此页面——请先复制所需内容，再重新登录。"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -218,7 +224,13 @@
     "removeItem": "移除 {{item}}",
     "stepOf": "第 {{current}} 步，共 {{total}} 步",
     "versionShort": "v{{version}}",
-    "resizePanel": "调整{{panel}}大小"
+    "resizePanel": "调整{{panel}}大小",
+    "errors": {
+      "network": "无法连接到 EDDI。请检查网络连接后重试。",
+      "unauthorized": "您的会话已过期，请重新登录。",
+      "forbidden": "您无权查看此内容。",
+      "notFound": "未找到——可能已被删除。"
+    }
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",
@@ -3091,7 +3103,11 @@
     "registeredSkills": "已注册技能",
     "noSkills": "未找到技能",
     "matchingAgents": "匹配的代理",
-    "noMatches": "该技能未找到匹配代理"
+    "noMatches": "该技能未找到匹配代理",
+    "searchLabel": "搜索技能",
+    "strategyLabel": "匹配策略",
+    "emptyTitle": "尚未注册任何能力",
+    "emptyDesc": "代理在配置中声明能力（技能）后会显示在这里。为代理添加能力后，它就会出现在此注册表中。"
   },
   "exportDialog": {
     "title": "导出智能体",
@@ -3590,7 +3606,18 @@
     "secretVault": "密钥库",
     "vaultDown": "Vault 不可用",
     "vaultUp": "Vault 就绪",
-    "viewLogs": "查看日志"
+    "viewLogs": "查看日志",
+    "vaultChecking": "正在检查保险库…",
+    "statsPartial": "部分计数无法加载——显示为不可用，而不是零。",
+    "countUnavailable": "无法加载",
+    "convState": {
+      "READY": "就绪",
+      "IN_PROGRESS": "进行中",
+      "ENDED": "已结束",
+      "EXECUTION_INTERRUPTED": "已中断",
+      "ERROR": "错误",
+      "AWAITING_HUMAN": "等待人工"
+    }
   },
   "errorBoundary": {
     "retry": "重试",
@@ -3671,7 +3698,11 @@
     "found_one": "找到 {{count}} 个孤立项",
     "scanIncomplete": "本次扫描未完成",
     "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。",
-    "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。"
+    "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。",
+    "scanFailed": "扫描失败",
+    "rescanFailed": "上次扫描失败——正在显示之前的结果。",
+    "reviewHint": "请先从列表中打开资源进行查看；列表中的所有孤立资源都会被删除。",
+    "typeToConfirm": "输入 {{count}} 以确认"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",

@@ -267,6 +267,7 @@ export function LinkedAccountsPanel({
     if (showFailureState) {
       return (
         <ErrorState
+          error={error}
           message={t("connections.loadMineFailed", "Could not load your linked accounts")}
           onRetry={() => void refetch()}
           retryLabel={t("common.retry", "Retry")}

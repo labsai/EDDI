@@ -70,7 +70,7 @@ export function GroupsPage() {
   // descriptor request plus one config read per listed group, up to 101 — so
   // querying on each keystroke fired that whole fan-out per character typed.
   const debouncedSearch = useDebounce(search.trim(), 300);
-  const { data: enrichedGroups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(
+  const { data: enrichedGroups, isLoading, isError, error, refetch } = useEnrichedGroupDescriptors(
     100,
     0,
     debouncedSearch,
@@ -291,7 +291,7 @@ export function GroupsPage() {
 
       {/* Error */}
       {isError && (
-        <ErrorState message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
+        <ErrorState error={error} message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
       )}
 
       {/* Empty */}
@@ -531,6 +531,7 @@ export function GroupsPage() {
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={() => void confirmDelete()}
+        lockWhilePending={!readingConfig}
         isPending={
           readingConfig || deleteMutation.isPending || deleteWithMembersMutation.isPending
         }

@@ -6,6 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { CapabilitiesPage } from "@/pages/capabilities";
 import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
+import { server } from "@/test/mocks/server";
 
 function renderPage() {
   const queryClient = new QueryClient({
@@ -109,5 +111,52 @@ describe("CapabilitiesPage", () => {
       expect(screen.getByTestId("capability-results")).toBeInTheDocument();
       expect(screen.getByText("Matching Agents")).toBeInTheDocument();
     });
+  });
+});
+
+describe("CapabilitiesPage — names, labels and empty state", () => {
+  it("shows the agent's name, not its raw id, and no external-link icon", async () => {
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=1",
+            name: "Support Agent",
+            createdOn: 1,
+            lastModifiedOn: 1,
+          },
+        ]),
+      ),
+    );
+    renderPage();
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("registry-row-customer-support"));
+
+    const link = await screen.findByRole("link", { name: "Support Agent" });
+    expect(link).toHaveAttribute("href", "/manage/agentview/agent1");
+    expect(link.querySelector("svg")).toBeNull();
+  });
+
+  it("marks expandable rows with aria-expanded", async () => {
+    renderPage();
+    const user = userEvent.setup();
+    const row = await screen.findByTestId("registry-row-faq");
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    await user.click(row);
+    expect(row).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("labels the search and strategy controls", () => {
+    renderPage();
+    expect(screen.getByRole("textbox", { name: "Search skills" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Match strategy" })).toBeInTheDocument();
+  });
+
+  it("explains an empty registry instead of rendering only a heading", async () => {
+    server.use(http.get("*/capabilities/skills", () => HttpResponse.json([])));
+    renderPage();
+    expect(await screen.findByTestId("registry-empty")).toHaveTextContent(
+      "No capabilities registered yet",
+    );
   });
 });

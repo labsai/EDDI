@@ -266,6 +266,66 @@ class ApiClient {
     delete this.headers["Authorization"];
   }
 
+  /**
+   * Registers how to renew the access token (keycloak `updateToken`). `force`
+   * asks for a new token even if the current one has not expired. Resolves true
+   * when a usable token is now set via {@link setAuthToken}, false when it could
+   * not be renewed. Absent (auth disabled) means no refresh and no 401 handling.
+   */
+  setTokenRefresher(refresher: ((force: boolean) => Promise<boolean>) | null) {
+    this.tokenRefresher = refresher;
+  }
+
+  /** Called when a request is still answered 401 after a token refresh. */
+  setUnauthorizedHandler(handler: (() => void) | null) {
+    this.unauthorizedHandler = handler;
+  }
+
+  private tokenRefresher: ((force: boolean) => Promise<boolean>) | null = null;
+  private unauthorizedHandler: (() => void) | null = null;
+
+  private async refreshToken(force: boolean): Promise<boolean> {
+    if (!this.tokenRefresher) return false;
+    try {
+      return await this.tokenRefresher(force);
+    } catch {
+      // A failed pre-flight refresh is not fatal on its own: the request goes
+      // out and the 401 path above decides what the user is told.
+      return false;
+    }
+  }
+
+  private async send(
+    url: string,
+    method: string,
+    path: string,
+    body: unknown,
+    requestHeaders?: Record<string, string>,
+  ): Promise<Response> {
+    const mergedHeaders: Record<string, string> = { ...this.headers, ...requestHeaders };
+    if (method === "POST" && this.createSpace && createsResources(path) && !(SPACE_HEADER in mergedHeaders)) {
+      mergedHeaders[SPACE_HEADER] = this.createSpace;
+    }
+    try {
+      return await fetch(url, {
+        method,
+        headers: mergedHeaders,
+        body: body !== undefined
+          ? (typeof body === "string" ? body : JSON.stringify(body))
+          : undefined,
+      });
+    } catch (networkError) {
+      // Network failure (offline, DNS, CORS, etc.)
+      throw new ApiClientError(
+        0,
+        networkError instanceof Error
+          ? `Network error: ${networkError.message}`
+          : "Network error: unable to reach server",
+        url,
+      );
+    }
+  }
+
   /** Get current auth header (if set). Used by modules that need raw fetch (SSE, text/plain). */
   getAuthHeader(): Record<string, string> {
     const auth = this.headers["Authorization"];
@@ -309,29 +369,22 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${path}`;
 
-    const mergedHeaders: Record<string, string> = { ...this.headers, ...requestHeaders };
-    if (method === "POST" && this.createSpace && createsResources(path) && !(SPACE_HEADER in mergedHeaders)) {
-      mergedHeaders[SPACE_HEADER] = this.createSpace;
-    }
+    // A token that expired while the tab was throttled or asleep is not renewed
+    // by keycloak's timer until the tab wakes, so renew it before the request
+    // rather than sending a stale one and failing with a 401.
+    await this.refreshToken(false);
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method,
-        headers: mergedHeaders,
-        body: body !== undefined
-          ? (typeof body === "string" ? body : JSON.stringify(body))
-          : undefined,
-      });
-    } catch (networkError) {
-      // Network failure (offline, DNS, CORS, etc.)
-      throw new ApiClientError(
-        0,
-        networkError instanceof Error
-          ? `Network error: ${networkError.message}`
-          : "Network error: unable to reach server",
-        url,
-      );
+    let response = await this.send(url, method, path, body, requestHeaders);
+
+    if (response.status === 401 && this.tokenRefresher) {
+      // The server rejected the token anyway. Force one refresh and retry once;
+      // if that does not help the session is over, and the owner of the auth
+      // flow (not this client) decides how to ask for a new one.
+      const refreshed = await this.refreshToken(true);
+      if (refreshed) {
+        response = await this.send(url, method, path, body, requestHeaders);
+      }
+      if (response.status === 401) this.unauthorizedHandler?.();
     }
 
     if (!response.ok) {

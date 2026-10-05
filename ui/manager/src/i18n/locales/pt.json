@@ -25,7 +25,13 @@
     "profile": "Perfil",
     "guest": "Visitante",
     "userMenu": "Menu do utilizador",
-    "signedIn": "Sessão iniciada"
+    "signedIn": "Sessão iniciada",
+    "authenticating": "Autenticando…",
+    "initFailedTitle": "Falha ao entrar",
+    "initFailedBody": "O Manager não conseguiu concluir o login. O serviço de login pode estar inacessível ou sua sessão foi rejeitada.",
+    "signInAgain": "Entrar novamente",
+    "sessionExpiredTitle": "Sua sessão expirou.",
+    "sessionExpiredBody": "As alterações não salvas continuam nesta página — copie o que precisar antes de entrar novamente."
   },
   "nav": {
     "dashboard": "Painel",
@@ -218,7 +224,13 @@
     "removeItem": "Remover {{item}}",
     "stepOf": "Etapa {{current}} de {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "Redimensionar {{panel}}"
+    "resizePanel": "Redimensionar {{panel}}",
+    "errors": {
+      "network": "Não foi possível alcançar o EDDI. Verifique sua conexão e tente novamente.",
+      "unauthorized": "Sua sessão expirou. Entre novamente.",
+      "forbidden": "Você não tem permissão para ver isto.",
+      "notFound": "Não encontrado — pode ter sido excluído."
+    }
   },
   "agents": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O agente e todos os seus dados serão removidos permanentemente.",
@@ -3127,7 +3139,11 @@
     "registeredSkills": "Competências registadas",
     "noSkills": "Nenhuma competência encontrada",
     "matchingAgents": "Agentes correspondentes",
-    "noMatches": "Nenhum agente encontrado para esta competência"
+    "noMatches": "Nenhum agente encontrado para esta competência",
+    "searchLabel": "Pesquisar habilidades",
+    "strategyLabel": "Estratégia de correspondência",
+    "emptyTitle": "Nenhuma capacidade registrada ainda",
+    "emptyDesc": "Os agentes aparecem aqui quando declaram capacidades (habilidades) na configuração. Adicione uma capacidade a um agente e ela aparecerá neste registro."
   },
   "exportDialog": {
     "title": "Exportar agente",
@@ -3628,7 +3644,18 @@
     "secretVault": "Cofre de segredos",
     "vaultDown": "Cofre indisponível",
     "vaultUp": "Cofre pronto",
-    "viewLogs": "Ver logs"
+    "viewLogs": "Ver logs",
+    "vaultChecking": "Verificando o cofre…",
+    "statsPartial": "Algumas contagens não puderam ser carregadas — aparecem como indisponíveis, não como zero.",
+    "countUnavailable": "Não foi possível carregar",
+    "convState": {
+      "READY": "Pronta",
+      "IN_PROGRESS": "Em andamento",
+      "ENDED": "Encerrada",
+      "EXECUTION_INTERRUPTED": "Interrompida",
+      "ERROR": "Erro",
+      "AWAITING_HUMAN": "Aguardando uma pessoa"
+    }
   },
   "errorBoundary": {
     "retry": "Tentar novamente",
@@ -3712,7 +3739,11 @@
     "found_other": "{{count}} órfãos encontrados",
     "scanIncomplete": "Esta análise não terminou",
     "scanIncompleteBody": "Recursos ainda em uso podem aparecer como órfãos. A purga está bloqueada até que uma análise termine.",
-    "confirmPurge": "Eliminar permanentemente todos os {{count}} recursos órfãos? Esta ação não pode ser anulada."
+    "confirmPurge": "Eliminar permanentemente todos os {{count}} recursos órfãos? Esta ação não pode ser anulada.",
+    "scanFailed": "A verificação falhou",
+    "rescanFailed": "A última verificação falhou — mostrando os resultados anteriores.",
+    "reviewHint": "Abra um recurso da lista para inspecioná-lo antes; todos os órfãos da lista são excluídos.",
+    "typeToConfirm": "Digite {{count}} para confirmar"
   },
   "quotas": {
     "apiCallsMinute": "Chamadas de API / minuto",
