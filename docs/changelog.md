@@ -55,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [September 2026](changelog/2026-09.md) | 187 | 1098 KB |
+| [September 2026](changelog/2026-09.md) | 188 | 1105 KB |
 | [August 2026](changelog/2026-08.md) | 212 | 837 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
 | [June 2026](changelog/2026-06.md) | 26 | 67 KB |
@@ -65,6 +65,124 @@ which neither a reader nor an agent's context window could usefully hold.
 
 The two running registers — **Decision Log** and **Regression Notes** — live at the
 bottom of this file and are never archived.
+
+---
+
+## 📈 fix(metrics): static files no longer exhaust the HTTP metrics URI tags (2026-10-02)
+
+**Repo:** EDDI (`fix/http-metrics-uri-cardinality`)
+
+### The bug
+
+`http.server.requests` tags each request with its URI, and Micrometer registers at most
+`quarkus.micrometer.binder.http-server.max-uri-tags` distinct values. After that, every new URI is
+denied and gets no request metrics, with a single WARN to show for it. REST endpoints are tagged by
+template, but Quarkus tags a static file by its literal path, and the image ships 816 content-hashed
+Manager chunks under `/assets` plus 65 fonts. A few minutes of clicking through the Manager on the
+6.5.0 release candidate used up the cap of 200. Every API endpoint first called after that went
+unmeasured.
+
+The cap was also too small without the assets: the API has 265 distinct paths (the Manager's
+OpenAPI snapshot). The value came in with an unrelated commit in 2022 and had never been sized.
+
+### What changed
+
+- [`application.properties`](../src/main/resources/application.properties):
+  `match-patterns` folds `/assets/*`, `/fonts/*`, `/scripts/*` and `/img/*` into one tag per
+  directory (`/assets/{file}` …). `max-uri-tags` goes from 200 to 500.
+- `HttpMetricsUriTagsConfigTest` (new) parses the patterns the way Quarkus 3.40 does (first `=`,
+  trimmed, whole-path `matches()`, read from the bytecode of `HttpBinderConfiguration` and
+  `RequestMetricInfo`). It checks that representative asset, font, script and image paths fold, that
+  REST and UI-shell paths are left alone, and that the cap stays at least 100 above the path count
+  in `ui/manager/src/test/mocks/openapi-operations.json`. As the API grows into the headroom, this
+  test fails before production does.
+- [`metrics.md`](metrics.md) explains the `uri` values and the cap.
+
+### Verified
+
+On the CI image of 1150bc1e1, with the two settings passed as environment variables, I requested
+all 881 static files the jar ships and then the UI shells and an API call. That produced 13 distinct
+`uri` tags and no cap warning. Without the settings, a handful of Manager pages produced 95.
+
+---
+
+## 🖱️ fix(manager): the Workforce onboarding page, confirm dialogs and the command palette scroll again (2026-10-02)
+
+**Repo:** EDDI (`fix/workforce-onboarding-scroll`)
+
+### What was broken
+
+- **The Workforce landing page could not be scrolled** (reported against 6.5.0). `workforce-main` clips its
+  content on purpose: every Workforce page brings its own scroll container (the scroll contract in
+  `workforce-scroll-contract.test.tsx`). `WorkforceDashboard` wrapped its populated view in one, but returned the
+  empty state, `<OnboardingHero />`, bare. The hero is 1406px tall, so on a 1280×640 window everything below the
+  how-it-works cards was out of reach, including the templates a first-time user needs to create a task force.
+  The contract test missed it twice: its mock always returns task forces, and an empty render was accepted as
+  "cannot overflow". The loading and error states had no scroller either.
+- **`AlertDialog`, the shared confirm dialog, had no height cap.** It is fixed and centred with a transform, so
+  content taller than the window ran off both edges with nothing able to scroll it. In a 375px landscape-phone
+  window the Undeploy prompt measured −40px to 416px: Close above the screen, Cancel and Undeploy cut off at the
+  bottom. Every confirm dialog shares the primitive; the ones with extra content (undeploy, agent delete,
+  conversations, groups, operator upgrade) hit it first.
+- **The command palette's list was a fixed 360px** below a 15% offset. With the search row, footer and borders
+  (86px, measured), the palette ran past the bottom of any window under about 525px tall: its footer at 310px in a
+  300px window, where scrolling the list cannot reach it.
+
+### What changed
+
+- [`workforce-dashboard.tsx`](../ui/manager/src/pages/workforce/workforce-dashboard.tsx): the empty, loading and
+  error states are each a `flex-1 min-h-0 overflow-y-auto` scroller, like the populated view.
+- [`alert-dialog.tsx`](../ui/manager/src/components/ui/alert-dialog.tsx): `max-h-[calc(100dvh-2rem)]
+  overflow-y-auto`, the same cap `AccessibleDialog` already had.
+- [`command-palette.tsx`](../ui/manager/src/components/shared/command-palette.tsx): the list is capped at
+  `min(360px, calc(85dvh - 6rem))`. The dialog starts at 15%, so 85dvh remain for all of it, and 6rem covers the
+  86px of fixed parts with a 10px margin. Measured in Chromium: the palette fits at 200px (30–189px), 300px
+  (45–289px) and 800px (unchanged at 360px). A first attempt at `min(360px, 60dvh)` ignored the footer and still
+  overflowed below about 370px; CodeRabbit caught it in review.
+- Tests: the scroll contract gains a case that renders the dashboard with **zero** task forces and requires the
+  onboarding hero (new `data-testid="workforce-onboarding-hero"`) to sit inside a scroller. A second case
+  holds the request pending and requires the same of the loading skeleton (`workforce-dashboard-skeleton`); the
+  page table never holds that state still. A new `alert-dialog.test.tsx` pins the dialog's cap and scroller, and
+  the palette test pins its list cap. The last two were added at CodeRabbit's suggestion. Each was
+  mutation-checked: removing the fix fails it.
+
+### How the rest was ruled out
+
+A detector run in the browser against the 6.5.0 image, over all 48 Manager and Workforce routes at 1280×640,
+375×812 and 1280×480, with seeded data (two agents, a group, a conversation). For every visible element below the
+fold, it checks whether some scroll container, or the document, can bring it into view. The only page-level failure
+was the onboarding hero, and the detector caught it as a positive control (65 unreachable elements under
+`#workforce-main`). Dialogs and sheets were checked by reading the overlay primitives: `AccessibleDialog`, the
+agent performance sheet, the mobile sidebar and the version diff already cap and scroll. Both fixes were then
+confirmed live: the patched Manager ran against the same backend, the hero scrolled to its last template, and the
+Undeploy dialog fit the 375px window and scrolled to its buttons.
+
+Not covered: states the seed data does not produce, such as a Workforce board with a long discussion or analytics
+with data. Those render inside scrollers the contract test already requires.
+
+---
+
+## 🔖 chore(release): after 6.5.0 (2026-10-01)
+
+**Repo:** EDDI (`chore/post-release-6.5.0`, opened by `post-release.yml` after the release pipeline published the image)
+
+### What
+
+- Release pointers: 6.4.0 → 6.5.0 (Helm chart 2.3.0 → 2.4.0)
+- Build version (pom.xml): 6.5.0 → 6.6.0
+
+Generated by `python scripts/bump-version.py post-release 6.5.0`. Files:
+
+- `pom.xml`
+- `docs/build-reproducibility.md`
+- `docs/developer-quickstart.md`
+- `docs/kubernetes.md`
+- `docs/redhat-openshift.md`
+- `docs/release-signing.md`
+- `k8s/base/kustomization.yaml`
+- `k8s/quickstart.yaml`
+- `helm/eddi/Chart.yaml`
+- `src/test/java/ai/labs/eddi/deploy/DeploymentManifestsTest.java`
 
 ---
 
@@ -1814,34 +1932,6 @@ Skipped keys are logged by name and count, never by value, and they aren't failu
 ### Next
 
 PR B covers readiness with agents in ERROR plus ERROR retry, the nested Thymeleaf concat, and migrating triggers and user conversations. PR C covers the retention sweep on first boot, the startup probe, the documentation fixes, a 5.x → 6.x upgrade guide, and moving the conversation environment pass server-side.
-
----
-
-## 🐛 fix(migration): failed deployments are retried and visible; triggers and user mappings migrate; unconvertible templates are reported (2026-09-29)
-
-**Repo:** EDDI (`fix/v6-first-boot-data`)
-
-### Why
-
-This is the second half of making a 5.x → 6.5 first boot work without manual steps, after `fix/v6-first-boot-blockers`. The rehearsal against a restored production 5.5.1 database found three more problems. An agent that failed to deploy stayed in ERROR until a restart, while readiness said UP. Managed conversations by intent found no trigger, and existing users' intent mappings pointed at no agent. And one legacy template was silently rewritten into literal text.
-
-### What changed
-
-**Failed deployments are retried, and readiness says which agents are in ERROR.** `deployAgent` reports a workflow that can't be built by leaving the agent in ERROR and returning normally. [`AgentDeploymentManagement.checkDeployments`](../src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java) recorded that deployment as handled, and never looked at it again. A deployment is now recorded only once the registry reports it READY; an outcome that isn't known yet (another caller holds it IN_PROGRESS) is simply looked at again on the next sweep. A failed one (ERROR, or an exception) is retried after 10 s, then with a doubling delay capped at 5 minutes, for as long as its record says it is deployed. It is logged at ERROR once when it starts failing and at INFO when it recovers, not on every retry. [`AgentsReadinessHealthCheck`](../src/main/java/ai/labs/eddi/engine/runtime/internal/readiness/AgentsReadinessHealthCheck.java) counts the failing deployments in its data (`agentsInErrorCount`) and **stays UP**. It reports only the count because `/q/health` is unauthenticated; the ids are in the log and in the authenticated deployment-status API. Readiness routes traffic for the whole instance, and one misconfigured agent must not take every replica out of rotation. The sweep now also stays parked until **every** startup migration has run, not only the rename. Before, the tick after the rename could deploy agents while the startup thread was still converting their templates, and those agents kept their Thymeleaf until a restart. If the startup path throws before it can grant readiness, the first sweep that completes grants it. The sweep is also serialized, because `SKIP` only stops one tick overlapping the next and the startup path calls the sweep itself. The #781 behaviour is unchanged: the sweep is parked while the rename migration is pending, and deferred readiness is granted by the first sweep after it.
-
-**Triggers and user-conversation mappings are migrated.** [`V6RenameMigration`](../src/main/java/ai/labs/eddi/configs/migration/V6RenameMigration.java) now renames `bottriggers` → `agenttriggers` with the other collections, and rewrites each trigger's `botDeployments[].botId` to `agentDeployments[].agentId`, with `unrestricted`/`restricted` becoming `production`. If the remap makes two entries of one trigger identical, they're collapsed into one and logged. The managed endpoint picks an entry at random, so a duplicate would double that agent's share. Entries that still differ are kept: which one was meant can't be told. `userconversations` gets `botId` → `agentId` and the same environment remap in one server-side `updateMany`. A mapping that already holds a different `agentId` is left unchanged and reported. Neither collection's unique key (`intent`; `intent, userId`) is touched, so nothing can collide. The v5 environments are matched ignoring case, as the per-document pass did. The v6 models also accept the v5 field names on read (`@JsonAlias`). A database whose rename migration an earlier 6.x already recorded gets the same trigger and mapping passes on its next boot with the flag on, since before 6.5 they didn't exist. A failed count of `bottriggers` is not taken for an empty collection.
-
-**Templates the converter can't convert safely are left alone and reported.** A template like `[['[[${'+'x.x'+'}]]']]`, an expression whose output is itself Thymeleaf, was rewritten to `[['+'x.x'+']]` and counted as migrated. [`TemplateSyntaxMigrator.unconvertibleReason`](../src/main/java/ai/labs/eddi/configs/migration/TemplateSyntaxMigrator.java) now refuses any string literal inside `[[…]]` or `[(…)]` that contains an expression opener (`[[`, `[(`, `${`), and `migrate` returns such input unchanged. A lone closer such as `']]'` is only text and still converts. A literal holding `{` is written into a Qute unparsed block (`TemplateEscaping.unparsedBlock`), so `'{' + 'name' + '}'` still prints `{name}` instead of becoming a Qute expression. [`V6QuteMigration`](../src/main/java/ai/labs/eddi/configs/migration/V6QuteMigration.java) leaves the whole document untouched, logs a WARN with its collection, id and the path of each field, and doesn't mark the migration complete. It also counts, as the same kind of failure, any string that still holds a Thymeleaf expression delimiter (`[[${`, `[(${`, `[# th:`) after conversion. That check deliberately doesn't match text that merely mentions `th:if`, and it accepts a directive opener with any whitespace after `[#`, as the conversion patterns do. The ZIP importer judges the decoded string values of a resource, because the escaped quotes of the JSON text hide where a literal ends. If a value is refused, it imports the resource without converting it and logs a WARN. The check only runs when the resource holds Thymeleaf at all. The existing test that required this shape to lose its `[[${` described the defect, so it now requires the shape to be refused.
-
-### Decisions
-
-- **Readiness stays UP with agents in ERROR** (option (a) of the handoff). The list is in the check's data, and the retry makes a transient failure heal without a restart. DOWN-on-any-ERROR would let one agent take down a fleet.
-- A failed deployment is retried **indefinitely at a capped rate** rather than a fixed number of times. A cause fixed hours later (a vault secret, an index) should still heal without a restart.
-- An unconvertible template keeps the Qute migration **incomplete**, so it runs again on the next boot until the document is fixed. That matches how the migration already treats a document it can't write.
-
-### Tests
-
-`AgentDeploymentManagementRetryTest` (with a steppable clock: ERROR then READY, persistent ERROR backing off exactly 10/20/40/…/300 s, undeployed while failing, exception path, readiness data), `V6RenameMigrationTriggersTest` (Testcontainers: trigger read by intent through `AgentTriggerStore`, user mapping read through `UserConversationStore`, dedupe, an ambiguous mapping, idempotence, the read alias), `V6QuteMigrationUnconvertibleTest`, and parameterised `TemplateSyntaxMigratorTest` cases. Each was mutation-checked: with each part reverted, at least one of its tests fails.
 
 ---
 
