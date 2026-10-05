@@ -72,19 +72,11 @@ class ImportStyleTest {
      * <ul>
      * <li>The two {@code HistorizedResourceStore} files declare a class whose
      * simple name collides with the superclass it extends.</li>
-     * <li>{@code NatsConversationCoordinator} imports {@code io.nats.client.api.*},
-     * which brings in {@code io.nats.client.api.Error}; its
-     * {@code catch (RuntimeException |
-     * java.lang.Error e)} clauses mean the JDK type. An explicit
-     * {@code import java.lang.Error} would resolve the ambiguity but is a redundant
-     * import (java.lang is implicit), which Checkstyle flags - so the inline FQN is
-     * the only clean spelling.</li>
      * </ul>
      */
     private static final Set<String> ALLOWED = Set.of(
             "src/main/java/ai/labs/eddi/datastore/mongo/HistorizedResourceStore.java",
-            "src/main/java/ai/labs/eddi/datastore/mongo/ModifiableHistorizedResourceStore.java",
-            "src/main/java/ai/labs/eddi/engine/runtime/internal/NatsConversationCoordinator.java");
+            "src/main/java/ai/labs/eddi/datastore/mongo/ModifiableHistorizedResourceStore.java");
 
     /** Blanks out comments and string literals so neither is ever matched. */
     private static String stripNonCode(String source) {

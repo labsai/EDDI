@@ -11,6 +11,8 @@ import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
@@ -697,6 +699,138 @@ class MongoConversationMemoryStoreTest {
         @DisplayName("no ids, no query")
         void emptyRequest() {
             assertTrue(store.loadListingSummaries(List.of()).isEmpty());
+        }
+    }
+
+    // ─── Cluster fencing ────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Cluster fencing (_fence)")
+    class Fencing {
+
+        private ConversationMemorySnapshot loadForTurn(String id) {
+            var loaded = store.loadConversationMemorySnapshot(id);
+            loaded.setPersistedStepCount(loaded.getConversationSteps().size());
+            return loaded;
+        }
+
+        private void addTurn(ConversationMemorySnapshot snapshot) {
+            snapshot.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+            snapshot.getConversationOutputs().add(new ConversationOutput());
+        }
+
+        private String newConversation() throws IResourceStore.ResourceStoreException {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.READY);
+            return store.storeConversationMemorySnapshot(snapshot);
+        }
+
+        @Test
+        @DisplayName("an unfenced (single-node) write never writes _fence")
+        void unfencedWriteHasNoFence() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var turn = loadForTurn(id);
+            addTurn(turn);
+            store.storeConversationMemorySnapshot(turn);
+            var full = store.loadConversationMemorySnapshot(id);
+            store.storeConversationMemorySnapshot(full); // full replace, no token
+            assertNull(store.loadConversationMemorySnapshot(id).getFence());
+        }
+
+        @Test
+        @DisplayName("a zombie append with an older token is refused and NOT merge-retried")
+        void staleAppendIsFenced() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var zombie = loadForTurn(id);
+            var winner = loadForTurn(id);
+            addTurn(winner);
+            winner.setFenceToken(9L);
+            store.storeConversationMemorySnapshot(winner);
+            assertEquals(9L, store.loadConversationMemorySnapshot(id).getFence());
+
+            addTurn(zombie);
+            zombie.setFenceToken(5L);
+            var thrown = assertThrows(ConversationFencedException.class, () -> store.storeConversationMemorySnapshot(zombie));
+            assertEquals(9L, thrown.getStoredFence());
+            var stored = store.loadConversationMemorySnapshot(id);
+            assertEquals(1, stored.getConversationSteps().size(), "the zombie's step was not appended");
+            assertEquals(9L, stored.getFence());
+        }
+
+        @Test
+        @DisplayName("a fence raised when the successor starts refuses a predecessor that has not written yet")
+        void raisedFenceRefusesThePredecessor() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var zombie = loadForTurn(id);
+            var successor = loadForTurn(id);
+            store.raiseFence(id, 9L); // the successor's lease started; nothing has been written yet
+            assertEquals(9L, store.loadConversationMemorySnapshot(id).getFence());
+
+            addTurn(zombie);
+            zombie.setFenceToken(5L);
+            assertThrows(ConversationFencedException.class, () -> store.storeConversationMemorySnapshot(zombie));
+            assertEquals(0, store.loadConversationMemorySnapshot(id).getConversationSteps().size());
+
+            // the raise moved no revision: the successor writes on the one it loaded
+            addTurn(successor);
+            successor.setFenceToken(9L);
+            store.storeConversationMemorySnapshot(successor);
+            assertEquals(1, store.loadConversationMemorySnapshot(id).getConversationSteps().size());
+
+            store.raiseFence(id, 3L); // never lowers
+            assertEquals(9L, store.loadConversationMemorySnapshot(id).getFence());
+        }
+
+        @Test
+        @DisplayName("without fencing the same race merges both appends (today's behaviour)")
+        void unfencedRaceStillMerges() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var first = loadForTurn(id);
+            var second = loadForTurn(id);
+            addTurn(first);
+            store.storeConversationMemorySnapshot(first);
+            addTurn(second);
+            store.storeConversationMemorySnapshot(second);
+            assertEquals(2, store.loadConversationMemorySnapshot(id).getConversationSteps().size());
+        }
+
+        @Test
+        @DisplayName("a newer token raises the fence; an unfenced append keeps it")
+        void fenceOnlyGrows() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var a = loadForTurn(id);
+            addTurn(a);
+            a.setFenceToken(4L);
+            store.storeConversationMemorySnapshot(a);
+            var b = loadForTurn(id);
+            addTurn(b);
+            b.setFenceToken(11L);
+            store.storeConversationMemorySnapshot(b);
+            var c = loadForTurn(id);
+            addTurn(c);
+            store.storeConversationMemorySnapshot(c); // degraded-mode turn: no token
+            var stored = store.loadConversationMemorySnapshot(id);
+            assertEquals(11L, stored.getFence());
+            assertEquals(3, stored.getConversationSteps().size());
+        }
+
+        @Test
+        @DisplayName("a full-document write with an older token is refused as fenced")
+        void staleFullWriteIsFenced() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var winner = loadForTurn(id);
+            addTurn(winner);
+            winner.setFenceToken(9L);
+            store.storeConversationMemorySnapshot(winner);
+            var zombie = store.loadConversationMemorySnapshot(id); // current revision, unknown step count
+            zombie.setFenceToken(3L);
+            assertThrows(ConversationFencedException.class, () -> store.storeConversationMemorySnapshot(zombie));
+            var fenced = store.loadConversationMemorySnapshot(id);
+            fenced.setFenceToken(3L);
+            assertFalse(store.storeConversationMemorySnapshotIfState(fenced, ConversationState.READY),
+                    "the conditional write is refused too");
+            var current = store.loadConversationMemorySnapshot(id);
+            current.setFenceToken(9L);
+            store.storeConversationMemorySnapshot(current); // the holder itself may write again
         }
     }
 

@@ -82,6 +82,7 @@
 - [Upgrading from EDDI 6.4](upgrading-from-6.4.md)
 - [Docker](docker.md)
 - [Kubernetes](kubernetes.md)
+- [Clustering (NATS)](clustering.md)
 - [RedHat OpenShift](redhat-openshift.md)
 - [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
 - [Release & Versioning Strategy](release-versioning.md)

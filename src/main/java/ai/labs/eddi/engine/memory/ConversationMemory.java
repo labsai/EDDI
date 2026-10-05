@@ -79,6 +79,10 @@ public class ConversationMemory implements IConversationMemory {
      * {@link IConversationMemory#getPersistedStepCount()}.
      */
     private int persistedStepCount = ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT;
+    /** Cluster fencing token of the running turn; transient. */
+    private Long fenceToken;
+    /** The {@code _fence} the document carried when this memory was loaded. */
+    private Long storedFence;
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
@@ -425,6 +429,26 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setPersistedStepCount(int persistedStepCount) {
         this.persistedStepCount = persistedStepCount;
+    }
+
+    @Override
+    public Long getFenceToken() {
+        return fenceToken;
+    }
+
+    @Override
+    public void setFenceToken(Long fenceToken) {
+        this.fenceToken = fenceToken;
+    }
+
+    @Override
+    public Long getStoredFence() {
+        return storedFence;
+    }
+
+    @Override
+    public void setStoredFence(Long storedFence) {
+        this.storedFence = storedFence;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

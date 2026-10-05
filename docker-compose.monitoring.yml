@@ -60,6 +60,9 @@ services:
       # meter EDDI registers. The operations dashboard stays the front door;
       # this is where you go when the KPI you need is not on it.
       - ./docs/monitoring/eddi-full-metrics-dashboard.json:/var/lib/grafana/dashboards/eddi-full-metrics.json:ro
+      # Cluster mode (eddi.messaging.type=nats): leases, fencing, shared KV, events.
+      # Empty on a single in-memory node.
+      - ./docs/monitoring/eddi-cluster-dashboard.json:/var/lib/grafana/dashboards/eddi-cluster.json:ro
       - ./docs/monitoring/grafana-provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./docs/monitoring/grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana

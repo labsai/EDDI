@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.model.DeadLetterEntry;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Conversation coordinator — ensures sequential message processing per
@@ -89,11 +90,21 @@ public interface IConversationCoordinator extends IEventBus {
     }
 
     /**
-     * Replay a dead-letter entry (re-inject into the main processing workflow).
+     * @return one dead-letter entry, if it exists
+     */
+    default Optional<DeadLetterEntry> getDeadLetter(String entryId) {
+        return getDeadLetters().stream().filter(e -> e.id().equals(entryId)).findFirst();
+    }
+
+    /**
+     * Removes an entry after its replay was submitted. The replay itself — a NEW
+     * turn built from the entry's captured input — is performed by the admin API
+     * through the conversation service; the failed task object is gone and is never
+     * re-run.
      *
      * @param entryId
      *            the dead-letter entry ID
-     * @return true if the entry was found and replayed
+     * @return true if the entry was found and removed
      */
     default boolean replayDeadLetter(String entryId) {
         return false;
@@ -117,5 +128,23 @@ public interface IConversationCoordinator extends IEventBus {
      */
     default int purgeDeadLetters() {
         return 0;
+    }
+
+    /**
+     * Called by the graceful shutdown as soon as it starts, before the drain: a
+     * coordinator stops admitting work it has not started yet. The cluster
+     * coordinator fails the turns still waiting for a conversation lease, which
+     * answers them 409 + Retry-After so the client retries on another node. A no-op
+     * in memory, where every queued turn runs during the drain.
+     */
+    default void beginShutdown() {
+    }
+
+    /**
+     * Called by the graceful shutdown after the drain, whether it completed or
+     * timed out. The cluster coordinator releases the leases this node still holds,
+     * so those conversations continue on other nodes at once.
+     */
+    default void completeShutdown() {
     }
 }

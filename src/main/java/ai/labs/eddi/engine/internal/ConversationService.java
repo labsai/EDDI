@@ -241,6 +241,14 @@ public class ConversationService implements IConversationService, UserErasurePar
      * log.
      */
     final Counter counterConversationStoreConflict;
+
+    /**
+     * Whether a dead letter records the turn's input and context so an operator can
+     * replay it. Field-injected with its default so the many tests that build this
+     * service with {@code new} keep the documented behaviour.
+     */
+    @ConfigProperty(name = "eddi.coordinator.dead-letter.capture-input", defaultValue = "true")
+    boolean captureDeadLetterInput = true;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
     private final MeterRegistry meterRegistry;
@@ -785,6 +793,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                             SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                     returnDetailed, returnCurrentStepOnly, returningFields);
                             memorySnapshot.setEnvironment(environment);
+                            if (stoppedByLeaseLoss(conversationId, returnConversationMemory, memorySnapshot)) {
+                                recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                                processingTurn.release();
+                                responseHandler.onSkipped(memorySnapshot);
+                                return;
+                            }
                             cacheConversationState(conversationId, memorySnapshot.getConversationState());
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
@@ -823,7 +837,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, !rerunOnly, notifySkipped, processingTurn);
+                    turnBuilder, !rerunOnly, notifySkipped, processingTurn, inputData, rerunOnly);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -1016,6 +1030,15 @@ public class ConversationService implements IConversationService, UserErasurePar
                             SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                     returnDetailed, returnCurrentStepOnly, returningFields);
                             memorySnapshot.setEnvironment(environment);
+                            if (stoppedByLeaseLoss(conversationId, returnConversationMemory, memorySnapshot)) {
+                                recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                                processingTurn.release();
+                                // Tokens of the discarded turn may already be on the wire: end the
+                                // stream with an error, not with a done event for a turn that is not stored.
+                                streamingHandler.onError(
+                                        new ConversationStepRunner.TurnLeaseLostException(conversationId, returnConversationMemory.getFenceToken()));
+                                return;
+                            }
                             cacheConversationState(conversationId, memorySnapshot.getConversationState());
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
@@ -1053,7 +1076,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, true, notifySkipped, processingTurn);
+                    turnBuilder, true, notifySkipped, processingTurn, inputData, false);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -1804,10 +1827,71 @@ public class ConversationService implements IConversationService, UserErasurePar
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                      Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
                                                      boolean rebuildWhenSuperseded, Consumer<IConversationMemory> skipNotifier,
-                                                     ProcessingTurn processingTurn)
+                                                     ProcessingTurn processingTurn, InputData inputData, boolean rerun)
             throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
-                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn);
+                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn,
+                describeTurn(environment, conversationMemory, conversationId, inputData, rerun));
+    }
+
+    /**
+     * What a dead letter of this turn records, so an operator can replay it as a
+     * new turn: the conversation, agent and environment, the user, and — unless
+     * {@code eddi.coordinator.dead-letter.capture-input=false} — the input and its
+     * context.
+     */
+    Map<String, Object> describeTurn(Environment environment, IConversationMemory memory, String conversationId, InputData inputData,
+                                     boolean rerun) {
+        Map<String, Object> turn = new LinkedHashMap<>();
+        turn.put("conversationId", conversationId);
+        turn.put("agentId", memory.getAgentId());
+        turn.put("agentVersion", memory.getAgentVersion());
+        turn.put("environment", environment == null ? null : environment.toString());
+        turn.put("userId", memory.getUserId());
+        turn.put("rerun", rerun);
+        if (captureDeadLetterInput && inputData != null) {
+            if (isSecretInput(inputData)) {
+                // A turn the client flagged secretInput: its input must not sit in a dead
+                // letter for days. Recorded as such, without input or context — so it can
+                // be discarded but not replayed.
+                turn.put("secretInput", true);
+                return turn;
+            }
+            turn.put("input", inputData.getInput());
+            if (inputData.getContext() != null && !inputData.getContext().isEmpty()) {
+                turn.put("context", inputData.getContext());
+            }
+        }
+        return turn;
+    }
+
+    private static boolean isSecretInput(InputData inputData) {
+        var context = inputData.getContext();
+        Context flag = context == null ? null : context.get("secretInput");
+        return flag != null && "true".equals(String.valueOf(flag.getValue()));
+    }
+
+    /**
+     * Cluster mode: the turn was stopped because this node lost the conversation's
+     * lease while it ran. It is never stored (another node holds the conversation)
+     * and is dead-lettered, so its caller must not get the reply of a turn that
+     * will not exist: it is answered as not processed, busy (409 with
+     * {@code Retry-After} over REST), like a turn that never got the lease; a
+     * stream ends with an error event instead of {@code done}. The snapshot is
+     * marked {@code IN_PROGRESS} for that, and the conversation state is not cached
+     * from it.
+     */
+    boolean stoppedByLeaseLoss(String conversationId, IConversationMemory memory, SimpleConversationMemorySnapshot snapshot) {
+        if (!memory.isCancelled() || !conversationStepRunner.isLeaseLost(conversationId)) {
+            return false;
+        }
+        snapshot.setConversationState(ConversationState.IN_PROGRESS);
+        return true;
+    }
+
+    /** A turn's write was refused by the cluster fence (cluster mode only). */
+    void counterFenceRejected() {
+        meterRegistry.counter("eddi.cluster.fence.rejected").increment();
     }
 
     void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {

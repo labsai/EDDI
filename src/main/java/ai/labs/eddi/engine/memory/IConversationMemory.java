@@ -445,6 +445,37 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    /**
+     * The cluster fencing token the current turn's writes carry — the revision of
+     * the conversation lease the turn holds — or {@code null} for an unfenced turn
+     * (single-node mode, or a degraded-mode turn without NATS). Transient: set by
+     * the conversation step runner when the turn starts, never persisted.
+     *
+     * @since 6.6.0
+     */
+    default Long getFenceToken() {
+        return null;
+    }
+
+    default void setFenceToken(Long fenceToken) {
+        // no-op by default
+    }
+
+    /**
+     * The {@code _fence} value the document carried when this memory was loaded
+     * ({@code null} for a document never written under a cluster lease). Carried so
+     * a full-document write keeps it.
+     *
+     * @since 6.6.0
+     */
+    default Long getStoredFence() {
+        return null;
+    }
+
+    default void setStoredFence(Long storedFence) {
+        // no-op by default
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 
