@@ -46,6 +46,12 @@ export function AlertDialog({
         <DialogPrimitive.Content
           className={cn(
             "fixed inset-x-0 top-[50%] z-50 mx-auto w-[calc(100%-2rem)] max-w-md translate-y-[-50%]",
+            // Capped and scrollable, like AccessibleDialog. Centred with a
+            // transform and fixed in place, a dialog taller than the window
+            // (a landscape phone, a zoomed laptop, an undeploy prompt listing
+            // live conversations) ran off both edges with nothing able to
+            // scroll it — Close above the screen, the action buttons below it.
+            "max-h-[calc(100dvh-2rem)] overflow-y-auto",
             "rounded-xl border border-border bg-card p-6 shadow-lg",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",

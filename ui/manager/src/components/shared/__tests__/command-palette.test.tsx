@@ -40,6 +40,19 @@ describe("CommandPalette", () => {
     ).toBeInTheDocument();
   });
 
+  /**
+   * The dialog starts at 15% of the window, so a fixed 360px list pushed the
+   * footer past the bottom of a short window, where scrolling the list cannot
+   * reach it. The cap is the space left below the offset minus the 86px of
+   * search row, footer and borders. jsdom has no layout, so the class is the
+   * contract.
+   */
+  it("caps the list by the height the window leaves below the dialog's offset", () => {
+    useCommandPalette.setState({ isOpen: true });
+    renderWithProviders(<CommandPalette />);
+    expect(screen.getByRole("listbox")).toHaveClass("max-h-[min(360px,calc(85dvh-6rem))]", "overflow-y-auto");
+  });
+
   it("shows Navigate section with page links", () => {
     useCommandPalette.setState({ isOpen: true });
     renderWithProviders(<CommandPalette />);

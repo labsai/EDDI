@@ -253,7 +253,7 @@ function OnboardingHero() {
   );
 
   return (
-    <div className="p-5 md:p-8 max-w-5xl ms-auto me-auto space-y-10">
+    <div data-testid="workforce-onboarding-hero" className="p-5 md:p-8 max-w-5xl ms-auto me-auto space-y-10">
       {/* ── Hero ────────────────────────────────────────────────── */}
       <section
         className="text-center space-y-4 pt-4 br-section-enter"
