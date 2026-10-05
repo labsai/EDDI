@@ -76,7 +76,11 @@
     "monitoring": "Monitorização de conversas",
     "analytics": "Análises",
     "connections": "Conexões",
-    "workspaces": "Espaços de trabalho"
+    "workspaces": "Espaços de trabalho",
+    "breadcrumb": "Trilha de navegação",
+    "checkingVersion": "Verificando a versão...",
+    "expandSidebar": "Expandir a barra lateral",
+    "collapseSidebar": "Recolher a barra lateral"
   },
   "theme": {
     "light": "Claro",
@@ -897,7 +901,8 @@
     "savedNotLive": "Guardado — ainda não ativo",
     "savedNotLiveDescription": "O agente em execução continua a servir a versão implementada. Implemente para aplicar esta alteração.",
     "deployNow": "Implementar",
-    "deployStarted": "Implementação iniciada"
+    "deployStarted": "Implementação iniciada",
+    "stay": "Ficar"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2400,7 +2405,8 @@
       "title": "Ajuda e Tour",
       "platformTour": "Tour da Plataforma",
       "resetAll": "Redefinir Todos os Tours",
-      "resetConfirm": "Deseja redefinir todo o progresso dos tours?"
+      "resetConfirm": "Deseja redefinir todo o progresso dos tours?",
+      "completed": "Concluído"
     },
     "offer": {
       "message": "Novo por aqui? Inicie o {{page}}",
@@ -5303,5 +5309,12 @@
     "impactReasonLegacy": "anterior ao acompanhamento de versões",
     "impactReasonBreaking": "alteração incompatível",
     "switchNotice": "O agente passou da v{{from}} para a v{{to}}"
+  },
+  "notFound": {
+    "title": "Página não encontrada",
+    "description": "Não há nada neste endereço. Ele pode ter sido movido ou o link pode estar digitado incorretamente.",
+    "backToDashboard": "Voltar ao painel",
+    "backToWorkforce": "Voltar ao Workforce",
+    "chooseWorkspace": "Escolher um espaço de trabalho"
   }
 }

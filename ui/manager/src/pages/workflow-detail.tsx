@@ -41,7 +41,7 @@ import {
   type AddExtensionResult,
 } from "@/components/editors/add-extension-dialog";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { getAgent, updateAgent } from "@/lib/api/agents";
 import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
@@ -339,6 +339,8 @@ export function WorkflowDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " \u2713");
           setShowDeleteDialog(false);
+          // The document is gone — nothing left for the unsaved-changes guard to protect.
+          allowNextNavigation();
           navigate("/manage/workflows");
         },
         onError: (err) => toast.error(getErrorMessage(err)),

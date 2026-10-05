@@ -1,6 +1,4 @@
-import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { useLocation, Link } from "react-router-dom";
 import {
   Moon,
@@ -16,6 +14,15 @@ import {
 import { useTheme } from "./theme-provider";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { useLanguageSwitcher } from "@/hooks/use-language-switcher";
+import { useRouteEntityName } from "@/hooks/use-route-entity-name";
+import { buildCrumbs } from "@/lib/route-registry";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { PlatformStatus } from "./platform-status";
 import { OperatorDrawer } from "@/components/operator/operator-drawer";
@@ -30,179 +37,22 @@ interface TopBarProps {
 function useBreadcrumbs() {
   const location = useLocation();
   const { t } = useTranslation();
-
-  const pathSegments = location.pathname
-    .replace(/^\/manage\/?/, "")
-    .split("/")
-    .filter(Boolean);
-
-  const crumbs: { label: string; to: string }[] = [
-    { label: t("nav.dashboard"), to: "/manage" },
-  ];
-
-  const labelMap: Record<string, string> = {
-    agents: t("nav.agents"),
-    workflows: t("nav.packages"),
-    conversations: t("nav.conversations"),
-    chat: t("nav.chat"),
-    resources: t("nav.resources"),
-    groups: t("nav.groups", "Groups"),
-    coordinator: t("nav.coordinator", "Coordinator"),
-    schedules: t("nav.schedules", "Schedules"),
-    logs: t("nav.logs", "Logs"),
-    orphans: t("nav.orphans", "Orphans"),
-    secrets: t("nav.secrets", "Secrets"),
-    audit: t("nav.audit", "Audit Trail"),
-    quotas: t("nav.quotas", "Quotas"),
-    userdata: t("userData.title", "User Data"),
-    triggers: t("nav.triggers", "Triggers"),
-    capabilities: t("nav.capabilities", "Capabilities"),
-    sync: t("nav.sync", "Sync"),
-    gdpr: t("nav.gdpr", "GDPR"),
-    connections: t("nav.connections", "Connections"),
-    "linked-accounts": t("pages.linkedAccounts.title", "Linked accounts"),
-    updates: t("nav.updates", "Updates"),
-    wizard: t("wizard.title", "Agent Wizard"),
-    agentview: t("nav.agents"),
-    workflowview: t("nav.packages"),
-    conversationview: t("nav.conversations"),
-  };
-
-  /**
-   * Detail pages live at /manage/<thing>view/:id, but there is no
-   * /manage/<thing>view route — only the list at /manage/<things>. Linking the
-   * intermediate crumb to the accumulated path therefore produced a dead link
-   * that fell through to the catch-all, so point it at the list instead.
-   */
-  const listRouteForSegment: Record<string, string> = {
-    agentview: "/manage/agents",
-    workflowview: "/manage/workflows",
-    conversationview: "/manage/conversations",
-  };
-
-  let currentPath = "/manage";
-  for (const segment of pathSegments) {
-    currentPath += `/${segment}`;
-    // Known routes get labels, IDs/params show as shortened
-    const label =
-      labelMap[segment] ??
-      (segment.match(/^[a-f0-9]{24}$/)
-        ? `${segment.substring(0, 8)}…`
-        : segment.replace(/view$/, ""));
-    crumbs.push({ label, to: listRouteForSegment[segment] ?? currentPath });
-  }
-
-  return crumbs;
+  const entityName = useRouteEntityName();
+  return buildCrumbs(t, location.pathname, entityName);
 }
 
 export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
   const { theme, setTheme } = useTheme();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const breadcrumbs = useBreadcrumbs();
+  const { language, languages, changeLanguage } = useLanguageSwitcher();
   const { method, user, logout } = useAuth();
   const showUser = method === "keycloak" && user;
-
-  // User dropdown state
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement>(null);
-
-  // Close dropdown on outside click or Escape key
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (
-        userMenuRef.current &&
-        !userMenuRef.current.contains(e.target as Node)
-      ) {
-        setUserMenuOpen(false);
-      }
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setUserMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [userMenuOpen]);
 
   const themeOptions = [
     { value: "light" as const, icon: Sun, label: t("theme.light") },
     { value: "dark" as const, icon: Moon, label: t("theme.dark") },
     { value: "system" as const, icon: Monitor, label: t("theme.system") },
-  ];
-
-  /**
-   * Switch language, tolerating a locale chunk that fails to arrive and a user
-   * who changes their mind mid-download.
-   *
-   * Locales are code-split (`src/i18n/config.ts`), so `changeLanguage` now
-   * performs a network fetch. Two consequences, both handled here:
-   *
-   *  - **It can fail without rejecting.** A tab held open across a deploy asks
-   *    for a hashed chunk that no longer exists. i18next 24 treats that as a
-   *    soft miss: `changeLanguage` RESOLVES, its callback reports `err === null`,
-   *    and `i18n.language` is set to the requested code — only `resolvedLanguage`
-   *    quietly stays behind on the fallback. So the select would read "Deutsch"
-   *    over English text with nothing to explain it. Whether the bundle actually
-   *    landed is the one trustworthy signal, hence {@link applyLanguage}.
-   *  - **Two changes can be in flight at once.** Chunks are different sizes, so
-   *    picking Thai then Spanish can finish Spanish-then-Thai and leave the user
-   *    reading a language they already moved on from. `latestLanguageRequest`
-   *    records the most recent pick; an older completion is discarded rather
-   *    than applied.
-   */
-  const latestLanguageRequest = useRef<string | null>(null);
-
-  /**
-   * Switch to `code`, throwing if its bundle did not actually arrive.
-   *
-   * English is bundled statically, so its check passes without a fetch.
-   */
-  async function applyLanguage(code: string) {
-    await i18n.changeLanguage(code);
-    if (!i18n.hasResourceBundle(code, "translation")) {
-      throw new Error(`locale bundle for "${code}" did not load`);
-    }
-  }
-
-  async function handleLanguageChange(code: string) {
-    const previous = i18n.language;
-    latestLanguageRequest.current = code;
-    try {
-      await applyLanguage(code);
-      // A slower earlier request may land after a faster later one. Only the
-      // most recent pick is allowed to stand.
-      const latest = latestLanguageRequest.current;
-      if (latest !== code) await applyLanguage(latest ?? code);
-    } catch {
-      if (latestLanguageRequest.current !== code) return; // superseded; stay quiet
-      // i18next has already moved `language` to the code that failed, which is
-      // what the select binds to. Put it back on something that renders.
-      latestLanguageRequest.current = previous;
-      await i18n.changeLanguage(previous).catch(() => {});
-      toast.error(
-        t("language.switchFailed", "Could not load that language. Please try again."),
-      );
-    }
-  }
-
-  const languages = [
-    { code: "en", label: t("language.en") },
-    { code: "de", label: t("language.de") },
-    { code: "fr", label: t("language.fr") },
-    { code: "es", label: t("language.es") },
-    { code: "ar", label: t("language.ar") },
-    { code: "zh", label: t("language.zh") },
-    { code: "th", label: t("language.th") },
-    { code: "ja", label: t("language.ja") },
-    { code: "ko", label: t("language.ko") },
-    { code: "pt", label: t("language.pt") },
-    { code: "hi", label: t("language.hi") },
   ];
 
   /** Avatar initials and label — both empty when the token carries no profile claims */
@@ -229,19 +79,27 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
 
         {/* Breadcrumbs */}
         <nav
-          aria-label="Breadcrumb"
-          className="hidden items-center gap-1 text-sm md:flex"
+          aria-label={t("nav.breadcrumb", "Breadcrumb")}
+          className="flex min-w-0 items-center gap-1 text-sm"
         >
           {/* Keyed by position, not by `to`: listRouteForSegment maps a *view
               segment onto the list route, so two crumbs can now resolve to the
               same path (e.g. /manage/agents/agentview) and collide as keys. */}
           {breadcrumbs.map((crumb, idx) => (
-            <span key={`${idx}-${crumb.to}`} className="flex items-center gap-1">
+            // Phones have no room for the whole trail: only the current page
+            // (the last crumb) stays, so context is never lost entirely.
+            <span
+              key={`${idx}-${crumb.to}`}
+              className={cn(
+                "items-center gap-1",
+                idx === breadcrumbs.length - 1 ? "flex min-w-0" : "hidden md:flex",
+              )}
+            >
               {idx > 0 && (
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                <ChevronRight className="hidden h-3.5 w-3.5 text-muted-foreground/60 md:block" aria-hidden="true" />
               )}
               {idx === breadcrumbs.length - 1 ? (
-                <span className="font-medium text-foreground" aria-current="page">
+                <span className="truncate font-medium text-foreground" aria-current="page">
                   {crumb.label}
                 </span>
               ) : (
@@ -257,12 +115,14 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
         </nav>
       </div>
 
-      {/* Center: Platform Status — hidden on phones: with the operator
-          launcher and personalization controls the 16px-high bar simply has
-          no room for it, and it used to push the bar into horizontal
-          overflow. */}
+      {/* Center: Platform Status. On phones only the dot stays (the full pill
+          pushed the bar into horizontal overflow); its label still names the
+          state for assistive tech. */}
       <div className="hidden md:block">
         <PlatformStatus />
+      </div>
+      <div className="md:hidden">
+        <PlatformStatus compact />
       </div>
 
       {/* Right: Operator launcher, then the personalization controls. The
@@ -273,14 +133,16 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
         <OperatorDrawer />
 
         <div className="flex items-center gap-2" data-tour="topbar-personalize">
-          {/* Language selector — hidden on phones (reachable via settings);
-              keeping it inflated the bar past the viewport at 375px. */}
+          {/* Language selector — hidden on phones, where the same control sits
+              in the navigation drawer; keeping it here inflated the bar past the
+              viewport at 375px. */}
           <div className="relative hidden items-center gap-1 sm:flex">
-            <Languages className="h-4 w-4 text-muted-foreground" />
+            <Languages className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <select
-              value={i18n.language}
-              onChange={(e) => void handleLanguageChange(e.target.value)}
+              value={language}
+              onChange={(e) => void changeLanguage(e.target.value)}
               data-testid="language-selector"
+              aria-label={t("language.label", "Language")}
               className="appearance-none rounded-md bg-transparent px-2 py-1.5 text-sm text-foreground outline-none transition-colors hover:bg-secondary focus:ring-2 focus:ring-ring"
             >
               {languages.map((lang) => (
@@ -313,85 +175,75 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
           ))}
         </div>
 
-        {/* User dropdown (only when auth enabled) */}
+        {/* User dropdown (only when auth enabled). Radix gives it the menu
+            keyboard model it claims: arrow keys, Home/End, typeahead, Escape,
+            and focus returning to the trigger. */}
         {showUser && (
-          <div className="relative" ref={userMenuRef}>
-            <button
-              onClick={() => setUserMenuOpen((prev) => !prev)}
-              data-testid="user-menu-trigger"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
-              title={displayName || t("auth.signedIn", "Signed in")}
-              aria-label={t("auth.userMenu", "User menu")}
-              aria-haspopup="true"
-              aria-expanded={userMenuOpen}
-            >
-              {initials ? (
-                <span data-testid="user-menu-initials">{initials}</span>
-              ) : (
-                <UserRound
-                  className="h-4 w-4"
-                  aria-hidden="true"
-                  data-testid="user-menu-avatar-icon"
-                />
-              )}
-            </button>
-
-            {userMenuOpen && (
-              <div
-                className="absolute inset-e-0 top-full z-50 mt-2 w-56 rounded-lg border border-border bg-card p-1 shadow-lg"
-                data-testid="user-menu-dropdown"
-                role="menu"
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                data-testid="user-menu-trigger"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+                title={displayName || t("auth.signedIn", "Signed in")}
                 aria-label={t("auth.userMenu", "User menu")}
               >
-                {/* User info */}
-                <div className="border-b border-border px-3 py-2.5">
-                  {/* truncate hides the end of a long name or address, so the
-                      full text stays available on hover. */}
-                  <p
-                    className="truncate text-sm font-medium text-foreground"
-                    title={displayName || undefined}
-                  >
-                    {displayName || t("auth.signedIn", "Signed in")}
-                  </p>
-                  {secondaryEmail && (
-                    <p className="truncate text-xs text-muted-foreground" title={secondaryEmail}>
-                      {secondaryEmail}
-                    </p>
-                  )}
-                </div>
+                {initials ? (
+                  <span data-testid="user-menu-initials">{initials}</span>
+                ) : (
+                  <UserRound
+                    className="h-4 w-4"
+                    aria-hidden="true"
+                    data-testid="user-menu-avatar-icon"
+                  />
+                )}
+              </button>
+            </DropdownMenuTrigger>
 
-                {/* Menu items */}
-                <div className="py-1">
-                  {/* The per-user half of connections lives here because there
-                      is nowhere else it could: the Manager has no profile area,
-                      and the sidebar's Connections entry is the admin config
-                      list, which most people cannot open. */}
-                  <Link
-                    to="/manage/linked-accounts"
-                    onClick={() => setUserMenuOpen(false)}
-                    data-testid="user-menu-linked-accounts"
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary"
-                  >
+            <DropdownMenuContent
+              align="end"
+              className="w-56 bg-card"
+              data-testid="user-menu-dropdown"
+              aria-label={t("auth.userMenu", "User menu")}
+            >
+              {/* User info */}
+              <div className="border-b border-border px-3 py-2.5">
+                {/* truncate hides the end of a long name or address, so the
+                    full text stays available on hover. */}
+                <p
+                  className="truncate text-sm font-medium text-foreground"
+                  title={displayName || undefined}
+                >
+                  {displayName || t("auth.signedIn", "Signed in")}
+                </p>
+                {secondaryEmail && (
+                  <p className="truncate text-xs text-muted-foreground" title={secondaryEmail}>
+                    {secondaryEmail}
+                  </p>
+                )}
+              </div>
+
+              {/* The per-user half of connections lives here because there is
+                  nowhere else it could: the Manager has no profile area, and the
+                  sidebar's Connections entry is the admin config list, which
+                  most people cannot open. */}
+              <div className="py-1">
+                <DropdownMenuItem asChild className="px-3 py-2 text-foreground">
+                  <Link to="/manage/linked-accounts" data-testid="user-menu-linked-accounts">
                     <Link2 className="h-4 w-4" aria-hidden="true" />
                     {t("pages.linkedAccounts.title", "Linked accounts")}
                   </Link>
-                  <button
-                    onClick={() => {
-                      setUserMenuOpen(false);
-                      logout();
-                    }}
-                    data-testid="user-menu-logout"
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-secondary"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    {t("auth.logout", "Logout")}
-                  </button>
-                </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => logout()}
+                  data-testid="user-menu-logout"
+                  className="px-3 py-2 text-foreground"
+                >
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
+                  {t("auth.logout", "Logout")}
+                </DropdownMenuItem>
               </div>
-            )}
-          </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         </div>
       </div>

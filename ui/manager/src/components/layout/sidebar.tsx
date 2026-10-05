@@ -2,12 +2,6 @@ import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePendingApprovals } from "@/hooks/use-hitl";
 import {
-  LayoutDashboard,
-  Bot,
-  Workflow,
-  MessagesSquare,
-  MessageCircle,
-  FileCode,
   PanelLeftClose,
   PanelLeft,
   LogOut,
@@ -15,104 +9,30 @@ import {
   ExternalLink,
   BookOpen,
   FileJson,
-  CalendarClock,
-  Link2Off,
-  ScrollText,
-  KeyRound,
-  ShieldCheck,
-  SlidersHorizontal,
-  Building2,
   HelpCircle,
   Check,
   RotateCcw,
-  Zap,
   ChevronRight,
-  Users,
-  Cable,
-  Variable,
-  Sparkles,
-  ArrowUpCircle,
-  Plug,
-  Blocks,
-  Radio,
-  Network,
-  Hand,
-  UserRoundSearch,
-  ArrowRightLeft,
-  ShieldUser,
+  Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
 import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
 import { useEddiVersion } from "@/hooks/use-update-check";
 import { UNKNOWN_VERSION } from "@/lib/api/system";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
+import { useLanguageSwitcher } from "@/hooks/use-language-switcher";
+import { NAV_SECTIONS, pageLabel } from "@/lib/route-registry";
 // Imported rather than referenced as "/logo_eddi.png" from public/: at 2 KB it
 // is under Vite's 4 KB assetsInlineLimit, so the app inlines it as a data URI
 // (same pixels, one fewer request) — and the design-system bundle, which cannot
 // ship public/ assets, inlines it too instead of rendering a broken image in
 // every design built with Sidebar.
 import logoEddi from "@/assets/logo_eddi.png";
-
-const navSections = [
-  {
-    labelKey: "nav.sectionCore",
-    items: [
-      { path: "/manage", icon: LayoutDashboard, labelKey: "nav.dashboard" },
-      { path: "/manage/operator", icon: Sparkles, labelKey: "nav.operator" },
-      { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
-      { path: "/manage/workflows", icon: Workflow, labelKey: "nav.packages" },
-      { path: "/manage/groups", icon: Users, labelKey: "nav.groups" },
-      { path: "/manage/channels", icon: Cable, labelKey: "nav.channels" },
-      { path: "/manage/capabilities", icon: Blocks, labelKey: "nav.capabilities" },
-    ],
-  },
-  {
-    labelKey: "nav.sectionBuild",
-    items: [
-      { path: "/manage/resources", icon: FileCode, labelKey: "nav.resources" },
-      { path: "/manage/chat", icon: MessageCircle, labelKey: "nav.chat" },
-      { path: "/manage/triggers", icon: Zap, labelKey: "nav.triggers" },
-    ],
-  },
-  {
-    labelKey: "nav.sectionMonitor",
-    items: [
-      { path: "/manage/logs", icon: ScrollText, labelKey: "nav.logs" },
-      { path: "/manage/conversations", icon: MessagesSquare, labelKey: "nav.conversations" },
-      { path: "/manage/conversations/monitoring", icon: Radio, labelKey: "nav.activeConversations", fallback: "Active Conversations" },
-      { path: "/manage/coordinator", icon: Network, labelKey: "nav.coordinator" },
-      { path: "/manage/approvals", icon: Hand, labelKey: "nav.approvals" },
-      { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
-    ],
-  },
-  {
-    labelKey: "nav.sectionAdmin",
-    items: [
-      { path: "/manage/workspaces", icon: Building2, labelKey: "nav.workspaces", fallback: "Workspaces" },
-      { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
-      // Shown to everybody, like the nine other admin-only entries around it.
-      // `navSections` is a static const and nothing here is role-gated, so
-      // hiding this one alone would be inconsistent — and it would also hide it
-      // from an admin whose roles have not arrived yet. The page explains a 403
-      // and degrades to the viewer's own linked accounts, which is a better
-      // answer than a nav entry that silently is not there.
-      { path: "/manage/connections", icon: Plug, labelKey: "nav.connections", fallback: "Connections" },
-      { path: "/manage/variables", icon: Variable, labelKey: "nav.variables" },
-      { path: "/manage/quotas", icon: SlidersHorizontal, labelKey: "nav.quotas" },
-      { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
-      { path: "/manage/userdata", icon: UserRoundSearch, labelKey: "nav.userData" },
-      { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
-      { path: "/manage/sync", icon: ArrowRightLeft, labelKey: "nav.sync" },
-      { path: "/manage/gdpr", icon: ShieldUser, labelKey: "nav.gdpr" },
-      { path: "/manage/updates", icon: ArrowUpCircle, labelKey: "nav.updates", fallback: "Updates" },
-    ],
-  },
-] as const;
 
 const externalLinks = [
   {
@@ -132,17 +52,23 @@ const externalLinks = [
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
+  /**
+   * Show the language selector in the footer. The top bar hides its own below
+   * `sm`, so the phone navigation drawer is where it has to live.
+   */
+  showLanguage?: boolean;
 }
 
-export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarProps) {
   const { t } = useTranslation();
+  const { language, languages, changeLanguage } = useLanguageSwitcher();
   const { method, user, logout } = useAuth();
   const showUser = method === "keycloak" && user;
 
   const { data: serverVersion, isLoading } = useEddiVersion();
 
   const versionLabel = isLoading
-    ? "Checking version..."
+    ? t("nav.checkingVersion", "Checking version...")
     : serverVersion && serverVersion !== UNKNOWN_VERSION
       ? `EDDI ${serverVersion}`
       : `EDDI Demo ${__APP_VERSION__}`;
@@ -161,21 +87,30 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const userLabel = displayName || t("auth.signedIn", "Signed in");
 
   // ── Collapsible section state (persisted in localStorage) ──
+  // Keyed by the section's stable id. It used to be keyed by position, so adding
+  // or reordering a section silently collapsed a different one for everybody who
+  // had saved state. Older saves held positions; they are mapped onto ids below.
   const STORAGE_KEY = "eddi-sidebar-sections";
-  const [collapsedSections, setCollapsedSections] = useState<Set<number>>(() => {
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? new Set(JSON.parse(stored) as number[]) : new Set();
+      if (!stored) return new Set();
+      const parsed = JSON.parse(stored) as unknown;
+      if (!Array.isArray(parsed)) return new Set();
+      const ids = parsed
+        .map((entry) => (typeof entry === "number" ? NAV_SECTIONS[entry]?.id : entry))
+        .filter((id): id is string => typeof id === "string");
+      return new Set(ids);
     } catch {
       return new Set();
     }
   });
 
-  const toggleSection = useCallback((idx: number) => {
+  const toggleSection = useCallback((id: string) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...next])); } catch { /* noop */ }
       return next;
     });
@@ -232,21 +167,21 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Navigation with section groupings */}
       <nav className="flex-1 overflow-y-auto p-1.5" aria-label={t("nav.mainNavigation", "Main navigation")}>
-        {navSections.map((section, idx) => (
-          <div key={section.labelKey} className={cn(idx > 0 && "mt-2.5")}>
+        {NAV_SECTIONS.map((section, idx) => (
+          <div key={section.id} className={cn(idx > 0 && "mt-2.5")}>
             {/* Section label — clickable toggle (hidden when sidebar is collapsed) */}
             {!collapsed && (
               <button
                 type="button"
-                onClick={() => toggleSection(idx)}
+                onClick={() => toggleSection(section.id)}
                 className="mb-1 flex w-full items-center gap-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 hover:text-sidebar-foreground/80 transition-colors"
-                aria-expanded={!collapsedSections.has(idx)}
-                aria-controls={`sidebar-section-${idx}`}
+                aria-expanded={!collapsedSections.has(section.id)}
+                aria-controls={`sidebar-section-${section.id}`}
               >
                 <ChevronRight
                   className={cn(
                     "h-3 w-3 shrink-0 transition-transform duration-200",
-                    !collapsedSections.has(idx) && "rotate-90"
+                    !collapsedSections.has(section.id) && "rotate-90"
                   )}
                   aria-hidden="true"
                 />
@@ -257,13 +192,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <div className="mx-3 mb-2 border-t border-sidebar-border" />
             )}
             {/* Section items — hidden when section is collapsed (only in expanded sidebar) */}
-            {(!collapsed ? !collapsedSections.has(idx) : true) && (
-              <div id={`sidebar-section-${idx}`} className="space-y-0.5">
+            {(!collapsed ? !collapsedSections.has(section.id) : true) && (
+              <div id={`sidebar-section-${section.id}`} className="space-y-0.5">
                 {section.items.map((item) => {
-                  const label =
-                    "fallback" in item
-                      ? t(item.labelKey, { defaultValue: item.fallback as string })
-                      : t(item.labelKey);
+                  const label = pageLabel(t, item);
                   return (
                   <NavLink
                     key={item.path}
@@ -417,6 +349,26 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
       )}
 
+      {/* Language — only in the phone drawer, see `showLanguage` */}
+      {showLanguage && !collapsed && (
+        <div className="flex items-center gap-2 border-t border-sidebar-border p-1.5 px-3 py-2">
+          <Languages className="h-5 w-5 shrink-0 text-sidebar-foreground" aria-hidden="true" />
+          <select
+            value={language}
+            onChange={(e) => void changeLanguage(e.target.value)}
+            aria-label={t("language.label", "Language")}
+            data-testid="sidebar-language-selector"
+            className="min-w-0 flex-1 rounded-md bg-sidebar-accent/5 px-2 py-1.5 text-sm text-sidebar-foreground outline-none focus:ring-2 focus:ring-ring"
+          >
+            {languages.map((lang) => (
+              <option key={lang.code} value={lang.code}>
+                {lang.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Help & Tour menu */}
       <HelpMenu collapsed={collapsed} />
 
@@ -446,7 +398,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <button
           onClick={onToggle}
           data-testid="sidebar-toggle"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={
+            collapsed
+              ? t("nav.expandSidebar", "Expand sidebar")
+              : t("nav.collapseSidebar", "Collapse sidebar")
+          }
+          aria-expanded={!collapsed}
           className="flex w-full items-center justify-center rounded-lg p-2 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent active:scale-[0.98]"
         >
           {collapsed ? (
@@ -517,11 +474,27 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
     };
   }, [open]);
 
+  // The chapter to start once its page is showing. A fixed delay after
+  // `navigate()` raced the lazy-loaded page chunk and missed targets that had not
+  // rendered yet; waiting for the location to arrive is exact, and the tour itself
+  // waits for each step's target (see GuidedTour).
+  const { pathname } = useLocation();
+  const [pendingChapter, setPendingChapter] = useState<TourChapterId | null>(null);
+  useEffect(() => {
+    if (pendingChapter && pathname === CHAPTER_ROUTES[pendingChapter]) {
+      restartChapter(pendingChapter);
+      setPendingChapter(null);
+    }
+  }, [pendingChapter, pathname, restartChapter]);
+
   const handleChapterClick = (id: TourChapterId) => {
     setOpen(false);
+    if (pathname === CHAPTER_ROUTES[id]) {
+      restartChapter(id);
+      return;
+    }
+    setPendingChapter(id);
     navigate(CHAPTER_ROUTES[id]);
-    // Small delay so page renders targets before tour starts
-    setTimeout(() => restartChapter(id), 300);
   };
 
   // Auto-focus first menu item when opened
@@ -614,7 +587,10 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
               >
                 <span className="flex-1 truncate">{t(chapter.titleKey)}</span>
                 {done ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" aria-hidden="true" />
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" aria-hidden="true" />
+                    <span className="sr-only">{t("onboarding.help.completed", "Completed")}</span>
+                  </>
                 ) : (
                   <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-sidebar-foreground/30" aria-hidden="true" />
                 )}

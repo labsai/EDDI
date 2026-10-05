@@ -294,6 +294,30 @@ what it finds. Off by default. Worth knowing before touching it:
 - **Activation runs a canary** — one probe read counting tool calls — because a
   READY deployment badge says nothing about whether the tools can authenticate.
 
+#### 4b. Router, navigation guard and route labels
+
+- **The app runs under a data router.** `src/main.tsx` renders
+  `RouterProvider` with `createAppRouter()` (`src/app-router.tsx`): one catch-all
+  route whose element is the provider stack plus `<App />`, which still declares
+  the real table with `<Routes>`. It is a data router because only that kind has
+  `useBlocker`.
+- **`useUnsavedChangesGuard(isDirty)` blocks in-app navigation**, not just
+  `beforeunload`: a path change while dirty is parked and `NavigationGuardDialog`
+  (mounted once in `app.tsx`) asks Stay / Discard. A page only calls the hook. A
+  programmatic `navigate()` whose edits are already resolved (after a delete, or
+  after a discard the page confirmed in its own dialog) must call
+  `allowNextNavigation()` right before it, or the user is asked twice. Isolated
+  component tests that mount a bare `MemoryRouter` have no data router, so the
+  blocker half is simply absent there; test it with `createMemoryRouter` +
+  `RouterProvider` (see `use-unsaved-changes-guard.router.test.tsx`).
+- **Route labels live in one place**, `src/lib/route-registry.ts`: the sidebar
+  sections, the command palette's page list, the breadcrumb and the document title
+  all read it. Add a page there once; do not add a fourth label table.
+- **Errors are caught twice.** `SuspendedOutlet` (inside both layouts) has its own
+  `ErrorBoundary` keyed on the location, so a crashing page keeps the sidebar and
+  top bar and any navigation recovers; the one in `app.tsx` is for routes outside a
+  layout.
+
 #### 5. Route-level code splitting
 
 Route pages in `app.tsx` load through `lazyPage()` (`src/lib/lazy-page.ts`) —

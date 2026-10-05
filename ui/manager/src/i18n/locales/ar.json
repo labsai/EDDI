@@ -76,7 +76,11 @@
     "monitoring": "مراقبة المحادثات",
     "analytics": "التحليلات",
     "connections": "الاتصالات",
-    "workspaces": "مساحات العمل"
+    "workspaces": "مساحات العمل",
+    "breadcrumb": "مسار التنقل",
+    "checkingVersion": "جارٍ التحقق من الإصدار...",
+    "expandSidebar": "توسيع الشريط الجانبي",
+    "collapseSidebar": "طي الشريط الجانبي"
   },
   "theme": {
     "light": "فاتح",
@@ -939,7 +943,8 @@
     "savedNotLive": "تم الحفظ — غير مُفعَّل بعد",
     "savedNotLiveDescription": "لا يزال الوكيل قيد التشغيل يقدّم النسخة المنشورة. انشر لتفعيل هذا التغيير.",
     "deployNow": "نشر",
-    "deployStarted": "بدأ النشر"
+    "deployStarted": "بدأ النشر",
+    "stay": "البقاء"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2466,7 +2471,8 @@
       "title": "المساعدة والجولة",
       "platformTour": "جولة المنصة",
       "resetAll": "إعادة تعيين جميع الجولات",
-      "resetConfirm": "هل تريد إعادة تعيين تقدم الجولات؟"
+      "resetConfirm": "هل تريد إعادة تعيين تقدم الجولات؟",
+      "completed": "مكتمل"
     },
     "offer": {
       "message": "هل أنت جديد هنا؟ خذ {{page}}",
@@ -5480,5 +5486,12 @@
     "impactReasonLegacy": "أقدم من تتبّع الإصدارات",
     "impactReasonBreaking": "تغيير غير متوافق",
     "switchNotice": "انتقل الوكيل من v{{from}} إلى v{{to}}"
+  },
+  "notFound": {
+    "title": "الصفحة غير موجودة",
+    "description": "لا يوجد شيء في هذا العنوان. ربما تم نقله، أو أن الرابط مكتوب بشكل خاطئ.",
+    "backToDashboard": "العودة إلى لوحة التحكم",
+    "backToWorkforce": "العودة إلى Workforce",
+    "chooseWorkspace": "اختيار مساحة عمل"
   }
 }

@@ -88,9 +88,24 @@ describe("App routing (code-split)", () => {
     expect(screen.getByTestId("sidebar")).toBe(sidebarBefore);
   });
 
-  it("redirects an unknown path to /welcome", async () => {
+  it("says so for an unknown /manage path instead of redirecting, shell intact", async () => {
+    renderWithProviders(<App />, { initialRoute: "/manage/definitely-not-a-route" });
+    expect(await screen.findByTestId("not-found-page")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Page not found" })).toBeInTheDocument();
+    // Still inside the Manager shell, so the sidebar is there to recover with.
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("not-found-home")).toHaveAttribute("href", "/manage");
+  });
+
+  it("says so for an unknown top-level path too", async () => {
     renderWithProviders(<App />, { initialRoute: "/definitely-not-a-route" });
-    expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
+    expect(await screen.findByTestId("not-found-page")).toBeInTheDocument();
+  });
+
+  it("says so for an unknown /workforce path, linking back to Workforce", async () => {
+    renderWithProviders(<App />, { initialRoute: "/workforce/board-1/not-a-page/extra" });
+    const home = await screen.findByTestId("not-found-home", undefined, { timeout: 5000 });
+    expect(home).toHaveAttribute("href", "/workforce");
   });
 
   it("redirects the legacy capital-W /Workforce path, sub-path intact", async () => {
