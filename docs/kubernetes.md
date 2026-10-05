@@ -567,6 +567,29 @@ The datastores carry their own ingress policies — see
 
 Default configuration uses in-memory messaging — suitable for development and low-traffic deployments.
 
+### Upgrades replace the pod (no surge)
+
+The EDDI Deployment uses the **`Recreate`** strategy in the Helm chart
+(`eddi.updateStrategy`, from chart 2.4.0), the Kustomize base and `quickstart.yaml`
+(after EDDI 6.5.0; the manifests 6.5.0 shipped still surge, see
+[Upgrading from 6.4](upgrading-from-6.4.md#1-before-you-start)): an upgrade stops
+the running pod before the new one starts, so each upgrade is unavailable for as long
+as EDDI takes to boot and become ready. A `RollingUpdate` with `maxSurge: 1` would
+avoid that, but only by running **two EDDI JVMs against the same database** for the
+length of every rollout — and everything EDDI keeps per process (the per-conversation
+turn lock, replay-protection nonces, rate limits and cost budgets, the agent and
+workflow caches, HITL crash recovery) diverges between them in that window. If you
+accept that trade-off, opt in on the chart:
+
+```yaml
+eddi:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+```
+
 ### Durable Messaging (production)
 
 EDDI runs at **exactly one replica**. It serialises the turns of a conversation with

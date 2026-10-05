@@ -489,7 +489,8 @@ class DocumentationAccuracyTest {
                 "planning/conversation-cancel-plan.md",
                 "planning/observability-and-pipeline-plan.md",
                 "planning/hitl-tool-approval-plan.md",
-                "planning/mcp-hitl-surface-plan.md");
+                "planning/mcp-hitl-surface-plan.md",
+                "planning/hitl-framework-plan.md");
         for (String rel : shipped) {
             String text = read(rel);
             String head = text.substring(0, Math.min(text.length(), 1200));

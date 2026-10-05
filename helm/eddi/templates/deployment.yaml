@@ -15,11 +15,13 @@ spec:
   # Always rendered — autoscaling is gated off above, so there is never an HPA
   # competing for ownership of this field.
   replicas: {{ .Values.eddi.replicas }}
+  # eddi.updateStrategy — Recreate by default, so an upgrade never runs two EDDI
+  # JVMs against one database; see the value's comment in values.yaml. The
+  # fallback covers `helm upgrade --reuse-values` from chart 2.3.0 or older,
+  # whose stored values have no updateStrategy: without it this would render
+  # `strategy: null` and Kubernetes would default to a 25% RollingUpdate.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    {{- toYaml (.Values.eddi.updateStrategy | default (dict "type" "Recreate")) | nindent 4 }}
   selector:
     matchLabels:
       {{- include "eddi.selectorLabels" . | nindent 6 }}

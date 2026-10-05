@@ -63,7 +63,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: keycloak
-          image: quay.io/keycloak/keycloak:26.0
+          image: quay.io/keycloak/keycloak:26.8.0
           # --import-realm reads /opt/keycloak/data/import. Without it Keycloak
           # boots with only the built-in `master` realm and every request to
           # .../realms/eddi returns 404. Import is ONE-SHOT: it seeds an empty

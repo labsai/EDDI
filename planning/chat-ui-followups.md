@@ -1,5 +1,13 @@
 # Follow-ups after the EDDI feature-parity branch
 
+> **Status: open follow-ups, recorded 2026-07-22 and not re-verified since.** Moved
+> here from `ui/chat/docs/superpowers/specs/` on 2026-10-02 (the feature-parity
+> design spec beside it described work that has shipped and was removed). PR
+> numbers below (#27, #28) are from the former `labsai/EDDI-Chat-UI` repository.
+> Check each item against `main` before acting on it; as of 2026-10-02 the code
+> item 1 cites is unchanged (`Conversation.storeUserInputInMemory` still builds
+> `input:initial` from the raw message and only masks the `input` output entry).
+
 Items that are **not** part of `feat/chat-ui-eddi-feature-parity` and should be
 picked up separately. Written to be actionable without the conversation that
 produced them.
