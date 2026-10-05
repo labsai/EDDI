@@ -61,12 +61,17 @@ same rule set or output set can be reused across workflows and agents.
 git clone https://github.com/labsai/EDDI.git
 cd EDDI
 
-# Start EDDI + MongoDB (pin a version, or omit to get :latest)
+# Start EDDI + MongoDB on 127.0.0.1:7070 (pin a release; omit EDDI_VERSION to get :latest)
 EDDI_VERSION=6.4.0 docker compose up -d
 
 # Access dashboard
 open http://localhost:7070/manage
 ```
+
+> Use the newest tag from the [releases page](https://github.com/labsai/EDDI/releases)
+> if it is newer than the one above. The compose file binds EDDI to `127.0.0.1` and
+> switches authentication off through three explicit opt-outs — fine on a laptop,
+> never on a shared host (see [Security](security.md)).
 
 Optional overlays stack on top of the base file — for example, a local LLM on
 the same Docker network:
@@ -86,11 +91,18 @@ cd EDDI
 # On Mac: brew services start mongodb-community
 # On Linux: sudo systemctl start mongod
 
-# Run EDDI in dev mode
+# Run EDDI in dev mode (API on :7070, Dev UI on /q/dev)
 ./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
+```
 
-# Access dashboard
-open http://localhost:7070
+Dev mode does **not** build the Manager dashboard — `compile` and `quarkus:dev`
+never run npm — so `http://localhost:7070/manage` is only there if an earlier
+`./mvnw package` (without `-DskipUi=true`) left the built UI in
+`target/classes`. To work on or use the dashboard against a dev-mode backend,
+run it from its own dev server:
+
+```bash
+cd ui/manager && npm ci && npm run dev    # http://localhost:3000, proxies the API to :7070
 ```
 
 > **💡 Secrets Vault:** If you plan to store API keys through the Manager UI or use `${vault:...}` references, set the vault master key first:
@@ -420,8 +432,11 @@ curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>" \
   "userId": "test-user",
   "environment": "production",
   "conversationState": "READY",
+  "undoAvailable": true,
+  "redoAvailable": false,
   "conversationOutputs": [
     {
+      "input": "hello",
       "actions": ["welcome_action"],
       "output": [
         { "type": "text", "text": "Hello! How can I help you today?", "delay": 0 }
@@ -429,9 +444,16 @@ curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>" \
     }
   ],
   "conversationProperties": {},
-  "conversationSteps": []
+  "conversationSteps": [
+    { "conversationStep": [ { "key": "input:initial", "value": "hello", "…": "…" } ] }
+  ]
 }
 ```
+
+`conversationSteps` carries the step's public entries (`input:initial`,
+`actions`, `output:*`); add `?returnDetailed=true` to get every key, which is
+what you want when debugging. The [REST API reference](rest-api-reference.md)
+covers the other conversation endpoints.
 
 The same endpoint accepts JSON when you want to pass context alongside the
 message:
@@ -613,50 +635,77 @@ The state object passed through the pipeline:
 
 ```java
 IConversationMemory memory = ...;
+IWritableConversationStep currentStep = memory.getCurrentStep();
 
-// Read user input
-String input = memory.getCurrentStep().getLatestData("input").getResult();
+// Read user input — getLatestData returns null when the key is absent
+IData<String> inputData = currentStep.getLatestData("input");
+String input = inputData != null ? inputData.getResult() : null;
 
-// Store parsed data
-memory.getCurrentStep().storeData(
-    dataFactory.createData("expressions", expressions)
-);
+// Store data for later tasks in this turn (and in the stored snapshot)
+currentStep.storeData(new Data<>("myfeature:result", result));
 
-// Access conversation properties
-String userName = memory.getConversationProperties().get("userName");
+// Conversation properties are a Map<String, Property>, not a Map<String, String>
+Property userName = memory.getConversationProperties().get("userName");
+String name = userName != null ? userName.getValueString() : null;
 ```
+
+Typed keys for the well-known entries live in `MemoryKeys` —
+`currentStep.getLatestData(MemoryKeys.ACTIONS)` returns an
+`IData<List<String>>` without a cast.
 
 ### ILifecycleTask
 
 Interface all tasks implement:
 
 ```java
+@ApplicationScoped
 public class MyTask implements ILifecycleTask {
+    public static final String ID = "ai.labs.mycompany.mytask";
+
     @Override
-    public void execute(IConversationMemory memory, Object component) {
-        // 1. Read from memory
-        String input = memory.getCurrentStep().getLatestData("input").getResult();
+    public TaskId getId() {
+        return new TaskId(ID);
+    }
+
+    @Override
+    public String getType() {
+        return "mytask";
+    }
+
+    @Override
+    public void execute(IConversationMemory memory, Object component) throws LifecycleException {
+        IWritableConversationStep currentStep = memory.getCurrentStep();
+
+        // 1. Read from memory (null when this turn has no input)
+        IData<String> inputData = currentStep.getLatestData("input");
+        if (inputData == null) {
+            return;
+        }
 
         // 2. Process
-        String result = process(input);
+        String result = process(inputData.getResult());
 
         // 3. Write to memory
-        memory.getCurrentStep().storeData(
-            dataFactory.createData("myResult", result)
-        );
+        currentStep.storeData(new Data<>("mytask:result", result));
     }
 }
 ```
+
+`getId()`, `getType()` and `execute()` are the three methods every task
+implements; `configure()` and `getExtensionDescriptor()` have defaults that a
+task loading a configuration resource overrides. Tasks are singletons shared by
+every conversation, so keep no conversation state in fields.
 
 ### ConversationCoordinator
 
 Ensures messages are processed in order:
 
 ```java
-// Messages for same conversation execute sequentially
-coordinator.submitInOrder(conversationId, () -> {
+// Turns of the same conversation execute sequentially; different
+// conversations run concurrently
+conversationCoordinator.submitInOrder(conversationId, () -> {
     processMessage(memory, input);
-    return null;
+    return null;    // the callable is a Callable<Void>
 });
 ```
 
@@ -664,28 +713,45 @@ coordinator.submitInOrder(conversationId, () -> {
 
 ### Pattern 1: Conditional LLM Invocation
 
-Only call LLM for complex queries:
+Only call LLM for complex queries. A rule set is a list of `behaviorGroups`,
+each holding `behaviorRules`; within one group only the **first** matching rule
+fires, which is exactly what you want here — a greeting never also reaches the
+model:
 
 ```json
 {
-  "behaviorRules": [
+  "behaviorGroups": [
     {
-      "name": "Simple Greeting",
-      "conditions": [
-        { "type": "inputmatcher", "configs": { "expressions": "greeting(*)" } }
-      ],
-      "actions": ["simple_greeting"]
-    },
-    {
-      "name": "Complex Question",
-      "conditions": [
-        { "type": "inputmatcher", "configs": { "expressions": "question(*)" } }
-      ],
-      "actions": ["send_to_ai"]
+      "name": "Routing",
+      "behaviorRules": [
+        {
+          "name": "Simple Greeting",
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": { "expressions": "greeting(*)", "occurrence": "currentStep" }
+            }
+          ],
+          "actions": ["simple_greeting"]
+        },
+        {
+          "name": "Complex Question",
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": { "expressions": "question(*)", "occurrence": "currentStep" }
+            }
+          ],
+          "actions": ["send_to_ai"]
+        }
+      ]
     }
   ]
 }
 ```
+
+Without `"occurrence": "currentStep"` an input matcher looks at the whole
+conversation, so a greeting from three turns ago would still match.
 
 ### Pattern 2: API Call Before LLM
 
@@ -693,22 +759,31 @@ Fetch data, then ask LLM to format it:
 
 ```json
 {
-  "behaviorRules": [
+  "behaviorGroups": [
     {
-      "name": "Weather Query",
-      "conditions": [
+      "name": "Weather",
+      "behaviorRules": [
         {
-          "type": "inputmatcher",
-          "configs": { "expressions": "entity(weather)" }
+          "name": "Weather Query",
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": { "expressions": "entity(weather)", "occurrence": "currentStep" }
+            }
+          ],
+          "actions": ["fetch_weather", "send_to_ai"]
         }
-      ],
-      "actions": ["httpcall(weather-api)", "send_to_ai"]
+      ]
     }
   ]
 }
 ```
 
-The LLM receives the API response in memory and can format it naturally.
+The API call in the `eddi://ai.labs.apicalls` step listens for `fetch_weather`
+and the LLM task for `send_to_ai`; put the API-call step **before** the LLM
+step in `workflowSteps`, since steps run in order. Store the response with the
+call's `postResponse` property instructions, and reference it in the system
+prompt as `{properties.<name>}` — see [HTTP Calls](httpcalls.md).
 
 ### Pattern 3: Context-Aware Responses
 
@@ -718,27 +793,28 @@ The start endpoint's JSON body **is** the context map — there is no `input`
 field on it, because starting a conversation and sending a message are separate
 calls:
 
-```bash
-# 1. Start with initial context
-curl -i -X POST "http://localhost:7070/agents/<AGENT_ID>/start?environment=production" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userName": { "type": "string", "value": "John" },
-    "userId":   { "type": "string", "value": "user-123" }
-  }'
+**Context belongs to the turn it was sent with.** Templates see the context of
+the *current* step only — a value sent with the start call is visible while the
+start turn runs, and is gone on the next turn. So send the context with the
+turn that needs it:
 
-# 2. Send the message (context may also be supplied per turn)
+```bash
 curl -s -X POST "http://localhost:7070/agents/<CONVERSATION_ID>" \
   -H "Content-Type: application/json" \
-  -d '{ "input": "What is my name?" }'
+  -d '{ "input": "hello",
+        "context": { "userName": { "type": "string", "value": "John" } } }'
 ```
 
-Access in an output template — and remember the `eddi://ai.labs.templating`
+and read it in an output template — remembering the `eddi://ai.labs.templating`
 step, or the placeholder is never resolved:
 
 ```text
 Hello {context.userName}!
 ```
+
+To keep a context value for the rest of the conversation, copy it into a
+conversation property with a property setter and read it as
+`{properties.userName}` from then on — see [Properties](properties.md).
 
 ## Next Steps
 
@@ -777,9 +853,11 @@ Create a custom lifecycle task:
 ```java
 @ApplicationScoped
 public class MyCustomTask implements ILifecycleTask {
+    public static final String ID = "ai.labs.mycompany.customtask";
+
     @Override
     public TaskId getId() {
-        return new TaskId("ai.labs.mycompany.customtask");
+        return new TaskId(ID);
     }
 
     @Override
@@ -794,7 +872,36 @@ public class MyCustomTask implements ILifecycleTask {
 }
 ```
 
-Register it in CDI and it becomes available as an extension!
+Being a CDI bean is **not** enough: a workflow can only name a step type that
+is registered in the `@LifecycleExtensions` provider map, and that registration
+is done by a `@Startup` bootstrap module. Without it, a workflow whose step is
+`"type": "eddi://ai.labs.mycompany.customtask"` cannot be deployed. Copy the
+shape of `modules/apicalls/bootstrap/ApiCallsModule.java`:
+
+```java
+@Startup(1000)
+@ApplicationScoped
+public class MyCustomTaskModule {
+    private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
+    private final Instance<ILifecycleTask> instance;
+
+    public MyCustomTaskModule(@LifecycleExtensions Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders,
+                              Instance<ILifecycleTask> instance) {
+        this.lifecycleTaskProviders = lifecycleTaskProviders;
+        this.instance = instance;
+    }
+
+    @PostConstruct
+    @Inject
+    protected void configure() {
+        lifecycleTaskProviders.put(MyCustomTask.ID, () -> instance.select(MyCustomTask.class).get());
+    }
+}
+```
+
+A task that reads its own configuration document also needs the configuration
+class, store, REST resource and `ExtensionDescriptor` — the full checklist is in
+`AGENTS.md` §4.3, and the API-call extension is the reference implementation.
 
 ## Troubleshooting
 

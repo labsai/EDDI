@@ -53,9 +53,12 @@ EDDI supports different scopes for storing data:
 
 | Scope          | Lifetime             | Use Case                                                     |
 | -------------- | -------------------- | ------------------------------------------------------------ |
-| `step`         | Single interaction   | Temporary data needed only for this response                 |
+| `step`         | Single interaction   | Temporary data needed only for this response. Cleared at the end of the turn, however it ends — except a HITL pause, whose turn is not over |
 | `conversation` | Entire conversation  | User preferences, extracted entities (persists across steps) |
-| `longTerm`     | Across conversations | User profile data that should persist between sessions       |
+| `longTerm`     | Across conversations | User profile data that should persist between sessions. Written to the user memory store when a turn completes |
+| `secret`       | Entire conversation  | API keys, tokens and other credentials. The plaintext goes into the [Secrets Vault](secrets-vault.md) the moment the instruction runs, and the property holds only a `${vault:...}` reference. Needs `EDDI_VAULT_MASTER_KEY`; without it the turn fails rather than storing plaintext. See [Properties](properties.md) |
+
+These are the values of the `Property.Scope` enum (`step`, `conversation`, `longTerm`, `secret`).
 
 ### 4. Undo/Redo Support
 
@@ -181,9 +184,13 @@ memory.getCurrentStep().storeData(
 ### Example: HTTP Calls Task
 
 ```java
-// Reads context from memory for request
-String userId = memory.getConversationProperties()
-    .get("context.userId");
+// Reads a context entry the client sent with this turn. Each entry is stored
+// as step data under "context:<name>", holding the Context ({type, value})
+IData<Context> userIdContext = memory.getCurrentStep().getLatestData("context:userId");
+if (userIdContext == null || userIdContext.getResult() == null || userIdContext.getResult().getValue() == null) {
+    return; // no userId sent with this turn: skip the lookup rather than call /users/null
+}
+String userId = String.valueOf(userIdContext.getResult().getValue());
 
 // Makes API call
 JsonObject response = httpClient.get("/users/" + userId);
@@ -241,50 +248,63 @@ AI says: {memory.current.output}
 
 ### Storage Mechanism
 
-1. **During Processing**: Memory resides in Java heap (fast access)
-2. **After Each Step**: Memory is serialized and saved to MongoDB
-3. **On Next Request**: Memory is loaded from MongoDB and cached
+1. **During a turn**: the memory is a Java object on the heap, read and written by the pipeline's tasks
+2. **After the turn**: it is converted to a `ConversationMemorySnapshot` and saved to the datastore — MongoDB or PostgreSQL, whichever the deployment uses. A turn that only added a step is appended; undo, redo, rerun and HITL pause/resume rewrite the document. Writes are guarded by an optimistic revision (`_rev`), so two writers cannot silently overwrite each other
+3. **On the next turn**: the snapshot is loaded from the datastore again and converted back into a live memory object
 
-### Caching Strategy
+### What Is Cached
+
+**Conversation memory is not cached.** Every turn loads it from the datastore and saves it back:
 
 ```
-Request → Check Cache → If Miss: Load from MongoDB → Execute Lifecycle → Save to MongoDB + Update Cache
+Request → Load snapshot from datastore → Execute lifecycle → Save snapshot to datastore
 ```
 
-EDDI uses **Caffeine** for in-process caching:
+What *is* cached is the conversation **state** (`READY`, `IN_PROGRESS`, …): `ConversationService` keeps it in a Caffeine cache named `conversationState` with a 30-second TTL, so clients polling `GET /agents/{conversationId}/status` during a running turn do not hit the database on every poll. The cache is local to each instance, and the TTL bounds how stale an entry written elsewhere can be.
 
-- Fast retrieval of frequently accessed conversations
-- Reduced MongoDB load
-- Size-based eviction with configurable maximum entries
+### Stored Document Structure
 
-### MongoDB Structure
+In MongoDB the snapshot is a document in the `conversationmemories` collection; in PostgreSQL the same JSON is the `data` column (JSONB) of the `conversation_memories` table. Abridged, with the HITL bookkeeping fields omitted:
 
 ```javascript
 {
-  "_id": "conversationId",
+  "_id": "<conversationId>",
+  "_rev": 4,                     // optimistic-concurrency revision
+  "_histRev": 1,                 // revision of the last write that rewrote history
+  "schemaVersion": 1,
   "agentId": "agent-123",
   "agentVersion": 1,
   "userId": "user-456",
+  "environment": "production",
   "conversationState": "READY",
   "conversationSteps": [
     {
-      "timestamp": 1699824000000,
-      "data": [
-        {"key": "input", "value": "Hello"},
-        {"key": "expressions", "value": ["greeting(hello)"]},
-        {"key": "actions", "value": ["welcome_action"]},
-        {"key": "output", "value": ["Hi! How can I help you?"]}
+      "workflows": [             // one entry per workflow of the agent
+        {
+          "lifecycleTasks": [    // the step's data, in the order it was stored
+            { "key": "input:initial", "result": "Hello", "timestamp": "...",
+              "originWorkflowId": "<workflowId>", "public": true, "committed": true },
+            { "key": "expressions:parsed", "result": "greeting(hello)", "public": false, "committed": true },
+            { "key": "actions", "result": ["welcome_action"], "public": true, "committed": true },
+            { "key": "output:text:welcome_action", "result": { "type": "text", "text": "Hi! How can I help you?" } }
+          ]
+        }
       ]
-    },
-    // ... more steps
+    }
   ],
-  "conversationProperties": {
-    "userName": "John",
-    "userPreference": "concise"
+  "conversationOutputs": [       // one per step: what the client and the LLM history see
+    { "input": "Hello", "actions": ["welcome_action"],
+      "output": [ { "type": "text", "text": "Hi! How can I help you?" } ] }
+  ],
+  "conversationProperties": {    // Property objects, not raw values
+    "userName": { "name": "userName", "valueString": "John", "scope": "conversation" }
   },
-  "redoCache": []
+  "pendingLongTermWrites": [],
+  "redoCache": []                // steps removed by undo, available for redo
 }
 ```
+
+Two things the shape makes visible: a step's data lives under `workflows[].lifecycleTasks[]`, keyed by memory key (prefixed keys such as `input:initial` and `output:text:<action>`), not as a flat list; and the rendered outputs are stored separately in `conversationOutputs`, which is what the conversation log and the LLM's history are built from.
 
 ## Best Practices
 
@@ -369,17 +389,21 @@ POST /agents/conv-123
 }
 ```
 
-### 2. Memory Initialization
+### 2. Memory Load and Step Preparation
+
+The conversation already exists (`POST /agents/{agentId}/start` created it and ran its first, `CONVERSATION_START` step). For this turn:
 
 ```java
-IConversationMemory memory = loadOrCreateMemory("conv-123");
-memory.getCurrentStep().storeData(
-    dataFactory.createData("input", "What's the weather in Paris?")
-);
-memory.getConversationProperties().put(
-    "context.userId", "john-doe"
-);
+// ConversationService: load the stored snapshot, convert it to live memory
+IConversationMemory memory = loadConversationMemory("conv-123");
+
+// Conversation.say(): state READY → IN_PROGRESS, start a new step, then store
+// the turn's input and context as step data
+//   "input:initial"  → "What's the weather in Paris?"
+//   "context:userId" → Context{type=string, value="john-doe"}
 ```
+
+Context entries are **step data** (`context:<name>`), not conversation properties: they belong to the turn they arrive with. Templates read them as `{context.userId}`.
 
 ### 3. Parser Task Execution
 
@@ -456,11 +480,14 @@ memory.getCurrentStep().storeData(
 ### 7. Memory Persistence
 
 ```java
-// Save to MongoDB
-conversationMemoryStore.save(memory);
+// Conversation: step-scoped properties dropped, changed longTerm properties
+// upserted to the user memory store, state IN_PROGRESS → READY
 
-// Update cache
-cache.put("conv-123", memory.getConversationState());
+// ConversationService: snapshot saved to the datastore (MongoDB or PostgreSQL)
+conversationMemoryStore.storeConversationMemorySnapshot(snapshot);
+
+// ...and the state cached for 30 seconds
+cacheConversationState("conv-123", ConversationState.READY);
 ```
 
 ### 8. Response to User
@@ -470,8 +497,11 @@ cache.put("conv-123", memory.getConversationState());
   "conversationState": "READY",
   "conversationOutputs": [
     {
-      "output": ["The weather in Paris is sunny with 22°C"],
-      "actions": ["fetch_weather"]
+      "input": "What's the weather in Paris?",
+      "actions": ["fetch_weather"],
+      "output": [
+        { "type": "text", "text": "The weather in Paris is sunny with 22°C", "delay": 0 }
+      ]
     }
   ]
 }
@@ -555,21 +585,40 @@ Understanding what happens at conversation boundaries is critical for features t
 
 ### Initialization (`Conversation.init()`)
 
-When a conversation starts or continues:
+`init()` runs **once**, when the conversation is created by `POST /agents/{agentId}/start` (`Agent.startConversation`). It does not load anything from the conversation store — the memory is new:
 
 ```
-Conversation.init()
-  ├─→ Load conversation memory from store
-  ├─→ loadLongTermProperties()
-  │     └─→ IPropertiesHandler.loadProperties(userId)
-  │     └─→ Properties loaded into conversationProperties with scope=longTerm
-  │     └─→ Available as {properties.key} in all templates
-  └─→ Set conversation state to IN_PROGRESS
+Agent.startConversation(userId, context)
+  ├─→ new ConversationMemory(agentId, agentVersion, userId)
+  └─→ Conversation.init(context)
+        ├─→ state = READY
+        ├─→ current step gets the CONVERSATION_START action
+        ├─→ loadUserProperties()
+        │     └─→ IUserMemoryStore.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries)
+        │     └─→ self + group + global entries; the most specific scope wins per key
+        │     └─→ put into conversationProperties with scope=longTerm
+        │     └─→ available as {properties.key} in all templates
+        └─→ runs the pipeline for this first step (context included)
+```
+
+Recalled `longTerm` properties then travel inside the conversation document; later turns do not reload them from the user memory store.
+
+### Each Turn (`Conversation.say()`)
+
+```
+ConversationService
+  ├─→ load snapshot from the datastore → live memory
+  └─→ Agent.continueConversation(memory) → Conversation.say(message, context)
+        ├─→ EXECUTION_INTERRUPTED is auto-recovered to READY;
+        │   IN_PROGRESS or AWAITING_HUMAN refuse the turn
+        ├─→ state = IN_PROGRESS, start a new step
+        ├─→ store input:initial and context:<name> step data
+        └─→ run every workflow's lifecycle
 ```
 
 ### Pipeline Execution
 
-The `LifecycleManager` runs all configured tasks in sequence:
+The `LifecycleManager` of each workflow runs its configured tasks in sequence, for example:
 
 ```
 LifecycleManager.executeLifecycle(memory)
@@ -581,18 +630,27 @@ LifecycleManager.executeLifecycle(memory)
   └─→ OutputGenerationTask → format response
 ```
 
-### Teardown (`postConversationLifecycleTasks()`)
+### Teardown
 
-After the pipeline completes:
+After the pipeline, still inside `Conversation`:
 
 ```
-Conversation.postConversationLifecycleTasks()
-  ├─→ storePropertiesPermanently()
-  │     ├─→ All longTerm properties saved via IPropertiesHandler
-  │     └─→ Secret properties scrubbed and vaulted via SecretsVault
-  ├─→ Save conversation memory to store
-  └─→ Set conversation state to READY
+on every exit of the turn
+  ├─→ secret context values scrubbed
+  ├─→ step-scoped properties dropped (unless the turn paused for HITL)
+  └─→ changed longTerm keys recorded as owed (pendingLongTermWrites)
+
+if the turn completed (not paused, cancelled or abandoned):
+  postConversationLifecycleTasks()
+    ├─→ record the turn's property changes (for undo/redo)
+    └─→ storePropertiesPermanently()
+          └─→ only longTerm properties that changed (or are owed) are upserted
+              to IUserMemoryStore, with visibility applied at this boundary
+
+state: IN_PROGRESS → READY (ENDED on CONVERSATION_END, ERROR on failure)
 ```
+
+`ConversationService` then saves the snapshot to the datastore and updates the cached state. `secret` properties are not handled here: they were vaulted when their property instruction ran.
 
 > **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If a feature needs to load/save cross-conversation state, it extends the Conversation init/teardown logic. The pipeline processes data for a single turn; session boundaries manage what persists between turns.
 

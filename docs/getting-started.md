@@ -89,23 +89,54 @@ There are two ways to run **EDDI** under Docker: with **Docker Compose**, or by 
 
 ### Launch the containers manually
 
+The image runs in production mode, and in production mode EDDI **refuses to
+start without authentication** unless you opt out explicitly. A bare
+`docker run labsai/eddi` therefore exits during startup — `AuthStartupGuard`
+stops it because OIDC is off, and `HighValueSurfaceGuard` separately requires an
+opt-in for the MCP endpoint and the secrets vault. The commands below make the
+same three opt-outs the bundled `docker-compose.yml` makes, and bind the port to
+`127.0.0.1` so the unauthenticated instance is reachable from this machine only.
+
 1.  Create a shared network
 
-    ```
+    ```bash
     docker network create eddi-network
     ```
 
-2.  Start a `MongoDB` instance using the `MongoDB` `Docker` image:
+2.  Start a `MongoDB` instance. The container must be named `mongodb`: the
+    image's default connection string is `mongodb://mongodb:27017/eddi`.
 
-    ```
-    docker run --name mongodb --network=eddi-network -d mongo
+    ```bash
+    docker run --name mongodb --network=eddi-network -d mongo:7.0.14
     ```
 
-3.  Start **EDDI** :
+3.  Start **EDDI**:
 
+    ```bash
+    docker run --name eddi --network=eddi-network -p 127.0.0.1:7070:7070 \
+      -e EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true \
+      -e EDDI_MCP_ALLOW_UNAUTHENTICATED=true \
+      -e EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true \
+      -e EDDI_VAULT_MASTER_KEY='replace-with-a-long-random-passphrase' \
+      -d labsai/eddi:latest
     ```
-    docker run --name eddi --network=eddi-network -p 7070:7070 -d labsai/eddi
-    ```
+
+> **Warning — local use only.** With these three flags every endpoint, including
+> agent administration, the MCP server and the secrets vault, answers without a
+> token. Keep the `127.0.0.1:` bind. For anything other people can reach, turn
+> authentication on instead (`QUARKUS_OIDC_TENANT_ENABLED=true` plus the OIDC
+> settings in the [Configuration Reference](configuration-reference.md), and drop
+> the three `ALLOW_UNAUTHENTICATED` flags) — see [Security](security.md).
+>
+> Keep `EDDI_VAULT_MASTER_KEY` stable: secrets stored in the vault are encrypted
+> with a key derived from it, and a different passphrase on the next start cannot
+> decrypt them. Without the variable EDDI still starts, but the vault is
+> disabled. For anything you keep, pin a release tag (for example
+> `labsai/eddi:6.4.0`; the [releases page](https://github.com/labsai/EDDI/releases)
+> lists the newest) instead of `latest`.
+>
+> To use a MongoDB that requires a password, pass the full connection string:
+> `-e MONGODB_CONNECTIONSTRING='mongodb://user:pass@host:27017/eddi?authSource=admin'`.
 
 ## Option 2 - Deploy on Kubernetes
 
@@ -205,7 +236,17 @@ On a terminal, under project root folder, run the following command:
 ./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 ```
 
-1. Go to Browser --> [http://localhost:7070](http://localhost:7070)
+The API is then on [http://localhost:7070](http://localhost:7070) and the Quarkus
+Dev UI on [http://localhost:7070/q/dev](http://localhost:7070/q/dev). Dev mode
+starts with authentication off — the guards described above only apply in
+production mode.
+
+> **The Manager dashboard is not built in dev mode.** `compile` and
+> `quarkus:dev` never run the UI build, so `/manage` only works if an earlier
+> `./mvnw package` (without `-DskipUi=true`) left the built UI in
+> `target/classes`. For dashboard work, run `npm run dev` in `ui/manager`
+> instead: it serves the Manager on port 3000 and proxies API calls to the
+> backend on 7070.
 
 ### Build App & Docker image
 
