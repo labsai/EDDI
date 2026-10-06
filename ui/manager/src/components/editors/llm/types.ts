@@ -251,9 +251,9 @@ export interface ResponseValidation {
    */
   onInvalidJson?: RetryableResponseValidationAction;
   /**
-   * Action when a reply parses but does not match the response schema.
-   * Accepted for configuration compatibility; takes effect with schema
-   * validation (R4). Default `ignore`.
+   * Action when a reply parses but breaks the response shape (`responseSchema`
+   * or `nonBlankFields`). `retry` re-asks with the violation as the reason;
+   * `ignore`/`warn` keep the parsed object. Default `ignore`.
    */
   onSchemaMismatch?: RetryableResponseValidationAction;
   /**

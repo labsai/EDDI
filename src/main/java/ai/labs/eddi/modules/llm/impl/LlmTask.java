@@ -479,7 +479,8 @@ public class LlmTask implements ILifecycleTask {
                 resolvedType, processedParams, shrinkSummaryPrefix, shrinkSkipSteps);
         FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
                 Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)),
-                FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M());
+                FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
         FormatRetryRunner.ReaskListener retryListener = (trigger, attempt) -> {
             if (memory.getEventSink() != null) {
                 memory.getEventSink().onLlmRetry(trigger.label(), attempt);
@@ -723,7 +724,7 @@ public class LlmTask implements ILifecycleTask {
         if (fallbackServed == null) {
             try {
                 var validated = applyResponseValidation(responseContent, responseMetadata, task, currentStep, templateDataObjects, memory,
-                        convertObject);
+                        convertObject, processedParams.get(KEY_RESPONSE_SCHEMA));
                 responseContent = validated.content();
                 fallbackServed = validated.fallback();
             } catch (LifecycleException validationFailure) {
@@ -1112,7 +1113,8 @@ public class LlmTask implements ILifecycleTask {
      */
     private Validated applyResponseValidation(String responseContent, Map<String, Object> responseMetadata,
                                               Task task, IWritableConversationStep currentStep,
-                                              Map<String, Object> templateDataObjects, IConversationMemory memory, boolean convertObject)
+                                              Map<String, Object> templateDataObjects, IConversationMemory memory, boolean convertObject,
+                                              String processedParamsSchema)
             throws LifecycleException {
 
         ResponseValidation validation = task.getResponseValidation();
@@ -1179,8 +1181,16 @@ public class LlmTask implements ILifecycleTask {
         // "retry" was already acted on by the executors; reaching it here means the
         // re-asks (and every cascade step) are spent, so fallbackAction applies.
         if (convertObject && !isNullOrEmpty(responseContent)) {
-            var parsed = modelOutputParser.parse(responseContent, true);
-            if (parsed.kind() == ModelOutputParser.Kind.INVALID) {
+            var parsed = modelOutputParser.parse(responseContent, true, processedParamsSchema, task.getNonBlankFields(), task.getId());
+            if (parsed.kind() == ModelOutputParser.Kind.SCHEMA_MISMATCH) {
+                var step = applyValidationAction(validation.getOnSchemaMismatch(), "schema_mismatch",
+                        "LLM response does not match the response shape (" + parsed.reason() + ")", responseContent, task, currentStep,
+                        templateDataObjects, memory, convertObject);
+                if (step.fallback() != null) {
+                    return step;
+                }
+                responseContent = step.content();
+            } else if (parsed.kind() == ModelOutputParser.Kind.INVALID) {
                 var step = applyValidationAction(validation.getOnInvalidJson(), "invalid_json",
                         "LLM response is not valid JSON (" + parsed.reason() + ")", responseContent, task, currentStep, templateDataObjects, memory,
                         convertObject);
@@ -1203,7 +1213,8 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /** Validation types whose {@code "retry"} action the executors act on. */
-    private static final Set<String> RETRYABLE_VALIDATIONS = Set.of("empty_response", "truncated_response", "content_filter", "invalid_json");
+    private static final Set<String> RETRYABLE_VALIDATIONS = Set.of("empty_response", "truncated_response", "content_filter", "invalid_json",
+            "schema_mismatch");
 
     /**
      * Whether a completion opens with one of the configured refusal prefixes.

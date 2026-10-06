@@ -1144,9 +1144,11 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private String onInvalidJson = "ignore";
 
         /**
-         * Action when a reply parses as JSON but does not match the response schema.
-         * Accepted for configuration compatibility; it takes effect with schema
-         * validation (R4). Until then it is a documented no-op. Default: "ignore".
+         * Action when a reply parses as JSON but breaks the response shape
+         * ({@code responseSchema} or {@code nonBlankFields}). {@code "retry"} re-asks
+         * the same model with the corrective message, whose {@code {reason}} is the
+         * violation ({@code schema: $.x required}). {@code "ignore"} / {@code "warn"}
+         * keep the parsed object. Default: "ignore".
          */
         private String onSchemaMismatch = "ignore";
 

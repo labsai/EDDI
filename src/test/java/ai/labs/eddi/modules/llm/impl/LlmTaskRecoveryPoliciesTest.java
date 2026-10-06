@@ -335,6 +335,55 @@ class LlmTaskRecoveryPoliciesTest {
         assertEquals(Map.of("answer", "hi"), templateData.get("taskA"));
     }
 
+    private static LlmConfiguration.Task shapeTask(Consumer<ResponseValidation> validation) {
+        var t = task(v -> v.setOnSchemaMismatch("retry"));
+        validation.accept(t.getResponseValidation());
+        t.setNonBlankFields(List.of("answer"));
+        return t;
+    }
+
+    @Test
+    @DisplayName("onSchemaMismatch retry: a blank required field is re-asked with the violation as the reason, then valid")
+    void schemaMismatchRetriesThenValid() throws Exception {
+        var model = FaultInjectingChatModel.script(Step.text("{\"answer\":\"\"}"), Step.text(VALID));
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+
+        run(shapeTask(v -> {
+        }));
+
+        assertEquals(2, model.callCount());
+        var second = model.requests().get(1).messages();
+        var corrective = ((UserMessage) second.getLast()).singleText();
+        assertTrue(corrective.startsWith("Your previous reply could not be used: nonBlank: $.answer"), corrective);
+        assertEquals(Map.of("answer", "hi"), templateData.get("taskA"));
+        verify(dataFactory, never()).createData(eq("llm:fallback:taskA"), any());
+    }
+
+    @Test
+    @DisplayName("onSchemaMismatch retry exhausted: the fallback is served")
+    void schemaMismatchFallsBack() throws Exception {
+        var model = FaultInjectingChatModel.script(Step.text("{\"answer\":\"\"}")).repeatLast();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+
+        run(shapeTask(v -> v.setFallbackMessage("Please try again.")));
+
+        assertEquals(2, model.callCount());
+        assertEquals("Please try again.", templateData.get("taskA"));
+        verify(dataFactory).createData("llm:fallback:taskA", Boolean.TRUE);
+    }
+
+    @Test
+    @DisplayName("onSchemaMismatch ignore: the parsed object is kept, no re-ask")
+    void schemaMismatchIgnoreKeepsTheObject() throws Exception {
+        var model = FaultInjectingChatModel.script(Step.text("{\"answer\":\"\"}"));
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+
+        run(shapeTask(v -> v.setOnSchemaMismatch("ignore")));
+
+        assertEquals(1, model.callCount());
+        assertEquals(Map.of("answer", ""), templateData.get("taskA"));
+    }
+
     @Test
     @DisplayName("context too long with maxContextTokens: the token budget is halved for the one re-ask")
     void tokenAwareWindowIsHalved() throws Exception {

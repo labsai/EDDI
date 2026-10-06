@@ -6,7 +6,7 @@
 
 Item R5 of the LLM turn-resilience plan ([`planning/llm-turn-resilience-plan.md`](../../planning/llm-turn-resilience-plan.md)), plus the cost and injection guards of R16 that belong to it. A one-off format slip (prose around the JSON, an empty reply, a cut-off object) is usually fixed by the model that made it; escalating first pays for a different, possibly slower or pricier model on every hiccup. `responseValidation` gains a `retry` action and the engine now recovers in cost order: **answer → local repair (the R3 parser) → up to `maxRetries` same-model corrective re-asks → escalate to the next cascade step (which repeats this with its own re-asks) → `fallbackAction`.**
 
-New `responseValidation` fields: `onInvalidJson` (default `ignore`), `onSchemaMismatch` (accepted, **a no-op until R4**), `onContextTooLong` (default `error`), `maxRetries` (default 1, clamped 0..3), `truncationRetryFactor` (default 2, clamped 1..4, never above 32768 tokens), `correctiveMessage`, `maxRetryCostUsd`, `minAttemptMs` (default 3000), `fallbackAction` (default `fallback`). `retry` is also accepted by `onEmpty`, `onTruncation`, `onContentFilter`. A cascade step gets `maxFormatRetries` (null inherits). Every default keeps today's behaviour: a task without a `retry` action is untouched.
+New `responseValidation` fields: `onInvalidJson` (default `ignore`), `onSchemaMismatch` (a reply that parses but breaks `responseSchema` / `nonBlankFields`, detected by R4; handled exactly like `onInvalidJson`, the R4 violation being the corrective message's reason), `onContextTooLong` (default `error`), `maxRetries` (default 1, clamped 0..3), `truncationRetryFactor` (default 2, clamped 1..4, never above 32768 tokens), `correctiveMessage`, `maxRetryCostUsd`, `minAttemptMs` (default 3000), `fallbackAction` (default `fallback`). `retry` is also accepted by `onEmpty`, `onTruncation`, `onContentFilter`. A cascade step gets `maxFormatRetries` (null inherits). Every default keeps today's behaviour: a task without a `retry` action is untouched.
 
 - **New `FormatRetryRunner`** owns the same-model recovery for all three call sites: plain chat (`LlmTask`), each cascade step (`CascadingModelExecutor`, escalation reason `invalid_output` in the trace, in `eddi.llm.cascade.escalations` and in the `cascade_escalation` SSE event), and the final answer of a tool loop.
 - **Truncation:** one re-ask with `maxOutputTokens` × factor, set on the `ChatRequest` (the cached model is not touched). The base cap comes from `maxTokens` / `maxOutputTokens` (Gemini) or Anthropic's built-in default; unknown base means no re-ask.
@@ -27,7 +27,7 @@ New `responseValidation` fields: `onInvalidJson` (default `ignore`), `onSchemaMi
 
 ### Not done / follow-ups
 
-- `onSchemaMismatch` detection (R4) and the breaker (R8); the R1 deadline plumbing (only the `RemainingBudget` hook exists).
+- The breaker (R8); the R1 deadline plumbing (only the `RemainingBudget` hook exists).
 - Tool mode: no truncation or context-too-long re-ask (no finish reason from the loop; shrinking after tools ran would replay them).
 - The HITL resume path (`executeResume`) keeps R3's local repair but has no re-asks.
 - Manager: TypeScript types only (`responseValidation`, `CascadeStep.maxFormatRetries`); no form fields yet.

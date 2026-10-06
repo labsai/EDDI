@@ -43,8 +43,9 @@ import java.util.Set;
  * <li>{@code CONTEXT_TOO_LONG} — the provider refused the prompt: <b>once</b>,
  * with the history window halved ({@link ContextShrinker}).</li>
  * </ol>
- * {@code SCHEMA_MISMATCH} has a configuration slot and no detector: it takes
- * effect with R4.
+ * {@code SCHEMA_MISMATCH} — a reply that parses but breaks the response shape
+ * ({@code responseSchema}, {@code nonBlankFields}); re-asked like invalid JSON,
+ * with the violation as the corrective message's reason.
  *
  * <h2>The corrective message</h2> Only an invalid-JSON re-ask carries one. The
  * request is the original messages, then the model's own bad reply as an
@@ -190,7 +191,8 @@ final class FormatRetryRunner {
      *            truncation re-ask then cannot raise it and is skipped)
      */
     record Policy(Set<Trigger> retryOn, int maxRetries, double truncationFactor, String correctiveMessage, long minAttemptMs,
-            Double maxRetryCostUsd, Double inputPricePer1M, Double outputPricePer1M, boolean convertToObject, Integer baseMaxOutputTokens) {
+            Double maxRetryCostUsd, Double inputPricePer1M, Double outputPricePer1M, boolean convertToObject, Integer baseMaxOutputTokens,
+            String responseSchema, List<String> nonBlankFields, String taskId) {
 
         /**
          * The policy a task (and optionally a cascade step) runs under, or null when
@@ -201,6 +203,16 @@ final class FormatRetryRunner {
          */
         static Policy from(ResponseValidation validation, Integer stepMaxFormatRetries, boolean convertToObject, Integer baseMaxOutputTokens,
                            Double inputPricePer1M, Double outputPricePer1M) {
+            return from(validation, stepMaxFormatRetries, convertToObject, baseMaxOutputTokens, inputPricePer1M, outputPricePer1M, null, null, null);
+        }
+
+        /**
+         * As above, with the task's response shape ({@code responseSchema},
+         * {@code nonBlankFields}) so a reply that parses but breaks it is detected (the
+         * {@code onSchemaMismatch} policy).
+         */
+        static Policy from(ResponseValidation validation, Integer stepMaxFormatRetries, boolean convertToObject, Integer baseMaxOutputTokens,
+                           Double inputPricePer1M, Double outputPricePer1M, String responseSchema, List<String> nonBlankFields, String taskId) {
             if (validation == null || !validation.isEnabled()) {
                 return null;
             }
@@ -211,6 +223,7 @@ final class FormatRetryRunner {
             addIfRetry(on, Trigger.CONTEXT_TOO_LONG, validation.getOnContextTooLong());
             if (convertToObject) {
                 addIfRetry(on, Trigger.INVALID_JSON, validation.getOnInvalidJson());
+                addIfRetry(on, Trigger.SCHEMA_MISMATCH, validation.getOnSchemaMismatch());
             }
             if (on.isEmpty()) {
                 return null;
@@ -222,7 +235,8 @@ final class FormatRetryRunner {
                 corrective = convertToObject ? ResponseValidation.DEFAULT_CORRECTIVE_MESSAGE : ResponseValidation.DEFAULT_CORRECTIVE_MESSAGE_TEXT;
             }
             return new Policy(Set.copyOf(on), retries, validation.getTruncationRetryFactor(), corrective, validation.getMinAttemptMs(),
-                    validation.getMaxRetryCostUsd(), inputPricePer1M, outputPricePer1M, convertToObject, baseMaxOutputTokens);
+                    validation.getMaxRetryCostUsd(), inputPricePer1M, outputPricePer1M, convertToObject, baseMaxOutputTokens, responseSchema,
+                    nonBlankFields, taskId);
         }
 
         private static void addIfRetry(Set<Trigger> on, Trigger trigger, String action) {
@@ -379,10 +393,14 @@ final class FormatRetryRunner {
         if (policy.retries(Trigger.CONTENT_FILTER) && "content_filter".equals(warning)) {
             return new Detection(Trigger.CONTENT_FILTER, "filtered reply");
         }
-        if (policy.retries(Trigger.INVALID_JSON) && parser != null && text != null && !text.isBlank()) {
-            ModelOutputParser.JsonOutcome outcome = parser.parse(text, true);
-            if (outcome.kind() == ModelOutputParser.Kind.INVALID) {
+        if ((policy.retries(Trigger.INVALID_JSON) || policy.retries(Trigger.SCHEMA_MISMATCH)) && parser != null && text != null
+                && !text.isBlank()) {
+            ModelOutputParser.JsonOutcome outcome = parser.parse(text, true, policy.responseSchema(), policy.nonBlankFields(), policy.taskId());
+            if (outcome.kind() == ModelOutputParser.Kind.INVALID && policy.retries(Trigger.INVALID_JSON)) {
                 return new Detection(Trigger.INVALID_JSON, outcome.reason());
+            }
+            if (outcome.kind() == ModelOutputParser.Kind.SCHEMA_MISMATCH && policy.retries(Trigger.SCHEMA_MISMATCH)) {
+                return new Detection(Trigger.SCHEMA_MISMATCH, outcome.reason());
             }
         }
         return null;

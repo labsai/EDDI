@@ -423,7 +423,8 @@ class CascadingModelExecutor {
                 FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), step.getMaxFormatRetries(),
                         convertToObject, FormatRetryRunner.resolveBaseMaxOutputTokens(mergedParams, modelType),
                         step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M(),
-                        step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M());
+                        step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M(),
+                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
                 boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept && isLastStep;
