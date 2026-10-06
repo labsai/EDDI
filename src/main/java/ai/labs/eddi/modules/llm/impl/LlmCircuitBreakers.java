@@ -168,6 +168,8 @@ public class LlmCircuitBreakers {
         private State state = State.CLOSED;
         private long openedAt;
         private long probeStartedAt = -1;
+        /** Incremented for every probe granted; a ticket settles only its own. */
+        private long probeGen;
         private Failure tripClass;
         private String tripReason;
 
@@ -211,29 +213,29 @@ public class LlmCircuitBreakers {
         synchronized (breaker) {
             switch (breaker.state) {
                 case CLOSED :
-                    return new Ticket(this, breaker, settings, Permit.ALLOW, null);
+                    return new Ticket(this, breaker, settings, Permit.ALLOW, null, 0);
                 case OPEN :
                     long waited = now - breaker.openedAt;
                     if (waited < settings.coolDownMs()) {
                         return denied(breaker, settings.coolDownMs() - waited);
                     }
-                    transition(breaker, State.HALF_OPEN, breaker.tripClass, breaker.tripReason, settings, now);
+                    transition(breaker, State.HALF_OPEN, breaker.tripClass, breaker.tripReason, settings);
                     breaker.probeStartedAt = now;
-                    return new Ticket(this, breaker, settings, Permit.PROBE, null);
+                    return new Ticket(this, breaker, settings, Permit.PROBE, null, ++breaker.probeGen);
                 default :
                     boolean probing = breaker.probeStartedAt >= 0 && now - breaker.probeStartedAt < settings.coolDownMs();
                     if (probing) {
                         return denied(breaker, settings.coolDownMs() - (now - breaker.probeStartedAt));
                     }
                     breaker.probeStartedAt = now;
-                    return new Ticket(this, breaker, settings, Permit.PROBE, null);
+                    return new Ticket(this, breaker, settings, Permit.PROBE, null, ++breaker.probeGen);
             }
         }
     }
 
     private Ticket denied(Breaker breaker, long retryInMs) {
         count("eddi.llm.circuit.skipped", breaker.tripClass);
-        return new Ticket(this, breaker, null, Permit.DENY, new Denial(breaker.tripClass, breaker.tripReason, Math.max(0, retryInMs)));
+        return new Ticket(this, breaker, null, Permit.DENY, new Denial(breaker.tripClass, breaker.tripReason, Math.max(0, retryInMs)), 0);
     }
 
     /** The state of a model's breaker, CLOSED when it has none. For tests/ops. */
@@ -249,20 +251,21 @@ public class LlmCircuitBreakers {
 
     // ------------------------------------------------------------ settle
 
-    private void settle(Breaker breaker, Settings settings, Permit permit, Failure failure, String reason) {
+    private void settle(Breaker breaker, Settings settings, Permit permit, long gen, Failure failure, String reason) {
         long now = clock.getAsLong();
         synchronized (breaker) {
             if (permit == Permit.PROBE) {
-                if (breaker.state != State.HALF_OPEN) {
+                // An abandoned probe's late result must not decide for its replacement.
+                if (breaker.state != State.HALF_OPEN || breaker.probeGen != gen) {
                     return;
                 }
                 breaker.probeStartedAt = -1;
                 if (failure == null) {
                     breaker.window.clear();
-                    transition(breaker, State.CLOSED, null, null, settings, now);
+                    transition(breaker, State.CLOSED, null, null, settings);
                 } else {
                     breaker.openedAt = now;
-                    transition(breaker, State.OPEN, failure, reason, settings, now);
+                    transition(breaker, State.OPEN, failure, reason, settings);
                 }
                 return;
             }
@@ -277,7 +280,7 @@ public class LlmCircuitBreakers {
             }
             if (failure.isImmediate() || countOf(breaker, failure) >= settings.threshold()) {
                 breaker.openedAt = now;
-                transition(breaker, State.OPEN, failure, reason, settings, now);
+                transition(breaker, State.OPEN, failure, reason, settings);
             }
         }
     }
@@ -299,18 +302,18 @@ public class LlmCircuitBreakers {
         return n;
     }
 
-    private void release(Breaker breaker, Permit permit) {
+    private void release(Breaker breaker, Permit permit, long gen) {
         if (permit != Permit.PROBE) {
             return;
         }
         synchronized (breaker) {
-            if (breaker.state == State.HALF_OPEN) {
+            if (breaker.state == State.HALF_OPEN && breaker.probeGen == gen) {
                 breaker.probeStartedAt = -1;
             }
         }
     }
 
-    private void transition(Breaker breaker, State to, Failure failure, String reason, Settings settings, long now) {
+    private void transition(Breaker breaker, State to, Failure failure, String reason, Settings settings) {
         State from = breaker.state;
         breaker.state = to;
         if (to == State.OPEN) {
@@ -379,16 +382,18 @@ public class LlmCircuitBreakers {
      */
     public static final class Ticket {
         /** Allows everything, records nothing. */
-        public static final Ticket DISABLED = new Ticket(null, null, null, Permit.ALLOW, null);
+        public static final Ticket DISABLED = new Ticket(null, null, null, Permit.ALLOW, null, 0);
 
         private final LlmCircuitBreakers owner;
         private final Breaker breaker;
         private final Settings settings;
         private final Permit permit;
         private final Denial denial;
+        private final long gen;
         private final AtomicBoolean settled = new AtomicBoolean();
 
-        private Ticket(LlmCircuitBreakers owner, Breaker breaker, Settings settings, Permit permit, Denial denial) {
+        private Ticket(LlmCircuitBreakers owner, Breaker breaker, Settings settings, Permit permit, Denial denial, long gen) {
+            this.gen = gen;
             this.owner = owner;
             this.breaker = breaker;
             this.settings = settings;
@@ -427,13 +432,13 @@ public class LlmCircuitBreakers {
          */
         public void release() {
             if (breaker != null && permit != Permit.DENY && settled.compareAndSet(false, true)) {
-                owner.release(breaker, permit);
+                owner.release(breaker, permit, gen);
             }
         }
 
         private void settle(Failure failure, String reason) {
             if (breaker != null && permit != Permit.DENY && settled.compareAndSet(false, true)) {
-                owner.settle(breaker, settings, permit, failure, reason);
+                owner.settle(breaker, settings, permit, gen, failure, reason);
             }
         }
 
