@@ -709,6 +709,11 @@ public class LlmTask implements ILifecycleTask {
         // === Response Validation (Phase D) ===
         // A fallback served by onError is the engine's own text — it is not validated
         // (a refusal-prefix match on the author's apology would otherwise re-trigger).
+        // The model's own text (if any) already reached a live stream; a fallback may
+        // be
+        // appended to the stream only when nothing did, since SSE cannot retract
+        // tokens.
+        boolean modelTextStreamed = fallbackServed == null && !isNullOrEmpty(responseContent);
         if (fallbackServed == null) {
             try {
                 var validated = applyResponseValidation(responseContent, responseMetadata, task, currentStep, templateDataObjects, memory,
@@ -726,6 +731,10 @@ public class LlmTask implements ILifecycleTask {
                         convertObject, memory.getConversationId());
                 responseContent = fallbackServed.content();
             }
+        }
+
+        if (fallbackServed != null && eventSink != null && !addToOutputExplicitlyFalse && !modelTextStreamed) {
+            eventSink.onToken(fallbackServed.text());
         }
 
         // Store metadata if configured
