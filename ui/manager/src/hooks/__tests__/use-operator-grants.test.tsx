@@ -4,7 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
-import { useActivateOperator, OperatorGrantPendingError } from "@/hooks/use-operator";
+import {
+  useActivateOperator,
+  OperatorGrantPendingError,
+  OperatorActivationNotStartedError,
+  keptAgentAfterFailure,
+} from "@/hooks/use-operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY, type OperatorConfig } from "@/lib/api/operator";
 import { READ_ENDPOINTS, WRITE_ENDPOINTS, parseEndpoint } from "@/lib/operator/tool-scopes";
 import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
@@ -274,5 +279,44 @@ describe("useActivateOperator — the vault grant", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(spy.deleted).toEqual(["op-old-kept"]);
     expect(spy.setupCalls).toBe(1);
+  });
+
+  it("a failure before the reuse decision keeps the kept agent: nothing removed, nothing created", async () => {
+    const spy = newSpy();
+    serve(spy);
+    // The endpoint check fails on this retry — before any agent is touched.
+    server.use(http.get("*/openapi", () => HttpResponse.json({ openapi: "3.0.0", info: {}, paths: {} })));
+    const kept = { agentId: "op-old-kept", version: 1, fingerprint: "f" };
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+
+    act(() =>
+      result.current.mutate({ agentName: "EDDI Platform Operator", config: config(), apiKey: "sk-test", reuseAgent: kept }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    const error = result.current.error;
+    expect(error).toBeInstanceOf(OperatorActivationNotStartedError);
+    expect((error as Error).message).toMatch(/does not expose/);
+    expect(spy.deleted).toEqual([]);
+    expect(spy.setupCalls).toBe(0);
+    // So the page remembers the kept agent for the next attempt.
+    expect(keptAgentAfterFailure(error, kept)).toBe(kept);
+  });
+});
+
+describe("keptAgentAfterFailure", () => {
+  const previous = { agentId: "a", version: 1, fingerprint: "f" };
+  const kept = { agentId: "b", version: 1, fingerprint: "g" };
+
+  it("takes the agent a refused grant kept", () => {
+    expect(keptAgentAfterFailure(new OperatorGrantPendingError(kept, null), previous)).toBe(kept);
+  });
+
+  it("keeps the previous one when activation never reached it", () => {
+    expect(keptAgentAfterFailure(new OperatorActivationNotStartedError(new Error("x")), previous)).toBe(previous);
+  });
+
+  it("forgets it after any other failure, which removed what it had", () => {
+    expect(keptAgentAfterFailure(new Error("deploy failed"), previous)).toBeNull();
   });
 });

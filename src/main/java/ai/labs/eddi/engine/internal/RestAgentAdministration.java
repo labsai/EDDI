@@ -187,7 +187,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 // quarkus-eddi) reads that body. A grant refusal answering 409 instead
                 // would give one outcome two shapes. The caller passed EDIT above, so it
                 // may see the secret NAMES the failure carries.
-                DeploymentFailure failure = status == ERROR && deployed != null ? deployed.getDeploymentFailure() : null;
+                // status is ERROR only when deployed is non-null (NOT_FOUND otherwise).
+                DeploymentFailure failure = status == ERROR ? deployed.getDeploymentFailure() : null;
                 if (deployError == null && failure != null) {
                     deployError = failure.message();
                 }

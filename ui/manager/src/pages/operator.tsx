@@ -30,7 +30,7 @@ import {
   runPostActivationProbes,
   operatorKeys,
   useOperatorAgentPresence,
-  OperatorGrantPendingError,
+  keptAgentAfterFailure,
   type ActivationStage,
   type KeptOperatorAgent,
 } from "@/hooks/use-operator";
@@ -321,9 +321,10 @@ export function OperatorPage() {
           },
           onError: (err) => {
             setStage("idle");
-            // A refused grant keeps the agent for the retry; anything else
-            // removed what it created, so there is nothing left to reuse.
-            setKeptAgent(err instanceof OperatorGrantPendingError ? err.kept : null);
+            // A refused grant keeps the agent for the retry; a failure before
+            // the reuse decision leaves the previous one untouched; anything
+            // else removed what it had, so there is nothing left to reuse.
+            setKeptAgent(keptAgentAfterFailure(err, keptAgent));
             const message = getErrorMessage(err);
             if (onFailure) onFailure(message);
             else setActivationError(message);
