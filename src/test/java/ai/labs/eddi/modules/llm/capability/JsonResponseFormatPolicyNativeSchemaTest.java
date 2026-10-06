@@ -176,6 +176,20 @@ class JsonResponseFormatPolicyNativeSchemaTest {
         }
 
         @Test
+        @DisplayName("the raw gemini schema drops $schema/$id/$comment but keeps a property named like one")
+        void rawSchemaStripsMetaKeywords() {
+            String schema = "{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"$id\":\"x\",\"type\":\"object\","
+                    + "\"properties\":{\"$schema\":{\"type\":\"string\"},\"n\":{\"type\":\"object\",\"$comment\":\"c\","
+                    + "\"properties\":{\"a\":{\"type\":\"string\"}}}},\"additionalProperties\":false}";
+            var raw = assertInstanceOf(JsonRawSchema.class, resolve("gemini", false, null, schema).jsonSchema().rootElement());
+            assertFalse(raw.schema().contains("draft-07"), raw.schema());
+            assertFalse(raw.schema().contains("\"$id\""), raw.schema());
+            assertFalse(raw.schema().contains("$comment"), raw.schema());
+            assertTrue(raw.schema().contains("\"properties\":{\"$schema\":{\"type\":\"string\"}"), raw.schema());
+            assertTrue(raw.schema().contains("additionalProperties"));
+        }
+
+        @Test
         @DisplayName("nested objects convert recursively")
         void nested() {
             String schema = "{\"type\":\"object\",\"properties\":{\"meta\":{\"type\":\"object\",\"required\":[\"id\"],"
