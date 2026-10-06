@@ -156,8 +156,13 @@ store replaces it with the non-unique 6.x one when it starts, and logs that at W
   Identifier fields (`id`, `…Id`, `…_id`) holding plain ids are migrated normally. Skipped keys
   are logged by name and count only, never by value, and stay readable in
   `properties_migrated_v6`. Move any you really need into the secrets vault by hand.
-- **Templates the converter cannot convert safely** (a template that generates template syntax)
-  are left in Thymeleaf and reported, as above.
+- **Templates the converter cannot convert safely** (a template that generates template syntax,
+  or a conditional it is not sure about) are left in Thymeleaf and reported, as above. Every
+  converted template is also **parsed as Qute** before it is written: if the result does not
+  parse, the original is kept, the document is reported as unconvertible, and it does not count
+  as migrated. Nested `cond ? a : b` expressions with string concatenation become
+  `{#if}…{#else}…{/if}`; a comparison against a number is guarded
+  (`x && x > 0`) so a missing value renders the else branch instead of failing.
 - **Credentials recorded in stored conversations.** EDDI 5 stored whatever a turn carried, and no
   migration rewrites stored conversations. So every conversation can still hold:
   - context values the client sent, such as a user token under `userInfo`;

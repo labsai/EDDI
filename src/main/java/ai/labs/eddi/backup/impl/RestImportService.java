@@ -2997,7 +2997,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 LOGGER.warnf("Importing %s with its Thymeleaf templates unconverted: %s. Convert them to Qute by hand.",
                         resourcePath.getFileName(), unconvertible);
             } else {
-                resourceContent = templateSyntaxMigrator.migrate(resourceContent);
+                String migrated = templateSyntaxMigrator.migrate(resourceContent);
+                // The conversion is parsed before it is trusted: a result Qute rejects
+                // fails on every render, so the original is imported instead.
+                String invalid = migrated.equals(resourceContent)
+                        ? null
+                        : templateSyntaxMigrator.quteParseErrorIn(jsonSerialization.deserialize(migrated, Map.class));
+                if (invalid != null) {
+                    LOGGER.warnf("Importing %s with its Thymeleaf templates unconverted: the converted template is not valid Qute (%s). "
+                            + "Convert them to Qute by hand.", resourcePath.getFileName(), invalid);
+                } else {
+                    resourceContent = migrated;
+                }
             }
 
             return jsonSerialization.deserialize(resourceContent, clazz);
