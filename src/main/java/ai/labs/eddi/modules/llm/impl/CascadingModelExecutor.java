@@ -387,7 +387,7 @@ class CascadingModelExecutor {
                 // default, so an escalation from e.g. mistral to gemini stops sending the
                 // JSON format the moment it would be paired with tools.
                 var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat(),
-                        baseParams.get("responseSchema"));
+                        mergedParams.get("responseSchema"));
 
                 StepResult stepResult;
                 try {

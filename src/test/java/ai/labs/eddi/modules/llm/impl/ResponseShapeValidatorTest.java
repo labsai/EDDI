@@ -81,6 +81,15 @@ class ResponseShapeValidatorTest {
         }
 
         @Test
+        @DisplayName("a non-finite number is just an enum miss, never an exception")
+        void nonFiniteEnum() {
+            String schema = "{\"type\":\"object\",\"properties\":{\"n\":{\"enum\":[1,2]}}}";
+            assertEquals("schema: $.n enum", validator.validate(Map.of("n", Double.NaN), schema, null).orElse(null));
+            assertEquals("schema: $.n enum", validator.validate(Map.of("n", Float.POSITIVE_INFINITY), schema, null).orElse(null));
+            assertTrue(validator.validate(Map.of("n", 2), schema, null).isEmpty());
+        }
+
+        @Test
         @DisplayName("minLength rejects an empty string")
         void minLength() {
             assertEquals("schema: $.htmlResponseText minLength", reason(Map.of("htmlResponseText", "")));
