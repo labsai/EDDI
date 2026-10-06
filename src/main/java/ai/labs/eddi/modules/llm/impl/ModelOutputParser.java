@@ -26,7 +26,10 @@ import java.util.regex.Pattern;
  * {@code ```json}, tag case-insensitive);</li>
  * <li>if that still does not parse, take the outermost balanced {@code {...}}
  * or {@code [...]} out of the text (string- and escape-aware scan) and parse
- * that — this handles a prose prefix and/or suffix.</li>
+ * that — this handles a prose prefix and/or suffix. An extracted fragment is
+ * accepted only if it is a JSON object with at least one key; a top-level array
+ * is accepted only as the whole (unfenced) reply, so prose like
+ * {@code Pick option [1] or [2].} is never turned into a List.</li>
  * </ol>
  * Invalid JSON itself is never "fixed" (no trailing-comma repair, no quote
  * swapping): it either parses or it is {@link Kind#INVALID}.
@@ -42,6 +45,8 @@ public final class ModelOutputParser {
     static final String REASON_NOT_JSON = "not JSON";
     /** A JSON value was opened and the reply ended before it was closed. */
     static final String REASON_TRUNCATED = "truncated JSON";
+    /** Only a fragment of the reply parsed, and it is not a non-empty object. */
+    static final String REASON_NO_OBJECT = "no JSON object";
     /** A closing bracket does not match the one that was opened. */
     static final String REASON_UNBALANCED = "unbalanced braces";
     /** Braces balance, but the content between them is not valid JSON. */
@@ -130,10 +135,14 @@ public final class ModelOutputParser {
             String candidate = unfenced.substring(open, scan.end() + 1);
             // The whole text was already tried above; do not parse it a second time.
             Object value = candidate.equals(unfenced) ? null : tryParse(candidate);
-            if (value != null) {
+            // An extracted fragment (there was text around it) is only trusted when it is
+            // a non-empty object: prose such as "Pick option [1] or [2]." or "The empty
+            // set {} is..." must stay the user's answer, not become a List or empty Map.
+            // A top-level array is accepted only as the whole reply, handled above.
+            if (value instanceof Map<?, ?> map && !map.isEmpty()) {
                 return new JsonOutcome(Kind.VALID, value, true, null, raw);
             }
-            reason = REASON_INVALID_SYNTAX;
+            reason = value == null ? REASON_INVALID_SYNTAX : REASON_NO_OBJECT;
             from = scan.end() + 1;
         }
         return new JsonOutcome(Kind.INVALID, raw, false, reason, raw);

@@ -1811,7 +1811,7 @@ Models do not always answer with a bare JSON document. Under `convertToObject=tr
 
 1. **Trim** surrounding whitespace.
 2. **Strip one surrounding markdown fence** — ```` ``` ```` or ```` ```json ```` (the language tag is case-insensitive).
-3. If it still does not parse, **extract the outermost balanced `{...}` or `[...]`** from the text (string- and escape-aware, so braces inside string values and `\"` do not confuse it) and parse that. This handles a prose prefix and/or suffix such as `Sure! Here you go: {...} Hope that helps.`
+3. If it still does not parse, **extract the outermost balanced `{...}` or `[...]`** from the text (string- and escape-aware, so braces inside string values and `\"` do not confuse it) and parse that. This handles a prose prefix and/or suffix such as `Sure! Here you go: {...} Hope that helps.` An extracted fragment is accepted only if it is a JSON object with at least one key; a top-level array is accepted only when it is the whole (fence-stripped) reply. So prose like `Pick option [1] or [2].` or `The empty set {} is...` stays the raw string instead of being replaced by a fragment.
 
 Invalid JSON itself is **never "fixed"** — there is no trailing-comma repair or quote swapping. A reply either parses or it does not.
 

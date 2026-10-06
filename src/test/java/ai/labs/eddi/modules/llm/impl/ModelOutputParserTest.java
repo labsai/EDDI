@@ -45,7 +45,6 @@ class ModelOutputParserTest {
                 Arguments.of("```Json {\"a\":1}```", Map.of("a", 1), true),
                 Arguments.of("```json\n[1,2]\n```", List.of(1, 2), true),
                 Arguments.of("Sure! Here you go: {\"a\":1} Hope that helps.", Map.of("a", 1), true),
-                Arguments.of("prefix [1,2] suffix", List.of(1, 2), true),
                 Arguments.of("Answer:\n```json\n{\"a\":1}\n```\nDone.", Map.of("a", 1), true),
                 // braces and brackets inside strings must not end the scan early
                 Arguments.of("note {\"a\":\"}{ ]\"} end", Map.of("a", "}{ ]"), true),
@@ -78,6 +77,9 @@ class ModelOutputParserTest {
                 Arguments.of("I am sorry, I cannot help with that.", ModelOutputParser.REASON_NOT_JSON),
                 Arguments.of("42", ModelOutputParser.REASON_NOT_JSON),
                 Arguments.of("{\"a\":1]", ModelOutputParser.REASON_UNBALANCED),
+                Arguments.of("Pick option [1] or [2].", ModelOutputParser.REASON_NO_OBJECT),
+                Arguments.of("prefix [1,2] suffix", ModelOutputParser.REASON_NO_OBJECT),
+                Arguments.of("The empty set {} is a set.", ModelOutputParser.REASON_NO_OBJECT),
                 Arguments.of("{\"a\":1,}", ModelOutputParser.REASON_INVALID_SYNTAX),
                 Arguments.of("{'a':1}", ModelOutputParser.REASON_INVALID_SYNTAX),
                 Arguments.of("```json\n{\"a\":1,}\n```", ModelOutputParser.REASON_INVALID_SYNTAX));
