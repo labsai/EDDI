@@ -170,6 +170,11 @@ public class LlmCircuitBreakers {
         private long probeStartedAt = -1;
         /** Incremented for every probe granted; a ticket settles only its own. */
         private long probeGen;
+        /**
+         * Incremented on every state change; an ALLOW ticket settles only in the cycle
+         * it was granted in.
+         */
+        private long cycle;
         private Failure tripClass;
         private String tripReason;
 
@@ -213,7 +218,7 @@ public class LlmCircuitBreakers {
         synchronized (breaker) {
             switch (breaker.state) {
                 case CLOSED :
-                    return new Ticket(this, breaker, settings, Permit.ALLOW, null, 0);
+                    return new Ticket(this, breaker, settings, Permit.ALLOW, null, breaker.cycle);
                 case OPEN :
                     long waited = now - breaker.openedAt;
                     if (waited < settings.coolDownMs()) {
@@ -271,7 +276,7 @@ public class LlmCircuitBreakers {
             }
             // A turn that started before the breaker opened: its late result must not
             // move an open or half-open breaker; only the probe decides those.
-            if (breaker.state != State.CLOSED) {
+            if (breaker.state != State.CLOSED || breaker.cycle != gen) {
                 return;
             }
             addOutcome(breaker, failure, settings.window());
@@ -316,6 +321,7 @@ public class LlmCircuitBreakers {
     private void transition(Breaker breaker, State to, Failure failure, String reason, Settings settings) {
         State from = breaker.state;
         breaker.state = to;
+        breaker.cycle++;
         if (to == State.OPEN) {
             breaker.tripClass = failure;
             breaker.tripReason = reason;
