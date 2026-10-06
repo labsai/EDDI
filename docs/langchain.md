@@ -1989,7 +1989,7 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 
 **Tools are never re-run.** In tool mode only the **final** model call is re-asked, over a transcript that already holds the tool calls and results. A tool request in the re-asked answer is ignored. Truncation and context-too-long retries are not available in tool mode (the loop reports no finish reason, and shrinking the prompt after tools ran would mean replaying them); empty and invalid-JSON re-asks are.
 
-**Streaming.** A task that may re-ask is **buffered**, not streamed: the tokens of an attempt that is then retried cannot be taken back. The final answer reaches the client once. An SSE event `llm_retry` with `{reason, attempt}` (`reason`: `empty`, `truncated`, `content_filter`, `invalid_json`, `context_too_long`) is sent before each re-ask so a UI can show "retrying…".
+**Streaming.** A task that may re-ask is **buffered**, not streamed: the tokens of an attempt that is then retried cannot be taken back. The final answer reaches the client once. An SSE event `llm_retry` with `{reason, attempt}` (`reason`: `empty`, `truncated`, `content_filter`, `invalid_json`, `schema_mismatch`, `context_too_long`) is sent before each re-ask so a UI can show "retrying…".
 
 **Cost.** Every attempt's tokens are summed into the turn's token usage and cost, so re-asks show up in the audit ledger and in `maxCostPerRun`. The step records `llm:retry:<taskId>` = `{reasks, unresolved}`. Metrics: `eddi.llm.recovery{action=retry|escalate, outcome, trigger}` (see [metrics](metrics.md)).
 

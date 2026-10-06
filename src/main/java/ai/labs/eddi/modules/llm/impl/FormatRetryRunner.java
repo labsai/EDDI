@@ -192,7 +192,7 @@ final class FormatRetryRunner {
      */
     record Policy(Set<Trigger> retryOn, int maxRetries, double truncationFactor, String correctiveMessage, long minAttemptMs,
             Double maxRetryCostUsd, Double inputPricePer1M, Double outputPricePer1M, boolean convertToObject, Integer baseMaxOutputTokens,
-            String responseSchema, List<String> nonBlankFields, String taskId) {
+            String responseSchema, List<String> nonBlankFields, String taskId, String emptyAction) {
 
         /**
          * The policy a task (and optionally a cascade step) runs under, or null when
@@ -236,13 +236,22 @@ final class FormatRetryRunner {
             }
             return new Policy(Set.copyOf(on), retries, validation.getTruncationRetryFactor(), corrective, validation.getMinAttemptMs(),
                     validation.getMaxRetryCostUsd(), inputPricePer1M, outputPricePer1M, convertToObject, baseMaxOutputTokens, responseSchema,
-                    nonBlankFields, taskId);
+                    nonBlankFields, taskId, validation.getOnEmpty());
         }
 
         private static void addIfRetry(Set<Trigger> on, Trigger trigger, String action) {
             if ("retry".equalsIgnoreCase(action)) {
                 on.add(trigger);
             }
+        }
+
+        /**
+         * Whether a blank reply to a JSON task may be re-asked as invalid JSON: not
+         * when {@code onEmpty} is {@code fallback} or {@code error}, which
+         * {@code LlmTask} must get to apply to the blank reply itself.
+         */
+        boolean blankMayBeReaskedAsInvalidJson() {
+            return !"fallback".equalsIgnoreCase(emptyAction) && !"error".equalsIgnoreCase(emptyAction);
         }
 
         boolean retries(Trigger trigger) {
@@ -320,7 +329,9 @@ final class FormatRetryRunner {
         boolean truncationReasked = false;
 
         while (true) {
-            Detection detection = detect(policy, attempt);
+            // A truncation that cannot be re-asked (already done, or no known cap to raise)
+            // must not mask a corrective re-ask for the cut-off JSON it left behind.
+            Detection detection = detect(policy, attempt, !truncationReasked && raisedCap(policy) != null);
             if (detection == null) {
                 return new Outcome(withUsage(attempt, totalUsage), null, null, reasks, messages);
             }
@@ -368,7 +379,7 @@ final class FormatRetryRunner {
             CascadingModelExecutor.mergeTokenUsage(totalUsage, tokenUsage(next));
             CascadingModelExecutor.mergeTokenUsage(retryUsage, tokenUsage(next));
             attempt = next;
-            Detection after = detect(policy, attempt);
+            Detection after = detect(policy, attempt, !truncationReasked && raisedCap(policy) != null);
             count("retry", after == null ? "recovered" : "still_invalid", trigger);
         }
     }
@@ -380,7 +391,8 @@ final class FormatRetryRunner {
      * The first rejected property of the reply whose policy is {@code retry}, or
      * null when the reply is usable (or only fails policies that do not retry).
      */
-    private Detection detect(Policy policy, Attempt attempt) {
+    private Detection detect(Policy policy, Attempt attempt, boolean truncationActionable) {
+        Detection truncation = null;
         String text = attempt.text();
         Map<String, Object> metadata = attempt.metadata();
         Object warning = metadata != null ? metadata.get("warning") : null;
@@ -388,7 +400,10 @@ final class FormatRetryRunner {
             return new Detection(Trigger.EMPTY, "empty reply");
         }
         if (policy.retries(Trigger.TRUNCATION) && "truncated".equals(warning)) {
-            return new Detection(Trigger.TRUNCATION, "truncated reply");
+            truncation = new Detection(Trigger.TRUNCATION, "truncated reply");
+            if (truncationActionable) {
+                return truncation;
+            }
         }
         if (policy.retries(Trigger.CONTENT_FILTER) && "content_filter".equals(warning)) {
             return new Detection(Trigger.CONTENT_FILTER, "filtered reply");
@@ -396,7 +411,7 @@ final class FormatRetryRunner {
         // A blank reply to a JSON task is not usable just because the empty policy does
         // not handle it: it is no object (a re-ask answered with a tool request or an
         // empty completion lands here).
-        if (policy.retries(Trigger.INVALID_JSON) && (text == null || text.isBlank())) {
+        if (policy.retries(Trigger.INVALID_JSON) && policy.blankMayBeReaskedAsInvalidJson() && (text == null || text.isBlank())) {
             return new Detection(Trigger.INVALID_JSON, "empty reply");
         }
         if ((policy.retries(Trigger.INVALID_JSON) || policy.retries(Trigger.SCHEMA_MISMATCH)) && parser != null && text != null
@@ -409,7 +424,9 @@ final class FormatRetryRunner {
                 return new Detection(Trigger.SCHEMA_MISMATCH, outcome.reason());
             }
         }
-        return null;
+        // nothing else wrong: a truncation that cannot be re-asked still ends
+        // unresolved
+        return truncation;
     }
 
     /**

@@ -1183,7 +1183,7 @@ public class LlmTask implements ILifecycleTask {
         // 6. Invalid JSON (convertToObject only): after the parser's own local repair.
         // "retry" was already acted on by the executors; reaching it here means the
         // re-asks (and every cascade step) are spent, so fallbackAction applies.
-        if (convertObject && isNullOrEmpty(responseContent) && "retry".equalsIgnoreCase(validation.getOnInvalidJson())) {
+        if (convertObject && (responseContent == null || responseContent.isBlank()) && "retry".equalsIgnoreCase(validation.getOnInvalidJson())) {
             // retry was spent on a blank reply (see FormatRetryRunner): out of recoveries
             var step = applyValidationAction(validation.getOnInvalidJson(), "invalid_json", "LLM response is empty", responseContent, task,
                     currentStep, templateDataObjects, memory, convertObject);
@@ -1191,7 +1191,7 @@ public class LlmTask implements ILifecycleTask {
                 return step;
             }
             responseContent = step.content();
-        } else if (convertObject && !isNullOrEmpty(responseContent)) {
+        } else if (convertObject && responseContent != null && !responseContent.isBlank()) {
             var parsed = modelOutputParser.parse(responseContent, true, processedParamsSchema, task.getNonBlankFields(), task.getId());
             if (parsed.kind() == ModelOutputParser.Kind.SCHEMA_MISMATCH) {
                 var step = applyValidationAction(validation.getOnSchemaMismatch(), "schema_mismatch",

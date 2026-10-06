@@ -101,7 +101,8 @@ public interface ConversationEventSink {
      *
      * @param reason
      *            why: {@code empty}, {@code truncated}, {@code content_filter},
-     *            {@code invalid_json} or {@code context_too_long}
+     *            {@code invalid_json}, {@code schema_mismatch} or
+     *            {@code context_too_long}
      * @param attempt
      *            1-based number of the re-ask
      */
