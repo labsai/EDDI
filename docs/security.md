@@ -686,6 +686,19 @@ In CI, fuzz tests run as standard JUnit regression tests. For deep coverage-guid
   -Djazzer.instrument=ai.labs.eddi.utils.PathNavigator
 ```
 
+### Secrets in the Container Environment
+
+The image's start script (`run-java.sh`) logs the complete Java command line at startup, built from
+`JAVA_OPTS` and `JAVA_OPTS_APPEND`. It masks only keys whose name contains `password`, and no
+setting disables the line. Never put a credential in a `-D...` system property there. In particular,
+`-Dmongodb.connectionString=...` writes the database user and password into the container log, and
+from there into any log aggregator.
+
+Provide the connection string through the `MONGODB_CONNECTIONSTRING` environment variable, injected
+from a secret store (ECS `secrets`, a Kubernetes `Secret`, Docker secrets). Environment variables
+are not printed by the script. See [Kubernetes](kubernetes.md) for the secret-based layout and
+[Upgrading from 5.x](upgrading-from-5x.md#keep-the-connection-string-out-of-the-java-command-line).
+
 ### Docker Image Security
 
 - Trivy scans the built Docker image for CRITICAL/HIGH CVEs **before** pushing to Docker Hub

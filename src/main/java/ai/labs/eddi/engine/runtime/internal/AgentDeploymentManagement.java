@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
+import ai.labs.eddi.configs.properties.mongo.PropertiesMigrationService;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
@@ -41,6 +42,7 @@ import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -90,6 +92,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final IRuntime runtime;
     private final IWorkflowStore workflowStore;
     private final IRuleSetStore ruleSetStore;
+    /**
+     * The legacy-properties migration. Field-injected (and null in plain unit
+     * tests) so the constructor keeps its shape; absent means nothing to migrate.
+     */
+    @Inject
+    Instance<PropertiesMigrationService> propertiesMigrationInstance;
     private final int maximumLifeTimeOfIdleConversationsInDays;
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(AgentDeploymentManagement.class);
@@ -282,6 +290,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (Exception e) {
             LOGGER.error("V6 rename migration failed — will retry on next startup", e);
         }
+        runPropertiesMigration();
         // E3: the document-level migrations read the v6 collections the rename
         // migration creates. Running them while it is still pending (it failed above,
         // or its log could not be read) let each one scan empty collections, find
@@ -325,6 +334,25 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             }
             reportReady();
         });
+    }
+
+    /**
+     * Moves the legacy 5.x {@code properties} documents into the user-memory store.
+     * It runs here, on the scheduler thread, and not on the main thread at startup:
+     * with tens of thousands of documents it blocked HTTP, and so the liveness
+     * probe, for minutes. It sits before the readiness callback and before the
+     * first deployment, so readiness stays DOWN while it runs, and no agent is
+     * deployed (so no conversation can load properties) until it has finished.
+     */
+    private void runPropertiesMigration() {
+        if (propertiesMigrationInstance == null || !propertiesMigrationInstance.isResolvable()) {
+            return;
+        }
+        try {
+            propertiesMigrationInstance.get().runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("Legacy properties migration failed — will retry on next startup", e);
+        }
     }
 
     private void runDocumentMigrations() {

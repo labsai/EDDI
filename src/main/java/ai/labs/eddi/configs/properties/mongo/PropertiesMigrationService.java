@@ -8,12 +8,11 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
+import ai.labs.eddi.utils.ProgressLogger;
 import com.mongodb.MongoNamespace;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.bson.Document;
@@ -85,6 +84,7 @@ public class PropertiesMigrationService {
     private final String datastoreType;
     private final SecretScrubber secretScrubber;
     private final Set<String> skipKeys;
+    private volatile boolean running;
 
     @Inject
     public PropertiesMigrationService(MongoDatabase database, IUserMemoryStore userMemoryStore,
@@ -250,15 +250,36 @@ public class PropertiesMigrationService {
         return false;
     }
 
-    void onStartup(@Observes StartupEvent event) {
+    /**
+     * Whether the migration is running right now. Readiness stays DOWN while it is:
+     * {@code AgentDeploymentManagement} runs it before it reports ready and before
+     * it deploys any agent, so no conversation can load the long-term properties
+     * while they are half moved.
+     */
+    public boolean isRunning() {
+        return running;
+    }
+
+    /**
+     * Runs the migration if there is one to run. Called by
+     * {@code AgentDeploymentManagement} on the scheduler thread, never on the main
+     * thread: on a database with tens of thousands of legacy documents it takes
+     * minutes, and the main thread is the one that has to answer the liveness
+     * probe. Failures are logged and retried on the next start; they never
+     * propagate.
+     */
+    public void runIfNeeded() {
         if (!"mongodb".equals(datastoreType)) {
             LOGGER.debug("[MIGRATION] Skipping properties migration — not in MongoDB mode");
             return;
         }
+        running = true;
         try {
             migrateIfNeeded();
         } catch (Exception e) {
             LOGGER.error("[MIGRATION] Failed to migrate legacy properties — will retry on next startup", e);
+        } finally {
+            running = false;
         }
     }
 
@@ -294,7 +315,9 @@ public class PropertiesMigrationService {
         Map<String, Integer> skippedByConfig = new TreeMap<>();
         Map<String, Integer> skippedAsCredential = new TreeMap<>();
 
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "legacy properties (of " + docCount + " documents)");
         for (Document doc : legacyCollection.find()) {
+            progress.advance();
             String userId = doc.getString("userId");
             if (userId == null) {
                 // Not a failure: a document with no owner can never be migrated, on this

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.utils.ProgressLogger;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
@@ -506,7 +507,9 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "agents");
         for (Document doc : collection == null ? List.<Document>of() : collection.find()) {
+            progress.advance();
             boolean changed = false;
 
             for (String[] mapping : AGENT_FIELD_RENAMES) {
@@ -533,6 +536,7 @@ public class V6RenameMigration {
             return new MigrationResult(migrated, failed).plus(unread);
         }
         for (Document doc : historyCollection == null ? List.<Document>of() : historyCollection.find()) {
+            progress.advance();
             boolean changed = false;
             for (String[] mapping : AGENT_FIELD_RENAMES) {
                 if (doc.containsKey(mapping[0])) {
@@ -574,7 +578,9 @@ public class V6RenameMigration {
                 || collectionName.equals(COLLECTION_WORKFLOWS + ".history");
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "documents");
         for (Document doc : collection.find()) {
+            progress.advance();
             boolean stepTypesRewritten = isWorkflowCollection && rewriteStepTypes(doc);
             Document rewritten = rewriteUrisInDocument(doc);
             if (rewritten != null || stepTypesRewritten) {
@@ -637,7 +643,9 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "documents");
         for (Document doc : collection.find()) {
+            progress.advance();
             Document rewritten = rewriteUrisInDocument(doc);
             if (rewritten != null) {
                 if (saveDocument(collection, doc, collectionName.endsWith(".history"))) {
@@ -811,7 +819,9 @@ public class V6RenameMigration {
         bumpRevision(set);
         long migrated;
         try {
-            migrated = collection.updateMany(or(holdsV5Step), List.of(new Document("$set", set))).getModifiedCount();
+            try (ProgressLogger.Heartbeat heartbeat = ProgressLogger.every10Seconds(LOGGER, "conversationmemories step shape").startHeartbeat()) {
+                migrated = collection.updateMany(or(holdsV5Step), List.of(new Document("$set", set))).getModifiedCount();
+            }
         } catch (Exception e) {
             LOGGER.errorf("  %s: the conversation steps could not be renamed (%s → %s) — counted as a failure, so the "
                     + "migration is NOT recorded as complete and runs again on the next start: %s", COLLECTION_CONVERSATIONS,
@@ -943,8 +953,10 @@ public class V6RenameMigration {
 
         long migrated;
         try {
-            migrated = collection.updateMany(and(or(v5Shaped), nor(ambiguous)),
-                    List.of(new Document("$set", set), new Document("$unset", v5Fields))).getModifiedCount();
+            try (ProgressLogger.Heartbeat heartbeat = ProgressLogger.every10Seconds(LOGGER, "conversationmemories field names").startHeartbeat()) {
+                migrated = collection.updateMany(and(or(v5Shaped), nor(ambiguous)),
+                        List.of(new Document("$set", set), new Document("$unset", v5Fields))).getModifiedCount();
+            }
         } catch (Exception e) {
             LOGGER.errorf("  %s: the v5 field names could not be migrated — counted as a failure, so the migration is NOT "
                     + "recorded as complete and runs again on the next start: %s", COLLECTION_CONVERSATIONS, e.toString());
@@ -1157,8 +1169,11 @@ public class V6RenameMigration {
 
         long migrated;
         try {
-            migrated = collection.updateMany(and(v5Shaped, nor(ambiguous)), List.of(new Document("$set", set),
-                    new Document("$unset", List.of(FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_NAME_V5)))).getModifiedCount();
+            try (ProgressLogger.Heartbeat heartbeat = ProgressLogger.every10Seconds(LOGGER, "conversation descriptors field names")
+                    .startHeartbeat()) {
+                migrated = collection.updateMany(and(v5Shaped, nor(ambiguous)), List.of(new Document("$set", set),
+                        new Document("$unset", List.of(FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_NAME_V5)))).getModifiedCount();
+            }
         } catch (Exception e) {
             LOGGER.errorf("  %s: the v5 field names of the conversation descriptors could not be renamed — counted as a "
                     + "failure, so this runs again on the next start: %s", collectionName, e.toString());
@@ -1331,7 +1346,9 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "agent triggers");
         for (Document trigger : collection.find(exists(FIELD_BOT_DEPLOYMENTS))) {
+            progress.advance();
             Object intent = trigger.get("intent");
             if (trigger.containsKey(FIELD_AGENT_DEPLOYMENTS)) {
                 LOGGER.warnf("  %s: the trigger for intent '%s' holds both '%s' and '%s' — left unchanged; merge them by hand",
@@ -1450,9 +1467,11 @@ public class V6RenameMigration {
 
         long migrated;
         try {
-            migrated = collection.updateMany(v5Shaped, List.of(
-                    new Document("$set", new Document(FIELD_AGENT_ID, agentId).append(FIELD_ENVIRONMENT, environment)),
-                    new Document("$unset", FIELD_BOT_ID))).getModifiedCount();
+            try (ProgressLogger.Heartbeat heartbeat = ProgressLogger.every10Seconds(LOGGER, "user conversations").startHeartbeat()) {
+                migrated = collection.updateMany(v5Shaped, List.of(
+                        new Document("$set", new Document(FIELD_AGENT_ID, agentId).append(FIELD_ENVIRONMENT, environment)),
+                        new Document("$unset", FIELD_BOT_ID))).getModifiedCount();
+            }
         } catch (Exception e) {
             LOGGER.errorf("  %s could not be migrated — counted as a failure, so the migration is NOT recorded as complete "
                     + "and runs again on the next start: %s", COLLECTION_USER_CONVERSATIONS, e.toString());
@@ -1505,7 +1524,9 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "documents");
         for (Document doc : collection.find()) {
+            progress.advance();
             boolean changed = false;
 
             // Rename old field names (e.g., botId → agentId, botVersion → agentVersion)

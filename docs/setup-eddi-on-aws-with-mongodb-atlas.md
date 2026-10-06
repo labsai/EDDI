@@ -70,8 +70,8 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    "essential": true,
    "environment": [
    {
-   "name": "JAVA_OPTS_APPEND",
-   "value": "-Dmongodb.connectionString=mongodb+srv://<user>:<password>@<host>/eddi?retryWrites=true&w=majority -Dmongodb.database=eddi"
+   "name": "MONGODB_DATABASE",
+   "value": "eddi"
    },
    {
    "name": "EDDI_SECURITY_ALLOW_UNAUTHENTICATED",
@@ -84,6 +84,12 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    {
    "name": "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED",
    "value": "true"
+   }
+   ],
+   "secrets": [
+   {
+   "name": "MONGODB_CONNECTIONSTRING",
+   "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:<secret-name>"
    }
    ],
    "mountPoints": [],
@@ -99,11 +105,12 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    "healthCheck": {
    "command": [
    "CMD-SHELL",
-   "curl -f http://localhost:7070/q/health || exit 1"
+   "curl -f http://localhost:7070/q/health/live || exit 1"
    ],
    "interval": 30,
    "timeout": 5,
-   "retries": 3
+   "retries": 3,
+   "startPeriod": 300
    }
    }
    ],
