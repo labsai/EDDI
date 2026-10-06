@@ -167,6 +167,13 @@ export interface LlmTask {
    */
   onError?: TaskOnError;
   /**
+   * Top-level or dotted fields (`"htmlResponseText"`, `"answer.text"`) of the
+   * parsed `convertToObject` reply that must hold a non-blank string. A
+   * violation is outcome `schema_mismatch`; the parsed object is still stored.
+   * Independent of `responseValidation.enabled`.
+   */
+  nonBlankFields?: string[];
+  /**
    * Timeout (seconds) for streaming chat completions. Overrides the engine
    * default (120s). Only applies while streaming is active.
    */

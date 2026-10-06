@@ -489,6 +489,19 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private String jsonResponseFormat;
 
+        /**
+         * Fields of the parsed {@code convertToObject} reply that must hold a non-blank
+         * string — top-level ({@code htmlResponseText}) or dotted
+         * ({@code answer.text}). A missing, non-string or blank ({@code ""}) value is a
+         * shape violation (outcome {@code schema_mismatch}), the shortcut for "an empty
+         * bubble is not an answer" without writing a {@code responseSchema}. Null or
+         * empty (default) checks nothing; it is independent of
+         * {@code responseValidation.enabled}.
+         *
+         * @since 6.6.0
+         */
+        private List<String> nonBlankFields;
+
         // === Multi-Model Cascade ===
 
         /**
@@ -990,6 +1003,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setJsonResponseFormat(String jsonResponseFormat) {
             this.jsonResponseFormat = jsonResponseFormat;
+        }
+
+        public List<String> getNonBlankFields() {
+            return nonBlankFields;
+        }
+
+        public void setNonBlankFields(List<String> nonBlankFields) {
+            this.nonBlankFields = nonBlankFields != null ? new ArrayList<>(nonBlankFields) : null;
         }
 
         public ModelCascadeConfig getModelCascade() {

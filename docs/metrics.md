@@ -455,7 +455,7 @@ expensive one.
 
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
-eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty)
+eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty|schema_mismatch)
 eddi_llm_recovery_total                     # Recovery actions of the LLM task; tags: action, outcome, trigger
                                             #   action=fallback, outcome=served,  trigger=onError|validation   (a turn answered with the configured fallback)
                                             #   action=retry,    outcome=recovered|still_invalid|failed|skipped_budget|skipped_no_time|skipped_cost|skipped_breaker,

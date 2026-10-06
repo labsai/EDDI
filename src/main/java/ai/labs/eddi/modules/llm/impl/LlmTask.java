@@ -96,6 +96,8 @@ public class LlmTask implements ILifecycleTask {
      * format recovery.
      */
     static final String KEY_RETRY = "llm:retry:";
+    /** Why the outcome is not valid ({@code invalid}, {@code schema_mismatch}). */
+    static final String KEY_OUTPUT_REASON = "llm:output:reason:";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
     private static final String KEY_RESPONSE_SCHEMA = "responseSchema";
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
@@ -508,7 +510,8 @@ public class LlmTask implements ILifecycleTask {
         // together. Every execution mode below gets the same policy, so a tool-enabled
         // or streaming agent is no longer silently downgraded to prompt-only JSON.
         boolean jsonMode = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
-        var jsonPolicy = JsonResponseFormatPolicy.of(jsonMode, resolvedType, task.getJsonResponseFormat());
+        var jsonPolicy = JsonResponseFormatPolicy.of(jsonMode, resolvedType, task.getJsonResponseFormat(),
+                processedParams.get(KEY_RESPONSE_SCHEMA));
 
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
@@ -766,7 +769,8 @@ public class LlmTask implements ILifecycleTask {
             // already the Map the postResponse templates expect.
             templateDataObjects.put(responseObjectName, fallbackServed.object());
         } else if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep));
+            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep,
+                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields()));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -1313,9 +1317,24 @@ public class LlmTask implements ILifecycleTask {
      * snapshots.
      */
     Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep) {
-        ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true);
+        return convertResponseToObject(responseContent, taskId, currentStep, null, null);
+    }
+
+    /**
+     * As above, then checks the parsed object against the task's
+     * {@code responseSchema} parameter and {@code nonBlankFields}. A violation is
+     * outcome {@code schema_mismatch}: the <em>parsed</em> object is still stored
+     * (templates that worked on a partially valid object keep working), the
+     * EDDI-generated reason goes under {@code llm:output:reason:<taskId>}, and the
+     * response-validation policy (not this method) decides what to do about it.
+     */
+    Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep, String responseSchema,
+                                   List<String> nonBlankFields) {
+        ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true, responseSchema, nonBlankFields, taskId);
         String label = outcome.label();
         switch (outcome.kind()) {
+            case SCHEMA_MISMATCH -> LOGGER.warnf("convertToObject=true but the response of task '%s' does not match the expected shape (%s)",
+                    taskId, outcome.reason());
             case INVALID -> LOGGER.warnf("convertToObject=true but the response of task '%s' is not valid JSON (%s), storing as string", taskId,
                     outcome.reason());
             case EMPTY -> LOGGER.warnf("convertToObject=true but the response of task '%s' is empty, storing as string", taskId);
@@ -1327,6 +1346,9 @@ public class LlmTask implements ILifecycleTask {
         }
         if (currentStep != null) {
             currentStep.storeData(dataFactory.createData(KEY_OUTPUT_OUTCOME + taskId, label));
+            if (outcome.reason() != null) {
+                currentStep.storeData(dataFactory.createData(KEY_OUTPUT_REASON + taskId, outcome.reason()));
+            }
         }
         if (meterRegistry != null) {
             meterRegistry.counter("eddi.llm.output", "outcome", label).increment();
@@ -1423,7 +1445,7 @@ public class LlmTask implements ILifecycleTask {
         // Same JSON policy the live loop would have applied — a resumed continuation
         // must not silently lose the API-level JSON the paused turn was running with.
         var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
-                task.getJsonResponseFormat());
+                task.getJsonResponseFormat(), processedParams.get(KEY_RESPONSE_SCHEMA));
 
         // Stream the continuation's model rounds too. Replayed transcript rounds
         // never call the model, so the bridge only ever forwards NEW tokens — text
@@ -1474,7 +1496,8 @@ public class LlmTask implements ILifecycleTask {
         currentStep.storeData(langchainData);
 
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep));
+            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep,
+                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields()));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }

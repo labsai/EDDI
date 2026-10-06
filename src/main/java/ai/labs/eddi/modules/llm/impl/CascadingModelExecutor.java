@@ -453,7 +453,8 @@ class CascadingModelExecutor {
                 // Per-step policy: the provider is the STEP's provider, not the task
                 // default, so an escalation from e.g. mistral to gemini stops sending the
                 // JSON format the moment it would be paired with tools.
-                var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat());
+                var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat(),
+                        baseParams.get("responseSchema"));
 
                 // Time this step still has for another attempt: its own timeout, and the
                 // turn's remaining time (R1 feeds turnBudget).
