@@ -6,6 +6,9 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.shared.FailureClass;
+import ai.labs.eddi.configs.shared.LlmFailure;
+import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -91,10 +94,24 @@ class CascadingModelExecutor {
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final MeterRegistry meterRegistry;
     private final CallerIdentityContext callerIdentityContext;
+    private final FormatRetryRunner formatRetryRunner;
+    /**
+     * Hook for the circuit breaker (R8): whether a same-model format re-ask may
+     * proceed. Defaults to always.
+     */
+    private volatile FormatRetryRunner.ReaskGate reaskGate = FormatRetryRunner.ReaskGate.ALWAYS;
 
     CascadingModelExecutor(ChatModelRegistry registry, GlobalVariableResolver globalVariableResolver, ITemplatingEngine templatingEngine,
             LegacyChatExecutor legacyChatExecutor, StreamingLegacyChatExecutor streamingLegacyChatExecutor, MeterRegistry meterRegistry,
             CallerIdentityContext callerIdentityContext) {
+        this(registry, globalVariableResolver, templatingEngine, legacyChatExecutor, streamingLegacyChatExecutor, meterRegistry,
+                callerIdentityContext, new FormatRetryRunner(null, meterRegistry));
+    }
+
+    CascadingModelExecutor(ChatModelRegistry registry, GlobalVariableResolver globalVariableResolver, ITemplatingEngine templatingEngine,
+            LegacyChatExecutor legacyChatExecutor, StreamingLegacyChatExecutor streamingLegacyChatExecutor, MeterRegistry meterRegistry,
+            CallerIdentityContext callerIdentityContext, FormatRetryRunner formatRetryRunner) {
+        this.formatRetryRunner = formatRetryRunner;
         this.registry = registry;
         this.globalVariableResolver = globalVariableResolver;
         this.templatingEngine = templatingEngine;
@@ -102,6 +119,22 @@ class CascadingModelExecutor {
         this.streamingLegacyChatExecutor = streamingLegacyChatExecutor;
         this.meterRegistry = meterRegistry;
         this.callerIdentityContext = callerIdentityContext;
+    }
+
+    void setReaskGate(FormatRetryRunner.ReaskGate reaskGate) {
+        this.reaskGate = reaskGate != null ? reaskGate : FormatRetryRunner.ReaskGate.ALWAYS;
+    }
+
+    /**
+     * What one step needs to recover from an unusable reply on its own model (R5):
+     * the policy, the time the step has left for another attempt, the way to
+     * rebuild a smaller prompt, and where to announce a re-ask. {@code null} policy
+     * means no {@code "retry"} policy applies to the step.
+     */
+    private record StepRecovery(FormatRetryRunner.Policy policy, FormatRetryRunner.RemainingBudget budget,
+            FormatRetryRunner.ContextShrinker shrinker, FormatRetryRunner.ReaskListener listener) {
+        static final StepRecovery NONE = new StepRecovery(null, FormatRetryRunner.RemainingBudget.UNBOUNDED, null,
+                FormatRetryRunner.ReaskListener.NONE);
     }
 
     /**
@@ -225,7 +258,32 @@ class CascadingModelExecutor {
                           ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
-                convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
+                convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, null,
+                FormatRetryRunner.RemainingBudget.UNBOUNDED);
+    }
+
+    /**
+     * As above, additionally giving a step the means to recover from an unusable
+     * reply on its own model (R5).
+     *
+     * @param contextShrinker
+     *            rebuilds the prompt with a halved history window for the
+     *            {@code onContextTooLong: "retry"} policy; null disables that retry
+     * @param turnBudget
+     *            the time left for the whole turn, combined with each step's own
+     *            timeout when deciding whether a re-ask still fits. This is the
+     *            hook the turn deadline (R1) feeds; pass
+     *            {@link FormatRetryRunner.RemainingBudget#UNBOUNDED} until then
+     */
+    CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
+                          LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
+                          Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
+                          ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
+                          FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget)
+            throws LifecycleException {
+        return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
+                convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
+                turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED);
     }
 
     /**
@@ -238,13 +296,15 @@ class CascadingModelExecutor {
                           Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming)
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
-                convertToObject, allowLiveStreaming, null, -1, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT);
+                convertToObject, allowLiveStreaming, null, -1, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT, null,
+                FormatRetryRunner.RemainingBudget.UNBOUNDED);
     }
 
     private CascadeResult doExecute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
                                     LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                     Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
-                                    ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
+                                    ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
+                                    FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget)
             throws LifecycleException {
 
         List<CascadeStep> steps = cascade.getSteps();
@@ -357,7 +417,16 @@ class CascadingModelExecutor {
                 // streamedLive so LlmTask does not re-emit); there is no equivalent
                 // recovery for a mid-cascade step, and this executor cannot un-send tokens.
                 // So only the last step streams live; every earlier step is buffered.
-                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode
+                // R5: a step that may re-ask its model must not stream: the tokens of an
+                // attempt that is then retried cannot be taken back. It is buffered and
+                // emitted once by the caller.
+                FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), step.getMaxFormatRetries(),
+                        convertToObject, FormatRetryRunner.resolveBaseMaxOutputTokens(mergedParams, modelType),
+                        step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M(),
+                        step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M(),
+                        // the step's merged params, so a step-level responseSchema override applies
+                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
+                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept && isLastStep;
                 StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
@@ -386,13 +455,27 @@ class CascadingModelExecutor {
                 // Per-step policy: the provider is the STEP's provider, not the task
                 // default, so an escalation from e.g. mistral to gemini stops sending the
                 // JSON format the moment it would be paired with tools.
-                var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat());
+                var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat(),
+                        mergedParams.get("responseSchema"));
+
+                // Time this step still has for another attempt: its own timeout, and the
+                // turn's remaining time (R1 feeds turnBudget).
+                var stepRecovery = retryPolicy == null
+                        ? StepRecovery.NONE
+                        : new StepRecovery(retryPolicy,
+                                FormatRetryRunner.RemainingBudget.until(System.currentTimeMillis() + stepTimeout).min(turnBudget),
+                                contextShrinker,
+                                (trigger, attempt) -> {
+                                    if (eventSink != null) {
+                                        eventSink.onLlmRetry(trigger.label(), attempt);
+                                    }
+                                });
 
                 StepResult stepResult;
                 try {
                     stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
                             memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
-                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange);
+                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange, stepRecovery);
                 } catch (Exception carriedRejected) {
                     if (!rejectedCarriedExchange(carriedRejected, carried)) {
                         throw carriedRejected;
@@ -414,7 +497,7 @@ class CascadingModelExecutor {
                     stepExchange = new ToolExchangeRecorder();
                     stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
                             memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
-                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange);
+                            effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange, stepRecovery);
                 }
 
                 long durationMs = System.currentTimeMillis() - stepStart;
@@ -462,13 +545,53 @@ class CascadingModelExecutor {
                 boolean stepTimedOut = stepResult.responseMetadata != null
                         && Boolean.TRUE.equals(stepResult.responseMetadata.get("streamingTimeout"));
 
-                if (!stepTimedOut && (bestSoFar == null || stepResult.confidence > bestSoFar.confidence())) {
-                    bestSoFar = new CascadeResult(stepResult.response, stepResult.confidence, i, modelType, modelName, stepResult.tokenUsage, 0.0,
+                // R5: a reply the step's retry policy rejected (and its re-asks could not
+                // fix) is a candidate of last resort only: it ranks below any usable answer.
+                FormatRetryRunner.Trigger unusable = stepResult.unresolved;
+                double rankedConfidence = unusable != null ? 0.0 : stepResult.confidence;
+                if (unusable != null) {
+                    stepTrace.put("invalidOutput", unusable.label());
+                    stepTrace.put("formatRetries", stepResult.reasks);
+                }
+
+                if (!stepTimedOut && (bestSoFar == null || rankedConfidence > bestSoFar.confidence())) {
+                    bestSoFar = new CascadeResult(stepResult.response, rankedConfidence, i, modelType, modelName, stepResult.tokenUsage, 0.0,
                             0.0, trace, stepResult.agentResult, stepResult.streamedLive, stepResult.responseMetadata);
+                }
+
+                if (unusable != null && !stepTimedOut) {
+                    if (!isLastStep) {
+                        // Same model first (done inside the step), then the next model.
+                        stepTrace.put("status", "escalated");
+                        stepTrace.put("reason", "invalid_output");
+                        trace.add(stepTrace);
+                        increment("eddi.llm.cascade.escalations", "reason", "invalid_output");
+                        formatRetryRunner.count("escalate", "invalid_output", unusable);
+                        LOGGER.warnf("Cascade step %d (%s) produced an unusable reply (%s) after %d re-ask(s), escalating", i, modelName,
+                                unusable.label(), stepResult.reasks);
+                        if (eventSink != null) {
+                            eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
+                                    "invalid_output", durationMs);
+                        }
+                        continue;
+                    }
+                    // Last step unusable: an earlier step's usable answer beats it.
+                    if (bestSoFar != null && bestSoFar.stepUsed() != i && bestSoFar.confidence() > 0.0) {
+                        stepTrace.put("status", "superseded_by_best");
+                        trace.add(stepTrace);
+                        for (Map<String, Object> entry : trace) {
+                            if (Integer.valueOf(bestSoFar.stepUsed()).equals(entry.get("step"))) {
+                                entry.put("status", "accepted_as_best");
+                            }
+                        }
+                        increment("eddi.llm.cascade.accepted.step", "step", String.valueOf(bestSoFar.stepUsed()));
+                        return withRun(bestSoFar, totals, trace);
+                    }
                 }
 
                 if (stepTimedOut && bestSoFar != null) {
                     stepTrace.put("status", "timeout");
+                    recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "streaming timeout"), modelName);
                     trace.add(stepTrace);
                     increment("eddi.llm.cascade.escalations", "reason", "timeout");
                     increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
@@ -539,6 +662,7 @@ class CascadingModelExecutor {
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("status", "timeout");
                 stepTrace.put("durationMs", durationMs);
+                recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "cascade step timeout"), modelName);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): timeout after %dms", i, modelName, durationMs));
                 increment("eddi.llm.cascade.escalations", "reason", "timeout");
@@ -588,11 +712,13 @@ class CascadingModelExecutor {
                     carryCompletedExchange(cascade, totals, carried, stepExchange, stepTrace);
                 }
                 long durationMs = System.currentTimeMillis() - stepStart;
-                String errorType = isRetryableError(e) ? "retryable_error" : "error";
+                LlmFailure failure = LlmFailureClassifier.classify(e);
+                String errorType = failure.isRetryable() ? "retryable_error" : "error";
                 String failureDescription = describeFailure(e);
                 stepTrace.put("status", errorType);
                 stepTrace.put("error", failureDescription);
                 stepTrace.put("durationMs", durationMs);
+                recordFailure(stepTrace, failure, modelName);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): %s", i, modelName, failureDescription));
                 increment("eddi.llm.cascade.escalations", "reason", errorType);
@@ -866,7 +992,8 @@ class CascadingModelExecutor {
                                               IAgentOrchestrator agentOrchestrator, boolean useAgentMode, ChatModel judgeModel,
                                               HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy, long timeoutMs,
                                               ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
-                                              List<ChatMessage> carriedToolExchange, ToolExchangeRecorder stepExchange)
+                                              List<ChatMessage> carriedToolExchange, ToolExchangeRecorder stepExchange,
+                                              StepRecovery recovery)
             throws Exception {
 
         // A cascade step runs on a virtual thread, so the caller binding on the
@@ -876,10 +1003,11 @@ class CascadingModelExecutor {
         Future<StepResult> future = TIMEOUT_EXECUTOR.submit(callerIdentityContext.propagate(() -> {
             if (useAgentMode) {
                 return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
-                        heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange, stepExchange);
+                        heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange, stepExchange,
+                        recovery);
             } else {
                 return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
-                        heuristicConfig, jsonPolicy);
+                        heuristicConfig, jsonPolicy, recovery);
             }
         }));
 
@@ -906,7 +1034,7 @@ class CascadingModelExecutor {
     private StepResult executeLegacyModeStep(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
                                              List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                              LlmConfiguration.Task task, ChatModel judgeModel, HeuristicConfig heuristicConfig,
-                                             JsonResponseFormatPolicy jsonPolicy)
+                                             JsonResponseFormatPolicy jsonPolicy, StepRecovery recovery)
             throws LifecycleException {
 
         // The structured_output wrapper only applies in legacy mode; it never co-occurs
@@ -922,7 +1050,26 @@ class CascadingModelExecutor {
         Map<String, Object> tokenUsage;
         Map<String, Object> responseMetadata;
         boolean streamedLive = false;
-        if (streamingModel != null && eventSink != null) {
+        FormatRetryRunner.Trigger unresolved = null;
+        int reasks = 0;
+        if (recovery.policy() != null && streamingModel == null) {
+            // R5: the model gets to fix its own reply before the cascade moves on.
+            FormatRetryRunner.ContextShrinker shrinker = recovery.shrinker() == null ? null : () -> {
+                List<ChatMessage> smaller = recovery.shrinker().shrink();
+                return smaller != null && "structured_output".equals(evaluationStrategy)
+                        ? augmentMessagesForStructuredOutput(smaller, systemMessage)
+                        : smaller;
+            };
+            var outcome = formatRetryRunner.run(recovery.policy(), messages, (msgs, maxTokens) -> {
+                var r = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens);
+                return new FormatRetryRunner.Attempt(r.response() != null ? r.response() : "", r.responseMetadata());
+            }, shrinker, recovery.budget(), reaskGate, recovery.listener());
+            responseText = outcome.attempt().text();
+            responseMetadata = outcome.attempt().metadata();
+            tokenUsage = extractTokenUsage(responseMetadata);
+            unresolved = outcome.unresolved();
+            reasks = outcome.reasks();
+        } else if (streamingModel != null && eventSink != null) {
             // Stream the always-accepted final step live — tokens emitted via the sink.
             var streamResult = streamingLegacyChatExecutor.executeCapturing(streamingModel, messages, eventSink, task, jsonPolicy);
             responseText = streamResult.response() != null ? streamResult.response() : "";
@@ -938,7 +1085,7 @@ class CascadingModelExecutor {
 
         var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
         return new StepResult(evalResult.response(), evalResult.confidence(), null, tokenUsage, streamedLive, responseMetadata,
-                evalResult.judgeTokenUsage());
+                evalResult.judgeTokenUsage(), unresolved, reasks);
     }
 
     /**
@@ -950,7 +1097,8 @@ class CascadingModelExecutor {
                                             LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                             ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
-                                            List<ChatMessage> carriedToolExchange, ToolExchangeRecorder stepExchange)
+                                            List<ChatMessage> carriedToolExchange, ToolExchangeRecorder stepExchange,
+                                            StepRecovery recovery)
             throws LifecycleException {
 
         // Strip only the leading system message (the orchestrator re-adds
@@ -961,23 +1109,84 @@ class CascadingModelExecutor {
         // re-sends this transcript, so the model sees every call and its result and
         // has no reason to repeat a side effect — the previous behaviour re-ran the
         // whole tool loop from the conversation alone, once per escalation.
+        // The history alone, before the carried exchange joins it: a format re-ask
+        // rebuilds the transcript from this plus the loop's complete tool exchange
+        // (which already contains the carried part).
+        List<ChatMessage> historyOnly = recovery.policy() != null ? List.copyOf(chatMessagesWithoutSystem) : List.of();
         chatMessagesWithoutSystem.addAll(carriedToolExchange);
 
         var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
                 effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, jsonPolicy, stepExchange);
 
         if (agentResult != null) {
+            FormatRetryRunner.Trigger unresolved = null;
+            int reasks = 0;
+            if (recovery.policy() != null) {
+                // Only the FINAL model call is re-asked, over a transcript that already
+                // holds the tool results: the loop (and so every tool) is never re-run.
+                var outcome = reaskToolModeFinalAnswer(chatModel, agentOrchestrator, systemMessage, historyOnly, agentResult, task, memory,
+                        jsonPolicy, recovery);
+                unresolved = outcome.unresolved();
+                reasks = outcome.reasks();
+                if (outcome.reasks() > 0) {
+                    // Keep the loop's own metadata (tool cost); only the token usage now
+                    // includes the re-asks.
+                    Map<String, Object> metadata = new LinkedHashMap<>(agentResult.responseMetadata());
+                    Object usage = outcome.attempt().metadata() != null ? outcome.attempt().metadata().get("tokenUsage") : null;
+                    if (usage != null) {
+                        metadata.put("tokenUsage", usage);
+                    }
+                    agentResult = new AgentOrchestrator.ExecutionResult(outcome.attempt().text(), agentResult.trace(), metadata,
+                            agentResult.toolExchange());
+                }
+            }
             String responseText = agentResult.response();
             Map<String, Object> tokenUsage = extractTokenUsage(agentResult.responseMetadata());
             var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
             return new StepResult(evalResult.response(), evalResult.confidence(), agentResult, tokenUsage, false, agentResult.responseMetadata(),
-                    evalResult.judgeTokenUsage());
+                    evalResult.judgeTokenUsage(), unresolved, reasks);
         }
 
         // Agent mode returned null (no tools enabled) — fall back to legacy (no live
         // stream).
         return executeLegacyModeStep(chatModel, null, null, originalMessages, systemMessage, evaluationStrategy, task, judgeModel, heuristicConfig,
-                jsonPolicy);
+                jsonPolicy, recovery);
+    }
+
+    /**
+     * The R5 recovery for a finished tool loop: re-asks the model once more over
+     * system + history + the loop's tool exchange (+ corrective), through
+     * {@link IAgentOrchestrator#reaskFinalAnswer} — a single model call that
+     * ignores any tool request in the answer, so no tool ever runs twice.
+     */
+    private FormatRetryRunner.Outcome reaskToolModeFinalAnswer(ChatModel chatModel, IAgentOrchestrator orchestrator, String systemMessage,
+                                                               List<ChatMessage> historyOnly, AgentOrchestrator.ExecutionResult agentResult,
+                                                               LlmConfiguration.Task task, IConversationMemory memory,
+                                                               JsonResponseFormatPolicy jsonPolicy, StepRecovery recovery)
+            throws LifecycleException {
+        return formatRetryRunner.resolve(recovery.policy(), new FormatRetryRunner.Attempt(agentResult.response(), agentResult.responseMetadata()),
+                toolTranscript(systemMessage, historyOnly, agentResult.toolExchange()),
+                (msgs, maxTokens) -> {
+                    var reply = orchestrator.reaskFinalAnswer(chatModel, msgs, maxTokens, task, memory, jsonPolicy);
+                    if (reply == null) {
+                        throw new LifecycleException("The tool loop cannot re-ask its final answer");
+                    }
+                    return new FormatRetryRunner.Attempt(reply.response() != null ? reply.response() : "", reply.responseMetadata());
+                }, recovery.budget(), reaskGate, recovery.listener());
+    }
+
+    /**
+     * The message list a tool-mode re-ask starts from: system, history, tool
+     * exchange.
+     */
+    static List<ChatMessage> toolTranscript(String systemMessage, List<ChatMessage> historyOnly, List<ChatMessage> toolExchange) {
+        List<ChatMessage> transcript = new ArrayList<>();
+        if (systemMessage != null && !systemMessage.isEmpty()) {
+            transcript.add(SystemMessage.from(systemMessage));
+        }
+        transcript.addAll(historyOnly);
+        transcript.addAll(toolExchange);
+        return transcript;
     }
 
     @SuppressWarnings("unchecked")
@@ -1205,6 +1414,20 @@ class CascadingModelExecutor {
         }
     }
 
+    /**
+     * Records why a step failed: the failure class and (when the provider gave one)
+     * its retry delay go into the step's trace entry as additive fields, and the
+     * class is counted as {@code eddi.llm.failure{class,model}}. The trace's
+     * existing {@code status}/{@code error} fields are unchanged.
+     */
+    private void recordFailure(Map<String, Object> stepTrace, LlmFailure failure, String modelName) {
+        stepTrace.put("failureClass", failure.cls().name());
+        if (failure.retryAfterMs() != null) {
+            stepTrace.put("retryAfterMs", failure.retryAfterMs());
+        }
+        increment("eddi.llm.failure", "class", failure.cls().name(), "model", isBlank(modelName) ? "unknown" : modelName);
+    }
+
     private void increment(String metric, String... tags) {
         if (meterRegistry != null) {
             meterRegistry.counter(metric, tags).increment();
@@ -1237,6 +1460,7 @@ class CascadingModelExecutor {
      * Internal result of a single cascade step execution.
      */
     private record StepResult(String response, double confidence, AgentOrchestrator.ExecutionResult agentResult, Map<String, Object> tokenUsage,
-            boolean streamedLive, Map<String, Object> responseMetadata, Map<String, Object> judgeTokenUsage) {
+            boolean streamedLive, Map<String, Object> responseMetadata, Map<String, Object> judgeTokenUsage,
+            FormatRetryRunner.Trigger unresolved, int reasks) {
     }
 }

@@ -29,6 +29,12 @@ export interface CascadeStep {
   /** Per-step token pricing overrides (USD per 1M tokens). Must be ≥ 0. */
   inputPricePer1M?: number;
   outputPricePer1M?: number;
+  /**
+   * Overrides `responseValidation.maxRetries` for this step: how many
+   * corrective same-model re-asks it gets before the cascade escalates
+   * (`0..3`; 0 for an expensive last-resort model). Omitted inherits the task.
+   */
+  maxFormatRetries?: number;
 }
 
 /** Judge model for the `judge_model` confidence-evaluation strategy. */
@@ -126,6 +132,8 @@ export interface LlmTask {
     backoffDelayMs?: number;
     backoffMultiplier?: number;
     maxBackoffDelayMs?: number;
+    honorRetryAfter?: boolean;
+    maxRetryAfterMs?: number;
   };
   maxBudgetPerConversation?: number;
   enableCostTracking?: boolean;
@@ -152,6 +160,19 @@ export interface LlmTask {
    * turn against per-signal policies and applies the configured remediation.
    */
   responseValidation?: ResponseValidation;
+  /**
+   * What the task does when its model phase fails outright. `fallback` serves
+   * the configured fallback (see `ResponseValidation.fallbackMessage`) and
+   * completes the turn; `error` (the default) fails it.
+   */
+  onError?: TaskOnError;
+  /**
+   * Top-level or dotted fields (`"htmlResponseText"`, `"answer.text"`) of the
+   * parsed `convertToObject` reply that must hold a non-blank string. A
+   * violation is outcome `schema_mismatch`; the parsed object is still stored.
+   * Independent of `responseValidation.enabled`.
+   */
+  nonBlankFields?: string[];
   /**
    * Timeout (seconds) for streaming chat completions. Overrides the engine
    * default (120s). Only applies while streaming is active.
@@ -188,6 +209,15 @@ export interface LlmTask {
  */
 export type ResponseValidationAction = "ignore" | "warn" | "fallback" | "error";
 
+/**
+ * The policies that can also `retry`: re-ask the same model (up to
+ * `maxRetries`), then escalate to the next cascade step, then apply
+ * `fallbackAction`. `refusal` and `streamingTimeout` do not take it.
+ */
+export type RetryableResponseValidationAction =
+  | ResponseValidationAction
+  | "retry";
+
 /** Ordered action options for response-validation policy selectors. */
 export const RESPONSE_VALIDATION_ACTIONS = [
   "ignore",
@@ -206,15 +236,73 @@ export interface ResponseValidation {
   /** Master switch — validation is only applied when enabled. */
   enabled?: boolean;
   /** Action when the LLM returns an empty or null response. */
-  onEmpty?: ResponseValidationAction;
-  /** Action when the response was truncated (finishReason=LENGTH). */
-  onTruncation?: ResponseValidationAction;
+  onEmpty?: RetryableResponseValidationAction;
+  /**
+   * Action when the response was truncated (finishReason=LENGTH). `retry`
+   * re-asks once with `maxOutputTokens` × `truncationRetryFactor`.
+   */
+  onTruncation?: RetryableResponseValidationAction;
   /** Action when the response was blocked by a content filter. */
-  onContentFilter?: ResponseValidationAction;
+  onContentFilter?: RetryableResponseValidationAction;
+  /**
+   * Action when a `convertToObject` reply is not valid JSON after the local
+   * repair. `retry` re-asks the same model with `correctiveMessage`.
+   * Default `ignore`.
+   */
+  onInvalidJson?: RetryableResponseValidationAction;
+  /**
+   * Action when a reply parses but breaks the response shape (`responseSchema`
+   * or `nonBlankFields`). `retry` re-asks with the violation as the reason;
+   * `ignore`/`warn` keep the parsed object. Default `ignore`.
+   */
+  onSchemaMismatch?: RetryableResponseValidationAction;
+  /**
+   * Action when the prompt exceeds the model's context window. `retry` re-sends
+   * once with the history window halved. Default `error`.
+   */
+  onContextTooLong?: "retry" | "error";
+  /** Same-model re-asks per model / cascade step, 0..3. Default 1. */
+  maxRetries?: number;
+  /** Factor applied to the output-token cap for the truncation re-ask, 1..4. Default 2. */
+  truncationRetryFactor?: number;
+  /**
+   * User message of an invalid-JSON re-ask. `{reason}` is replaced literally
+   * with EDDI's own reason (never model output). Not a template.
+   */
+  correctiveMessage?: string;
+  /** Dollar cap on the re-asks of one model (needs per-1M prices configured). */
+  maxRetryCostUsd?: number;
+  /** A re-ask only starts if at least this many ms remain. Default 3000. */
+  minAttemptMs?: number;
+  /** After every re-ask and cascade step failed: `fallback` (default), `error` or `warn`. */
+  fallbackAction?: "fallback" | "error" | "warn";
   /** Action when the LLM refused to respond (heuristic detection). */
   onRefusal?: ResponseValidationAction;
   /** Action when a streaming response timed out. */
   onStreamingTimeout?: ResponseValidationAction;
+  /**
+   * Template (Qute) rendered with the task's template data and served by the
+   * `fallback` action and by `onError: fallback`. Blank = the default sentence.
+   */
+  fallbackMessage?: string;
+  /**
+   * Under convertToObject, the fallback is stored as
+   * `{"<fallbackField>": "<message>"}` so existing output templates render it.
+   */
+  fallbackField?: string;
+  /** Quick replies added next to the fallback; value/expressions are templates. */
+  fallbackQuickReplies?: FallbackQuickReply[];
+}
+
+export interface FallbackQuickReply {
+  value?: string;
+  expressions?: string;
+  isDefault?: boolean;
+}
+
+/** Task-level failure policy — mirrors backend `LlmConfiguration.OnError`. */
+export interface TaskOnError {
+  action?: "fallback" | "error";
 }
 
 export interface ConversationSummaryConfig {

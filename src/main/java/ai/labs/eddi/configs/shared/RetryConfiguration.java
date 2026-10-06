@@ -6,20 +6,11 @@ package ai.labs.eddi.configs.shared;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import dev.langchain4j.exception.HttpException;
-import dev.langchain4j.exception.NonRetriableException;
-import dev.langchain4j.exception.RetriableException;
-import jakarta.ws.rs.WebApplicationException;
 import org.jboss.logging.Logger;
 
-import java.net.ConnectException;
-import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeoutException;
-import java.util.regex.Pattern;
 
 /**
  * Shared retry configuration and execution utility.
@@ -49,6 +40,41 @@ public class RetryConfiguration {
     private Long backoffDelayMs = 1000L;
     private Double backoffMultiplier = 2.0;
     private Long maxBackoffDelayMs = 10000L;
+
+    /**
+     * When the provider says how long to wait (Gemini {@code RetryInfo.retryDelay},
+     * "try again in 6s"), sleep that long instead of the configured backoff.
+     * Default {@code true}: it only changes the length of a sleep that would happen
+     * anyway, and retrying a rate limit sooner than the provider asked just burns
+     * an attempt.
+     */
+    private Boolean honorRetryAfter = true;
+
+    /**
+     * Longest provider-requested wait this call will sit through. A longer request
+     * ends the retry loop at once — no sleep — so the caller (the model cascade,
+     * the turn deadline) can escalate instead of parking a pipeline thread. Capped
+     * by the engine at {@value #MAX_BACKOFF_CEILING_MS} ms.
+     */
+    private Long maxRetryAfterMs = DEFAULT_MAX_RETRY_AFTER_MS;
+
+    static final long DEFAULT_MAX_RETRY_AFTER_MS = 10_000L;
+
+    public Boolean getHonorRetryAfter() {
+        return honorRetryAfter;
+    }
+
+    public void setHonorRetryAfter(Boolean honorRetryAfter) {
+        this.honorRetryAfter = honorRetryAfter;
+    }
+
+    public Long getMaxRetryAfterMs() {
+        return maxRetryAfterMs;
+    }
+
+    public void setMaxRetryAfterMs(Long maxRetryAfterMs) {
+        this.maxRetryAfterMs = maxRetryAfterMs;
+    }
 
     public Integer getMaxAttempts() {
         return maxAttempts;
@@ -90,7 +116,7 @@ public class RetryConfiguration {
      * Uses exponential backoff: {@code delay * multiplier^(attempt-1)}, capped at
      * {@code maxBackoffDelayMs}. Retryable errors are identified by walking the
      * exception cause chain for known transient error types (timeout, connection,
-     * rate limit, HTTP 429/502/503/504).
+     * rate limit, HTTP 429/500/502/503/504).
      * <p>
      * Config alone cannot hold a pipeline thread indefinitely: attempts are clamped
      * to {@value #MAX_ATTEMPTS_CEILING}, one backoff to
@@ -117,6 +143,38 @@ public class RetryConfiguration {
                                          String actionDescription)
             throws LifecycleException {
         return executeWithRetry(action, retryConfig, actionDescription, new long[1]);
+    }
+
+    /**
+     * Retries a call that has no pipeline retry policy of its own — the judge
+     * model, the summarisers — with the default {@link RetryConfiguration}, and
+     * throws what the action threw. The provider clients are built without library
+     * retries, so every model call needs exactly one retry owner; this gives the
+     * helper callers that do not carry a task {@code retry} block the same default
+     * policy.
+     *
+     * @return the action's result
+     * @throws RuntimeException
+     *             the action's own runtime failure once it is not retryable or the
+     *             attempts are spent (unwrapped, so callers' handling is unchanged)
+     */
+    public static <T> T executeWithDefaultRetry(Callable<T> action, String actionDescription) {
+        return executeWithRetryUnwrapped(action, null, actionDescription);
+    }
+
+    /**
+     * As {@link #executeWithDefaultRetry}, with an explicit (typically tighter)
+     * policy for callers that run inside a time budget of their own.
+     */
+    public static <T> T executeWithRetryUnwrapped(Callable<T> action, RetryConfiguration retryConfig, String actionDescription) {
+        try {
+            return executeWithRetry(action, retryConfig, actionDescription);
+        } catch (LifecycleException e) {
+            if (e.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new IllegalStateException(e.getMessage(), e);
+        }
     }
 
     /**
@@ -182,8 +240,22 @@ public class RetryConfiguration {
                 lastException = e;
 
                 if (attempt < maxAttempts) {
-                    if (isRetryableError(e)) {
-                        long sleepFor = budgetedSleep(currentBackoff, totalBackoff);
+                    LlmFailure failure = LlmFailureClassifier.classify(e);
+                    if (failure.isRetryable()) {
+                        long wanted = currentBackoff;
+                        Long retryAfter = failure.retryAfterMs();
+                        if (retryAfter != null && honorRetryAfter(retryConfig)) {
+                            long cap = effectiveMaxRetryAfterMs(retryConfig);
+                            if (retryAfter > cap) {
+                                // Do not sleep: stop here so the cascade escalates now.
+                                LOGGER.warn(actionDescription + " rate limited; provider asked to wait " + retryAfter
+                                        + "ms which exceeds maxRetryAfterMs=" + cap + "; giving up after " + attempt + " attempt(s)");
+                                throw new LifecycleException(actionDescription + " failed: provider requested a " + retryAfter
+                                        + "ms wait (> maxRetryAfterMs " + cap + "ms) [" + failure.cls() + "]", e);
+                            }
+                            wanted = Math.max(currentBackoff, retryAfter);
+                        }
+                        long sleepFor = budgetedSleep(wanted, totalBackoff);
                         if (sleepFor < 0) {
                             LOGGER.warn(actionDescription + " exhausted its " + MAX_TOTAL_BACKOFF_MS
                                     + "ms retry budget after " + attempt + " attempt(s); giving up");
@@ -292,6 +364,29 @@ public class RetryConfiguration {
         return MAX_BACKOFF_CEILING_MS;
     }
 
+    /** {@code honorRetryAfter}, defaulting to {@code true} when unset. */
+    static boolean honorRetryAfter(RetryConfiguration retryConfig) {
+        return retryConfig == null || retryConfig.getHonorRetryAfter() == null || retryConfig.getHonorRetryAfter();
+    }
+
+    /**
+     * The longest provider-requested wait this call accepts, after the engine
+     * ceiling.
+     *
+     * @see #MAX_BACKOFF_CEILING_MS
+     */
+    static long effectiveMaxRetryAfterMs(RetryConfiguration retryConfig) {
+        long configured = retryConfig != null && retryConfig.getMaxRetryAfterMs() != null
+                ? retryConfig.getMaxRetryAfterMs()
+                : DEFAULT_MAX_RETRY_AFTER_MS;
+        configured = Math.max(0L, configured);
+        if (configured <= MAX_BACKOFF_CEILING_MS) {
+            return configured;
+        }
+        warnClamped("maxRetryAfterMs", configured, MAX_BACKOFF_CEILING_MS);
+        return MAX_BACKOFF_CEILING_MS;
+    }
+
     /**
      * Says once, per distinct clamped value, that a configured retry setting is not
      * being honoured as written.
@@ -370,82 +465,20 @@ public class RetryConfiguration {
     // ==========================
 
     /**
-     * Transient-failure signatures in an exception message — the last resort, for
-     * providers that surface a failure only as prose.
-     * <p>
-     * The union of what the two previous implementations matched.
-     * {@code CascadingModelExecutor} had its own regex that additionally caught
-     * bare status numbers, so the same provider failure was retried on the cascade
-     * path and not on the tool-loop path (or vice versa) depending purely on how
-     * the message happened to be worded. Word boundaries keep {@code 429} from
-     * matching inside an id or a token count.
-     */
-    private static final Pattern RETRYABLE_MESSAGE = Pattern.compile(
-            "timeout|rate limit|too many requests|connection refused|connection reset"
-                    + "|service unavailable|bad gateway|gateway timeout|\\b429\\b|\\b50[234]\\b",
-            Pattern.CASE_INSENSITIVE);
-
-    private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 502, 503, 504);
-
-    /**
      * The single retryable-error verdict for the whole codebase — LLM tool loop,
      * MCP calls and the model cascade all route here.
      *
      * <p>
-     * Order matters. langchain4j's own classification is checked FIRST, because it
-     * is what {@code chatModel.chat()} actually throws and it is authoritative:
-     * {@link RetriableException} (rate limit, provider timeout, 5xx) means retry,
-     * {@link NonRetriableException} (bad request, auth, unknown model) means stop —
-     * and stopping early matters, since a wrapped auth failure whose message merely
-     * mentions a timeout would otherwise be retried until the attempts run out.
-     * Untyped transport exceptions come next, then HTTP status codes, and only then
-     * the message-text fallback.
+     * A thin wrapper over {@link LlmFailureClassifier}: retryable means the failure
+     * classifies as {@link FailureClass#TRANSIENT},
+     * {@link FailureClass#RATE_LIMITED} or {@link FailureClass#TIMEOUT}. Quota
+     * exhaustion is deliberately <em>not</em> retryable even though it is an HTTP
+     * 429. See the classifier for the order of evidence (status and body, typed
+     * langchain4j exceptions over the whole cause chain, transport exceptions, and
+     * only then message wording).
      * </p>
      */
     public static boolean isRetryableError(Exception e) {
-        // Pass 1: langchain4j's typed verdict, over the WHOLE chain, before any
-        // fallback gets a say.
-        //
-        // Running the four signals interleaved down one walk did not implement the
-        // order above — it implemented "outermost exception wins", and the weakest
-        // signal is the one most likely to be present on the outermost wrapper.
-        // new RuntimeException("timeout", new AuthenticationException(...)) matched
-        // the message fallback on the wrapper and returned true, never reaching the
-        // NonRetriableException underneath: precisely the wrapped auth failure this
-        // ordering was written to stop from burning the retry budget.
-        for (Throwable current = e; current != null; current = current.getCause()) {
-            if (current instanceof RetriableException) {
-                return true;
-            }
-            if (current instanceof NonRetriableException) {
-                return false;
-            }
-        }
-
-        for (Throwable current = e; current != null; current = current.getCause()) {
-            // 2. Untyped transport failures
-            if (current instanceof SocketTimeoutException
-                    || current instanceof TimeoutException
-                    || current instanceof ConnectException
-                    || current instanceof UnknownHostException) {
-                return true;
-            }
-
-            // 3. HTTP status code matching from typed exceptions
-            if (current instanceof HttpException httpException && RETRYABLE_STATUS_CODES.contains(httpException.statusCode())) {
-                return true;
-            }
-            if (current instanceof WebApplicationException wae && RETRYABLE_STATUS_CODES.contains(wae.getResponse().getStatus())) {
-                return true;
-            }
-
-            // 4. String-based fallback for wrapped/untyped exceptions
-            String message = current.getMessage();
-            if (message != null && RETRYABLE_MESSAGE.matcher(message).find()) {
-                return true;
-            }
-        }
-
-        return false;
+        return LlmFailureClassifier.classify(e).isRetryable();
     }
 }

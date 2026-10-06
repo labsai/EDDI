@@ -203,6 +203,13 @@ public interface IConversationService {
         default void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
         }
 
+        /**
+         * Called when the LLM task re-asks the same model after an unusable reply.
+         * Default no-op.
+         */
+        default void onLlmRetry(String reason, int attempt) {
+        }
+
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);

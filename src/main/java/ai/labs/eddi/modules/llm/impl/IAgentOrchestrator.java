@@ -83,6 +83,29 @@ interface IAgentOrchestrator {
     }
 
     /**
+     * Asks the model for its final answer once more over a transcript that already
+     * holds the tool results (system, history, the loop's tool exchange, and
+     * usually a corrective user message) — the format re-ask of
+     * {@code responseValidation} in tool mode. <b>It is a single model call: no
+     * tool is executed, and a tool request in the answer is ignored.</b> The tool
+     * specifications are sent only so the transcript stays valid for providers that
+     * require them next to tool-call messages.
+     * <p>
+     * The default returns {@code null} ("cannot re-ask"); the caller then keeps the
+     * reply it has.
+     *
+     * @param maxOutputTokens
+     *            overrides the output-token cap for this request, or null
+     * @return the reply text and metadata (token usage), or null when unsupported
+     */
+    default AgentOrchestrator.ExecutionResult reaskFinalAnswer(ChatModel chatModel, List<ChatMessage> transcript, Integer maxOutputTokens,
+                                                               LlmConfiguration.Task task, IConversationMemory memory,
+                                                               JsonResponseFormatPolicy jsonPolicy)
+            throws LifecycleException {
+        return null;
+    }
+
+    /**
      * Resumes a turn that paused on a gated tool call, applying the human's
      * verdicts and continuing the same loop from the iteration that paused.
      *

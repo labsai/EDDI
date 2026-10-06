@@ -94,6 +94,22 @@ public interface ConversationEventSink {
     }
 
     /**
+     * Called when the LLM task is about to ask the same model again because its
+     * reply was unusable (the {@code retry} action of {@code responseValidation}).
+     * Tokens of the earlier attempt were buffered, not streamed, so a UI can show
+     * "retrying..." without having to retract text.
+     *
+     * @param reason
+     *            why: {@code empty}, {@code truncated}, {@code content_filter},
+     *            {@code invalid_json}, {@code schema_mismatch} or
+     *            {@code context_too_long}
+     * @param attempt
+     *            1-based number of the re-ask
+     */
+    default void onLlmRetry(String reason, int attempt) {
+    }
+
+    /**
      * Called when a pipeline task fails during execution. Provides structured error
      * information for admin monitoring.
      */
