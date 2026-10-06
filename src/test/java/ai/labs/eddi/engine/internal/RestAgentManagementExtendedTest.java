@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import io.quarkus.security.UnauthorizedException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -882,7 +883,7 @@ class RestAgentManagementExtendedTest {
     class CannotCreateConversation {
 
         @Test
-        @DisplayName("non-201 response throws InternalServerErrorException")
+        @DisplayName("non-201 response throws InternalServerErrorException (no NPE)")
         void non201ThrowsError() throws Exception {
             var mgmt = create(false);
 
@@ -895,10 +896,9 @@ class RestAgentManagementExtendedTest {
             when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
                     .thenReturn(Response.status(500).build());
 
-            // Note: The production code has a null-safety gap — when createNewConversation
-            // throws CannotCreateConversationException and the fallback getUserConversation
-            // also returns null, isConversationEnded(null) NPEs. This is expected behavior.
-            assertThrows(NullPointerException.class, () -> mgmt.loadConversationMemory("intent-1", "user-1", "en",
+            // The concurrent-creation fallback finds no conversation either, so the
+            // failure is reported as a 500 rather than dereferencing null.
+            assertThrows(InternalServerErrorException.class, () -> mgmt.loadConversationMemory("intent-1", "user-1", "en",
                     false, false, List.of(), asyncResponse));
         }
     }
