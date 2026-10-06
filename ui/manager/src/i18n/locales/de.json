@@ -3122,7 +3122,8 @@
     "humanTurnTimeoutInvalid": "Keine gültige ISO-8601-Dauer, z. B. PT24H oder P1D.",
     "humanTurnTimeoutLabel": "Zug-Timeout (ISO-8601-Dauer)",
     "humanTurnTimeoutPlaceholder": "z. B. PT24H — leer lassen für unbegrenztes Warten",
-    "memberTypeHuman": "Mensch"
+    "memberTypeHuman": "Mensch",
+    "deployingAgents": "Agenten werden bereitgestellt ..."
   },
   "groupTemplates": {
     "advisoryBoard": "Beratungsgremium",
@@ -5300,6 +5301,15 @@
     "allowAllAndDeploy": "Alle erlauben und bereitstellen",
     "addAndDeploy": "Hinzufügen und bereitstellen",
     "cancelled": "Nicht bereitgestellt — der Vault-Schlüssel wurde nicht freigegeben.",
-    "fix": "Beheben"
+    "fix": "Beheben",
+    "titleMany": "Diesen Agenten sind ihre Vault-Schlüssel nicht freigegeben",
+    "issueMany": "Agenten, die den eingeschränkten Schlüssel \"{{key}}\" verwenden, der nur anderen Agenten freigegeben ist: {{agents}}.",
+    "questionMany": "Alle diese Agenten zur Freigabe hinzufügen?",
+    "nonAdminMany": "Nur ein Administrator kann ändern, wer einen Vault-Schlüssel verwenden darf. Bitten Sie einen, diese Agenten zur Freigabe hinzuzufügen, und stellen Sie sie danach erneut bereit."
+  },
+  "deployMany": {
+    "cancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben. Die Agenten wurden erstellt – versuchen Sie es erneut, um sie freizugeben und bereitzustellen, oder stellen Sie sie auf ihren Agentenseiten bereit.",
+    "failed": "Erstellt, aber nicht bereitgestellt: {{names}}. {{reason}} Versuchen Sie es erneut oder stellen Sie sie auf ihren Agentenseiten bereit.",
+    "memberCancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben"
   }
 }

@@ -3335,7 +3335,8 @@
     "humanTurnTimeoutInvalid": "유효한 ISO-8601 기간이 아닙니다(예: PT24H 또는 P1D).",
     "humanTurnTimeoutLabel": "차례 시간 제한(ISO-8601 기간)",
     "humanTurnTimeoutPlaceholder": "예: PT24H — 비워 두면 무기한 대기",
-    "memberTypeHuman": "사람"
+    "memberTypeHuman": "사람",
+    "deployingAgents": "에이전트를 배포하는 중..."
   },
   "groupTemplates": {
     "advisoryBoard": "자문단",
@@ -5300,6 +5301,15 @@
     "allowAllAndDeploy": "모두 허용하고 배포",
     "addAndDeploy": "추가하고 배포",
     "cancelled": "배포되지 않음 — 볼트 키 권한이 부여되지 않았습니다.",
-    "fix": "수정"
+    "fix": "수정",
+    "titleMany": "이 에이전트들에는 보관함 키가 부여되지 않았습니다",
+    "issueMany": "다른 에이전트에게만 부여된 제한된 키 \"{{key}}\"를 사용하는 에이전트: {{agents}}.",
+    "questionMany": "이 에이전트를 모두 권한에 추가하시겠습니까?",
+    "nonAdminMany": "보관함 키를 사용할 수 있는 대상은 관리자만 변경할 수 있습니다. 관리자에게 이 에이전트들을 권한에 추가해 달라고 요청한 뒤 다시 배포하세요."
+  },
+  "deployMany": {
+    "cancelled": "배포되지 않음: 보관함 키가 부여되지 않았습니다. 에이전트는 생성되었습니다. 다시 시도하여 키를 부여하고 배포하거나, 각 에이전트 페이지에서 배포하세요.",
+    "failed": "생성되었지만 배포되지 않음: {{names}}. {{reason}} 다시 시도하거나 각 에이전트 페이지에서 배포하세요.",
+    "memberCancelled": "배포되지 않음: 보관함 키가 부여되지 않았습니다"
   }
 }

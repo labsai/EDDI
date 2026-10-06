@@ -3372,7 +3372,8 @@
     "humanTurnTimeoutInvalid": "No es una duración ISO-8601 válida, p. ej. PT24H o P1D.",
     "humanTurnTimeoutLabel": "Tiempo de espera del turno (duración ISO-8601)",
     "humanTurnTimeoutPlaceholder": "p. ej. PT24H — en blanco espera indefinidamente",
-    "memberTypeHuman": "Humano"
+    "memberTypeHuman": "Humano",
+    "deployingAgents": "Desplegando los agentes..."
   },
   "groupTemplates": {
     "advisoryBoard": "Consejo asesor",
@@ -5361,6 +5362,15 @@
     "allowAllAndDeploy": "Permitir a todos y desplegar",
     "addAndDeploy": "Añadir y desplegar",
     "cancelled": "No desplegado: la clave del almacén no se autorizó.",
-    "fix": "Corregir"
+    "fix": "Corregir",
+    "titleMany": "Estos agentes no tienen concedidas sus claves del almacén",
+    "issueMany": "Agentes que usan la clave restringida \"{{key}}\", concedida solo a otros agentes: {{agents}}.",
+    "questionMany": "¿Añadir todos estos agentes a la concesión?",
+    "nonAdminMany": "Solo un administrador puede cambiar quién puede usar una clave del almacén. Pídale que añada estos agentes a la concesión y luego despliéguelos de nuevo."
+  },
+  "deployMany": {
+    "cancelled": "No desplegados: no se concedió la clave del almacén. Los agentes se crearon; vuelva a intentarlo para concederla y desplegarlos, o despliéguelos desde sus páginas de agente.",
+    "failed": "Creados pero no desplegados: {{names}}. {{reason}} Vuelva a intentarlo o despliéguelos desde sus páginas de agente.",
+    "memberCancelled": "No desplegado: no se concedió la clave del almacén"
   }
 }

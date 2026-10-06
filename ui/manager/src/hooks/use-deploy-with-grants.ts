@@ -11,6 +11,7 @@ import {
   type GrantEnforcement,
   type PreflightGrantIssue,
 } from "@/lib/api/agents";
+import { getErrorMessage } from "@/lib/api-client";
 import { agentKeys } from "@/lib/query-keys";
 
 /* ─── The grant decision, shared with the one mounted dialog ─── */
@@ -29,6 +30,17 @@ export interface GrantIssue {
   allowedAgents?: string[];
   /** How many agents the grant lists; absent when unknown. */
   allowedAgentCount?: number;
+  /**
+   * The agents of a batch request that need THIS key — absent for a
+   * single-agent request, where it is the request's own agent.
+   */
+  agentIds?: string[];
+}
+
+/** One agent a (batch) grant request covers. */
+export interface GrantAgent {
+  agentId: string;
+  agentName?: string;
 }
 
 /** What the person decided in the dialog. The dialog performs the grant itself before answering `granted`. */
@@ -47,6 +59,13 @@ export interface GrantRequest {
   source: "preflight" | "failure";
   /** The refusal, when `source` is `failure` — its message is shown verbatim. */
   failure?: DeploymentFailure;
+  /**
+   * Set only for a batch request that spans several agents (the wizards that
+   * create a team): every agent the request covers, so the dialog asks ONCE and
+   * a grant adds all of them. `agentId` is then the first of them. Absent for
+   * the ordinary one-agent request, which renders exactly as before.
+   */
+  agents?: GrantAgent[];
 }
 
 interface PendingGrantRequest extends GrantRequest {
@@ -208,7 +227,17 @@ export async function runDeployWithGrants(options: DeployWithGrantsOptions): Pro
     }
   }
 
-  let result = await deployAgentAndWait(environment, options.agentId, options.version, options.signal);
+  return deployAndSettle(base, options.signal);
+}
+
+type DeployBase = Pick<GrantRequest, "agentId" | "agentName" | "version" | "environment">;
+
+/**
+ * Deploy and wait; on a grant refusal the preflight did not predict, ask once
+ * and redeploy. The tail both the single and the batch flow end in.
+ */
+async function deployAndSettle(base: DeployBase, signal?: AbortSignal): Promise<DeployWithGrantsOutcome> {
+  let result = await deployAgentAndWait(base.environment, base.agentId, base.version, signal);
   if (result.status !== "READY" && isGrantFailure(result.failure)) {
     const failure = result.failure;
     const decision = await requestGrantDecision({
@@ -220,7 +249,7 @@ export async function runDeployWithGrants(options: DeployWithGrantsOptions): Pro
     });
     if (decision === "cancel") return { kind: "cancelled", failure };
     if (decision === "granted") {
-      result = await deployAgentAndWait(environment, options.agentId, options.version, options.signal);
+      result = await deployAgentAndWait(base.environment, base.agentId, base.version, signal);
     }
   }
 
@@ -231,6 +260,126 @@ export async function runDeployWithGrants(options: DeployWithGrantsOptions): Pro
     message: result.failure?.message ?? result.error ?? null,
     failure: result.failure,
   };
+}
+
+/* ─── Many agents, one question ─── */
+
+/** An agent to deploy as part of a batch. */
+export interface DeployTarget {
+  agentId: string;
+  version: number;
+  /** Shown in the dialog; the id is used when absent. */
+  agentName?: string;
+}
+
+export interface DeployManyOptions {
+  targets: DeployTarget[];
+  environment?: string;
+  signal?: AbortSignal;
+}
+
+/** What happened to one target of a batch. */
+export interface DeployManyResult {
+  target: DeployTarget;
+  outcome: DeployWithGrantsOutcome;
+}
+
+/**
+ * Merge the preflight issues of several agents by the secret they name — the
+ * `(tenantId, keyName)` pair, or the raw reference when it is not a plain vault
+ * reference — so the person is asked about each key once, with every agent that
+ * needs it listed on it.
+ */
+export function mergeGrantIssues(perAgent: { agentId: string; issues: GrantIssue[] }[]): GrantIssue[] {
+  const merged = new Map<string, GrantIssue>();
+  for (const { agentId, issues } of perAgent) {
+    for (const issue of issues) {
+      const id = issue.tenantId && issue.keyName ? `${issue.tenantId}/${issue.keyName}` : `ref:${issue.reference}`;
+      const existing = merged.get(id);
+      if (!existing) {
+        merged.set(id, { ...issue, agentIds: [agentId] });
+      } else if (!existing.agentIds!.includes(agentId)) {
+        existing.agentIds!.push(agentId);
+      }
+    }
+  }
+  return [...merged.values()];
+}
+
+/**
+ * {@link runDeployWithGrants} for several agents created together: preflight
+ * them all, ask about the keys ONCE (each key listed once, with every agent that
+ * needs it, and one confirmation adds all of them), then deploy each and wait.
+ *
+ * - **Cancel deploys nothing** — every target comes back `cancelled`, including
+ *   the ones that needed no grant, so a team is never left half-live.
+ * - The unexpected refusal (a race, a preflight that could not run) still gets
+ *   its one second chance, per agent, through the ordinary single-agent dialog.
+ * - Targets are deployed one after another: a second dialog would cancel the
+ *   first, and a deploy that waits is not something to fan out.
+ * - A transport error on one target is that target's `failed` outcome, not a
+ *   throw that hides the others.
+ */
+export async function runDeployManyWithGrants(options: DeployManyOptions): Promise<DeployManyResult[]> {
+  const environment = options.environment ?? "production";
+  const targets = options.targets;
+  const baseOf = (target: DeployTarget): DeployBase => ({
+    agentId: target.agentId,
+    agentName: target.agentName,
+    version: target.version,
+    environment,
+  });
+
+  const preflights = await Promise.all(
+    targets.map((target) =>
+      preflightDeploy(environment, target.agentId, target.version).catch((): DeploymentPreflight | null => null),
+    ),
+  );
+  const needing: { target: DeployTarget; preflight: DeploymentPreflight }[] = [];
+  targets.forEach((target, i) => {
+    const preflight = preflights[i];
+    if (preflight && preflight.checked && preflight.enforcement !== "OFF" && preflight.grantIssues.length > 0) {
+      needing.push({ target, preflight });
+    }
+  });
+
+  if (needing.length > 0) {
+    const issues = mergeGrantIssues(
+      needing.map(({ target, preflight }) => ({ agentId: target.agentId, issues: issuesFromPreflight(preflight) })),
+    );
+    const first = needing[0]!.target;
+    const isBatch = needing.length > 1;
+    const decision = await requestGrantDecision({
+      ...baseOf(first),
+      enforcement: needing.some(({ preflight }) => preflight.enforcement === "ENFORCE") ? "ENFORCE" : "WARN",
+      // One agent after all: the dialog's single-agent wording, without agent lists.
+      issues: isBatch ? issues : issues.map((issue) => ({ ...issue, agentIds: undefined })),
+      source: "preflight",
+      ...(isBatch
+        ? { agents: needing.map(({ target }) => ({ agentId: target.agentId, agentName: target.agentName })) }
+        : {}),
+    });
+    if (decision === "cancel") {
+      return targets.map((target) => ({ target, outcome: { kind: "cancelled" as const } }));
+    }
+  }
+
+  const results: DeployManyResult[] = [];
+  for (const target of targets) {
+    let outcome: DeployWithGrantsOutcome;
+    try {
+      outcome = await deployAndSettle(baseOf(target), options.signal);
+    } catch (err) {
+      const message = getErrorMessage(err);
+      outcome = {
+        kind: "failed",
+        result: { status: "ERROR", agentId: target.agentId, version: target.version, environment, error: message },
+        message,
+      };
+    }
+    results.push({ target, outcome });
+  }
+  return results;
 }
 
 /**
@@ -259,5 +408,21 @@ export function useDeployWithGrants() {
     [queryClient],
   );
 
-  return { deploy, isRunning };
+  const deployMany = useCallback(
+    async (options: DeployManyOptions): Promise<DeployManyResult[]> => {
+      runningRef.current += 1;
+      setIsRunning(true);
+      try {
+        return await runDeployManyWithGrants(options);
+      } finally {
+        runningRef.current -= 1;
+        if (runningRef.current === 0) setIsRunning(false);
+        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+        void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+      }
+    },
+    [queryClient],
+  );
+
+  return { deploy, deployMany, isRunning };
 }

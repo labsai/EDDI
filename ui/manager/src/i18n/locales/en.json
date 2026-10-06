@@ -3176,7 +3176,8 @@
     "humanPrincipalId": "Principal ID",
     "humanPrincipalIdPlaceholder": "The user's login/principal id",
     "humanTurnSettingsHint": "The discussion pauses and waits when it's a human member's turn to speak. Choose what happens if they don't respond in time.",
-    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak."
+    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak.",
+    "deployingAgents": "Deploying the agents..."
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -5300,6 +5301,15 @@
     "allowAllAndDeploy": "Allow all and deploy",
     "addAndDeploy": "Add and deploy",
     "cancelled": "Not deployed — the vault key was not granted.",
-    "fix": "Fix"
+    "fix": "Fix",
+    "titleMany": "These agents are not granted their vault keys",
+    "issueMany": "Agents using the restricted key \"{{key}}\", which is granted only to other agents: {{agents}}.",
+    "questionMany": "Add all of these agents to the grant?",
+    "nonAdminMany": "Only an administrator can change who may use a vault key. Ask one to add these agents to the grant, then deploy them again."
+  },
+  "deployMany": {
+    "cancelled": "Not deployed: the vault key was not granted. The agents were created - try again to grant and deploy them, or deploy them from their agent pages.",
+    "failed": "Created but not deployed: {{names}}. {{reason}} Try again, or deploy them from their agent pages.",
+    "memberCancelled": "Not deployed: the vault key was not granted"
   }
 }

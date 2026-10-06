@@ -5,6 +5,7 @@ import {
   isGrantFailure,
   runDeployWithGrants,
   type DeployWithGrantsOptions,
+  type DeployManyResult,
   type DeployWithGrantsOutcome,
 } from "@/hooks/use-deploy-with-grants";
 
@@ -71,5 +72,31 @@ export function reportDeployOutcome(
           onClick: () => void fixGrantAndRedeploy({ ...options, failure }, t, onSettled),
         }
       : undefined,
+  });
+}
+
+/**
+ * The sentence for a batch deploy that left agents un-deployed — what a team
+ * wizard shows instead of "done". Empty when nothing is wrong. The agents DO
+ * exist, so it says so, and how to finish: try again, or deploy from the agent
+ * page.
+ */
+export function describeUndeployed(results: DeployManyResult[], t: TFunction): string {
+  const bad = results.filter((r) => r.outcome.kind !== "deployed");
+  if (bad.length === 0) return "";
+  const failed = bad.filter((r) => r.outcome.kind === "failed");
+  if (failed.length === 0) {
+    return t(
+      "deployMany.cancelled",
+      "Not deployed: the vault key was not granted. The agents were created - try again to grant and deploy them, or deploy them from their agent pages.",
+    );
+  }
+  const names = bad.map((r) => r.target.agentName || r.target.agentId).join(", ");
+  const first = failed[0]!.outcome as Extract<DeployWithGrantsOutcome, { kind: "failed" }>;
+  return t("deployMany.failed", {
+    names,
+    reason: deployFailureMessage(first, t),
+    defaultValue:
+      "Created but not deployed: {{names}}. {{reason}} Try again, or deploy them from their agent pages.",
   });
 }

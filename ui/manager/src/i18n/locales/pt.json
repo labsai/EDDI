@@ -3372,7 +3372,8 @@
     "humanTurnTimeoutInvalid": "Não é uma duração ISO-8601 válida, por exemplo PT24H ou P1D.",
     "humanTurnTimeoutLabel": "Tempo limite da vez (duração ISO-8601)",
     "humanTurnTimeoutPlaceholder": "por ex. PT24H — em branco espera indefinidamente",
-    "memberTypeHuman": "Humano"
+    "memberTypeHuman": "Humano",
+    "deployingAgents": "Implantando os agentes..."
   },
   "groupTemplates": {
     "advisoryBoard": "Conselho consultivo",
@@ -5361,6 +5362,15 @@
     "allowAllAndDeploy": "Permitir a todos e implantar",
     "addAndDeploy": "Adicionar e implantar",
     "cancelled": "Não implantado — a chave do cofre não foi autorizada.",
-    "fix": "Corrigir"
+    "fix": "Corrigir",
+    "titleMany": "Estes agentes não têm concedidas as suas chaves do cofre",
+    "issueMany": "Agentes que usam a chave restrita \"{{key}}\", concedida apenas a outros agentes: {{agents}}.",
+    "questionMany": "Adicionar todos estes agentes à concessão?",
+    "nonAdminMany": "Apenas um administrador pode alterar quem pode usar uma chave do cofre. Peça a um que adicione estes agentes à concessão e depois implante-os novamente."
+  },
+  "deployMany": {
+    "cancelled": "Não implantados: a chave do cofre não foi concedida. Os agentes foram criados; tente novamente para concedê-la e implantá-los, ou implante-os a partir das páginas dos agentes.",
+    "failed": "Criados, mas não implantados: {{names}}. {{reason}} Tente novamente ou implante-os a partir das páginas dos agentes.",
+    "memberCancelled": "Não implantado: a chave do cofre não foi concedida"
   }
 }

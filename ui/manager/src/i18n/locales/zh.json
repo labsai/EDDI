@@ -3335,7 +3335,8 @@
     "humanTurnTimeoutInvalid": "不是有效的 ISO-8601 时长，例如 PT24H 或 P1D。",
     "humanTurnTimeoutLabel": "发言超时（ISO-8601 时长）",
     "humanTurnTimeoutPlaceholder": "例如 PT24H——留空表示无限期等待",
-    "memberTypeHuman": "人类"
+    "memberTypeHuman": "人类",
+    "deployingAgents": "正在部署智能体..."
   },
   "groupTemplates": {
     "advisoryBoard": "顾问团",
@@ -5300,6 +5301,15 @@
     "allowAllAndDeploy": "允许全部并部署",
     "addAndDeploy": "加入并部署",
     "cancelled": "未部署 — 保管库密钥未获授权。",
-    "fix": "修复"
+    "fix": "修复",
+    "titleMany": "这些智能体尚未获得其保管库密钥的授权",
+    "issueMany": "使用受限密钥“{{key}}”的智能体（该密钥仅授权给其他智能体）：{{agents}}。",
+    "questionMany": "将所有这些智能体添加到授权中？",
+    "nonAdminMany": "只有管理员才能更改谁可以使用保管库密钥。请让管理员将这些智能体添加到授权中，然后重新部署。"
+  },
+  "deployMany": {
+    "cancelled": "未部署：保管库密钥尚未授权。智能体已创建——请重试以授权并部署它们，或从各自的智能体页面部署。",
+    "failed": "已创建但未部署：{{names}}。{{reason}} 请重试，或从各自的智能体页面部署。",
+    "memberCancelled": "未部署：保管库密钥尚未授权"
   }
 }

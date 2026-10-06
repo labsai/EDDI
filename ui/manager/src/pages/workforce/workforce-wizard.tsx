@@ -8,6 +8,9 @@ import { getErrorMessage } from "@/lib/api-client";
 import { groupSaveProblems } from "@/lib/group-config";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent } from "@/hooks/use-agent-setup";
+import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
+import { resolveSetupVersion } from "@/lib/api/agent-setup";
+import { deployFailureMessage, describeUndeployed } from "@/lib/deploy-outcome";
 import { useCreateGroup, useAvailableStyles } from "@/hooks/use-groups";
 import { useTemplates } from "@/hooks/use-templates";
 import {
@@ -69,8 +72,15 @@ function WorkforceWizard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const setupAgent = useSetupAgent();
+  const { deployMany } = useDeployWithGrants();
   const createGroup = useCreateGroup();
   const creatingRef = useRef(false);
+  /**
+   * Advisors that exist but are not live yet, agent id -> version. Kept across
+   * attempts like `createdAgentId`: a Try Again after a cancelled grant must
+   * deploy them, not skip them because they were already "created".
+   */
+  const pendingDeployRef = useRef(new Map<string, number>());
 
   // ─── State ──────────────────────────────────────────────────────────────
 
@@ -362,8 +372,11 @@ function WorkforceWizard() {
           provider: llm.provider || undefined,
           model: llm.model || undefined,
           apiKey: llm.apiKey || undefined,
-          deploy: true,
+          // Created first, deployed below through the grant flow: a new agent is
+          // on no vault key's grant, so deploying it here would be refused.
+          deploy: false,
         });
+        pendingDeployRef.current.set(result.agentId, await resolveSetupVersion(result));
 
         resolvedMembers[i] = { ...member, agentId: result.agentId };
         // Persist the id so a retry after a later failure reuses this agent
@@ -393,6 +406,56 @@ function WorkforceWizard() {
         setIsCreating(false);
         creatingRef.current = false;
         return; // Stop on error
+      }
+    }
+
+    // Deploy every advisor that is not live yet - the new ones, and any a
+    // previous attempt could not deploy. The grant question is asked ONCE for
+    // the whole team (each key listed once), not once per advisor.
+    const toDeploy = resolvedMembers.filter((m) => pendingDeployRef.current.has(m.agentId));
+    if (toDeploy.length > 0) {
+      for (const m of toDeploy) updateProgress(m.id, { status: "creating", error: undefined });
+      let results;
+      try {
+        results = await deployMany({
+          targets: toDeploy.map((m) => ({
+            agentId: m.agentId,
+            version: pendingDeployRef.current.get(m.agentId)!,
+            agentName: m.displayName,
+          })),
+        });
+      } catch (err) {
+        const message = getErrorMessage(err);
+        for (const m of toDeploy) updateProgress(m.id, { status: "error", error: message });
+        toast.error(message);
+        setIsCreating(false);
+        creatingRef.current = false;
+        return;
+      }
+      for (const { target, outcome } of results) {
+        const member = toDeploy.find((m) => m.agentId === target.agentId);
+        if (!member) continue;
+        if (outcome.kind === "deployed") {
+          pendingDeployRef.current.delete(target.agentId);
+          updateProgress(member.id, { status: "done" });
+        } else {
+          updateProgress(member.id, {
+            status: "error",
+            error:
+              outcome.kind === "failed"
+                ? deployFailureMessage(outcome, t)
+                : t("deployMany.memberCancelled", "Not deployed: the vault key was not granted"),
+          });
+        }
+      }
+      const problem = describeUndeployed(results, t);
+      if (problem) {
+        // The advisors exist; the group is not saved around advisors that are not
+        // live, and this is not reported as done.
+        toast.error(problem, { duration: 15000 });
+        setIsCreating(false);
+        creatingRef.current = false;
+        return;
       }
     }
 
@@ -472,6 +535,7 @@ function WorkforceWizard() {
     t,
     updateProgress,
     setupAgent,
+    deployMany,
     selectedTemplateObj,
     boardName,
     boardDescription,

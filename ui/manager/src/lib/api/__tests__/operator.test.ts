@@ -937,9 +937,9 @@ describe("reactivateOperator", () => {
     let deployUrl = "";
     let saved: OperatorConfig | undefined;
     server.use(
-      http.post("*/administration/:env/deploy/:agentId", ({ request }) => {
+      http.post("*/administration/:env/deploy/:agentId", ({ request, params }) => {
         deployUrl = request.url;
-        return new HttpResponse(null, { status: 200 });
+        return HttpResponse.json({ status: "READY", agentId: params.agentId, version: 3, environment: "test" });
       }),
       http.put(`${BASE}/${OPERATOR_VARIABLE_KEY}`, async ({ request }) => {
         const body = (await request.json()) as { value: string };
@@ -954,6 +954,8 @@ describe("reactivateOperator", () => {
 
     expect(deployUrl).toContain("/administration/test/deploy/op-1");
     expect(deployUrl).toContain("version=3");
+    // Waited for, so a refused deploy is an error rather than an operator that is "on".
+    expect(deployUrl).toContain("waitForCompletion=true");
     expect(result.enabled).toBe(true);
     expect(saved?.agentId).toBe("op-1");
   });

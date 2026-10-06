@@ -3372,7 +3372,8 @@
     "humanTurnTimeoutInvalid": "Durée ISO-8601 non valide, par exemple PT24H ou P1D.",
     "humanTurnTimeoutLabel": "Délai du tour (durée ISO-8601)",
     "humanTurnTimeoutPlaceholder": "ex. PT24H — laisser vide pour une attente indéfinie",
-    "memberTypeHuman": "Humain"
+    "memberTypeHuman": "Humain",
+    "deployingAgents": "Déploiement des agents..."
   },
   "groupTemplates": {
     "advisoryBoard": "Comité consultatif",
@@ -5361,6 +5362,15 @@
     "allowAllAndDeploy": "Tout autoriser et déployer",
     "addAndDeploy": "Ajouter et déployer",
     "cancelled": "Non déployé — la clé du coffre n'a pas été autorisée.",
-    "fix": "Corriger"
+    "fix": "Corriger",
+    "titleMany": "Ces agents n'ont pas accès à leurs clés du coffre",
+    "issueMany": "Agents qui utilisent la clé restreinte \"{{key}}\", accordée uniquement à d'autres agents : {{agents}}.",
+    "questionMany": "Ajouter tous ces agents à l'autorisation ?",
+    "nonAdminMany": "Seul un administrateur peut modifier qui peut utiliser une clé du coffre. Demandez-lui d'ajouter ces agents à l'autorisation, puis déployez-les à nouveau."
+  },
+  "deployMany": {
+    "cancelled": "Non déployés : la clé du coffre n'a pas été accordée. Les agents ont été créés – réessayez pour l'accorder et les déployer, ou déployez-les depuis leurs pages d'agent.",
+    "failed": "Créés mais non déployés : {{names}}. {{reason}} Réessayez, ou déployez-les depuis leurs pages d'agent.",
+    "memberCancelled": "Non déployé : la clé du coffre n'a pas été accordée"
   }
 }

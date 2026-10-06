@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
-import { useActivateOperator, OperatorGrantPendingError } from "@/hooks/use-operator";
+import { useActivateOperator, useReactivateOperator, OperatorGrantPendingError } from "@/hooks/use-operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY, type OperatorConfig } from "@/lib/api/operator";
 import { READ_ENDPOINTS, WRITE_ENDPOINTS, parseEndpoint } from "@/lib/operator/tool-scopes";
 import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
@@ -274,5 +274,67 @@ describe("useActivateOperator — the vault grant", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(spy.deleted).toEqual(["op-old-kept"]);
     expect(spy.setupCalls).toBe(1);
+  });
+});
+
+describe("useReactivateOperator - the vault grant", () => {
+  beforeEach(() => {
+    server.resetHandlers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  const disabled = () => config({ enabled: false, agentId: AGENT_ID, version: 1, environment: "production" });
+
+  it("goes through the grant flow: asks, grants THE agent, deploys, and only then writes the config", async () => {
+    const spy = newSpy();
+    serve(spy, { preflightIssues: true });
+    const user = userEvent.setup();
+    const { result } = renderHook(() => useReactivateOperator(), { wrapper });
+    act(() => result.current.mutate(disabled()));
+
+    await screen.findByTestId("grant-required-dialog");
+    // Nothing deployed and nothing written while the admin decides.
+    expect(spy.deploys).toBe(0);
+    expect(spy.configWritten).toBe(false);
+    await user.click(screen.getByTestId("grant-required-confirm"));
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(spy.grants).toEqual([`${KEY}->${AGENT_ID}`]);
+    expect(spy.deploys).toBe(1);
+    expect(spy.configWritten).toBe(true);
+    expect(spy.setupCalls).toBe(0);
+    expect(result.current.data?.enabled).toBe(true);
+  });
+
+  it("cancelling the grant deploys nothing, leaves the operator off and says why", async () => {
+    const spy = newSpy();
+    serve(spy, { preflightIssues: true });
+    const user = userEvent.setup();
+    const { result } = renderHook(() => useReactivateOperator(), { wrapper });
+    act(() => result.current.mutate(disabled()));
+
+    await screen.findByTestId("grant-required-dialog");
+    await user.click(screen.getByTestId("grant-required-cancel"));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/not enabled.*not granted/i);
+    expect(spy.deploys).toBe(0);
+    expect(spy.configWritten).toBe(false);
+  });
+
+  it("a deploy that fails for another reason is an error, not a silently enabled operator", async () => {
+    const spy = newSpy();
+    serve(spy, {
+      deployBody: {
+        status: "ERROR",
+        agentId: AGENT_ID,
+        failure: { code: "DEPLOYMENT_FAILED", message: "LLM provider rejected the model name" },
+      },
+    });
+    const { result } = renderHook(() => useReactivateOperator(), { wrapper });
+    act(() => result.current.mutate(disabled()));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/LLM provider rejected the model name/);
+    expect(spy.configWritten).toBe(false);
   });
 });

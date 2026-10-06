@@ -3335,7 +3335,8 @@
     "humanTurnTimeoutInvalid": "有効な ISO-8601 期間ではありません（例: PT24H や P1D）。",
     "humanTurnTimeoutLabel": "ターンのタイムアウト（ISO-8601 期間）",
     "humanTurnTimeoutPlaceholder": "例: PT24H — 空欄の場合は無期限に待機します",
-    "memberTypeHuman": "人間"
+    "memberTypeHuman": "人間",
+    "deployingAgents": "エージェントをデプロイしています..."
   },
   "groupTemplates": {
     "advisoryBoard": "アドバイザリーボード",
@@ -5300,6 +5301,15 @@
     "allowAllAndDeploy": "すべて許可してデプロイ",
     "addAndDeploy": "追加してデプロイ",
     "cancelled": "デプロイしていません — Vault キーが許可されませんでした。",
-    "fix": "修正"
+    "fix": "修正",
+    "titleMany": "これらのエージェントには保管庫キーが付与されていません",
+    "issueMany": "制限付きキー「{{key}}」（他のエージェントにのみ付与）を使用するエージェント: {{agents}}。",
+    "questionMany": "これらのエージェントをすべて付与に追加しますか？",
+    "nonAdminMany": "保管庫キーを使用できる対象を変更できるのは管理者のみです。管理者にこれらのエージェントを付与に追加してもらってから、もう一度デプロイしてください。"
+  },
+  "deployMany": {
+    "cancelled": "デプロイされていません: 保管庫キーが付与されませんでした。エージェントは作成済みです。もう一度試して付与とデプロイを行うか、各エージェントのページからデプロイしてください。",
+    "failed": "作成済みですが未デプロイ: {{names}}。{{reason}} もう一度試すか、各エージェントのページからデプロイしてください。",
+    "memberCancelled": "デプロイされていません: 保管庫キーが付与されませんでした"
   }
 }

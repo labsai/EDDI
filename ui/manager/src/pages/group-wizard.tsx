@@ -63,9 +63,12 @@ import {
 } from "@/lib/group-templates";
 import {
   setupAgent,
+  resolveSetupVersion,
   LLM_PROVIDERS,
   type SetupAgentRequest,
 } from "@/lib/api/agent-setup";
+import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
+import { describeUndeployed, reportDeployOutcome } from "@/lib/deploy-outcome";
 
 /* ================================================================
    Types & Constants
@@ -83,6 +86,12 @@ interface MemberSlot extends GroupMember {
   created: boolean;
   /** Set while creating */
   creating: boolean;
+  /**
+   * Created but not live yet: the version to deploy. Set when the agent is
+   * created, cleared once it is deployed - so a deploy the person cancelled (or
+   * that failed) is retried by the next Create instead of being forgotten.
+   */
+  pendingDeploy?: { version: number };
 }
 
 interface WizardState {
@@ -242,6 +251,7 @@ export function GroupWizardPage() {
   const [isBatchCreating, setIsBatchCreating] = useState(false);
 
   const createMutation = useCreateGroup();
+  const { deployMany } = useDeployWithGrants();
   // Gate progression on it here too: ConfigStep only renders the warning, and
   // this wizard provisions agents before saving.
   const availableStyles = useAvailableStyles();
@@ -333,9 +343,17 @@ export function GroupWizardPage() {
           provider: slot.provider || "anthropic",
           model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5-5"),
           apiKey: slot.apiKey || undefined,
-          deploy: true,
+          // Created first, deployed below through the grant flow: a new agent is
+          // on no vault key's grant, so deploying it here would be refused.
+          deploy: false,
         });
-        updatedMembers[index] = { ...updatedMembers[index]!, agentId: result.agentId, created: true };
+        const version = await resolveSetupVersion(result);
+        updatedMembers[index] = {
+          ...updatedMembers[index]!,
+          agentId: result.agentId,
+          created: true,
+          pendingDeploy: { version },
+        };
       } catch (err) {
         toast.error(t("groupWizard.agentCreateFailed", {
           error: err instanceof Error ? err.message : String(err),
@@ -357,13 +375,50 @@ export function GroupWizardPage() {
           provider: updatedModerator.provider || "anthropic",
           model: updatedModerator.model || (LLM_PROVIDERS.find(p => p.id === (updatedModerator!.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5-5"),
           apiKey: updatedModerator.apiKey || undefined,
-          deploy: true,
+          deploy: false,
         });
-        updatedModerator = { ...updatedModerator, agentId: result.agentId, created: true };
+        const version = await resolveSetupVersion(result);
+        updatedModerator = { ...updatedModerator, agentId: result.agentId, created: true, pendingDeploy: { version } };
       } catch (err) {
         toast.error(t("groupWizard.agentCreateFailed", {
           error: err instanceof Error ? err.message : String(err),
         }));
+        setIsBatchCreating(false);
+        setCreationProgress(null);
+        setState((s) => ({ ...s, members: updatedMembers }));
+        return;
+      }
+    }
+
+    // --- Phase 1b: Deploy every created-but-not-live agent, grants asked ONCE ---
+    // (also the ones a previous attempt created and could not deploy).
+    const toDeploy = [...updatedMembers, ...(updatedModerator ? [updatedModerator] : [])].filter(
+      (m) => m.pendingDeploy && m.agentId,
+    );
+    if (toDeploy.length > 0) {
+      setCreationProgress(t("groupWizard.deployingAgents", "Deploying the agents..."));
+      const results = await deployMany({
+        targets: toDeploy.map((m) => ({
+          agentId: m.agentId,
+          version: m.pendingDeploy!.version,
+          agentName: m.displayName,
+        })),
+      });
+      const live = new Set(results.filter((r) => r.outcome.kind === "deployed").map((r) => r.target.agentId));
+      const settle = (m: MemberSlot): MemberSlot =>
+        live.has(m.agentId) ? { ...m, pendingDeploy: undefined } : m;
+      for (let i = 0; i < updatedMembers.length; i++) updatedMembers[i] = settle(updatedMembers[i]!);
+      if (updatedModerator) updatedModerator = settle(updatedModerator);
+      setState((s) => ({ ...s, members: updatedMembers, moderator: updatedModerator }));
+
+      const problem = describeUndeployed(
+        results.filter((r) => r.outcome.kind !== "deployed"),
+        t,
+      );
+      if (problem) {
+        // Do not save a group whose members are not live, and do not call it done:
+        // the agents exist, so say that and how to finish.
+        toast.error(problem, { duration: 15000 });
         setIsBatchCreating(false);
         setCreationProgress(null);
         return;
@@ -1106,6 +1161,7 @@ function MembersStep({
   const { t } = useTranslation();
   const { data: agentDescriptors, refetch: refetchAgents } = useAgentDescriptors(100);
   const agents = agentDescriptors ? groupAgentsByName(agentDescriptors) : [];
+  const { deploy } = useDeployWithGrants();
 
   function addMember() {
     onChange({
@@ -1138,19 +1194,36 @@ function MembersStep({
       provider: slot.provider || "anthropic",
       model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5-5"),
       apiKey: slot.apiKey || undefined,
-      deploy: true,
+      deploy: false,
     };
 
+    // Known once the agent exists, so a failure AFTER that still records it.
+    let created: { agentId: string; version: number } | null = null;
     try {
       const result = await setupAgent(req);
+      created = { agentId: result.agentId, version: await resolveSetupVersion(result) };
+      // Through the grant flow: a new agent is on no vault key's grant yet.
+      const options = { agentId: created.agentId, agentName: slot.displayName, version: created.version };
+      const outcome = await deploy(options);
       updateMember(idx, {
-        agentId: result.agentId,
+        agentId: created.agentId,
         created: true,
         creating: false,
+        // Not live? The final Create deploys it again rather than forgetting it.
+        pendingDeploy: outcome.kind === "deployed" ? undefined : { version: created.version },
       });
-      toast.success(t("groupWizard.agentCreated", { name: slot.displayName }));
+      if (outcome.kind === "deployed") {
+        toast.success(t("groupWizard.agentCreated", { name: slot.displayName }));
+      } else {
+        reportDeployOutcome(outcome, options, t);
+      }
     } catch (err) {
-      updateMember(idx, { creating: false });
+      updateMember(
+        idx,
+        created
+          ? { agentId: created.agentId, created: true, creating: false, pendingDeploy: { version: created.version } }
+          : { creating: false },
+      );
       toast.error(t("groupWizard.agentCreateFailed", {
         error: err instanceof Error ? err.message : String(err),
       }));
@@ -1169,17 +1242,35 @@ function MembersStep({
       provider: mod.provider || "anthropic",
       model: mod.model || (LLM_PROVIDERS.find(p => p.id === (mod.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5-5"),
       apiKey: mod.apiKey || undefined,
-      deploy: true,
+      deploy: false,
     };
 
+    let created: { agentId: string; version: number } | null = null;
     try {
       const result = await setupAgent(req);
+      created = { agentId: result.agentId, version: await resolveSetupVersion(result) };
+      const options = { agentId: created.agentId, agentName: mod.displayName, version: created.version };
+      const outcome = await deploy(options);
       onChange({
-        moderator: { ...mod, agentId: result.agentId, created: true, creating: false },
+        moderator: {
+          ...mod,
+          agentId: created.agentId,
+          created: true,
+          creating: false,
+          pendingDeploy: outcome.kind === "deployed" ? undefined : { version: created.version },
+        },
       });
-      toast.success(t("groupWizard.moderatorCreated"));
+      if (outcome.kind === "deployed") {
+        toast.success(t("groupWizard.moderatorCreated"));
+      } else {
+        reportDeployOutcome(outcome, options, t);
+      }
     } catch (err) {
-      onChange({ moderator: { ...mod, creating: false } });
+      onChange({
+        moderator: created
+          ? { ...mod, agentId: created.agentId, created: true, creating: false, pendingDeploy: { version: created.version } }
+          : { ...mod, creating: false },
+      });
       toast.error(t("groupWizard.agentCreateFailed", {
         error: err instanceof Error ? err.message : String(err),
       }));
