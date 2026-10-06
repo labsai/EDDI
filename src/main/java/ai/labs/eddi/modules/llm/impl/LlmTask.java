@@ -603,7 +603,8 @@ public class LlmTask implements ILifecycleTask {
                 // model construction, timeouts and escalation, so the streaming bridge the
                 // two non-cascade branches hand to the loop stops at this boundary rather
                 // than threading a second transport through the cascade's own machinery.
-                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
+                if (eventSink != null && retryPolicy == null && responseContent != null && !addToOutputExplicitlyFalse
+                        && !cascadeResult.streamedLive()) {
                     // F10: this is the same single-chunk downgrade the two non-cascade agent
                     // paths record. Agent mode is the DEFAULT here (enableInAgentMode defaults
                     // to true), so leaving it uninstrumented meant the most common streaming
@@ -636,7 +637,7 @@ public class LlmTask implements ILifecycleTask {
                 // Agent mode with cascade disabled — use normal agent flow. The streaming
                 // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
                 var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
-                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
+                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, retryPolicy != null ? null : eventSink, addToOutputExplicitlyFalse,
                         resolvedType, processedParams, retryPolicy, retryListener, currentStep);
                 if (outcome != null) {
                     responseContent = outcome.response();
@@ -649,7 +650,7 @@ public class LlmTask implements ILifecycleTask {
                     responseMetadata = chatResult.responseMetadata();
                     // Forward the buffered response to the stream so an SSE client is not left
                     // empty.
-                    if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+                    if (eventSink != null && retryPolicy == null && responseContent != null && !addToOutputExplicitlyFalse) {
                         eventSink.onToken(responseContent);
                     }
                 }
@@ -657,7 +658,7 @@ public class LlmTask implements ILifecycleTask {
             } else {
                 // === Standard (non-cascade) execution path ===
                 var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
-                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
+                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, retryPolicy != null ? null : eventSink, addToOutputExplicitlyFalse,
                         resolvedType, processedParams, retryPolicy, retryListener, currentStep);
 
                 if (outcome != null) {
@@ -681,7 +682,7 @@ public class LlmTask implements ILifecycleTask {
                                 currentStep);
                         responseContent = chatResult.response();
                         responseMetadata = chatResult.responseMetadata();
-                        if (!addToOutputExplicitlyFalse) {
+                        if (!addToOutputExplicitlyFalse && retryPolicy == null) {
                             eventSink.onToken(responseContent);
                         }
                     }
@@ -713,7 +714,9 @@ public class LlmTask implements ILifecycleTask {
         // be
         // appended to the stream only when nothing did, since SSE cannot retract
         // tokens.
-        boolean modelTextStreamed = fallbackServed == null && !isNullOrEmpty(responseContent);
+        // A task that may re-ask is buffered (R5): nothing has been emitted yet, so the
+        // single emission below carries the final answer or the fallback, never both.
+        boolean modelTextStreamed = fallbackServed == null && !isNullOrEmpty(responseContent) && retryPolicy == null;
         if (fallbackServed == null) {
             try {
                 var validated = applyResponseValidation(responseContent, responseMetadata, task, currentStep, templateDataObjects, memory,
@@ -735,6 +738,8 @@ public class LlmTask implements ILifecycleTask {
 
         if (fallbackServed != null && eventSink != null && !addToOutputExplicitlyFalse && !modelTextStreamed) {
             eventSink.onToken(fallbackServed.text());
+        } else if (retryPolicy != null && fallbackServed == null && eventSink != null && !addToOutputExplicitlyFalse && responseContent != null) {
+            eventSink.onToken(responseContent);
         }
 
         // Store metadata if configured

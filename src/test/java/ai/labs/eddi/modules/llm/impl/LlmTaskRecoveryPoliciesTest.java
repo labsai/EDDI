@@ -336,6 +336,72 @@ class LlmTaskRecoveryPoliciesTest {
     }
 
     @Test
+    @DisplayName("context too long with maxContextTokens: the token budget is halved for the one re-ask")
+    void tokenAwareWindowIsHalved() throws Exception {
+        String filler = "word ".repeat(100);
+        var outputs = new ArrayList<ConversationOutput>();
+        for (int i = 0; i < 6; i++) {
+            var o = new ConversationOutput();
+            o.put("input", "q" + i + " " + filler);
+            o.put("output", List.of("a" + i + " " + filler));
+            outputs.add(o);
+        }
+        var last = new ConversationOutput();
+        last.put("input", "question");
+        outputs.add(last);
+        when(memory.getConversationOutputs()).thenReturn(outputs);
+        var model = FaultInjectingChatModel.script(Step.fail(new InvalidRequestException("This model's maximum context length is 8192 tokens")),
+                Step.text(VALID));
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task(v -> v.setOnContextTooLong("retry"));
+        task.setMaxContextTokens(2000);
+        task.getParameters().put("modelName", "gpt-4o"); // a model jtokkit knows
+
+        run(task);
+
+        assertEquals(2, model.callCount());
+        int before = model.requests().get(0).messages().size();
+        int after = model.requests().get(1).messages().size();
+        assertTrue(after < before, "token budget not reduced: " + before + " -> " + after);
+        assertEquals(Map.of("answer", "hi"), templateData.get("taskA"));
+    }
+
+    @Test
+    @DisplayName("buffered streaming: exhausted re-asks emit only the fallback, once, never the raw reply")
+    void bufferedTaskEmitsFallbackOnce() throws Exception {
+        var sink = mock(ConversationEventSink.class);
+        when(memory.getEventSink()).thenReturn(sink);
+        var model = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task(retryInvalidJson().andThen(v -> v.setFallbackMessage("Please try again.")));
+        task.getParameters().put("addToOutput", "true");
+
+        run(task);
+
+        verify(sink, times(1)).onToken(anyString());
+        verify(sink).onToken("Please try again.");
+        verify(sink, never()).onToken(PROSE);
+    }
+
+    @Test
+    @DisplayName("buffered streaming: onError fallback after a failed re-ask path emits the fallback once")
+    void bufferedTaskOnErrorEmitsFallbackOnce() throws Exception {
+        var sink = mock(ConversationEventSink.class);
+        when(memory.getEventSink()).thenReturn(sink);
+        var model = FaultInjectingChatModel.script(Step.status(401)).repeatLast();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task(retryInvalidJson().andThen(v -> v.setFallbackMessage("Please try again.")));
+        var onError = new LlmConfiguration.OnError();
+        onError.setAction("fallback");
+        task.setOnError(onError);
+
+        run(task);
+
+        verify(sink, times(1)).onToken(anyString());
+        verify(sink).onToken("Please try again.");
+    }
+
+    @Test
     @DisplayName("tool mode: only the final answer is re-asked, over a transcript that already holds the tool result; the tool runs once")
     void toolModeNeverReexecutesATool() throws Exception {
         var toolRuns = new AtomicInteger();
