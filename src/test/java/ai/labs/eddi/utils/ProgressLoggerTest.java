@@ -53,6 +53,15 @@ class ProgressLoggerTest {
     }
 
     @Test
+    void heartbeatOnlyLineDoesNotClaimZeroProcessed() {
+        clock.addAndGet(10_000L);
+        progress.emitIfDue();
+        assertEquals(1, lines.size());
+        assertTrue(!lines.getFirst().contains("processed"));
+        assertTrue(lines.getFirst().contains("10s elapsed"));
+    }
+
+    @Test
     void emitIfDueNeedsNoItems() {
         clock.addAndGet(10_000L);
         progress.emitIfDue();

@@ -68,7 +68,10 @@ public final class ProgressLogger {
         long now = clockMillis.getAsLong();
         if (now - lastEmittedAt >= intervalMillis) {
             lastEmittedAt = now;
-            sink.accept("  " + label + ": still working — " + count + " processed so far, " + (now - startedAt) / 1000 + "s elapsed");
+            // A heartbeat around one server-side call never advances the count; saying
+            // "0 processed" there would be wrong, so report elapsed time only.
+            String processed = count > 0 ? count + " processed so far, " : "";
+            sink.accept("  " + label + ": still working — " + processed + (now - startedAt) / 1000 + "s elapsed");
         }
     }
 

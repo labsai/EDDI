@@ -239,7 +239,7 @@ The migration steps run in the background and log progress about every ten secon
 is not a silent one. While they run, **readiness is DOWN and liveness is UP**.
 
 - Point the container health check at **`/q/health/live`**, with a **start period of about 300
-  seconds** (more for a very large database).
+  seconds** (longer only on platforms that support it; the ECS maximum is 300 seconds).
 - Do **not** use `/q/health`. It aggregates readiness, so it stays DOWN for the whole migration and
   the orchestrator replaces a healthy task mid-migration. Each replacement starts the migration
   again.

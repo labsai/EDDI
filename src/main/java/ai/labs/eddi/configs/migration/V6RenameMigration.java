@@ -578,7 +578,7 @@ public class V6RenameMigration {
                 || collectionName.equals(COLLECTION_WORKFLOWS + ".history");
         int migrated = 0;
         int failed = 0;
-        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "documents");
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, collectionName);
         for (Document doc : collection.find()) {
             progress.advance();
             boolean stepTypesRewritten = isWorkflowCollection && rewriteStepTypes(doc);
@@ -643,7 +643,7 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
-        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "documents");
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, collectionName);
         for (Document doc : collection.find()) {
             progress.advance();
             Document rewritten = rewriteUrisInDocument(doc);
@@ -1524,7 +1524,7 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
-        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "documents");
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, collectionName);
         for (Document doc : collection.find()) {
             progress.advance();
             boolean changed = false;
