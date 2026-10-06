@@ -9,7 +9,12 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import org.jboss.logging.Logger;
 
 import io.micrometer.core.instrument.Metrics;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
+import org.jboss.logging.MDC;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
@@ -364,7 +369,7 @@ public class RetryConfiguration {
      * pause signal behave exactly as without a deadline.
      */
     private static <T> T callWithin(Callable<T> action, long budgetMs, String actionDescription) throws Exception {
-        Future<T> future = ATTEMPT_EXECUTOR.submit(action);
+        Future<T> future = ATTEMPT_EXECUTOR.submit(carryingCallerContext(action));
         try {
             return future.get(Math.max(1L, budgetMs), TimeUnit.MILLISECONDS);
         } catch (TimeoutException te) {
@@ -385,6 +390,30 @@ public class RetryConfiguration {
             future.cancel(true);
             throw ie;
         }
+    }
+
+    /**
+     * Carries what the calling thread has bound across the hop to the attempt's
+     * thread: the OpenTelemetry context (so the per-task span stays the parent of
+     * the model call's spans) and the logging MDC (conversation and agent ids on
+     * the attempt's log lines). Caller identity needs no handling here - a model
+     * call reads none.
+     */
+    static <T> Callable<T> carryingCallerContext(Callable<T> action) {
+        Context otel = Context.current();
+        Map<String, Object> mdc = MDC.getMap();
+        Map<String, Object> mdcCopy = mdc == null ? Map.of() : new HashMap<>(mdc);
+        return () -> {
+            try (Scope ignored = otel.makeCurrent()) {
+                MDC.clear();
+                mdcCopy.forEach(MDC::put);
+                try {
+                    return action.call();
+                } finally {
+                    MDC.clear();
+                }
+            }
+        };
     }
 
     private static void deadlineExceeded(String stage) {

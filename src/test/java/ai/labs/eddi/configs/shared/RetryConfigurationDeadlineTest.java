@@ -6,8 +6,13 @@ package ai.labs.eddi.configs.shared;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import dev.langchain4j.exception.HttpException;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.ContextKey;
+import io.opentelemetry.context.Scope;
+import org.jboss.logging.MDC;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -182,6 +187,41 @@ class RetryConfigurationDeadlineTest {
         } finally {
             Metrics.removeRegistry(meters);
         }
+    }
+
+    @Test
+    @DisplayName("the caller's MDC and OpenTelemetry context are visible inside the attempt")
+    void callerContextCrossesTheThreadHop() throws LifecycleException {
+        var key = ContextKey.<String>named("test-key");
+        MDC.put("conversationId", "c-123");
+        try (Scope ignored = Context.current().with(key, "ctx-value").makeCurrent()) {
+            var d = TurnDeadline.of(Clock.systemUTC(), System.currentTimeMillis(), 60_000, 1_000L);
+            Callable<String> probe = () -> MDC.get("conversationId") + "|" + Context.current().get(key);
+
+            String seen = RetryConfiguration.executeWithRetry(probe, retry(1, 1), "test", new long[1], d);
+
+            assertEquals("c-123|ctx-value", seen);
+        } finally {
+            MDC.remove("conversationId");
+        }
+    }
+
+    @Test
+    @DisplayName("a HITL pause thrown inside a deadline-bounded attempt surfaces unchanged")
+    void toolApprovalRequiredIsNotWrapped() {
+        var pause = new ToolApprovalRequiredException("approval needed", null);
+        var d = TurnDeadline.of(Clock.systemUTC(), System.currentTimeMillis(), 60_000, 1_000L);
+        AtomicInteger calls = new AtomicInteger();
+        Callable<String> gated = () -> {
+            calls.incrementAndGet();
+            throw pause;
+        };
+
+        var thrown = assertThrows(ToolApprovalRequiredException.class,
+                () -> RetryConfiguration.executeWithRetry(gated, retry(3, 1), "test", new long[1], d));
+
+        assertSame(pause, thrown);
+        assertEquals(1, calls.get(), "a pause is never retried");
     }
 
     @Test
