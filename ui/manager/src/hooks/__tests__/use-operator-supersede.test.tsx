@@ -213,6 +213,66 @@ describe("useActivateOperator — retiring the superseded operator", () => {
     expect(warning).toMatch(/no recorded version/i);
   });
 
+  /**
+   * The incident behind "could not be removed (eddi://…?version=2)": the old
+   * operator was edited in place after activation, so it lived at v2 while its
+   * config still said v1, and the backend refuses a permanent delete addressed at
+   * anything but the live version.
+   */
+  it("retires a predecessor that moved past its recorded version", async () => {
+    const spy = freshSpy();
+    serveReconfigure(spy);
+    const deletedVersions: string[] = [];
+    server.use(
+      http.get("*/agentstore/agents/:id/currentversion", ({ params }) =>
+        HttpResponse.json(params.id === OLD_AGENT ? 2 : 1),
+      ),
+      http.delete("*/agentstore/agents/:id", ({ params, request }) => {
+        const version = new URL(request.url).searchParams.get("version");
+        spy.deletes.push(String(params.id));
+        if (params.id === OLD_AGENT) {
+          deletedVersions.push(String(version));
+          if (version !== "2") {
+            return HttpResponse.text(`eddi://ai.labs.agent/agentstore/agents/${OLD_AGENT}?version=2`, { status: 409 });
+          }
+        }
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: existingOperator({ version: 1 }),
+      apiKey: "sk-test",
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(deletedVersions).toEqual(["2"]);
+    expect(result.current.data?.supersededWarning).toBeNull();
+  });
+
+  /** A 409's body is only the agent's URI — that must not be shown as the reason. */
+  it("explains a conflicting retirement instead of quoting the bare URI", async () => {
+    const spy = freshSpy();
+    serveReconfigure(spy);
+    server.use(
+      http.delete("*/agentstore/agents/:id", ({ params }) =>
+        params.id === OLD_AGENT
+          ? HttpResponse.text(`eddi://ai.labs.agent/agentstore/agents/${OLD_AGENT}?version=9`, { status: 409 })
+          : new HttpResponse(null, { status: 200 }),
+      ),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({ agentName: "EDDI Platform Operator", config: existingOperator(), apiKey: "sk-test" });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const warning = result.current.data?.supersededWarning ?? "";
+    expect(warning).toMatch(/newer version.*HTTP 409/);
+    expect(warning).not.toContain("eddi://");
+  });
+
   /** A first activation has nothing to retire, and must not report as if it had. */
   it("retires nothing on a first activation", async () => {
     const spy = freshSpy();
