@@ -108,6 +108,7 @@ public class LlmTask implements ILifecycleTask {
     private final PrePostUtils prePostUtils;
 
     private final ChatModelRegistry chatModelRegistry;
+    private final LlmFallbackHandler fallbackHandler;
     private final ConversationHistoryBuilder conversationHistoryBuilder;
     private final LegacyChatExecutor legacyChatExecutor;
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
@@ -191,6 +192,7 @@ public class LlmTask implements ILifecycleTask {
         this.templatingEngine = templatingEngine;
         this.jsonSerialization = jsonSerialization;
         this.modelOutputParser = new ModelOutputParser(jsonSerialization);
+        this.fallbackHandler = new LlmFallbackHandler(templatingEngine, jsonSerialization, dataFactory, meterRegistry);
         this.prePostUtils = prePostUtils;
 
         this.meterRegistry = meterRegistry;
@@ -478,9 +480,6 @@ public class LlmTask implements ILifecycleTask {
         boolean skipCascade = cascadeConfigured && task.isAgentMode() && !cascadeConfig.isEnableInAgentMode();
         boolean cascadeActive = cascadeConfigured && !skipCascade;
 
-        var chatModel = cascadeActive ? null : chatModelRegistry.getOrCreate(resolvedType, processedParams);
-        prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
-
         // Detect streaming mode — event sink is set when SSE endpoint is used
         ConversationEventSink eventSink = memory.getEventSink();
 
@@ -515,154 +514,202 @@ public class LlmTask implements ILifecycleTask {
         String agentSystemMessage = ConversationHistoryBuilder.composeSystemMessage(systemMessage, summaryPrefix);
         List<ChatMessage> chatMessagesWithoutSystem = ConversationHistoryBuilder.withoutLeadingSystemMessage(messages, agentSystemMessage);
 
-        // === Multi-Model Cascade Branch ===
-        if (cascadeActive) {
-            boolean convertToObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
-            boolean allowLiveStreaming = eventSink != null && !addToOutputExplicitlyFalse;
-            var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
-                    agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
-                    effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+        // === onError: fallback (R7) ===
+        // The model phase below — model construction, preRequest, the cascade / tool
+        // loop
+        // / plain chat — runs under one guard. With onError=fallback a failure that is
+        // not control flow is absorbed: the turn gets the configured fallback as its
+        // model answer and everything after (storing, output, postResponse) runs as
+        // usual. With the default (error) the guard is transparent and the exception
+        // propagates exactly as before.
+        boolean fallbackOnError = task.getOnError() != null && task.getOnError().isFallback();
+        Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
+        LlmFallbackHandler.Fallback fallbackServed = null;
+        boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        try {
+            var chatModel = cascadeActive ? null : chatModelRegistry.getOrCreate(resolvedType, processedParams);
+            prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
-            responseContent = cascadeResult.response();
-            cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
+            // === Multi-Model Cascade Branch ===
+            if (cascadeActive) {
+                boolean convertToObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+                boolean allowLiveStreaming = eventSink != null && !addToOutputExplicitlyFalse;
+                var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
+                        agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
+                        effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
 
-            // Propagate agent result's tool trace if agent mode was used
-            if (cascadeResult.agentResult() != null) {
-                toolTrace = cascadeResult.agentResult().trace();
-                usedToolMode = true;
-            }
+                responseContent = cascadeResult.response();
+                cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
 
-            // Surface real token usage + cost as response metadata (#gap: cost/token
-            // evidence). Previously the cascade discarded these, so
-            // responseMetadataObjectName yielded {}.
-            if (cascadeResult.tokenUsage() != null && !cascadeResult.tokenUsage().isEmpty()) {
-                responseMetadata.put("tokenUsage", cascadeResult.tokenUsage());
-            }
-
-            // Carry the winning step's validation signals through. Without these,
-            // responseValidation's onTruncation / onContentFilter / onStreamingTimeout
-            // policies are unreachable whenever the cascade is enabled — a truncated or
-            // filtered answer would reach the user even with action "error" configured.
-            var cascadeMetadata = cascadeResult.responseMetadata();
-            if (cascadeMetadata != null) {
-                if (cascadeMetadata.get("warning") != null) {
-                    responseMetadata.put("warning", cascadeMetadata.get("warning"));
-                }
-                if (cascadeMetadata.get("finishReason") != null) {
-                    responseMetadata.put("finishReason", cascadeMetadata.get("finishReason"));
-                }
-                if (Boolean.TRUE.equals(cascadeMetadata.get("streamingTimeout"))) {
-                    responseMetadata.put("streamingTimeout", true);
-                }
-            }
-            responseMetadata.put("cascadeCostUsd", cascadeResult.runCostUsd());
-            // Tool spend of the run. This branch builds a FRESH metadata map instead of
-            // adopting the agent's, so without this the entire tool cost of an agent-mode
-            // cascade (the DEFAULT — enableInAgentMode defaults to true) never reaches
-            // accumulateAuditEvidence's cascadeCostUsd + toolCostUsd sum, and the ledger
-            // reports token cost only. The non-cascade branches below assign the agent's
-            // whole map and always carried it.
-            responseMetadata.put("toolCostUsd", cascadeResult.runToolCostUsd());
-            responseMetadata.put("cascadeModel", cascadeAuditModel);
-            responseMetadata.put("cascadeStep", cascadeResult.stepUsed());
-            responseMetadata.put("cascadeConfidence", cascadeResult.confidence());
-
-            // Emit the final response to the stream unless the executor already streamed
-            // it live token-by-token (legacy final-step streaming). Agent-mode results
-            // are emitted here as a single chunk — the cascade is now the deliberate
-            // EXCEPTION to tool-loop streaming: CascadingModelExecutor owns per-step
-            // model construction, timeouts and escalation, so the streaming bridge the
-            // two non-cascade branches hand to the loop stops at this boundary rather
-            // than threading a second transport through the cascade's own machinery.
-            if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
-                // F10: this is the same single-chunk downgrade the two non-cascade agent
-                // paths record. Agent mode is the DEFAULT here (enableInAgentMode defaults
-                // to true), so leaving it uninstrumented meant the most common streaming
-                // downgrade in the product was the one nobody could observe.
+                // Propagate agent result's tool trace if agent mode was used
                 if (cascadeResult.agentResult() != null) {
-                    recordStreamingDowngrade(responseMetadata, task, responseContent);
+                    toolTrace = cascadeResult.agentResult().trace();
+                    usedToolMode = true;
                 }
-                eventSink.onToken(responseContent);
-            }
 
-            // Store cascade trace for audit
-            if (!cascadeResult.trace().isEmpty()) {
-                var cascadeTraceData = dataFactory.createData(KEY_LANGCHAIN + ":cascade:trace:" + task.getId(), cascadeResult.trace());
-                currentStep.storeData(cascadeTraceData);
-            }
+                // Surface real token usage + cost as response metadata (#gap: cost/token
+                // evidence). Previously the cascade discarded these, so
+                // responseMetadataObjectName yielded {}.
+                if (cascadeResult.tokenUsage() != null && !cascadeResult.tokenUsage().isEmpty()) {
+                    responseMetadata.put("tokenUsage", cascadeResult.tokenUsage());
+                }
 
-            // Store cascade metadata in audit — real model name + provider + step + cost
-            // (#5). Confidence goes under AUDIT_CONFIDENCE as a Double: the former
-            // "audit:cascade_confidence" String had no reader anywhere, while the
-            // IData<Double> slot LifecycleManager reads had no writer. Cost and token
-            // usage are accumulated below from responseMetadata, together with every
-            // other execution path, so they are not written twice here.
-            if (memory.getAuditCollector() != null) {
-                String cascadeModelDesc = cascadeAuditModel + " (step " + cascadeResult.stepUsed() + ")";
-                currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_CASCADE_MODEL, cascadeModelDesc));
-                currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_CONFIDENCE, cascadeResult.confidence()));
-            }
+                // Carry the winning step's validation signals through. Without these,
+                // responseValidation's onTruncation / onContentFilter / onStreamingTimeout
+                // policies are unreachable whenever the cascade is enabled — a truncated or
+                // filtered answer would reach the user even with action "error" configured.
+                var cascadeMetadata = cascadeResult.responseMetadata();
+                if (cascadeMetadata != null) {
+                    if (cascadeMetadata.get("warning") != null) {
+                        responseMetadata.put("warning", cascadeMetadata.get("warning"));
+                    }
+                    if (cascadeMetadata.get("finishReason") != null) {
+                        responseMetadata.put("finishReason", cascadeMetadata.get("finishReason"));
+                    }
+                    if (Boolean.TRUE.equals(cascadeMetadata.get("streamingTimeout"))) {
+                        responseMetadata.put("streamingTimeout", true);
+                    }
+                }
+                responseMetadata.put("cascadeCostUsd", cascadeResult.runCostUsd());
+                // Tool spend of the run. This branch builds a FRESH metadata map instead of
+                // adopting the agent's, so without this the entire tool cost of an agent-mode
+                // cascade (the DEFAULT — enableInAgentMode defaults to true) never reaches
+                // accumulateAuditEvidence's cascadeCostUsd + toolCostUsd sum, and the ledger
+                // reports token cost only. The non-cascade branches below assign the agent's
+                // whole map and always carried it.
+                responseMetadata.put("toolCostUsd", cascadeResult.runToolCostUsd());
+                responseMetadata.put("cascadeModel", cascadeAuditModel);
+                responseMetadata.put("cascadeStep", cascadeResult.stepUsed());
+                responseMetadata.put("cascadeConfidence", cascadeResult.confidence());
 
-        } else if (skipCascade) {
-            // Agent mode with cascade disabled — use normal agent flow. The streaming
-            // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
-            var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
-                    effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
-                    resolvedType, processedParams);
-            if (outcome != null) {
-                responseContent = outcome.response();
-                toolTrace = outcome.trace();
-                responseMetadata = outcome.responseMetadata();
-                usedToolMode = true;
-            } else {
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
-                responseContent = chatResult.response();
-                responseMetadata = chatResult.responseMetadata();
-                // Forward the buffered response to the stream so an SSE client is not left
-                // empty.
-                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+                // Emit the final response to the stream unless the executor already streamed
+                // it live token-by-token (legacy final-step streaming). Agent-mode results
+                // are emitted here as a single chunk — the cascade is now the deliberate
+                // EXCEPTION to tool-loop streaming: CascadingModelExecutor owns per-step
+                // model construction, timeouts and escalation, so the streaming bridge the
+                // two non-cascade branches hand to the loop stops at this boundary rather
+                // than threading a second transport through the cascade's own machinery.
+                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
+                    // F10: this is the same single-chunk downgrade the two non-cascade agent
+                    // paths record. Agent mode is the DEFAULT here (enableInAgentMode defaults
+                    // to true), so leaving it uninstrumented meant the most common streaming
+                    // downgrade in the product was the one nobody could observe.
+                    if (cascadeResult.agentResult() != null) {
+                        recordStreamingDowngrade(responseMetadata, task, responseContent);
+                    }
                     eventSink.onToken(responseContent);
                 }
-            }
 
-        } else {
-            // === Standard (non-cascade) execution path ===
-            var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
-                    effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
-                    resolvedType, processedParams);
+                // Store cascade trace for audit
+                if (!cascadeResult.trace().isEmpty()) {
+                    var cascadeTraceData = dataFactory.createData(KEY_LANGCHAIN + ":cascade:trace:" + task.getId(), cascadeResult.trace());
+                    currentStep.storeData(cascadeTraceData);
+                }
 
-            if (outcome != null) {
-                responseContent = outcome.response();
-                toolTrace = outcome.trace();
-                responseMetadata = outcome.responseMetadata();
-                usedToolMode = true;
-            } else if (eventSink != null) {
-                // Legacy mode with streaming — try to get a streaming model
-                var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
-                if (streamingModel != null) {
-                    var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task, jsonPolicy);
-                    responseContent = streamingResult.response();
-                    responseMetadata.putAll(streamingResult.metadata());
+                // Store cascade metadata in audit — real model name + provider + step + cost
+                // (#5). Confidence goes under AUDIT_CONFIDENCE as a Double: the former
+                // "audit:cascade_confidence" String had no reader anywhere, while the
+                // IData<Double> slot LifecycleManager reads had no writer. Cost and token
+                // usage are accumulated below from responseMetadata, together with every
+                // other execution path, so they are not written twice here.
+                if (memory.getAuditCollector() != null) {
+                    String cascadeModelDesc = cascadeAuditModel + " (step " + cascadeResult.stepUsed() + ")";
+                    currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_CASCADE_MODEL, cascadeModelDesc));
+                    currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_CONFIDENCE, cascadeResult.confidence()));
+                }
+
+            } else if (skipCascade) {
+                // Agent mode with cascade disabled — use normal agent flow. The streaming
+                // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
+                var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
+                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
+                        resolvedType, processedParams);
+                if (outcome != null) {
+                    responseContent = outcome.response();
+                    toolTrace = outcome.trace();
+                    responseMetadata = outcome.responseMetadata();
+                    usedToolMode = true;
                 } else {
-                    // Streaming not supported by this builder — fall back to sync, emit as single
-                    // chunk
                     var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
-                    if (!addToOutputExplicitlyFalse) {
+                    // Forward the buffered response to the stream so an SSE client is not left
+                    // empty.
+                    if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
                         eventSink.onToken(responseContent);
                     }
                 }
+
             } else {
-                // Standard non-streaming legacy mode
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
-                responseContent = chatResult.response();
-                responseMetadata = chatResult.responseMetadata();
+                // === Standard (non-cascade) execution path ===
+                var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
+                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
+                        resolvedType, processedParams);
+
+                if (outcome != null) {
+                    responseContent = outcome.response();
+                    toolTrace = outcome.trace();
+                    responseMetadata = outcome.responseMetadata();
+                    usedToolMode = true;
+                } else if (eventSink != null) {
+                    // Legacy mode with streaming — try to get a streaming model
+                    var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
+                    if (streamingModel != null) {
+                        var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task, jsonPolicy);
+                        responseContent = streamingResult.response();
+                        responseMetadata.putAll(streamingResult.metadata());
+                    } else {
+                        // Streaming not supported by this builder — fall back to sync, emit as single
+                        // chunk
+                        var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+                        responseContent = chatResult.response();
+                        responseMetadata = chatResult.responseMetadata();
+                        if (!addToOutputExplicitlyFalse) {
+                            eventSink.onToken(responseContent);
+                        }
+                    }
+                } else {
+                    // Standard non-streaming legacy mode
+                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+                    responseContent = chatResult.response();
+                    responseMetadata = chatResult.responseMetadata();
+                }
             }
+
+        } catch (Exception e) {
+            if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(e)) {
+                throw e;
+            }
+            markUncommitted(currentStep, dataBefore);
+            fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", e, convertObject, memory.getConversationId());
+            responseContent = fallbackServed.content();
+            responseMetadata = new HashMap<>();
+            toolTrace = new ArrayList<>();
+            usedToolMode = false;
+            cascadeAuditModel = null;
         }
 
         // === Response Validation (Phase D) ===
-        responseContent = applyResponseValidation(responseContent, responseMetadata, task, currentStep);
+        // A fallback served by onError is the engine's own text — it is not validated
+        // (a refusal-prefix match on the author's apology would otherwise re-trigger).
+        if (fallbackServed == null) {
+            try {
+                var validated = applyResponseValidation(responseContent, responseMetadata, task, currentStep, templateDataObjects, memory,
+                        convertObject);
+                responseContent = validated.content();
+                fallbackServed = validated.fallback();
+            } catch (LifecycleException validationFailure) {
+                // A validation policy of "error" is a deliberate failure of the model
+                // phase: with onError=fallback it is absorbed like any other.
+                if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(validationFailure)) {
+                    throw validationFailure;
+                }
+                markUncommitted(currentStep, dataBefore);
+                fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", validationFailure,
+                        convertObject, memory.getConversationId());
+                responseContent = fallbackServed.content();
+            }
+        }
 
         // Store metadata if configured
         var responseMetadataObjectName = task.getResponseMetadataObjectName();
@@ -682,7 +729,12 @@ public class LlmTask implements ILifecycleTask {
         var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), responseContent);
         currentStep.storeData(langchainData);
 
-        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+        if (fallbackServed != null) {
+            // The engine's own text, never parsed: it is neither a model output to
+            // classify (eddi.llm.output) nor invalid JSON. Under fallbackField it is
+            // already the Map the postResponse templates expect.
+            templateDataObjects.put(responseObjectName, fallbackServed.object());
+        } else if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
@@ -694,7 +746,8 @@ public class LlmTask implements ILifecycleTask {
                     systemMessage + "\n---\n" + (processedParams.get(KEY_PROMPT) != null ? processedParams.get(KEY_PROMPT) : ""));
             currentStep.storeData(compiledPrompt);
 
-            if (responseContent != null) {
+            // Not for a fallback: the ledger records what the MODEL said.
+            if (responseContent != null && fallbackServed == null) {
                 var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
@@ -727,13 +780,19 @@ public class LlmTask implements ILifecycleTask {
                 && (usedToolMode || Boolean.parseBoolean(processedParams.getOrDefault(KEY_ADD_TO_OUTPUT, "false")));
 
         if (shouldAddToOutput) {
-            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
+            // A fallback shows its message, not the JSON it was wrapped in for
+            // fallbackField.
+            String visibleText = fallbackServed != null ? fallbackServed.text() : responseContent;
+            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), visibleText);
             currentStep.storeData(outputData);
             // Only add to conversation output if there is actual text.
             // Null/blank responses (e.g. from token budget exhaustion or
             // thinking-only turns) should not produce empty message bubbles.
-            if (producesRenderableOutput(responseContent)) {
-                var outputItem = new TextOutputItem(responseContent, 0);
+            if (producesRenderableOutput(visibleText)) {
+                var outputItem = new TextOutputItem(visibleText, 0);
+                if (fallbackServed != null) {
+                    outputItem.setFallback(true);
+                }
                 currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
             } else {
                 // DEBUG, not WARN: this is a documented-expected outcome (a
@@ -788,6 +847,38 @@ public class LlmTask implements ILifecycleTask {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));
                 // Non-fatal — conversation continues, summary will catch up next turn
+            }
+        }
+    }
+
+    /**
+     * The step's data entries by key, by identity, taken before the model phase so
+     * that {@link #markUncommitted} can tell what the failed phase wrote.
+     */
+    private static Map<String, IData<?>> snapshotStepData(IWritableConversationStep step) {
+        Map<String, IData<?>> snapshot = new HashMap<>();
+        List<IData<?>> elements = step.getAllElements();
+        if (elements != null) {
+            for (IData<?> element : elements) {
+                snapshot.put(element.getKey(), element);
+            }
+        }
+        return snapshot;
+    }
+
+    /**
+     * Commit Flags for a failed model phase (same rule as strict write discipline):
+     * every entry the phase added or overwrote is marked uncommitted, so it stays
+     * stored for debugging but out of what later turns show the model.
+     */
+    private static void markUncommitted(IWritableConversationStep step, Map<String, IData<?>> before) {
+        List<IData<?>> elements = step.getAllElements();
+        if (elements == null) {
+            return;
+        }
+        for (IData<?> element : elements) {
+            if (before.get(element.getKey()) != element) {
+                element.setCommitted(false);
             }
         }
     }
@@ -895,15 +986,17 @@ public class LlmTask implements ILifecycleTask {
      * and metadata for anomalies (empty, truncated, filtered, refused, streaming
      * timeout) and applies the configured action.
      *
-     * @return the (possibly modified) response content
+     * @return the (possibly modified) response content, and the fallback if a
+     *         {@code "fallback"} action substituted one
      */
-    private String applyResponseValidation(String responseContent, Map<String, Object> responseMetadata,
-                                           Task task, IWritableConversationStep currentStep)
+    private Validated applyResponseValidation(String responseContent, Map<String, Object> responseMetadata,
+                                              Task task, IWritableConversationStep currentStep,
+                                              Map<String, Object> templateDataObjects, IConversationMemory memory, boolean convertObject)
             throws LifecycleException {
 
         ResponseValidation validation = task.getResponseValidation();
         if (validation == null || !validation.isEnabled()) {
-            return responseContent;
+            return new Validated(responseContent, null);
         }
 
         String warning = responseMetadata != null ? (String) responseMetadata.get("warning") : null;
@@ -911,36 +1004,65 @@ public class LlmTask implements ILifecycleTask {
 
         // 1. Empty response check
         if (isNullOrEmpty(responseContent)) {
-            responseContent = applyValidationAction(validation.getOnEmpty(), "empty_response",
-                    "LLM returned empty response", responseContent, task, currentStep);
+            var step = applyValidationAction(validation.getOnEmpty(), "empty_response",
+                    "LLM returned empty response", responseContent, task, currentStep, templateDataObjects, memory, convertObject);
+            if (step.fallback() != null) {
+                return step;
+            }
+            responseContent = step.content();
         }
 
         // 2. Truncation check (finishReason=LENGTH)
         if ("truncated".equals(warning)) {
-            responseContent = applyValidationAction(validation.getOnTruncation(), "truncated_response",
-                    "LLM response was truncated (finishReason=LENGTH)", responseContent, task, currentStep);
+            var step = applyValidationAction(validation.getOnTruncation(), "truncated_response",
+                    "LLM response was truncated (finishReason=LENGTH)", responseContent, task, currentStep, templateDataObjects, memory,
+                    convertObject);
+            if (step.fallback() != null) {
+                return step;
+            }
+            responseContent = step.content();
         }
 
         // 3. Content filter check
         if ("content_filter".equals(warning)) {
-            responseContent = applyValidationAction(validation.getOnContentFilter(), "content_filter",
-                    "LLM response was blocked by content filter", responseContent, task, currentStep);
+            var step = applyValidationAction(validation.getOnContentFilter(), "content_filter",
+                    "LLM response was blocked by content filter", responseContent, task, currentStep, templateDataObjects, memory, convertObject);
+            if (step.fallback() != null) {
+                return step;
+            }
+            responseContent = step.content();
         }
 
         // 4. Streaming timeout check
         if (streamingTimeout) {
-            responseContent = applyValidationAction(validation.getOnStreamingTimeout(), "streaming_timeout",
-                    "Streaming response timed out", responseContent, task, currentStep);
+            var step = applyValidationAction(validation.getOnStreamingTimeout(), "streaming_timeout",
+                    "Streaming response timed out", responseContent, task, currentStep, templateDataObjects, memory, convertObject);
+            if (step.fallback() != null) {
+                return step;
+            }
+            responseContent = step.content();
         }
 
         // 5. Refusal heuristic — configured prefixes, defaulting to the four that were
         // hard-coded here.
         if (!isNullOrEmpty(responseContent) && looksLikeRefusal(responseContent, validation.getRefusalPatterns())) {
-            responseContent = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
-                    "LLM response appears to be a refusal", responseContent, task, currentStep);
+            var step = applyValidationAction(validation.getOnRefusal(), "refusal_detected",
+                    "LLM response appears to be a refusal", responseContent, task, currentStep, templateDataObjects, memory, convertObject);
+            if (step.fallback() != null) {
+                return step;
+            }
+            responseContent = step.content();
         }
 
-        return responseContent;
+        return new Validated(responseContent, null);
+    }
+
+    /**
+     * What response validation hands back: the text to carry on with, and the
+     * fallback when a {@code "fallback"} action replaced the model's answer (so the
+     * caller can skip parsing it and flag the turn).
+     */
+    private record Validated(String content, LlmFallbackHandler.Fallback fallback) {
     }
 
     /**
@@ -972,14 +1094,16 @@ public class LlmTask implements ILifecycleTask {
     /**
      * Applies a single validation action.
      *
-     * @return the (possibly modified) response content
+     * @return the (possibly modified) response content, and the fallback if one was
+     *         substituted
      */
-    private String applyValidationAction(String action, String validationType, String message,
-                                         String responseContent, Task task, IWritableConversationStep currentStep)
+    private Validated applyValidationAction(String action, String validationType, String message,
+                                            String responseContent, Task task, IWritableConversationStep currentStep,
+                                            Map<String, Object> templateDataObjects, IConversationMemory memory, boolean convertObject)
             throws LifecycleException {
 
         if (action == null || "ignore".equalsIgnoreCase(action)) {
-            return responseContent;
+            return new Validated(responseContent, null);
         }
 
         switch (action.toLowerCase()) {
@@ -990,12 +1114,13 @@ public class LlmTask implements ILifecycleTask {
                 break;
 
             case "fallback" :
-                String fallbackMsg = "I'm sorry, I wasn't able to generate a complete response. Please try again.";
                 LOGGER.warnf("[ResponseValidation] %s — substituting fallback (task=%s)", validationType, task.getId());
                 var fallbackData = dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(),
                         Map.of("action", "fallback", "original", responseContent != null ? responseContent : ""));
                 currentStep.storeData(fallbackData);
-                return fallbackMsg;
+                var served = fallbackHandler.serve(task, templateDataObjects, currentStep, "validation", null, convertObject,
+                        memory.getConversationId());
+                return new Validated(served.content(), served);
 
             case "error" :
                 LOGGER.errorf("[ResponseValidation] %s — throwing error (task=%s): %s", validationType, task.getId(), message);
@@ -1008,7 +1133,7 @@ public class LlmTask implements ILifecycleTask {
                 break;
         }
 
-        return responseContent;
+        return new Validated(responseContent, null);
     }
 
     /**

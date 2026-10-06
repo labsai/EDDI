@@ -844,7 +844,8 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
-| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout` | (none) |
+| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | (none) |
+| `onError`                  | object   | `{"action": "fallback" \| "error"}`. With `fallback`, a failed model phase serves the configured fallback and the turn completes normally instead of failing — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | `error` |
 | **Retrieval (RAG)**        |          | Requires the agent's workflow to bind the knowledge base with an `eddi://ai.labs.rag` step — see [RAG](rag.md#configuration) | |
 | `knowledgeBases`           | object[] | Knowledge bases this task retrieves from, by `name`, each optionally overriding `maxResults` / `minScore`. The name must match a KB the workflow binds; an unmatched name is skipped silently | (none) |
 | `enableWorkflowRag`        | boolean  | Retrieve from **every** knowledge base the workflow binds, instead of listing them. Ignored when `knowledgeBases` contains at least one reference; an empty `knowledgeBases` array does **not** suppress it | false |
@@ -1827,6 +1828,39 @@ Every `convertToObject` reply gets an outcome, recorded on the step under `llm:o
 | `empty` | Null or blank reply; the raw value is stored |
 
 A rising `invalid` rate for one agent usually points at a prompt, schema or model-version problem. The key is not part of the public conversation snapshot.
+
+### Fallback answers and `onError`
+
+Two things can leave a turn without a model answer: a `responseValidation` policy set to `fallback` (empty, truncated or filtered reply), and a model phase that fails outright (provider error after its retries and any cascade, an unusable model configuration, a validation policy of `error`). Both serve the same configurable fallback.
+
+```json
+{
+  "convertToObject": "true",
+  "onError": { "action": "fallback" },
+  "responseValidation": {
+    "enabled": true,
+    "onEmpty": "fallback",
+    "fallbackMessage": "{#if properties.language == 'de'}Entschuldigung, das hat gerade nicht geklappt. Bitte versuche es noch einmal.{#else}Sorry, I could not answer that just now. Please try again.{/if}",
+    "fallbackField": "htmlResponseText",
+    "fallbackQuickReplies": [ { "value": "Try again", "expressions": "retry_last" } ]
+  }
+}
+```
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `onError.action` | `fallback` absorbs a failure of the task's model phase: the task serves the fallback and returns normally, so the turn completes with HTTP 200 and the conversation is **not** set to `ERROR`. `error` lets it fail the turn. Only that failure is absorbed: a human-in-the-loop tool pause, a conversation cancel, a graceful-shutdown interrupt and a thread interrupt always propagate | `error` |
+| `responseValidation.fallbackMessage` | The text served. It is a template (Qute, like every author-written config field) rendered with the task's template data, so `{properties.x}`, `{snippets.x}` and `{#if}` all work. A template that fails to render, or renders blank, falls back to the default sentence | `I'm sorry, I wasn't able to generate a complete response. Please try again.` |
+| `responseValidation.fallbackField` | Under `convertToObject`, the fallback is stored under `responseObjectName` as the object `{"<fallbackField>": "<message>"}`, so a `postResponse` output template such as `{properties.aiOutputObject.htmlResponseText}` renders it unchanged. Unset, the fallback stays a plain string | (none) |
+| `responseValidation.fallbackQuickReplies` | Quick replies (`value`, `expressions`, both templates) added to the step next to the fallback, exactly as an output set adds them | (none) |
+
+`onError` works without a `responseValidation` block (the defaults above apply), and the fallback fields work without `onError` (they shape the validation `fallback` action).
+
+**What is recorded.** The step gets `llm:fallback:<taskId>` = `true` for any fallback, and, for an absorbed failure, `llm:error:<taskId>` = `{class, message}`: the simple class name of the root cause and its message, with secrets redacted, URLs replaced by `[url]` and the text cut at 200 characters (never a request body or stack trace). Data the failed phase had already written to the step is marked uncommitted (see [Memory Policy](memory-policy.md)), and the audit ledger's model-response field is left empty rather than recording the fallback as something the model said. The Micrometer counter `eddi.llm.recovery` counts each one (`action=fallback`, `outcome=served`, `trigger=onError|validation`).
+
+**The model never sees the fallback.** When the next turn's history is built for the model, the assistant message of a fallback turn is left out; the user's question stays. To keep the roles alternating (some providers reject two user messages in a row) the following user message is merged into it. The conversation log and the UI still show the fallback, and an output item the task itself adds under `addToOutput` carries `"fallback": true`. The rolling summary and the recall tool still see the turn.
+
+**Not covered:** the resume path after a human-in-the-loop tool approval does not apply `onError`; a failure there fails the turn as before.
 
 ### Debugging
 
