@@ -330,6 +330,22 @@ class LlmCircuitBreakersTest {
     }
 
     @Test
+    @DisplayName("a late failure from before an open-and-recover cycle cannot re-open the recovered breaker")
+    void lateResultFromEarlierCycleIsIgnored() {
+        var cfg = config(10, 8, 60_000);
+        Ticket stale = breakers.acquire(MODEL, cfg);
+        fail(MODEL, cfg, Failure.AUTH);
+        now.addAndGet(60_000);
+        breakers.acquire(MODEL, cfg).success();
+        assertEquals(State.CLOSED, breakers.stateOf(MODEL));
+
+        stale.failure(Failure.AUTH, "old");
+
+        assertEquals(State.CLOSED, breakers.stateOf(MODEL));
+        assertTrue(breakers.acquire(MODEL, cfg).allowed());
+    }
+
+    @Test
     @DisplayName("a ticket settles once; later settles are ignored")
     void ticketSettlesOnce() {
         var cfg = defaults();
