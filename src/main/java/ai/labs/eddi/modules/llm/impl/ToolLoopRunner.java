@@ -418,7 +418,7 @@ class ToolLoopRunner {
                 ChatResponse chatResponse;
                 try {
                     chatResponse = AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(chatRequest), task, "Agent execution",
-                            backoffSpentMs);
+                            backoffSpentMs, memory.getTurnDeadline());
                 } catch (LifecycleException requestFailure) {
                     // Nothing has executed in this run until the first request is
                     // answered. Say so, so a caller that may retry the run (the cascade's

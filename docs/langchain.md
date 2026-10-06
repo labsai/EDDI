@@ -1291,6 +1291,64 @@ self-hosted OpenAI-compatible gateway that answers an unsupported `response_form
 rather than a 4xx therefore fails the turn instead of falling back; set `jsonResponseFormat: "off"`
 on that task (see the provider matrix below) so the format is never sent.
 
+### Turn Deadline
+
+Retries, cascade steps and HTTP calls each have their own timeouts, and they multiply: three
+attempts of a 25-second model, a two-step cascade and a retried HTTP call can add up to minutes. A
+caller with a 60-second timeout then gives up while the engine is still working, and the late answer
+is never seen. A **turn deadline** makes every layer spend from one budget instead.
+
+```json
+{
+  "turnDeadlineMs": 55000,
+  "turnDeadlineReserveMs": 1500
+}
+```
+
+Both are **agent-level** settings (on the agent configuration, not on an LLM task). Unset
+`turnDeadlineMs` — the default — means no deadline: every layer applies only its own timeouts,
+exactly as before.
+
+| Setting                 | Description                                                                                                                  | Default |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `turnDeadlineMs`        | Wall-clock budget of one turn, counted from the request's arrival (time spent queued behind another turn counts)             | unset   |
+| `turnDeadlineReserveMs` | Kept back for the fallback answer and for persisting the turn; no model or HTTP work is started that would eat into it        | 1500    |
+
+**Per request.** A caller can send `X-EDDI-Turn-Deadline-Ms: <milliseconds>` on a conversation
+`say`, on the managed-conversation endpoint and on the OpenAI-compatible `/v1` chat endpoint. When
+the agent sets `turnDeadlineMs`, the header can only *shorten* it. When the agent sets none, the
+header alone enables a deadline, capped at 10 minutes. A missing, non-numeric or non-positive value
+is ignored (the request is never rejected over it). Only the `say`/`rerun` turn paths read it; a
+HITL resume starts a turn without one.
+
+**What spends from it**
+
+- **Model attempts** (`retry`): the first attempt always starts while any time remains; a *retry* only
+  starts when at least 3 seconds plus the reserve are left. Each attempt is bounded by what is left
+  after the reserve, and an attempt that overruns is abandoned and its call cancelled. A backoff —
+  or a provider `Retry-After` — that would leave no room for the next attempt is **not slept**: the
+  loop stops and the failure goes up, so a [model cascade](model-cascade.md) escalates, or the turn
+  falls back, while there is still time.
+- **Cascade**: `maxTotalDurationMs` is `min(configured, remaining - reserve)`, step timeouts are
+  clamped to the remaining budget, and no further step starts when under 3 seconds (plus reserve)
+  remain. Time already spent by earlier tasks is already gone from the remaining budget.
+- **HTTP calls** ([httpcalls](httpcalls.md)): each call's timeout is clamped to the remaining budget,
+  and `retryApiCallInstruction` retries that cannot fit (backoff plus a call of at least
+  `min(timeout, 3 s)`) are skipped. The first call is never skipped unless the deadline has already
+  passed, in which case the call fails fast with a clear message.
+
+Streaming (SSE) model calls keep their own streaming timeout and are not yet bounded by the turn
+deadline.
+
+**Metrics.** `eddi.llm.turn.deadline.exceeded{stage}` counts every time a layer stopped because of
+the deadline; `eddi.llm.cancelled{scope}` counts attempts and cascade steps abandoned on timeout.
+
+**Deploy-time warnings.** When an agent is loaded, the engine logs (once, never blocking) a warning
+if a task's model `timeout` is longer than its cascade step's `timeoutMs`, if `convertToObject` has no
+fallback path (no `responseValidation` fallback and no `onError` fallback), and — for agents that set
+`turnDeadlineMs` — if the static worst case (every LLM retry running to its timeout, plus the slowest
+httpcall of each httpcalls step with its retries) exceeds the deadline minus the reserve.
+
 ### Rolling Conversation Summary
 
 The third windowing strategy compresses older turns into a running summary that is injected into

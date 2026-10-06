@@ -168,9 +168,25 @@ The full per-step trace is stored in conversation memory under `langchain:cascad
 
 If `responseMetadataObjectName` is set, the cascade populates it with real token usage plus `cascadeCostUsd`, `cascadeModel` (`provider/model`), `cascadeStep`, and `cascadeConfidence`.
 
+### Turn deadline and request timeouts
+
+Inside an agent's [turn deadline](langchain.md#turn-deadline) the cascade's own budget shrinks to
+`min(maxTotalDurationMs, remaining - reserve)`, each step's timeout is clamped to what is left, and a
+further step is not started when less than 3 seconds (plus the reserve) remain — the best answer so
+far is returned instead.
+
+A step's `timeoutMs` also bounds the provider request itself: the model built for the step has its
+`timeout` parameter clamped to the step's `timeoutMs` (rounded up to whole seconds up to 10 s, and to
+5-second steps above, so a deadline that shrinks every turn does not create a model per millisecond).
+Without that, cancelling the waiting future left the HTTP call running — billed, and holding a thread
+— for the model's full `timeout`. A model `timeout` already at or below the step's is left alone.
+Setting a model `timeout` longer than its step's `timeoutMs` is reported as a deploy-time warning;
+set them equal. `eddi.llm.cancelled{scope=cascade_step}` counts steps cancelled on timeout, and the
+trace of a clamped step carries `modelTimeoutClampedMs`.
+
 ### Metrics (Micrometer, `/q/metrics`)
 
-`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`).
+`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`), `eddi.llm.turn.deadline.exceeded` (tag `stage`), `eddi.llm.cancelled` (tag `scope`).
 
 ## Audit Trail
 

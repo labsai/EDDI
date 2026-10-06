@@ -249,6 +249,15 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.postResponse.propertyInstructions.httpCodeValidator.runOnHttpCode  | (`Array`: \<Integer> ) a list of http code that enables this property instruction e.g \[`200`]                                                                                                                                   |
 | httpCall.postResponse.propertyInstructions.httpCodeValidator.skipOnHttpCode | (`Array`: \<Integer>) list of http code that enables this property instruction e.g \[`500,501,400`]                                                                                                                              |
 
+### Turn deadline
+
+When the agent sets a [turn deadline](langchain.md#turn-deadline) (`turnDeadlineMs`, or the caller's
+`X-EDDI-Turn-Deadline-Ms` header), each call's `timeoutInMillis` is clamped to the time the turn has
+left after its reserve, and a `retryApiCallInstruction` retry is skipped when its backoff plus a call
+of `min(timeoutInMillis, 3 s)` no longer fits — the last response is then used as if the retries had
+been exhausted. The first call is always sent while the deadline has not passed; once it has, the call
+fails fast instead of being sent. Without a deadline, nothing changes.
+
 ### HttpCall API endpoints
 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |

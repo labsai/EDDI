@@ -8,9 +8,17 @@ import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import org.jboss.logging.Logger;
 
+import io.micrometer.core.instrument.Metrics;
+
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Shared retry configuration and execution utility.
@@ -31,6 +39,18 @@ public class RetryConfiguration {
     public static final int MAX_ATTEMPTS_CEILING = 10;
     static final long MAX_BACKOFF_CEILING_MS = 30_000L;
     static final long MAX_TOTAL_BACKOFF_MS = 60_000L;
+
+    /**
+     * Runs deadline-bounded attempts, so one that overruns can be abandoned (and
+     * its provider call cancelled) instead of waited for.
+     */
+    private static final ExecutorService ATTEMPT_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+
+    /**
+     * A first attempt is still made when the turn deadline leaves less than this
+     * after the reserve — it is then given whatever time is left.
+     */
+    private static final long MIN_FIRST_ATTEMPT_BUDGET_MS = 500L;
 
     /** Distinct clamped values already reported; see {@link #warnClamped}. */
     private static final Set<String> CLAMP_WARNINGS = ConcurrentHashMap.newKeySet();
@@ -187,6 +207,35 @@ public class RetryConfiguration {
     public static <T> T executeWithRetry(Callable<T> action, RetryConfiguration retryConfig, String actionDescription,
                                          long[] sharedBackoffMs)
             throws LifecycleException {
+        return executeWithRetry(action, retryConfig, actionDescription, sharedBackoffMs, null);
+    }
+
+    /**
+     * As {@link #executeWithRetry(Callable, RetryConfiguration, String, long[])},
+     * inside a turn deadline.
+     * <p>
+     * With a non-null {@code deadline} the loop spends from the turn's budget
+     * rather than from its own settings alone:
+     * <ul>
+     * <li>the first attempt always runs while any time is left; a <em>retry</em> is
+     * only started when at least {@value TurnDeadline#MIN_ATTEMPT_MS} ms plus the
+     * deadline's reserve remain;</li>
+     * <li>each attempt is bounded by what is left after the reserve (the call runs
+     * on its own thread and is cancelled on overrun, because a cached model carries
+     * a fixed provider timeout that cannot be shortened per call);</li>
+     * <li>a sleep — the configured backoff or a provider {@code Retry-After} — that
+     * would leave no room for the next attempt is not taken: the loop stops and
+     * rethrows, so the caller (the cascade, the fallback path) acts while there is
+     * still time to.</li>
+     * </ul>
+     * A {@code null} deadline is exactly the previous behaviour.
+     *
+     * @param deadline
+     *            the turn's deadline, or {@code null} for none
+     */
+    public static <T> T executeWithRetry(Callable<T> action, RetryConfiguration retryConfig, String actionDescription,
+                                         long[] sharedBackoffMs, TurnDeadline deadline)
+            throws LifecycleException {
 
         if (retryConfig == null) {
             retryConfig = new RetryConfiguration();
@@ -205,12 +254,31 @@ public class RetryConfiguration {
         Exception lastException = null;
 
         while (attempt < maxAttempts) {
+            long attemptBudgetMs = -1L;
+            if (deadline != null) {
+                attemptBudgetMs = deadline.remainingAfterReserveMs();
+                if (attempt == 0) {
+                    if (deadline.isExpired()) {
+                        deadlineExceeded("attempt");
+                        throw new LifecycleException(actionDescription + " not started: the turn deadline has already passed");
+                    }
+                    if (attemptBudgetMs < MIN_FIRST_ATTEMPT_BUDGET_MS) {
+                        attemptBudgetMs = deadline.remainingMs();
+                    }
+                } else if (attemptBudgetMs < TurnDeadline.MIN_ATTEMPT_MS) {
+                    deadlineExceeded("attempt");
+                    LOGGER.warn(actionDescription + " not retried: " + deadline.remainingMs() + "ms left in the turn, below the "
+                            + TurnDeadline.MIN_ATTEMPT_MS + "ms minimum attempt plus the " + deadline.reserveMs() + "ms reserve");
+                    throw new LifecycleException(actionDescription + " failed after " + attempt + " attempts: turn deadline reached",
+                            lastException);
+                }
+            }
             attempt++;
 
             try {
                 LOGGER.debug(actionDescription + " attempt " + attempt + "/" + maxAttempts);
 
-                T result = action.call();
+                T result = deadline == null ? action.call() : callWithin(action, attemptBudgetMs, actionDescription);
 
                 // INFO only when a retry actually rescued the call — at INFO for every
                 // success this fired once per LLM and MCP call in production.
@@ -253,6 +321,14 @@ public class RetryConfiguration {
                                     + "ms retry budget after " + attempt + " attempt(s); giving up");
                             break;
                         }
+                        if (deadline != null && deadline.remainingAfterReserveMs() < sleepFor + TurnDeadline.MIN_ATTEMPT_MS) {
+                            // Sleeping would leave no room for the attempt it is waiting for.
+                            deadlineExceeded("sleep");
+                            LOGGER.warn(actionDescription + " not retried: a " + sleepFor + "ms wait plus a " + TurnDeadline.MIN_ATTEMPT_MS
+                                    + "ms attempt does not fit in the " + deadline.remainingMs() + "ms left in the turn");
+                            throw new LifecycleException(actionDescription + " failed: turn deadline leaves no room to wait " + sleepFor
+                                    + "ms and retry [" + failure.cls() + "]", e);
+                        }
 
                         LOGGER.warn(actionDescription + " failed (attempt " + attempt + "/" + maxAttempts
                                 + "), retrying after " + sleepFor + "ms: " + e.getMessage());
@@ -280,6 +356,39 @@ public class RetryConfiguration {
         // The attempts actually made, not the attempts configured: breaking out on a
         // spent budget reported "failed after 10 attempts" for a call that made two.
         throw new LifecycleException(actionDescription + " failed after " + attempt + " attempts", lastException);
+    }
+
+    /**
+     * Runs one attempt on its own thread and abandons it when the budget is spent.
+     * The thrown exception is the attempt's own, so classification and the HITL
+     * pause signal behave exactly as without a deadline.
+     */
+    private static <T> T callWithin(Callable<T> action, long budgetMs, String actionDescription) throws Exception {
+        Future<T> future = ATTEMPT_EXECUTOR.submit(action);
+        try {
+            return future.get(Math.max(1L, budgetMs), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException te) {
+            future.cancel(true);
+            Metrics.globalRegistry.counter("eddi.llm.cancelled", "scope", "attempt").increment();
+            deadlineExceeded("attempt_timeout");
+            throw new TimeoutException(actionDescription + " timed out after " + budgetMs + "ms (turn deadline)");
+        } catch (ExecutionException ee) {
+            Throwable cause = ee.getCause();
+            if (cause instanceof Exception ex) {
+                throw ex;
+            }
+            if (cause instanceof Error err) {
+                throw err;
+            }
+            throw ee;
+        } catch (InterruptedException ie) {
+            future.cancel(true);
+            throw ie;
+        }
+    }
+
+    private static void deadlineExceeded(String stage) {
+        Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", stage).increment();
     }
 
     /**

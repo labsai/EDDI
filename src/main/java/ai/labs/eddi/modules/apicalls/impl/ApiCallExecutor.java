@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.MemoryKeys;
@@ -32,6 +33,7 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -101,6 +103,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * {@value #BATCH_DEFAULT_MAX_SIZE_PROPERTY}.
      */
     public static final int DEFAULT_MAX_BATCH_SIZE = 100;
+
+    /**
+     * Below this much budget after the reserve, a call gets the whole of what is
+     * left of the turn rather than a sliver.
+     */
+    private static final long MIN_DEADLINE_CALL_BUDGET_MS = 500L;
 
     /**
      * Ceiling for {@code maxBatchSize}: a config may lower the default or raise it
@@ -262,6 +270,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
                     substitutedSecrets.addAll(built.resolvedSecrets());
                     request = built.request();
+                    // Inside a turn deadline the call may not outlive what is left of the
+                    // turn. The first call is never skipped while any time remains.
+                    TurnDeadline turnDeadline = memory.getTurnDeadline();
+                    if (turnDeadline != null) {
+                        if (turnDeadline.isExpired()) {
+                            Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall").increment();
+                            throw new LifecycleException("ApiCall (" + call.getName() + ") not sent: the turn deadline has already passed");
+                        }
+                        request.setTimeout(deadlineBoundedTimeout(resolveTimeout(call), turnDeadline), TimeUnit.MILLISECONDS);
+                    }
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
                     // Scrub resolved secrets — headers, query parameters and body — from
@@ -405,6 +423,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     amountOfExecutions++;
                     retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
                             response.getContentAsString());
+                    if (retryCall && memory.getTurnDeadline() != null
+                            && !retryFitsDeadline(call, amountOfExecutions, memory.getTurnDeadline())) {
+                        Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall_retry").increment();
+                        LOGGER.warn(format("ApiCall (%s) not retried: %sms left in the turn is not enough for the backoff plus another attempt",
+                                call.getName(), memory.getTurnDeadline().remainingMs()));
+                        retryCall = false;
+                    }
                 } while (retryCall);
 
                 // This executor has no response-validation stage, so a post-response
@@ -747,6 +772,30 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
 
         return Math.min(configuredMaxBackoff, MAX_BACKOFF_MILLIS);
+    }
+
+    /**
+     * The call's timeout, shortened to what the turn can still spare: what is left
+     * after the reserve, or all of what is left when that is almost nothing (the
+     * call is still attempted, with the time there is).
+     */
+    static long deadlineBoundedTimeout(long configuredMs, TurnDeadline deadline) {
+        long budget = deadline.remainingAfterReserveMs();
+        if (budget < MIN_DEADLINE_CALL_BUDGET_MS) {
+            budget = deadline.remainingMs();
+        }
+        return Math.max(1L, Math.min(configuredMs, budget));
+    }
+
+    /**
+     * Whether another attempt of {@code call} fits: the retry backoff plus a call
+     * of at least {@code min(timeout, 3 s)} must remain after the reserve.
+     * {@code amountOfExecutions} is how many attempts have been made.
+     */
+    boolean retryFitsDeadline(ApiCall call, int amountOfExecutions, TurnDeadline deadline) {
+        long delay = getDelayInMillis(call, true, amountOfExecutions);
+        long attempt = Math.min(resolveTimeout(call), TurnDeadline.MIN_ATTEMPT_MS);
+        return deadline.remainingAfterReserveMs() >= delay + attempt;
     }
 
     /**
