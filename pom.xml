@@ -25,8 +25,8 @@
              langchain4j-community.version were byte-identical duplicates of
              langchain4j.version and langchain4j-beta.version), which made a
              half-finished bump the likely outcome of any upgrade. -->
-        <langchain4j.version>1.20.2</langchain4j.version>
-        <langchain4j-beta.version>1.20.2-beta30</langchain4j-beta.version>
+        <langchain4j.version>1.21.0</langchain4j.version>
+        <langchain4j-beta.version>1.21.0-beta31</langchain4j-beta.version>
         <!-- langchain4j-community-oci-genai is published on its own schedule: its newest release is
              1.20.0-beta30, with no 1.20.2-beta30. Pinned separately so the rest of the beta line can
              move; a patch-level core difference is binary compatible. Rejoin the beta property when
