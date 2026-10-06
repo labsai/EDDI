@@ -1214,6 +1214,11 @@ When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit`
 
 ### Retry Configuration
 
+> **The whole picture** — failure classes, the order in which the engine recovers, every setting with its
+> default, a recipe for an agent behind a 60-second caller, and how to read the trace, metrics and log lines
+> afterwards — is in [LLM Turn Resilience](llm-resilience.md). This section and the ones below are the field
+> reference.
+
 `retry` on an LLM task bounds how the engine re-attempts a failed model call. Only errors the
 engine classifies as retriable are retried — transport faults, rate limits and 5xx responses —
 never a malformed request, an authentication failure or a spent quota.
@@ -2008,7 +2013,7 @@ Two things can leave a turn without a model answer: a `responseValidation` polic
 
 **The model never sees the fallback.** When the next turn's history is built for the model, the assistant message of a fallback turn is left out; the user's question stays. To keep the roles alternating (some providers reject two user messages in a row) the following user message is merged into it. The conversation log and the UI still show the fallback, and an output item the task itself adds under `addToOutput` carries `"fallback": true`. The rolling summary and the recall tool still see the turn.
 
-**Not covered:** the resume path after a human-in-the-loop tool approval does not apply `onError`; a failure there fails the turn as before.
+**Resume after a human-in-the-loop approval.** The resumed model phase runs under the same `onError` guard: a failure of the final answer serves the fallback instead of failing the turn (the approved tool calls already ran exactly once, so only the answer is replaced). A pause, a cancel and a refused approval still propagate. See [LLM Turn Resilience](llm-resilience.md#after-a-human-approval-resume) for what does and does not apply on resume.
 
 ### Recovery policies: retry where it helps
 
@@ -2052,7 +2057,9 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 
 **Cost.** Every attempt's tokens are summed into the turn's token usage and cost, so re-asks show up in the audit ledger and in `maxCostPerRun`. The step records `llm:retry:<taskId>` = `{reasks, unresolved}`. Metrics: `eddi.llm.recovery{action=retry|escalate, outcome, trigger}` (see [metrics](metrics.md)).
 
-**Not covered:** the resume path after a human-in-the-loop tool approval gets the parser's local repair but no re-asks. A model that keeps failing the same way is taken out by the [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing), which also switches off the same-model re-ask of invalid output.
+**Resume after a human-in-the-loop approval.** A resumed turn re-asks its **final answer** on the same model for an empty, invalid-JSON or schema-mismatch reply (one model call over the resumed transcript; no tool runs again) and applies the `responseValidation` actions. Truncation and context-too-long re-asks are not available there, and the circuit breaker and the cascade are not consulted: the resume continues on the model whose tool loop paused. A resume that recorded no transcript cannot re-ask and goes to `fallbackAction`.
+
+**One log line per recovery.** Each repair, re-ask, escalation, circuit skip and served fallback writes exactly one INFO line, `LLM recovery conversationId=… agentId=… class=… action=… outcome=… attempt=… durationMs=…` (see [LLM Turn Resilience](llm-resilience.md#in-the-log)). A model that keeps failing the same way is taken out by the [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing), which also switches off the same-model re-ask of invalid output.
 
 ### Circuit breaker: skip a model that keeps failing
 
@@ -2228,6 +2235,8 @@ This means:
 ---
 
 ## See Also
+
+- [LLM Turn Resilience](llm-resilience.md) - failure taxonomy, recovery order, configuration surface and how to read the trace, metrics and logs
 
 - [Behavior Rules](behavior-rules.md) - Triggering LLM tasks conditionally
 - [HTTP Calls](httpcalls.md) - Creating custom HTTP call tools for agents

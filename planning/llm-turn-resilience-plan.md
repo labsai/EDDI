@@ -2,10 +2,66 @@
 
 ## Status
 
-- **R3 + R14 implemented** (PR for branch `feat/llm-output-parsing-never-throws`): fence stripping and prose recovery of **objects** (a non-empty object extracted from surrounding text), arrays accepted **only as the whole reply**; parsing never throws; outcome recorded under `llm:output:outcome:<taskId>` and `eddi.llm.output{outcome}`. `FaultInjectingChatModel` is test scope only.
-- **R2, R4, R5, R6, R7 implemented** on the stacked branches (see `docs/changelog.d/2026-10-06-*.md`). Where the implementation differs from the text below: a corrective message is sent only for invalid JSON and schema mismatches (empty, truncated and filtered replies are re-asked with the original request; context-too-long re-sends with the history window halved); fallback exclusion from the LLM history is driven by the step flag `llm:fallback:<taskId>`, because a `postResponse` fallback has no task-created `OutputItem`.
-- **R4 implemented** (PR for branch `feat/llm-response-schema-validation`): shape validation and native schema. Where it differs from the R4 text below: a shape violation is outcome `schema_mismatch` (not `INVALID`) and keeps the parsed object; reason under `llm:output:reason:<taskId>`; the native schema is sent per request, **non-strict** (langchain4j's `strict` is a model-builder flag), for openai, azure-openai, mistral and gemini (not gemini-vertex); `nonBlankFields` is a task field next to `jsonResponseFormat`. See `docs/langchain.md` Structured Output.
-- Everything else below is still to do.
+**R1 to R16 are implemented.** The user-facing description is [`docs/llm-resilience.md`](../docs/llm-resilience.md); the
+per-item reasoning is in the changelog fragments of the series (`docs/changelog.d/2026-10-06-*.md`, later
+`docs/changelog.md`).
+
+| Item | Branch (PR) |
+|---|---|
+| R3 never-throwing output parsing, R14 fault-injection harness | `feat/llm-output-parsing-never-throws` (#989) |
+| R2 error classification, retry ownership, `Retry-After` | `feat/llm-error-classification` (#994) |
+| R6 JSON-aware fallback, R7 `onError` | `feat/llm-fallback-and-onerror` (#993) |
+| R5 recovery policies (same-model re-ask), the cost and injection guards of R16 | `feat/llm-recovery-policies` (#999) |
+| R4 shape validation and native schema | `feat/llm-response-schema-validation` (#998) |
+| R1 turn deadline, R10 cancellation hygiene, R15 deploy-time warnings | `feat/llm-turn-deadline` (#996) |
+| R9 structured errors and idempotent turns | `feat/turn-idempotency-structured-errors` (#1000) |
+| R8 circuit breaker and alerting | `feat/llm-circuit-breaker` (#1001) |
+| R11 observability, R12 resume parity, R13 docs | `feat/llm-resilience-observability-docs` (this change) |
+
+Where the implementation differs from the text below:
+
+- **Corrective message (R5).** It is sent only for invalid JSON and schema mismatches. Empty, truncated and filtered
+  replies are re-asked with the original request; context-too-long re-sends with the history window halved.
+- **Fallback exclusion (R6).** The assistant message of a fallback turn is left out of the LLM history by the step
+  flag `llm:fallback:<taskId>`, because a `postResponse` fallback has no task-created `OutputItem`.
+- **Shape violation (R4).** It is outcome `schema_mismatch` (not `INVALID`) and keeps the parsed object; the reason is
+  under `llm:output:reason:<taskId>`. The native schema is sent per request, **non-strict** (`strict` is a model-builder
+  flag in langchain4j), for openai, azure-openai, mistral and gemini (not gemini-vertex). `nonBlankFields` is a task
+  field next to `jsonResponseFormat`.
+- **`turnDeadlineMs` (R1)** and `turnDeadlineReserveMs` are **agent-level** settings, not task fields.
+- **Resume (R12).** A resumed turn applies parsing, shape validation, `responseValidation` actions, `onError` and the
+  same-model re-ask of the final answer (a single call over the resumed transcript). It does not apply the circuit
+  breaker, the cascade, the truncation and context-too-long re-asks, or a turn deadline; see the table in
+  `docs/llm-resilience.md`.
+- **Recovery meter (R11).** `eddi.llm.recovery{action,outcome,trigger}` has `action` in `repair`, `retry`, `escalate`,
+  `circuit_skip`, `fallback` (`circuit_skip` is an addition to the plan's list). `eddi.llm.failure{class,model}` is
+  counted for single-model tasks as well as cascade steps. Every recovery writes one `LLM recovery ...` INFO line.
+
+### Known gaps and follow-ups
+
+- **Streaming.** `StreamingLegacyChatExecutor` keeps its own timeout, is not bounded by the turn deadline, and retries
+  with the plain backoff instead of the provider's delay (R1, R2). A task that may re-ask is buffered, not streamed (R5).
+- **`Retry-After` header.** Not reachable: langchain4j's `HttpException` keeps only the status and the body (R2).
+- **Tool mode.** No truncation or context-too-long re-ask (the loop reports no finish reason; shrinking after tools ran
+  would replay them) (R5). A HITL resume starts a turn without a deadline (R1, R12).
+- **Fallback turns** are still in the rolling summary and the recall tool (R6). The audit ledger has no error field; the
+  failure is on the step as `llm:error:<taskId>` (R7).
+- **R15.** The warning for `onInvalidJson: "retry"` with `maxRetries: 0` is not implemented, and the `onError`
+  half of the "no fallback path" check is still read reflectively although the field now exists in the same tree.
+- **R14.** The WireMock cascade IT (two-step cascade through a real `LlmTask` pipeline) was not written; the unit-level
+  harness (`FaultInjectingChatModel`) covers the same paths.
+- **Circuit breaker (R8)** state is per node, and there is no webhook or Slack notification: alert from the ERROR log line
+  or `eddi_llm_circuit_total{state="open"}`.
+- **Idempotency (R9).** A duplicate of a running turn that lands on another node (NATS coordinator) still meets `409`
+  until the turn completes.
+- **Native schema (R4)** is derived from the langchain4j 1.20.2 bindings and checked at the `ChatRequest` level only;
+  it was not verified against live provider APIs.
+- **`maxRetryCostUsd` (R16)** is priced from the configured per-1M prices and does not consult the per-conversation
+  `ToolCostTracker`.
+- **Manager UI.** Types only for `retry.honorRetryAfter` / `maxRetryAfterMs`, `nonBlankFields`, `responseValidation`
+  extensions, `onError`, `circuitBreaker` and `maxFormatRetries`; no editor controls yet.
+- **Dashboard.** The full-metrics dashboard has a recovery panel but none dedicated to `action=repair` or
+  `action=circuit_skip`; two pre-existing duplicate panel ids (158/159, 168 to 172) are not from this series.
 
 
 **Repo:** `labsai/EDDI` (Java backend). Branch from `origin/main` (AGENTS.md §2 rule 3), for example

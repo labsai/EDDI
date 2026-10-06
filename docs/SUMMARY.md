@@ -31,6 +31,7 @@
 - [LLM Integration](langchain.md)
 - [RAG (Retrieval-Augmented Generation)](rag.md)
 - [Model Cascade](model-cascade.md)
+- [LLM Turn Resilience](llm-resilience.md)
 - [Prompt Snippets](prompt-snippets-guide.md)
 - [Output Configuration](output-configuration.md)
 - [Output Templating](output-templating.md)

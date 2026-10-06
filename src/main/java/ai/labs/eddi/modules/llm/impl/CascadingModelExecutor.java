@@ -396,7 +396,7 @@ class CascadingModelExecutor {
             StepModel stepModel = resolveStepModel(step, task, baseParams, templateDataObjects, memory, "Cascade step " + i);
             String modelType = stepModel.modelType();
             Map<String, String> mergedParams = stepModel.params();
-            String modelName = resolveModelName(mergedParams, modelType);
+            String modelName = resolveVariables(resolveModelName(mergedParams, modelType));
 
             // R8: a model whose circuit is open is not called; the cascade goes straight
             // to its next step, which is what makes a systemically failing cheap model
@@ -418,7 +418,7 @@ class CascadingModelExecutor {
                         modelName));
                 errors.add(String.format("Step %d (%s): %s", i, modelName, denialMessage));
                 increment("eddi.llm.cascade.escalations", "reason", "circuit_open");
-                LOGGER.warnf("Cascade step %d (%s/%s) skipped: circuit open (%s)", i, modelType, modelName, denial.failure().label());
+                recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", denial.failure().label(), i + 1, 0L);
                 if (!isLastStep) {
                     if (eventSink != null) {
                         eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
@@ -533,11 +533,11 @@ class CascadingModelExecutor {
                         : new StepRecovery(retryPolicy,
                                 FormatRetryRunner.RemainingBudget.until(System.currentTimeMillis() + stepTimeout).min(turnBudget),
                                 contextShrinker,
-                                (trigger, attempt) -> {
+                                LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(), (trigger, attempt) -> {
                                     if (eventSink != null) {
                                         eventSink.onLlmRetry(trigger.label(), attempt);
                                     }
-                                }, trigger -> reaskGate.allowReask(trigger) && ticket.reaskAllowed(trigger));
+                                }), trigger -> reaskGate.allowReask(trigger) && ticket.reaskAllowed(trigger));
 
                 StepResult stepResult;
                 try {
@@ -635,7 +635,7 @@ class CascadingModelExecutor {
                         stepTrace.put("reason", "invalid_output");
                         trace.add(stepTrace);
                         increment("eddi.llm.cascade.escalations", "reason", "invalid_output");
-                        formatRetryRunner.count("escalate", "invalid_output", unusable);
+                        recordRecovery(memory, LlmRecoveryLog.ESCALATE, "invalid_output", unusable.label(), i + 1, durationMs);
                         LOGGER.warnf("Cascade step %d (%s) produced an unusable reply (%s) after %d re-ask(s), escalating", i, modelName,
                                 unusable.label(), stepResult.reasks);
                         if (eventSink != null) {
@@ -664,6 +664,9 @@ class CascadingModelExecutor {
                     trace.add(stepTrace);
                     increment("eddi.llm.cascade.escalations", "reason", "timeout");
                     increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
+                    if (!isLastStep) {
+                        recordRecovery(memory, LlmRecoveryLog.ESCALATE, "timeout", FailureClass.TIMEOUT.name(), i + 1, durationMs);
+                    }
 
                     if (isLastStep) {
                         LOGGER.warnf("Cascade step %d timed out mid-stream (last step), returning best response", i);
@@ -716,12 +719,13 @@ class CascadingModelExecutor {
                 stepTrace.put("status", "escalated");
                 trace.add(stepTrace);
                 increment("eddi.llm.cascade.escalations", "reason", "low_confidence");
+                recordRecovery(memory, LlmRecoveryLog.ESCALATE, "low_confidence", "low_confidence", i + 1, durationMs);
 
                 if (eventSink != null) {
                     eventSink.onCascadeEscalation(i, i + 1, stepResult.confidence, step.getConfidenceThreshold(), "low_confidence", durationMs);
                 }
 
-                LOGGER.infof("Cascade step %d escalating: confidence=%.2f < threshold=%.2f, model=%s", i, stepResult.confidence,
+                LOGGER.debugf("Cascade step %d escalating: confidence=%.2f < threshold=%.2f, model=%s", i, stepResult.confidence,
                         step.getConfidenceThreshold(), modelName);
 
             } catch (TimeoutException e) {
@@ -740,6 +744,9 @@ class CascadingModelExecutor {
 
                 LOGGER.warnf("Cascade step %d timed out after %dms, escalating", i, durationMs);
 
+                if (!isLastStep) {
+                    recordRecovery(memory, LlmRecoveryLog.ESCALATE, "timeout", FailureClass.TIMEOUT.name(), i + 1, durationMs);
+                }
                 if (!isLastStep && eventSink != null) {
                     eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
                             "timeout", durationMs);
@@ -803,6 +810,9 @@ class CascadingModelExecutor {
 
                 LOGGER.warnf("Cascade step %d failed (%s): %s, escalating", i, errorType, e.getMessage());
 
+                if (!isLastStep) {
+                    recordRecovery(memory, LlmRecoveryLog.ESCALATE, errorType, failure.cls().name(), i + 1, durationMs);
+                }
                 if (!isLastStep && eventSink != null) {
                     eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
                             errorType, durationMs);
@@ -1474,6 +1484,24 @@ class CascadingModelExecutor {
     }
 
     /**
+     * The model name with its ${vars:...} references resolved — what the registry
+     * builds the model with — so the trace, the audit and the circuit key carry the
+     * real model instead of the template. An unresolvable reference leaves the raw
+     * text.
+     */
+    private String resolveVariables(String name) {
+        if (globalVariableResolver == null || !GlobalVariableResolver.containsReference(name)) {
+            return name;
+        }
+        try {
+            String resolved = globalVariableResolver.resolveValue(name);
+            return resolved != null ? resolved : name;
+        } catch (RuntimeException e) {
+            return name;
+        }
+    }
+
+    /**
      * Describe a step failure so it can actually be diagnosed.
      * <p>
      * The retry wrapper reports a generic "… failed after N attempts", which reads
@@ -1579,6 +1607,16 @@ class CascadingModelExecutor {
             stepTrace.put("retryAfterMs", failure.retryAfterMs());
         }
         increment("eddi.llm.failure", "class", failure.cls().name(), "model", isBlank(modelName) ? "unknown" : modelName);
+    }
+
+    /**
+     * One recovery action of the cascade:
+     * {@code eddi.llm.recovery{action,outcome,trigger}} and the single structured
+     * INFO line (R11).
+     */
+    private void recordRecovery(IConversationMemory memory, String action, String outcome, String failureClass, int attempt, long durationMs) {
+        increment("eddi.llm.recovery", "action", action, "outcome", outcome, "trigger", failureClass);
+        LlmRecoveryLog.log(memory.getConversationId(), memory.getAgentId(), failureClass, action, outcome, attempt, durationMs);
     }
 
     private void increment(String metric, String... tags) {

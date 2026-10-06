@@ -144,6 +144,14 @@ final class FormatRetryRunner {
         };
 
         void onReask(Trigger trigger, int attempt);
+
+        /**
+         * Called once the re-ask has finished: {@code outcome} is {@code recovered},
+         * {@code still_invalid} or {@code failed}. The structured recovery log line
+         * (R11) is written from here, where the duration is known.
+         */
+        default void onReaskDone(Trigger trigger, int attempt, String outcome, long durationMs) {
+        }
     }
 
     /**
@@ -286,13 +294,16 @@ final class FormatRetryRunner {
             current = smaller;
             LOGGER.warnf("Prompt exceeded the model's context window; re-asking once with the history window halved (%d -> %d messages)",
                     messages.size(), smaller.size());
+            long started = System.nanoTime();
             try {
                 first = asker.ask(current, null);
             } catch (LifecycleException second) {
                 count("retry", "failed", Trigger.CONTEXT_TOO_LONG);
+                listener.onReaskDone(Trigger.CONTEXT_TOO_LONG, reasks, "failed", elapsedMs(started));
                 throw second;
             }
             count("retry", "recovered", Trigger.CONTEXT_TOO_LONG);
+            listener.onReaskDone(Trigger.CONTEXT_TOO_LONG, reasks, "recovered", elapsedMs(started));
         }
         return resolve(policy, first, current, asker, budget, gate, listener, reasks);
     }
@@ -353,7 +364,7 @@ final class FormatRetryRunner {
             reasks++;
             truncationReasked |= trigger == Trigger.TRUNCATION;
             listener.onReask(trigger, reasks);
-            LOGGER.infof("Re-asking the same model (%s, re-ask %d of %d)", trigger.label(), reasks, policy.maxRetries());
+            long started = System.nanoTime();
             Attempt next;
             try {
                 next = asker.ask(request, maxTokens);
@@ -362,6 +373,7 @@ final class FormatRetryRunner {
                     throw e;
                 }
                 count("retry", "failed", trigger);
+                listener.onReaskDone(trigger, reasks, "failed", elapsedMs(started));
                 LOGGER.warnf("Re-ask (%s) failed: %s — keeping the earlier reply", trigger.label(), e.getMessage());
                 return new Outcome(withUsage(attempt, totalUsage), trigger, detection.reason(), reasks, messages);
             }
@@ -369,8 +381,14 @@ final class FormatRetryRunner {
             CascadingModelExecutor.mergeTokenUsage(retryUsage, tokenUsage(next));
             attempt = next;
             Detection after = detect(policy, attempt);
-            count("retry", after == null ? "recovered" : "still_invalid", trigger);
+            String result = after == null ? "recovered" : "still_invalid";
+            count("retry", result, trigger);
+            listener.onReaskDone(trigger, reasks, result, elapsedMs(started));
         }
+    }
+
+    private static long elapsedMs(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000L;
     }
 
     /**

@@ -438,9 +438,9 @@ eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMo
 eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
 eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
 eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
-eddi_llm_failure_total                      # Failed cascade steps by failure class; tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model
+eddi_llm_failure_total                      # Failed model calls by failure class: each failed cascade step, and each failed single-model task (a cascade's overall failure is not counted twice); tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model (the resolved name, not a ${vars:...} template)
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
-eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|httpcall|httpcall_retry)
+eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|tool|httpcall|httpcall_retry)
 eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
@@ -474,7 +474,10 @@ eddi_llm_recovery_total                     # Recovery actions of the LLM task; 
                                             #   action=fallback, outcome=served,  trigger=onError|validation   (a turn answered with the configured fallback)
                                             #   action=retry,    outcome=recovered|still_invalid|failed|skipped_budget|skipped_no_time|skipped_cost|skipped_breaker,
                                             #                    trigger=empty|truncated|content_filter|invalid_json|context_too_long   (a same-model re-ask)
-                                            #   action=escalate, outcome=invalid_output, trigger=...            (a cascade step handed over after its re-asks)
+                                            #   action=escalate, outcome=invalid_output|timeout|error|retryable_error|low_confidence, trigger=<reply problem or failure class>   (a cascade step handed over)
+                                            #   action=repair,   outcome=recovered, trigger=invalid_json       (a reply parsed only after fence stripping / extraction)
+                                            #   action=circuit_skip, outcome=skipped, trigger=<class>          (a model with an open circuit was not called)
+                                            # every action also writes one INFO line, "LLM recovery conversationId=... action=..." (see llm-resilience.md)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)

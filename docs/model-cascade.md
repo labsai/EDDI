@@ -129,6 +129,17 @@ A separate (typically cheap) model rates the response's confidence. Requires a `
 
 Always returns `1.0` — effectively disables confidence gating. The first step's response is always accepted. Useful for timeout/error recovery only, or A/B testing.
 
+> Failure classes, the order of recovery across retry, re-ask, escalation and fallback, and a worked recipe are in
+> [LLM Turn Resilience](llm-resilience.md).
+
+### Cascade as failover
+
+A cascade does not have to be a cost ladder. As **failover** it answers with the first model and only moves on
+when that model fails or returns nothing usable: use `evaluationStrategy: "heuristic"` with a first-step
+`confidenceThreshold` of `0.1` (the heuristic scores an empty reply `0.0` and everything else at least `0.2`), or
+`evaluationStrategy: "none"` (confidence is always `1.0`, so low confidence never escalates; errors, timeouts and
+unusable replies still do). Put a second model, ideally another version or provider, behind it.
+
 ## Error Handling
 
 | Error Type | Behavior |
@@ -140,6 +151,8 @@ Always returns `1.0` — effectively disables confidence gating. The first step'
 | **Circuit open** | With the task's opt-in [`circuitBreaker`](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing), a step whose model keeps failing with the same permanent class (invalid output, bad request, model not found; auth or quota at once) is **skipped without a call** until its cool-down ends, then probed once. Per model: the other steps still run. Trace `status: circuit_open`. If the last step is open too, the best response so far is returned, else the turn fails with an `LlmCircuitOpenException` (or serves the `onError` fallback). |
 | **Duration / cost ceiling reached** | Stop escalating, return the best response so far. |
 | **All steps fail** | Return the best response seen so far, or throw `LifecycleException` if none produced a result. |
+
+Every escalation, re-ask and skipped step also leaves one structured INFO line (`LLM recovery ... action=escalate|retry|circuit_skip`) and counts `eddi.llm.recovery{action,outcome,trigger}`; see [LLM Turn Resilience](llm-resilience.md#in-the-log). A `${vars:...}` model name is shown **resolved** in the trace, the audit and the circuit key.
 
 The cascade tracks the "best response" seen so far — if a later step fails but an earlier step produced a usable response, that response is returned rather than throwing.
 
