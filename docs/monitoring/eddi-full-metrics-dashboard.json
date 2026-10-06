@@ -4687,6 +4687,82 @@
           }
         },
         {
+          "id": 174,
+          "type": "timeseries",
+          "title": "LLM failures by class and model",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Failed LLM calls (cascade steps) by failure class: TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, BAD_REQUEST, CONTEXT_TOO_LONG, MODEL_NOT_FOUND, TIMEOUT, UNKNOWN. QUOTA_EXHAUSTED, AUTH and MODEL_NOT_FOUND are systemic: they will fail every turn until someone acts.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 54
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (class, model) (rate(eddi_llm_failure_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "{{class}} / {{model}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
           "id": 157,
           "type": "timeseries",
           "title": "Ceiling exceeded (cost / duration)",

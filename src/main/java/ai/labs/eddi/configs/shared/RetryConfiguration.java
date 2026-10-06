@@ -146,6 +146,30 @@ public class RetryConfiguration {
     }
 
     /**
+     * Retries a call that has no pipeline retry policy of its own — the judge
+     * model, the summarisers — with the default {@link RetryConfiguration}, and
+     * throws what the action threw. The provider clients are built without library
+     * retries, so every model call needs exactly one retry owner; this gives the
+     * helper callers that do not carry a task {@code retry} block the same default
+     * policy.
+     *
+     * @return the action's result
+     * @throws RuntimeException
+     *             the action's own runtime failure once it is not retryable or the
+     *             attempts are spent (unwrapped, so callers' handling is unchanged)
+     */
+    public static <T> T executeWithDefaultRetry(Callable<T> action, String actionDescription) {
+        try {
+            return executeWithRetry(action, null, actionDescription);
+        } catch (LifecycleException e) {
+            if (e.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
+    /**
      * As {@link #executeWithRetry(Callable, RetryConfiguration, String)}, but
      * drawing the backoff from a budget shared across several calls.
      * <p>

@@ -29,9 +29,11 @@ HTTP 500 was never retried, and langchain4j's built-in client retries stacked un
   `Retry-After` header is not reachable: langchain4j's `HttpException` keeps only the status and the body.
 - **Single retry owner.** `maxRetries(0)` on the synchronous OpenAI, Anthropic, Gemini, Vertex Gemini, Mistral,
   Ollama, Azure OpenAI and Bedrock clients; `executeWithRetry` is the only loop. Hugging Face and OCI GenAI expose
-  no setting, streaming clients have none (EDDI's own streaming loop retries). Callers that call a model with no
-  `executeWithRetry` around it (judge model, tool-response summariser, `SummarizationService`) lose the silent
-  library retries; each already has a fallback or a retrying caller.
+  no setting, streaming clients have none (EDDI's own streaming loop retries). The judge model, tool-response
+  summariser and `SummarizationService` call models with no task retry policy, so they now go through
+  `RetryConfiguration.executeWithDefaultRetry` (default policy, original exception rethrown unwrapped): every
+  model call has exactly one retry owner. The Azure OpenAI and Vertex Gemini builders use the same constant but are
+  not asserted in tests (Azure exposes no retry field; Vertex needs GCP credentials to build).
 - **Cascade.** Failed steps carry `failureClass` (and `retryAfterMs`) in the trace entry, additively, and count
   `eddi.llm.failure{class,model}`. `status` / `error` / escalation reason strings are unchanged.
 - Docs: [`langchain.md`](../langchain.md#retry-configuration) (the default is 3 attempts even without a `retry`

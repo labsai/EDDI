@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
@@ -254,8 +255,9 @@ class ConfidenceEvaluator {
                     + "to 1.0 (fully confident, complete, and accurate). " + "Respond with ONLY a JSON object: {\"confidence\": <score>}\n\n"
                     + "Response to evaluate:\n%s", response);
 
-            var judgeResponse = judgeModel.chat(
-                    List.of(SystemMessage.from("You are a response quality evaluator. Output only valid JSON."), UserMessage.from(judgePrompt)));
+            var judgeResponse = RetryConfiguration.executeWithDefaultRetry(() -> judgeModel.chat(
+                    List.of(SystemMessage.from("You are a response quality evaluator. Output only valid JSON."), UserMessage.from(judgePrompt))),
+                    "Judge model");
 
             if (judgeResponse.metadata() != null && judgeResponse.metadata().tokenUsage() != null) {
                 judgeUsage = ToolContextBudget.tokenUsageMap(judgeResponse.metadata().tokenUsage());

@@ -1275,12 +1275,7 @@ code and the body, not the headers.
 **EDDI is the only retry loop.** The provider clients are built with `maxRetries(0)` (OpenAI,
 Anthropic, Gemini, Vertex AI Gemini, Mistral, Ollama, Azure OpenAI, Bedrock), so `maxAttempts: 3`
 means three provider calls, not up to nine. The Hugging Face and OCI GenAI clients expose no such
-setting and the streaming clients have none; streaming retries are EDDI's own loop. Note that
-helper calls that go straight to a model without the retry loop — the cascade's judge model
-(falls back to the heuristic), the tool-response summariser (falls back to truncation) and the
-summarisation service used by conversation summaries, Dream and groups (the failure goes to its
-caller, which handles it or re-runs on the next schedule) — share the same cached model and so no
-longer get the library's silent retries either.
+setting and the streaming clients have none; streaming retries are EDDI's own loop. Helper calls that go straight to a model without a task retry policy (the cascade judge model, the tool-response summariser and the summarisation service) run through the default policy, `RetryConfiguration.executeWithDefaultRetry` (3 attempts, same classification), so every model call has exactly one retry owner.
 
 **In a tool loop, the unit of retry is one model request.** A failure on the fifth model call of
 a tool-calling turn resends that one request — with every tool result gathered so far — rather
