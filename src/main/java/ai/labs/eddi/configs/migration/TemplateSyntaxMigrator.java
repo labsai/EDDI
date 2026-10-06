@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.modules.templating.TemplateEscaping;
+import io.quarkus.qute.Engine;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.ArrayDeque;
@@ -87,7 +88,7 @@ public class TemplateSyntaxMigrator {
      * [[${a + '/' + b}]] → {a}/{b}, [[${a + '..' + b}]] → {a}..{b}
      */
     private String migrateStringConcat(String input) {
-        if (!input.contains("+")) {
+        if (!input.contains("+") && !input.contains("?")) {
             return input;
         }
         var out = new StringBuilder(input.length());
@@ -117,7 +118,10 @@ public class TemplateSyntaxMigrator {
             }
             out.append(input, cursor, open);
             String expr = input.substring(bodyStart, close).trim();
-            if (expr.indexOf('+') >= 0) {
+            String conditional = OgnlTernaryConverter.hasConditional(expr) ? OgnlTernaryConverter.convert(expr) : null;
+            if (conditional != null) {
+                out.append(conditional);
+            } else if (expr.indexOf('+') >= 0) {
                 out.append(concatToQute(expr));
             } else {
                 // No concatenation: left exactly as it is, for the output patterns
@@ -269,7 +273,7 @@ public class TemplateSyntaxMigrator {
      * silently rewritten into control characters.
      * </p>
      */
-    private static String literalText(String literal) {
+    static String literalText(String literal) {
         String body = literal.substring(1, literal.length() - 1);
         if (body.indexOf(ESCAPE) < 0) {
             return body;
@@ -303,11 +307,15 @@ public class TemplateSyntaxMigrator {
         var sb = new StringBuilder();
         int i = 0;
         while (i < input.length()) {
-            // Detect {#for ...} or {#if ...} to push onto the stack
+            // Detect {#for ...} or {#if ...} to push onto the stack. A section already
+            // closed in Qute form ({/if}, e.g. from a converted conditional) pops its own
+            // opener, so a later [/] still closes the Thymeleaf element it belongs to.
             if (input.startsWith("{#for", i)) {
                 stack.push("for");
             } else if (input.startsWith("{#if", i)) {
                 stack.push("if");
+            } else if ((input.startsWith("{/if}", i) || input.startsWith("{/for}", i)) && !stack.isEmpty()) {
+                stack.pop();
             }
 
             // Replace [/] with the correct close tag
@@ -464,6 +472,53 @@ public class TemplateSyntaxMigrator {
                 if (reason != null) {
                     return reason;
                 }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The one parser the check below uses. Only the default section helpers are
+     * registered, enough to read {@code #if}, {@code #for}, {@code #when} and
+     * {@code #let}; namespaces are resolved at render time, so an unknown one such
+     * as {@code vars:} or {@code json:} does not fail a parse.
+     */
+    private static final Engine PARSE_ENGINE = Engine.builder().addDefaults().build();
+
+    /**
+     * Why {@code template} is not valid Qute, or {@code null} when it parses. Parse
+     * only, nothing is rendered. The conversion is regex- and scan-based and can
+     * emit syntax Qute rejects: a template that then fails on every render in the
+     * running system, after a migration that reported success. So the result of a
+     * conversion is parsed before it is trusted.
+     */
+    public String quteParseError(String template) {
+        if (template == null) {
+            return null;
+        }
+        try {
+            PARSE_ENGINE.parse(template);
+            return null;
+        } catch (RuntimeException e) {
+            String message = e.getMessage();
+            return message == null ? e.getClass().getSimpleName() : message.replaceAll("\\s+", " ").trim();
+        }
+    }
+
+    /**
+     * {@link #quteParseError(String)} for every string in a decoded JSON document,
+     * or {@code null} when all of them parse. For the import, which converts a
+     * resource as one JSON string.
+     */
+    public String quteParseErrorIn(Object decoded) {
+        if (decoded instanceof String text) {
+            return quteParseError(text);
+        }
+        Iterable<?> children = decoded instanceof Map<?, ?> map ? map.values() : decoded instanceof List<?> list ? list : List.of();
+        for (Object child : children) {
+            String error = quteParseErrorIn(child);
+            if (error != null) {
+                return error;
             }
         }
         return null;
