@@ -314,6 +314,18 @@ class FormatRetryRunnerTest {
         }
 
         @Test
+        @DisplayName("a blank reply to a JSON task is unusable even when onEmpty does not retry")
+        void blankReplyIsInvalidJson() throws Exception {
+            var model = FaultInjectingChatModel.script(Step.text(PROSE), Step.empty());
+
+            var outcome = run(jsonPolicy(v -> {
+            }), model);
+
+            assertEquals(Trigger.INVALID_JSON, outcome.unresolved());
+            assertEquals("empty reply", outcome.reason());
+        }
+
+        @Test
         @DisplayName("a re-ask that itself fails keeps the earlier reply and does not throw")
         void failedReaskKeepsTheEarlierReply() throws Exception {
             var model = FaultInjectingChatModel.script(Step.text(PROSE), Step.status(503));

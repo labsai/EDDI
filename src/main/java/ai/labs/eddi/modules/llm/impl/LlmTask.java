@@ -944,6 +944,9 @@ public class LlmTask implements ILifecycleTask {
             smaller = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, prompt, half, anchorFirstSteps,
                     includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
         } else {
+            if (logSizeLimit == 0) {
+                return null; // the prompt carried no history: nothing to halve
+            }
             int window = logSizeLimit > 0 ? logSizeLimit : Math.max(0, memory.getConversationOutputs().size() - skipSteps);
             int half = window / 2;
             if (half < 1) {
@@ -1180,7 +1183,15 @@ public class LlmTask implements ILifecycleTask {
         // 6. Invalid JSON (convertToObject only): after the parser's own local repair.
         // "retry" was already acted on by the executors; reaching it here means the
         // re-asks (and every cascade step) are spent, so fallbackAction applies.
-        if (convertObject && !isNullOrEmpty(responseContent)) {
+        if (convertObject && isNullOrEmpty(responseContent) && "retry".equalsIgnoreCase(validation.getOnInvalidJson())) {
+            // retry was spent on a blank reply (see FormatRetryRunner): out of recoveries
+            var step = applyValidationAction(validation.getOnInvalidJson(), "invalid_json", "LLM response is empty", responseContent, task,
+                    currentStep, templateDataObjects, memory, convertObject);
+            if (step.fallback() != null) {
+                return step;
+            }
+            responseContent = step.content();
+        } else if (convertObject && !isNullOrEmpty(responseContent)) {
             var parsed = modelOutputParser.parse(responseContent, true, processedParamsSchema, task.getNonBlankFields(), task.getId());
             if (parsed.kind() == ModelOutputParser.Kind.SCHEMA_MISMATCH) {
                 var step = applyValidationAction(validation.getOnSchemaMismatch(), "schema_mismatch",

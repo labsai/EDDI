@@ -260,7 +260,7 @@ export interface ResponseValidation {
    * Action when the prompt exceeds the model's context window. `retry` re-sends
    * once with the history window halved. Default `error`.
    */
-  onContextTooLong?: RetryableResponseValidationAction;
+  onContextTooLong?: "retry" | "error";
   /** Same-model re-asks per model / cascade step, 0..3. Default 1. */
   maxRetries?: number;
   /** Factor applied to the output-token cap for the truncation re-ask, 1..4. Default 2. */
