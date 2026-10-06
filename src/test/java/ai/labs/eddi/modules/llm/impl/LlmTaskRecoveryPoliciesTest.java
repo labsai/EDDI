@@ -483,6 +483,19 @@ class LlmTaskRecoveryPoliciesTest {
     }
 
     @Test
+    @DisplayName("context too long with no history in the prompt (limit 0): nothing to halve, the failure propagates without a re-ask")
+    void noHistoryNothingToHalve() throws Exception {
+        var model = FaultInjectingChatModel.script(Step.fail(new InvalidRequestException("This model's maximum context length is 8192 tokens")))
+                .repeatLast();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task(v -> v.setOnContextTooLong("retry"));
+        task.setConversationHistoryLimit(0);
+
+        assertThrows(LifecycleException.class, () -> run(task));
+        assertEquals(1, model.callCount());
+    }
+
+    @Test
     @DisplayName("context too long without the retry policy fails the turn as before")
     void contextTooLongWithoutPolicyFails() throws Exception {
         var model = FaultInjectingChatModel.script(Step.fail(new InvalidRequestException("This model's maximum context length is 8192 tokens")))

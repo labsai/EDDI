@@ -469,7 +469,9 @@ class CascadingModelExecutor {
                         convertToObject, FormatRetryRunner.resolveBaseMaxOutputTokens(mergedParams, modelType),
                         step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M(),
                         step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M(),
-                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
+                        // the task-level schema: what the request enforces natively and what LlmTask
+                        // validates last
+                        baseParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
                 boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept && isLastStep;

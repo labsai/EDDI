@@ -414,6 +414,12 @@ final class FormatRetryRunner {
         if (policy.retries(Trigger.CONTENT_FILTER) && "content_filter".equals(warning)) {
             return new Detection(Trigger.CONTENT_FILTER, "filtered reply");
         }
+        // A blank reply to a JSON task is not usable just because the empty policy does
+        // not handle it: it is no object (a re-ask answered with a tool request or an
+        // empty completion lands here).
+        if (policy.retries(Trigger.INVALID_JSON) && (text == null || text.isBlank())) {
+            return new Detection(Trigger.INVALID_JSON, "empty reply");
+        }
         if ((policy.retries(Trigger.INVALID_JSON) || policy.retries(Trigger.SCHEMA_MISMATCH)) && parser != null && text != null
                 && !text.isBlank()) {
             ModelOutputParser.JsonOutcome outcome = parser.parse(text, true, policy.responseSchema(), policy.nonBlankFields(), policy.taskId());

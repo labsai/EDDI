@@ -3,6 +3,7 @@
 ## Status
 
 - **R3 + R14 implemented** (PR for branch `feat/llm-output-parsing-never-throws`): fence stripping and prose recovery of **objects** (a non-empty object extracted from surrounding text), arrays accepted **only as the whole reply**; parsing never throws; outcome recorded under `llm:output:outcome:<taskId>` and `eddi.llm.output{outcome}`. `FaultInjectingChatModel` is test scope only.
+- **R2, R4, R5, R6, R7 implemented** on the stacked branches (see `docs/changelog.d/2026-10-06-*.md`). Where the implementation differs from the text below: a corrective message is sent only for invalid JSON and schema mismatches (empty, truncated and filtered replies are re-asked with the original request; context-too-long re-sends with the history window halved); fallback exclusion from the LLM history is driven by the step flag `llm:fallback:<taskId>`, because a `postResponse` fallback has no task-created `OutputItem`.
 - Everything else below is still to do.
 
 
