@@ -119,7 +119,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `includeFirstAgentMessage` | boolean | **Deprecated — do not use in new configs.** Include the opening **agent** message in context. `false` drops it — and only it: a first message from the *user* is always kept. Setting it logs a WARN; see [Deprecated parameters](#deprecated-parameters) | true              |
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
-| `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
+| `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format. If it is a JSON Schema it is also validated against the parsed reply and sent natively to OpenAI, Azure OpenAI, Mistral and Gemini — see [Structured Output](#shape-validation-responseschema-and-nonblankfields) | ""                |
 | `addToOutput`              | boolean | Add response to conversation output                   | false             |
 | **Logging**                |         |                                                       |                   |
 | `logRequests`              | boolean | Log API requests (sync and streaming)                 | false             |
@@ -1716,8 +1716,8 @@ EDDI uses three complementary mechanisms to ensure reliable JSON output:
 | Layer | Mechanism | Coverage |
 |---|---|---|
 | **1. System Prompt** | Appends `## RESPONSE FORMAT (MANDATORY)` section with schema to every request | All providers |
-| **2. Native API** | Sets `ResponseFormatType.JSON` on the outgoing `ChatRequest` | See the matrix below |
-| **3. Validation** | A response starting with `{` becomes an object (a map), one starting with `[` a list; plain text, or JSON the model truncated or malformed, is kept as the raw string with a WARN rather than failing the turn | All providers |
+| **2. Native API** | Sets `ResponseFormatType.JSON` on the outgoing `ChatRequest` — with your `responseSchema` attached as a JSON schema where the provider enforces one (see [Native schema enforcement](#native-schema-enforcement)) | See the matrix below |
+| **3. Validation** | A response starting with `{` becomes an object (a map), one starting with `[` a list; plain text, or JSON the model truncated or malformed, is kept as the raw string with a WARN rather than failing the turn. A parsed object is then checked against `responseSchema` / `nonBlankFields` ([Shape validation](#shape-validation-responseschema-and-nonblankfields)) | All providers |
 
 If a provider doesn't support native JSON mode (e.g. Anthropic), EDDI gracefully falls back to prompt-only enforcement.
 
@@ -1735,6 +1735,23 @@ Layer 2 is applied **per request**, never baked into the model instance, and it 
 | `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `groq` | ✅ | ❌ — no verified tools + JSON support |
 | `minimax`, `openrouter` | ❌ | ❌ |
 | `ollama`, `jlama`, `huggingface`, `oracle-genai` | ❌ (not verified — opt in with `jsonResponseFormat: "on"`) | ❌ |
+
+#### Native schema enforcement
+
+When the task has a `responseSchema` that is a **JSON Schema** with an `object` root and at least one property, the request carries it as a `JSON_SCHEMA` response format instead of schemaless JSON — for the providers whose langchain4j binding enforces a schema **per request**:
+
+| Provider | Native schema | Notes |
+|---|---|---|
+| `openai`, `azure-openai` | ✅ | Sent as `response_format: json_schema` (non-strict, see below) |
+| `mistral` | ✅ | |
+| `gemini` | ✅ | Same no-tools rule as JSON mode: with tools in the request nothing is sent |
+| `gemini-vertex` | ❌ | The Vertex binding only takes a schema on the model builder, which would bake it into a cached model. Schemaless JSON is sent |
+| everything else | ❌ | Schemaless JSON where the matrix above allows it; the prompt block carries the schema |
+
+- **Strictness.** langchain4j's `strict: true` is a *model*-builder flag (`strictJsonSchema`), not part of the request, and EDDI never bakes a response format into a cached model. So the schema is sent **non-strict**: a strong hint the provider honours in practice, not a guarantee. The guarantee is EDDI's own validation below. (Strict mode also demands `additionalProperties: false` and every property in `required`; most hand-written schemas are not strict-compatible, which is why non-strict is the safe default.)
+- **All or nothing.** A schema EDDI cannot express faithfully — type arrays such as `["string","null"]`, a property without `type`, `anyOf`/`oneOf`/`$ref`, an array without `items`, a non-object root — is not sent natively; the request falls back to schemaless JSON plus the prompt block. Convertible: `object` / `string` (with an all-string `enum`) / `integer` / `number` / `boolean` / `array` + `items`, `required`, `description`, boolean `additionalProperties`. `minLength` has no native counterpart and is enforced by EDDI after the reply arrives.
+- **Safety net.** If a provider rejects the request, the no-tools path retries once without any response format, exactly as it did for schemaless JSON mode.
+- A `responseSchema` written as an *example object* (`{"answer": "string — ..."}`, as in the example below) is not a JSON Schema: it is used only for the prompt block, and neither validated nor sent natively.
 
 #### Overriding the matrix per task
 
@@ -1786,6 +1803,38 @@ For maximum reliability, specify the exact JSON structure you expect:
 
 The schema is injected into the system prompt as a JSON code block so the LLM sees the exact expected format.
 
+### Shape validation: `responseSchema` and `nonBlankFields`
+
+A reply can be perfectly valid JSON and still unusable: the field the output template reads is missing, has the wrong type, or is `""` (which renders as an empty bubble, because `?:` does not fall back on an empty string). After the reply parsed, EDDI checks its **shape** against two optional settings:
+
+- **`responseSchema`**, when it is a JSON Schema. Supported subset: `type` (`object`, `array`, `string`, `number`, `integer`, `boolean`, `null`, or an array of those), `required`, `properties` (recursive), `items`, `enum`, `minLength`, and optionally `additionalProperties: false`. Every other keyword (`pattern`, `$ref`, `oneOf`, `format`, ...) is **ignored** — validation is in-house and never evaluates a regex or fetches a reference against model output. An unparseable or malformed schema (`{"type": "strng"}`, `{"required": "a"}`) logs one `WARN` and **skips validation**; it never fails the turn.
+- **`nonBlankFields`** (a task field next to `jsonResponseFormat`, not a parameter): a list of top-level or dotted names (`"htmlResponseText"`, `"answer.text"`) that must hold a non-blank string. The shortcut for "an empty answer is a failure" without writing a schema. Independent of `responseValidation.enabled`.
+
+```json
+{
+  "id": "answerer",
+  "type": "openai",
+  "nonBlankFields": ["htmlResponseText"],
+  "parameters": {
+    "convertToObject": "true",
+    "responseSchema": "{\"type\":\"object\",\"required\":[\"htmlResponseText\"],\"properties\":{\"htmlResponseText\":{\"type\":\"string\",\"minLength\":1},\"mood\":{\"type\":\"string\",\"enum\":[\"happy\",\"sad\"]}}}"
+  }
+}
+```
+
+A violation is outcome **`schema_mismatch`** (see the table below). Unlike `invalid`, the reply *did* parse, so the **parsed object is still stored** under `responseObjectName` — templates that worked on a partially valid object keep working, and nothing changes for an agent that does not set either option beyond the extra outcome/metric. The EDDI-generated reason is recorded under `llm:output:reason:<taskId>`:
+
+| Reason | Meaning |
+|---|---|
+| `schema: $.htmlResponseText required` | A `required` property is absent |
+| `schema: $.count type` | Wrong JSON type (an integer-valued `2.0` counts as an integer) |
+| `schema: $.mood enum` | Value not in the `enum` |
+| `schema: $.htmlResponseText minLength` | String shorter than `minLength` |
+| `schema: $ additionalProperties` | An undeclared key with `additionalProperties: false` |
+| `nonBlank: $.htmlResponseText` | Missing, not a string, or blank |
+
+Up to three violations are listed, joined by `; `. Reasons contain only the keyword and the path from your schema — **never a model value or a key taken from the reply** — so they are safe to quote back to the model in a corrective re-ask. What to *do* about a mismatch (ignore, retry, escalate, fall back) is the response-validation policy's job, not the parser's.
+
 ### Using with Output Configuration
 
 When `convertToObject=true`, the LLM's JSON response is stored in conversation memory as a parsed object. You can then reference its fields in the Output Configuration:
@@ -1825,8 +1874,9 @@ Every `convertToObject` reply gets an outcome, recorded on the step under `llm:o
 | `repaired` | Parsed only after fence stripping or extraction |
 | `invalid` | Not parseable; the raw string is stored |
 | `empty` | Null or blank reply; the raw value is stored |
+| `schema_mismatch` | Parsed, but violates `responseSchema` / `nonBlankFields`; the **parsed** object is stored and the reason is under `llm:output:reason:<taskId>` |
 
-A rising `invalid` rate for one agent usually points at a prompt, schema or model-version problem. The key is not part of the public conversation snapshot.
+A rising `invalid` or `schema_mismatch` rate for one agent usually points at a prompt, schema or model-version problem. Neither key is part of the public conversation snapshot.
 
 ### Debugging
 
