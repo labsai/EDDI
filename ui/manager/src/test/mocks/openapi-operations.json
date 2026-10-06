@@ -271,6 +271,7 @@
     "POST /connectionstore/connections/{id}/currentversion",
     "POST /conversations/{conversationId}/attachments",
     "POST /conversationstore/conversations/end",
+    "POST /conversationstore/conversations/end-inactive",
     "POST /descriptorstore/descriptors/{id}/shares",
     "POST /descriptorstore/descriptors/{id}/shares/requests",
     "POST /dictionarystore/dictionaries",

@@ -297,9 +297,9 @@ class AgentDeploymentManagementIdleSweepTest {
     }
 
     /**
-     * A production 5.x deployment held 34,000 open conversations averaging 630 KB;
-     * the sweep loaded every one of them in full and ran a 2 GB JVM out of heap six
-     * minutes after boot. The sweep must read the projection only.
+     * A production 5.x deployment held tens of thousands of open conversations of
+     * several hundred KB each; the sweep loaded every one of them in full and ran
+     * out of heap shortly after boot. The sweep must read the projection only.
      */
     @Nested
     @DisplayName("the sweep never materialises a conversation")

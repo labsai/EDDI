@@ -68,8 +68,8 @@ still open counts as active, so it keeps its version deployed.
 
 **The sweep is memory-safe.** It reads one small projection per open conversation (id, state, agent,
 version, last-interaction time) in batches of 200, never the conversation itself. Earlier releases
-loaded every open conversation in full: a production 5.x deployment with 34,000 open conversations
-averaging 630 KB ran a 2 GB JVM out of heap six minutes after boot. If you switched the sweep off
+loaded every open conversation in full: a production 5.x deployment with tens of thousands of open
+conversations of several hundred KB each ran out of heap shortly after boot. If you switched the sweep off
 with `-1` for that reason, you can switch it back on. A conversation the sweep ends records the end
 reason `idle`.
 
@@ -87,6 +87,8 @@ It ends every `READY` conversation whose last interaction is older than `inactiv
 (optionally of one agent), with end reason `idle`, and answers `{"count": n, "dryRun": false}`.
 `dryRun=true` ends nothing and returns what it would end: run it first. The role is `eddi-admin`,
 `inactiveForDays` must be at least 1, and every call is written to the audit ledger.
+
+**Ending conversations can make them eligible for deletion by the next retention run** (see the retention bullet below), so check `deleteEndedConversationsOnceOlderThanDays` before you run it for real.
 
 - A conversation paused for human approval (`AWAITING_HUMAN`), one in the middle of a turn
   (`IN_PROGRESS`) and one with no timestamp at all are left alone.

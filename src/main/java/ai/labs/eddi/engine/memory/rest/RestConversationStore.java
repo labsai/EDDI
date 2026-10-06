@@ -1061,9 +1061,8 @@ public class RestConversationStore implements IRestConversationStore {
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
 
         // Projected, in batches: never the conversations themselves. This listing used
-        // to load every open conversation in full, which ran a JVM with 34,000 open
-        // conversations (averaging 630 KB) out of heap — and undeploy-with-end, which
-        // lists through here, with it.
+        // to load every open conversation in full, which ran a JVM with tens of
+        // thousands of open conversations out of heap.
         String afterConversationId = null;
         while (true) {
             var batch = conversationMemoryStore.loadOpenConversationActivity(agentId, agentVersion, afterConversationId, ACTIVE_LISTING_BATCH_SIZE);

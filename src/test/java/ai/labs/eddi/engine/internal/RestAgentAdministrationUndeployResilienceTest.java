@@ -49,6 +49,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -121,6 +122,10 @@ class RestAgentAdministrationUndeployResilienceTest {
         verify(agentFactory).undeployAgent(ENV, AGENT, 1);
         verify(conversationMemoryStore, never()).loadActiveConversationMemorySnapshot(any(), any());
         verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(any());
+        // Descriptor reads: the access check and the ENDED mark of ending it — not a
+        // third
+        // one for a last-interaction time nothing here uses.
+        verify(conversationDescriptorStore, times(2)).readDescriptor(conversationId, 0);
     }
 
     @Test

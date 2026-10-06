@@ -899,9 +899,9 @@ class RestConversationStoreTest {
         }
 
         /**
-         * With ~34,000 open conversations of ~630 KB each this listing — and
-         * undeploy-with-end, which lists through it — ran a 2 GB JVM out of heap,
-         * because it loaded every conversation in full just to read three fields.
+         * With tens of thousands of open conversations of several hundred KB each this
+         * listing ran out of heap, because it loaded every conversation in full just to
+         * read three fields.
          */
         @Test
         @DisplayName("never loads a conversation in full — the listing is built from the projection")

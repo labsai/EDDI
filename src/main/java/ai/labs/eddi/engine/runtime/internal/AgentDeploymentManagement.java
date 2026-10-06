@@ -818,8 +818,8 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             // A projected batch — id, state, agent, version, last-interaction — never the
             // conversation itself. This used to load every open conversation in full
             // (loadActiveConversationMemorySnapshot): a production 5.x deployment with
-            // 34,000 open conversations averaging 630 KB ran a 2 GB JVM out of heap six
-            // minutes after boot, before it had ended anything.
+            // tens of thousands of open conversations of several hundred KB each ran out
+            // of heap shortly after boot, before it had ended anything.
             var batch = conversationMemoryStore.loadOpenConversationActivity(agentId, agentVersion, afterConversationId, IDLE_SWEEP_BATCH_SIZE);
             if (batch.isEmpty()) {
                 break;

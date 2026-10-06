@@ -128,8 +128,8 @@ public interface IConversationMemoryStore {
     /**
      * Loads every open conversation of an agent <strong>in full</strong>. Memory
      * grows with the number of open conversations times their size (a production
-     * 5.x deployment held 34,000 open conversations averaging 630 KB), so a sweep
-     * or listing over open conversations must use
+     * 5.x deployment held tens of thousands of conversations of several hundred KB
+     * each), so a sweep or listing over open conversations must use
      * {@link #loadOpenConversationActivity} instead.
      */
     List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)

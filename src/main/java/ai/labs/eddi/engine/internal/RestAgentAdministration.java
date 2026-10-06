@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
@@ -443,6 +444,26 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         }
     }
 
+    private List<ConversationStatus> openConversationsOf(String agentId, int version) throws Exception {
+        var statuses = new ArrayList<ConversationStatus>();
+        String after = null;
+        while (true) {
+            var batch = conversationMemoryStore.loadOpenConversationActivity(agentId, version, after, 500);
+            if (batch.isEmpty()) {
+                return statuses;
+            }
+            for (var activity : batch) {
+                var status = new ConversationStatus();
+                status.setConversationId(activity.conversationId());
+                status.setAgentId(agentId);
+                status.setAgentVersion(version);
+                status.setConversationState(activity.conversationState());
+                statuses.add(status);
+            }
+            after = batch.getLast().conversationId();
+        }
+    }
+
     /**
      * Undeploys one version: ends or refuses its open conversations as the caller
      * asked, then takes it out of service.
@@ -464,9 +485,10 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                     successor);
         } else if (activeConversationCount > 0) {
             if (endAllActiveConversations) {
-                // Listed as a projection, never as full conversations — see
-                // RestConversationStore.getActiveConversations.
-                var activeConversations = restConversationStore.getActiveConversations(agentId, version);
+                // Listed as a projection, never as full conversations, and without the
+                // per-conversation descriptor read of the /active listing: ending needs only
+                // the ids (the access check on the agent is the one undeploy already made).
+                var activeConversations = openConversationsOf(agentId, version);
                 // Ending continues past a failed conversation and reports it in
                 // a 500; do not undeploy on top of conversations still open.
                 var endResponse = restConversationStore.endActiveConversations(activeConversations,
