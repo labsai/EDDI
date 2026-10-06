@@ -255,12 +255,22 @@ public class TurnIdempotencyService {
                             // consumed, so this request is simply the first one now.
                             retry.run();
                         }
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         LOGGER.warnf("Could not answer a duplicate of turn %s: %s", conversationId, e.getMessage());
+                        answerWithCurrentState(sink, current, conversationId);
                     }
                 });
                 return false;
             }
+        }
+    }
+
+    /** Last resort: a waiter must never be left to hit its own timeout. */
+    private static void answerWithCurrentState(SnapshotSink sink, CurrentSnapshot current, String conversationId) {
+        try {
+            sink.skipped(current.get());
+        } catch (Throwable fallback) {
+            LOGGER.warnf("Could not answer a duplicate of turn %s even with the current state: %s", conversationId, fallback.getMessage());
         }
     }
 
@@ -382,7 +392,10 @@ public class TurnIdempotencyService {
                 throw new InvalidIdempotencyKeyException("The idempotency key may only contain printable ASCII characters");
             }
         }
-        return raw.trim();
+        if (raw.charAt(0) == ' ' || raw.charAt(raw.length() - 1) == ' ') {
+            throw new InvalidIdempotencyKeyException("The idempotency key must not start or end with a space");
+        }
+        return raw;
     }
 
     /** A malformed {@code Idempotency-Key}; the REST layer answers 400. */

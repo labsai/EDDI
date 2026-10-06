@@ -144,6 +144,33 @@ class TurnIdempotencyServiceTest {
     }
 
     @Test
+    @DisplayName("a retry that fails still answers the waiter, with the current state")
+    void failedRetryStillAnswers() throws Exception {
+        service.admitOrServe("c1", "k", null, () -> null, sink(new AtomicReference<>()), () -> null, () -> {
+        });
+        var skipped = new AtomicReference<SimpleConversationMemorySnapshot>();
+        var current = snapshot(ConversationState.READY);
+        var sink = new TurnIdempotencyService.SnapshotSink() {
+            @Override
+            public void done(SimpleConversationMemorySnapshot s) {
+                fail("must not complete");
+            }
+
+            @Override
+            public void skipped(SimpleConversationMemorySnapshot s) {
+                skipped.set(s);
+            }
+        };
+        service.admitOrServe("c1", "k", null, () -> null, sink, () -> current, () -> {
+            throw new IllegalStateException("shutting down");
+        });
+
+        service.abandon("c1", "k", new IllegalStateException("refused"));
+
+        assertSame(current, skipped.get());
+    }
+
+    @Test
     @DisplayName("the wait budget is the caller's deadline, never above the agent timeout")
     void waitBudget() {
         assertEquals(30_000, service.waitBudgetMs(null));
@@ -166,6 +193,9 @@ class TurnIdempotencyServiceTest {
         assertEquals("k".repeat(128), TurnIdempotencyService.validateKey("k".repeat(128)));
         assertThrows(InvalidIdempotencyKeyException.class, () -> TurnIdempotencyService.validateKey("k".repeat(129)));
         assertThrows(InvalidIdempotencyKeyException.class, () -> TurnIdempotencyService.validateKey("  "));
+        assertThrows(InvalidIdempotencyKeyException.class, () -> TurnIdempotencyService.validateKey("abc "));
+        assertThrows(InvalidIdempotencyKeyException.class, () -> TurnIdempotencyService.validateKey(" abc"));
+        assertEquals("a b", TurnIdempotencyService.validateKey("a b"));
         assertThrows(InvalidIdempotencyKeyException.class, () -> TurnIdempotencyService.validateKey("a\nb"));
         assertThrows(InvalidIdempotencyKeyException.class, () -> TurnIdempotencyService.validateKey("café"));
     }

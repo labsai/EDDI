@@ -660,6 +660,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                 sb.append(",\"conversationOutputs\":")
                         .append(MAPPER.writeValueAsString(snapshot.getConversationOutputs()));
             }
+            if (snapshot.getError() != null) {
+                sb.append(",\"error\":").append(MAPPER.writeValueAsString(snapshot.getError()));
+            }
             sb.append("}");
             return sb.toString();
         } catch (Exception e) {
