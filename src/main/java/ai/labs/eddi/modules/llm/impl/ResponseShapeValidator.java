@@ -240,12 +240,22 @@ public final class ResponseShapeValidator {
                             ? member.asText().equals(value)
                             : member.isBoolean()
                                     ? Boolean.valueOf(member.asBoolean()).equals(value)
-                                    : member.isNumber() && value instanceof Number n
-                                            && member.decimalValue().compareTo(new BigDecimal(n.toString())) == 0) {
+                                    : member.isNumber() && numberEquals(member, value)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * NaN / Infinity never equal an enum member (and would not parse as
+     * BigDecimal).
+     */
+    private static boolean numberEquals(JsonNode member, Object value) {
+        if (!(value instanceof Number n) || (n instanceof Double d && !Double.isFinite(d)) || (n instanceof Float f && !Float.isFinite(f))) {
+            return false;
+        }
+        return member.decimalValue().compareTo(new BigDecimal(n.toString())) == 0;
     }
 
     private static boolean isNonBlankString(Object parsed, String field) {

@@ -129,6 +129,8 @@ class JsonResponseFormatPolicyNativeSchemaTest {
         @ValueSource(strings = {"{not json", "[1,2]", "{\"type\":\"string\"}", "{\"type\":\"object\"}",
                 "{\"type\":\"object\",\"properties\":{\"a\":{\"type\":[\"string\",\"null\"]}}}",
                 "{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"array\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\",\"enum\":[]}}}",
+                "{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\",\"enum\":\"x\"}}}",
                 "{\"type\":\"object\",\"properties\":{\"a\":{\"anyOf\":[{\"type\":\"string\"}]}}}"})
         @DisplayName("a schema that cannot be expressed faithfully falls back as a whole")
         void unconvertible(String schema) {
