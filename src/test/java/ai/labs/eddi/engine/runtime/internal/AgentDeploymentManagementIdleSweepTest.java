@@ -17,10 +17,7 @@ import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -42,11 +39,11 @@ import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -148,30 +145,6 @@ class AgentDeploymentManagementIdleSweepTest {
     }
 
     @Nested
-    @DisplayName("lastInteractionOf")
-    class LastInteraction {
-
-        @Test
-        @DisplayName("returns the newest timestamp across every step")
-        void newestAcrossSteps() {
-            Instant oldest = Instant.now().minus(10, ChronoUnit.DAYS);
-            Instant newest = Instant.now().minus(1, ChronoUnit.HOURS);
-
-            var snapshot = snapshotWithTimestamps(oldest, newest, Instant.now().minus(5, ChronoUnit.DAYS));
-
-            assertEquals(newest.toEpochMilli(), AgentDeploymentManagement.lastInteractionOf(snapshot).toEpochMilli());
-        }
-
-        @Test
-        @DisplayName("null when nothing is timestamped")
-        void nullWhenUntimestamped() {
-            assertNull(AgentDeploymentManagement.lastInteractionOf(new ConversationMemorySnapshot()));
-            assertNull(AgentDeploymentManagement.lastInteractionOf(snapshotWithTimestamps()));
-            assertNull(AgentDeploymentManagement.lastInteractionOf(null));
-        }
-    }
-
-    @Nested
     @DisplayName("the sweep uses the conversation's own age")
     class SweepUsesConversationAge {
 
@@ -204,9 +177,8 @@ class AgentDeploymentManagementIdleSweepTest {
         @Test
         @DisplayName("a paused (AWAITING_HUMAN) conversation is still spared regardless of age")
         void pausedConversationSpared() throws Exception {
-            var snapshot = snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS));
-            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
-            givenOldAgentVersionWithConversation(snapshot, Instant.now().minus(400, ChronoUnit.DAYS));
+            var paused = withState(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)), ConversationState.AWAITING_HUMAN);
+            givenOldAgentVersionWithConversation(paused, Instant.now().minus(400, ChronoUnit.DAYS));
 
             management.manageAgentDeployments();
 
@@ -303,7 +275,7 @@ class AgentDeploymentManagementIdleSweepTest {
             var stale = snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS));
             givenOldAgentVersionWithConversation(stale, Instant.now().minus(400, ChronoUnit.DAYS));
             // The re-read sees a turn that landed after the sweep loaded its snapshots.
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1"))
+            when(conversationMemoryStore.loadConversationActivity("conv-1"))
                     .thenReturn(snapshotWithTimestamps(Instant.now()));
 
             management.manageAgentDeployments();
@@ -316,11 +288,81 @@ class AgentDeploymentManagementIdleSweepTest {
         void reReadFailurePreservesTheConversation() throws Exception {
             givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)),
                     Instant.now().minus(400, ChronoUnit.DAYS));
-            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenThrow(new RuntimeException("store down"));
+            when(conversationMemoryStore.loadConversationActivity("conv-1")).thenThrow(new RuntimeException("store down"));
 
             management.manageAgentDeployments();
 
             verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), eq(ConversationState.ENDED));
+        }
+    }
+
+    /**
+     * A production 5.x deployment held tens of thousands of open conversations of
+     * several hundred KB each; the sweep loaded every one of them in full and ran
+     * out of heap shortly after boot. The sweep must read the projection only.
+     */
+    @Nested
+    @DisplayName("the sweep never materialises a conversation")
+    class NeverLoadsConversations {
+
+        @Test
+        @DisplayName("neither the full-snapshot loader nor a single-conversation load is ever called")
+        void noFullSnapshotIsLoaded() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(90, ChronoUnit.DAYS)), Instant.now());
+
+            management.manageAgentDeployments();
+
+            // The conversation WAS ended, so the whole path ran: read, re-check, CAS.
+            verify(conversationMemoryStore).compareAndSetState(eq("conv-1"), any(), eq(ConversationState.ENDED));
+            verify(conversationMemoryStore, never()).loadActiveConversationMemorySnapshot(any(), any());
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(any());
+        }
+
+        @Test
+        @DisplayName("every batch is read, keyset-paged on the last id of the previous one")
+        void pagesThroughEveryBatch() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(90, ChronoUnit.DAYS)), Instant.now());
+            var second = new ConversationActivitySummary("conv-2", ConversationState.READY, "agent-1", 1,
+                    Instant.now().minus(90, ChronoUnit.DAYS));
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), eq("conv-1"), anyInt())).thenReturn(List.of(second));
+            when(conversationMemoryStore.loadConversationActivity("conv-2")).thenReturn(second);
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore).compareAndSetState(eq("conv-1"), any(), eq(ConversationState.ENDED));
+            verify(conversationMemoryStore).compareAndSetState(eq("conv-2"), any(), eq(ConversationState.ENDED));
+        }
+
+        @Test
+        @DisplayName("an ended conversation records the end reason 'idle'")
+        void recordsIdleEndReason() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(90, ChronoUnit.DAYS)), Instant.now());
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore).setConversationEndReason("conv-1", "idle");
+        }
+
+        @Test
+        @DisplayName("a conversation left alone records no end reason")
+        void noEndReasonWhenNotEnded() throws Exception {
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(1, ChronoUnit.HOURS)), Instant.now());
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore, never()).setConversationEndReason(any(), any());
+        }
+
+        @Test
+        @DisplayName("a disabled sweep reads nothing at all")
+        void disabledSweepReadsNothing() throws Exception {
+            management = managementWithIdleLimit(-1);
+            givenOldAgentVersionWithConversation(snapshotWithTimestamps(Instant.now().minus(400, ChronoUnit.DAYS)), Instant.now());
+
+            management.manageAgentDeployments();
+
+            verify(conversationMemoryStore, never()).loadOpenConversationActivity(any(), any(), any(), anyInt());
+            verify(conversationMemoryStore, never()).loadActiveConversationMemorySnapshot(any(), any());
         }
     }
 
@@ -437,7 +479,7 @@ class AgentDeploymentManagementIdleSweepTest {
         }
     }
 
-    private void givenOldAgentVersionWithConversation(ConversationMemorySnapshot snapshot, Instant agentLastModified) throws Exception {
+    private void givenOldAgentVersionWithConversation(ConversationActivitySummary activity, Instant agentLastModified) throws Exception {
         var info = new DeploymentInfo();
         info.setEnvironment(Environment.production);
         info.setAgentId("agent-1");
@@ -452,9 +494,10 @@ class AgentDeploymentManagementIdleSweepTest {
 
         when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(1L);
         when(conversationMemoryStore.compareAndSetState(any(), any(), any())).thenReturn(true);
-        when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", 1)).thenReturn(List.of(snapshot));
-        // The sweep re-reads the conversation immediately before ending it.
-        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+        // One batch; the next page (after its last id) is empty, which ends the paging.
+        when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), isNull(), anyInt())).thenReturn(List.of(activity));
+        // The sweep re-reads the conversation's activity immediately before ending it.
+        when(conversationMemoryStore.loadConversationActivity("conv-1")).thenReturn(activity);
 
         var descriptor = new DocumentDescriptor();
         descriptor.setName("Test Agent");
@@ -462,26 +505,22 @@ class AgentDeploymentManagementIdleSweepTest {
         when(documentDescriptorStore.readDescriptor("agent-1", 1)).thenReturn(descriptor);
     }
 
-    /** A snapshot whose steps carry exactly the given data timestamps. */
-    private static ConversationMemorySnapshot snapshotWithTimestamps(Instant... timestamps) {
-        var snapshot = new ConversationMemorySnapshot();
-        snapshot.setId("conv-1");
-        snapshot.setAgentId("agent-1");
-        snapshot.setAgentVersion(1);
-
+    /**
+     * What the store projects for a conversation whose data carries exactly the
+     * given timestamps: the newest of them, or none.
+     */
+    private static ConversationActivitySummary snapshotWithTimestamps(Instant... timestamps) {
+        Instant newest = null;
         for (Instant timestamp : timestamps) {
-            var result = new ResultSnapshot();
-            result.setKey("input");
-            result.setTimestamp(Date.from(timestamp));
-
-            var workflow = new WorkflowRunSnapshot();
-            workflow.setLifecycleTasks(List.of(result));
-
-            var step = new ConversationStepSnapshot();
-            step.setWorkflows(List.of(workflow));
-
-            snapshot.getConversationSteps().add(step);
+            if (newest == null || timestamp.isAfter(newest)) {
+                newest = timestamp;
+            }
         }
-        return snapshot;
+        return new ConversationActivitySummary("conv-1", ConversationState.READY, "agent-1", 1, newest);
+    }
+
+    private static ConversationActivitySummary withState(ConversationActivitySummary activity, ConversationState state) {
+        return new ConversationActivitySummary(activity.conversationId(), state, activity.agentId(), activity.agentVersion(),
+                activity.lastInteraction());
     }
 }

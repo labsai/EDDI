@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -19,6 +20,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -31,8 +33,11 @@ import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -69,6 +74,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_ENVIRONMENT = "environment";
     /** Computed by the listing projection; never stored. */
     private static final String KEY_STEP_COUNT = "stepCount";
+    /** Computed by the activity projection; never stored. */
+    private static final String KEY_LAST_INTERACTION = "lastInteraction";
     /**
      * Optimistic-concurrency revision — see
      * {@link ConversationMemorySnapshot#getRevision()}.
@@ -522,6 +529,118 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
             conversationCollectionObject.find(query).forEach(retRet::add);
             return retRet;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * The newest step-data timestamp of a conversation, as a server-side
+     * expression:
+     * {@code conversationSteps[].workflows[].lifecycleTasks[].timestamp}, flattened
+     * and reduced with {@code $max}. {@code $max} ignores nulls, so a conversation
+     * whose data carries no timestamp yields {@code null} — which callers must test
+     * for explicitly, because in a comparison {@code null} sorts below every date.
+     */
+    private static Document lastInteractionExpression() {
+        var timestampsOfStep = new Document("$reduce", new Document("input", new Document("$ifNull", List.of("$$this.workflows", List.of())))
+                .append("initialValue", List.of())
+                .append("in", new Document("$concatArrays", List.of("$$value", new Document("$map",
+                        new Document("input", new Document("$ifNull", List.of("$$this.lifecycleTasks", List.of())))
+                                .append("as", "task").append("in", toDate("$$task.timestamp")))))));
+        var allTimestamps = new Document("$reduce", new Document("input", new Document("$ifNull", List.of("$" + KEY_CONVERSATION_STEPS, List.of())))
+                .append("initialValue", List.of())
+                .append("in", new Document("$concatArrays", List.of("$$value", timestampsOfStep))));
+        return new Document("$max", allTimestamps);
+    }
+
+    /**
+     * The stored timestamp as a date, whatever shape it was written in: the
+     * persistence mapper writes {@code java.util.Date} as an ISO-8601 string, while
+     * a document from EDDI 5 or a differently configured mapper may hold a BSON
+     * date or epoch milliseconds. Anything unreadable becomes {@code null}, which
+     * {@code $max} ignores.
+     */
+    private static Document toDate(String path) {
+        return new Document("$convert", new Document("input", path).append("to", "date").append("onError", null).append("onNull", null));
+    }
+
+    private static Instant instantOrNull(Object storedDate) {
+        return storedDate instanceof Date date ? date.toInstant() : null;
+    }
+
+    private static ConversationActivitySummary toActivitySummary(Document document) {
+        Object agentVersion = document.get(KEY_AGENT_VERSION);
+        return new ConversationActivitySummary(document.get(OBJECT_ID).toString(), conversationStateOrNull(document.get(KEY_CONVERSATION_STATE)),
+                document.getString(KEY_AGENT_ID), agentVersion instanceof Number number ? number.intValue() : null,
+                instantOrNull(document.get(KEY_LAST_INTERACTION)));
+    }
+
+    private static final Bson ACTIVITY_PROJECTION = Projections.fields(
+            Projections.include(KEY_CONVERSATION_STATE, KEY_AGENT_ID, KEY_AGENT_VERSION),
+            Projections.computed(KEY_LAST_INTERACTION, lastInteractionExpression()));
+
+    @Override
+    public List<ConversationActivitySummary> loadOpenConversationActivity(String agentId, Integer agentVersion, String afterConversationId,
+                                                                          int limit)
+            throws IResourceStore.ResourceStoreException {
+        try {
+            var filters = new ArrayList<Bson>();
+            filters.add(Filters.eq(KEY_AGENT_ID, agentId));
+            if (agentVersion != null) {
+                filters.add(Filters.eq(KEY_AGENT_VERSION, agentVersion));
+            }
+            filters.add(Filters.ne(KEY_CONVERSATION_STATE, ENDED.toString()));
+            if (afterConversationId != null) {
+                filters.add(Filters.gt(OBJECT_ID, new ObjectId(afterConversationId)));
+            }
+            var batch = new ArrayList<ConversationActivitySummary>();
+            conversationCollectionDocument.find(Filters.and(filters)).projection(ACTIVITY_PROJECTION).sort(Sorts.ascending(OBJECT_ID)).limit(limit)
+                    .forEach(document -> batch.add(toActivitySummary(document)));
+            return batch;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public ConversationActivitySummary loadConversationActivity(String conversationId) throws IResourceStore.ResourceStoreException {
+        try {
+            if (conversationId == null || !ObjectId.isValid(conversationId)) {
+                return null;
+            }
+            Document document = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
+                    .projection(ACTIVITY_PROJECTION).first();
+            return document == null ? null : toActivitySummary(document);
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public long endIdleConversations(Instant idleSince, String agentId, String endReason, boolean dryRun)
+            throws IResourceStore.ResourceStoreException {
+        try {
+            var lastInteraction = lastInteractionExpression();
+            var filters = new ArrayList<Bson>();
+            filters.add(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.READY.name()));
+            if (agentId != null) {
+                filters.add(Filters.eq(KEY_AGENT_ID, agentId));
+            }
+            // "No timestamp" is null, and null sorts below every date: without the
+            // $ne guard a conversation that cannot be proven idle would be ended.
+            filters.add(Filters.expr(new Document("$and", List.of(new Document("$ne", Arrays.asList(lastInteraction, null)),
+                    new Document("$lt", List.of(lastInteraction, Date.from(idleSince)))))));
+            Bson filter = Filters.and(filters);
+            if (dryRun) {
+                return conversationCollectionDocument.countDocuments(filter);
+            }
+            var set = new ArrayList<Bson>();
+            set.add(Updates.set(KEY_CONVERSATION_STATE, ENDED.name()));
+            if (endReason != null) {
+                set.add(Updates.set(KEY_END_REASON, endReason));
+            }
+            return conversationCollectionDocument.updateMany(filter, Updates.combine(set)).getModifiedCount();
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
