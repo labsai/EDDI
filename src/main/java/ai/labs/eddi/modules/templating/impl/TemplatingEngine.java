@@ -180,6 +180,27 @@ public class TemplatingEngine implements ITemplatingEngine {
         return compiledTemplates.estimatedSize();
     }
 
+    /**
+     * Parses {@code template} with the restricted runtime engine, exactly as
+     * {@link #processTemplate} would before rendering it, and answers why it does
+     * not parse. A string with no template marker is never parsed, as at render
+     * time.
+     */
+    @Override
+    public String validateTemplate(String template) {
+        if (template == null || template.isEmpty() || !containsTemplatingControlCharacters(template)) {
+            return null;
+        }
+        try {
+            engine.parse(template);
+            return null;
+        } catch (Exception e) {
+            String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            int lineEnd = message.indexOf('\n');
+            return lineEnd > 0 ? message.substring(0, lineEnd) : message;
+        }
+    }
+
     private boolean containsTemplatingControlCharacters(String template) {
         return QUTE_CONTROL_PATTERN.matcher(template).find();
     }

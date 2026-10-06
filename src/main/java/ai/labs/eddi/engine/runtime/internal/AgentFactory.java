@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.compat.AgentCompatibilityLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.IConversation.IConversationOutputRenderer;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -52,6 +53,15 @@ public class AgentFactory implements IAgentFactory {
      */
     @Inject
     VaultGrantGate vaultGrantGate;
+
+    /**
+     * Deploy-time compatibility lint: advisory findings about configuration that
+     * behaves differently than it did in 5.x. Field-injected and null-checked for
+     * the same reason as the gate above. It runs before the agent is published and
+     * can never fail or delay a deployment beyond the few reads it makes.
+     */
+    @Inject
+    AgentCompatibilityLint compatibilityLint;
 
     private static final Logger log = Logger.getLogger(AgentFactory.class);
 
@@ -294,6 +304,7 @@ public class AgentFactory implements IAgentFactory {
         try {
             IAgent agent = agentStoreClientLibrary.getAgent(agentId, version);
             ((Agent) agent).setDeploymentStatus(Deployment.Status.READY);
+            lintCompatibility((Agent) agent, agentId, version);
 
             // replace(key, OUR placeholder, agent), never put(key, agent).
             //
@@ -327,6 +338,21 @@ public class AgentFactory implements IAgentFactory {
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             throw new RuntimeException(e);
+        }
+    }
+
+    private void lintCompatibility(Agent agent, String agentId, Integer version) {
+        if (compatibilityLint == null) {
+            return;
+        }
+        try {
+            List<String> warnings = compatibilityLint.lint(agentId, version);
+            agent.setDeploymentWarnings(warnings);
+            for (String warning : warnings) {
+                log.warnf("Agent %s v%s compatibility check: %s", sanitize(agentId), version, sanitize(warning));
+            }
+        } catch (RuntimeException e) {
+            log.debugf(e, "Compatibility lint failed for agent %s v%s", sanitize(agentId), version);
         }
     }
 

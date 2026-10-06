@@ -1255,7 +1255,7 @@ public class LlmTask implements ILifecycleTask {
      * Parameters that should NOT be processed by the template engine (credentials,
      * secrets).
      */
-    private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
+    public static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
     /**
      * A configuration reference MENTIONED in an LLM parameter —
@@ -1268,7 +1268,7 @@ public class LlmTask implements ILifecycleTask {
      * Qute namespace resolver — so to Qute every one of them is an unresolvable
      * namespaced expression, not just {@code vault}.
      */
-    static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
+    public static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
      * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
