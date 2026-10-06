@@ -20,7 +20,9 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.engine.model.DeploymentImpact;
+import ai.labs.eddi.engine.model.DeploymentPreflight;
 import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -32,6 +34,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -69,6 +72,13 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
 
     private final ResourceAccessGuard resourceAccessGuard;
     private final SpaceReferenceGuard spaceReferenceGuard;
+
+    /**
+     * Field-injected, like {@code AgentFactory}'s, so the test-seam constructors
+     * keep their signatures; null there, which reports the check as not run.
+     */
+    @Inject
+    VaultGrantGate vaultGrantGate;
 
     @Inject
     public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IAgentStore agentStore, IDeploymentStore deploymentStore,
@@ -164,14 +174,28 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 }
 
                 // Return the actual status after waiting
-                Status status = checkDeploymentStatus(environment, agentId, version);
+                IAgent deployed = deployedAgent(environment, agentId, version);
+                Status status = deployed != null ? deployed.getDeploymentStatus() : NOT_FOUND;
                 var responseBody = new LinkedHashMap<String, Object>();
                 responseBody.put("status", status.toString());
                 responseBody.put("agentId", agentId);
                 responseBody.put("version", version);
                 responseBody.put("environment", environment.name());
+                // Why it failed, when the factory recorded it. Still 200, deliberately:
+                // every failed waited deploy has always answered 200 with the outcome in
+                // the body, and every caller (the setup API, the MCP tools, the Manager,
+                // quarkus-eddi) reads that body. A grant refusal answering 409 instead
+                // would give one outcome two shapes. The caller passed EDIT above, so it
+                // may see the secret NAMES the failure carries.
+                DeploymentFailure failure = status == ERROR && deployed != null ? deployed.getDeploymentFailure() : null;
+                if (deployError == null && failure != null) {
+                    deployError = failure.message();
+                }
                 if (deployError != null) {
                     responseBody.put("error", deployError);
+                }
+                if (failure != null) {
+                    responseBody.put("failure", failure);
                 }
                 return Response.ok(responseBody, MediaType.APPLICATION_JSON).build();
             }
@@ -578,13 +602,48 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
 
-        String status = checkDeploymentStatus(environment, agentId, version).toString();
+        IAgent deployed = deployedAgent(environment, agentId, version);
+        String status = (deployed != null ? deployed.getDeploymentStatus() : NOT_FOUND).toString();
 
         if ("text".equalsIgnoreCase(format)) {
             return Response.ok(status, MediaType.TEXT_PLAIN).build();
         }
 
-        return Response.ok(Map.of("status", status), MediaType.APPLICATION_JSON).build();
+        var body = new LinkedHashMap<String, Object>();
+        body.put("status", status);
+        // The failure names secrets (never values) and the agent's grant situation, so
+        // it goes only to someone who may edit, and so deploy, the agent. This
+        // endpoint itself is open to any editor, for any agent id.
+        if ("detailed".equalsIgnoreCase(format) && deployed != null && deployed.getDeploymentStatus() == ERROR
+                && deployed.getDeploymentFailure() != null && resourceAccessGuard.hasAccess(agentId, AccessLevel.EDIT)) {
+            body.put("failure", deployed.getDeploymentFailure());
+        }
+        return Response.ok(body, MediaType.APPLICATION_JSON).build();
+    }
+
+    @Override
+    public DeploymentPreflight preflightDeployment(Deployment.Environment environment, String agentId, Integer version) {
+        RuntimeUtilities.checkNotNull(environment, "environment");
+        RuntimeUtilities.checkNotNull(agentId, "agentId");
+        RuntimeUtilities.checkNotNull(version, "version");
+        // EDIT, like the deploy it previews: the answer describes the agent's grants.
+        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
+        requireAgentExists(agentId, version);
+
+        if (vaultGrantGate == null) {
+            return new DeploymentPreflight(agentId, version, VaultGrantGate.Mode.OFF.name(), false, true, List.of());
+        }
+        VaultGrantGate.GrantCheck check = vaultGrantGate.check(agentId, version);
+        boolean admin = resourceAccessGuard.isAdmin();
+        List<DeploymentPreflight.GrantIssue> issues = new ArrayList<>();
+        for (String reference : check.ungranted()) {
+            var parsed = VaultGrantGate.parseVaultReference(reference);
+            var grant = parsed != null ? vaultGrantGate.grantOf(reference) : null;
+            List<String> allowed = grant != null ? grant.allowedAgents() : null;
+            issues.add(new DeploymentPreflight.GrantIssue(parsed != null ? parsed.tenantId() : null, parsed != null ? parsed.keyName() : null,
+                    reference, false, allowed != null ? allowed.size() : null, admin && allowed != null ? List.copyOf(allowed) : null));
+        }
+        return new DeploymentPreflight(agentId, version, check.mode().name(), check.checked(), !check.blocked(), issues);
     }
 
     /**
@@ -646,11 +705,19 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
     }
 
     private Status checkDeploymentStatus(Deployment.Environment environment, String agentId, Integer version) {
+        IAgent agent = deployedAgent(environment, agentId, version);
+        return agent != null ? agent.getDeploymentStatus() : NOT_FOUND;
+    }
+
+    /**
+     * The registry entry for this version, carrying status and failure, or null.
+     */
+    private IAgent deployedAgent(Deployment.Environment environment, String agentId, Integer version) {
         try {
-            IAgent agent = agentFactory.getAgent(environment, agentId, version);
-            return agent != null ? agent.getDeploymentStatus() : NOT_FOUND;
+            return agentFactory.getAgent(environment, agentId, version);
         } catch (ServiceException e) {
-            return throwError(agentId, version, e, "Error while deploying agent! (agentId=%s , version=%s)");
+            throwError(agentId, version, e, "Error while deploying agent! (agentId=%s , version=%s)");
+            return null;
         }
     }
 

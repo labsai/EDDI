@@ -95,6 +95,46 @@ public interface IRestSecretStore {
                          @DefaultValue("false") boolean dryRun, GrantRequest body);
 
     /**
+     * Add one agent to a secret's grant, keeping everything already on it.
+     * <p>
+     * The change every NEW agent that uses a restricted secret needs: a grant lists
+     * agent ids, so an agent created after the grant was written is never on it and
+     * its first deploy is refused. Unlike {@link #updateGrant}, which replaces the
+     * list and therefore needs a read-modify-write in the caller, this appends
+     * atomically — two admins granting two agents at once both land.
+     * <p>
+     * Idempotent: an agent already granted, or a secret open to every agent
+     * ({@code ["*"]}), is left as it is and answers {@code changed=false}. It never
+     * turns "every agent" into a list. Every real change is written to the audit
+     * ledger.
+     *
+     * @param tenantId
+     *            the tenant namespace
+     * @param keyName
+     *            the secret key name
+     * @param agentId
+     *            the agent to add
+     * @param dryRun
+     *            when true, nothing is written; the response shows the grant as it
+     *            would be
+     * @return 200 with the {@link #updateGrant} response shape plus
+     *         {@code changed}; 404 if the secret does not exist; 400 on a malformed
+     *         id or a full grant; 409 if concurrent edits kept winning
+     */
+    @POST
+    @Path("/{tenantId}/{keyName}/grant/agents/{agentId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    @Operation(summary = "Add one agent to a secret's grant",
+               description = "Appends agentId to the secret's allowedAgents without touching the value or the other entries — "
+                       + "what a newly created agent needs before its first deploy when it uses a restricted secret. Idempotent: "
+                       + "an agent already granted, or a secret open to every agent, is left unchanged (changed=false). Atomic "
+                       + "against concurrent grant edits. Pass dryRun=true to preview. Audited.")
+    Response grantAgent(@PathParam("tenantId") String tenantId, @PathParam("keyName") String keyName, @PathParam("agentId") String agentId,
+                        @QueryParam("dryRun")
+                        @DefaultValue("false") boolean dryRun);
+
+    /**
      * Delete a secret from the vault.
      *
      * @param tenantId

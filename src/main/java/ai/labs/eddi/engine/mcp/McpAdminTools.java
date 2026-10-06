@@ -35,6 +35,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
@@ -146,8 +147,26 @@ public class McpAdminTools {
                         result.put("deployed", ready);
                         if (!ready && !"IN_PROGRESS".equals(deployStatus)) {
                             result.put("action", "deploy_failed");
-                            result.put("error", "Deployment status is " + deployStatus
-                                    + ". Check Agent configuration, LLM provider credentials, and model availability.");
+                            if (body.get("failure") instanceof DeploymentFailure failure) {
+                                // The structured reason — for a missing vault grant, the
+                                // secret names and the exact grant call. Granting is
+                                // deliberately NOT something this toolset can do: no MCP tool
+                                // widens a grant, so the model relays the fix to a human admin.
+                                result.put("failureCode", failure.code());
+                                if (failure.secrets() != null) {
+                                    result.put("secrets", failure.secrets());
+                                }
+                                result.put("error", failure.message());
+                                if (failure.isGrantMissing()) {
+                                    result.put("humanActionRequired", "An administrator must add this agent to the grant of each listed "
+                                            + "secret (the Manager's deploy dialog or Secrets page, or the endpoints in 'fix'), then deploy "
+                                            + "this same agent again. No tool available here can change a grant.");
+                                    result.put("fix", failure.fix());
+                                }
+                            } else {
+                                result.put("error", "Deployment status is " + deployStatus
+                                        + ". Check Agent configuration, LLM provider credentials, and model availability.");
+                            }
                             return jsonSerialization.serialize(result);
                         }
                     }

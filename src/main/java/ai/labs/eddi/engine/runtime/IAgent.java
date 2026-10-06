@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 
 import java.util.Map;
 
@@ -69,6 +70,16 @@ public interface IAgent {
      * @since 6.5.0
      */
     default Integer getCompatibilityGeneration() {
+        return null;
+    }
+
+    /**
+     * Why this deployment is in {@link Deployment.Status#ERROR}, or {@code null}
+     * when it is not or the cause was not recorded.
+     *
+     * @since 6.6.0
+     */
+    default DeploymentFailure getDeploymentFailure() {
         return null;
     }
 }

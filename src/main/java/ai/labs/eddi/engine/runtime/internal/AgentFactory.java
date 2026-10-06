@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -277,12 +278,19 @@ public class AgentFactory implements IAgentFactory {
             }
         }
 
-        if (vaultGrantGate != null && !vaultGrantGate.mayDeploy(agentId, version)) {
+        var grantCheck = vaultGrantGate != null ? vaultGrantGate.checkForDeployment(agentId, version) : null;
+        if (grantCheck != null && grantCheck.blocked()) {
             // Refused: the agent names a vault secret it is not granted. Release the
             // placeholder we just claimed so the key does not stay IN_PROGRESS, and
             // report ERROR so the caller does not record a successful deployment.
+            //
+            // The reason is kept on the refused entry, so the deploy response and the
+            // detailed deployment status can say WHICH secret and how to grant it. It
+            // used to reach the server log only, and the API answered a bare ERROR. A
+            // later successful deploy replaces the entry, which clears it.
             var refused = createInProgressDummyAgent(agentId, version);
             refused.setDeploymentStatus(Deployment.Status.ERROR);
+            refused.setDeploymentFailure(grantCheck.toFailure(agentId, version));
             agentEnvironment.replace(id, placeholder, refused);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
@@ -318,17 +326,50 @@ public class AgentFactory implements IAgentFactory {
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
         } catch (ServiceException e) {
             log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + e.getMessage(), e);
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version, e)));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
         } catch (IllegalAccessException e) {
             // The placeholder is still published; mark it ERROR so a retry is not
             // mistaken for a deployment still in flight.
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version, e)));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             throw new RuntimeException(e);
+        } catch (RuntimeException e) {
+            // Without this branch an unchecked failure while building the agent left
+            // the IN_PROGRESS placeholder published for good: every later deploy of
+            // this version answered "already in progress" and returned, and the only
+            // way out was a restart.
+            log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + sanitize(e.getMessage()), e);
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version, e)));
+            placeholder.setDeploymentStatus(Deployment.Status.ERROR);
+            finalDeploymentProcess.completed(Deployment.Status.ERROR);
+            logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
+            throw e;
         }
     }
+
+    /**
+     * The message a {@link DeploymentFailure#DEPLOYMENT_FAILED} carries: the
+     * cause's own message, which is what the server log already shows an operator.
+     * Bounded, so a cause that dumps a whole document cannot bloat every status
+     * response.
+     */
+    static String failureMessage(String agentId, Integer version, Throwable e) {
+        Throwable cause = e;
+        while (cause.getCause() != null && cause.getCause() != cause && (cause.getMessage() == null || cause.getMessage().isBlank())) {
+            cause = cause.getCause();
+        }
+        String detail = cause.getMessage() != null && !cause.getMessage().isBlank() ? cause.getMessage() : cause.getClass().getSimpleName();
+        if (detail.length() > MAX_FAILURE_DETAIL) {
+            detail = detail.substring(0, MAX_FAILURE_DETAIL) + "…";
+        }
+        return String.format("Agent '%s' v%s could not be deployed: %s", agentId, version, detail);
+    }
+
+    private static final int MAX_FAILURE_DETAIL = 500;
 
     private DeploymentProcess defaultIfNull(DeploymentProcess deploymentProcess) {
         return deploymentProcess == null ? status -> {
