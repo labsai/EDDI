@@ -400,44 +400,92 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             // evidence: another deployed version actually seen.
             final boolean agentLeavesEnvironment = deployedVersions(environment, agentId).stream()
                     .allMatch(deployed -> deployed >= lowestUndeployed && deployed <= highestUndeployed);
-            do {
-                Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(agentId, version);
-                Integer successor = activeConversationCount > 0
-                        ? compatibleDeployedVersion(environment, agentId, version, lowestUndeployed, highestUndeployed)
-                        : null;
-                if (successor != null) {
-                    // Nothing to end and nothing to refuse: these conversations move to the
-                    // compatible version on their next turn.
-                    log.infof("%d active conversation(s) of Agent %s v%d continue on compatible v%d", activeConversationCount,
-                            sanitize(agentId), version, successor);
-                } else if (activeConversationCount > 0) {
-                    if (endAllActiveConversations) {
-                        var activeConversations = restConversationStore.getActiveConversations(agentId, version);
-                        // Ending continues past a failed conversation and reports it in
-                        // a 500; do not undeploy on top of conversations still open.
-                        var endResponse = restConversationStore.endActiveConversations(activeConversations,
-                                IConversationService.END_REASON_AGENT_VERSION_RETIRED);
-                        if (endResponse != null && endResponse.getStatus() >= 300) {
-                            throw new IllegalStateException(String.format(
-                                    "Could not end every active conversation of agent %s (version %s) — not undeploying",
-                                    sanitize(agentId), version));
+            // With undeployThisAndAllPreviousAgentVersions one failing version used to
+            // abort
+            // the loop and leave every lower version deployed — and the caller with a 500
+            // that said nothing of the versions it never reached. Each version is now
+            // attempted, and the failures and refusals are reported together at the end. A
+            // single-version call has nothing to continue to, and fails as it always did.
+            final boolean continueOnFailure = lowestUndeployed < highestUndeployed;
+            final List<String> failures = new ArrayList<>();
+            final List<String> refusals = new ArrayList<>();
+            for (int current = highestUndeployed; current >= lowestUndeployed; current--) {
+                try {
+                    Response refusal = undeployVersion(environment, agentId, current, lowestUndeployed, highestUndeployed,
+                            Boolean.TRUE.equals(endAllActiveConversations), agentLeavesEnvironment);
+                    if (refusal != null) {
+                        if (!continueOnFailure) {
+                            return refusal;
                         }
-                    } else {
-                        var message = getConflictExplanations(agentId, version, activeConversationCount);
-                        return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
+                        refusals.add(String.valueOf(refusal.getEntity()));
                     }
+                } catch (Exception e) {
+                    if (!continueOnFailure) {
+                        throw e;
+                    }
+                    log.errorf(e, "Could not undeploy agent %s version %d — continuing with the lower versions", sanitize(agentId), current);
+                    failures.add("version " + current + ": " + e.getLocalizedMessage());
                 }
+            }
 
-                undeploy(environment, agentId, version, agentLeavesEnvironment);
-                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", sanitize(agentId), version,
-                        environment));
-            } while (undeployThisAndAllPreviousAgentVersions && version-- > 1);
+            if (!failures.isEmpty()) {
+                throw new IllegalStateException(String.format("Could not undeploy every version of agent %s (%s)%s", sanitize(agentId),
+                        String.join("; ", failures), refusals.isEmpty() ? "" : " — and refused: " + String.join(" ", refusals)));
+            }
+            if (!refusals.isEmpty()) {
+                return Response.status(Response.Status.CONFLICT).entity(String.join("\n", refusals)).type(MediaType.TEXT_PLAIN).build();
+            }
 
             return Response.accepted().build();
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Undeploys one version: ends or refuses its open conversations as the caller
+     * asked, then takes it out of service.
+     *
+     * @return {@code null} when the version was undeployed, or the 409 that refuses
+     *         it because it still has open conversations
+     */
+    private Response undeployVersion(Deployment.Environment environment, String agentId, int version, int lowestUndeployed,
+                                     int highestUndeployed, boolean endAllActiveConversations, boolean agentLeavesEnvironment)
+            throws Exception {
+        Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(agentId, version);
+        Integer successor = activeConversationCount > 0
+                ? compatibleDeployedVersion(environment, agentId, version, lowestUndeployed, highestUndeployed)
+                : null;
+        if (successor != null) {
+            // Nothing to end and nothing to refuse: these conversations move to the
+            // compatible version on their next turn.
+            log.infof("%d active conversation(s) of Agent %s v%d continue on compatible v%d", activeConversationCount, sanitize(agentId), version,
+                    successor);
+        } else if (activeConversationCount > 0) {
+            if (endAllActiveConversations) {
+                // Listed as a projection, never as full conversations — see
+                // RestConversationStore.getActiveConversations.
+                var activeConversations = restConversationStore.getActiveConversations(agentId, version);
+                // Ending continues past a failed conversation and reports it in
+                // a 500; do not undeploy on top of conversations still open.
+                var endResponse = restConversationStore.endActiveConversations(activeConversations,
+                        IConversationService.END_REASON_AGENT_VERSION_RETIRED);
+                if (endResponse != null && endResponse.getStatus() >= 300) {
+                    throw new IllegalStateException(
+                            String.format("Could not end every active conversation of agent %s (version %s) — not undeploying",
+                                    sanitize(agentId), version));
+                }
+            } else {
+                var message = getConflictExplanations(agentId, version, activeConversationCount);
+                return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
+            }
+        }
+
+        undeploy(environment, agentId, version, agentLeavesEnvironment);
+        log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", sanitize(agentId), version,
+                environment));
+        return null;
     }
 
     /**

@@ -19,7 +19,8 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -224,12 +225,9 @@ class AgentDeploymentManagementExtendedTest {
                     .thenReturn(1L);
 
             // Load old conversations for cleanup
-            var snapshot = new ConversationMemorySnapshot();
-            snapshot.setId("conv-old");
-            snapshot.setAgentId("agent-1");
-            snapshot.setAgentVersion(1);
-            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", 1))
-                    .thenReturn(List.of(snapshot));
+            var activity = new ConversationActivitySummary("conv-old", ConversationState.READY, "agent-1", 1, null);
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), isNull(), anyInt()))
+                    .thenReturn(List.of(activity));
 
             // Old descriptor - 60 days old (max is 30)
             var descriptor = new DocumentDescriptor();
@@ -243,7 +241,8 @@ class AgentDeploymentManagementExtendedTest {
             // The post-undeployment attempt should have ended the old conversation
             // (the UndeploymentExecutor lambda is invoked after all current agents are
             // deployed)
-            verify(conversationMemoryStore).loadActiveConversationMemorySnapshot("agent-1", 1);
+            verify(conversationMemoryStore).loadOpenConversationActivity(eq("agent-1"), eq(1), isNull(), anyInt());
+            verify(conversationMemoryStore, never()).loadActiveConversationMemorySnapshot(any(), any());
         }
     }
 

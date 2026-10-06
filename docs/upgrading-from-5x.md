@@ -66,6 +66,39 @@ conversation**, so on an older 6.x use a large number instead (for example `3650
 versions with no active conversation are still undeployed either way. An idle conversation that is
 still open counts as active, so it keeps its version deployed.
 
+**The sweep is memory-safe.** It reads one small projection per open conversation (id, state, agent,
+version, last-interaction time) in batches of 200, never the conversation itself. Earlier releases
+loaded every open conversation in full: a production 5.x deployment with 34,000 open conversations
+averaging 630 KB ran a 2 GB JVM out of heap six minutes after boot. If you switched the sweep off
+with `-1` for that reason, you can switch it back on. A conversation the sweep ends records the end
+reason `idle`.
+
+### Ending a backlog of idle conversations in one call
+
+After a migration, 5.x can leave tens of thousands of conversations open. To end them without
+waiting for the daily job, an admin can run one database operation:
+
+```
+POST /conversationstore/conversations/end-inactive?inactiveForDays=90
+POST /conversationstore/conversations/end-inactive?inactiveForDays=90&agentId=<agentId>&dryRun=true
+```
+
+It ends every `READY` conversation whose last interaction is older than `inactiveForDays`
+(optionally of one agent), with end reason `idle`, and answers `{"count": n, "dryRun": false}`.
+`dryRun=true` ends nothing and returns what it would end: run it first. The role is `eddi-admin`,
+`inactiveForDays` must be at least 1, and every call is written to the audit ledger.
+
+- A conversation paused for human approval (`AWAITING_HUMAN`), one in the middle of a turn
+  (`IN_PROGRESS`) and one with no timestamp at all are left alone.
+- Conversation descriptors are **not** touched, so the retention clock
+  (`deleteEndedConversationsOnceOlderThanDays`) keeps counting from the conversation's last
+  interaction, exactly as for conversations the sweep ends. A conversation idle for longer than the
+  retention is therefore deleted by the next retention run: decide on retention first (see above).
+- The listing re-derives a conversation's state from the conversation itself, so it shows `ENDED`
+  at once.
+- On PostgreSQL the update runs in batches of 500 rows, each its own transaction, so a large
+  backlog never holds one huge transaction open.
+
 ## 4. Health probes during the first boot
 
 Readiness (`/q/health/ready`) stays **DOWN until the migrations have finished** and the agents

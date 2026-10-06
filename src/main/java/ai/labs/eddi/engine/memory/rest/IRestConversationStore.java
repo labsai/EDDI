@@ -109,6 +109,47 @@ public interface IRestConversationStore {
             throws ResourceStoreException, ResourceNotFoundException, ResourceModifiedException;
 
     /**
+     * Deployment-wide bulk end of idle conversations, run inside the database:
+     * every {@code READY} conversation whose last interaction is older than
+     * {@code inactiveForDays} days becomes {@code ENDED} with end reason
+     * {@code idle}, and the count is returned. Admin-only, and the age must be at
+     * least one day. Nothing is loaded into the application, so it is the way to
+     * clear a backlog of open conversations that the scheduled sweep cannot reach
+     * (for instance after it was switched off with
+     * {@code maximumLifeTimeOfIdleConversationsInDays=-1}).
+     * <p>
+     * Paused ({@code AWAITING_HUMAN}) conversations are never touched — a pending
+     * approval needs the HITL-aware end — and neither is a conversation with no
+     * timestamp at all, which cannot be proven idle. Conversation descriptors are
+     * not changed: retention keeps counting from the conversation's last
+     * interaction, as it does for conversations the sweep ends. {@code dryRun=true}
+     * ends nothing and returns what would be ended. Every call is recorded in the
+     * audit ledger.
+     *
+     * @param inactiveForDays
+     *            required, at least 1
+     * @param agentId
+     *            optional: restrict to one agent (every version)
+     * @param dryRun
+     *            count only
+     * @return {@code {"count": n, "dryRun": bool}}
+     */
+    @POST
+    @Path("end-inactive")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    Response endInactiveConversations(@Parameter(name = "inactiveForDays", required = true, example = "90",
+                                                 description = "End READY conversations whose last interaction is older than this many days (at least 1)")
+    @QueryParam("inactiveForDays") Integer inactiveForDays,
+                                      @Parameter(name = "agentId", required = false,
+                                                 description = "Restrict to one agent; omit for every agent")
+                                      @QueryParam("agentId") String agentId,
+                                      @Parameter(name = "dryRun", required = false, example = "true",
+                                                 description = "Only count what would be ended")
+                                      @QueryParam("dryRun")
+                                      @DefaultValue("false") boolean dryRun);
+
+    /**
      * The open (not ENDED) conversations of an agent, across all owners. Requires
      * EDIT access on the agent when workspaces are enforced.
      */
