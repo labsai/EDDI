@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import io.vertx.core.http.HttpServerRequest;
+import io.vertx.ext.web.RoutingContext;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -102,10 +106,10 @@ class RestAgentEngineStructuredErrorTest {
     @Test
     @DisplayName("the error serialises as {error:{code,retryable,retryAfterMs,message}} with an explicit null")
     void errorJsonShape() throws Exception {
-        var body = new com.fasterxml.jackson.databind.ObjectMapper()
+        var body = new ObjectMapper()
                 .writeValueAsString(RestAgentEngine.errorBody(new TurnError("TURN_FAILED", false, null, "m")));
         assertEquals("{\"error\":{\"code\":\"TURN_FAILED\",\"retryable\":false,\"retryAfterMs\":null,\"message\":\"m\"}}", body);
-        var clean = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(new SimpleConversationMemorySnapshot());
+        var clean = new ObjectMapper().writeValueAsString(new SimpleConversationMemorySnapshot());
         assertFalse(clean.contains("\"error\""), "a good turn has no error key");
     }
 
@@ -128,9 +132,9 @@ class RestAgentEngineStructuredErrorTest {
     @Test
     @DisplayName("a malformed idempotency key is a 400 with the structured body, and no turn runs")
     void invalidKeyIs400() throws Exception {
-        var current = mock(io.quarkus.vertx.http.runtime.CurrentVertxRequest.class);
-        var routing = mock(io.vertx.ext.web.RoutingContext.class);
-        var request = mock(io.vertx.core.http.HttpServerRequest.class);
+        var current = mock(CurrentVertxRequest.class);
+        var routing = mock(RoutingContext.class);
+        var request = mock(HttpServerRequest.class);
         when(current.getCurrent()).thenReturn(routing);
         when(routing.request()).thenReturn(request);
         when(request.getHeader(IdempotencyKeyHeaderReader.HEADER)).thenReturn("k".repeat(129));

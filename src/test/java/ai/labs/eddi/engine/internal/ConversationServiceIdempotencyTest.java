@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -274,7 +275,7 @@ class ConversationServiceIdempotencyTest {
     @Test
     @DisplayName("a failed turn without a task entry still says why, generically")
     void failedTurnWithoutTaskEntry() {
-        IConversationMemory memory = new ai.labs.eddi.engine.memory.ConversationMemory("a", 1, "u");
+        IConversationMemory memory = new ConversationMemory("a", 1, "u");
         memory.setConversationState(ConversationState.ERROR);
         memory.getCurrentStep();
         TurnError error = ConversationService.turnErrorOf(memory);

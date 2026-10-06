@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.engine.internal.TurnIdempotencyService.Admission;
 import ai.labs.eddi.engine.internal.TurnIdempotencyService.InvalidIdempotencyKeyException;
 import ai.labs.eddi.engine.internal.TurnIdempotencyService.Kind;
@@ -190,7 +191,7 @@ class TurnIdempotencyServiceTest {
     @Test
     @DisplayName("a request body cannot carry the key")
     void bodyCannotSetKey() throws Exception {
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var mapper = new ObjectMapper();
         InputData parsed = mapper.readValue("{\"input\":\"hi\",\"idempotencyKey\":\"sneaky\"}", InputData.class);
         assertNull(parsed.getIdempotencyKey());
     }
