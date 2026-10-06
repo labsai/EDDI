@@ -12,6 +12,14 @@
 - **History Management**: Full conversation history is maintained, with support for undo/redo operations
 - **Context Passing**: External context can be injected into conversations at any step
 
+### Turn deadline
+
+A caller that will only wait so long can say so per request: send `X-EDDI-Turn-Deadline-Ms: <milliseconds>`
+on a `say`, a managed-conversation message or an OpenAI-compatible chat completion. The engine then
+stops retries, cascade steps and HTTP calls that cannot finish in time and answers (or falls back)
+inside the budget. The agent's own `turnDeadlineMs` caps it; with none configured the header alone
+applies, up to 10 minutes. See [Turn Deadline](langchain.md#turn-deadline).
+
 ### How Conversations Work in EDDI
 
 When you create a conversation:

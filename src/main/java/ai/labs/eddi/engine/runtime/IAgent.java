@@ -51,6 +51,26 @@ public interface IAgent {
     }
 
     /**
+     * The agent's {@code turnDeadlineMs}; {@code null} when no deadline is
+     * configured.
+     *
+     * @since 6.6.0
+     */
+    default Long getTurnDeadlineMs() {
+        return null;
+    }
+
+    /**
+     * The agent's {@code turnDeadlineReserveMs}; {@code null} means the engine
+     * default.
+     *
+     * @since 6.6.0
+     */
+    default Long getTurnDeadlineReserveMs() {
+        return null;
+    }
+
+    /**
      * Memory policy from agent deployment. {@code null} when no policy is
      * configured.
      *

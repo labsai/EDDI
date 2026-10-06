@@ -11,6 +11,19 @@ import java.util.Map;
 import java.util.Set;
 
 public interface ILanguageModelBuilder {
+    /**
+     * The {@code maxRetries} every synchronous provider client is built with.
+     * <p>
+     * langchain4j clients retry on their own by default (two retries), which
+     * stacked underneath EDDI's {@code RetryConfiguration.executeWithRetry}: three
+     * configured attempts became up to nine provider calls, each of them billed and
+     * rate-limited, with backoff the agent designer never configured.
+     * {@code executeWithRetry} is the single retry owner, so the clients must not
+     * retry. Streaming clients expose no such setting; their retries live in
+     * {@code StreamingLegacyChatExecutor}.
+     */
+    int NO_LIBRARY_RETRIES = 0;
+
     ChatModel build(Map<String, String> parameters);
 
     /**

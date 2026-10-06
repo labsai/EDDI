@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -82,6 +83,11 @@ public class ConversationMemory implements IConversationMemory {
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
+
+    /**
+     * Transient — never serialized. The running turn's deadline, set per turn.
+     */
+    private transient TurnDeadline turnDeadline;
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
@@ -444,6 +450,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public ConversationEventSink getEventSink() {
         return eventSink;
+    }
+
+    @Override
+    public TurnDeadline getTurnDeadline() {
+        return turnDeadline;
+    }
+
+    @Override
+    public void setTurnDeadline(TurnDeadline turnDeadline) {
+        this.turnDeadline = turnDeadline;
     }
 
     @Override

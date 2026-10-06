@@ -118,6 +118,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     @Inject
     ClientContextGuard clientContextGuard = ClientContextGuard.strict();
 
+    /** Reads {@code X-EDDI-Turn-Deadline-Ms}; nullable in unit tests. */
+    @Inject
+    TurnDeadlineHeaderReader turnDeadlineHeaderReader;
+
     @Inject
     public RestAgentEngineStreaming(IConversationService conversationService,
             ConversationAccessGuard conversationAccessGuard,
@@ -158,6 +162,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // Engine-reserved context keys are only ever set by EDDI itself — see
         // ClientContextGuard. Same boundary as the non-streaming twin.
         clientContextGuard.strip(inputData);
+        if (turnDeadlineHeaderReader != null) {
+            turnDeadlineHeaderReader.apply(inputData);
+        }
 
         // Every outbound frame goes through this stream, which doubles as the
         // client-disconnect detector — see SseStream.

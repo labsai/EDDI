@@ -99,6 +99,14 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Inject
     ClientContextGuard clientContextGuard = ClientContextGuard.strict();
 
+    /**
+     * Reads {@code X-EDDI-Turn-Deadline-Ms}. Field-injected and nullable for the
+     * same reason as the guard above: directly constructed unit tests have no
+     * request to read it from.
+     */
+    @Inject
+    TurnDeadlineHeaderReader turnDeadlineHeaderReader;
+
     @Inject
     public RestAgentEngine(IConversationService conversationService,
             IConversationMemoryStore conversationMemoryStore,
@@ -245,6 +253,11 @@ public class RestAgentEngine implements IRestAgentEngine {
 
         response.setTimeout(agentTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
+
+        // The caller's own budget for this turn — read here, on the request thread.
+        if (turnDeadlineHeaderReader != null) {
+            turnDeadlineHeaderReader.apply(inputData);
+        }
 
         // onSkipped: the queued turn was dropped without consuming the input
         // (pause/busy committed after the request was accepted) — answer honestly

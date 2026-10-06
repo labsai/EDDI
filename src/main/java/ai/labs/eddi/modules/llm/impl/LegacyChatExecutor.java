@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -75,6 +76,16 @@ class LegacyChatExecutor {
      */
     ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
+        return execute(chatModel, messages, task, jsonPolicy, null);
+    }
+
+    /**
+     * As above, inside the turn's deadline: attempts, backoff and the per-attempt
+     * wait spend from it ({@code null} = no deadline, the previous behaviour).
+     */
+    ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy,
+                       TurnDeadline deadline)
+            throws LifecycleException {
 
         ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
 
@@ -87,7 +98,7 @@ class LegacyChatExecutor {
                     var requestBuilder = ChatRequest.builder().messages(messages);
                     requestBuilder.responseFormat(responseFormat);
                     return chatModel.chat(requestBuilder.build());
-                }, task, "Chat model execution (JSON mode)");
+                }, task, "Chat model execution (JSON mode)", new long[1], deadline);
             } catch (LifecycleException e) {
                 // A transient failure (timeout, 429, 5xx — already retried) or an
                 // interrupt says nothing about JSON support. Falling back on those too
@@ -100,10 +111,10 @@ class LegacyChatExecutor {
                 // Provider may not support ResponseFormat.JSON — fall back to standard call.
                 // System prompt reinforcement still provides JSON enforcement.
                 LOGGER.warn("JSON response format not supported by provider, falling back to standard mode: " + e.getMessage());
-                messageResponse = AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task);
+                messageResponse = AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task, deadline);
             }
         } else {
-            messageResponse = AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task);
+            messageResponse = AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task, deadline);
         }
 
         var aiMessage = messageResponse.aiMessage();

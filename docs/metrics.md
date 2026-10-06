@@ -438,7 +438,10 @@ eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMo
 eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
 eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
 eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
+eddi_llm_failure_total                      # Failed cascade steps by failure class; tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
+eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|httpcall|httpcall_retry)
+eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
 eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
