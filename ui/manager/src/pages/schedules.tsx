@@ -59,6 +59,10 @@ import {
   DEFAULT_TIME_ZONE,
   MIN_INTERVAL_SECONDS,
   UNLIMITED_COST,
+  DISABLED_BY_UNDEPLOY,
+  DISABLED_ACCESS_REVOKED,
+  invalidScheduleReason,
+  isFinishedOneShot,
 } from "@/lib/api/schedules";
 import type {
   ScheduleConfiguration,
@@ -171,6 +175,108 @@ function StatusBadge({ schedule }: { schedule: ScheduleConfiguration }) {
       {s.label}
     </span>
   );
+}
+
+// ==================== Disabled Reason ====================
+
+/**
+ * Why a disabled schedule is off (EDDI 6.6+ `disabledReason`).
+ *
+ * The system switches a schedule off for two reasons, and each has a different
+ * way back: an undeploy is undone by the next successful deploy of the agent,
+ * while a revoked access stays off until someone who may use the agent fixes
+ * the share and enables it. Without the reason both looked exactly like a
+ * schedule a person had paused. A backend that predates the field sends none,
+ * which renders as "disabled by a person" — the truth as far as it can tell.
+ */
+function DisabledReasonNotice({ schedule }: { schedule: ScheduleConfiguration }) {
+  const { t } = useTranslation();
+  if (schedule.enabled) return null;
+  const reason = schedule.disabledReason?.trim() || null;
+
+  if (!reason) {
+    // A one-shot schedule that has run is switched off by the engine, not by a
+    // person; "disabled by a person ... enable it once by hand" would be wrong
+    // there. Its fireStatus is back at PENDING after markCompleted, so the
+    // shape decides, not the status.
+    if (isFinishedOneShot(schedule)) {
+      return (
+        <p
+          className="mt-1 max-w-[16rem] text-[10px] leading-snug text-muted-foreground"
+          data-testid={`finished-one-shot-${schedule.id}`}
+        >
+          {t("schedules.finishedOneShot", "One-time schedule: it ran and is finished.")}
+        </p>
+      );
+    }
+    return (
+      <p
+        className="mt-1 max-w-[16rem] text-[10px] leading-snug text-muted-foreground"
+        data-testid={`disabled-by-person-${schedule.id}`}
+      >
+        {t(
+          "schedules.disabledByPerson",
+          "Disabled by a person. A schedule an undeploy switched off before EDDI 6.6 also shows this: enable it once by hand.",
+        )}
+      </p>
+    );
+  }
+
+  const known = disabledReasonText(t, reason, schedule.createdBy);
+  return (
+    <div className="mt-1 max-w-[16rem] space-y-0.5" data-testid={`disabled-reason-${schedule.id}`} data-reason={reason}>
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+          reason === DISABLED_ACCESS_REVOKED
+            ? "bg-destructive/10 text-destructive"
+            : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+        }`}
+      >
+        {reason === DISABLED_ACCESS_REVOKED ? (
+          <Ban className="h-3 w-3" aria-hidden="true" />
+        ) : (
+          <Pause className="h-3 w-3" aria-hidden="true" />
+        )}
+        {known.label}
+      </span>
+      <p className="text-[10px] leading-snug text-muted-foreground">{known.explanation}</p>
+    </div>
+  );
+}
+
+function disabledReasonText(
+  t: ReturnType<typeof useTranslation>["t"],
+  reason: string,
+  createdBy?: string,
+): { label: string; explanation: string } {
+  if (reason === DISABLED_BY_UNDEPLOY) {
+    return {
+      label: t("schedules.disabledUndeployed", "Agent undeployed"),
+      explanation: t(
+        "schedules.disabledUndeployedHint",
+        "Switched off when its agent was undeployed. It comes back on by itself at the agent's next successful deploy — no action needed.",
+      ),
+    };
+  }
+  if (reason === DISABLED_ACCESS_REVOKED) {
+    return {
+      label: t("schedules.disabledAccessRevoked", "Access revoked"),
+      explanation: createdBy
+        ? t("schedules.disabledAccessRevokedHintBy", {
+            defaultValue:
+              "Its creator ({{user}}) can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
+            user: createdBy,
+          })
+        : t(
+            "schedules.disabledAccessRevokedHint",
+            "Its creator can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
+          ),
+    };
+  }
+  return {
+    label: reason,
+    explanation: t("schedules.disabledOtherHint", "Switched off by EDDI for the reason shown."),
+  };
 }
 
 // ==================== Type Badge ====================
@@ -631,6 +737,9 @@ function ScheduleFormDialog({
   const [userId, setUserId] = useState("");
   const [unlimitedCost, setUnlimitedCost] = useState(true);
   const [maxCost, setMaxCost] = useState(1);
+  // The server's reason for refusing the last save (a 400). Shown in the dialog,
+  // next to the fields it is about, rather than in a toast that disappears.
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const timeZones = useMemo(() => listTimeZones(), []);
 
@@ -684,6 +793,7 @@ function ScheduleFormDialog({
   // (Re)initialise the form each time the dialog opens.
   useEffect(() => {
     if (!open) return;
+    setServerError(null);
     if (editing) prefillFrom(editing);
     else resetToDefaults();
   }, [open, editing, prefillFrom, resetToDefaults]);
@@ -818,6 +928,14 @@ function ScheduleFormDialog({
   const handleSubmit = () => {
     if (!isValid) return;
     const config = buildConfig();
+    setServerError(null);
+    // A 400 is the server telling the author what to fix — keep it on screen in
+    // the dialog. Anything else is not about the form and stays a toast.
+    const failed = (fallback: string) => (err: unknown) => {
+      const reason = invalidScheduleReason(err);
+      if (reason) setServerError(reason);
+      else toast.error(fallback);
+    };
     if (isEdit && editing?.id) {
       updateMutation.mutate(
         { id: editing.id, config },
@@ -826,10 +944,7 @@ function ScheduleFormDialog({
             toast.success(t("schedules.updateSuccess", "Schedule updated"));
             onClose();
           },
-          onError: () =>
-            toast.error(
-              t("schedules.updateError", "Failed to update schedule")
-            ),
+          onError: failed(t("schedules.updateError", "Failed to update schedule")),
         }
       );
     } else {
@@ -840,8 +955,7 @@ function ScheduleFormDialog({
           );
           onClose();
         },
-        onError: () =>
-          toast.error(t("schedules.createError", "Failed to create schedule")),
+        onError: failed(t("schedules.createError", "Failed to create schedule")),
       });
     }
   };
@@ -1233,6 +1347,24 @@ function ScheduleFormDialog({
             </div>
           )}
         </div>
+
+        {serverError && (
+          <div
+            className="mt-4 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-foreground"
+            role="alert"
+            data-testid="schedule-server-error"
+          >
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
+            <div>
+              <p className="font-semibold text-destructive">
+                {isEdit
+                  ? t("schedules.serverRefusedUpdate", "The server refused this change:")
+                  : t("schedules.serverRefusedCreate", "The server refused this schedule:")}
+              </p>
+              <p className="mt-0.5 break-words">{serverError}</p>
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="mt-6 flex justify-end gap-2">
@@ -1708,6 +1840,7 @@ export function SchedulesPage() {
                                 ×{s.failCount}
                               </span>
                             )}
+                            <DisabledReasonNotice schedule={s} />
                           </td>
                           <td className="px-5 py-3 text-sm tabular-nums text-muted-foreground">
                             {/* Rendered in the SCHEDULE's zone — the label just

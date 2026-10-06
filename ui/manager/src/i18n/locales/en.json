@@ -1068,7 +1068,8 @@
     "skipNone": "none — no code is skipped",
     "runSkipConflict": "{{codes}} is also in the skip list, so this instruction never runs on it.",
     "httpCodeFilterSkipSet": "An empty \"Run on codes\" uses 200, 201; an empty \"Skip on codes\" skips nothing.",
-    "useDefaultSkipCodes": "Use default skip list"
+    "useDefaultSkipCodes": "Use default skip list",
+    "scope": "Scope"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "On failure the pipeline continues; the error is exposed at ",
@@ -1126,7 +1127,9 @@
     "argumentType": "Argument type",
     "argumentText": "Text",
     "argumentInvalidJson": "Not valid JSON — the last valid value is kept",
-    "removeArgument": "Remove argument"
+    "removeArgument": "Remove argument",
+    "maxResponseSize": "Max stored response size (characters)",
+    "maxResponseSizeHint": "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs EDDI 6.6 or later."
   },
   "llmEditor": {
     "addCustomInstruction": "Add Instruction",
@@ -1396,7 +1399,13 @@
     "compatibleEndpointOverridden": "Endpoint: {{url}}",
     "modelType": "Model type",
     "paramName": "Parameter name",
-    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
+    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all.",
+    "maxToolCallsPerIteration": "Max tool calls per response",
+    "maxToolCallsPerIterationDefault": "(default {{n}})",
+    "maxToolCallsPerTurn": "Max tool calls per turn",
+    "maxToolCallsPerTurnDefault": "(default {{n}})",
+    "maxToolCallsHint": "Calls past a cap are not run: each gets a NOT_EXECUTED result telling the model the limit was reached, and the model answers with what it has. Refused calls never reach the approval gate. The per-turn count includes calls made before an approval pause. -1 or 0 removes a cap. Needs EDDI 6.6 or later — leave blank on an older server.",
+    "maxToolCallsUncapped": "A cap is switched off: the model can run any number of tool calls there, bounded only by Max Tool Iterations."
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -1856,7 +1865,44 @@
       "reasonUncovered": "{{count}} loaded entry(ies) older than the checked window",
       "unverifiedTitle": "Not fully verified",
       "unverifiedDesc": "No signature was disproven, but not everything could be checked: {{reasons}}."
-    }
+    },
+    "adminActions": {
+      "description": "Every administrative change made through the REST API — deploys, configuration writes, imports, erasures, and the calls that were refused — signed into the audit ledger. Request bodies are never recorded, and the id of a person an action was about is pseudonymised.",
+      "actor": "Actor",
+      "actorPlaceholder": "Principal, e.g. alice",
+      "apply": "Apply",
+      "method": "Method",
+      "allMethods": "All methods",
+      "window": "Time",
+      "clear": "Clear filters",
+      "noMatch": "No administrative actions match these filters",
+      "empty": "No administrative actions recorded yet",
+      "noMatchLoadOlder": "Only the newest rows are loaded — load older ones to search further back.",
+      "emptyHint": "EDDI records them from version 6.6 on, unless eddi.audit.admin-actions.enabled is false. An older server shows nothing here.",
+      "caption": "Administrative actions, newest first",
+      "colTime": "Time",
+      "colActor": "Actor",
+      "colAction": "Action",
+      "colEndpoint": "Endpoint",
+      "colStatus": "Status",
+      "filterByActor": "Show only this actor's actions",
+      "loadOlderError": "Loading older rows failed.",
+      "loadOlder": "Load older",
+      "forbidden": "Only administrators can read administrative actions",
+      "forbiddenHint": "The log records every administrator's changes, so reading it needs the eddi-admin role.",
+      "unsupported": "This EDDI does not record administrative actions",
+      "unsupportedHint": "They are recorded from EDDI 6.6 on.",
+      "loadError": "Could not load the administrative actions.",
+      "shown": "{{shown}} of {{loaded}} loaded rows shown",
+      "windowAny": "Any time",
+      "windowHour": "Last hour",
+      "windowDay": "Last 24 hours",
+      "windowWeek": "Last 7 days",
+      "windowMonth": "Last 30 days"
+    },
+    "views": "Audit views",
+    "tabTrail": "Pipeline trail",
+    "tabAdminActions": "Administrative actions"
   },
   "schedules": {
     "cronHelp": "5-field format: minute hour day-of-month month day-of-week",
@@ -1987,7 +2033,17 @@
     "systemManaged": "System",
     "systemManagedHint": "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
     "persistentConversationIdLocked": "Set when the schedule is created. The server keeps the conversation the fires have been appending to.",
-    "failedScheduleGone": "Schedule no longer exists"
+    "failedScheduleGone": "Schedule no longer exists",
+    "disabledByPerson": "Disabled by a person. A schedule an undeploy switched off before EDDI 6.6 also shows this: enable it once by hand.",
+    "disabledUndeployed": "Agent undeployed",
+    "disabledUndeployedHint": "Switched off when its agent was undeployed. It comes back on by itself at the agent's next successful deploy — no action needed.",
+    "disabledAccessRevoked": "Access revoked",
+    "disabledAccessRevokedHint": "Its creator can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
+    "disabledOtherHint": "Switched off by EDDI for the reason shown.",
+    "serverRefusedUpdate": "The server refused this change:",
+    "serverRefusedCreate": "The server refused this schedule:",
+    "disabledAccessRevokedHintBy": "Its creator ({{user}}) can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
+    "finishedOneShot": "One-time schedule: it ran and is finished."
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -2288,7 +2344,31 @@
     "chunkStrategyLegacy": "{{value}} (saved as Recursive)",
     "saveBeforeIngest": "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen.",
     "chunkStrategyUnsupported": "{{value}} (not supported)",
-    "chunkStrategyUnsupportedHint": "The server refuses this strategy when you save. Choose Recursive."
+    "chunkStrategyUnsupportedHint": "The server refuses this strategy when you save. Choose Recursive.",
+    "location": {
+      "reference": "A store location must be written out, not a ${…} reference. The location decides whose documents an agent reads, and a reference is resolved only when the store is built — after every check — from variables any editor can change, so it could point at another knowledge base's store or at SQL. A knowledge base already saved with a reference stops ingesting and retrieving until it is saved once with the literal name.",
+      "pgIdentifier": "A pgvector table must be a plain name, optionally schema-qualified (letters, digits, _ and $). The store puts it into SQL as it is, so quotes, spaces and punctuation are refused.",
+      "refused": "The server refuses {{param}} = {{value}}",
+      "reserved": "Names starting with {{prefix}} (in any part, any case) are reserved: EDDI derives every knowledge base's own location from that prefix, so this name could address another knowledge base's store. Choose another name, or leave it blank to get a location of this knowledge base's own.",
+      "savedReference": "The saved {{param}} = {{value}} no longer works",
+      "refusedIfChanged": "{{param}} = {{value}} keeps working as saved, but the server would refuse it if it were changed"
+    },
+    "layout": {
+      "idTitle": "Own store (addressed by id)",
+      "nameTitle": "Name-based store (6.5 layout)",
+      "idBody": "This knowledge base has a store of its own: every chunk is tagged with its id and retrieval sees only its own chunks, even in a shared table.",
+      "nameBody": "Created before EDDI 6.6: its store is found by the knowledge base's name, so any other knowledge base with the same name shares it. It keeps working as it is.",
+      "defaultUnsaved": "Location: eddi_kbid_<id> (default, assigned when saved)",
+      "migrate": "Move to its own store…",
+      "renameNote": "Renaming this knowledge base moves it the same way. Needs EDDI 6.6 or later.",
+      "migrateTitle": "Move this knowledge base to its own store?",
+      "migrateBodyExplicit": "It keeps its table, but only chunks tagged with its id are retrieved from now on — none of the chunks already there carry that tag, so it starts EMPTY. Its sources re-ingest by themselves on their next run; documents added through /ingest must be ingested again. Nothing is deleted. The change takes effect when you save, and cannot be switched back.",
+      "migrateBody": "It moves to a new, EMPTY store of its own. Its sources re-ingest by themselves on their next run; documents added through /ingest must be ingested again. The old store is left in place, untouched. The change takes effect when you save, and cannot be switched back.",
+      "migrateConfirm": "Move when I save",
+      "explicit": "Location: {{value}} (set above)",
+      "default": "Location: {{value}} (default)",
+      "legacyDefault": "Location: derived from the name “{{name}}” (default)"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -3040,8 +3120,10 @@
       "humanNeedsName_one": "{{count}} human member needs a display name.",
       "humanNeedsName_other": "{{count}} human members need a display name.",
       "humanNeedsId_one": "{{count}} human member needs the person's user id.",
-      "humanNeedsId_other": "{{count}} human members need the person's user id."
-    }
+      "humanNeedsId_other": "{{count}} human members need the person's user id.",
+      "duplicateMember": "{{ids}} is listed more than once. A member holds one seat: two seats would share one member conversation and see each other's answers. Use a second agent for a second seat."
+    },
+    "serverRefused": "The server refused this group:"
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3369,7 +3451,9 @@
     "partialBody": "The rest of the agent was written. These resources were left as they were and need attention.",
     "partialCounts": "{{created}} created, {{updated}} updated, {{failed}} failed.",
     "schedulesSkipped_one": "{{count}} schedule in the archive was not imported, because the selection did not include it.",
-    "schedulesSkipped_other": "{{count}} schedules in the archive were not imported, because the selection did not include them."
+    "schedulesSkipped_other": "{{count}} schedules in the archive were not imported, because the selection did not include them.",
+    "mergeScopeDefaultSpace": "your default space",
+    "mergeScope": "This merge updates only resources you may edit in {{space}}. A copy of this agent in another workspace is never changed — the import creates your own copy instead. Switch space first to update the copy that lives there."
   },
   "sync": {
     "actionCreate": "New",
@@ -3689,7 +3773,19 @@
     "conversationsTruncated_other": "Conversations were capped — the user has {{count}} in total.",
     "failedConversations_one": "{{count}} conversation could not be read and is absent from the bundle.",
     "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
-    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled."
+    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled.",
+    "auditRedacted": "Audit Entries Redacted",
+    "auditLegacy": "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
+    "auditPseudonymizeMode": "Audit content was kept: this server runs with eddi.audit.erasure-mode=pseudonymize (for example under a legal hold), so only the user id in the audit ledger was replaced.",
+    "auditRedactionFailed": "No audit content was redacted: the redaction step failed (see above), so the prompts and responses recorded in the ledger are still there. Run the erasure again.",
+    "auditRedactedExplanation": "The user's audit rows are kept for record-keeping, but their prompts, responses, model details and tool calls were replaced by a redaction marker and the user id was pseudonymised. Rows that verified before were re-signed; a row that had already been tampered with stays marked invalid.",
+    "completeExplanation": "Complete means every step succeeded, including a final check that no audit row under this user's id still holds unredacted content.",
+    "failedStep": {
+      "auditRedaction": "Some audit rows still hold this user's prompts or responses. Run the erasure again — it is safe to repeat and only touches what is left. If it keeps failing, the server log names the cause under this erasure's pseudonym.",
+      "auditLedger": "The user id could not be replaced in every audit row. Run the erasure again once the database is reachable.",
+      "databaseLogs": "Database log entries could not be pseudonymised. Run the erasure again; log retention also removes them in time.",
+      "generic": "This step did not finish. Run the erasure again once the cause in the server log is fixed — it is safe to repeat."
+    }
   },
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
@@ -5244,5 +5340,22 @@
     "impactReasonLegacy": "predates version following",
     "impactReasonBreaking": "breaking change",
     "switchNotice": "Agent moved from v{{from}} to v{{to}}"
+  },
+  "propertyValue": {
+    "typeLabel": "Value type",
+    "jsonOnly": "Set in the JSON tab",
+    "valueLabel": "Value",
+    "intRange": "Outside the Integer range (±2,147,483,647). Choose Long integer for this value.",
+    "unsafeLong": "Beyond 9,007,199,254,740,991 the browser cannot hold this whole number exactly; edit it in the JSON tab.",
+    "needs66": "Long integer and Decimal need EDDI 6.6 or later.",
+    "conflict": "This row sets {{fields}}. Only {{winner}} is used; choosing a type here keeps that one value and removes the rest.",
+    "kindString": "Text / template",
+    "kindInt": "Integer",
+    "kindLong": "Long integer",
+    "kindDouble": "Decimal",
+    "kindFloat": "Float (≈7 digits)",
+    "kindBoolean": "Boolean",
+    "kindObject": "Object (JSON)",
+    "kindList": "List (JSON)"
   }
 }

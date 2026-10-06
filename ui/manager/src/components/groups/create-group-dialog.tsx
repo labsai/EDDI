@@ -22,7 +22,9 @@ import {
 import { styleInfo, styleLabel, styleDisplay } from "@/lib/discussion-styles";
 import {
   groupSaveProblems,
+  idsTakenByOtherMembers,
   memberPolicyLabel,
+  optionsOfferedTo,
   uncoveredRolePhases,
   type GroupSaveProblem,
 } from "@/lib/group-config";
@@ -79,6 +81,9 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   const [maxRetries, setMaxRetries] = useState(2);
   const [onMemberUnavailable, setOnMemberUnavailable] = useState<MemberUnavailablePolicy>("SKIP");
   const [maxTurns, setMaxTurns] = useState(0);
+  // The backend's reason for refusing Create — kept in the dialog, where the
+  // roster it is about is still on screen, not only in a vanishing toast.
+  const [serverError, setServerError] = useState<string | null>(null);
 
   // Resolve agent IDs → display names for review step
   const agentNameMap = useMemo(() => {
@@ -102,6 +107,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
     setMaxRetries(2);
     setOnMemberUnavailable("SKIP");
     setMaxTurns(0);
+    setServerError(null);
     onClose();
   }, [onClose]);
 
@@ -168,13 +174,19 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
       },
     };
 
+    setServerError(null);
     createMutation.mutate(config, {
       onSuccess: () => {
         toast.success(t("groups.createSuccess", "Group created successfully"));
         resetAndClose();
       },
-      // The backend's 400 names what it rejected; a generic error hid it.
-      onError: (err) => toast.error(getErrorMessage(err)),
+      // The backend's 400 names what it rejected (a repeated member names both
+      // positions); a generic error hid it.
+      onError: (err) => {
+        const message = getErrorMessage(err);
+        setServerError(message);
+        toast.error(message);
+      },
     });
   }
 
@@ -620,6 +632,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                         <GroupPickerSelect
                           value={member.agentId}
                           onChange={(v) => updateMember(idx, { agentId: v })}
+                          exclude={idsTakenByOtherMembers(members, idx)}
                         />
                       ) : (
                         <select
@@ -631,7 +644,10 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                           )}
                         >
                           <option value="">{t("groups.selectAgent", "Select agent…")}</option>
-                          {agents.map((agent) => (
+                          {/* An agent already seated in another row is not
+                              offered again: both seats would share one member
+                              conversation, and EDDI 6.6 refuses the save. */}
+                          {optionsOfferedTo(agents, members, idx).map((agent) => (
                             <option key={agent.id} value={agent.id}>
                               {agent.name || agent.id.slice(0, 12)}
                             </option>
@@ -681,6 +697,21 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
               maxTurns={maxTurns}
               saveProblems={saveProblems}
             />
+          )}
+          {step === "review" && serverError && (
+            <div
+              className="mt-4 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-xs"
+              role="alert"
+              data-testid="create-group-server-error"
+            >
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
+              <div>
+                <p className="font-semibold text-destructive">
+                  {t("groups.serverRefused", "The server refused this group:")}
+                </p>
+                <p className="mt-0.5 break-words text-foreground">{serverError}</p>
+              </div>
+            </div>
           )}
         </div>
 
@@ -953,9 +984,12 @@ function ReviewStep({
 function GroupPickerSelect({
   value,
   onChange,
+  exclude,
 }: {
   value: string;
   onChange: (id: string) => void;
+  /** Ids other members already hold — a seat is keyed by id whatever the member type. */
+  exclude?: Set<string>;
 }) {
   const { t } = useTranslation();
   const { data: groups, isLoading } = useEnrichedGroupDescriptors(100);
@@ -992,7 +1026,9 @@ function GroupPickerSelect({
       )}
     >
       <option value="">{t("groupWizard.selectGroup", "Select existing group…")}</option>
-      {groups.map((group) => (
+      {groups
+        .filter((group) => group.id === value || !exclude?.has(group.id))
+        .map((group) => (
         <option key={group.id} value={group.id}>
           {group.name || group.id.slice(0, 12)} ({group.memberCount} members)
         </option>

@@ -1042,7 +1042,8 @@
     "skipNone": "nenhum — nenhum código é ignorado",
     "runSkipConflict": "{{codes}} também está na lista de ignorados, então esta instrução nunca é executada com ele.",
     "httpCodeFilterSkipSet": "Um \"Executar nos códigos\" vazio usa 200, 201; um \"Ignorar nos códigos\" vazio não ignora nada.",
-    "useDefaultSkipCodes": "Usar lista de ignorados padrão"
+    "useDefaultSkipCodes": "Usar lista de ignorados padrão",
+    "scope": "Escopo"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "Em caso de falha, o pipeline continua; o erro é exposto em ",
@@ -1100,7 +1101,9 @@
     "argumentType": "Tipo do argumento",
     "argumentText": "Texto",
     "argumentInvalidJson": "JSON inválido — o último valor válido é mantido",
-    "removeArgument": "Remover argumento"
+    "removeArgument": "Remover argumento",
+    "maxResponseSize": "Tamanho máx. da resposta armazenada (caracteres)",
+    "maxResponseSizeHint": "Um resultado de ferramenta mais longo é cortado para este número de caracteres antes de ser salvo na memória da conversa (um aviso é registrado). Vazio, 0 ou menos usa o padrão de 2.000.000 (cerca de 2 MB). Requer EDDI 6.6 ou posterior."
   },
   "llmEditor": {
     "addCustomInstruction": "Adicionar instrução",
@@ -1370,7 +1373,13 @@
     "compatibleEndpointOverridden": "Ponto de extremidade: {{url}}",
     "modelType": "Tipo de modelo",
     "paramName": "Nome do parâmetro",
-    "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desmarque \"Ativar ferramentas integradas\" para as desativar todas."
+    "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desmarque \"Ativar ferramentas integradas\" para as desativar todas.",
+    "maxToolCallsPerIteration": "Máx. de chamadas de ferramentas por resposta",
+    "maxToolCallsPerIterationDefault": "(padrão {{n}})",
+    "maxToolCallsPerTurn": "Máx. de chamadas de ferramentas por turno",
+    "maxToolCallsPerTurnDefault": "(padrão {{n}})",
+    "maxToolCallsHint": "Chamadas além de um limite não são executadas: cada uma recebe um resultado NOT_EXECUTED informando ao modelo que o limite foi atingido, e o modelo responde com o que tem. Chamadas recusadas nunca chegam à aprovação. A contagem por turno inclui chamadas feitas antes de uma pausa de aprovação. -1 ou 0 remove um limite. Requer EDDI 6.6 ou posterior — deixe em branco em um servidor mais antigo.",
+    "maxToolCallsUncapped": "Um limite está desligado: o modelo pode executar ali qualquer número de chamadas, limitado apenas por Max Tool Iterations."
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",
@@ -1797,7 +1806,44 @@
       "reasonUncovered": "{{count}} entrada(s) carregada(s) mais antiga(s) que o intervalo verificado",
       "unverifiedTitle": "Não totalmente verificado",
       "unverifiedDesc": "Nenhuma assinatura foi refutada, mas nem tudo pôde ser verificado: {{reasons}}."
-    }
+    },
+    "adminActions": {
+      "description": "Toda alteração administrativa feita pela API REST — implantações, gravações de configuração, importações, exclusões e chamadas recusadas — assinada no registro de auditoria. Os corpos das requisições nunca são gravados, e o id de uma pessoa envolvida é pseudonimizado.",
+      "actor": "Ator",
+      "actorPlaceholder": "Principal, ex.: alice",
+      "apply": "Aplicar",
+      "method": "Método",
+      "allMethods": "Todos os métodos",
+      "window": "Período",
+      "clear": "Limpar filtros",
+      "noMatch": "Nenhuma ação administrativa corresponde a estes filtros",
+      "empty": "Nenhuma ação administrativa registrada ainda",
+      "noMatchLoadOlder": "Só as linhas mais recentes estão carregadas — carregue as mais antigas para buscar mais para trás.",
+      "emptyHint": "O EDDI as registra a partir da versão 6.6, a menos que eddi.audit.admin-actions.enabled seja false. Um servidor mais antigo não mostra nada aqui.",
+      "caption": "Ações administrativas, mais recentes primeiro",
+      "colTime": "Hora",
+      "colActor": "Ator",
+      "colAction": "Ação",
+      "colEndpoint": "Endpoint",
+      "colStatus": "Status",
+      "filterByActor": "Mostrar só as ações deste ator",
+      "loadOlderError": "Falha ao carregar linhas mais antigas.",
+      "loadOlder": "Carregar mais antigas",
+      "forbidden": "Só administradores podem ler as ações administrativas",
+      "forbiddenHint": "O registro contém as alterações de todos os administradores, por isso lê-lo exige o papel eddi-admin.",
+      "unsupported": "Este EDDI não registra ações administrativas",
+      "unsupportedHint": "Elas são registradas a partir do EDDI 6.6.",
+      "loadError": "Não foi possível carregar as ações administrativas.",
+      "shown": "{{shown}} de {{loaded}} linhas carregadas exibidas",
+      "windowAny": "Qualquer momento",
+      "windowHour": "Última hora",
+      "windowDay": "Últimas 24 horas",
+      "windowWeek": "Últimos 7 dias",
+      "windowMonth": "Últimos 30 dias"
+    },
+    "views": "Visões de auditoria",
+    "tabTrail": "Rastro do pipeline",
+    "tabAdminActions": "Ações administrativas"
   },
   "schedules": {
     "cronHelp": "Formato de 5 campos: minuto hora dia-do-mês mês dia-da-semana",
@@ -1928,7 +1974,17 @@
     "systemManaged": "Sistema",
     "systemManagedHint": "Gerido pelo EDDI (ingestão da base de conhecimento, consolidação de memória ou cadência da equipa). Altere-o onde está definido, não aqui.",
     "persistentConversationIdLocked": "Definido quando o agendamento é criado. O servidor mantém a conversa à qual as execuções têm sido acrescentadas.",
-    "failedScheduleGone": "O agendamento já não existe"
+    "failedScheduleGone": "O agendamento já não existe",
+    "disabledByPerson": "Desativado por uma pessoa. Um agendamento que um undeploy desligou antes do EDDI 6.6 também aparece assim: ative-o uma vez manualmente.",
+    "disabledUndeployed": "Agente removido do deploy",
+    "disabledUndeployedHint": "Desligado quando o agente foi removido do deploy. Ele volta a ligar sozinho no próximo deploy bem-sucedido do agente — nada a fazer.",
+    "disabledAccessRevoked": "Acesso revogado",
+    "disabledAccessRevokedHint": "O criador não pode mais usar este agente, então ele parou de disparar. Compartilhe o agente com essa pessoa de novo — ou recrie o agendamento como alguém que possa usá-lo — e então ative-o.",
+    "disabledOtherHint": "Desligado pelo EDDI pelo motivo mostrado.",
+    "serverRefusedUpdate": "O servidor recusou esta alteração:",
+    "serverRefusedCreate": "O servidor recusou este agendamento:",
+    "disabledAccessRevokedHintBy": "O criador ({{user}}) não pode mais usar este agente, então ele parou de disparar. Compartilhe o agente com essa pessoa de novo — ou recrie o agendamento como alguém que possa usá-lo — e então ative-o.",
+    "finishedOneShot": "Agendamento único: foi executado e está concluído."
   },
   "cascadeTrace": {
     "title": "Cascata de modelos",
@@ -2229,7 +2285,31 @@
     "chunkStrategyLegacy": "{{value}} (salvo como Recursivo)",
     "saveBeforeIngest": "Salve suas alterações primeiro — os documentos são ingeridos com o armazenamento e o modelo de embeddings da base de conhecimento salva, não com as edições na tela.",
     "chunkStrategyUnsupported": "{{value}} (não suportado)",
-    "chunkStrategyUnsupportedHint": "O servidor recusa esta estratégia ao salvar. Escolha Recursivo."
+    "chunkStrategyUnsupportedHint": "O servidor recusa esta estratégia ao salvar. Escolha Recursivo.",
+    "location": {
+      "reference": "Um local de armazenamento deve ser escrito por extenso, não como referência ${…}. O local decide quais documentos um agente lê, e uma referência só é resolvida quando o armazenamento é montado — depois de todas as verificações — a partir de variáveis que qualquer editor pode alterar, então poderia apontar para o armazenamento de outra base de conhecimento ou para SQL. Uma base já salva com uma referência para de ingerir e recuperar até ser salva uma vez com o nome literal.",
+      "pgIdentifier": "Uma tabela pgvector deve ser um nome simples, opcionalmente com esquema (letras, dígitos, _ e $). O armazenamento a insere no SQL como está, por isso aspas, espaços e pontuação são recusados.",
+      "refused": "O servidor recusa {{param}} = {{value}}",
+      "reserved": "Nomes que começam com {{prefix}} (em qualquer parte, qualquer caixa) são reservados: o EDDI deriva o local próprio de cada base de conhecimento desse prefixo, então este nome poderia apontar para o armazenamento de outra base. Escolha outro nome ou deixe em branco para obter um local próprio desta base.",
+      "savedReference": "O {{param}} = {{value}} salvo não funciona mais",
+      "refusedIfChanged": "{{param}} = {{value}} continua funcionando como salvo, mas o servidor o recusaria se fosse alterado"
+    },
+    "layout": {
+      "idTitle": "Armazenamento próprio (endereçado por id)",
+      "nameTitle": "Armazenamento por nome (layout 6.5)",
+      "idBody": "Esta base de conhecimento tem armazenamento próprio: cada trecho leva o seu id e a recuperação vê apenas os seus próprios trechos, mesmo em uma tabela compartilhada.",
+      "nameBody": "Criada antes do EDDI 6.6: o armazenamento é encontrado pelo nome da base, então qualquer outra base com o mesmo nome o compartilha. Continua funcionando como está.",
+      "defaultUnsaved": "Local: eddi_kbid_<id> (padrão, atribuído ao salvar)",
+      "migrate": "Mover para armazenamento próprio…",
+      "renameNote": "Renomear esta base de conhecimento a move da mesma forma. Requer EDDI 6.6 ou posterior.",
+      "migrateTitle": "Mover esta base de conhecimento para armazenamento próprio?",
+      "migrateBodyExplicit": "Ela mantém a tabela, mas a partir de agora só são recuperados os trechos com o seu id — nenhum dos trechos existentes tem essa marca, então ela começa VAZIA. As fontes são reingeridas sozinhas na próxima execução; documentos adicionados via /ingest precisam ser ingeridos de novo. Nada é excluído. A alteração vale ao salvar e não pode ser revertida.",
+      "migrateBody": "Ela passa para um armazenamento próprio novo e VAZIO. As fontes são reingeridas sozinhas na próxima execução; documentos adicionados via /ingest precisam ser ingeridos de novo. O armazenamento antigo fica intacto. A alteração vale ao salvar e não pode ser revertida.",
+      "migrateConfirm": "Mover ao salvar",
+      "explicit": "Local: {{value}} (definido acima)",
+      "default": "Local: {{value}} (padrão)",
+      "legacyDefault": "Local: derivado do nome “{{name}}” (padrão)"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -3022,8 +3102,10 @@
       "humanNeedsName_other": "{{count}} membros humanos precisam de um nome de apresentação.",
       "humanNeedsId_many": "{{count}} membros humanos precisam do id de utilizador da pessoa.",
       "humanNeedsId_one": "{{count}} membro humano precisa do id de utilizador da pessoa.",
-      "humanNeedsId_other": "{{count}} membros humanos precisam do id de utilizador da pessoa."
-    }
+      "humanNeedsId_other": "{{count}} membros humanos precisam do id de utilizador da pessoa.",
+      "duplicateMember": "{{ids}} aparece mais de uma vez. Um membro ocupa um só lugar: dois lugares compartilhariam uma conversa de membro e veriam as respostas um do outro. Use um segundo agente para um segundo lugar."
+    },
+    "serverRefused": "O servidor recusou este grupo:"
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -3186,7 +3268,9 @@
     "partialCounts": "{{created}} criados, {{updated}} atualizados, {{failed}} falharam.",
     "schedulesSkipped_one": "{{count}} agendamento do arquivo não foi importado, porque a seleção não o incluía.",
     "schedulesSkipped_other": "{{count}} agendamentos do arquivo não foram importados, porque a seleção não os incluía.",
-    "schedulesSkipped_many": "{{count}} agendamentos do arquivo não foram importados, porque a seleção não os incluía."
+    "schedulesSkipped_many": "{{count}} agendamentos do arquivo não foram importados, porque a seleção não os incluía.",
+    "mergeScopeDefaultSpace": "o seu espaço padrão",
+    "mergeScope": "Esta mesclagem só atualiza recursos que você pode editar em {{space}}. Uma cópia deste agente em outro espaço de trabalho nunca é alterada — a importação cria a sua própria cópia. Troque de espaço primeiro para atualizar a cópia que está lá."
   },
   "syncPage": {
     "title": "Sincronização",
@@ -3688,7 +3772,19 @@
     "failedConversations_other": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
     "conversationsTruncated_many": "As conversas foram limitadas — o utilizador tem {{count}} no total.",
     "failedConversations_many": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
-    "deleteIncomplete": "Eliminação incompleta — alguns dados deste utilizador podem ainda existir. Não a comunique como cumprida."
+    "deleteIncomplete": "Eliminação incompleta — alguns dados deste utilizador podem ainda existir. Não a comunique como cumprida.",
+    "auditRedacted": "Entradas de auditoria ocultadas",
+    "auditLegacy": "Este EDDI só substitui o id do usuário no registro de auditoria: os prompts e respostas gravados ali são mantidos. O EDDI 6.6 e posteriores também os ocultam, a menos que o servidor rode com eddi.audit.erasure-mode=pseudonymize.",
+    "auditPseudonymizeMode": "O conteúdo de auditoria foi mantido: este servidor roda com eddi.audit.erasure-mode=pseudonymize (por exemplo, sob retenção legal), então só o id do usuário no registro de auditoria foi substituído.",
+    "auditRedactionFailed": "Nenhum conteúdo de auditoria foi ocultado: a etapa de ocultação falhou (veja acima), portanto os prompts e as respostas registrados no livro ainda estão lá. Execute o apagamento novamente.",
+    "auditRedactedExplanation": "As linhas de auditoria do usuário são mantidas para registro, mas os prompts, respostas, detalhes do modelo e chamadas de ferramentas foram substituídos por uma marca de ocultação e o id do usuário foi pseudonimizado. Linhas que eram verificadas antes foram reassinadas; uma linha já adulterada continua marcada como inválida.",
+    "completeExplanation": "Completo significa que cada etapa foi bem-sucedida, incluindo uma verificação final de que nenhuma linha de auditoria sob o id deste usuário ainda contém conteúdo não ocultado.",
+    "failedStep": {
+      "auditRedaction": "Algumas linhas de auditoria ainda contêm prompts ou respostas deste usuário. Execute a exclusão de novo — é seguro repetir e só afeta o que restou. Se continuar falhando, o log do servidor indica a causa sob o pseudônimo desta exclusão.",
+      "auditLedger": "Não foi possível substituir o id do usuário em todas as linhas de auditoria. Execute a exclusão de novo quando o banco de dados estiver acessível.",
+      "databaseLogs": "Não foi possível pseudonimizar as entradas de log do banco de dados. Execute a exclusão de novo; a retenção de logs também as remove com o tempo.",
+      "generic": "Esta etapa não terminou. Execute a exclusão de novo quando a causa no log do servidor for corrigida — é seguro repetir."
+    }
   },
   "mockBanner": {
     "message": "Modo de demonstração — Exibindo dados de exemplo. Conecte um backend EDDI para dados reais."
@@ -5303,5 +5399,22 @@
     "impactReasonLegacy": "anterior ao acompanhamento de versões",
     "impactReasonBreaking": "alteração incompatível",
     "switchNotice": "O agente passou da v{{from}} para a v{{to}}"
+  },
+  "propertyValue": {
+    "typeLabel": "Tipo de valor",
+    "jsonOnly": "Definido na aba JSON",
+    "valueLabel": "Valor",
+    "intRange": "Fora do intervalo Integer (±2.147.483.647). Escolha Inteiro longo para este valor.",
+    "unsafeLong": "Além de 9.007.199.254.740.991 o navegador não consegue guardar este número inteiro com exatidão; edite-o na aba JSON.",
+    "needs66": "Inteiro longo e Decimal exigem EDDI 6.6 ou posterior.",
+    "conflict": "Esta linha define {{fields}}. Só {{winner}} é usado; escolher um tipo aqui mantém esse único valor e remove os demais.",
+    "kindString": "Texto / modelo",
+    "kindInt": "Inteiro",
+    "kindLong": "Inteiro longo",
+    "kindDouble": "Decimal",
+    "kindFloat": "Float (≈7 dígitos)",
+    "kindBoolean": "Booleano",
+    "kindObject": "Objeto (JSON)",
+    "kindList": "Lista (JSON)"
   }
 }

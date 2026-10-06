@@ -401,13 +401,18 @@ export function GdprPage() {
                   "Some of this user's data may still exist. Do not report the erasure as fulfilled until these steps succeed.",
                 )}
               </p>
-              <ul className="list-disc space-y-0.5 ps-5 text-xs text-foreground">
+              <ul className="list-disc space-y-1 ps-5 text-xs text-foreground">
                 {result.failedSteps.map((step) => (
-                  <li key={step}>{step}</li>
+                  <li key={step} data-testid={`gdpr-failed-step-${step}`}>
+                    <code className="font-mono">{step}</code>
+                    <span className="text-muted-foreground"> — {failedStepExplanation(t, step)}</span>
+                  </li>
                 ))}
               </ul>
             </div>
           )}
+
+          <AuditErasureSummary result={result} />
 
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <ResultCard
@@ -422,6 +427,16 @@ export function GdprPage() {
               label={t("gdpr.conversationMappingsDeleted", "Mappings Deleted")}
               value={result.conversationMappingsDeleted}
             />
+            {/* Absent on an EDDI before 6.6, which never redacted audit
+                content — no tile then, rather than a "—" that reads as
+                "nothing to redact". */}
+            {typeof result.auditEntriesRedacted === "number" && (
+              <ResultCard
+                label={t("gdpr.auditRedacted", "Audit Entries Redacted")}
+                value={result.auditEntriesRedacted}
+                testId="gdpr-audit-redacted"
+              />
+            )}
             <ResultCard
               label={t("gdpr.auditPseudonymized", "Audit Pseudonymized")}
               value={result.auditEntriesPseudonymized}
@@ -489,13 +504,95 @@ export function GdprPage() {
  * shape the old `logEntriesPseudonymized` typo produced silently — a blank tile
  * nobody could distinguish from a real zero.
  */
-function ResultCard({ label, value }: { label: string; value?: number }) {
+function ResultCard({ label, value, testId }: { label: string; value?: number; testId?: string }) {
   return (
-    <div className="rounded-lg border border-border bg-background p-3 text-center">
+    <div className="rounded-lg border border-border bg-background p-3 text-center" data-testid={testId}>
       <p className="text-2xl font-bold text-foreground">
         {typeof value === "number" ? value : "—"}
       </p>
       <p className="mt-0.5 text-[10px] text-muted-foreground">{label}</p>
     </div>
   );
+}
+
+/**
+ * What the erasure did to the audit ledger, in words a DPO can repeat.
+ *
+ * Since EDDI 6.6 an erasure keeps the user's audit rows (record-keeping) but
+ * replaces their content with a redaction marker; under
+ * `eddi.audit.erasure-mode=pseudonymize` it keeps the content and replaces only
+ * the user id; an older EDDI did only the latter and says nothing about it.
+ * Three different answers to "is the user's text still in the ledger?", and the
+ * counters alone do not tell them apart.
+ */
+function AuditErasureSummary({ result }: { result: GdprDeletionResult }) {
+  const { t } = useTranslation();
+  const redacted = result.auditEntriesRedacted;
+  let text: string;
+  if (typeof redacted !== "number") {
+    text = t(
+      "gdpr.auditLegacy",
+      "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
+    );
+  } else if (
+    redacted === 0 &&
+    result.auditEntriesPseudonymized > 0 &&
+    // A redaction that failed also leaves the content in place and the rows
+    // pseudonymised, but that is not the legal-hold mode: the failed step says why.
+    !result.failedSteps?.includes("auditRedaction")
+  ) {
+    text = t(
+      "gdpr.auditPseudonymizeMode",
+      "Audit content was kept: this server runs with eddi.audit.erasure-mode=pseudonymize (for example under a legal hold), so only the user id in the audit ledger was replaced.",
+    );
+  } else if (redacted === 0 && result.failedSteps?.includes("auditRedaction")) {
+    text = t(
+      "gdpr.auditRedactionFailed",
+      "No audit content was redacted: the redaction step failed (see above), so the prompts and responses recorded in the ledger are still there. Run the erasure again.",
+    );
+  } else {
+    text = t(
+      "gdpr.auditRedactedExplanation",
+      "The user's audit rows are kept for record-keeping, but their prompts, responses, model details and tool calls were replaced by a redaction marker and the user id was pseudonymised. Rows that verified before were re-signed; a row that had already been tampered with stays marked invalid.",
+    );
+  }
+  return (
+    <div className="space-y-1 rounded-lg border border-border bg-background/60 px-3 py-2 text-xs text-muted-foreground" data-testid="gdpr-audit-summary">
+      <p>{text}</p>
+      {result.complete && typeof redacted === "number" && (
+        <p data-testid="gdpr-complete-explanation">
+          {t(
+            "gdpr.completeExplanation",
+            "Complete means every step succeeded, including a final check that no audit row under this user's id still holds unredacted content.",
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A plain-language reading of one failed cascade step. */
+function failedStepExplanation(t: ReturnType<typeof useTranslation>["t"], step: string): string {
+  switch (step) {
+    case "auditRedaction":
+      return t(
+        "gdpr.failedStep.auditRedaction",
+        "Some audit rows still hold this user's prompts or responses. Run the erasure again — it is safe to repeat and only touches what is left. If it keeps failing, the server log names the cause under this erasure's pseudonym.",
+      );
+    case "auditLedger":
+      return t(
+        "gdpr.failedStep.auditLedger",
+        "The user id could not be replaced in every audit row. Run the erasure again once the database is reachable.",
+      );
+    case "databaseLogs":
+      return t(
+        "gdpr.failedStep.databaseLogs",
+        "Database log entries could not be pseudonymised. Run the erasure again; log retention also removes them in time.",
+      );
+    default:
+      return t(
+        "gdpr.failedStep.generic",
+        "This step did not finish. Run the erasure again once the cause in the server log is fixed — it is safe to repeat.",
+      );
+  }
 }

@@ -1,6 +1,9 @@
 import { formatUsd } from "@/lib/utils";
 import { displayUserInput } from "@/lib/api/conversations";
-import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useHasRole } from "@/hooks/use-auth";
+import { AdminActionsView } from "@/components/audit/admin-actions-view";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import {
@@ -531,7 +534,104 @@ function LoadingSkeleton() {
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
+type AuditView = "trail" | "admin";
+
+/**
+ * The audit ledger, in two views: the pipeline trail (what agents did, per agent
+ * or conversation) and the administrative actions (who changed what through the
+ * REST API — EDDI 6.6+). `?view=admin` opens the second directly, so a link can
+ * point at it.
+ */
 export function AuditPage() {
+  const { t } = useTranslation();
+  const [params, setParams] = useSearchParams();
+  // GET /auditstore/admin-actions is eddi-admin only. The tab is not offered to
+  // anyone else (useHasRole is true for everyone when auth is off); the view's own
+  // 401/403 state stays as the fallback for a role the token does not show.
+  const isAdmin = useHasRole("eddi-admin");
+  const view: AuditView = isAdmin && params.get("view") === "admin" ? "admin" : "trail";
+  const select = (next: AuditView) => {
+    const updated = new URLSearchParams(params);
+    if (next === "admin") updated.set("view", "admin");
+    else updated.delete("view");
+    setParams(updated, { replace: true });
+  };
+
+  const tabs = !isAdmin ? null : (
+    <div role="tablist" aria-label={t("audit.views", "Audit views")} className="flex gap-1 border-b border-border">
+      {(
+        [
+          ["trail", t("audit.tabTrail", "Pipeline trail")],
+          ["admin", t("audit.tabAdminActions", "Administrative actions")],
+        ] as const
+      ).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          id={`audit-tab-${key}`}
+          aria-selected={view === key}
+          aria-controls={`audit-panel-${key}`}
+          tabIndex={view === key ? 0 : -1}
+          onClick={() => select(key)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+              e.preventDefault();
+              const next = key === "trail" ? "admin" : "trail";
+              select(next);
+              document.getElementById(`audit-tab-${next}`)?.focus();
+            }
+          }}
+          className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            view === key
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+          data-testid={`audit-tab-${key}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (view === "admin") {
+    return (
+      <div className="space-y-6" data-testid="audit-page">
+        <AuditHeader />
+        {tabs}
+        <div role="tabpanel" id="audit-panel-admin" aria-labelledby="audit-tab-admin">
+          <AdminActionsView />
+        </div>
+      </div>
+    );
+  }
+  return <AuditTrailView tabs={tabs} />;
+}
+
+function AuditHeader({ actions }: { actions?: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+          <ShieldCheck className="h-5 w-5 text-primary" />
+        </div>
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold text-foreground">
+            {t("audit.title", "Audit Trail")}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {t("audit.description", "Browse the immutable audit ledger for compliance and debugging.")}
+          </p>
+        </div>
+        {actions}
+      </div>
+    </div>
+  );
+}
+
+function AuditTrailView({ tabs }: { tabs: ReactNode | null }) {
   const { t } = useTranslation();
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
@@ -755,19 +855,8 @@ export function AuditPage() {
   return (
     <div className="space-y-6" data-testid="audit-page">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-            <ShieldCheck className="h-5 w-5 text-primary" />
-          </div>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold text-foreground">
-              {t("audit.title", "Audit Trail")}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {t("audit.description", "Browse the immutable audit ledger for compliance and debugging.")}
-            </p>
-          </div>
+      <AuditHeader
+        actions={
           <div className="flex items-center gap-2">
             {/* Export */}
             <button
@@ -781,8 +870,10 @@ export function AuditPage() {
               {t("audit.export", "Export")}
             </button>
           </div>
-        </div>
-      </div>
+        }
+      />
+      {tabs}
+      <div role={tabs ? "tabpanel" : undefined} id="audit-panel-trail" aria-labelledby={tabs ? "audit-tab-trail" : undefined} className="space-y-6">
 
       {/* Search bar */}
       <div className="rounded-xl border border-border bg-card p-4">
@@ -1045,6 +1136,7 @@ export function AuditPage() {
         </div>
         </AuditProblemsContext.Provider>
       )}
+      </div>
     </div>
   );
 }

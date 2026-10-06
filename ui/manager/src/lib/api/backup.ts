@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, SPACE_HEADER } from "../api-client";
 
 // ==================== Export Types ====================
 
@@ -366,6 +366,23 @@ export async function exportAndDownloadAgent(
 // ==================== Existing Import Functions ====================
 
 /**
+ * The space an import writes into — the one the user is looking at, as for
+ * every other create (`ApiClient` adds the same header to `…store/` POSTs).
+ *
+ * These calls bypass `ApiClient` for their zip body, so they never sent it, and
+ * an import always landed in the caller's default space whatever the switcher
+ * said. Since EDDI 6.6 that matters beyond placement: with workspaces enforced
+ * a merge (and its preview) only matches resources the importer may edit IN the
+ * space being imported into, so the space decides which copy a merge updates.
+ * Empty when no space is selected or workspaces are off — `useSpaces` only ever
+ * sets a space the server confirmed the caller is in.
+ */
+export function importSpaceHeader(): Record<string, string> {
+  const space = api.getCreateSpace();
+  return space ? { [SPACE_HEADER]: space } : {};
+}
+
+/**
  * Import a agent from a zip file (create new — default strategy).
  * POST /backup/import with Content-Type: application/zip
  * Returns the Location of the newly created agent.
@@ -373,7 +390,7 @@ export async function exportAndDownloadAgent(
 export async function importAgent(file: File): Promise<string> {
   const res = await fetch(`${api.getBaseUrl()}/backup/import`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
 
@@ -392,7 +409,7 @@ export async function importAgent(file: File): Promise<string> {
 export async function previewImport(file: File): Promise<ImportPreview> {
   const res = await fetch(`${api.getBaseUrl()}/backup/import/preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
 
@@ -431,7 +448,7 @@ export async function importAgentMerge(
 
   const res = await fetch(`${api.getBaseUrl()}/backup/import?${params}`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
 
@@ -554,7 +571,7 @@ export async function importAgentUpgrade(
 
   const res = await fetch(`${api.getBaseUrl()}/backup/import?${params}`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
   if (!res.ok) throw await failureOf(res, "Upgrade import failed");

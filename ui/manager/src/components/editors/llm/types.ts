@@ -134,6 +134,18 @@ export interface LlmTask {
   defaultRateLimit?: number;
   toolRateLimits?: Record<string, number>;
   maxToolIterations?: number;
+  /**
+   * Most tool calls executed from ONE model response (EDDI 6.6+, default 20).
+   * Calls past it are answered `NOT_EXECUTED` and never reach the approval gate.
+   * `-1` or `0` removes the cap. Absent = the server default; never sent unless set,
+   * because an older backend's strict config parser refuses an unknown field.
+   */
+  maxToolCallsPerIteration?: number;
+  /**
+   * Most tool calls executed across a whole turn, HITL resumes included
+   * (EDDI 6.6+, default 100). Same refusal and same `-1`/`0` rule as above.
+   */
+  maxToolCallsPerTurn?: number;
   modelCascade?: ModelCascadeConfig;
 
   // Conversation Summary (Rolling Summary Strategy)

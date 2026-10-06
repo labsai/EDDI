@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { isApiError } from "@/lib/api-client";
 import {
+  getAdminActions,
   getAuditTrail,
   getAuditTrailByAgent,
   getEntryCount,
@@ -38,6 +40,24 @@ export function useAuditTrailByAgent(
     queryKey: KEYS.trailByAgent(agentId, agentVersion, skip, limit),
     queryFn: () => getAuditTrailByAgent(agentId, agentVersion, skip, limit),
     enabled: !!agentId,
+  });
+}
+
+/**
+ * Administrative actions, loaded a page at a time (newest first). `actor` is a
+ * server-side filter, so a new actor starts a new list. Not retried on 401/403/404:
+ * those answer "not an admin" and "this EDDI does not record them", and
+ * retrying only delays saying so.
+ */
+export function useAdminActions(actor: string, pageSize = 100) {
+  return useInfiniteQuery({
+    queryKey: ["audit", "admin-actions", actor, pageSize] as const,
+    queryFn: ({ pageParam }) => getAdminActions(actor || null, pageParam, pageSize),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length < pageSize ? undefined : allPages.reduce((n, page) => n + page.length, 0),
+    retry: (failureCount, error) =>
+      !(isApiError(error) && [401, 403, 404].includes(error.status)) && failureCount < 2,
   });
 }
 

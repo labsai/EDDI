@@ -494,3 +494,46 @@ describe("McpCallsEditor argument rows (review follow-ups)", () => {
     expect(Object.keys((onChange.mock.lastCall![0] as McpCallsConfig).mcpCalls![0]!.toolArguments!)).toEqual(["constructor"]);
   });
 });
+
+describe("McpCallsEditor — maxResponseSizeInBytes (EDDI 6.6+)", () => {
+  function Harness({ initial, spy }: { initial: McpCallsConfig; spy: (c: McpCallsConfig) => void }) {
+    const [data, setData] = useState(initial);
+    return (
+      <McpCallsEditor
+        data={data}
+        onChange={(c) => {
+          setData(c);
+          spy(c);
+        }}
+      />
+    );
+  }
+
+  it("shows the 2,000,000 default as a placeholder and leaves the field unset", () => {
+    renderWithProviders(<Harness initial={populatedConfig} spy={vi.fn()} />);
+    const input = screen.getByTestId("mcp-max-response-size-input");
+    expect(input).toHaveValue(null);
+    expect(input).toHaveAttribute("placeholder", "2000000");
+    expect(screen.getByLabelText("Max stored response size (characters)")).toBe(input);
+  });
+
+  it("writes a typed cap and removes it again when cleared", () => {
+    const spy = vi.fn();
+    renderWithProviders(<Harness initial={populatedConfig} spy={spy} />);
+    const input = screen.getByTestId("mcp-max-response-size-input");
+    fireEvent.change(input, { target: { value: "50000" } });
+    expect((spy.mock.lastCall![0] as McpCallsConfig).mcpCalls![0]!.maxResponseSizeInBytes).toBe(50000);
+    fireEvent.change(input, { target: { value: "" } });
+    expect((spy.mock.lastCall![0] as McpCallsConfig).mcpCalls![0]!.maxResponseSizeInBytes).toBeUndefined();
+  });
+
+  it("is not offered when the response is not saved", () => {
+    renderWithProviders(
+      <Harness
+        initial={{ ...populatedConfig, mcpCalls: [{ ...populatedConfig.mcpCalls![0]!, saveResponse: false }] }}
+        spy={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("mcp-max-response-size")).not.toBeInTheDocument();
+  });
+});

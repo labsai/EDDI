@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { parseInstant } from "./schedules";
 
 /* ─── Types ─── */
 
@@ -133,4 +134,67 @@ export async function getAuditTrailByAgent(
 /** Get the number of audit entries for a conversation. */
 export async function getEntryCount(conversationId: string): Promise<number> {
   return api.get<number>(`${BASE}/${conversationId}/count`);
+}
+
+/* ─── Administrative actions (EDDI 6.6+) ─── */
+
+/**
+ * One administrative action, as `AdminActionAuditFilter` records it: a signed
+ * ledger row per POST/PUT/PATCH/DELETE outside the chat APIs. Only the caller,
+ * method, path, endpoint and status are kept — never the body or query string —
+ * and the id of a person the action was about is pseudonymised in the path.
+ */
+export interface AdminAction {
+  id: string;
+  /** The caller's principal, or "anonymous". */
+  actor: string;
+  method: string;
+  /** The request path, person-ids already pseudonymised. */
+  path: string;
+  /** `ResourceClass#method` that served it. */
+  endpoint: string | null;
+  /** The HTTP status the endpoint answered (403/404/409 refusals included). */
+  status: number | null;
+  timestamp: string;
+}
+
+function nonBlank(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/** Reads an {@link AuditEntry} as the administrative action it records. */
+export function toAdminAction(entry: AuditEntry): AdminAction {
+  const input = (entry.input ?? {}) as Record<string, unknown>;
+  const output = (entry.output ?? {}) as Record<string, unknown>;
+  const method =
+    nonBlank(input.method) ??
+    (entry.actions ?? []).find((a) => a.startsWith("ADMIN_"))?.slice("ADMIN_".length) ??
+    "?";
+  return {
+    id: entry.id,
+    actor: entry.userId ?? "anonymous",
+    method: method.toUpperCase(),
+    path: nonBlank(input.path) ?? "",
+    endpoint: nonBlank(input.resource),
+    status: typeof output.status === "number" ? output.status : null,
+    // An Instant may arrive as fractional epoch seconds (write-dates-as-timestamps);
+    // normalised once here so filtering and display read one format.
+    timestamp: parseInstant(entry.timestamp as string | number)?.toISOString() ?? String(entry.timestamp),
+  };
+}
+
+/**
+ * List administrative actions, newest first (`GET /auditstore/admin-actions`,
+ * admin only). `actor` is filtered by the server; an EDDI older than 6.6 has no
+ * such endpoint and answers 404.
+ */
+export async function getAdminActions(
+  actor: string | null,
+  skip = 0,
+  limit = 100,
+): Promise<AdminAction[]> {
+  const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+  if (actor && actor.trim()) params.set("actor", actor.trim());
+  const entries = await api.get<AuditEntry[]>(`${BASE}/admin-actions?${params.toString()}`);
+  return (entries ?? []).map(toAdminAction);
 }

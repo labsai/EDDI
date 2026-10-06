@@ -72,6 +72,9 @@ const EXEMPT: Record<string, string> = {
   "POST */snippetstore/snippets/:id":
     "DRIFT, tracked: the backend exposes put/get/delete on {id} for snippets, not post. parserstore does have post, which is probably where this was copied from.",
 
+  "GET */auditstore/admin-actions":
+    "AHEAD of the snapshot: added by EDDI 6.6 (AdminActionAuditFilter, PR #952). The Manager's Administrative actions tab handles its absence (an older backend answers 404 or an empty list). Run npm run openapi:refresh once a release carries it — this entry then goes stale and the next test says to delete it.",
+
   "GET */logs/recent":
     "Dead mock: production reads /administration/logs (logs.ts BASE + query string), which the snapshot does contain. Nothing calls this.",
 };

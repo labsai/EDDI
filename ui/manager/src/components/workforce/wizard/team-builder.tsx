@@ -188,6 +188,7 @@ function MemberCard({
   llmDefaults,
   onUpdate,
   onRemove,
+  takenAgentIds,
 }: {
   member: MemberSlot;
   canRemove: boolean;
@@ -196,6 +197,8 @@ function MemberCard({
   llmDefaults: LlmDefaults;
   onUpdate: (updated: MemberSlot) => void;
   onRemove: () => void;
+  /** Agents other advisors already are — one agent holds one seat (EDDI 6.6+ refuses a repeat). */
+  takenAgentIds?: ReadonlySet<string>;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -391,6 +394,7 @@ function MemberCard({
               <AgentPicker
                 value={member.agentId}
                 onChange={(id) => update({ agentId: id })}
+                excludeIds={takenAgentIds}
                 id={`agent-${member.id}`}
                 aria-invalid={(showErrors && issue === "agent") || undefined}
                 aria-describedby={
@@ -466,6 +470,21 @@ function MemberCard({
       )}
     </div>
   );
+}
+
+/**
+ * The agents every OTHER advisor stands for: an existing agent's id, or the id
+ * a new advisor was already provisioned as. A seat is keyed by agent id, so a
+ * second seat for the same agent would share its member conversation.
+ */
+function seatedAgentIds(members: MemberSlot[], index: number): Set<string> {
+  const taken = new Set<string>();
+  members.forEach((m, i) => {
+    if (i === index) return;
+    const id = (m.mode === "existing" ? m.agentId : m.createdAgentId)?.trim();
+    if (id) taken.add(id);
+  });
+  return taken;
 }
 
 // ─── TeamBuilder (exported) ─────────────────────────────────────────────────
@@ -634,6 +653,7 @@ function TeamBuilder({
             llmDefaults={llmDefaults}
             onUpdate={(updated) => updateMember(index, updated)}
             onRemove={() => removeMember(index)}
+            takenAgentIds={seatedAgentIds(members, index)}
           />
         ))}
       </div>

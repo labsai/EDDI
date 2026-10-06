@@ -103,6 +103,21 @@ describe("AgentPicker", () => {
     });
   });
 
+  it("does not offer an excluded agent (one already seated elsewhere in the group)", async () => {
+    const user = userEvent.setup();
+    const first = renderWithProviders(<AgentPicker {...defaultProps} />);
+    await user.click(screen.getByPlaceholderText("Select Agent"));
+    await waitFor(() => expect(document.querySelectorAll("[data-agent-item]").length).toBeGreaterThan(1));
+    const all = document.querySelectorAll("[data-agent-item]").length;
+    await user.click(document.querySelector("[data-agent-item]") as HTMLElement);
+    const firstId = defaultProps.onChange.mock.lastCall![0] as string;
+    first.unmount();
+
+    renderWithProviders(<AgentPicker {...defaultProps} excludeIds={new Set([firstId])} />);
+    await user.click(screen.getByPlaceholderText("Select Agent"));
+    await waitFor(() => expect(document.querySelectorAll("[data-agent-item]").length).toBe(all - 1));
+  });
+
   it("calls onChange when agent is selected from popup", async () => {
     const user = userEvent.setup();
     renderWithProviders(<AgentPicker {...defaultProps} />);
