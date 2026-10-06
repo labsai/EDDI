@@ -458,7 +458,9 @@
       "notice": "聊天向用户显示的提示（留空则使用标准措辞）",
       "noticePlaceholder": "与此智能体的对话可能会被其维护者阅读，以便改进它。",
       "versionNote": "适用于此次更改所创建版本及之后版本上的对话——绝不包括之前的内容。Slack、Teams 和 API 客户端无法显示此提示；如果用户通过这些渠道使用此智能体，请在问候语中说明。"
-    }
+    },
+    "deployed": "智能体已部署",
+    "deployFailedTitle": "部署失败。"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -883,7 +885,8 @@
     "savedNotLive": "已保存 — 尚未生效",
     "savedNotLiveDescription": "运行中的智能体仍在使用已部署的版本。请部署以使此更改生效。",
     "deployNow": "部署",
-    "deployStarted": "部署已开始"
+    "deployStarted": "部署已开始",
+    "deployDone": "已部署 — 更改已生效"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -3723,7 +3726,12 @@
     "connectionForbidden": "您的角色无法列出连接。如果知道名称，请手动输入 ${connection:name}。",
     "connectionUnavailable": "此后端不提供连接功能。",
     "connectionFailed": "无法加载连接。",
-    "connectionHint": "将 ${connection:name} 作为完整值插入。EDDI 在每个请求中将其解析为凭据。"
+    "connectionHint": "将 ${connection:name} 作为完整值插入。EDDI 在每个请求中将其解析为凭据。",
+    "restricted_one": "仅限 {{count}} 个智能体",
+    "restricted_other": "仅限 {{count}} 个智能体",
+    "restrictedTooltip": "已授权给：{{agents}}",
+    "notGrantedAdmin": "此智能体尚未获授权使用此密钥。部署时会请你将其加入。",
+    "notGrantedNonAdmin": "此智能体尚未获授权使用此密钥。请在部署前让管理员授权。"
   },
   "snippetEditor": {
     "category": "类别",
@@ -4417,7 +4425,8 @@
       "platformBaseUrlUnresolved": "此部署运行在随机 HTTP 端口上且未设置 eddi.self.base-url，因此无法告知访问自身的地址。请在此处填写地址。",
       "llmEndpoint": "模型端点",
       "promptBodyDiffers": "这些说明与当前默认值不同——它们已被编辑，或由较早版本的 Manager 编写。",
-      "promptBodyReset": "重置为默认值"
+      "promptBodyReset": "重置为默认值",
+      "keyRestricted": "“{{key}}”仅限特定智能体使用。操作员将被加入 {{key}} 的授权 — 部署前会请你确认。"
     },
     "authMode": {
       "none": {
@@ -4439,7 +4448,8 @@
       "done": "完成",
       "longWait1": "正在构建并部署操作员代理 — 这是耗时最长的一步…",
       "longWait2": "正在为新代理配置工具和审批门…",
-      "longWait3": "仍在进行中 — 在繁忙的平台上部署可能需要一些时间…"
+      "longWait3": "仍在进行中 — 在繁忙的平台上部署可能需要一些时间…",
+      "deploying": "正在部署操作员智能体 — 可能会请你为其授权模型密钥…"
     },
     "status": {
       "title": "操作员",
@@ -4605,6 +4615,30 @@
       "hintAction": "升级",
       "keepCurrent": "保留当前文本（它不会学到新默认值新增的内容）",
       "title": "Platform Operator 有可用更新"
+    },
+    "unregistered": {
+      "title": "此页面未管理的操作员智能体",
+      "description": "这些智能体看起来是 Platform Operator，但操作员配置并未指向它们。采用其中一个以在此管理，或将其移除。",
+      "adopt": "采用",
+      "adopted": "已采用操作员 — 现在由此页面管理。",
+      "fixAndDeploy": "修复授权并部署",
+      "remove": "移除",
+      "removeTitle": "移除此操作员智能体？",
+      "removeBody": "该智能体将被取消部署，其对话将被结束，它及为其创建的资源将被永久删除。此操作无法撤销。",
+      "removed": "操作员智能体已移除",
+      "status": {
+        "READY": "已部署",
+        "IN_PROGRESS": "部署中",
+        "ERROR": "错误",
+        "NOT_FOUND": "未部署"
+      }
+    },
+    "health": {
+      "missing": "操作员配置指向的智能体 {{id}} 已不存在。",
+      "cleared": "操作员配置已清除",
+      "clear": "清除配置",
+      "notDeployed": "操作员已开启，但其智能体未部署。",
+      "deploy": "重新部署"
     }
   },
   "groupWorkspace": {
@@ -5244,5 +5278,28 @@
     "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
     "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
     "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
+  },
+  "grantRequired": {
+    "title": "此智能体未获授权使用其保管库密钥",
+    "titleRefused": "部署被拒绝：保管库密钥未授权",
+    "copied": "请求已复制 — 请发送给管理员",
+    "issueWithAgents": "“{{agent}}”使用受限密钥“{{key}}”，当前仅授权给：{{agents}}。",
+    "issueWithCount_one": "“{{agent}}”使用受限密钥“{{key}}”，当前授权给 {{count}} 个智能体。",
+    "issueWithCount_other": "“{{agent}}”使用受限密钥“{{key}}”，当前授权给 {{count}} 个智能体。",
+    "issue": "“{{agent}}”使用受限密钥“{{key}}”，该密钥仅授权给其他智能体。",
+    "unfixable": "“{{reference}}”不是简单的保管库引用，因此无法在此授权。请修改智能体的配置，改用它有权使用的保管库密钥。",
+    "questionAll": "允许所有智能体使用这些密钥？",
+    "question": "将“{{agent}}”加入授权？",
+    "allowAll": "改为允许所有智能体使用此密钥",
+    "allowAllWarning": "此部署中的每个智能体（包括以后创建的）都将能够使用它。这会取消对此密钥使用范围的唯一限制。",
+    "nonAdmin": "只有管理员可以更改谁能使用保管库密钥。请让管理员将此智能体加入授权，然后重新部署。",
+    "copyRequest": "复制给管理员的请求",
+    "losingAccess": "以下已部署的智能体将失去对该密钥的访问权限：",
+    "deployAnyway": "仍然部署",
+    "applyAnyway": "仍然应用并部署",
+    "allowAllAndDeploy": "允许全部并部署",
+    "addAndDeploy": "加入并部署",
+    "cancelled": "未部署 — 保管库密钥未获授权。",
+    "fix": "修复"
   }
 }

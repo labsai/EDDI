@@ -14,7 +14,10 @@ import {
   CircleDashed,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { useDeploymentStatuses, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
+import { useDeploymentStatuses, useUndeployAgent } from "@/hooks/use-agents";
+import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
+import { reportDeployOutcome } from "@/lib/deploy-outcome";
+import { useQueryClient } from "@tanstack/react-query";
 import { DeploymentEnvironmentBadge } from "./deployment-environments";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { accessFor, type ResourceAccess } from "@/lib/access";
@@ -58,7 +61,8 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const { data: envStatuses, isLoading: statusLoading } = useDeploymentStatuses(agent.id, agent.version);
   const envLabel = useEnvironmentLabel();
-  const deployMutation = useDeployAgent();
+  const { deploy: deployWithGrants, isRunning: isDeploying } = useDeployWithGrants();
+  const queryClient = useQueryClient();
   const undeployMutation = useUndeployAgent();
   const startConversation = useStartConversation();
 
@@ -82,18 +86,26 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
   const isProductionDeployed = isLiveAtRequestedVersion(productionEntry);
   const config = statusIcons[isProductionDeployed ? "READY" : productionStatus];
   const isBusy =
-    deployMutation.isPending ||
+    isDeploying ||
     undeployMutation.isPending ||
     isAnyEnvironmentBusy(envStatuses);
 
+  /*
+   * Grant-aware and waited. The card used to fire the deploy and toast success
+   * on the 202 — so an agent refused for an ungranted vault key showed "Agent
+   * deployed successfully" and then a red badge with no reason. Now a restricted
+   * key is settled first (the grant dialog), and a failure toasts the backend's
+   * reason, with a Fix action for a grant refusal.
+   */
   function handleDeploy() {
-    deployMutation.mutate(
-      { agentId: agent.id, version: agent.version },
-      {
-        onSuccess: () => toast.success(t("agents.deploySuccess", "Agent deployed successfully")),
-        onError: () => toast.error(t("agents.deployError", "Deploy failed")),
-      }
-    );
+    const options = { agentId: agent.id, version: agent.version, agentName: agent.name, environment: "production" };
+    deployWithGrants(options)
+      .then((outcome) =>
+        reportDeployOutcome(outcome, options, t, undefined, () => {
+          void queryClient.invalidateQueries({ queryKey: ["agents"] });
+        }),
+      )
+      .catch((err) => toast.error(getErrorMessage(err) || t("agents.deployError", "Deploy failed")));
   }
 
   // Undeploying takes a live agent offline for everyone chatting with it, so

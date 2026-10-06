@@ -458,7 +458,9 @@
       "notice": "채팅이 사용자에게 알리는 내용 (비워 두면 기본 문구 사용)",
       "noticePlaceholder": "이 에이전트와의 대화는 개선을 위해 에이전트를 관리하는 사람들이 읽을 수 있습니다.",
       "versionNote": "이 변경으로 생성되는 버전과 이후 버전의 대화에 적용됩니다 — 이전에 나눈 대화에는 적용되지 않습니다. Slack, Teams 및 API 클라이언트는 알림을 표시할 수 없으므로, 그곳에서 이 에이전트를 사용한다면 인사말에서 안내하세요."
-    }
+    },
+    "deployed": "에이전트를 배포했습니다",
+    "deployFailedTitle": "배포에 실패했습니다."
   },
   "wizard": {
     "title": "Agent 마법사"
@@ -883,7 +885,8 @@
     "savedNotLive": "저장됨 — 아직 반영되지 않음",
     "savedNotLiveDescription": "실행 중인 에이전트는 여전히 배포된 버전을 제공합니다. 이 변경을 적용하려면 배포하세요.",
     "deployNow": "배포",
-    "deployStarted": "배포를 시작했습니다"
+    "deployStarted": "배포를 시작했습니다",
+    "deployDone": "배포됨 — 변경 사항이 적용되었습니다"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -3723,7 +3726,12 @@
     "connectionForbidden": "현재 역할로는 연결 목록을 볼 수 없습니다. 이름을 안다면 ${connection:name}을 직접 입력하세요.",
     "connectionUnavailable": "이 백엔드는 연결 기능을 제공하지 않습니다.",
     "connectionFailed": "연결을 불러올 수 없습니다.",
-    "connectionHint": "${connection:name}을 전체 값으로 삽입합니다. EDDI가 요청마다 자격 증명으로 확인합니다."
+    "connectionHint": "${connection:name}을 전체 값으로 삽입합니다. EDDI가 요청마다 자격 증명으로 확인합니다.",
+    "restricted_one": "{{count}}개의 에이전트로 제한됨",
+    "restricted_other": "{{count}}개의 에이전트로 제한됨",
+    "restrictedTooltip": "허용 대상: {{agents}}",
+    "notGrantedAdmin": "이 에이전트에는 아직 이 키 권한이 없습니다. 배포할 때 추가할지 묻습니다.",
+    "notGrantedNonAdmin": "이 에이전트에는 아직 이 키 권한이 없습니다. 배포하기 전에 관리자에게 권한 부여를 요청하세요."
   },
   "snippetEditor": {
     "category": "카테고리",
@@ -4417,7 +4425,8 @@
       "platformBaseUrlUnresolved": "이 배포는 임의의 HTTP 포트에서 실행되고 eddi.self.base-url이 없어 자신에게 도달할 주소를 알려줄 수 없습니다. 여기에 주소를 입력하세요.",
       "llmEndpoint": "모델 엔드포인트",
       "promptBodyDiffers": "이 지침은 현재 기본값과 다릅니다. 편집되었거나 이전 버전의 Manager가 작성했습니다.",
-      "promptBodyReset": "기본값으로 재설정"
+      "promptBodyReset": "기본값으로 재설정",
+      "keyRestricted": "\"{{key}}\"는 특정 에이전트로 제한되어 있습니다. 오퍼레이터가 {{key}}의 권한에 추가되며, 배포 전에 확인을 요청합니다."
     },
     "authMode": {
       "none": {
@@ -4439,7 +4448,8 @@
       "done": "완료",
       "longWait1": "오퍼레이터 에이전트를 생성하고 배포하는 중입니다 — 가장 오래 걸리는 단계입니다…",
       "longWait2": "새 에이전트에 도구와 승인 게이트를 설정하는 중입니다…",
-      "longWait3": "아직 진행 중입니다 — 바쁜 플랫폼에서는 배포에 시간이 걸릴 수 있습니다…"
+      "longWait3": "아직 진행 중입니다 — 바쁜 플랫폼에서는 배포에 시간이 걸릴 수 있습니다…",
+      "deploying": "오퍼레이터 에이전트를 배포하는 중 — 모델 키 권한 부여를 요청받을 수 있습니다…"
     },
     "status": {
       "title": "오퍼레이터",
@@ -4605,6 +4615,30 @@
       "hintAction": "업그레이드",
       "keepCurrent": "현재 텍스트 유지(새 기본값에 추가된 내용은 반영되지 않음)",
       "title": "Platform Operator 업데이트를 사용할 수 있습니다"
+    },
+    "unregistered": {
+      "title": "이 화면에서 관리하지 않는 오퍼레이터 에이전트",
+      "description": "이 에이전트들은 Platform Operator처럼 보이지만 오퍼레이터 설정이 이를 가리키지 않습니다. 여기서 관리하려면 채택하거나 제거하세요.",
+      "adopt": "채택",
+      "adopted": "오퍼레이터를 채택했습니다 — 이제 이 화면에서 관리합니다.",
+      "fixAndDeploy": "권한 수정 후 배포",
+      "remove": "제거",
+      "removeTitle": "이 오퍼레이터 에이전트를 제거할까요?",
+      "removeBody": "에이전트의 배포가 해제되고 대화가 종료되며, 에이전트와 이를 위해 생성된 리소스가 영구적으로 삭제됩니다. 되돌릴 수 없습니다.",
+      "removed": "오퍼레이터 에이전트를 제거했습니다",
+      "status": {
+        "READY": "배포됨",
+        "IN_PROGRESS": "배포 중",
+        "ERROR": "오류",
+        "NOT_FOUND": "배포되지 않음"
+      }
+    },
+    "health": {
+      "missing": "오퍼레이터 설정이 가리키는 에이전트 {{id}}가 더 이상 존재하지 않습니다.",
+      "cleared": "오퍼레이터 설정을 지웠습니다",
+      "clear": "설정 지우기",
+      "notDeployed": "오퍼레이터가 켜져 있지만 해당 에이전트가 배포되지 않았습니다.",
+      "deploy": "다시 배포"
     }
   },
   "groupWorkspace": {
@@ -5244,5 +5278,28 @@
     "switchNotice": "에이전트가 v{{from}}에서 v{{to}}(으)로 이동했습니다",
     "impactFollow_one": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
     "impactStay_one": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다"
+  },
+  "grantRequired": {
+    "title": "이 에이전트에는 볼트 키 사용 권한이 없습니다",
+    "titleRefused": "배포 거부됨: 볼트 키 권한 없음",
+    "copied": "요청을 복사했습니다 — 관리자에게 보내세요",
+    "issueWithAgents": "\"{{agent}}\"이(가) 제한된 키 \"{{key}}\"를 사용하며, 현재 허용 대상은 {{agents}}입니다.",
+    "issueWithCount_one": "\"{{agent}}\"이(가) 제한된 키 \"{{key}}\"를 사용하며, 현재 {{count}}개의 에이전트에 허용되어 있습니다.",
+    "issueWithCount_other": "\"{{agent}}\"이(가) 제한된 키 \"{{key}}\"를 사용하며, 현재 {{count}}개의 에이전트에 허용되어 있습니다.",
+    "issue": "\"{{agent}}\"이(가) 제한된 키 \"{{key}}\"를 사용하지만, 이 키는 다른 에이전트에만 허용되어 있습니다.",
+    "unfixable": "\"{{reference}}\"는 단순한 볼트 참조가 아니므로 여기에서 권한을 줄 수 없습니다. 사용이 허용된 볼트 키를 쓰도록 에이전트 설정을 변경하세요.",
+    "questionAll": "모든 에이전트가 이 키를 사용하도록 허용할까요?",
+    "question": "\"{{agent}}\"을(를) 권한에 추가할까요?",
+    "allowAll": "대신 모든 에이전트가 이 키를 사용하도록 허용",
+    "allowAllWarning": "이 배포의 모든 에이전트(나중에 생성되는 에이전트 포함)가 이 키를 사용할 수 있게 됩니다. 이 키의 사용 범위에 대한 유일한 제한이 사라집니다.",
+    "nonAdmin": "볼트 키를 누가 사용할 수 있는지는 관리자만 변경할 수 있습니다. 관리자에게 이 에이전트를 권한에 추가해 달라고 요청한 뒤 다시 배포하세요.",
+    "copyRequest": "관리자용 요청 복사",
+    "losingAccess": "다음 배포된 에이전트는 이 키에 대한 접근 권한을 잃게 됩니다:",
+    "deployAnyway": "그래도 배포",
+    "applyAnyway": "그래도 적용하고 배포",
+    "allowAllAndDeploy": "모두 허용하고 배포",
+    "addAndDeploy": "추가하고 배포",
+    "cancelled": "배포되지 않음 — 볼트 키 권한이 부여되지 않았습니다.",
+    "fix": "수정"
   }
 }

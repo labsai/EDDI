@@ -26,6 +26,7 @@ import {
   ServerCog,
 } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import {
   discoverMcpTools,
@@ -975,6 +976,7 @@ export function McpCallsEditor({
   readOnly,
 }: McpCallsEditorProps) {
   const { t } = useTranslation();
+  const owningAgentId = useOwningAgentId();
 
   // Discovery state
   const [discoveredTools, setDiscoveredTools] = useState<McpToolInfo[]>([]);
@@ -1124,6 +1126,7 @@ export function McpCallsEditor({
                 the reference must be the whole value, and a PER_USER or
                 CALLER_SUPPLIED connection is withheld from discovery. */}
             <SecretKeyPicker
+              agentId={owningAgentId}
               value={data.apiKey ?? ""}
               onChange={(v) => update({ apiKey: v })}
               readOnly={readOnly}

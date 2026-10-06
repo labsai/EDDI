@@ -155,6 +155,42 @@ instead of a flag. A retry after a refused grant reuses the agent the failed att
 
 ### 5.4 Operator marker
 
-`provisionOperator` sets the descriptor description marker and the agents are recognised by the
-heuristic `gateLooksInstalled` + an API toolset that targets this instance; see the Manager code for
-the exact rule.
+`provisionOperator` stamps the new agent's **descriptor description** with the
+token `[eddi-platform-operator]` (`OPERATOR_DESCRIPTOR_MARKER` in
+`ui/manager/src/lib/api/operator-marker.ts`; the full description is "Platform
+Operator — managed from the Manager's Operator screen. [eddi-platform-operator]").
+A descriptor field because `AgentConfiguration` has nowhere free-form to put one,
+and because the descriptor is what the agent listing already returns — so
+recognition costs no read beyond the listing. Adopting an agent stamps it too.
+The stamp is best-effort: a failed PATCH never fails an activation.
+
+Recognition (`findUnregisteredOperators` in `lib/api/operator-discovery.ts`),
+cheapest first:
+
+1. ONE descriptor listing, `filter=perator` (the backend matches name OR
+   description, case-sensitively — this catches both "Operator" in a name and the
+   marker), limit 100.
+2. A descriptor carrying the marker is an operator.
+3. Otherwise only a name matching `/operator/i` makes it a candidate (at most 10
+   are read), and it counts only when its stored gate passes `gateLooksInstalled`
+   AND one of its httpcalls toolsets has a `targetServerUrl` equal to this
+   instance's address (the config's `apiBaseUrl`, the backend's `self-url`, or
+   the browser's origin; `localhost`/`127.0.0.1` treated alike). That is what a
+   pre-marker operator looks like and what an ordinary agent named "operator" is
+   not.
+
+The agent `platform.operator` points at is excluded. Each listed agent gets its
+detailed deployment status (so a refused grant shows its reason) and the actions
+Adopt (only when the registered operator is missing or off), Fix grant and deploy
+(when not READY), and Remove. The inverse — `platform.operator` pointing at an
+agent that no longer exists, or one switched on and not deployed — is a banner on
+the operator screen (`RegisteredOperatorHealth`) with Clear configuration or
+Fix grant and deploy / Deploy again.
+
+Activation cancel behaviour: a refused or cancelled grant **keeps** the created
+agent (not deployed, not registered, marked) and throws
+`OperatorGrantPendingError` naming it; the page passes it back as `reuseAgent` on
+the next attempt, which reuses it when its provisioning fingerprint (name, key,
+model, prompt, scope, addresses) is unchanged and removes it first otherwise. Any
+other deploy failure removes the agent. So a failed activation leaves no agent or
+exactly one, and that one is listed on the operator screen with Fix and Remove.

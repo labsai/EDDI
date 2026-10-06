@@ -344,7 +344,9 @@ describe("provisionOperator", () => {
     });
     expect(captured?.apiBaseUrl).toBe("http://127.0.0.1:7070");
     expect(captured?.apiBaseUrl).not.toBe("https://eddi.example");
-    expect(captured?.deploy).toBe(true);
+    // Created WITHOUT deploying: activation deploys afterwards through the
+    // grant flow, so a restricted model key can be granted to this agent first.
+    expect(captured?.deploy).toBe(false);
   });
 
   /** An admin override is used verbatim — they know something the server does not. */
@@ -749,15 +751,12 @@ describe("assertProvisioned", () => {
     expect(() => assertProvisioned({ ...base, agentId: "" })).toThrow(/agent id/i);
   });
 
-  // 201 is returned even when the deploy step failed.
-  it("rejects a created-but-undeployed agent", () => {
-    expect(() => assertProvisioned({ ...base, deployed: false })).toThrow(/deploy/i);
-  });
-
-  it("rejects an ERROR deployment status", () => {
-    expect(() =>
-      assertProvisioned({ ...base, deployed: true, deploymentStatus: "ERROR" }),
-    ).toThrow(/ERROR/);
+  // Provisioning no longer deploys (deploy:false), so an undeployed result is
+  // the expected one. The deploy is judged later, inside the part of
+  // activation that rolls the agent back — judging it here threw past that
+  // rollback and leaked the agent.
+  it("accepts a created-but-undeployed agent", () => {
+    expect(() => assertProvisioned({ ...base, deployed: false })).not.toThrow();
   });
 
   it("accepts a result that simply omits the deploy fields", () => {

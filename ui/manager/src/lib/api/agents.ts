@@ -177,6 +177,81 @@ export interface AutoSnapshot {
 
 export interface DeploymentStatus {
   status: "NOT_FOUND" | "IN_PROGRESS" | "READY" | "ERROR";
+  /**
+   * Why a deployment is in `ERROR` — only with `format=detailed`, and only for a
+   * caller who may edit the agent. Absent on every other answer.
+   */
+  failure?: DeploymentFailure;
+}
+
+/** The code of a deployment refused because the agent uses a vault secret it is not granted. */
+export const VAULT_GRANT_MISSING = "VAULT_GRANT_MISSING";
+
+/** One secret a refused deployment names. `tenantId`/`keyName` are absent for a reference that is not a plain vault one. */
+export interface DeploymentFailureSecret {
+  tenantId?: string;
+  keyName?: string;
+  reference: string;
+}
+
+/**
+ * Why a deployment failed, as the backend reports it on the waited deploy and on
+ * `deploymentstatus?format=detailed`. Only non-null fields are serialised.
+ *
+ * `code` is `VAULT_GRANT_MISSING` (the agent uses a restricted secret it is not
+ * granted — `secrets` and `fix` say which and how) or `DEPLOYMENT_FAILED` (any
+ * other cause; `message` carries it). Typed as `string` beyond those two so a
+ * newer backend's code is shown rather than rejected.
+ */
+export interface DeploymentFailure {
+  code: typeof VAULT_GRANT_MISSING | "DEPLOYMENT_FAILED" | (string & {});
+  message: string;
+  secrets?: DeploymentFailureSecret[];
+  fix?: {
+    addAgentId: string;
+    /** e.g. `POST /secretstore/secrets/default/k/grant/agents/<id>` */
+    endpoints: string[];
+    dryRunFirst: boolean;
+  };
+}
+
+/** Body of `POST …/deploy/{id}?waitForCompletion=true`. */
+export interface DeployResult {
+  status: DeploymentStatus["status"];
+  agentId?: string;
+  version?: number;
+  environment?: string;
+  /** Set when the deploy failed; also filled from `failure.message` when the deploy itself raised nothing. */
+  error?: string;
+  failure?: DeploymentFailure;
+}
+
+/** `eddi.vault.grant-enforcement` as the preflight reports it. */
+export type GrantEnforcement = "ENFORCE" | "WARN" | "OFF";
+
+/** One restricted secret an agent uses but is not granted. */
+export interface PreflightGrantIssue {
+  /** Null/absent for a reference that is not a plain vault reference. */
+  tenantId?: string | null;
+  keyName?: string | null;
+  reference: string;
+  grantsAllAgents: boolean;
+  /** Null when the grant could not be read. */
+  allowedAgentCount?: number | null;
+  /** The agent ids on the grant — returned to an `eddi-admin` only. */
+  allowedAgents?: string[] | null;
+}
+
+/** `GET /administration/{env}/deploy/{agentId}/preflight?version=` */
+export interface DeploymentPreflight {
+  agentId: string;
+  version: number;
+  enforcement: GrantEnforcement;
+  /** False when the check did not run (mode OFF, or it could not read what it needed) — the deploy is then let through. */
+  checked: boolean;
+  /** False only in ENFORCE mode with at least one issue: exactly when the deploy would be refused. */
+  ready: boolean;
+  grantIssues: PreflightGrantIssue[];
 }
 
 /** Parse resource URI to extract id and version.
@@ -430,11 +505,76 @@ export function getDeploymentImpact(
 export function getDeploymentStatus(
   environment: string,
   agentId: string,
-  version: number
+  version: number,
+  options?: {
+    /** `format=detailed`: an ERROR also carries `failure` (for a caller who may edit the agent). */
+    detailed?: boolean;
+  }
 ): Promise<DeploymentStatus> {
+  const format = options?.detailed ? "&format=detailed" : "";
   return api.get<DeploymentStatus>(
-    `/administration/${environment}/deploymentstatus/${agentId}?version=${version}`
+    `/administration/${environment}/deploymentstatus/${agentId}?version=${version}${format}`
   );
+}
+
+/**
+ * What a deploy of this version would run into — today, the vault-grant check.
+ *
+ * A grant names agent ids, so a freshly created agent is on no grant yet; the
+ * Manager asks this before the first deploy rather than letting it fail. Read-only.
+ */
+export function preflightDeploy(
+  environment: string,
+  agentId: string,
+  version: number
+): Promise<DeploymentPreflight> {
+  return api.get<DeploymentPreflight>(
+    `/administration/${encodeURIComponent(environment)}/deploy/${encodeURIComponent(agentId)}/preflight?version=${version}`
+  );
+}
+
+/** How long {@link deployAgentAndWait} polls when the backend did not wait itself. */
+const DEPLOY_POLL_INTERVAL_MS = 2_000;
+const DEPLOY_POLL_ATTEMPTS = 15;
+
+/**
+ * Deploy and wait for the outcome — `POST …/deploy/{id}?waitForCompletion=true`.
+ *
+ * A refused or failed deployment is NOT an exception: the backend answers 200
+ * with `status: "ERROR"` and a `failure` saying why (a grant refusal included —
+ * see the plan's decision 5.1), so the caller branches on the body. Only a
+ * transport failure or a non-2xx (404, 429, 403) throws.
+ *
+ * If the answer carries no status (a backend that ignored the flag and answered
+ * 202), the deployment status is polled instead, with `format=detailed` so an
+ * ERROR still comes back with its reason.
+ */
+export async function deployAgentAndWait(
+  environment: string,
+  agentId: string,
+  version: number,
+  signal?: AbortSignal
+): Promise<DeployResult> {
+  const body = await api.post<DeployResult | undefined>(
+    `/administration/${environment}/deploy/${agentId}?version=${version}&waitForCompletion=true`
+  );
+  if (body && typeof body === "object" && typeof body.status === "string") {
+    return body;
+  }
+  let last: DeploymentStatus = { status: "IN_PROGRESS" };
+  for (let attempt = 0; attempt < DEPLOY_POLL_ATTEMPTS; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, DEPLOY_POLL_INTERVAL_MS));
+    if (signal?.aborted) break;
+    try {
+      last = await getDeploymentStatus(environment, agentId, version, { detailed: true });
+    } catch (err) {
+      // A failed status READ is worth retrying; only the last one counts.
+      if (attempt === DEPLOY_POLL_ATTEMPTS - 1) throw err;
+      continue;
+    }
+    if (last.status === "READY" || last.status === "ERROR") break;
+  }
+  return { status: last.status, agentId, version, environment, failure: last.failure };
 }
 
 export interface EnvironmentStatus {

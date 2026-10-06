@@ -1295,8 +1295,34 @@ export const handlers = [
     ),
   ),
 
-  // Deploy agent
-  http.post("*/administration/:env/deploy/:agentId", () => {
+  // Deploy preflight (IRestAgentAdministration.preflightDeployment): what a
+  // deploy would run into. Nothing by default — a test that needs a grant
+  // issue overrides this via server.use().
+  http.get("*/administration/:env/deploy/:agentId/preflight", ({ request, params }) => {
+    const url = new URL(request.url);
+    return HttpResponse.json({
+      agentId: params.agentId,
+      version: parseInt(url.searchParams.get("version") ?? "1", 10),
+      enforcement: "ENFORCE",
+      checked: true,
+      ready: true,
+      grantIssues: [],
+    });
+  }),
+
+  // Deploy agent. With waitForCompletion=true the backend answers 200 with the
+  // outcome in the body (status, and error/failure on a refusal); without it,
+  // an empty body.
+  http.post("*/administration/:env/deploy/:agentId", ({ request, params }) => {
+    const url = new URL(request.url);
+    if (url.searchParams.get("waitForCompletion") === "true") {
+      return HttpResponse.json({
+        status: "READY",
+        agentId: params.agentId,
+        version: parseInt(url.searchParams.get("version") ?? "1", 10),
+        environment: params.env,
+      });
+    }
     return new HttpResponse(null, { status: 200 });
   }),
 
@@ -3997,6 +4023,48 @@ export const secretsHandlers = [
         previousAllowedAgents,
         grantsAllAgents: body.allowedAgents.includes("*"),
         description: body.description ?? existing.description,
+        createdAt: existing.createdAt,
+        lastRotatedAt: existing.lastRotatedAt,
+        agentsLosingAccess: [],
+      });
+    },
+  ),
+
+  // Append ONE agent to a secret's grant (POST …/grant/agents/{agentId}).
+  // Idempotent like the backend: an agent already on the list, or a secret that
+  // already grants every agent, is answered with changed:false and not written.
+  http.post(
+    "*/secretstore/secrets/:tenantId/:keyName/grant/agents/:agentId",
+    ({ params, request }) => {
+      const tenantId = params.tenantId as string;
+      const keyName = params.keyName as string;
+      const agentId = params.agentId as string;
+      const existing = findMockSecret(tenantId, keyName);
+      if (!existing) {
+        return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+      }
+      const dryRun = new URL(request.url).searchParams.get("dryRun") === "true";
+      const previousAllowedAgents = [...existing.allowedAgents];
+      const open =
+        previousAllowedAgents.length === 0 || previousAllowedAgents.includes("*");
+      const changed = !open && !previousAllowedAgents.includes(agentId);
+      const allowedAgents = changed
+        ? [...previousAllowedAgents, agentId]
+        : previousAllowedAgents;
+      if (changed && !dryRun) existing.allowedAgents = allowedAgents;
+      return HttpResponse.json({
+        reference:
+          tenantId === "default"
+            ? `\${vault:${keyName}}`
+            : `\${vault:${tenantId}/${keyName}}`,
+        tenantId,
+        keyName,
+        dryRun,
+        changed,
+        allowedAgents,
+        previousAllowedAgents,
+        grantsAllAgents: open,
+        description: existing.description,
         createdAt: existing.createdAt,
         lastRotatedAt: existing.lastRotatedAt,
         agentsLosingAccess: [],

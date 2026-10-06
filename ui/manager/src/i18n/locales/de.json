@@ -458,7 +458,9 @@
       "notice": "Was der Chat den Personen mitteilt (leer lassen für den Standardtext)",
       "noticePlaceholder": "Gespräche mit diesem Agenten können von den Personen gelesen werden, die ihn betreuen, um ihn zu verbessern.",
       "versionNote": "Gilt für Gespräche mit der Version, die diese Änderung erzeugt, und allen späteren — nie für bereits Gesagtes. Slack, Teams und API-Clients können den Hinweis nicht anzeigen; wenn Personen diesen Agenten dort nutzen, erwähnen Sie es in der Begrüßung."
-    }
+    },
+    "deployed": "Agent bereitgestellt",
+    "deployFailedTitle": "Bereitstellung fehlgeschlagen."
   },
   "wizard": {
     "title": "Agent-Assistent"
@@ -883,7 +885,8 @@
     "savedNotLive": "Gespeichert — noch nicht aktiv",
     "savedNotLiveDescription": "Der laufende Agent liefert weiterhin die bereitgestellte Version. Zum Aktivieren bereitstellen.",
     "deployNow": "Bereitstellen",
-    "deployStarted": "Bereitstellung gestartet"
+    "deployStarted": "Bereitstellung gestartet",
+    "deployDone": "Bereitgestellt — die Änderung ist aktiv"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -3723,7 +3726,12 @@
     "connectionForbidden": "Ihre Rolle darf keine Verbindungen auflisten. Wenn Sie den Namen kennen, tippen Sie ${connection:name} von Hand ein.",
     "connectionUnavailable": "Dieses Backend bietet keine Verbindungen an.",
     "connectionFailed": "Verbindungen konnten nicht geladen werden.",
-    "connectionHint": "Fügt ${connection:name} als gesamten Wert ein. EDDI löst ihn bei jeder Anfrage in die Zugangsdaten auf."
+    "connectionHint": "Fügt ${connection:name} als gesamten Wert ein. EDDI löst ihn bei jeder Anfrage in die Zugangsdaten auf.",
+    "restricted_one": "Auf {{count}} Agenten beschränkt",
+    "restricted_other": "Auf {{count}} Agenten beschränkt",
+    "restrictedTooltip": "Freigegeben für: {{agents}}",
+    "notGrantedAdmin": "Diesem Agenten ist der Schlüssel noch nicht freigegeben. Bei der Bereitstellung werden Sie gefragt, ob er hinzugefügt werden soll.",
+    "notGrantedNonAdmin": "Diesem Agenten ist der Schlüssel noch nicht freigegeben. Bitten Sie vor der Bereitstellung einen Administrator um die Freigabe."
   },
   "snippetEditor": {
     "category": "Kategorie",
@@ -4417,7 +4425,8 @@
       "platformBaseUrlUnresolved": "Diese Installation läuft auf einem zufälligen HTTP-Port und hat kein eddi.self.base-url, kann also nicht sagen, wo sie sich selbst erreicht. Tragen Sie die Adresse hier ein.",
       "llmEndpoint": "Modell-Endpunkt",
       "promptBodyDiffers": "Diese Anweisungen weichen vom aktuellen Standard ab — sie wurden bearbeitet oder von einer älteren Version des Managers geschrieben.",
-      "promptBodyReset": "Auf Standard zurücksetzen"
+      "promptBodyReset": "Auf Standard zurücksetzen",
+      "keyRestricted": "„{{key}}“ ist auf bestimmte Agenten beschränkt. Der Operator wird zur Freigabe von {{key}} hinzugefügt — vor der Bereitstellung werden Sie um Bestätigung gebeten."
     },
     "authMode": {
       "none": {
@@ -4439,7 +4448,8 @@
       "done": "Fertig",
       "longWait1": "Der Operator-Agent wird erstellt und bereitgestellt — dies ist der längste Schritt…",
       "longWait2": "Werkzeuge und Freigabe-Gate werden am neuen Agenten eingerichtet…",
-      "longWait3": "Läuft noch — die Bereitstellung kann auf einer ausgelasteten Plattform etwas dauern…"
+      "longWait3": "Läuft noch — die Bereitstellung kann auf einer ausgelasteten Plattform etwas dauern…",
+      "deploying": "Der Operator-Agent wird bereitgestellt — möglicherweise werden Sie gebeten, ihm seinen Modellschlüssel freizugeben…"
     },
     "status": {
       "title": "Operator",
@@ -4605,6 +4615,30 @@
       "hintAction": "Aktualisieren",
       "keepCurrent": "Aktuellen Text behalten (er lernt nicht, was der neue Standard ergänzt)",
       "title": "Für den Platform Operator ist ein Update verfügbar"
+    },
+    "unregistered": {
+      "title": "Operator-Agenten, die diese Seite nicht verwaltet",
+      "description": "Diese Agenten sehen wie ein Platform Operator aus, aber die Operator-Konfiguration verweist nicht auf sie. Übernehmen Sie einen, um ihn hier zu verwalten, oder entfernen Sie ihn.",
+      "adopt": "Übernehmen",
+      "adopted": "Operator übernommen — diese Seite verwaltet ihn jetzt.",
+      "fixAndDeploy": "Freigabe korrigieren und bereitstellen",
+      "remove": "Entfernen",
+      "removeTitle": "Diesen Operator-Agenten entfernen?",
+      "removeBody": "Der Agent wird außer Betrieb genommen, seine Unterhaltungen werden beendet, und er sowie die für ihn erstellten Ressourcen werden dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
+      "removed": "Operator-Agent entfernt",
+      "status": {
+        "READY": "Bereitgestellt",
+        "IN_PROGRESS": "Wird bereitgestellt",
+        "ERROR": "Fehler",
+        "NOT_FOUND": "Nicht bereitgestellt"
+      }
+    },
+    "health": {
+      "missing": "Die Operator-Konfiguration verweist auf den Agenten {{id}}, der nicht mehr existiert.",
+      "cleared": "Operator-Konfiguration gelöscht",
+      "clear": "Konfiguration löschen",
+      "notDeployed": "Der Operator ist eingeschaltet, aber sein Agent ist nicht bereitgestellt.",
+      "deploy": "Erneut bereitstellen"
     }
   },
   "groupWorkspace": {
@@ -5244,5 +5278,28 @@
     "impactReasonLegacy": "älter als die Versionsfolge",
     "impactReasonBreaking": "inkompatible Änderung",
     "switchNotice": "Agent wechselte von v{{from}} zu v{{to}}"
+  },
+  "grantRequired": {
+    "title": "Diesem Agenten sind seine Vault-Schlüssel nicht freigegeben",
+    "titleRefused": "Bereitstellung abgelehnt: Vault-Schlüssel nicht freigegeben",
+    "copied": "Anfrage kopiert — senden Sie sie an einen Administrator",
+    "issueWithAgents": "„{{agent}}“ verwendet den eingeschränkten Schlüssel „{{key}}“, derzeit freigegeben für: {{agents}}.",
+    "issueWithCount_one": "„{{agent}}“ verwendet den eingeschränkten Schlüssel „{{key}}“, derzeit für {{count}} Agenten freigegeben.",
+    "issueWithCount_other": "„{{agent}}“ verwendet den eingeschränkten Schlüssel „{{key}}“, derzeit für {{count}} Agenten freigegeben.",
+    "issue": "„{{agent}}“ verwendet den eingeschränkten Schlüssel „{{key}}“, der nur anderen Agenten freigegeben ist.",
+    "unfixable": "„{{reference}}“ ist keine einfache Vault-Referenz und kann daher hier nicht freigegeben werden. Ändern Sie die Konfiguration des Agenten, sodass sie einen Vault-Schlüssel verwendet, den er nutzen darf.",
+    "questionAll": "Allen Agenten die Nutzung dieser Schlüssel erlauben?",
+    "question": "„{{agent}}“ zur Freigabe hinzufügen?",
+    "allowAll": "Stattdessen allen Agenten die Nutzung dieses Schlüssels erlauben",
+    "allowAllWarning": "Jeder Agent dieser Installation — auch später erstellte — kann ihn dann nutzen. Damit entfällt die einzige Begrenzung der Reichweite dieses Schlüssels.",
+    "nonAdmin": "Nur ein Administrator kann ändern, wer einen Vault-Schlüssel nutzen darf. Bitten Sie einen Administrator, diesen Agenten zur Freigabe hinzuzufügen, und stellen Sie dann erneut bereit.",
+    "copyRequest": "Anfrage für einen Administrator kopieren",
+    "losingAccess": "Diese bereitgestellten Agenten würden den Zugriff auf den Schlüssel verlieren:",
+    "deployAnyway": "Trotzdem bereitstellen",
+    "applyAnyway": "Trotzdem übernehmen und bereitstellen",
+    "allowAllAndDeploy": "Alle erlauben und bereitstellen",
+    "addAndDeploy": "Hinzufügen und bereitstellen",
+    "cancelled": "Nicht bereitgestellt — der Vault-Schlüssel wurde nicht freigegeben.",
+    "fix": "Beheben"
   }
 }

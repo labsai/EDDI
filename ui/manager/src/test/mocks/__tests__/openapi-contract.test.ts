@@ -57,6 +57,12 @@ const SNAPSHOT = path.join(__dirname, "..", "openapi-operations.json");
  * defeats the check.
  */
 const EXEMPT: Record<string, string> = {
+  "GET */administration/:env/deploy/:agentId/preflight":
+    "NEW in EDDI 6.6.0 (feat/vault-grant-ux): the deploy preflight. Newer than this 6.4.0 snapshot — drop this entry when `npm run openapi:refresh` runs against a backend that has it.",
+
+  "POST */secretstore/secrets/:tenantId/:keyName/grant/agents/:agentId":
+    "NEW in EDDI 6.6.0 (feat/vault-grant-ux): append one agent to a secret's grant. Newer than this 6.4.0 snapshot — drop this entry when the snapshot is refreshed.",
+
   "GET */openapi":
     "The document that defines this check. It does not describe itself, so it can never appear in its own path list.",
 

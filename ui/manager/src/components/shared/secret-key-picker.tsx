@@ -11,9 +11,15 @@ import {
   Loader2,
   Search,
   ChevronDown,
+  Lock,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useSecrets, useStoreSecret, useVaultHealth } from "@/hooks/use-secrets";
-import { SecretsError, SECRET_EXISTS } from "@/lib/api/secrets";
+import { useHasRole } from "@/hooks/use-auth";
+import { groupAgentsByName } from "@/hooks/use-agents";
+import { getAgentDescriptors } from "@/lib/api/agents";
+import { agentKeys } from "@/lib/query-keys";
+import { SecretsError, SECRET_EXISTS, grantsAllAgents } from "@/lib/api/secrets";
 import { toast } from "sonner";
 import { createPortal } from "react-dom";
 import {
@@ -92,6 +98,31 @@ interface SecretKeyPickerProps {
    * connection reference is never admissible.
    */
   connections?: boolean;
+  /**
+   * The agent this field belongs to, when the caller knows it. Opt-in: with it,
+   * a restricted key this agent is not on gets a note saying the deploy will
+   * ask for the grant (or, for a non-admin, that an administrator must). Without
+   * it the picker still badges restricted keys, it just cannot say whether this
+   * agent is one of the allowed ones.
+   */
+  agentId?: string;
+}
+
+/** How many agents to pull in to put names on a grant's ids. Shared with the grant dialogs. */
+const NAME_LOOKUP_LIMIT = 200;
+
+/** A vault key as the picker lists it. */
+interface PickerSecret {
+  keyName: string;
+  description: string | null;
+  /** The grant; `["*"]` / empty / absent mean every agent. */
+  allowedAgents?: string[];
+}
+
+/** The restricted part of a grant, or null for a key every agent may use. */
+function restrictedTo(secret: PickerSecret | undefined): string[] | null {
+  if (!secret || grantsAllAgents(secret.allowedAgents)) return null;
+  return secret.allowedAgents ?? null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -325,6 +356,45 @@ function CreateSecretModal({
   return createPortal(modalContent, document.body);
 }
 
+// ─── RestrictedBadge ─────────────────────────────────────────────────────────
+
+/**
+ * "Restricted to N agents", on a key whose grant is narrowed. Its tooltip names
+ * the agents. Nothing for a key every agent may use.
+ *
+ * Shown BEFORE anything is saved or deployed: a narrowed key only bites at
+ * deploy time, and an agent that is not on the list is refused then.
+ */
+function RestrictedBadge({
+  allowed,
+  agentName,
+  testId,
+}: {
+  allowed: string[] | null;
+  agentName: (agentId: string) => string;
+  testId: string;
+}) {
+  const { t } = useTranslation();
+  if (!allowed) return null;
+  const names = allowed.map(agentName).join(", ");
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-warning/15 px-1.5 py-px text-[10px] font-medium text-warning"
+      title={t("secretPicker.restrictedTooltip", {
+        agents: names,
+        defaultValue: "Allowed for: {{agents}}",
+      })}
+      data-testid={testId}
+    >
+      <Lock className="h-2.5 w-2.5" aria-hidden="true" />
+      {t("secretPicker.restricted", {
+        count: allowed.length,
+        defaultValue: "Restricted to {{count}} agents",
+      })}
+    </span>
+  );
+}
+
 // ─── VaultPopup ──────────────────────────────────────────────────────────────
 
 interface VaultPopupProps {
@@ -338,7 +408,9 @@ interface VaultPopupProps {
    * and the array it indexes were derived in different places, which is what
    * let the keyboard handling drift apart from what was on screen.
    */
-  filtered: { keyName: string; description: string | null }[];
+  filtered: PickerSecret[];
+  /** Agent names for a grant's ids; ids are shown when a name is unknown. */
+  agentName: (agentId: string) => string;
   secretsLoading: boolean;
   vaultAvailable: boolean;
   filter: string;
@@ -357,6 +429,7 @@ interface VaultPopupProps {
 
 function VaultPopup({
   filtered,
+  agentName,
   secretsLoading,
   vaultAvailable,
   filter,
@@ -534,6 +607,11 @@ function VaultPopup({
                   </span>
                 )}
               </div>
+              <RestrictedBadge
+                allowed={restrictedTo(secret)}
+                agentName={agentName}
+                testId={`vault-key-restricted-${secret.keyName}`}
+              />
             </button>
           ))
         )}
@@ -583,9 +661,11 @@ export function SecretKeyPicker({
   ariaLabel,
   referenceOnly = false,
   connections = false,
+  agentId,
 }: SecretKeyPickerProps) {
   const { t } = useTranslation();
   const offerConnections = connections && !referenceOnly;
+  const isAdmin = useHasRole("eddi-admin");
 
   // UI state
   const [showPassword, setShowPassword] = useState(false);
@@ -618,7 +698,11 @@ export function SecretKeyPicker({
   const secretList = useMemo(
     () =>
       (secrets ?? [])
-        .map((s) => ({ keyName: s.keyName, description: s.description }))
+        .map((s): PickerSecret => ({
+          keyName: s.keyName,
+          description: s.description,
+          allowedAgents: s.allowedAgents,
+        }))
         .sort((a, b) => a.keyName.localeCompare(b.keyName)),
     [secrets],
   );
@@ -691,10 +775,36 @@ export function SecretKeyPicker({
   // every one of them as missing.
   const pointsAtVault = isVaultScheme(value);
   const currentKeyExists = !pointsAtVault || secretKeyNames.has(currentBareKey);
-  const currentDescription =
+  const currentSecret =
     hasVaultRef && pointsAtVault
-      ? secretList.find((s) => s.keyName === currentBareKey)?.description ?? null
-      : null;
+      ? secretList.find((s) => s.keyName === currentBareKey)
+      : undefined;
+  const currentDescription = currentSecret?.description ?? null;
+  /** The grant of the picked key when it is narrowed; null when every agent may use it. */
+  const currentRestriction = restrictedTo(currentSecret);
+  /**
+   * The picked key is restricted and this field's agent is not on its grant —
+   * so the agent's next deploy is refused until someone adds it. Only knowable
+   * when the caller said which agent this is.
+   */
+  const agentNotGranted =
+    Boolean(agentId) && currentRestriction !== null && !currentRestriction.includes(agentId!);
+
+  /* Names for a grant's ids. Fetched only once a restricted key is on screen,
+   * under the same key the grant dialogs use, so they share one request. */
+  const anyRestrictedShown =
+    currentRestriction !== null || (popupOpen && secretList.some((s) => restrictedTo(s) !== null));
+  const { data: rawAgents } = useQuery({
+    queryKey: agentKeys.descriptors(NAME_LOOKUP_LIMIT, 0, ""),
+    queryFn: () => getAgentDescriptors(NAME_LOOKUP_LIMIT, 0, ""),
+    enabled: anyRestrictedShown,
+    staleTime: 30_000,
+  });
+  const agentName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const agent of groupAgentsByName(Array.isArray(rawAgents) ? rawAgents : [])) map.set(agent.id, agent.name);
+    return (id: string) => map.get(id) ?? id;
+  }, [rawAgents]);
 
   // Filtered list for keyboard nav count
   const filteredForNav = useMemo(() => {
@@ -977,6 +1087,11 @@ export function SecretKeyPicker({
           <span className="flex-1 truncate font-mono text-xs font-medium text-amber-700 dark:text-amber-300">
             {currentVaultKey}
           </span>
+          <RestrictedBadge
+            allowed={currentRestriction}
+            agentName={agentName}
+            testId={`${testId}-restricted`}
+          />
           {/* Warning if key not found in vault */}
           {!secretsLoading && !currentKeyExists && currentVaultKey && (
             <span
@@ -1001,6 +1116,25 @@ export function SecretKeyPicker({
             </button>
           )}
         </div>
+        {agentNotGranted && (
+          <p
+            className="mt-1 flex items-start gap-1 text-[11px] text-warning"
+            data-testid={`${testId}-grant-note`}
+          >
+            <Lock className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+            <span>
+              {isAdmin
+                ? t(
+                    "secretPicker.notGrantedAdmin",
+                    "This agent isn't granted this key yet. You'll be asked to add it on deploy.",
+                  )
+                : t(
+                    "secretPicker.notGrantedNonAdmin",
+                    "This agent isn't granted this key yet. Ask an administrator to grant it before deploying.",
+                  )}
+            </span>
+          </p>
+        )}
       </div>
     );
   }
@@ -1133,6 +1267,7 @@ export function SecretKeyPicker({
       {popupOpen && (
         <VaultPopup
           filtered={filteredForNav}
+          agentName={agentName}
           secretsLoading={secretsLoading}
           vaultAvailable={vaultAvailable}
           filter={filter}

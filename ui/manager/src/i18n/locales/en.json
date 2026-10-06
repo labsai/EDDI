@@ -485,7 +485,9 @@
       "notice": "What the chat tells people (leave empty for the standard wording)",
       "noticePlaceholder": "Conversations with this agent may be read by the people who maintain it, to improve it.",
       "versionNote": "Covers conversations on the version this change creates and later ones — never what was said before. Slack, Teams and API clients cannot show the notice; if people reach this agent there, say it in the greeting."
-    }
+    },
+    "deployed": "Agent deployed",
+    "deployFailedTitle": "Deployment failed."
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -923,7 +925,8 @@
     "savedNotLive": "Saved — not yet live",
     "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
     "deployNow": "Deploy",
-    "deployStarted": "Deployment started"
+    "deployStarted": "Deployment started",
+    "deployDone": "Deployed — the change is live"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -3764,7 +3767,12 @@
     "connectionForbidden": "Your role cannot list connections. If you know its name, type ${connection:name} by hand.",
     "connectionUnavailable": "This backend does not offer connections.",
     "connectionFailed": "Could not load connections.",
-    "connectionHint": "Inserts ${connection:name} as the whole value. EDDI resolves it to the credential on every request."
+    "connectionHint": "Inserts ${connection:name} as the whole value. EDDI resolves it to the credential on every request.",
+    "restricted_one": "Restricted to {{count}} agent",
+    "restricted_other": "Restricted to {{count}} agents",
+    "restrictedTooltip": "Allowed for: {{agents}}",
+    "notGrantedAdmin": "This agent isn't granted this key yet. You'll be asked to add it on deploy.",
+    "notGrantedNonAdmin": "This agent isn't granted this key yet. Ask an administrator to grant it before deploying."
   },
   "snippetEditor": {
     "category": "Category",
@@ -4417,7 +4425,8 @@
       "platformBaseUrlUnresolved": "This deployment runs on a random HTTP port and has no eddi.self.base-url, so it cannot say where it can reach itself. Enter the address here.",
       "llmEndpoint": "Model endpoint",
       "promptBodyDiffers": "These instructions differ from the current default — they were edited, or written by an earlier version of the Manager.",
-      "promptBodyReset": "Reset to default"
+      "promptBodyReset": "Reset to default",
+      "keyRestricted": "\"{{key}}\" is restricted to specific agents. The operator will be added to the grant of {{key}} — you will be asked to confirm before it is deployed."
     },
     "authMode": {
       "none": {
@@ -4439,7 +4448,8 @@
       "done": "Done",
       "longWait1": "The operator agent is being built and deployed — this is the longest step…",
       "longWait2": "Wiring up tools and the approval gate on the new agent…",
-      "longWait3": "Still working — deployment can take a while on a busy platform…"
+      "longWait3": "Still working — deployment can take a while on a busy platform…",
+      "deploying": "Deploying the operator agent — you may be asked to grant it its model key…"
     },
     "status": {
       "title": "Operator",
@@ -4605,6 +4615,30 @@
       "hintAction": "Upgrade",
       "keepCurrent": "Keep the current text (it will not learn what the new default adds)",
       "title": "An update for the Platform Operator is available"
+    },
+    "unregistered": {
+      "title": "Operator agents this screen does not manage",
+      "description": "These agents look like a Platform Operator, but the operator configuration does not point at them. Adopt one to manage it here, or remove it.",
+      "adopt": "Adopt",
+      "adopted": "Operator adopted — this screen now manages it.",
+      "fixAndDeploy": "Fix grant and deploy",
+      "remove": "Remove",
+      "removeTitle": "Remove this operator agent?",
+      "removeBody": "The agent is undeployed, its conversations are ended, and it and the resources created for it are permanently deleted. This cannot be undone.",
+      "removed": "Operator agent removed",
+      "status": {
+        "READY": "Deployed",
+        "IN_PROGRESS": "Deploying",
+        "ERROR": "Error",
+        "NOT_FOUND": "Not deployed"
+      }
+    },
+    "health": {
+      "missing": "The operator configuration points at agent {{id}}, which no longer exists.",
+      "cleared": "Operator configuration cleared",
+      "clear": "Clear configuration",
+      "notDeployed": "The operator is switched on, but its agent is not deployed.",
+      "deploy": "Deploy again"
     }
   },
   "groupWorkspace": {
@@ -5244,5 +5278,28 @@
     "impactReasonLegacy": "predates version following",
     "impactReasonBreaking": "breaking change",
     "switchNotice": "Agent moved from v{{from}} to v{{to}}"
+  },
+  "grantRequired": {
+    "title": "This agent is not granted its vault keys",
+    "titleRefused": "Deployment refused: vault key not granted",
+    "copied": "Request copied — send it to an administrator",
+    "issueWithAgents": "\"{{agent}}\" uses the restricted key \"{{key}}\", currently allowed for: {{agents}}.",
+    "issueWithCount_one": "\"{{agent}}\" uses the restricted key \"{{key}}\", currently allowed for {{count}} agent.",
+    "issueWithCount_other": "\"{{agent}}\" uses the restricted key \"{{key}}\", currently allowed for {{count}} agents.",
+    "issue": "\"{{agent}}\" uses the restricted key \"{{key}}\", which is granted only to other agents.",
+    "unfixable": "\"{{reference}}\" is not a plain vault reference, so it cannot be granted from here. Change the agent's configuration to use a vault key it may use.",
+    "questionAll": "Allow every agent to use these keys?",
+    "question": "Add \"{{agent}}\" to the grant?",
+    "allowAll": "Allow every agent to use this key instead",
+    "allowAllWarning": "Every agent on this deployment — including ones created later — will be able to use it. That removes the only limit on this key's reach.",
+    "nonAdmin": "Only an administrator can change who may use a vault key. Ask one to add this agent to the grant, then deploy again.",
+    "copyRequest": "Copy request for an admin",
+    "losingAccess": "These deployed agents would lose access to the key:",
+    "deployAnyway": "Deploy anyway",
+    "applyAnyway": "Apply anyway and deploy",
+    "allowAllAndDeploy": "Allow all and deploy",
+    "addAndDeploy": "Add and deploy",
+    "cancelled": "Not deployed — the vault key was not granted.",
+    "fix": "Fix"
   }
 }

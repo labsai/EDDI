@@ -26,3 +26,25 @@ A vault secret's grant (`allowedAgents`) lists agent ids, and an id exists only 
 | 2026-10-06 | A deploy refused by the vault-grant gate returns 200 + `failure`, not 409 | Handoff preferred 409 so callers notice a grant refusal | 409: every other failed waited deploy is a 200 with the outcome in the body; one outcome would get two shapes across 4 in-process callers, the Manager and quarkus-eddi |
 | 2026-10-06 | One-agent grant append is a compare-and-set loop over the existing guarded write, not a new persistence method | Two admins granting two new agents at once lost one grant with the replacing PUT | A new atomic `$addToSet` per store (Mongo + Postgres twins) for the same guarantee |
 ```
+
+## ✨ feat(manager): grant-then-deploy dialog, restricted-key badge, and an operator that never leaks an agent (2026-10-06)
+
+**Repo:** EDDI (`feat/vault-grant-ux`), `ui/manager`
+
+### What changed and why
+
+- **One shared grant step wherever the Manager deploys** (`useDeployWithGrants` + `GrantRequiredDialog`): save-and-deploy, the agent card, agent detail, the resource page's deploy action and the agent wizard. It runs the preflight, then (for an administrator) a dry-run append, the append, and a waited deploy. A deploy that still comes back with `VAULT_GRANT_MISSING` reopens the same dialog, once. Non-administrators get the explanation and a copyable request for an admin. A failed deploy now shows its reason, with a **Fix** button for a missing grant. The agent wizard creates with `deploy: false` and settles grants before the first deploy, so a new agent never shows a failed first deploy.
+- **Secret picker:** a lock badge "Restricted to N agents" on a restricted key, and a "not granted yet" note when the editor knows its owning agent (`useOwningAgent`, set by the resource page and Agent Studio).
+- **Platform Operator:**
+  - activation no longer leaks the created agent when its deploy fails. The old `assertProvisioned` threw before the rollback `try`.
+  - a restricted model key is granted inside activation, on the same agent, and a retry reuses it.
+  - operator agents the Manager did not register are listed with Adopt, Fix and Remove. The marker is `[eddi-platform-operator]` on the descriptor.
+  - the preflight endpoint is on the operator's read allow-list. The append-grant endpoint is deliberately not, because no LLM may widen a grant. The prompt explains `failure`. The operator revision moved from 2 to 3.
+- The 6.4.0 OpenAPI snapshot predates the two new endpoints, so they are exempted in `openapi-contract.test.ts` until the next `npm run openapi:refresh`.
+
+### Still open
+
+- `pages/group-wizard.tsx` and `pages/workforce/workforce-wizard.tsx` still create member agents with `deploy: true`. Their refused deploys now carry the reason, but they do not yet go through the grant dialog.
+- Re-enabling a paused operator (`reactivateOperator`) deploys without the grant dialog. If that deploy is refused, the operator screen's banner shows the reason and a Fix button.
+
+**Files:** [`use-deploy-with-grants.ts`](../../ui/manager/src/hooks/use-deploy-with-grants.ts), [`grant-required-dialog.tsx`](../../ui/manager/src/components/secrets/grant-required-dialog.tsx), [`secret-key-picker.tsx`](../../ui/manager/src/components/shared/secret-key-picker.tsx), [`use-operator.ts`](../../ui/manager/src/hooks/use-operator.ts), [`operator-discovery.ts`](../../ui/manager/src/lib/api/operator-discovery.ts), [`unregistered-operators.tsx`](../../ui/manager/src/components/operator/unregistered-operators.tsx). Docs: [`architecture.md`](../architecture.md#a-restricted-model-key-and-operators-the-manager-did-not-register).

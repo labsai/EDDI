@@ -29,8 +29,12 @@ import {
   seedConfig,
   runPostActivationProbes,
   operatorKeys,
+  useOperatorAgentPresence,
+  OperatorGrantPendingError,
   type ActivationStage,
+  type KeptOperatorAgent,
 } from "@/hooks/use-operator";
+import { RegisteredOperatorHealth, UnregisteredOperators } from "@/components/operator/unregistered-operators";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
 import { useApprovalStatus } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
@@ -80,6 +84,13 @@ export function OperatorPage() {
    * and an upgrade never opens it.
    */
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  /**
+   * The agent an activation kept because its model key was not granted to it.
+   * Handed to the next attempt, which reuses it instead of creating a second
+   * one. Page state: after a reload the agent is still found by the
+   * unregistered-operators listing (it carries the operator marker).
+   */
+  const [keptAgent, setKeptAgent] = useState<KeptOperatorAgent | null>(null);
 
   const activate = useActivateOperator();
   const reactivate = useReactivateOperator();
@@ -92,6 +103,7 @@ export function OperatorPage() {
   const gate = useVerifyOperatorGate(config);
   const chat = useOperatorChat(config);
   const upgrade = useOperatorUpgradeAssessment(config);
+  const presence = useOperatorAgentPresence(config);
 
   // Structured RULE/TOOL_CALL pause detail — the streamed `done` snapshot only
   // carries the generic bookmark fields, not per-call tool names/arguments.
@@ -225,9 +237,11 @@ export function OperatorPage() {
           apiKey,
           baseUrl,
           onStage: setStage,
+          reuseAgent: keptAgent,
         },
         {
           onSuccess: (outcome) => {
+            setKeptAgent(null);
             setStage("idle");
             setShowActivation(false);
             // A replacement whose predecessor could not be retired leaves TWO
@@ -307,6 +321,9 @@ export function OperatorPage() {
           },
           onError: (err) => {
             setStage("idle");
+            // A refused grant keeps the agent for the retry; anything else
+            // removed what it created, so there is nothing left to reuse.
+            setKeptAgent(err instanceof OperatorGrantPendingError ? err.kept : null);
             const message = getErrorMessage(err);
             if (onFailure) onFailure(message);
             else setActivationError(message);
@@ -315,7 +332,7 @@ export function OperatorPage() {
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activate, chat.reset, t],
+    [activate, chat.reset, t, keptAgent],
   );
 
   /**
@@ -442,9 +459,13 @@ export function OperatorPage() {
     );
   }
 
+  /** The registered operator exists and is switched on — adopting another would orphan it. */
+  const registeredHealthy = Boolean(config?.agentId && config.enabled && presence.data !== "absent");
+
   if (isPaused) {
     return (
       <div className="mx-auto max-w-lg space-y-4 py-16 text-center">
+        {config && <RegisteredOperatorHealth config={config} status={status.data} />}
         <PauseCircle className="mx-auto h-10 w-10 text-muted-foreground/60" />
         <p className="text-lg font-medium">{t("operator.paused.title", "The Platform Operator is paused")}</p>
         <p className="text-sm text-muted-foreground">{t("operator.paused.description", "It is still configured — turning it back on redeploys the same agent. Nothing has been deleted.")}</p>
@@ -483,13 +504,18 @@ export function OperatorPage() {
             handleReset();
           }}
         />
+        <div className="text-start">
+          <UnregisteredOperators config={config} registeredHealthy={registeredHealthy} />
+        </div>
       </div>
     );
   }
 
   if (!isActive) {
     return (
-      <div className="py-8">
+      <div className="space-y-4 py-8">
+        {config?.agentId && <RegisteredOperatorHealth config={config} status={status.data} />}
+        <UnregisteredOperators config={config} registeredHealthy={registeredHealthy} />
         <EmptyState
           icon={Sparkles}
           title={t("operator.empty.title", "The Platform Operator is off")}
@@ -510,6 +536,9 @@ export function OperatorPage() {
           <p className="text-sm text-muted-foreground">{t("operator.subtitle", "Ask about this EDDI deployment — it looks things up for you.")}</p>
         </div>
       </header>
+
+      <RegisteredOperatorHealth config={config!} status={status.data} />
+      <UnregisteredOperators config={config} registeredHealthy={registeredHealthy} />
 
       {upgrade?.needed && (
         <OperatorUpgradeNotice

@@ -3,7 +3,6 @@ import { isForbidden } from "@/lib/access";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { accessForDetail } from "@/lib/access";
@@ -49,7 +48,9 @@ import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
-import { deployAgent } from "@/lib/api/agents";
+import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
+import { reportDeployOutcome } from "@/lib/deploy-outcome";
+import { OwningAgentContext } from "@/hooks/use-owning-agent";
 
 /**
  * One id for the "saved — not yet live" toast, so only the most recent save's
@@ -62,7 +63,6 @@ export function ResourceDetailPage() {
   const [searchParams] = useSearchParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const rt = getResourceType(type ?? "");
   const Icon = getResourceTypeIcon(rt?.slug);
@@ -171,6 +171,7 @@ export function ResourceDetailPage() {
   // Agent context for Save & Test
   const agentCtx = useAgentContext();
   const { saveAndDeploy, isRunning: isSaveAndDeploying } = useSaveAndDeploy();
+  const { deploy: deployWithGrants } = useDeployWithGrants();
 
   // Version diff dialog state
   const [showDiff, setShowDiff] = useState(false);
@@ -265,16 +266,21 @@ export function ResourceDetailPage() {
                     ? {
                         label: t("editor.deployNow", "Deploy"),
                         onClick: () => {
-                          deployAgent("production", cascadeContext.agentId, newAgentVersion)
-                            .then(() => {
-                              // Same caches the Save & Deploy flow refreshes: the
-                              // agent list and the chat's deployed-agent picker
-                              // both render a deployment state that has just
-                              // changed underneath them.
-                              queryClient.invalidateQueries({ queryKey: ["agents"] });
-                              queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
-                              toast.success(t("editor.deployStarted", "Deployment started"));
-                            })
+                          // Grant-aware and waited: a restricted vault key this
+                          // agent is not granted is asked about before the
+                          // deploy, and a refusal says why instead of a toast
+                          // that reported "started" for a deploy that then failed.
+                          // useDeployWithGrants refreshes the agent and chat
+                          // caches whatever the outcome.
+                          const options = {
+                            agentId: cascadeContext.agentId,
+                            version: newAgentVersion,
+                            environment: "production",
+                          };
+                          deployWithGrants(options)
+                            .then((outcome) =>
+                              reportDeployOutcome(outcome, options, t, t("editor.deployDone", "Deployed — the change is live")),
+                            )
                             .catch((err) => toast.error(getErrorMessage(err)));
                         },
                       }
@@ -332,7 +338,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, queryClient, adoptPartialCascade]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, adoptPartialCascade, deployWithGrants]
   );
 
   const handleSaveAndDeploy = useCallback(
@@ -617,6 +623,10 @@ export function ResourceDetailPage() {
 
       {!isLoading && !isError && data !== undefined && (
         <>
+          {/* The agent this resource is being edited for, when reached from one —
+              so the editors' secret pickers can say whether that agent is on a
+              restricted key's grant. */}
+          <OwningAgentContext.Provider value={cascadeContext?.agentId}>
           <ConfigEditorLayout
             typeName={typeName}
             typeIcon={Icon}
@@ -639,6 +649,7 @@ export function ResourceDetailPage() {
             jsonSchema={jsonSchema}
             onCompare={() => setShowDiff(true)}
           />
+          </OwningAgentContext.Provider>
           {/* Version diff dialog */}
           {showDiff && (
             <VersionDiffDialog

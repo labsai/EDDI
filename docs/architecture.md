@@ -718,6 +718,23 @@ The Manager tracks this with a **provisioning revision** (`ui/manager/src/lib/op
 
 *Upgrade* rebuilds the operator with the same model, key, environment and access settings. Like *Reconfigure*, it is a replacement: the new operator passes every activation check before the old one is removed. The open operator chat ends, and conversations with the old operator no longer appear in its history. Instructions the admin never edited are replaced with the new default; edited ones are kept unless the admin chooses the new default. An operator whose model key was entered as plain text (never stored), or whose model-server address was not recorded, opens the activation form prefilled instead.
 
+### A restricted model key, and operators the Manager did not register
+
+**Activation creates, grants, then deploys.** The operator is created with `deploy: false` and given the descriptor marker `[eddi-platform-operator]`. Then the [deploy preflight](secrets-vault.md#preflight-before-deploying) runs against it. If the model key is a vault secret restricted to named agents, the activation dialog says so before anything is created. After creating the agent, it asks the administrator to add this agent to the key's grant (dry run, then append), and only then deploys. A grant that is refused or cancelled keeps that one agent: not deployed, not registered. The next attempt reuses it as long as the settings are unchanged, so retrying never leaves a second operator behind. Any other deploy failure removes the agent it just created.
+
+**The operator screen also finds operator agents it did not register.** Normally the screen knows the operator from the `platform.operator` global variable. That variable is missing, or points elsewhere, when the operator was created by the setup API or MCP, imported from another instance, or left behind by an older failed activation. In those cases the screen lists the operator agents it finds, using one descriptor listing:
+
+- an agent whose descriptor carries the marker counts as an operator;
+- an older agent named "operator" counts only if its stored approval gate is complete and one of its HTTP toolsets targets this instance.
+
+Each listed agent shows its deployment status and, for a refused deploy, the reason. The actions are:
+
+- **Adopt** writes `platform.operator` from the agent's own configuration, after verifying its gate.
+- **Fix grant and deploy** opens the grant dialog.
+- **Remove** undeploys and deletes the agent.
+
+The reverse case gets a banner: `platform.operator` names an agent that no longer exists, or one that is enabled but not deployed.
+
 ### Key Insight
 
 The operator isn't special code—it's a **regular EDDI agent** that uses:

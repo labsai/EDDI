@@ -6,6 +6,7 @@ import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import { App } from "@/app";
+import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
 import { i18nReady } from "@/i18n/config";
 import "@/index.css";
 // NOT importing "@/hooks/session-log-store" here, deliberately. It used to be a
@@ -112,6 +113,8 @@ async function startApp() {
             <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
               <App />
               <Toaster position="bottom-right" richColors closeButton />
+              {/* The one vault-grant dialog every deploy flow asks through. */}
+              <GrantRequiredDialogHost />
             </ThemeProvider>
           </QueryClientProvider>
         </AuthProvider>
