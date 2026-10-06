@@ -320,7 +320,7 @@ final class OgnlTernaryConverter {
         if (right.kind() == Kind.NUMBER && !equality) {
             // Guard against a missing value. Qute reads zero as false, so the guard
             // is only right where x == 0 is false for the comparison anyway.
-            double bound = Double.parseDouble(right.text());
+            double bound = numberValue(right.text());
             boolean zeroIsFalse = (comparison.equals(">") && bound >= 0) || (comparison.equals(">=") && bound > 0);
             if (!zeroIsFalse) {
                 throw new Unsure();
@@ -328,6 +328,19 @@ final class OgnlTernaryConverter {
             return new Cond(left.text() + " && " + left.text() + " " + comparison + " " + right.text(), Cond.AND);
         }
         throw new Unsure();
+    }
+
+    /**
+     * The value of a number literal the converter is willing to emit: plain digits
+     * with an optional fraction, at most nine integer digits. Anything else (a
+     * value past what Qute reads as a number, {@code 1.2.3}) is not converted
+     * rather than risking a conversion that throws at render time.
+     */
+    private static double numberValue(String literal) {
+        if (!literal.matches("\\d{1,9}(\\.\\d{1,9})?")) {
+            throw new Unsure();
+        }
+        return Double.parseDouble(literal);
     }
 
     private static boolean isComparison(String op) {

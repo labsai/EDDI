@@ -100,6 +100,11 @@ class TemplateSyntaxMigratorConditionalTest {
         assertNull(OgnlTernaryConverter.convert("userInfo.n < 5 ? 'a' : 'b'"));
         assertNull(OgnlTernaryConverter.convert("userInfo.n + 1 > 0 ? 'a' : 'b'"));
         assertNull(OgnlTernaryConverter.convert("user.name() ? 'a' : 'b'"));
+        // a number literal that is malformed or too large must answer "not sure", never
+        // throw
+        assertNull(OgnlTernaryConverter.convert("userInfo.n > 99999999999999999999 ? 'a' : 'b'"));
+        assertNull(OgnlTernaryConverter.convert("userInfo.n > 1.2.3 ? 'a' : 'b'"));
+        assertNotNull(OgnlTernaryConverter.convert("userInfo.n > 100 ? 'a' : 'b'"));
         assertNull(OgnlTernaryConverter.convert("userInfo.n > 0 ? 'a' : 'b' trailing"));
     }
 
