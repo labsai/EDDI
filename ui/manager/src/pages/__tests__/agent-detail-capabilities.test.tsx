@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -8,6 +8,9 @@ import type { Agent } from "@/lib/api/agents";
 import userEvent from "@testing-library/user-event";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
+
+/** The page's draft setter; a section only ever reports an edit through it. */
+const onChange = vi.fn();
 
 function renderSection(agentOverrides: Partial<Agent> = {}) {
   const queryClient = new QueryClient({
@@ -26,13 +29,15 @@ function renderSection(agentOverrides: Partial<Agent> = {}) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test-cap-editor">
-        <CapabilitiesSection agent={agent} agentId="agent-test" version={1} />
+        <CapabilitiesSection agent={agent} onChange={onChange} />
       </ThemeProvider>
     </QueryClientProvider>,
   );
 }
 
 describe("CapabilitiesSection — Editor", () => {
+  beforeEach(() => onChange.mockReset());
+
   it("renders capabilities section container", async () => {
     renderSection();
     // Section is collapsed by default when no capabilities
@@ -165,7 +170,7 @@ describe("CapabilitiesSection — Editor", () => {
 
   // ─── Interaction tests ────────────────────────────────────────────────
 
-  it("adds a new capability via add button and calls update API", async () => {
+  it("adds a new capability via add button records the edit without saving", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -193,11 +198,13 @@ describe("CapabilitiesSection — Editor", () => {
     await user.click(screen.getByTestId("add-capability-btn"));
 
     await waitFor(() => {
-      expect(updateCalled).toBe(true);
+      // Recorded in the draft — and not written: saving is the page's Save.
+      expect(onChange).toHaveBeenCalled();
+      expect(updateCalled).toBe(false);
     });
   });
 
-  it("removes a capability and calls update API", async () => {
+  it("removes a capability records the edit without saving", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -225,11 +232,13 @@ describe("CapabilitiesSection — Editor", () => {
     await user.click(removeBtn);
 
     await waitFor(() => {
-      expect(updateCalled).toBe(true);
+      // Recorded in the draft — and not written: saving is the page's Save.
+      expect(onChange).toHaveBeenCalled();
+      expect(updateCalled).toBe(false);
     });
   });
 
-  it("changes confidence level and calls update API", async () => {
+  it("changes confidence level records the edit without saving", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -253,11 +262,13 @@ describe("CapabilitiesSection — Editor", () => {
     await user.selectOptions(screen.getByTestId("confidence-select-0"), "high");
 
     await waitFor(() => {
-      expect(updateCalled).toBe(true);
+      // Recorded in the draft — and not written: saving is the page's Save.
+      expect(onChange).toHaveBeenCalled();
+      expect(updateCalled).toBe(false);
     });
   });
 
-  it("selects an autocomplete item and calls update API", async () => {
+  it("selects an autocomplete item records the edit without saving", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -292,7 +303,9 @@ describe("CapabilitiesSection — Editor", () => {
     await user.click(suggestion);
 
     await waitFor(() => {
-      expect(updateCalled).toBe(true);
+      // Recorded in the draft — and not written: saving is the page's Save.
+      expect(onChange).toHaveBeenCalled();
+      expect(updateCalled).toBe(false);
     });
   });
 });

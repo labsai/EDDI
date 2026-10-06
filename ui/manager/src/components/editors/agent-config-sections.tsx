@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
+import { useState, useRef, useEffect, useMemo, memo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -20,90 +20,68 @@ import {
   Hand,
   NotebookPen,
 } from "lucide-react";
-import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
+import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
 import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
-import { isApiError } from "@/lib/api-client";
 import { EditorSection } from "./editor-section";
 import { ToolApprovalsEditor } from "./tool-approvals-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 
-// ─── Debounced input helpers ─────────────────────────────────────────────────
+/** What every agent-detail section takes from the page. */
+interface AgentSectionProps {
+  /** The page's draft of the agent document. */
+  agent: Agent;
+  /** Records an edit in the draft — nothing is saved until the page's Save. */
+  onChange: AgentEdit;
+  /** True while the page is saving the draft. */
+  disabled?: boolean;
+  /** Whether this section's fields differ from the saved version. */
+  modified?: boolean;
+}
 
-/** Text input that buffers locally and debounces the mutation to avoid per-keystroke PUTs */
-function DebouncedInput({
+// ─── Draft input helpers ─────────────────────────────────────────────────────
+
+/**
+ * Text input that writes every keystroke into the page's draft. Edits are local
+ * until the page's Save, so there is nothing left to debounce.
+ */
+function DraftInput({
   value,
   onCommit,
-  delay = 600,
   ...rest
 }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange"> & {
   value: string;
   onCommit: (v: string) => void;
-  delay?: number;
 }) {
-  const [local, setLocal] = useState(value);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Sync from parent if the external value changes (version bump etc.)
-  useEffect(() => setLocal(value), [value]);
-
-  const commit = useCallback(
-    (v: string) => {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => onCommit(v), delay);
-    },
-    [onCommit, delay],
-  );
-
-  // Cleanup on unmount
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  return (
-    <input
-      {...rest}
-      value={local}
-      onChange={(e) => {
-        setLocal(e.target.value);
-        commit(e.target.value);
-      }}
-    />
-  );
+  return <input {...rest} value={value} onChange={(e) => onCommit(e.target.value)} />;
 }
 
-/** Number input that buffers locally and debounces the mutation */
-function DebouncedNumberInput({
+/**
+ * Number input that keeps what is typed (an empty or half-typed number stays
+ * on screen) and writes the parsed value — or `fallback` — into the draft.
+ */
+function DraftNumberInput({
   value,
   onCommit,
-  delay = 600,
   fallback = 0,
   ...rest
 }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value"> & {
   value: number;
   onCommit: (v: number) => void;
-  delay?: number;
   fallback?: number;
 }) {
   const [local, setLocal] = useState(String(value));
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => setLocal(String(value)), [value]);
-
-  const commit = useCallback(
-    (raw: string) => {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        onCommit(parseFloat(raw) || fallback);
-      }, delay);
-    },
-    [onCommit, delay, fallback],
-  );
-
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  // Follow the draft when it changes underneath (Discard, a save, a version
+  // switch) — but not when it merely holds the number this field just parsed.
+  useEffect(() => {
+    setLocal((prev) => ((parseFloat(prev) || fallback) === value ? prev : String(value)));
+  }, [value, fallback]);
 
   return (
     <input
@@ -112,7 +90,7 @@ function DebouncedNumberInput({
       value={local}
       onChange={(e) => {
         setLocal(e.target.value);
-        commit(e.target.value);
+        onCommit(parseFloat(e.target.value) || fallback);
       }}
     />
   );
@@ -125,26 +103,12 @@ const INERT_SECURITY_FLAGS = ["signInterAgentMessages", "signMcpInvocations", "r
 
 export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   agent,
-  agentId,
-  version,
-}: {
-  agent: Agent;
-  agentId: string;
-  version: number;
-}) {
+  onChange,
+  disabled = false,
+  modified = false,
+}: AgentSectionProps) {
   const { t } = useTranslation();
-  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [pendingFlag, setPendingFlag] = useState<typeof INERT_SECURITY_FLAGS[number] | null>(null);
-  const [securityError, setSecurityError] = useState<string | null>(null);
-
-  // Clear error after 8 seconds
-  useEffect(() => {
-    if (securityError) {
-      const timer = setTimeout(() => setSecurityError(null), 8000);
-      return () => clearTimeout(timer);
-    }
-  }, [securityError]);
-
   const hasAnyFlagEnabled = INERT_SECURITY_FLAGS.some((f) => agent.security?.[f]);
 
   function handleToggle(field: typeof INERT_SECURITY_FLAGS[number]) {
@@ -159,28 +123,10 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   }
 
   function doToggle(field: typeof INERT_SECURITY_FLAGS[number], currentValue: boolean) {
-    setSecurityError(null);
-    updateAgent.mutate(
-      {
-        id: agentId,
-        version,
-        agent: {
-          ...agent,
-          security: { ...agent.security, [field]: !currentValue },
-        },
-      },
-      {
-        onError: (err) => {
-          if (isApiError(err) && err.status === 400) {
-            setSecurityError(err.message);
-          } else {
-            setSecurityError(
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-        },
-      },
-    );
+    onChange({
+      ...agent,
+      security: { ...agent.security, [field]: !currentValue },
+    });
   }
 
   function confirmPendingFlag() {
@@ -196,6 +142,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
       icon={ShieldCheck}
       accent="text-rose-500"
       variant="card"
+      modified={modified}
       defaultOpen={!!(agent.security?.signInterAgentMessages || agent.security?.signMcpInvocations || agent.identity?.agentDid)}
     >
       {/* Identity */}
@@ -209,17 +156,13 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             <label className="mb-1 block text-xs text-muted-foreground">
               {t("agentDetail.agentDid", "Agent DID")}
             </label>
-            <DebouncedInput
+            <DraftInput
               type="text"
               value={agent.identity?.agentDid ?? ""}
               onCommit={(v) =>
-                updateAgent.mutate({
-                  id: agentId,
-                  version,
-                  agent: {
-                    ...agent,
-                    identity: { ...agent.identity, agentDid: v || undefined },
-                  },
+                onChange({
+                  ...agent,
+                  identity: { ...agent.identity, agentDid: v || undefined },
                 })
               }
               placeholder="did:eddi:agent:..."
@@ -305,20 +248,6 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           </div>
         )}
 
-        {/* HTTP 400 error display */}
-        {securityError && (
-          <div
-            className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5"
-            data-testid="security-flag-error"
-            role="alert"
-          >
-            <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-            <p className="text-[11px] text-destructive leading-relaxed">
-              {securityError}
-            </p>
-          </div>
-        )}
-
         {([
           ["signInterAgentMessages", t("agentDetail.signA2A", "Sign inter-agent (A2A) messages"), t("agentDetail.signA2ADesc", "Cryptographically sign outbound A2A messages for tamper-proofing")],
           ["signMcpInvocations", t("agentDetail.signMcp", "Sign MCP invocations"), t("agentDetail.signMcpDesc", "Attach signatures to MCP tool calls for secure server verification")],
@@ -329,7 +258,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
               type="checkbox"
               checked={agent.security?.[field] ?? false}
               onChange={() => handleToggle(field)}
-              disabled={updateAgent.isPending}
+              disabled={disabled}
               className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
               data-testid={`security-flag-${field}`}
             />
@@ -471,48 +400,27 @@ function CapabilityAttributesEditor({
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
 
-  // Keep a ref to the latest attributes so debounced callbacks don't use stale state
-  const attrsRef = useRef(attributes);
-  useEffect(() => { attrsRef.current = attributes; }, [attributes]);
-
-  // Debounce timer for value edits
-  const valueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (valueTimer.current) clearTimeout(valueTimer.current); }, []);
-
   function addAttribute() {
     if (!newKey.trim()) return;
-    onChange({ ...attrsRef.current, [newKey.trim()]: newValue.trim() });
+    onChange({ ...attributes, [newKey.trim()]: newValue.trim() });
     setNewKey("");
     setNewValue("");
   }
 
   function removeAttribute(key: string) {
-    // Cancel any pending debounced edit for this (or any) key to prevent
-    // a stale commitValue callback from resurrecting the deleted attribute
-    if (valueTimer.current) {
-      clearTimeout(valueTimer.current);
-      valueTimer.current = null;
-    }
-    const next = { ...attrsRef.current };
+    const next = { ...attributes };
     delete next[key];
     onChange(next);
-  }
-
-  function commitValue(key: string, val: string) {
-    if (valueTimer.current) clearTimeout(valueTimer.current);
-    valueTimer.current = setTimeout(() => {
-      onChange({ ...attrsRef.current, [key]: val });
-    }, 600);
   }
 
   return (
     <div className="space-y-1.5 ps-3 border-s-2 border-violet-500/20">
       {entries.map(([k, v]) => (
-        <DebouncedAttrRow
+        <AttrRow
           key={k}
           attrKey={k}
           attrValue={v}
-          onCommit={(val) => commitValue(k, val)}
+          onCommit={(val) => onChange({ ...attributes, [k]: val })}
           onRemove={() => removeAttribute(k)}
           disabled={disabled}
         />
@@ -552,8 +460,8 @@ function CapabilityAttributesEditor({
   );
 }
 
-/** Single attribute row that buffers its value locally to avoid per-keystroke PUTs. */
-function DebouncedAttrRow({
+/** Single attribute row; every keystroke goes into the page's draft. */
+function AttrRow({
   attrKey,
   attrValue,
   onCommit,
@@ -566,21 +474,6 @@ function DebouncedAttrRow({
   onRemove: () => void;
   disabled?: boolean;
 }) {
-  const [local, setLocal] = useState(attrValue);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Sync from parent on external changes (version bump etc.)
-  useEffect(() => setLocal(attrValue), [attrValue]);
-
-  // Cleanup timer on unmount
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  function handleChange(val: string) {
-    setLocal(val);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => onCommit(val), 600);
-  }
-
   return (
     <div className="flex items-center gap-1.5">
       <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
@@ -588,8 +481,8 @@ function DebouncedAttrRow({
       </span>
       <input
         type="text"
-        value={local}
-        onChange={(e) => handleChange(e.target.value)}
+        value={attrValue}
+        onChange={(e) => onCommit(e.target.value)}
         disabled={disabled}
         className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
@@ -607,15 +500,11 @@ function DebouncedAttrRow({
 
 export const CapabilitiesSection = memo(function CapabilitiesSection({
   agent,
-  agentId,
-  version,
-}: {
-  agent: Agent;
-  agentId: string;
-  version: number;
-}) {
+  onChange,
+  disabled = false,
+  modified = false,
+}: AgentSectionProps) {
   const { t } = useTranslation();
-  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [newSkill, setNewSkill] = useState("");
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
@@ -629,24 +518,24 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
       return;
     }
     const updated = [...caps, { skill: skill.trim(), confidence: "medium", attributes: {} }];
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, capabilities: updated } });
+    onChange({ ...agent, capabilities: updated });
     setNewSkill("");
   }
 
   function removeCapability(idx: number) {
     const updated = caps.filter((_, i) => i !== idx);
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, capabilities: updated } });
+    onChange({ ...agent, capabilities: updated });
     if (expandedIdx === idx) setExpandedIdx(null);
   }
 
   function updateConfidence(idx: number, confidence: string) {
     const updated = caps.map((c, i) => (i === idx ? { ...c, confidence } : c));
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, capabilities: updated } });
+    onChange({ ...agent, capabilities: updated });
   }
 
   function updateAttributes(idx: number, attributes: Record<string, string>) {
     const updated = caps.map((c, i) => (i === idx ? { ...c, attributes } : c));
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, capabilities: updated } });
+    onChange({ ...agent, capabilities: updated });
   }
 
   return (
@@ -655,6 +544,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
       icon={Sparkles}
       accent="text-violet-500"
       variant="card"
+      modified={modified}
       defaultOpen={caps.length > 0}
     >
       <div className="space-y-3" data-testid="capabilities-section">
@@ -705,7 +595,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                   <button
                     type="button"
                     onClick={() => removeCapability(i)}
-                    disabled={updateAgent.isPending}
+                    disabled={disabled}
                     data-testid={`remove-capability-${i}`}
                     className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
                   >
@@ -721,7 +611,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                     <CapabilityAttributesEditor
                       attributes={cap.attributes ?? {}}
                       onChange={(attrs) => updateAttributes(i, attrs)}
-                      disabled={updateAgent.isPending}
+                      disabled={disabled}
                     />
                   </div>
                 )}
@@ -741,7 +631,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
           <button
             type="button"
             onClick={() => addCapability(newSkill)}
-            disabled={!newSkill.trim() || updateAgent.isPending}
+            disabled={!newSkill.trim() || disabled}
             className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
             data-testid="add-capability-btn"
           >
@@ -757,15 +647,11 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
 
 export const UserMemorySection = memo(function UserMemorySection({
   agent,
-  agentId,
-  version,
-}: {
-  agent: Agent;
-  agentId: string;
-  version: number;
-}) {
+  onChange,
+  disabled = false,
+  modified = false,
+}: AgentSectionProps) {
   const { t } = useTranslation();
-  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const enabled = agent.enableMemoryTools ?? false;
   const cfg = agent.userMemoryConfig ?? {};
@@ -773,7 +659,7 @@ export const UserMemorySection = memo(function UserMemorySection({
   const guardrails = cfg.guardrails ?? {};
 
   function patch(updates: Partial<Agent>) {
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, ...updates } });
+    onChange({ ...agent, ...updates });
   }
 
   function patchConfig(updates: Record<string, unknown>) {
@@ -794,6 +680,7 @@ export const UserMemorySection = memo(function UserMemorySection({
       icon={Brain}
       accent="text-teal-500"
       variant="card"
+      modified={modified}
       defaultOpen={enabled}
     >
       <div className="space-y-4" data-testid="user-memory-section">
@@ -806,7 +693,7 @@ export const UserMemorySection = memo(function UserMemorySection({
             type="checkbox"
             checked={enabled}
             onChange={() => patch({ enableMemoryTools: !enabled })}
-            disabled={updateAgent.isPending}
+            disabled={disabled}
             className="h-3.5 w-3.5 rounded border-input accent-primary"
           />
           <NotebookPen className="h-3.5 w-3.5 text-teal-500" />
@@ -834,7 +721,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("agentDetail.maxRecallEntries", "Max Recall")}
                 </label>
-                <DebouncedNumberInput
+                <DraftNumberInput
                   value={cfg.maxRecallEntries ?? 50}
                   onCommit={(v) => patchConfig({ maxRecallEntries: v })}
                   fallback={50}
@@ -845,7 +732,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("agentDetail.maxEntriesPerUser", "Max per User")}
                 </label>
-                <DebouncedNumberInput
+                <DraftNumberInput
                   value={cfg.maxEntriesPerUser ?? 500}
                   onCommit={(v) => patchConfig({ maxEntriesPerUser: v })}
                   fallback={500}
@@ -891,15 +778,15 @@ export const UserMemorySection = memo(function UserMemorySection({
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxKeyLength", "Max Key Length")}</label>
-                  <DebouncedNumberInput value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxValueLength", "Max Value Length")}</label>
-                  <DebouncedNumberInput value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxWritesPerTurn", "Max Writes/Turn")}</label>
-                  <DebouncedNumberInput value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
               </div>
             </div>
@@ -911,7 +798,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   type="checkbox"
                   checked={dream.enabled ?? false}
                   onChange={() => patchDream({ enabled: !(dream.enabled ?? false) })}
-                  disabled={updateAgent.isPending}
+                  disabled={disabled}
                   className="h-3.5 w-3.5 rounded border-input accent-primary"
                 />
                 <Moon className="h-3.5 w-3.5 text-indigo-400" />
@@ -926,29 +813,29 @@ export const UserMemorySection = memo(function UserMemorySection({
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamSchedule", "Schedule (cron)")}</label>
-                      <DebouncedInput type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmProvider", "LLM Provider")}</label>
-                      <DebouncedInput type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
-                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
-                      <DebouncedNumberInput value={dream.maxCostPerRun ?? 5.00} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput value={dream.maxCostPerRun ?? 5.00} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamPruneDays", "Prune After (days)")}</label>
-                      <DebouncedNumberInput value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamBatchSize", "Batch Size")}</label>
-                      <DebouncedNumberInput value={dream.batchSize ?? 50} onCommit={(v) => patchDream({ batchSize: v })} fallback={50} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput value={dream.batchSize ?? 50} onCommit={(v) => patchDream({ batchSize: v })} fallback={50} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="flex gap-4">
@@ -975,30 +862,22 @@ export const UserMemorySection = memo(function UserMemorySection({
 
 export const MemoryPolicySection = memo(function MemoryPolicySection({
   agent,
-  agentId,
-  version,
-}: {
-  agent: Agent;
-  agentId: string;
-  version: number;
-}) {
+  onChange,
+  disabled = false,
+  modified = false,
+}: AgentSectionProps) {
   const { t } = useTranslation();
-  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const policy = agent.memoryPolicy ?? {};
   const swd = policy.strictWriteDiscipline ?? {};
   const enabled = swd.enabled ?? false;
 
   function patchSwd(updates: Record<string, unknown>) {
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: {
-        ...agent,
-        memoryPolicy: {
-          ...policy,
-          strictWriteDiscipline: { ...swd, ...updates },
-        },
+    onChange({
+      ...agent,
+      memoryPolicy: {
+        ...policy,
+        strictWriteDiscipline: { ...swd, ...updates },
       },
     });
   }
@@ -1009,6 +888,7 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
       icon={ShieldBan}
       accent="text-rose-500"
       variant="card"
+      modified={modified}
       defaultOpen={enabled}
     >
       <div className="space-y-3" data-testid="memory-policy-section">
@@ -1021,7 +901,7 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
             type="checkbox"
             checked={enabled}
             onChange={() => patchSwd({ enabled: !enabled })}
-            disabled={updateAgent.isPending}
+            disabled={disabled}
             className="h-3.5 w-3.5 rounded border-input accent-primary"
             data-testid="swd-enable"
           />
@@ -1038,7 +918,7 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
               <select
                 value={swd.onFailure ?? "digest"}
                 onChange={(e) => patchSwd({ onFailure: e.target.value })}
-                disabled={updateAgent.isPending}
+                disabled={disabled}
                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
                 data-testid="swd-on-failure"
               >
@@ -1060,51 +940,39 @@ const SNAPSHOT_TRIGGERS = ["before_tool", "before_action"] as const;
 
 export const HitlConfigSection = memo(function HitlConfigSection({
   agent,
-  agentId,
-  version,
-}: {
-  agent: Agent;
-  agentId: string;
-  version: number;
-}) {
+  onChange,
+  disabled = false,
+  modified = false,
+}: AgentSectionProps) {
   const { t } = useTranslation();
-  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const hitl: AgentHitlConfig = agent.hitlConfig ?? {};
   const enabled = !!agent.hitlConfig;
 
   function patchHitl(updates: Partial<AgentHitlConfig>) {
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: { ...agent, hitlConfig: { ...hitl, ...updates } },
-    });
+    onChange({ ...agent, hitlConfig: { ...hitl, ...updates } });
   }
 
   function setEnabled(on: boolean) {
     if (on) {
-      updateAgent.mutate({
-        id: agentId,
-        version,
-        agent: {
-          ...agent,
-          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", approvalTimeout: null, ...hitl },
-        },
+      onChange({
+        ...agent,
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", approvalTimeout: null, ...hitl },
       });
     } else {
       const next = { ...agent };
       delete next.hitlConfig;
-      updateAgent.mutate({ id: agentId, version, agent: next });
+      onChange(next);
     }
   }
 
   const finite = requiresApprovalTimeout(hitl.timeoutPolicy);
-  // Draft state so the red border / invalid hint reflect what the user is
-  // TYPING — a controlled input bound to the committed value can't, since we
-  // deliberately don't persist an invalid finite-policy timeout.
+  // Local text so the red border / invalid hint reflect what the user is
+  // TYPING — a controlled input bound to the draft can't, since an invalid
+  // finite-policy timeout is deliberately never written into it.
   const [timeoutDraft, setTimeoutDraft] = useState(hitl.approvalTimeout ?? "");
-  // Resync to the committed value when it changes OR when the field is
-  // re-shown after a policy toggle, so a stale unsaved draft can't linger.
+  // Resync to the draft's value when it changes OR when the field is re-shown
+  // after a policy toggle, so stale typed text can't linger.
   useEffect(() => setTimeoutDraft(hitl.approvalTimeout ?? ""), [hitl.approvalTimeout, finite]);
   const invalid = finite && (!timeoutDraft.trim() || !isValidIsoDuration(timeoutDraft.trim()));
 
@@ -1114,6 +982,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
       icon={Hand}
       accent="text-amber-500"
       variant="card"
+      modified={modified}
       defaultOpen={enabled}
     >
       <div className="space-y-4" data-testid="hitl-config-section">
@@ -1129,7 +998,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
             type="checkbox"
             checked={enabled}
             onChange={() => setEnabled(!enabled)}
-            disabled={updateAgent.isPending}
+            disabled={disabled}
             className="h-3.5 w-3.5 rounded border-input accent-primary"
             data-testid="hitl-config-enabled"
           />
@@ -1144,10 +1013,10 @@ export const HitlConfigSection = memo(function HitlConfigSection({
               <label className="mb-1 block text-[10px] text-muted-foreground">
                 {t("agentDetail.hitlPauseReason", "Approval reason (shown to approvers)")}
               </label>
-              <DebouncedInput
+              <DraftInput
                 type="text"
                 value={hitl.pauseReason ?? ""}
-                onCommit={(v) => patchHitl({ pauseReason: v.trim() || null })}
+                onCommit={(v) => patchHitl({ pauseReason: v.trim() ? v : null })}
                 maxLength={MAX_PAUSE_REASON_LENGTH}
                 placeholder={t("agentDetail.hitlPauseReasonPlaceholder", "e.g. Deletion requires manager sign-off")}
                 className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1175,7 +1044,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                   }
                   patchHitl(updates);
                 }}
-                disabled={updateAgent.isPending}
+                disabled={disabled}
                 className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 data-testid="hitl-timeout-policy"
               >
@@ -1194,11 +1063,12 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                 <input
                   type="text"
                   value={timeoutDraft}
-                  onChange={(e) => setTimeoutDraft(e.target.value)}
-                  onBlur={() => {
-                    const next = timeoutDraft.trim() || null;
-                    // Never persist an invalid finite-policy config (backend 400);
-                    // the field shows the typed value + red border via `invalid`.
+                  onChange={(e) => {
+                    setTimeoutDraft(e.target.value);
+                    const next = e.target.value.trim() || null;
+                    // Never put an invalid finite-policy timeout into the draft
+                    // (the backend refuses it with a 400); the field shows the
+                    // typed value and a red border via `invalid` instead.
                     if (finite && !(next && isValidIsoDuration(next))) return;
                     if (next !== (hitl.approvalTimeout ?? null)) patchHitl({ approvalTimeout: next });
                   }}
@@ -1222,7 +1092,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                   type="checkbox"
                   checked={!!hitl.toolApprovals}
                   onChange={(e) => patchHitl({ toolApprovals: e.target.checked ? {} : null })}
-                  disabled={updateAgent.isPending}
+                  disabled={disabled}
                   className="h-3.5 w-3.5 rounded border-input accent-primary"
                   data-testid="hitl-tool-enabled"
                 />
@@ -1232,7 +1102,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                 <div className="mt-3">
                   <ToolApprovalsEditor
                     value={hitl.toolApprovals}
-                    disabled={updateAgent.isPending}
+                    disabled={disabled}
                     agentTimeoutPolicy={hitl.timeoutPolicy}
                     onChange={(u) =>
                       patchHitl({
@@ -1252,27 +1122,19 @@ export const HitlConfigSection = memo(function HitlConfigSection({
 
 export const SessionManagementSection = memo(function SessionManagementSection({
   agent,
-  agentId,
-  version,
-}: {
-  agent: Agent;
-  agentId: string;
-  version: number;
-}) {
+  onChange,
+  disabled = false,
+  modified = false,
+}: AgentSectionProps) {
   const { t } = useTranslation();
-  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const sm = agent.sessionManagement ?? {};
   const snap = sm.autoSnapshot ?? {};
 
   function patchSm(updates: Record<string, unknown>) {
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: {
-        ...agent,
-        sessionManagement: { ...sm, ...updates },
-      },
+    onChange({
+      ...agent,
+      sessionManagement: { ...sm, ...updates },
     });
   }
 
@@ -1286,6 +1148,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
       icon={Fingerprint}
       accent="text-teal-500"
       variant="card"
+      modified={modified}
       defaultOpen={snap.enabled ?? false}
     >
       <div className="space-y-4" data-testid="session-management-section">
@@ -1303,7 +1166,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
               type="checkbox"
               checked={snap.enabled ?? false}
               onChange={() => patchSnap({ enabled: !(snap.enabled ?? false) })}
-              disabled={updateAgent.isPending}
+              disabled={disabled}
               className="h-3.5 w-3.5 rounded border-input accent-primary"
               data-testid="auto-snapshot-enabled"
             />
@@ -1331,7 +1194,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
                             : [...current, trigger];
                           patchSnap({ triggerOn: next.length > 0 ? next : undefined });
                         }}
-                        disabled={updateAgent.isPending}
+                        disabled={disabled}
                         className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[10px] font-medium transition-colors ${
                           active
                             ? "border-primary bg-primary/10 text-primary"
@@ -1352,7 +1215,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
                 <label className="text-xs text-foreground whitespace-nowrap">
                   {t("agentDetail.maxCheckpoints", "Max Checkpoints")}
                 </label>
-                <DebouncedNumberInput
+                <DraftNumberInput
                   value={sm.maxCheckpointsPerConversation ?? 10}
                   onCommit={(v) => patchSm({ maxCheckpointsPerConversation: v })}
                   min={1}
@@ -1535,55 +1398,25 @@ function SlackChannelCard({
   const { t } = useTranslation();
   const cfg = useMemo(() => channel.config ?? {}, [channel.config]);
 
-  // Keep a ref to the latest config so debounced callbacks never use stale state.
-  // Without this, a 600ms channelId debounce could overwrite a botToken change
-  // that fired immediately (via SecretKeyPicker) during the debounce window.
-  const cfgRef = useRef(cfg);
-  useEffect(() => { cfgRef.current = cfg; }, [cfg]);
-
-  // Local state for channelId and groupId to debounce
-  const [localChannelId, setLocalChannelId] = useState(cfg.channelId ?? "");
-  const [localGroupId, setLocalGroupId] = useState(cfg.groupId ?? "");
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const channelIdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const groupIdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const channelId = cfg.channelId ?? "";
 
-  // Sync from parent on external changes
-  useEffect(() => setLocalChannelId(cfg.channelId ?? ""), [cfg.channelId]);
-  useEffect(() => setLocalGroupId(cfg.groupId ?? ""), [cfg.groupId]);
-
-  // Cleanup timers
-  useEffect(() => () => {
-    if (channelIdTimer.current) clearTimeout(channelIdTimer.current);
-    if (groupIdTimer.current) clearTimeout(groupIdTimer.current);
-  }, []);
-
-  function commitChannelId(v: string) {
-    if (channelIdTimer.current) clearTimeout(channelIdTimer.current);
-    channelIdTimer.current = setTimeout(() => {
-      onUpdate(index, { ...cfgRef.current, channelId: v });
-    }, 600);
-  }
-
-  function commitGroupId(v: string) {
-    if (groupIdTimer.current) clearTimeout(groupIdTimer.current);
-    groupIdTimer.current = setTimeout(() => {
-      if (!v.trim()) {
-        // Remove empty groupId to keep config clean
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { groupId: _discarded, ...rest } = cfgRef.current;
-        onUpdate(index, rest);
-      } else {
-        onUpdate(index, { ...cfgRef.current, groupId: v });
-      }
-    }, 600);
+  function setGroupId(v: string) {
+    if (!v) {
+      // Remove an empty groupId to keep the config clean
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { groupId: _discarded, ...rest } = cfg;
+      onUpdate(index, rest);
+    } else {
+      onUpdate(index, { ...cfg, groupId: v });
+    }
   }
 
   function handleSecretChange(key: "botToken" | "signingSecret", value: string) {
-    onUpdate(index, { ...cfgRef.current, [key]: value });
+    onUpdate(index, { ...cfg, [key]: value });
   }
 
-  const channelIdValid = !localChannelId || /^C[A-Z0-9]+$/.test(localChannelId);
+  const channelIdValid = !channelId || /^C[A-Z0-9]+$/.test(channelId);
 
   return (
     <div className="rounded-lg border border-border bg-background" data-testid={`slack-channel-${index}`}>
@@ -1594,9 +1427,9 @@ function SlackChannelCard({
           <span className="text-xs font-semibold text-foreground">
             {t("agentDetail.slackChannel", "Slack Channel")}
           </span>
-          {localChannelId && (
+          {channelId && (
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              {localChannelId}
+              {channelId}
             </code>
           )}
         </div>
@@ -1621,12 +1454,8 @@ function SlackChannelCard({
           </label>
           <input
             type="text"
-            value={localChannelId}
-            onChange={(e) => {
-              const v = e.target.value;
-              setLocalChannelId(v);
-              commitChannelId(v);
-            }}
+            value={channelId}
+            onChange={(e) => onUpdate(index, { ...cfg, channelId: e.target.value })}
             disabled={disabled}
             placeholder="C0123ABCDEF"
             className={`h-8 w-full rounded-md border bg-background px-2.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 ${
@@ -1682,12 +1511,8 @@ function SlackChannelCard({
           </label>
           <input
             type="text"
-            value={localGroupId}
-            onChange={(e) => {
-              const v = e.target.value;
-              setLocalGroupId(v);
-              commitGroupId(v);
-            }}
+            value={cfg.groupId ?? ""}
+            onChange={(e) => setGroupId(e.target.value)}
             disabled={disabled}
             placeholder={t("agentDetail.groupIdPlaceholder", "Multi-agent group config ID")}
             className="h-8 w-full rounded-md border border-input bg-background px-2.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
@@ -1718,15 +1543,11 @@ function SlackChannelCard({
 
 export const ChannelsSection = memo(function ChannelsSection({
   agent,
-  agentId,
-  version,
-}: {
-  agent: Agent;
-  agentId: string;
-  version: number;
-}) {
+  onChange,
+  disabled = false,
+  modified = false,
+}: AgentSectionProps) {
   const { t } = useTranslation();
-  const updateAgent = useAgentSectionSave(agentId, version, agent);
 
   const channels: ChannelConnector[] = agent.channels ?? [];
   const slackChannels = channels.filter((c) => c.type === "slack");
@@ -1737,11 +1558,7 @@ export const ChannelsSection = memo(function ChannelsSection({
       type: "slack",
       config: { channelId: "", botToken: "", signingSecret: "" },
     };
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: { ...agent, channels: [...channels, newChannel] },
-    });
+    onChange({ ...agent, channels: [...channels, newChannel] });
   }
 
   function updateChannel(idx: number, config: Record<string, string>) {
@@ -1757,11 +1574,7 @@ export const ChannelsSection = memo(function ChannelsSection({
       }
       return c;
     });
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: { ...agent, channels: updated },
-    });
+    onChange({ ...agent, channels: updated });
   }
 
   function removeChannel(idx: number) {
@@ -1776,11 +1589,7 @@ export const ChannelsSection = memo(function ChannelsSection({
       }
       return true;
     });
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: { ...agent, channels: updated },
-    });
+    onChange({ ...agent, channels: updated });
   }
 
   return (
@@ -1789,6 +1598,7 @@ export const ChannelsSection = memo(function ChannelsSection({
       icon={Cable}
       accent="text-indigo-500"
       variant="card"
+      modified={modified}
       defaultOpen={hasChannels}
     >
       <div className="space-y-4" data-testid="channels-section">
@@ -1821,7 +1631,7 @@ export const ChannelsSection = memo(function ChannelsSection({
             index={idx}
             onUpdate={updateChannel}
             onRemove={removeChannel}
-            disabled={updateAgent.isPending}
+            disabled={disabled}
           />
         ))}
 
@@ -1829,7 +1639,7 @@ export const ChannelsSection = memo(function ChannelsSection({
         <button
           type="button"
           onClick={addSlackChannel}
-          disabled={updateAgent.isPending}
+          disabled={disabled}
           className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-indigo-500/30 bg-indigo-500/5 px-4 py-2.5 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-500/10 hover:border-indigo-500/50 disabled:opacity-50 dark:text-indigo-400"
           data-testid="add-slack-channel-btn"
         >

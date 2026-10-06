@@ -349,9 +349,6 @@
     "userMemory": "用户记忆",
     "userMemoryDesc": "使用 LLM 工具（记住/召回/遗忘）的按用户持久化记忆。无论此开关如何设置，基本的 longTerm 属性持久化始终有效。",
     "viewingOldVersion": "您正在查看版本 {{current}}。最新版本为 {{latest}}。",
-    "workflowAdded": "工作流已添加",
-    "workflowRemoved": "工作流已移除",
-    "workflowUpdated": "工作流已更新到最新版本",
     "title": "Agent 详情",
     "backToAgents": "返回 Agents",
     "packages": "工作流",
@@ -458,7 +455,17 @@
       "notice": "聊天向用户显示的提示（留空则使用标准措辞）",
       "noticePlaceholder": "与此智能体的对话可能会被其维护者阅读，以便改进它。",
       "versionNote": "适用于此次更改所创建版本及之后版本上的对话——绝不包括之前的内容。Slack、Teams 和 API 客户端无法显示此提示；如果用户通过这些渠道使用此智能体，请在问候语中说明。"
-    }
+    },
+    "savedAsVersion": "已保存为版本 {{version}}",
+    "saved": "智能体已保存",
+    "saveConflict": "自你打开后，此智能体已在别处被修改。你的编辑已保留：请检查后再次保存。",
+    "saveBeforeDeploy": "部署前请保存或放弃你的更改",
+    "reviewChanges": "查看更改",
+    "unsavedSections": "有未保存更改的部分：{{count}}",
+    "reviewChangesTitle": "对版本 {{version}} 的未保存更改",
+    "savedVersion": "已保存 v{{version}}",
+    "yourChanges": "你的更改",
+    "discardMessage": "此页面上所有未保存的更改都将恢复为版本 {{version}} 的内容。"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -883,7 +890,13 @@
     "savedNotLive": "已保存 — 尚未生效",
     "savedNotLiveDescription": "运行中的智能体仍在使用已部署的版本。请部署以使此更改生效。",
     "deployNow": "部署",
-    "deployStarted": "部署已开始"
+    "deployStarted": "部署已开始",
+    "leaveTitle": "有未保存的更改，确定离开？",
+    "leaveMessage": "此页面上有尚未保存的更改。请保存、放弃，或继续编辑。",
+    "keepEditing": "继续编辑",
+    "discardChanges": "放弃更改",
+    "saveAndLeave": "保存并离开",
+    "modified": "已修改"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5233,7 +5246,7 @@
     "compatibleHint": "仅适用于不会破坏进行中会话的更改，例如提示词措辞或更换模型。如果重命名或删除了属性、动作或工作流步骤，请不要勾选。",
     "compatibleLegacyNote": "当前版本早于版本跟随功能，因此已在其上运行的会话会保留在该版本。下一次兼容保存将连接起版本链。",
     "compatibleUnknownNote": "运行在早于版本跟随功能的版本上的会话会保留在该版本。",
-    "generationBadge": "兼容代 {{generation}}",
+    "generationBadge": "第 {{generation}} 代",
     "generationTooltip": "兼容代 {{generation}}：此智能体中兼容代相同的版本彼此兼容，因此进行中的会话会在下一轮切换到最新部署的版本。不兼容的保存会开始新的兼容代。",
     "impactTitle": "将 v{{version}} 部署到{{environment}} — 进行中的会话",
     "impactFollow_other": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",

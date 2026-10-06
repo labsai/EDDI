@@ -126,8 +126,6 @@ export function WorkflowDetailPage() {
     localExtensions !== null &&
     JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
 
-  // Warn on tab close/reload when dirty
-  useUnsavedChangesGuard(isDirty);
 
   // Save & Test support
   const { saveAndDeploy, isRunning: isSaveAndDeploying } = useSaveAndDeploy();
@@ -225,8 +223,8 @@ export function WorkflowDetailPage() {
   );
 
 
-  const handleSave = useCallback(async () => {
-    if (!isDirty || !localExtensions) return;
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    if (!isDirty || !localExtensions) return true;
     try {
       const result = await updateMutation.mutateAsync({
         id: id!,
@@ -242,13 +240,18 @@ export function WorkflowDetailPage() {
         text: t("packageEditor.saved", "Workflow saved successfully"),
       });
       setLocalExtensions(null);
+      return true;
     } catch {
       setSaveMessage({
         type: "error",
         text: t("packageEditor.saveError", "Failed to save workflow"),
       });
+      return false;
     }
   }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, t]);
+
+  // Tab close / reload, and in-app navigation with Save & leave
+  useUnsavedChangesGuard(isDirty, { onSave: handleSave });
 
   const handleSaveAndDeploy = useCallback(async () => {
     if (!isDirty || !localExtensions || !agentId || !currentAgentVer) return;
@@ -468,7 +471,7 @@ export function WorkflowDetailPage() {
 
           {/* Save */}
           <button
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             disabled={!isDirty || updateMutation.isPending || isSaveAndDeploying}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
             data-testid="save-btn"

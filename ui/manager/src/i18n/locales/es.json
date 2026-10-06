@@ -350,9 +350,6 @@
     "userMemory": "Memoria del usuario",
     "userMemoryDesc": "Memoria persistente por usuario con herramientas de LLM (remember/recall/forget). La persistencia básica de propiedades longTerm siempre funciona, independientemente de esta opción.",
     "viewingOldVersion": "Está viendo la versión {{current}}. La última es la versión {{latest}}.",
-    "workflowAdded": "Workflow añadido",
-    "workflowRemoved": "Workflow eliminado",
-    "workflowUpdated": "Workflow actualizado a la última versión",
     "title": "Detalles del agent",
     "backToAgents": "Volver a Agents",
     "packages": "Flujos de trabajo",
@@ -459,7 +456,17 @@
       "notice": "Lo que el chat indica a las personas (déjelo vacío para usar el texto estándar)",
       "noticePlaceholder": "Las conversaciones con este agente pueden ser leídas por las personas que lo mantienen, para mejorarlo.",
       "versionNote": "Cubre las conversaciones con la versión que crea este cambio y las posteriores — nunca lo que se dijo antes. Slack, Teams y los clientes de la API no pueden mostrar el aviso; si las personas usan este agente por esos medios, indíquelo en el saludo."
-    }
+    },
+    "savedAsVersion": "Guardado como versión {{version}}",
+    "saved": "Agente guardado",
+    "saveConflict": "Este agente se modificó en otro lugar desde que lo abriste. Tus cambios se conservan: revísalos y vuelve a guardar.",
+    "saveBeforeDeploy": "Guarda o descarta tus cambios antes de desplegar",
+    "reviewChanges": "Revisar cambios",
+    "unsavedSections": "Secciones con cambios sin guardar: {{count}}",
+    "reviewChangesTitle": "Cambios sin guardar en la versión {{version}}",
+    "savedVersion": "Guardado v{{version}}",
+    "yourChanges": "Tus cambios",
+    "discardMessage": "Todos los cambios sin guardar de esta página vuelven a lo que contiene la versión {{version}}."
   },
   "wizard": {
     "title": "Asistente de Agent"
@@ -897,7 +904,13 @@
     "savedNotLive": "Guardado — aún no activo",
     "savedNotLiveDescription": "El agente en ejecución sigue sirviendo la versión desplegada. Despliegue para aplicar este cambio.",
     "deployNow": "Desplegar",
-    "deployStarted": "Despliegue iniciado"
+    "deployStarted": "Despliegue iniciado",
+    "leaveTitle": "¿Salir con cambios sin guardar?",
+    "leaveMessage": "Esta página tiene cambios que aún no se han guardado. Guárdalos, descártalos o sigue editando.",
+    "keepEditing": "Seguir editando",
+    "discardChanges": "Descartar cambios",
+    "saveAndLeave": "Guardar y salir",
+    "modified": "Modificado"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5290,7 +5303,7 @@
     "compatibleHint": "Solo para cambios que no pueden romper una conversación en curso, p. ej. la redacción del prompt o un modelo distinto. Déjalo sin marcar si se renombraron o eliminaron propiedades, acciones o pasos del workflow.",
     "compatibleLegacyNote": "La versión actual es anterior al seguimiento de versiones, así que las conversaciones que ya la usan se quedan en ella. El próximo guardado compatible enlaza la cadena.",
     "compatibleUnknownNote": "Las conversaciones en una versión anterior al seguimiento de versiones se quedan en ella.",
-    "generationBadge": "gen. compat. {{generation}}",
+    "generationBadge": "Generación {{generation}}",
     "generationTooltip": "Generación de compatibilidad {{generation}}: las versiones de este agente con la misma generación son compatibles, por lo que una conversación en curso pasa a la más reciente desplegada en su siguiente turno. Un guardado incompatible inicia una nueva generación.",
     "impactTitle": "Desplegar v{{version}} en {{environment}} — conversaciones en curso",
     "impactFollow_one": "{{count}} conversación activa en v{{from}} continuará en v{{to}}",

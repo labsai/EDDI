@@ -349,9 +349,6 @@
     "userMemory": "사용자 메모리",
     "userMemoryDesc": "LLM 도구(remember/recall/forget)를 사용한 영구적인 사용자별 메모리입니다. 기본 longTerm 속성 지속성은 이 토글과 관계없이 항상 작동합니다.",
     "viewingOldVersion": "버전 {{current}}을(를) 보고 있습니다. 최신 버전은 {{latest}}입니다.",
-    "workflowAdded": "워크플로가 추가되었습니다",
-    "workflowRemoved": "워크플로가 제거되었습니다",
-    "workflowUpdated": "워크플로가 최신 버전으로 업데이트되었습니다",
     "title": "Agent 상세",
     "backToAgents": "Agents로 돌아가기",
     "packages": "워크플로",
@@ -458,7 +455,17 @@
       "notice": "채팅이 사용자에게 알리는 내용 (비워 두면 기본 문구 사용)",
       "noticePlaceholder": "이 에이전트와의 대화는 개선을 위해 에이전트를 관리하는 사람들이 읽을 수 있습니다.",
       "versionNote": "이 변경으로 생성되는 버전과 이후 버전의 대화에 적용됩니다 — 이전에 나눈 대화에는 적용되지 않습니다. Slack, Teams 및 API 클라이언트는 알림을 표시할 수 없으므로, 그곳에서 이 에이전트를 사용한다면 인사말에서 안내하세요."
-    }
+    },
+    "savedAsVersion": "버전 {{version}}(으)로 저장됨",
+    "saved": "에이전트가 저장됨",
+    "saveConflict": "이 에이전트를 연 후 다른 곳에서 변경되었습니다. 편집 내용은 유지됩니다. 검토 후 다시 저장하세요.",
+    "saveBeforeDeploy": "배포하기 전에 변경 사항을 저장하거나 취소하세요",
+    "reviewChanges": "변경 사항 검토",
+    "unsavedSections": "저장하지 않은 변경 사항이 있는 섹션: {{count}}",
+    "reviewChangesTitle": "버전 {{version}}에 대한 저장하지 않은 변경 사항",
+    "savedVersion": "저장됨 v{{version}}",
+    "yourChanges": "내 변경 사항",
+    "discardMessage": "이 페이지의 저장하지 않은 모든 변경 사항이 버전 {{version}}의 내용으로 되돌아갑니다."
   },
   "wizard": {
     "title": "Agent 마법사"
@@ -883,7 +890,13 @@
     "savedNotLive": "저장됨 — 아직 반영되지 않음",
     "savedNotLiveDescription": "실행 중인 에이전트는 여전히 배포된 버전을 제공합니다. 이 변경을 적용하려면 배포하세요.",
     "deployNow": "배포",
-    "deployStarted": "배포를 시작했습니다"
+    "deployStarted": "배포를 시작했습니다",
+    "leaveTitle": "저장하지 않은 변경 사항이 있습니다. 나가시겠습니까?",
+    "leaveMessage": "이 페이지에 아직 저장되지 않은 변경 사항이 있습니다. 저장하거나 취소하거나 계속 편집하세요.",
+    "keepEditing": "계속 편집",
+    "discardChanges": "변경 사항 취소",
+    "saveAndLeave": "저장 후 나가기",
+    "modified": "수정됨"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5233,7 +5246,7 @@
     "compatibleHint": "진행 중인 대화를 깨뜨릴 수 없는 변경(예: 프롬프트 문구나 다른 모델)에만 사용하세요. 속성, 액션 또는 워크플로 단계의 이름을 바꾸거나 삭제했다면 선택하지 마세요.",
     "compatibleLegacyNote": "현재 버전은 버전 추종 기능 이전의 버전이므로 이미 실행 중인 대화는 그대로 유지됩니다. 다음 호환 저장부터 체인이 연결됩니다.",
     "compatibleUnknownNote": "버전 추종 기능 이전 버전의 대화는 그 버전에 그대로 유지됩니다.",
-    "generationBadge": "호환 세대 {{generation}}",
+    "generationBadge": "세대 {{generation}}",
     "generationTooltip": "호환 세대 {{generation}}: 같은 세대의 이 에이전트 버전들은 서로 호환되므로 진행 중인 대화는 다음 턴에 최신 배포 버전으로 이동합니다. 호환되지 않는 저장은 새 세대를 시작합니다.",
     "impactTitle": "v{{version}}을(를) {{environment}}에 배포 — 진행 중인 대화",
     "impactFollow_other": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",

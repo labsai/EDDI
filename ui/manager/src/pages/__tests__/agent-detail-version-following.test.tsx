@@ -26,7 +26,7 @@ describe("AgentDetailPage — version following", () => {
     atVersion3();
     renderDetail();
     await waitFor(() =>
-      expect(screen.getByTestId("compatibility-generation-badge")).toHaveTextContent("compat. gen 2"),
+      expect(screen.getByTestId("compatibility-generation-badge")).toHaveTextContent("Generation 2"),
     );
   });
 

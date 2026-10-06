@@ -349,9 +349,6 @@
     "userMemory": "ユーザーメモリ",
     "userMemoryDesc": "LLM ツール（remember/recall/forget）を備えたユーザーごとの永続メモリ。基本的な longTerm プロパティの永続化は、このトグルに関係なく常に機能します。",
     "viewingOldVersion": "バージョン {{current}} を表示しています。最新はバージョン {{latest}} です。",
-    "workflowAdded": "ワークフローを追加しました",
-    "workflowRemoved": "ワークフローを削除しました",
-    "workflowUpdated": "ワークフローを最新バージョンに更新しました",
     "title": "Agent 詳細",
     "backToAgents": "Agents に戻る",
     "packages": "ワークフロー",
@@ -458,7 +455,17 @@
       "notice": "チャットで利用者に伝える内容（空欄にすると標準の文言を使用）",
       "noticePlaceholder": "このエージェントとの会話は、改善のために管理者が閲覧する場合があります。",
       "versionNote": "この変更で作成されるバージョン以降の会話が対象です — それ以前の会話は対象外です。Slack、Teams、API クライアントでは通知を表示できません。利用者がそこからこのエージェントを使う場合は、あいさつ文でお知らせください。"
-    }
+    },
+    "savedAsVersion": "バージョン {{version}} として保存しました",
+    "saved": "エージェントを保存しました",
+    "saveConflict": "開いた後にこのエージェントが別の場所で変更されました。編集内容は保持されています。確認してから再度保存してください。",
+    "saveBeforeDeploy": "デプロイする前に変更を保存または破棄してください",
+    "reviewChanges": "変更を確認",
+    "unsavedSections": "未保存の変更があるセクション: {{count}}",
+    "reviewChangesTitle": "バージョン {{version}} への未保存の変更",
+    "savedVersion": "保存済み v{{version}}",
+    "yourChanges": "あなたの変更",
+    "discardMessage": "このページの未保存の変更はすべて、バージョン {{version}} の内容に戻ります。"
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -883,7 +890,13 @@
     "savedNotLive": "保存しました — まだ反映されていません",
     "savedNotLiveDescription": "実行中のエージェントはデプロイ済みのバージョンを使用しています。この変更を反映するにはデプロイしてください。",
     "deployNow": "デプロイ",
-    "deployStarted": "デプロイを開始しました"
+    "deployStarted": "デプロイを開始しました",
+    "leaveTitle": "未保存の変更があります。移動しますか？",
+    "leaveMessage": "このページにはまだ保存されていない変更があります。保存、破棄、または編集を続けてください。",
+    "keepEditing": "編集を続ける",
+    "discardChanges": "変更を破棄",
+    "saveAndLeave": "保存して移動",
+    "modified": "変更あり"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5233,7 +5246,7 @@
     "compatibleHint": "進行中の会話を壊さない変更（プロンプトの言い回しや別のモデルなど）の場合のみ。プロパティ、アクション、ワークフローのステップを名前変更または削除した場合はチェックしないでください。",
     "compatibleLegacyNote": "現在のバージョンはバージョン追従より前のものなので、すでに実行中の会話はそのまま残ります。次の互換保存からチェーンがつながります。",
     "compatibleUnknownNote": "バージョン追従より前のバージョンの会話はそのバージョンに残ります。",
-    "generationBadge": "互換世代 {{generation}}",
+    "generationBadge": "世代 {{generation}}",
     "generationTooltip": "互換世代 {{generation}}：同じ世代を持つこのエージェントのバージョンは互換性があるため、進行中の会話は次のターンで最新のデプロイ済みバージョンに移ります。互換性のない保存は新しい世代を開始します。",
     "impactTitle": "v{{version}} を{{environment}}にデプロイ — 進行中の会話",
     "impactFollow_other": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",

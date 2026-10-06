@@ -204,7 +204,7 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
   });
 
   // ─── Mutation verification: A2A toggle calls update API ─────────────────
-  it("toggling A2A enable calls the update agent API", async () => {
+  it("enabling A2A is saved by Save, not on click", async () => {
     const user = userEvent.setup();
     let updateCalled = false;
     server.use(
@@ -240,6 +240,11 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
     });
 
     await user.click(screen.getByTestId("enable-a2a-btn"));
+
+    // Recorded in the draft only — nothing is written until Save.
+    expect(updateCalled).toBe(false);
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    await user.click(screen.getByTestId("save-btn"));
 
     await waitFor(() => {
       expect(updateCalled).toBe(true);
