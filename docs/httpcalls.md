@@ -258,6 +258,8 @@ of `min(timeoutInMillis, 3 s)` no longer fits — the last response is then used
 been exhausted. The first call is always sent while the deadline has not passed; once it has, the call
 fails fast instead of being sent. Without a deadline, nothing changes.
 
+Fire-and-forget calls are not bounded by it: they are built on the turn's thread but sent in the background and never awaited, so they add nothing to the turn's duration. LLM tool calls (including these httpcalls when used as tools) are clamped the same way — a tool is not started once the deadline has passed.
+
 ### HttpCall API endpoints
 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |

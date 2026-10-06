@@ -144,6 +144,21 @@ class TurnResilienceWarningsTest {
     }
 
     @Test
+    @DisplayName("a backoff multiplier below 1 is treated as 1, so the backoffs are not estimated as zero")
+    void multiplierBelowOneIsNormalised() {
+        var task = task(Map.of("timeout", "10000"));
+        var retry = new RetryConfiguration();
+        retry.setMaxAttempts(3);
+        retry.setBackoffDelayMs(1_000L);
+        retry.setBackoffMultiplier(0.0);
+        retry.setMaxBackoffDelayMs(10_000L);
+        task.setRetry(retry);
+
+        // 3 x 10 s + two 1 s backoffs (multiplier 1.0), not 31 s
+        assertEquals(32_000, TurnResilienceWarnings.worstCaseLlmMs(task));
+    }
+
+    @Test
     @DisplayName("a cascade's worst case is the sum of its steps, each bounded by its timeoutMs, and by maxTotalDurationMs")
     void cascadeWorstCase() {
         var task = task(Map.of("timeout", "25000"));
