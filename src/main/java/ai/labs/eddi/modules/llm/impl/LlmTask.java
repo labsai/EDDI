@@ -588,7 +588,7 @@ public class LlmTask implements ILifecycleTask {
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
-                        FormatRetryRunner.RemainingBudget.UNBOUNDED);
+                        turnBudget(memory.getTurnDeadline()));
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
@@ -931,6 +931,15 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
+     * What a same-model re-ask may still spend: the turn's time after the reserve,
+     * or no bound when the turn has no deadline. {@code minAttemptMs} is checked
+     * against it, so a re-ask never starts with the turn nearly out of time.
+     */
+    static FormatRetryRunner.RemainingBudget turnBudget(TurnDeadline deadline) {
+        return deadline != null ? deadline::remainingAfterReserveMs : FormatRetryRunner.RemainingBudget.UNBOUNDED;
+    }
+
+    /**
      * One recovery action of this task:
      * {@code eddi.llm.recovery{action,outcome,trigger}} and the single structured
      * INFO line (R11).
@@ -1014,7 +1023,7 @@ public class LlmTask implements ILifecycleTask {
         var outcome = formatRetryRunner.run(policy, messages, (msgs, maxTokens) -> {
             var result = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, deadline);
             return new FormatRetryRunner.Attempt(result.response(), result.responseMetadata());
-        }, shrinker, FormatRetryRunner.RemainingBudget.UNBOUNDED, gate, listener);
+        }, shrinker, turnBudget(deadline), gate, listener);
         recordRetry(currentStep, task, outcome);
         return new LegacyChatExecutor.ChatResult(outcome.attempt().text(), outcome.attempt().metadata());
     }
@@ -1795,7 +1804,7 @@ public class LlmTask implements ILifecycleTask {
                         throw new LifecycleException("The tool loop cannot re-ask its final answer");
                     }
                     return new FormatRetryRunner.Attempt(reply.response() != null ? reply.response() : "", reply.responseMetadata());
-                }, FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskGate.ALWAYS, retryListener);
+                }, turnBudget(memory.getTurnDeadline()), FormatRetryRunner.ReaskGate.ALWAYS, retryListener);
         recordRetry(currentStep, task, recovered);
         if (recovered.reasks() == 0) {
             return result;
@@ -2199,7 +2208,7 @@ public class LlmTask implements ILifecycleTask {
                             throw new LifecycleException("The tool loop cannot re-ask its final answer");
                         }
                         return new FormatRetryRunner.Attempt(reply.response(), reply.responseMetadata());
-                    }, FormatRetryRunner.RemainingBudget.UNBOUNDED, gate, retryListener);
+                    }, turnBudget(memory.getTurnDeadline()), gate, retryListener);
             recordRetry(currentStep, task, recovered);
             if (recovered.reasks() > 0) {
                 Map<String, Object> metadata = new HashMap<>(agentResult.responseMetadata());

@@ -356,6 +356,11 @@ class CascadingModelExecutor {
         final TurnDeadline turnDeadline = memory.getTurnDeadline();
         if (turnDeadline != null) {
             long left = Math.max(0L, turnDeadline.remainingAfterReserveMs());
+            if (left < 500L) {
+                // Same rule as the other deadline consumers: the first step gets what is
+                // left of the turn instead of a 1 ms sliver that fails it at once.
+                left = Math.max(0L, turnDeadline.remainingMs());
+            }
             if (maxTotalDurationMs == null || left < maxTotalDurationMs) {
                 maxTotalDurationMs = left;
             }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -153,6 +155,18 @@ class CascadingModelExecutorObservabilityTest {
 
         assertEquals("resolved-model-1", result.modelName());
         assertEquals("resolved-model-1", result.trace().get(0).get("model"));
+    }
+
+    @Test
+    @DisplayName("a turn whose time left is already inside the reserve still gives step 0 a real timeout, not 1 ms")
+    void stepZeroGetsTheRemainingTurnTimeWhenTheReserveIsSpent() throws Exception {
+        when(memory.getTurnDeadline()).thenReturn(TurnDeadline.of(Clock.systemUTC(), System.currentTimeMillis(), 1_200, 1_500L));
+        models(FaultInjectingChatModel.script(Step.text(VALID)), FaultInjectingChatModel.script(Step.text(VALID)));
+
+        var result = run(cascade(step("openai"), step("anthropic")), task(null, false), "m");
+
+        assertEquals(0, result.stepUsed());
+        assertEquals(VALID, result.response());
     }
 
     @Test

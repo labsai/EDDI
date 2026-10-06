@@ -20,6 +20,15 @@ R11, R12 and R13 of the LLM turn-resilience plan ([`planning/llm-turn-resilience
 
 **Plan status.** The status block of the plan now marks R1 to R16 implemented with the branch and PR of each, where the implementation differs from the plan text, and the known gaps below.
 
+### Review fixes on the stacked PR
+
+- **Fallback turns in the model's history.** The step-wide `llm:fallback` flag dropped the whole output of a step, including another LLM task's good answer in the same step. Now only output items marked `fallback: true` are dropped (`ConversationOutputExtractor.withoutFallbackItems`, both history paths); a flagged step with no marked item (a `postResponse`-rendered fallback) is still dropped whole, since nothing says which text it wrote.
+- **Configured `prompt` after a fallback turn** replaced the whole merged user message and lost the fallback turn's unanswered question; it now replaces only the current input's contents.
+- **Re-ask budget** now spends from the turn deadline (plain, cascade, tool-mode and resume re-asks): a re-ask no longer starts with less than `minAttemptMs` left. A cascade whose time left is already inside the reserve gives step 0 the remaining turn time instead of a 1 ms timeout.
+- **Interrupt on the deadline-bounded retry path** is restored on the thread and surfaces as `LifecycleInterruptedException` instead of being classified `UNKNOWN` (which let a cancelled step pay a second provider call).
+- Keyed streaming requests now forward `llm_retry`; dashboard panels in the cascade row no longer overlap and the circuit-transition series is a `rate`.
+- Not changed: the Manager editor's selectors still omit `retry` (types only, as documented): adding it is UI work with three i18n gates and is a follow-up.
+
 ### Design decisions
 
 - One helper rather than six `LOGGER.infof` calls, so the line has one shape and tests can assert "exactly one line per recovery" through an observer hook (`LlmRecoveryLog.observer`, null in production).

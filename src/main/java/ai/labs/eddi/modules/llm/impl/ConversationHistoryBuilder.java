@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.memory.ConversationLogGenerator;
+import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import dev.langchain4j.data.message.*;
@@ -135,10 +136,7 @@ class ConversationHistoryBuilder {
 
         // If a custom prompt is defined, replace the last user input with it
         if (!isNullOrEmpty(prompt)) {
-            if (!chatMessages.isEmpty()) {
-                chatMessages.removeLast();
-            }
-            chatMessages.add(UserMessage.from(prompt));
+            replaceCurrentInput(chatMessages, prompt, memory, skipSteps == 0);
         }
 
         // Assemble full message list: system + history
@@ -233,10 +231,7 @@ class ConversationHistoryBuilder {
 
         // If a custom prompt is defined, replace the last user input with it
         if (!isNullOrEmpty(prompt)) {
-            if (!allMessages.isEmpty()) {
-                allMessages.removeLast();
-            }
-            allMessages.add(UserMessage.from(prompt));
+            replaceCurrentInput(allMessages, prompt, memory, skipSteps == 0);
         }
 
         // If conversation is short enough, try to fit everything
@@ -425,8 +420,15 @@ class ConversationHistoryBuilder {
             // keeps the user's question but not the apology: the model must not learn
             // from text it never wrote.
             if (ConversationLogGenerator.isFallbackStep(allSteps, i)) {
-                mergeNextUser = true;
-                continue;
+                // Only what the fallback wrote when its items are marked: another task's
+                // answer in the same step stays. An unmarked (postResponse) fallback
+                // drops the step's whole output.
+                var kept = ConversationOutputExtractor.withoutFallbackItems(output);
+                if (kept == output || ConversationOutputUtils.extractOutputText(kept) == null) {
+                    mergeNextUser = true;
+                    continue;
+                }
+                output = kept;
             }
 
             // No pre-check on the shape of "output": deciding here that a turn is only
@@ -462,6 +464,35 @@ class ConversationHistoryBuilder {
         }
 
         return result;
+    }
+
+    /**
+     * Replaces the current turn's input with the configured prompt. When the turn
+     * before was a fallback its unanswered question was merged into the same user
+     * message (to keep roles alternating); that earlier question stays, and only
+     * the current input's contents are replaced.
+     *
+     * @param inputFilesAreContents
+     *            whether the history was built by {@link ConversationLogGenerator}
+     *            (input files are separate contents ahead of the text) rather than
+     *            from the plain outputs
+     */
+    private static void replaceCurrentInput(List<ChatMessage> messages, String prompt, IConversationMemory memory,
+                                            boolean inputFilesAreContents) {
+        ChatMessage last = messages.isEmpty() ? null : messages.removeLast();
+        var outputs = memory.getConversationOutputs();
+        if (last instanceof UserMessage user && outputs != null && outputs.size() >= 2
+                && ConversationLogGenerator.isFallbackStep(memory.getAllSteps(), outputs.size() - 2)) {
+            int current = 1 + (inputFilesAreContents ? ConversationLogGenerator.inputFileCount(outputs.getLast()) : 0);
+            var contents = user.contents();
+            if (contents.size() > current) {
+                var merged = new ArrayList<>(contents.subList(0, contents.size() - current));
+                merged.add(TextContent.from(prompt));
+                messages.add(UserMessage.from(merged));
+                return;
+            }
+        }
+        messages.add(UserMessage.from(prompt));
     }
 
     /**

@@ -4307,8 +4307,8 @@
           "gridPos": {
             "h": 7,
             "w": 8,
-            "x": 12,
-            "y": 26
+            "x": 16,
+            "y": 33
           },
           "targets": [
             {
@@ -5079,7 +5079,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 61
+            "y": 68
           },
           "targets": [
             {
@@ -5155,7 +5155,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 61
+            "y": 68
           },
           "targets": [
             {
@@ -5231,12 +5231,12 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 68
+            "y": 75
           },
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (state, class) (increase(eddi_llm_circuit_total{job=~\"$job\"}[$__rate_interval]))",
+              "expr": "sum by (state, class) (rate(eddi_llm_circuit_total{job=~\"$job\"}[$__rate_interval]))",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -5318,7 +5318,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 68
+            "y": 75
           },
           "targets": [
             {

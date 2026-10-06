@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -261,6 +263,19 @@ class LlmTaskObservabilityTest {
         assertTrue(linesFor("retry").get(0).contains(" outcome=still_invalid "));
         assertEquals(1, linesFor("fallback").size());
         assertTrue(linesFor("fallback").get(0).contains(" outcome=served attempt=1 "));
+    }
+
+    @Test
+    @DisplayName("a re-ask does not start when the turn has less than minAttemptMs left after its reserve")
+    void reaskRespectsTheTurnDeadline() throws Exception {
+        when(memory.getTurnDeadline()).thenReturn(TurnDeadline.of(Clock.systemUTC(), System.currentTimeMillis(), 2_000, 1_500L));
+        var model = FaultInjectingChatModel.script(Step.text(PROSE), Step.text(VALID));
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+
+        run(task("base-model", v -> v.setOnInvalidJson("retry")));
+
+        assertEquals(1, model.callCount(), "the second model call must not be made");
+        assertTrue(linesFor("retry").isEmpty(), recoveryLines.toString());
     }
 
     @Test
