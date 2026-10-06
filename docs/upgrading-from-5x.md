@@ -85,7 +85,8 @@ can take minutes. **Liveness** (`/q/health/live`) is UP throughout.
 
 ## 5. What the first boot does
 
-Separately, as the application starts, the legacy **`properties`** collection is copied into
+Separately, in the background (on the scheduler thread, so the liveness probe keeps answering, and
+before readiness goes UP or any agent is deployed), the legacy **`properties`** collection is copied into
 long-term user memory and renamed `properties_migrated_v6`. Per-request identity (`userInfo`) and
 credential-shaped values are **not** copied (see
 [user memory](user-memory.md#migration-from-legacy-properties)).
@@ -226,3 +227,81 @@ on a copy and take a backup first.
   ```javascript
   db.usermemories.deleteMany({ category: "legacy", key: "userInfo" })
   ```
+
+## 9. Operating the first boot in production
+
+Practical points for running the migration against a large production 5.x database. They apply to
+any orchestrator; the examples name ECS because its defaults are the ones that bite.
+
+### Container health checks and start period
+
+The migration steps run in the background and log progress about every ten seconds, so a long step
+is not a silent one. While they run, **readiness is DOWN and liveness is UP**.
+
+- Point the container health check at **`/q/health/live`**, with a **start period of about 300
+  seconds** (longer only on platforms that support it; the ECS maximum is 300 seconds).
+- Do **not** use `/q/health`. It aggregates readiness, so it stays DOWN for the whole migration and
+  the orchestrator replaces a healthy task mid-migration. Each replacement starts the migration
+  again.
+- In ECS the health check is `healthCheck.command` with `startPeriod`; see
+  [Setting up EDDI on AWS](setup-eddi-on-aws-with-mongodb-atlas.md). Use the readiness endpoint
+  only for the load balancer's target-group check, which is what keeps traffic away from the
+  half-migrated instance.
+
+### Disable deployment rollback for the migration
+
+Turn off any automatic rollback (for ECS, the deployment circuit breaker's rollback) for the
+deployment that performs the migration. If the new task is judged unhealthy and the service rolls
+back, the previous revision is **5.x, which cannot read the migrated data**. Roll back by restoring
+the database backup, not by redeploying the old image. Re-enable rollback once the migration has
+finished.
+
+### Memory sizing
+
+Size the memory for the largest collection, not the idle footprint. About 2 GB is tight for a
+database with a large number of conversations, and it is the first thing to raise if the process is
+killed for memory during or just after the first boot. An out-of-memory kill during the
+migration is the same as any other interruption: it restarts the unfinished steps, which are
+idempotent. Later 6.x releases reduce the memory the idle-conversation sweep needs, so also run a
+current release.
+
+### Keys that used to be properties need the vault
+
+The properties migration deliberately **does not copy** credential-shaped values, nor the keys in
+`eddi.migration.properties.skip-keys` (see [section 7](#7-what-is-not-migrated-automatically)).
+An agent that read an API key or token from a property in 5.x finds nothing there in 6.x. Create
+those entries in the [secrets vault](secrets-vault.md) before the cut-over and point the agent
+configuration at the vault reference.
+
+### Never-ended 5.x conversations
+
+5.x left many conversations open that were never ended. Plan their clean-up deliberately rather
+than leaving them to the idle sweep ([section 3](#3-retention-decide-before-the-first-boot)):
+
+1. Keep idle-ending off for the first boot, as in section 3.
+2. After the migration, end the inactive ones in bulk with the **end-inactive** operation of the
+   conversation store REST API (`POST` on the `end-inactive` sub-resource of the
+   `/conversationstore/conversations` collection, available in releases that include it). It ends
+   by inactivity age, so you can start with a generous cut-off and tighten it. Check the API
+   reference of your release for its parameters.
+3. Then enable the retention settings from section 3 so the remaining ones are handled by the
+   normal sweep.
+
+### Rehearse with real turns
+
+Restore a recent backup into a scratch database and run the first boot against it, as in
+[section 1](#1-before-you-start). Then **send real conversation turns** to the agents you care
+about, including continuing a conversation that was started on 5.x. The migration finishing and
+the health endpoints turning green does not prove that an agent answers correctly on migrated
+data. Time the rehearsal: it is your estimate for the real window, and it tells you the start
+period and memory the live run needs.
+
+### Keep the connection string out of the Java command line
+
+The image's start script prints the full Java command line to the log at startup. Anything passed
+as a system property in `JAVA_OPTS` or `JAVA_OPTS_APPEND`, such as
+`-Dmongodb.connectionString=...`, is therefore written to the container log, credentials included.
+The script masks only keys whose name contains `password`, and no environment variable turns the
+line off. Supply the connection string through the **`MONGODB_CONNECTIONSTRING` environment
+variable**, injected from a secret (ECS `secrets`, a Kubernetes `Secret`, Docker secrets), and keep
+`JAVA_OPTS_APPEND` for non-sensitive flags. See [Security](security.md#secrets-in-the-container-environment).

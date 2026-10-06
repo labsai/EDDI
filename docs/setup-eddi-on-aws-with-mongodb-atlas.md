@@ -54,6 +54,7 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
     - Use the following JSON configuration:
 ```json
 {
+   "executionRoleArn": "<task-execution-role-arn>",
    "containerDefinitions": [
    {
    "name": "eddi",
@@ -70,8 +71,8 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    "essential": true,
    "environment": [
    {
-   "name": "JAVA_OPTS_APPEND",
-   "value": "-Dmongodb.connectionString=mongodb+srv://<user>:<password>@<host>/eddi?retryWrites=true&w=majority -Dmongodb.database=eddi"
+   "name": "MONGODB_DATABASE",
+   "value": "eddi"
    },
    {
    "name": "EDDI_SECURITY_ALLOW_UNAUTHENTICATED",
@@ -84,6 +85,12 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    {
    "name": "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED",
    "value": "true"
+   }
+   ],
+   "secrets": [
+   {
+   "name": "MONGODB_CONNECTIONSTRING",
+   "valueFrom": "arn:aws:secretsmanager:<region>:<account-id>:secret:<secret-name>"
    }
    ],
    "mountPoints": [],
@@ -99,11 +106,12 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    "healthCheck": {
    "command": [
    "CMD-SHELL",
-   "curl -f http://localhost:7070/q/health || exit 1"
+   "curl -f http://localhost:7070/q/health/live || exit 1"
    ],
    "interval": 30,
    "timeout": 5,
-   "retries": 3
+   "retries": 3,
+   "startPeriod": 300
    }
    }
    ],
@@ -159,6 +167,10 @@ This guide provides step-by-step instructions to set up EDDI on Amazon ECS and c
    "memory": "2048"
 }
 ```
+
+The `MONGODB_CONNECTIONSTRING` secret is injected by ECS when the container starts, so the **task
+execution role** (`executionRoleArn`) needs `secretsmanager:GetSecretValue` on that secret and, if it is
+encrypted with a customer-managed KMS key, `kms:Decrypt` on that key. Without them the task fails to start.
 
 > ⚠️ **About the three `*_ALLOW_UNAUTHENTICATED` variables.** A Fargate task runs in production launch mode, where EDDI refuses to start without authentication: `AuthStartupGuard` fails startup unless OIDC is enabled or `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`, and `HighValueSurfaceGuard` fails startup unless `/mcp` and `/secretstore` are either protected or explicitly opted out. The opt-outs above are only acceptable for a task in a private subnet with no public ingress. For anything reachable from outside, drop all three and set `QUARKUS_OIDC_TENANT_ENABLED=true` plus your Keycloak realm settings instead — see [`security.md`](security.md).
 

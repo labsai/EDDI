@@ -15,6 +15,8 @@ import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.properties.mongo.PropertiesMigrationService;
+import jakarta.enterprise.inject.Instance;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
@@ -467,6 +469,48 @@ class AgentDeploymentManagementTest {
 
             verify(v6RenameMigration).runIfNeeded();
             verify(v6QuteMigration).runIfNeeded();
+            verify(migrationManager).startMigrationIfFirstTimeRun(any());
+        }
+
+        @Test
+        @DisplayName("runs the legacy properties migration after the rename and before readiness, on the sweep thread")
+        @SuppressWarnings("unchecked")
+        void runsPropertiesMigrationBeforeReadiness() throws Exception {
+            when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
+            PropertiesMigrationService propertiesMigration = mock(PropertiesMigrationService.class);
+            Instance<PropertiesMigrationService> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(propertiesMigration);
+            management.propertiesMigrationInstance = instance;
+            doAnswer(inv -> {
+                IMigrationManager.IMigrationFinished callback = inv.getArgument(0);
+                callback.onComplete();
+                return null;
+            }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+            management.autoDeployAgents();
+
+            var order = inOrder(v6RenameMigration, propertiesMigration, migrationManager, agentsReadiness);
+            order.verify(v6RenameMigration).runIfNeeded();
+            order.verify(propertiesMigration).runIfNeeded();
+            order.verify(migrationManager).startMigrationIfFirstTimeRun(any());
+            order.verify(agentsReadiness).setAgentsReadiness(true);
+        }
+
+        @Test
+        @DisplayName("a failing properties migration does not stop the deployment")
+        @SuppressWarnings("unchecked")
+        void failingPropertiesMigrationDoesNotBlockDeployment() throws Exception {
+            when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
+            PropertiesMigrationService propertiesMigration = mock(PropertiesMigrationService.class);
+            doThrow(new IllegalStateException("boom")).when(propertiesMigration).runIfNeeded();
+            Instance<PropertiesMigrationService> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(propertiesMigration);
+            management.propertiesMigrationInstance = instance;
+
+            management.autoDeployAgents();
+
             verify(migrationManager).startMigrationIfFirstTimeRun(any());
         }
     }
