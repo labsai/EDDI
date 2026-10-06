@@ -517,6 +517,9 @@ class PostgresConversationMemoryStoreUnitTest {
         assertEquals(2, batch.size(), "one unreadable state must not abort the page");
         assertNull(batch.get(0).conversationState());
         assertEquals(ConversationState.READY, batch.get(1).conversationState());
+        // The store owns the ResultSet and the statement: both are released.
+        verify(resultSet).close();
+        verify(preparedStatement).close();
     }
 
     // ─── Helpers ───
