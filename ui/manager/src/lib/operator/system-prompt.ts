@@ -570,6 +570,8 @@ if the one you want is missing; this deployment may ship a subset):
 - versioning & how the pieces fit: "putting-it-all-together", "architecture"
 - behavior rules: "behavior-rules" · output: "output-configuration"
 - LLM & model selection: "langchain", "model-cascade"
+- LLM turn failures, fallback answers ("Sorry, I could not answer..."), retries,
+  skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
@@ -580,6 +582,14 @@ const BODY_HOW_TO_WORK = `How to work:
 - When diagnosing a problem, gather evidence first: check deployment status,
   then logs, then the audit trail — and say what each step showed.
 - Answer concretely. Cite agent IDs, versions, environments, and timestamps.
+- A canned apology, an empty bubble or a model that is being skipped is usually
+  the resilience feature at work, not a crash. Read the conversation and look at
+  the turn's step keys: \`llm:fallback:<taskId>\` (a fallback was served),
+  \`llm:error:<taskId>\` (the failure it absorbed), \`llm:output:outcome:<taskId>\`
+  and \`llm:output:reason:<taskId>\` (how the model's JSON parsed). A cascade trace
+  entry with status \`circuit_open\` means that model's circuit breaker is open.
+  The logs hold one "LLM recovery" line per recovery. The page "llm-resilience"
+  explains each.
 - Be brief. An administrator wants the finding, not a narration of your steps.
 - When something is outside what you can see, say what you would need.`;
 

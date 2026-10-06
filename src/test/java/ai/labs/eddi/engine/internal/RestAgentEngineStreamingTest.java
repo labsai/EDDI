@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -162,6 +163,21 @@ class RestAgentEngineStreamingTest {
         }
 
         @Test
+        @DisplayName("a failed turn's done frame carries the structured error")
+        void includesError() throws Exception {
+            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("toJson", SimpleConversationMemorySnapshot.class);
+            method.setAccessible(true);
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.ERROR);
+            snapshot.setError(new TurnError("RATE_LIMITED", true, 1500L, "slow down"));
+
+            String json = (String) method.invoke(streaming, snapshot);
+
+            assertTrue(json.contains("\"error\":{\"code\":\"RATE_LIMITED\",\"retryable\":true,\"retryAfterMs\":1500,\"message\":\"slow down\"}"),
+                    json);
+        }
+
+        @Test
         @DisplayName("should include conversationOutputs when present")
         void includesOutputs() throws Exception {
             Method method = RestAgentEngineStreaming.class.getDeclaredMethod("toJson", SimpleConversationMemorySnapshot.class);
@@ -292,6 +308,10 @@ class RestAgentEngineStreamingTest {
             handler.onCascadeEscalation(0, 1, 0.4, 0.7, "low_confidence", 42L);
             verify(eventBuilder).name("cascade_escalation");
             verify(eventSink, times(2)).send(sseEvent);
+
+            handler.onLlmRetry("invalid_json", 1);
+            verify(eventBuilder).name("llm_retry");
+            verify(eventSink, times(3)).send(sseEvent);
         }
 
         @Test

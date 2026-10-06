@@ -2,11 +2,16 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck, Info } from "lucide-react";
 import { EditorSection } from "../editor-section";
 import type { TaskSectionProps } from "./task-section-props";
-import type { ResponseValidation, ResponseValidationAction } from "./types";
+import type { ResponseValidationAction } from "./types";
 import { RESPONSE_VALIDATION_ACTIONS } from "./types";
 
 /** Policy fields on `responseValidation`, in display order. */
-type PolicyField = keyof Omit<ResponseValidation, "enabled">;
+type PolicyField =
+  | "onEmpty"
+  | "onTruncation"
+  | "onContentFilter"
+  | "onRefusal"
+  | "onStreamingTimeout";
 
 interface PolicyMeta {
   field: PolicyField;

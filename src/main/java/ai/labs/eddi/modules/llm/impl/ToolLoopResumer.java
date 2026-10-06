@@ -311,10 +311,11 @@ class ToolLoopResumer {
         // rather than widening resumeToolLoop's signature for the primary knob, which
         // governs the initial pause.
         TokenUsage[] tokenHolder = new TokenUsage[1];
+        List<ChatMessage> finalTranscript = new ArrayList<>();
         String response = toolLoopRunner.runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, AgentOrchestrator.DEFAULT_TRANSCRIPT_MAX_BYTES,
                 tokenHolder,
-                jsonPolicy, null, null);
+                jsonPolicy, finalTranscript, null);
 
         // ── Step 5: merge the pre-pause trace with the resume trace ──
         List<Map<String, Object>> mergedTrace = new ArrayList<>();
@@ -328,7 +329,24 @@ class ToolLoopResumer {
             responseMetadata.put("tokenUsage", ToolContextBudget.tokenUsageMap(tokenHolder[0]));
         }
         responseMetadata.put("toolCostUsd", toolLoopRunner.toolCostDelta(conversationId, toolCostBefore));
-        return new AgentOrchestrator.ExecutionResult(response, mergedTrace, responseMetadata);
+        return new AgentOrchestrator.ExecutionResult(response, mergedTrace, responseMetadata, List.of(), answeredFrom(finalTranscript));
+    }
+
+    /**
+     * What the model saw when it gave its final answer: the loop's final message
+     * list without that answer (a text-only assistant message at the end). Nothing
+     * here is replayed to a tool — it is only the request a same-model re-ask of
+     * the answer is built on.
+     */
+    static List<ChatMessage> answeredFrom(List<ChatMessage> finalTranscript) {
+        if (finalTranscript.isEmpty()) {
+            return List.of();
+        }
+        ChatMessage last = finalTranscript.get(finalTranscript.size() - 1);
+        if (last instanceof AiMessage ai && !ai.hasToolExecutionRequests()) {
+            return List.copyOf(finalTranscript.subList(0, finalTranscript.size() - 1));
+        }
+        return List.copyOf(finalTranscript);
     }
 
     /**

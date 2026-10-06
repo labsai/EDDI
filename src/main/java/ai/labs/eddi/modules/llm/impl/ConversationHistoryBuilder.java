@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.memory.ConversationLogGenerator;
+import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationLog;
 import dev.langchain4j.data.message.*;
@@ -129,16 +130,13 @@ class ConversationHistoryBuilder {
         if (skipSteps > 0) {
             chatMessages = generateMessagesFromOutputs(memory, skipSteps, logSizeLimit, includeFirstAgentMessage);
         } else {
-            chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage, true)
+            chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage, true, true)
                     .getMessages().stream().map(this::convertMessage).toList());
         }
 
         // If a custom prompt is defined, replace the last user input with it
         if (!isNullOrEmpty(prompt)) {
-            if (!chatMessages.isEmpty()) {
-                chatMessages.removeLast();
-            }
-            chatMessages.add(UserMessage.from(prompt));
+            replaceCurrentInput(chatMessages, prompt, memory, skipSteps == 0);
         }
 
         // Assemble full message list: system + history
@@ -227,16 +225,13 @@ class ConversationHistoryBuilder {
         if (skipSteps > 0) {
             allMessages = generateMessagesFromOutputs(memory, skipSteps, -1, includeFirstAgentMessage);
         } else {
-            allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage, true).getMessages()
+            allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage, true, true).getMessages()
                     .stream().map(this::convertMessage).toList());
         }
 
         // If a custom prompt is defined, replace the last user input with it
         if (!isNullOrEmpty(prompt)) {
-            if (!allMessages.isEmpty()) {
-                allMessages.removeLast();
-            }
-            allMessages.add(UserMessage.from(prompt));
+            replaceCurrentInput(allMessages, prompt, memory, skipSteps == 0);
         }
 
         // If conversation is short enough, try to fit everything
@@ -403,11 +398,37 @@ class ConversationHistoryBuilder {
 
         var allSteps = memory.getAllSteps();
         var result = new ArrayList<ChatMessage>();
+        boolean mergeNextUser = false;
         for (int i = startIndex; i < outputs.size(); i++) {
             var output = outputs.get(i);
             var input = output.get("input", String.class);
             if (input != null) {
-                result.add(UserMessage.from(ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input)));
+                var user = UserMessage.from(ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input));
+                if (mergeNextUser && !result.isEmpty() && result.getLast() instanceof UserMessage previous) {
+                    // The assistant turn between them was a fallback and is gone: fold
+                    // the inputs together so roles keep alternating.
+                    var contents = new ArrayList<>(previous.contents());
+                    contents.addAll(user.contents());
+                    result.set(result.size() - 1, UserMessage.from(contents));
+                } else {
+                    result.add(user);
+                }
+                mergeNextUser = false;
+            }
+
+            // A turn answered by an LLM task's fallback ("Sorry, I could not answer")
+            // keeps the user's question but not the apology: the model must not learn
+            // from text it never wrote.
+            if (ConversationLogGenerator.isFallbackStep(allSteps, i)) {
+                // Only what the fallback wrote when its items are marked: another task's
+                // answer in the same step stays. An unmarked (postResponse) fallback
+                // drops the step's whole output.
+                var kept = ConversationOutputExtractor.withoutFallbackItems(output);
+                if (kept == output || ConversationOutputUtils.extractOutputText(kept) == null) {
+                    mergeNextUser = true;
+                    continue;
+                }
+                output = kept;
             }
 
             // No pre-check on the shape of "output": deciding here that a turn is only
@@ -443,6 +464,35 @@ class ConversationHistoryBuilder {
         }
 
         return result;
+    }
+
+    /**
+     * Replaces the current turn's input with the configured prompt. When the turn
+     * before was a fallback its unanswered question was merged into the same user
+     * message (to keep roles alternating); that earlier question stays, and only
+     * the current input's contents are replaced.
+     *
+     * @param inputFilesAreContents
+     *            whether the history was built by {@link ConversationLogGenerator}
+     *            (input files are separate contents ahead of the text) rather than
+     *            from the plain outputs
+     */
+    private static void replaceCurrentInput(List<ChatMessage> messages, String prompt, IConversationMemory memory,
+                                            boolean inputFilesAreContents) {
+        ChatMessage last = messages.isEmpty() ? null : messages.removeLast();
+        var outputs = memory.getConversationOutputs();
+        if (last instanceof UserMessage user && outputs != null && outputs.size() >= 2
+                && ConversationLogGenerator.isFallbackStep(memory.getAllSteps(), outputs.size() - 2)) {
+            int current = 1 + (inputFilesAreContents ? ConversationLogGenerator.inputFileCount(outputs.getLast()) : 0);
+            var contents = user.contents();
+            if (contents.size() > current) {
+                var merged = new ArrayList<>(contents.subList(0, contents.size() - current));
+                merged.add(TextContent.from(prompt));
+                messages.add(UserMessage.from(merged));
+                return;
+            }
+        }
+        messages.add(UserMessage.from(prompt));
     }
 
     /**

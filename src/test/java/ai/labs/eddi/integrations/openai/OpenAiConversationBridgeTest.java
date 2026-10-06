@@ -143,6 +143,27 @@ class OpenAiConversationBridgeTest {
         return bridge.prepare(statelessModel, simpleRequest(), headers(null), USER_ID);
     }
 
+    @Test
+    void turnDeadlineHeaderIsCarriedOnTheInput() throws Exception {
+        var headers = headers(null);
+        headers.put("X-EDDI-Turn-Deadline-Ms", "20000");
+
+        var turn = bridge.prepare(statelessModel, simpleRequest(), headers, USER_ID);
+
+        assertEquals(20_000L, turn.inputData().getRequestedTurnDeadlineMs());
+    }
+
+    @Test
+    void unusableTurnDeadlineHeaderIsIgnored() throws Exception {
+        var headers = headers(null);
+        headers.put("X-EDDI-Turn-Deadline-Ms", "soon");
+
+        var turn = bridge.prepare(statelessModel, simpleRequest(), headers, USER_ID);
+
+        assertNull(turn.inputData().getRequestedTurnDeadlineMs());
+        assertNull(statelessTurn().inputData().getRequestedTurnDeadlineMs(), "absent header = no deadline");
+    }
+
     private static int countOccurrences(String haystack, String needle) {
         int count = 0;
         int index = haystack.indexOf(needle);
