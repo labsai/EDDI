@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -681,7 +682,7 @@ public class LlmTask implements ILifecycleTask {
                     usedToolMode = true;
                 } else {
                     var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep,
-                            circuitGate);
+                            circuitGate, memory.getTurnDeadline());
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                     // Forward the buffered response to the stream so an SSE client is not left
@@ -715,7 +716,7 @@ public class LlmTask implements ILifecycleTask {
                         // Streaming not supported by this builder (or buffered for R5) — fall back
                         // to sync, emit as single chunk
                         var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener,
-                                currentStep, circuitGate);
+                                currentStep, circuitGate, memory.getTurnDeadline());
                         responseContent = chatResult.response();
                         responseMetadata = chatResult.responseMetadata();
                         if (!addToOutputExplicitlyFalse && retryPolicy == null) {
@@ -725,7 +726,7 @@ public class LlmTask implements ILifecycleTask {
                 } else {
                     // Standard non-streaming legacy mode
                     var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep,
-                            circuitGate);
+                            circuitGate, memory.getTurnDeadline());
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                 }
@@ -971,13 +972,14 @@ public class LlmTask implements ILifecycleTask {
     private LegacyChatExecutor.ChatResult executePlain(FormatRetryRunner.Policy policy, ChatModel chatModel, List<ChatMessage> messages,
                                                        Task task, JsonResponseFormatPolicy jsonPolicy,
                                                        FormatRetryRunner.ContextShrinker shrinker, FormatRetryRunner.ReaskListener listener,
-                                                       IWritableConversationStep currentStep, FormatRetryRunner.ReaskGate gate)
+                                                       IWritableConversationStep currentStep, FormatRetryRunner.ReaskGate gate,
+                                                       TurnDeadline deadline)
             throws LifecycleException {
         if (policy == null) {
-            return legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+            return legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, deadline);
         }
         var outcome = formatRetryRunner.run(policy, messages, (msgs, maxTokens) -> {
-            var result = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens);
+            var result = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, deadline);
             return new FormatRetryRunner.Attempt(result.response(), result.responseMetadata());
         }, shrinker, FormatRetryRunner.RemainingBudget.UNBOUNDED, gate, listener);
         recordRetry(currentStep, task, outcome);

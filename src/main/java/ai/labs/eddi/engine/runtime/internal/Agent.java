@@ -30,6 +30,8 @@ public class Agent implements IAgent {
 
     private Deployment.Status deploymentStatus;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
+    private Long turnDeadlineMs;
+    private Long turnDeadlineReserveMs;
     private boolean memoryToolsEnabled;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ToolApprovalsConfig toolApprovalsConfig;
@@ -104,6 +106,21 @@ public class Agent implements IAgent {
 
     public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig userMemoryConfig) {
         this.userMemoryConfig = userMemoryConfig;
+    }
+
+    @Override
+    public Long getTurnDeadlineMs() {
+        return turnDeadlineMs;
+    }
+
+    @Override
+    public Long getTurnDeadlineReserveMs() {
+        return turnDeadlineReserveMs;
+    }
+
+    public void setTurnDeadline(Long turnDeadlineMs, Long turnDeadlineReserveMs) {
+        this.turnDeadlineMs = turnDeadlineMs;
+        this.turnDeadlineReserveMs = turnDeadlineReserveMs;
     }
 
     @Override
