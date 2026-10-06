@@ -135,6 +135,9 @@ export function AgentDetailPage() {
   useEffect(() => {
     setVersion(undefined);
     setDraft(null);
+    setRebaseFrom(null);
+    setShowReviewDialog(false);
+    setShowDiscardDialog(false);
   }, [id]);
 
   const { data: versions } = useAgentVersions(id!);

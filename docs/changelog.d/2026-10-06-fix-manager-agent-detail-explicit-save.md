@@ -46,6 +46,10 @@ version picker at the same height as "Generation 1", with the explanation in
 its tooltip. The secret access ("Who may use …") dialog's body had no padding
 against the dialog border; it now has the `p-5` every other dialog body has.
 
+**Dependency:** `source-map-js` 1.2.1 → 1.2.2 in `ui/manager/.ds-sync/package-lock.json`
+(CVE-2026-93749, HIGH — `Trivy Filesystem Scan`). Edited by hand rather than via
+`npm install`, which on Windows prunes the Tailwind wasm dependencies from the lock.
+
 ### Design decisions
 
 - One draft of the whole document rather than per-section drafts: one Save, one
