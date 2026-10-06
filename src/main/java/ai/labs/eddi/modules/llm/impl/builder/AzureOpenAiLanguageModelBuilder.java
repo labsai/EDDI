@@ -77,6 +77,9 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
             builder.logRequestsAndResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES)));
         }
 
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
+
         return builder.build();
     }
 

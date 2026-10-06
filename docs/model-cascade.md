@@ -132,7 +132,8 @@ Always returns `1.0` — effectively disables confidence gating. The first step'
 
 | Error Type | Behavior |
 |---|---|
-| **Rate limited (429) / 5xx** | Retried **in-step** up to the task's `retry.maxAttempts` (with backoff) before escalating to the next step. |
+| **Rate limited (429) / 5xx (500 included)** | Retried **in-step** up to the task's `retry.maxAttempts` (with backoff, or the provider's own retry delay) before escalating to the next step. A provider delay longer than `retry.maxRetryAfterMs` skips the in-step retries and escalates at once. |
+| **Spent quota (e.g. a per-day quota)** | Not retried — a 429 that names a per-day quota or `insufficient_quota` escalates immediately (failure class `QUOTA_EXHAUSTED`). |
 | **Timeout** | The step is cancelled and the cascade escalates; a warning is logged. A step streamed live is exempt from cancellation — see [Streaming the Final Step](#streaming-the-final-step). |
 | **Other errors** | Logged; escalate to the next step. |
 | **Duration / cost ceiling reached** | Stop escalating, return the best response so far. |
@@ -161,15 +162,31 @@ When streaming (SSE), a **guaranteed-accept step** is streamed **live** token-by
 
 ### Trace
 
-The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`). When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
+The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`). A step that ended in a failure (`timeout`, `error`, `retryable_error`) also carries `failureClass` — one of `TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`, `UNKNOWN` (see [error classification](langchain.md#error-classification)) — and, when the provider asked callers to wait, `retryAfterMs`. Both are additive; `status` and `error` are unchanged. When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
 
 ### Response metadata
 
 If `responseMetadataObjectName` is set, the cascade populates it with real token usage plus `cascadeCostUsd`, `cascadeModel` (`provider/model`), `cascadeStep`, and `cascadeConfidence`.
 
+### Turn deadline and request timeouts
+
+Inside an agent's [turn deadline](langchain.md#turn-deadline) the cascade's own budget shrinks to
+`min(maxTotalDurationMs, remaining - reserve)`, each step's timeout is clamped to what is left, and a
+further step is not started when less than 3 seconds (plus the reserve) remain — the best answer so
+far is returned instead.
+
+A step's `timeoutMs` also bounds the provider request itself: the model built for the step has its
+`timeout` parameter clamped to the step's `timeoutMs` (rounded up to whole seconds up to 10 s, and to
+5-second steps above, so a deadline that shrinks every turn does not create a model per millisecond).
+Without that, cancelling the waiting future left the HTTP call running — billed, and holding a thread
+— for the model's full `timeout`. A model `timeout` already at or below the step's is left alone.
+Setting a model `timeout` longer than its step's `timeoutMs` is reported as a deploy-time warning;
+set them equal. `eddi.llm.cancelled{scope=cascade_step}` counts steps cancelled on timeout, and the
+trace of a clamped step carries `modelTimeoutClampedMs`.
+
 ### Metrics (Micrometer, `/q/metrics`)
 
-`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`).
+`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`), `eddi.llm.turn.deadline.exceeded` (tag `stage`), `eddi.llm.cancelled` (tag `scope`).
 
 ## Audit Trail
 

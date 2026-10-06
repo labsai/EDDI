@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -198,6 +199,8 @@ public class OpenAiConversationBridge {
         } catch (OpenAiMessageMapper.NoUserMessageException e) {
             throw OpenAiApiException.badRequest(OpenAiErrorResponse.CODE_NO_USER_MESSAGE, e.getMessage());
         }
+
+        inputData.setRequestedTurnDeadlineMs(TurnDeadline.parseHeader(headerValue(headers, TurnDeadline.HEADER)));
 
         String chatKey = resolveChatKey(headers, request);
         String intent = buildIntent(model.agentId(), chatKey);

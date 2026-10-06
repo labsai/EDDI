@@ -12,6 +12,56 @@
 - **History Management**: Full conversation history is maintained, with support for undo/redo operations
 - **Context Passing**: External context can be injected into conversations at any step
 
+### Turn deadline
+
+A caller that will only wait so long can say so per request: send `X-EDDI-Turn-Deadline-Ms: <milliseconds>`
+on a `say`, a managed-conversation message or an OpenAI-compatible chat completion. The engine then
+stops retries, cascade steps and HTTP calls that cannot finish in time and answers (or falls back)
+inside the budget. The agent's own `turnDeadlineMs` caps it; with none configured the header alone
+applies, up to 10 minutes. See [Turn Deadline](langchain.md#turn-deadline).
+
+### Failed turns: the `error` object
+
+When a turn fails (`conversationState: "ERROR"`), the response to the `say` keeps the status and the
+snapshot shape it always had, and gains a top-level `error`:
+
+```json
+{ "conversationState": "ERROR",
+  "error": { "code": "RATE_LIMITED", "retryable": true, "retryAfterMs": 13000, "message": "Task 'llm' failed: ..." } }
+```
+
+- `code` is a failure class (`TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`,
+  `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`) when the failure was recognised as a provider or transport
+  failure, otherwise `TURN_FAILED`. An unexpected server fault is a `500` with
+  `{"error": {"code": "INTERNAL_ERROR", ...}}`.
+- `retryable` says whether sending the same request again can succeed; `retryAfterMs` is the provider's own
+  hint (`null` when it gave none) and is also sent as a `Retry-After` header (whole seconds).
+- `message` is a short, redacted digest: never a stack trace, a credential or a raw provider body.
+- The same object is on the final `done` event of a streaming `say`. The `/v1` OpenAI-compatible API keeps
+  its own error format, and the older refusals (`409`, `429`, `503`, ...) keep their existing bodies.
+- The endpoints produce JSON only, so there is no plain-text variant of the body.
+
+### Idempotent turns
+
+A caller whose timeout is shorter than a turn gives up and sends the request again. Send an
+`Idempotency-Key` header (or `X-EDDI-Request-Id`; the former wins) on `say`, a managed-conversation message
+or a streaming `say`, and the retry is answered instead of refused:
+
+- **Same key while the turn runs:** the request waits for that turn (up to `X-EDDI-Turn-Deadline-Ms`, at most
+  the agent timeout) and returns its result. No `409`, no second run. If the wait runs out it is answered like
+  today's busy conversation (`409`, retry shortly). The waiter gets the result in the shape the first request
+  asked for.
+- **Same key after the turn completed**, within `eddi.turns.idempotency.ttl-seconds` (default 600): the stored
+  answer, without running the pipeline again. The key is recorded on the turn's step in the database, so this
+  works after a restart and on any node, for as long as that step is among the conversation's latest 50.
+- **A different key, or none:** an ordinary turn (with the usual `409` while another turn is running).
+- Keys are scoped to the conversation, 1 to 128 printable ASCII characters; anything else is a `400`
+  (`INVALID_IDEMPOTENCY_KEY`).
+- A turn that **failed** is not remembered: retrying a failed request with the same key runs it again.
+- Waiting for a running turn works on the node that runs it; behind a multi-node (NATS) coordinator a
+  duplicate that lands on another node still meets `409` until the turn completes, after which the stored
+  answer is served everywhere. `0` for the TTL switches the feature off.
+
 ### How Conversations Work in EDDI
 
 When you create a conversation:

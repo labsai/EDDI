@@ -611,7 +611,7 @@ public class LlmTask implements ILifecycleTask {
                 responseMetadata = outcome.responseMetadata();
                 usedToolMode = true;
             } else {
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, memory.getTurnDeadline());
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
                 // Forward the buffered response to the stream so an SSE client is not left
@@ -642,7 +642,7 @@ public class LlmTask implements ILifecycleTask {
                 } else {
                     // Streaming not supported by this builder — fall back to sync, emit as single
                     // chunk
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, memory.getTurnDeadline());
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                     if (!addToOutputExplicitlyFalse) {
@@ -651,7 +651,7 @@ public class LlmTask implements ILifecycleTask {
                 }
             } else {
                 // Standard non-streaming legacy mode
-                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+                var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, memory.getTurnDeadline());
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
             }

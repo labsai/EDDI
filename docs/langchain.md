@@ -1214,7 +1214,11 @@ When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit`
 
 `retry` on an LLM task bounds how the engine re-attempts a failed model call. Only errors the
 engine classifies as retriable are retried — transport faults, rate limits and 5xx responses —
-never a malformed request or an authentication failure.
+never a malformed request, an authentication failure or a spent quota.
+
+**An LLM task with no `retry` block still retries**: the defaults below apply, so a transient
+failure is attempted up to 3 times before the cascade (if any) escalates. To turn retries off set
+`"retry": { "maxAttempts": 1 }`.
 
 ```json
 {
@@ -1222,21 +1226,56 @@ never a malformed request or an authentication failure.
     "maxAttempts": 3,
     "backoffDelayMs": 1000,
     "backoffMultiplier": 2.0,
-    "maxBackoffDelayMs": 10000
+    "maxBackoffDelayMs": 10000,
+    "honorRetryAfter": true,
+    "maxRetryAfterMs": 10000
   }
 }
 ```
 
-| Parameter            | Type   | Description                                          | Default |
-| -------------------- | ------ | ---------------------------------------------------- | ------- |
-| `maxAttempts`        | int    | Total attempts including the first                   | 3       |
-| `backoffDelayMs`     | long   | Delay before the second attempt                      | 1000    |
-| `backoffMultiplier`  | double | Multiplier applied to the delay after each failure   | 2.0     |
-| `maxBackoffDelayMs`  | long   | Ceiling on any single delay                          | 10000   |
+| Parameter            | Type    | Description                                                                                  | Default |
+| -------------------- | ------- | -------------------------------------------------------------------------------------------- | ------- |
+| `maxAttempts`        | int     | Total attempts including the first                                                           | 3       |
+| `backoffDelayMs`     | long    | Delay before the second attempt                                                              | 1000    |
+| `backoffMultiplier`  | double  | Multiplier applied to the delay after each failure                                           | 2.0     |
+| `maxBackoffDelayMs`  | long    | Ceiling on any single delay                                                                  | 10000   |
+| `honorRetryAfter`    | boolean | Sleep the delay the provider asked for (when the error carries one) instead of the backoff   | true    |
+| `maxRetryAfterMs`    | long    | Longest provider-requested wait accepted; a longer request stops retrying **without sleeping** | 10000   |
 
 The engine clamps these so a config cannot pin a pipeline thread: at most 10 attempts, at most
-30 seconds for one backoff, and at most 60 seconds of backoff in total across the retry sequence.
-A clamped value is reported once in a WARN.
+30 seconds for one backoff (and for `maxRetryAfterMs`), and at most 60 seconds of backoff in total
+across the retry sequence. A clamped value is reported once in a WARN.
+
+#### Error classification
+
+Every failure is classified into one class (`FailureClass`); only `TRANSIENT`, `RATE_LIMITED` and
+`TIMEOUT` are retried. The class is taken from the HTTP status **and the provider's error body**,
+because a status alone cannot tell a rate limit from a spent quota:
+
+| Class              | Retried | Typical signals                                                                                                              |
+| ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `TRANSIENT`        | yes     | HTTP 500/502/503/529; Gemini `INTERNAL`/`UNAVAILABLE`; Anthropic `overloaded_error`/`api_error`; connect failure, DNS         |
+| `RATE_LIMITED`     | yes     | HTTP 429; Gemini `RESOURCE_EXHAUSTED` (per-minute quota); OpenAI `rate_limit_exceeded`; Anthropic `rate_limit_error`        |
+| `TIMEOUT`          | yes     | read/connect timeout, HTTP 408/504, Gemini `DEADLINE_EXCEEDED`, a cascade step timeout                                       |
+| `QUOTA_EXHAUSTED`  | no      | OpenAI `insufficient_quota`; Gemini `RESOURCE_EXHAUSTED` whose `QuotaFailure` names a per-day quota (e.g. `...PerDay...`)    |
+| `AUTH`             | no      | HTTP 401/403; Gemini `PERMISSION_DENIED`, `API_KEY_INVALID`; Anthropic `authentication_error`                                 |
+| `MODEL_NOT_FOUND`  | no      | HTTP 404, Gemini `NOT_FOUND`, OpenAI `model_not_found`, Anthropic `not_found_error`                                          |
+| `CONTEXT_TOO_LONG` | no      | HTTP 400 saying "input token count exceeds", `context_length_exceeded`, "prompt is too long", "maximum context length"     |
+| `BAD_REQUEST`      | no      | any other HTTP 400/422                                                                                                       |
+| `UNKNOWN`          | no      | anything unrecognised                                                                                                        |
+
+For a rate limit the provider's own delay is read from the body — Gemini `RetryInfo.retryDelay`
+(`"13s"`, `"1.5s"`) or the "retry in 13s" / "try again in 250ms" sentence OpenAI and Gemini put in
+the message — and slept instead of the configured backoff (`honorRetryAfter`). If it is longer than
+`maxRetryAfterMs` the engine does not sleep: retrying stops at once and the failure (still
+classified `RATE_LIMITED`) goes up so a [model cascade](model-cascade.md) escalates immediately. An
+HTTP `Retry-After` **header** is not used: the langchain4j HTTP exception keeps only the status
+code and the body, not the headers.
+
+**EDDI is the only retry loop.** The provider clients are built with `maxRetries(0)` (OpenAI,
+Anthropic, Gemini, Vertex AI Gemini, Mistral, Ollama, Azure OpenAI, Bedrock), so `maxAttempts: 3`
+means three provider calls, not up to nine. The Hugging Face and OCI GenAI clients expose no such
+setting and the streaming clients have none; streaming retries are EDDI's own loop. Helper calls that go straight to a model without a task retry policy (the cascade judge model, the tool-response summariser and the summarisation service) run through the default policy, `RetryConfiguration.executeWithDefaultRetry` (3 attempts, same classification), so every model call has exactly one retry owner.
 
 **In a tool loop, the unit of retry is one model request.** A failure on the fifth model call of
 a tool-calling turn resends that one request — with every tool result gathered so far — rather
@@ -1247,10 +1286,68 @@ HITL resume continues the turn with a fresh budget.)
 
 When `convertToObject` requests the provider's native JSON mode and the call still fails after
 its retries, the engine falls back to a plain request only if the failure could mean "JSON mode
-is not supported". A timeout, rate limit or 5xx is rethrown instead of being paid for twice. A
+is not supported". A timeout, rate limit or 5xx (500 included) is rethrown instead of being paid for twice. A
 self-hosted OpenAI-compatible gateway that answers an unsupported `response_format` with a **5xx**
 rather than a 4xx therefore fails the turn instead of falling back; set `jsonResponseFormat: "off"`
 on that task (see the provider matrix below) so the format is never sent.
+
+### Turn Deadline
+
+Retries, cascade steps and HTTP calls each have their own timeouts, and they multiply: three
+attempts of a 25-second model, a two-step cascade and a retried HTTP call can add up to minutes. A
+caller with a 60-second timeout then gives up while the engine is still working, and the late answer
+is never seen. A **turn deadline** makes every layer spend from one budget instead.
+
+```json
+{
+  "turnDeadlineMs": 55000,
+  "turnDeadlineReserveMs": 1500
+}
+```
+
+Both are **agent-level** settings (on the agent configuration, not on an LLM task). Unset
+`turnDeadlineMs` — the default — means no deadline: every layer applies only its own timeouts,
+exactly as before.
+
+| Setting                 | Description                                                                                                                  | Default |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `turnDeadlineMs`        | Wall-clock budget of one turn, counted from the request's arrival (time spent queued behind another turn counts)             | unset   |
+| `turnDeadlineReserveMs` | Kept back for the fallback answer and for persisting the turn; no model or HTTP work is started that would eat into it        | 1500    |
+
+**Per request.** A caller can send `X-EDDI-Turn-Deadline-Ms: <milliseconds>` on a conversation
+`say`, on the managed-conversation endpoint and on the OpenAI-compatible `/v1` chat endpoint. When
+the agent sets `turnDeadlineMs`, the header can only *shorten* it. When the agent sets none, the
+header alone enables a deadline, capped at 10 minutes. A missing, non-numeric or non-positive value
+is ignored (the request is never rejected over it). Only the `say`/`rerun` turn paths read it; a
+HITL resume starts a turn without one.
+
+**What spends from it**
+
+- **Model attempts** (`retry`): the first attempt always starts while any time remains; a *retry* only
+  starts when at least 3 seconds plus the reserve are left. Each attempt is bounded by what is left
+  after the reserve, and an attempt that overruns is abandoned and its call cancelled. A backoff —
+  or a provider `Retry-After` — that would leave no room for the next attempt is **not slept**: the
+  loop stops and the failure goes up, so a [model cascade](model-cascade.md) escalates, or the turn
+  falls back, while there is still time.
+- **Cascade**: `maxTotalDurationMs` is `min(configured, remaining - reserve)`, step timeouts are
+  clamped to the remaining budget, and no further step starts when under 3 seconds (plus reserve)
+  remain. Time already spent by earlier tasks is already gone from the remaining budget.
+- **HTTP calls** ([httpcalls](httpcalls.md)): each call's timeout is clamped to the remaining budget,
+  and `retryApiCallInstruction` retries that cannot fit (backoff plus a call of at least
+  `min(timeout, 3 s)`) are skipped. The first call is never skipped unless the deadline has already
+  passed, in which case the call fails fast with a clear message.
+
+Streaming (SSE) model calls keep their own streaming timeout and are not yet bounded by the turn
+deadline.
+
+**Metrics.** `eddi.llm.turn.deadline.exceeded{stage}` counts every time a layer stopped because of
+the deadline; `eddi.llm.cancelled{scope}` counts attempts and cascade steps abandoned on timeout.
+
+**Deploy-time warnings.** When an agent is loaded, the engine logs (once, never blocking) a warning
+if a task's model `timeout` is longer than its cascade step's `timeoutMs`, if `convertToObject` has no
+fallback path (no `responseValidation` fallback and no `onError` fallback), and — for agents that set
+`turnDeadlineMs` — if the static worst case (every LLM retry running to its timeout, plus the slowest
+httpcall of each httpcalls step with its retries) exceeds the deadline minus the reserve.
 
 ### Rolling Conversation Summary
 

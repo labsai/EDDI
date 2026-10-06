@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.runtime.client.agents;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.modules.llm.impl.TurnBudgetValidator;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.IWorkflowFactory;
 import ai.labs.eddi.engine.runtime.internal.Agent;
@@ -29,12 +30,20 @@ import static java.lang.String.format;
 public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
     private final IAgentStoreService agentStoreService;
     private final IWorkflowFactory workflowFactory;
+    /** Deploy-time turn budget warning; absent in directly constructed tests. */
+    private final TurnBudgetValidator turnBudgetValidator;
     private static final Logger LOGGER = Logger.getLogger(AgentFactory.class);
 
     @Inject
-    public AgentStoreClientLibrary(IAgentStoreService agentStoreService, IWorkflowFactory workflowFactory) {
+    public AgentStoreClientLibrary(IAgentStoreService agentStoreService, IWorkflowFactory workflowFactory,
+            TurnBudgetValidator turnBudgetValidator) {
         this.agentStoreService = agentStoreService;
         this.workflowFactory = workflowFactory;
+        this.turnBudgetValidator = turnBudgetValidator;
+    }
+
+    public AgentStoreClientLibrary(IAgentStoreService agentStoreService, IWorkflowFactory workflowFactory) {
+        this(agentStoreService, workflowFactory, null);
     }
 
     @Override
@@ -83,6 +92,11 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
         // honored on the CONVERSATION_START (init) turn, not just say/resume turns.
         if (agentConfig.getHitlConfig() != null) {
             ((Agent) agent).setToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
+        }
+
+        ((Agent) agent).setTurnDeadline(agentConfig.getTurnDeadlineMs(), agentConfig.getTurnDeadlineReserveMs());
+        if (turnBudgetValidator != null) {
+            turnBudgetValidator.warnIfOverBudget(agentConfig, agentId, version);
         }
 
         // Read once here so the per-turn version resolution compares integers

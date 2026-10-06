@@ -149,6 +149,7 @@ eddi_conversation_undo_count_total          # Undo operations
 eddi_conversation_redo_count_total          # Redo operations
 eddi_conversation_agent_version_switch_count_total  # Conversations moved to another compatible version of their agent
 eddi_conversation_store_conflict_count_total  # Writes refused: another writer changed the conversation first
+eddi_turn_idempotency_total                  # Keyed (Idempotency-Key) duplicate requests; tag: outcome (replayed|waited|wait_timeout)
 eddi_processing_conversation_count          # Currently active (gauge)
 
 eddi_conversation_start_duration_seconds    # Start latency (timer)
@@ -438,7 +439,10 @@ eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMo
 eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
 eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
 eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
+eddi_llm_failure_total                      # Failed cascade steps by failure class; tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
+eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|httpcall|httpcall_retry)
+eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
 eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider

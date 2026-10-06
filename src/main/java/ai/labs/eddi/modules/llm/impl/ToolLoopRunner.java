@@ -14,6 +14,7 @@ import dev.langchain4j.model.TokenCountEstimator;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
@@ -41,6 +42,7 @@ import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
+import io.micrometer.core.instrument.Metrics;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -418,7 +420,7 @@ class ToolLoopRunner {
                 ChatResponse chatResponse;
                 try {
                     chatResponse = AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(chatRequest), task, "Agent execution",
-                            backoffSpentMs);
+                            backoffSpentMs, memory.getTurnDeadline());
                 } catch (LifecycleException requestFailure) {
                     // Nothing has executed in this run until the first request is
                     // answered. Say so, so a caller that may retry the run (the cascade's
@@ -799,7 +801,10 @@ class ToolLoopRunner {
         // tracking
         ToolExecutor executor = toolExecutors.get(toolRequest.name());
         String toolResult;
-        if (executor != null) {
+        if (executor != null && memory != null && memory.getTurnDeadline() != null && memory.getTurnDeadline().isExpired()) {
+            Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "tool").increment();
+            toolResult = "Error: the turn deadline has passed; tool '" + toolRequest.name() + "' was not run";
+        } else if (executor != null) {
             // A built-in is DISPATCHED under its @Tool method name ("calculate") but
             // CONFIGURED under its whitelist slug ("calculator"). Resolve the slug once,
             // here, and hand both names down: only the price and the cache TTL are looked
@@ -831,6 +836,12 @@ class ToolLoopRunner {
                                     task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId),
                             memory != null ? memory.getAgentId() : null, toolSource)
                     : null;
+
+            // Inside a turn deadline a tool may not outlive what is left of the turn.
+            TurnDeadline turnDeadline = memory != null ? memory.getTurnDeadline() : null;
+            if (turnDeadline != null) {
+                toolTimeoutMs = deadlineBoundedToolTimeoutMs(toolTimeoutMs, turnDeadline);
+            }
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
             toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
@@ -1010,6 +1021,23 @@ class ToolLoopRunner {
             limit = toolRateLimits.get(canonicalName);
         }
         return limit != null ? limit : defaultRateLimit;
+    }
+
+    /**
+     * A tool's timeout shortened to what the turn can still spare: what is left
+     * after the reserve, or all of what is left when that is almost nothing. Never
+     * longer than the configured timeout (a non-positive, i.e. unbounded, one takes
+     * the whole budget), never below 1 ms.
+     */
+    static int deadlineBoundedToolTimeoutMs(int configuredMs, TurnDeadline deadline) {
+        long budget = deadline.remainingAfterReserveMs();
+        if (budget < 500L) {
+            budget = deadline.remainingMs();
+        }
+        // A non-positive configured timeout means "no per-tool timeout": the turn's
+        // remaining budget is then the only bound, not a 1 ms one.
+        long bounded = configuredMs <= 0 ? budget : Math.min((long) configuredMs, budget);
+        return (int) Math.max(1L, Math.min((long) Integer.MAX_VALUE, bounded));
     }
 
     /**
