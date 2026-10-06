@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "Invalid value for 'temperature': expected a number between 0 and 2.",
+    "type": "invalid_request_error",
+    "param": "temperature",
+    "code": null
+  }
+}
