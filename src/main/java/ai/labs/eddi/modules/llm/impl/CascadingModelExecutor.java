@@ -6,6 +6,9 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.shared.FailureClass;
+import ai.labs.eddi.configs.shared.LlmFailure;
+import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -469,6 +472,7 @@ class CascadingModelExecutor {
 
                 if (stepTimedOut && bestSoFar != null) {
                     stepTrace.put("status", "timeout");
+                    recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "streaming timeout"), modelName);
                     trace.add(stepTrace);
                     increment("eddi.llm.cascade.escalations", "reason", "timeout");
                     increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
@@ -539,6 +543,7 @@ class CascadingModelExecutor {
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("status", "timeout");
                 stepTrace.put("durationMs", durationMs);
+                recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "cascade step timeout"), modelName);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): timeout after %dms", i, modelName, durationMs));
                 increment("eddi.llm.cascade.escalations", "reason", "timeout");
@@ -588,11 +593,13 @@ class CascadingModelExecutor {
                     carryCompletedExchange(cascade, totals, carried, stepExchange, stepTrace);
                 }
                 long durationMs = System.currentTimeMillis() - stepStart;
-                String errorType = isRetryableError(e) ? "retryable_error" : "error";
+                LlmFailure failure = LlmFailureClassifier.classify(e);
+                String errorType = failure.isRetryable() ? "retryable_error" : "error";
                 String failureDescription = describeFailure(e);
                 stepTrace.put("status", errorType);
                 stepTrace.put("error", failureDescription);
                 stepTrace.put("durationMs", durationMs);
+                recordFailure(stepTrace, failure, modelName);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): %s", i, modelName, failureDescription));
                 increment("eddi.llm.cascade.escalations", "reason", errorType);
@@ -1203,6 +1210,20 @@ class CascadingModelExecutor {
         if (stepCost > 0) {
             meterRegistry.counter("eddi.llm.cascade.cost", "provider", modelType).increment(stepCost);
         }
+    }
+
+    /**
+     * Records why a step failed: the failure class and (when the provider gave one)
+     * its retry delay go into the step's trace entry as additive fields, and the
+     * class is counted as {@code eddi.llm.failure{class,model}}. The trace's
+     * existing {@code status}/{@code error} fields are unchanged.
+     */
+    private void recordFailure(Map<String, Object> stepTrace, LlmFailure failure, String modelName) {
+        stepTrace.put("failureClass", failure.cls().name());
+        if (failure.retryAfterMs() != null) {
+            stepTrace.put("retryAfterMs", failure.retryAfterMs());
+        }
+        increment("eddi.llm.failure", "class", failure.cls().name(), "model", isBlank(modelName) ? "unknown" : modelName);
     }
 
     private void increment(String metric, String... tags) {

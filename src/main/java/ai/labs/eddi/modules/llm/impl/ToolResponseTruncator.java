@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
 import dev.langchain4j.data.message.ChatMessage;
@@ -232,7 +233,8 @@ public class ToolResponseTruncator {
                     SystemMessage.from(systemPrompt),
                     UserMessage.from(result));
 
-            var response = model.chat(ChatRequest.builder().messages(messages).build());
+            var response = RetryConfiguration.executeWithDefaultRetry(() -> model.chat(ChatRequest.builder().messages(messages).build()),
+                    "Tool response summarization");
             String summary = response.aiMessage().text();
 
             // Guard 4: empty summary
