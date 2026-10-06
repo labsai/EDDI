@@ -482,10 +482,26 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     /** How many rows one statement of {@link #endIdleConversations} ends. */
     private static final int END_IDLE_BATCH_SIZE = 500;
 
+    /**
+     * The state a projection reports: {@code null} for a value this version does
+     * not know (a row written by a newer one) rather than an exception that would
+     * abort a whole page — the same mapping as the MongoDB store.
+     */
+    private static ConversationState stateOrNull(String state) {
+        if (state == null) {
+            return null;
+        }
+        try {
+            return ConversationState.valueOf(state);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     private static ConversationActivitySummary toActivitySummary(ResultSet rs) throws SQLException {
         String state = rs.getString("conversation_state");
         BigDecimal lastInteractionMs = rs.getBigDecimal("last_interaction_ms");
-        return new ConversationActivitySummary(rs.getString("id"), state == null ? null : ConversationState.valueOf(state),
+        return new ConversationActivitySummary(rs.getString("id"), stateOrNull(state),
                 rs.getString("AGENT_ID"), rs.getObject("AGENT_VERSION", Integer.class),
                 lastInteractionMs == null ? null : Instant.ofEpochMilli(lastInteractionMs.longValue()));
     }
@@ -698,7 +714,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     Integer agentVersion = rs.getObject("AGENT_VERSION", Integer.class);
                     summaries.put(conversationId, new ConversationListingSummary(conversationId, rs.getString("user_id"),
                             environment == null ? null : Deployment.Environment.fromString(environment),
-                            state == null ? null : ConversationState.valueOf(state), rs.getString("AGENT_ID"),
+                            stateOrNull(state), rs.getString("AGENT_ID"),
                             agentVersion, rs.getInt("step_count")));
                 }
             }

@@ -503,6 +503,22 @@ class PostgresConversationMemoryStoreUnitTest {
         assertThrows(RuntimeException.class, () -> store.deleteConversationsByUserId("user-1"));
     }
 
+    @Test
+    void loadOpenConversationActivity_unknownStateIsNullNotAnException() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, true, false);
+        when(resultSet.getString("id")).thenReturn("00000000-0000-0000-0000-0000000000a1", "00000000-0000-0000-0000-0000000000a2");
+        when(resultSet.getString("conversation_state")).thenReturn("SOME_FUTURE_STATE", "READY");
+        when(resultSet.getString("AGENT_ID")).thenReturn("agent-1");
+        when(resultSet.getObject("AGENT_VERSION", Integer.class)).thenReturn(1);
+
+        var batch = store.loadOpenConversationActivity("agent-1", 1, null, 10);
+
+        assertEquals(2, batch.size(), "one unreadable state must not abort the page");
+        assertNull(batch.get(0).conversationState());
+        assertEquals(ConversationState.READY, batch.get(1).conversationState());
+    }
+
     // ─── Helpers ───
 
     private ConversationMemorySnapshot createSnapshot(String conversationId) {
