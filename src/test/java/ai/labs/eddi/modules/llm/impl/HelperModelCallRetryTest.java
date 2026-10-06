@@ -7,7 +7,9 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.exception.AuthenticationException;
+import dev.langchain4j.exception.HttpException;
 import dev.langchain4j.exception.InternalServerException;
+import dev.langchain4j.exception.RateLimitException;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -90,6 +92,21 @@ class HelperModelCallRetryTest {
 
         assertTrue(result.contains("short summary"), result);
         verify(model, times(2)).chat(any(ChatRequest.class));
+    }
+
+    @Test
+    @DisplayName("cascade judge model: a provider wait above the judge's short cap is not slept; falls back to the heuristic")
+    void judgeModelRespectsItsShortBudget() {
+        ChatModel judge = mock(ChatModel.class);
+        String body = "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.RetryInfo\",\"retryDelay\":\"30s\"}]}}";
+        when(judge.chat(anyList())).thenThrow(new RateLimitException(new HttpException(429, body)));
+        long start = System.nanoTime();
+
+        var result = ConfidenceEvaluator.evaluateWithJudge("A confident, complete answer with plenty of detail.", judge, null);
+
+        assertTrue((System.nanoTime() - start) / 1_000_000 < 1500, "must not sleep the requested 30s");
+        verify(judge, times(1)).chat(anyList());
+        assertTrue(result.confidence() >= 0.0);
     }
 
     @Test

@@ -201,7 +201,10 @@ public final class LlmFailureClassifier {
             return new LlmFailure(FailureClass.QUOTA_EXHAUSTED, null, "per-day quota exhausted (" + perDayQuota + ")");
         }
 
-        if (effectiveStatus == 429 || signals.contains("resource_exhausted") || signals.contains("rate_limit")) {
+        // Body signals decide only when the HTTP status is unknown; a known non-429
+        // status (e.g. a 503 whose body mentions rate limits) takes its own branch
+        // below.
+        if (effectiveStatus == 429 || (effectiveStatus <= 0 && (signals.contains("resource_exhausted") || signals.contains("rate_limit")))) {
             Long retryAfter = retryDelayMs(error);
             if (retryAfter == null) {
                 retryAfter = retryInHint(errMessage.isEmpty() ? body : errMessage);
@@ -282,7 +285,7 @@ public final class LlmFailureClassifier {
             if (delay.isTextual()) {
                 Matcher matcher = DURATION.matcher(delay.asText());
                 if (matcher.matches()) {
-                    return toMillis(Double.parseDouble(matcher.group(1)), matcher.group(2));
+                    return toMillis(matcher.group(1), matcher.group(2));
                 }
             } else if (delay.isObject()) {
                 double seconds = delay.path("seconds").asDouble(0) + delay.path("nanos").asDouble(0) / 1_000_000_000d;
@@ -297,10 +300,31 @@ public final class LlmFailureClassifier {
             return null;
         }
         Matcher matcher = RETRY_IN_MESSAGE.matcher(message);
-        return matcher.find() ? toMillis(Double.parseDouble(matcher.group(1)), matcher.group(2)) : null;
+        return matcher.find() ? toMillis(matcher.group(1), matcher.group(2)) : null;
     }
 
+    /**
+     * As {@link #toMillis(double, String)} for a number still in text form: a value
+     * that does not parse yields {@code null} (no delay inferred) rather than an
+     * exception on the classification path.
+     */
+    private static Long toMillis(String number, String unit) {
+        try {
+            return toMillis(Double.parseDouble(number), unit);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Converts to milliseconds, capped at {@link #MAX_RETRY_AFTER_MS}. A value that
+     * overflows to infinity (hundreds of digits) or is not a number is treated as
+     * the cap, never as a short delay.
+     */
     private static long toMillis(double value, String unit) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return MAX_RETRY_AFTER_MS;
+        }
         String u = unit == null ? "s" : unit.toLowerCase(Locale.ROOT);
         double factor = switch (u) {
             case "ms" -> 1d;
@@ -319,6 +343,11 @@ public final class LlmFailureClassifier {
         }
         if (current instanceof ModelNotFoundException) {
             return new LlmFailure(FailureClass.MODEL_NOT_FOUND, null, "model not found");
+        }
+        // ContentFilteredException is an InvalidRequestException: test it first, or it
+        // is unreachable.
+        if (current instanceof ContentFilteredException) {
+            return new LlmFailure(FailureClass.UNKNOWN, null, "content filtered");
         }
         if (current instanceof InvalidRequestException) {
             for (Throwable t : chain(outermost)) {
@@ -339,9 +368,6 @@ public final class LlmFailureClassifier {
         }
         if (current instanceof InternalServerException) {
             return new LlmFailure(FailureClass.TRANSIENT, null, "provider internal error");
-        }
-        if (current instanceof ContentFilteredException) {
-            return new LlmFailure(FailureClass.UNKNOWN, null, "content filtered");
         }
         if (current instanceof RetriableException) {
             return new LlmFailure(FailureClass.TRANSIENT, null, "retriable (" + current.getClass().getSimpleName() + ")");
