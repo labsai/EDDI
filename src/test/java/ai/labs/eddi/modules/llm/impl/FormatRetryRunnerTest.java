@@ -326,6 +326,43 @@ class FormatRetryRunnerTest {
         }
 
         @Test
+        @DisplayName("onEmpty fallback/error keeps the blank reply for LlmTask: it is not re-asked as invalid JSON")
+        void blankIsLeftToTheEmptyPolicy() throws Exception {
+            var model = FaultInjectingChatModel.script(Step.empty());
+
+            var outcome = run(jsonPolicy(v -> v.setOnEmpty("fallback")), model);
+
+            assertEquals(1, model.callCount());
+            assertTrue(outcome.usable());
+        }
+
+        @Test
+        @DisplayName("truncated JSON whose truncation re-ask cannot run still gets the corrective re-ask")
+        void truncatedJsonFallsThroughToCorrective() throws Exception {
+            var model = FaultInjectingChatModel.script(Step.finishReason("{\"a\":", FinishReason.LENGTH), Step.text(VALID));
+
+            // no known output cap: the truncation re-ask is impossible
+            var outcome = run(jsonPolicy(v -> v.setOnTruncation("retry")), model);
+
+            assertTrue(outcome.usable());
+            assertEquals(2, model.callCount());
+            var second = model.requests().get(1).messages();
+            assertTrue(((UserMessage) second.getLast()).singleText().contains("truncated JSON"));
+        }
+
+        @Test
+        @DisplayName("a truncation that cannot be re-asked, with no JSON policy, still ends unresolved")
+        void unactionableTruncationStaysUnresolved() throws Exception {
+            var model = FaultInjectingChatModel.script(Step.finishReason("x", FinishReason.LENGTH));
+
+            var outcome = runner.run(Policy.from(validation(v -> v.setOnTruncation("retry")), null, false, null, null, null), original(),
+                    askerOver(model), null, RemainingBudget.UNBOUNDED, ReaskGate.ALWAYS, ReaskListener.NONE);
+
+            assertEquals(Trigger.TRUNCATION, outcome.unresolved());
+            assertEquals(1, model.callCount());
+        }
+
+        @Test
         @DisplayName("a re-ask that itself fails keeps the earlier reply and does not throw")
         void failedReaskKeepsTheEarlierReply() throws Exception {
             var model = FaultInjectingChatModel.script(Step.text(PROSE), Step.status(503));

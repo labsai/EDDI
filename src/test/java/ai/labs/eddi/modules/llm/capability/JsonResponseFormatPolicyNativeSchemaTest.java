@@ -12,6 +12,7 @@ import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonEnumSchema;
 import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.model.chat.request.json.JsonRawSchema;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -158,6 +159,20 @@ class JsonResponseFormatPolicyNativeSchemaTest {
             assertInstanceOf(JsonIntegerSchema.class, root.properties().get("count"));
             var tags = assertInstanceOf(JsonArraySchema.class, root.properties().get("tags"));
             assertInstanceOf(JsonStringSchema.class, tags.items());
+        }
+
+        @Test
+        @DisplayName("gemini gets a closed object as a raw schema (its typed mapper drops additionalProperties); others stay typed")
+        void geminiClosedObjectIsRaw() {
+            var gemini = resolve("gemini", false, null, SCHEMA).jsonSchema().rootElement();
+            var raw = assertInstanceOf(JsonRawSchema.class, gemini);
+            assertTrue(raw.schema().contains("additionalProperties"));
+            assertInstanceOf(JsonObjectSchema.class, resolve("openai", false, null, SCHEMA).jsonSchema().rootElement());
+            // an open schema stays typed on gemini too
+            String open = "{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}}}";
+            assertInstanceOf(JsonObjectSchema.class, resolve("gemini", false, null, open).jsonSchema().rootElement());
+            // an inconvertible closed schema still falls back to schemaless JSON
+            assertSame(ResponseFormat.JSON, resolve("gemini", false, null, "{\"type\":\"object\",\"additionalProperties\":false}"));
         }
 
         @Test

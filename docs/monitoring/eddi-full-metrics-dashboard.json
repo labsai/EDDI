@@ -5001,8 +5001,8 @@
           "description": "Cascade runs cut short because the configured cost or duration ceiling was hit. Non-zero means users are receiving the best answer obtained so far rather than the best answer available.",
           "gridPos": {
             "h": 7,
-            "w": 24,
-            "x": 0,
+            "w": 12,
+            "x": 12,
             "y": 54
           },
           "targets": [

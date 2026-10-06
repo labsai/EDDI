@@ -284,6 +284,26 @@ class LlmCircuitBreakersTest {
     }
 
     @Test
+    @DisplayName("a late result from an abandoned probe cannot close, re-open or release the breaker for its replacement")
+    void abandonedProbeCannotDecideForItsReplacement() {
+        var cfg = config(10, 8, 60_000);
+        fail(MODEL, cfg, Failure.AUTH);
+        now.addAndGet(60_000);
+        Ticket probeA = breakers.acquire(MODEL, cfg);
+        now.addAndGet(60_000);
+        Ticket probeB = breakers.acquire(MODEL, cfg);
+        assertTrue(probeB.isProbe());
+
+        probeA.success();
+        assertEquals(State.HALF_OPEN, breakers.stateOf(MODEL));
+        probeA.release();
+        assertFalse(breakers.acquire(MODEL, cfg).allowed(), "B is still in flight: no third probe");
+
+        probeB.success();
+        assertEquals(State.CLOSED, breakers.stateOf(MODEL));
+    }
+
+    @Test
     @DisplayName("per model, per agent version and per agent: one breaker opening leaves the others closed")
     void keysAreIsolated() {
         var cfg = defaults();
