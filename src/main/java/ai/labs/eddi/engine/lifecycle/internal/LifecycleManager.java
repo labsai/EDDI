@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.lifecycle.internal;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.shared.LlmFailure;
+import ai.labs.eddi.configs.shared.LlmFailureClassifier;
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
@@ -1032,6 +1035,16 @@ public class LifecycleManager implements ILifecycleManager {
         errorOutput.put("taskId", task.getId().name());
         errorOutput.put("taskType", task.getType());
         errorOutput.put("text", digestText);
+        // The machine-readable half, for the caller's `error` object. The message is
+        // the same redacted digest the text carries, never the raw exception.
+        LlmFailure failure = LlmFailureClassifier.classify(exception);
+        TurnError turnError = TurnError.of(failure, summarizeException(exception));
+        errorOutput.put(TurnError.KEY_CODE, turnError.code());
+        errorOutput.put(TurnError.KEY_RETRYABLE, turnError.retryable());
+        if (turnError.retryAfterMs() != null) {
+            errorOutput.put(TurnError.KEY_RETRY_AFTER_MS, turnError.retryAfterMs());
+        }
+        errorOutput.put(TurnError.KEY_MESSAGE, turnError.message());
         step.addConversationOutputList(TASK_ERRORS, List.of(errorOutput));
         return digestText;
     }

@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.TurnError;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
 import java.util.Date;
@@ -52,6 +54,13 @@ public class SimpleConversationMemorySnapshot {
      * {@code ConversationMemorySnapshot.hitlPendingToolCalls}.
      */
     private PendingToolCallBatch hitlPendingToolCalls;
+    /**
+     * Why the turn this snapshot answers failed; {@code null} (and omitted) when it
+     * did not. Set only on the response to a {@code say}, never on a read, and only
+     * when {@code conversationState} is {@code ERROR}.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private TurnError error;
     private boolean undoAvailable;
     private boolean redoAvailable;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
@@ -135,6 +144,14 @@ public class SimpleConversationMemorySnapshot {
         public void setOriginWorkflowId(String originWorkflowId) {
             this.originWorkflowId = originWorkflowId;
         }
+    }
+
+    public TurnError getError() {
+        return error;
+    }
+
+    public void setError(TurnError error) {
+        this.error = error;
     }
 
     public String getConversationId() {

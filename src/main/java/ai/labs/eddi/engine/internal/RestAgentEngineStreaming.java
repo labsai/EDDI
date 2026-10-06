@@ -25,10 +25,14 @@ import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMappe
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -122,6 +126,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     @Inject
     TurnDeadlineHeaderReader turnDeadlineHeaderReader;
 
+    /**
+     * Reads {@code Idempotency-Key} / {@code X-EDDI-Request-Id}; nullable in unit
+     * tests.
+     */
+    @Inject
+    IdempotencyKeyHeaderReader idempotencyKeyHeaderReader;
+
     @Inject
     public RestAgentEngineStreaming(IConversationService conversationService,
             ConversationAccessGuard conversationAccessGuard,
@@ -164,6 +175,18 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         clientContextGuard.strip(inputData);
         if (turnDeadlineHeaderReader != null) {
             turnDeadlineHeaderReader.apply(inputData);
+        }
+        if (idempotencyKeyHeaderReader != null) {
+            try {
+                idempotencyKeyHeaderReader.apply(inputData);
+            } catch (TurnIdempotencyService.InvalidIdempotencyKeyException e) {
+                // Before the sink is touched, like the input cap: a plain 400, not an
+                // 'error' event on a 200 stream.
+                throw new BadRequestException(e.getMessage(), Response.status(Response.Status.BAD_REQUEST)
+                        .type(MediaType.APPLICATION_JSON).entity(RestAgentEngine.errorBody(
+                                new TurnError("INVALID_IDEMPOTENCY_KEY", false, null, e.getMessage())))
+                        .build());
+            }
         }
 
         // Every outbound frame goes through this stream, which doubles as the
