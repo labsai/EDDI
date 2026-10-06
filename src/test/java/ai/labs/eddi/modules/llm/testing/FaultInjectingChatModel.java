@@ -138,8 +138,14 @@ public final class FaultInjectingChatModel implements ChatModel {
 
     @Override
     public ChatResponse doChat(ChatRequest request) {
-        requests.add(request);
-        int index = calls.getAndIncrement();
+        int index;
+        // Index and request are recorded under one lock so requests().get(i) is call i.
+        // perform() stays outside it: a simulated delay must not serialize other
+        // callers.
+        synchronized (requests) {
+            index = calls.getAndIncrement();
+            requests.add(request);
+        }
         if (index >= script.size() && !repeatLast) {
             throw new IllegalStateException("fault-injection script exhausted: call " + (index + 1) + " but only " + script.size() + " step(s)");
         }

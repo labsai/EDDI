@@ -114,7 +114,7 @@ public final class ModelOutputParser {
         String unfenced = stripFence(trimmed);
         boolean fenceStripped = !unfenced.equals(trimmed);
 
-        Object parsed = tryParse(unfenced);
+        Object parsed = tryParseWhole(unfenced);
         if (parsed != null) {
             return new JsonOutcome(Kind.VALID, parsed, fenceStripped, null, raw);
         }
@@ -151,6 +151,21 @@ public final class ModelOutputParser {
     static String stripFence(String trimmed) {
         Matcher m = FENCE.matcher(trimmed);
         return m.matches() ? m.group(1).trim() : trimmed;
+    }
+
+    /**
+     * Whole-reply parse. The injected mapper tolerates trailing tokens, so
+     * {@code [1,2] and more prose} would deserialize to the List; require that the
+     * balanced root starting at index 0 ends at the last character before parsing.
+     */
+    private Object tryParseWhole(String text) {
+        if (!text.startsWith("{") && !text.startsWith("[")) {
+            return null;
+        }
+        if (scan(text, 0).end() != text.length() - 1) {
+            return null;
+        }
+        return tryParse(text);
     }
 
     private Object tryParse(String text) {
