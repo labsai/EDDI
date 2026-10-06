@@ -4687,7 +4687,7 @@
           }
         },
         {
-          "id": 174,
+          "id": 177,
           "type": "timeseries",
           "title": "LLM failures by class and model",
           "datasource": {
@@ -4763,7 +4763,7 @@
           }
         },
         {
-          "id": 175,
+          "id": 178,
           "type": "timeseries",
           "title": "Turn deadline exceeded by stage",
           "datasource": {
@@ -4839,7 +4839,7 @@
           }
         },
         {
-          "id": 176,
+          "id": 179,
           "type": "timeseries",
           "title": "Cancelled LLM attempts and steps",
           "datasource": {

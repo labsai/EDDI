@@ -37,4 +37,11 @@ class ToolLoopRunnerDeadlineTest {
     void reserveOnlyFallsBackToWhatIsLeft() {
         assertEquals(1_200, ToolLoopRunner.deadlineBoundedToolTimeoutMs(30_000, deadline(1_200, 1_000)));
     }
+
+    @Test
+    @DisplayName("a non-positive (unbounded) tool timeout gets the whole remaining budget, not 1 ms")
+    void unboundedToolGetsTheBudget() {
+        assertEquals(4_000, ToolLoopRunner.deadlineBoundedToolTimeoutMs(-1, deadline(5_000, 1_000)));
+        assertEquals(4_000, ToolLoopRunner.deadlineBoundedToolTimeoutMs(0, deadline(5_000, 1_000)));
+    }
 }

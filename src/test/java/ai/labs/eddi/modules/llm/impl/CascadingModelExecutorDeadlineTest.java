@@ -20,7 +20,10 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -44,6 +47,17 @@ import static org.mockito.Mockito.*;
 class CascadingModelExecutorDeadlineTest {
 
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    private final SimpleMeterRegistry globalMeters = new SimpleMeterRegistry();
+
+    @BeforeEach
+    void attachGlobal() {
+        Metrics.addRegistry(globalMeters);
+    }
+
+    @AfterEach
+    void detachGlobal() {
+        Metrics.removeRegistry(globalMeters);
+    }
 
     private static IConversationMemory memory(TurnDeadline deadline) {
         IConversationMemory memory = mock(IConversationMemory.class);
@@ -159,7 +173,13 @@ class CascadingModelExecutorDeadlineTest {
 
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
         assertTrue(elapsedMs < 10_000, "the step must end near the 1 s budget, not the 30 s step timeout; took " + elapsedMs + "ms");
-        assertEquals(1.0, meters.counter("eddi.llm.cancelled", "scope", "cascade_step").count());
+        // Either layer may fire first at the same budget: the attempt's own bound
+        // (global
+        // registry) or the step future (this executor's registry). One must have
+        // cancelled the hang.
+        double cancelled = meters.counter("eddi.llm.cancelled", "scope", "cascade_step").count()
+                + globalMeters.counter("eddi.llm.cancelled", "scope", "attempt").count();
+        assertTrue(cancelled >= 1.0, "the hanging call must be cancelled, was " + cancelled);
     }
 
     @Test

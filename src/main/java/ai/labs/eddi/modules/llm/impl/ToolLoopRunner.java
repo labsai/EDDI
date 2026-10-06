@@ -1026,14 +1026,18 @@ class ToolLoopRunner {
     /**
      * A tool's timeout shortened to what the turn can still spare: what is left
      * after the reserve, or all of what is left when that is almost nothing. Never
-     * longer than the configured timeout, never below 1 ms.
+     * longer than the configured timeout (a non-positive, i.e. unbounded, one takes
+     * the whole budget), never below 1 ms.
      */
     static int deadlineBoundedToolTimeoutMs(int configuredMs, TurnDeadline deadline) {
         long budget = deadline.remainingAfterReserveMs();
         if (budget < 500L) {
             budget = deadline.remainingMs();
         }
-        return (int) Math.max(1L, Math.min((long) configuredMs, budget));
+        // A non-positive configured timeout means "no per-tool timeout": the turn's
+        // remaining budget is then the only bound, not a 1 ms one.
+        long bounded = configuredMs <= 0 ? budget : Math.min((long) configuredMs, budget);
+        return (int) Math.max(1L, Math.min((long) Integer.MAX_VALUE, bounded));
     }
 
     /**

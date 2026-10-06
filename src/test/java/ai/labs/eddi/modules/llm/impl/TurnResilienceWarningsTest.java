@@ -137,6 +137,7 @@ class TurnResilienceWarningsTest {
         retry.setBackoffDelayMs(1_000L);
         retry.setBackoffMultiplier(2.0);
         retry.setMaxBackoffDelayMs(10_000L);
+        retry.setHonorRetryAfter(false);
         task.setRetry(retry);
 
         // 3 x 10 s + backoffs of 1 s and 2 s
@@ -152,10 +153,30 @@ class TurnResilienceWarningsTest {
         retry.setBackoffDelayMs(1_000L);
         retry.setBackoffMultiplier(0.0);
         retry.setMaxBackoffDelayMs(10_000L);
+        retry.setHonorRetryAfter(false);
         task.setRetry(retry);
 
         // 3 x 10 s + two 1 s backoffs (multiplier 1.0), not 31 s
         assertEquals(32_000, TurnResilienceWarnings.worstCaseLlmMs(task));
+    }
+
+    @Test
+    @DisplayName("an honoured provider Retry-After counts at its cap, replacing a smaller configured backoff")
+    void providerRetryAfterIsInTheEstimate() {
+        var task = task(Map.of("timeout", "10000"));
+        var retry = new RetryConfiguration();
+        retry.setMaxAttempts(3);
+        retry.setBackoffDelayMs(1_000L);
+        retry.setBackoffMultiplier(1.0);
+        retry.setMaxBackoffDelayMs(1_000L);
+        retry.setMaxRetryAfterMs(8_000L);
+        task.setRetry(retry);
+
+        // 3 x 10 s + two waits of up to 8 s each
+        assertEquals(46_000, TurnResilienceWarnings.worstCaseLlmMs(task));
+
+        retry.setHonorRetryAfter(false);
+        assertEquals(32_000, TurnResilienceWarnings.worstCaseLlmMs(task), "ignored hints cost nothing extra");
     }
 
     @Test

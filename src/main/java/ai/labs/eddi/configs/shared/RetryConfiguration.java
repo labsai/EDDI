@@ -503,7 +503,7 @@ public class RetryConfiguration {
     }
 
     /** {@code honorRetryAfter}, defaulting to {@code true} when unset. */
-    static boolean honorRetryAfter(RetryConfiguration retryConfig) {
+    public static boolean honorRetryAfter(RetryConfiguration retryConfig) {
         return retryConfig == null || retryConfig.getHonorRetryAfter() == null || retryConfig.getHonorRetryAfter();
     }
 
@@ -513,7 +513,7 @@ public class RetryConfiguration {
      *
      * @see #MAX_BACKOFF_CEILING_MS
      */
-    static long effectiveMaxRetryAfterMs(RetryConfiguration retryConfig) {
+    public static long effectiveMaxRetryAfterMs(RetryConfiguration retryConfig) {
         long configured = retryConfig != null && retryConfig.getMaxRetryAfterMs() != null
                 ? retryConfig.getMaxRetryAfterMs()
                 : DEFAULT_MAX_RETRY_AFTER_MS;
