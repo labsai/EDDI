@@ -266,7 +266,10 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
             return null;
         }
         if (supportsNativeSchema(provider)) {
-            return ResponseSchemaConverter.convert(responseSchema)
+            // Gemini's typed schema mapper drops additionalProperties; send the author's
+            // schema text raw when it relies on a closed object.
+            boolean raw = LLM_TYPE_GEMINI.equals(normalize(provider)) && ResponseSchemaConverter.hasClosedObject(responseSchema);
+            return (raw ? ResponseSchemaConverter.convertRaw(responseSchema) : ResponseSchemaConverter.convert(responseSchema))
                     .map(schema -> ResponseFormat.builder().type(ResponseFormatType.JSON).jsonSchema(schema).build())
                     .orElse(ResponseFormat.JSON);
         }

@@ -12,6 +12,7 @@ import dev.langchain4j.model.chat.request.json.JsonEnumSchema;
 import dev.langchain4j.model.chat.request.json.JsonIntegerSchema;
 import dev.langchain4j.model.chat.request.json.JsonNumberSchema;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.model.chat.request.json.JsonRawSchema;
 import dev.langchain4j.model.chat.request.json.JsonSchema;
 import dev.langchain4j.model.chat.request.json.JsonSchemaElement;
 import dev.langchain4j.model.chat.request.json.JsonStringSchema;
@@ -81,6 +82,49 @@ public final class ResponseSchemaConverter {
         Optional<JsonSchema> converted = doConvert(responseSchemaJson);
         CACHE.put(responseSchemaJson, converted);
         return converted;
+    }
+
+    /**
+     * Like {@link #convert}, but the root is the author's schema text as a
+     * {@link JsonRawSchema}. Needed where a binding's typed mapper drops a keyword
+     * the designer relies on: langchain4j 1.20.2's Gemini {@code SchemaMapper}
+     * never carries {@code additionalProperties}, so a closed object would be sent
+     * open. Still empty when the schema is not convertible at all, so the request
+     * falls back to schemaless JSON exactly as {@link #convert} does.
+     */
+    public static Optional<JsonSchema> convertRaw(String responseSchemaJson) {
+        return convert(responseSchemaJson)
+                .map(typed -> JsonSchema.builder().name(SCHEMA_NAME).rootElement(JsonRawSchema.from(responseSchemaJson)).build());
+    }
+
+    /**
+     * Whether any object in the schema says {@code additionalProperties: false}.
+     */
+    public static boolean hasClosedObject(String responseSchemaJson) {
+        try {
+            return responseSchemaJson != null && containsClosed(MAPPER.readTree(responseSchemaJson), 0);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean containsClosed(JsonNode node, int depth) {
+        if (node == null || depth > MAX_DEPTH) {
+            return false;
+        }
+        JsonNode additional = node.get("additionalProperties");
+        if (additional != null && additional.isBoolean() && !additional.asBoolean()) {
+            return true;
+        }
+        JsonNode properties = node.get("properties");
+        if (properties != null && properties.isObject()) {
+            for (JsonNode child : properties) {
+                if (containsClosed(child, depth + 1)) {
+                    return true;
+                }
+            }
+        }
+        return containsClosed(node.get("items"), depth + 1);
     }
 
     private static Optional<JsonSchema> doConvert(String json) {
