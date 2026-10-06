@@ -212,6 +212,18 @@ class LlmTaskRecoveryPoliciesTest {
     }
 
     @Test
+    @DisplayName("a whitespace-only reply after the re-asks is out of recoveries: the fallback is served")
+    void whitespaceReplyFallsBack() throws Exception {
+        var model = FaultInjectingChatModel.script(Step.text("   ")).repeatLast();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+
+        run(task(retryInvalidJson().andThen(v -> v.setFallbackMessage("Please try again."))));
+
+        assertEquals("Please try again.", templateData.get("taskA"));
+        verify(dataFactory).createData("llm:fallback:taskA", Boolean.TRUE);
+    }
+
+    @Test
     @DisplayName("fallbackAction error fails the turn, warn keeps the raw reply")
     void fallbackActionVariants() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
