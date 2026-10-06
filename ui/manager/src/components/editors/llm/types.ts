@@ -29,6 +29,12 @@ export interface CascadeStep {
   /** Per-step token pricing overrides (USD per 1M tokens). Must be ≥ 0. */
   inputPricePer1M?: number;
   outputPricePer1M?: number;
+  /**
+   * Overrides `responseValidation.maxRetries` for this step: how many
+   * corrective same-model re-asks it gets before the cascade escalates
+   * (`0..3`; 0 for an expensive last-resort model). Omitted inherits the task.
+   */
+  maxFormatRetries?: number;
 }
 
 /** Judge model for the `judge_model` confidence-evaluation strategy. */
@@ -196,6 +202,15 @@ export interface LlmTask {
  */
 export type ResponseValidationAction = "ignore" | "warn" | "fallback" | "error";
 
+/**
+ * The policies that can also `retry`: re-ask the same model (up to
+ * `maxRetries`), then escalate to the next cascade step, then apply
+ * `fallbackAction`. `refusal` and `streamingTimeout` do not take it.
+ */
+export type RetryableResponseValidationAction =
+  | ResponseValidationAction
+  | "retry";
+
 /** Ordered action options for response-validation policy selectors. */
 export const RESPONSE_VALIDATION_ACTIONS = [
   "ignore",
@@ -214,11 +229,46 @@ export interface ResponseValidation {
   /** Master switch — validation is only applied when enabled. */
   enabled?: boolean;
   /** Action when the LLM returns an empty or null response. */
-  onEmpty?: ResponseValidationAction;
-  /** Action when the response was truncated (finishReason=LENGTH). */
-  onTruncation?: ResponseValidationAction;
+  onEmpty?: RetryableResponseValidationAction;
+  /**
+   * Action when the response was truncated (finishReason=LENGTH). `retry`
+   * re-asks once with `maxOutputTokens` × `truncationRetryFactor`.
+   */
+  onTruncation?: RetryableResponseValidationAction;
   /** Action when the response was blocked by a content filter. */
-  onContentFilter?: ResponseValidationAction;
+  onContentFilter?: RetryableResponseValidationAction;
+  /**
+   * Action when a `convertToObject` reply is not valid JSON after the local
+   * repair. `retry` re-asks the same model with `correctiveMessage`.
+   * Default `ignore`.
+   */
+  onInvalidJson?: RetryableResponseValidationAction;
+  /**
+   * Action when a reply parses but does not match the response schema.
+   * Accepted for configuration compatibility; takes effect with schema
+   * validation (R4). Default `ignore`.
+   */
+  onSchemaMismatch?: RetryableResponseValidationAction;
+  /**
+   * Action when the prompt exceeds the model's context window. `retry` re-sends
+   * once with the history window halved. Default `error`.
+   */
+  onContextTooLong?: RetryableResponseValidationAction;
+  /** Same-model re-asks per model / cascade step, 0..3. Default 1. */
+  maxRetries?: number;
+  /** Factor applied to the output-token cap for the truncation re-ask, 1..4. Default 2. */
+  truncationRetryFactor?: number;
+  /**
+   * User message of an invalid-JSON re-ask. `{reason}` is replaced literally
+   * with EDDI's own reason (never model output). Not a template.
+   */
+  correctiveMessage?: string;
+  /** Dollar cap on the re-asks of one model (needs per-1M prices configured). */
+  maxRetryCostUsd?: number;
+  /** A re-ask only starts if at least this many ms remain. Default 3000. */
+  minAttemptMs?: number;
+  /** After every re-ask and cascade step failed: `fallback` (default), `error` or `warn`. */
+  fallbackAction?: "fallback" | "error" | "warn";
   /** Action when the LLM refused to respond (heuristic detection). */
   onRefusal?: ResponseValidationAction;
   /** Action when a streaming response timed out. */

@@ -844,7 +844,7 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
-| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | (none) |
+| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onInvalidJson`, `onSchemaMismatch`, `onContextTooLong`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror); the `retry` action re-asks the model — see [Recovery policies](#recovery-policies-retry-where-it-helps) | (none) |
 | `onError`                  | object   | `{"action": "fallback" \| "error"}`. With `fallback`, a failed model phase serves the configured fallback and the turn completes normally instead of failing — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | `error` |
 | **Retrieval (RAG)**        |          | Requires the agent's workflow to bind the knowledge base with an `eddi://ai.labs.rag` step — see [RAG](rag.md#configuration) | |
 | `knowledgeBases`           | object[] | Knowledge bases this task retrieves from, by `name`, each optionally overriding `maxResults` / `minScore`. The name must match a KB the workflow binds; an unmatched name is skipped silently | (none) |
@@ -1900,6 +1900,50 @@ Two things can leave a turn without a model answer: a `responseValidation` polic
 **The model never sees the fallback.** When the next turn's history is built for the model, the assistant message of a fallback turn is left out; the user's question stays. To keep the roles alternating (some providers reject two user messages in a row) the following user message is merged into it. The conversation log and the UI still show the fallback, and an output item the task itself adds under `addToOutput` carries `"fallback": true`. The rolling summary and the recall tool still see the turn.
 
 **Not covered:** the resume path after a human-in-the-loop tool approval does not apply `onError`; a failure there fails the turn as before.
+
+### Recovery policies: retry where it helps
+
+A reply the task cannot use is usually fixed by asking again, and the model that slipped is the cheapest one to ask. `responseValidation` therefore has a `retry` action. The order of recovery is always: **the model answers, the parser repairs what it can locally (fence stripping, extracting the object from surrounding prose — free), the same model is asked again with a corrective message (up to `maxRetries`), then a cascade escalates to the next model (which gets its own repair and re-asks, see [Model Cascade](model-cascade.md#format-recovery-and-escalation)), and after the last model `fallbackAction` applies.** Without a cascade it is the same without the escalation step.
+
+```json
+{
+  "convertToObject": "true",
+  "maxTokens": "2000",
+  "responseValidation": {
+    "enabled": true,
+    "onInvalidJson": "retry",
+    "onTruncation": "retry",
+    "onEmpty": "retry",
+    "onContextTooLong": "retry",
+    "maxRetries": 1,
+    "fallbackAction": "fallback",
+    "fallbackMessage": "Sorry, I could not answer that just now."
+  }
+}
+```
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `onEmpty`, `onTruncation`, `onContentFilter` | now also accept `retry` | `warn` |
+| `onInvalidJson` | A `convertToObject` reply that is not valid JSON after the local repair. `retry` re-asks with the corrective message; `warn`/`fallback`/`error` act as for the other policies | `ignore` (the raw string is stored, as before) |
+| `onSchemaMismatch` | Reserved for schema validation (R4). The field is accepted so configs can be written ahead of it; **it does nothing yet** | `ignore` |
+| `onContextTooLong` | The provider refused the prompt as too long. `retry` re-sends **once** with the history window halved (half the `maxContextTokens`, or half the `conversationHistoryLimit`; when that is unlimited, half of the conversation). The anchored first steps (`anchorFirstSteps`) are kept. Any other value lets the failure propagate as before | `error` |
+| `maxRetries` | Same-model re-asks **per model** (per cascade step), shared by every `retry` policy. Clamped to `0..3`. `0` sends no re-ask (a cascade still escalates on invalid output). A cascade step overrides it with `steps[i].maxFormatRetries`, e.g. `0` for an expensive last-resort model | `1` |
+| `truncationRetryFactor` | The truncation re-ask runs **once** with the output-token cap multiplied by this (`maxTokens`, or `maxOutputTokens` for Gemini; Anthropic's built-in default counts). Clamped to `1..4` and never above 32768 tokens. If the cap is not configured (and the provider has no known default) there is nothing to raise and the re-ask is skipped | `2` |
+| `correctiveMessage` | The user message of an invalid-JSON re-ask. `{reason}` is replaced **literally** with EDDI's own reason (`not JSON`, `truncated JSON`, `no JSON object`, `unbalanced braces`, `invalid JSON syntax`). It is not a template and never receives model or user text | "Your previous reply could not be used: {reason}. Reply again with only the JSON object described in the instructions." (a neutral sentence for a task that does not return JSON) |
+| `maxRetryCostUsd` | Optional dollar cap on what the re-asks of one model may cost in total; a re-ask that would start at or above it is skipped. It is priced from the task's / step's `inputPricePer1M` / `outputPricePer1M`: **without prices it cannot fire**. Per-conversation cost ceilings (`ToolCostTracker`) are not consulted | (none) |
+| `minAttemptMs` | A re-ask only starts if the model's remaining time (the cascade step's `timeoutMs`; the turn deadline once there is one) is at least this. Otherwise the cascade escalates at once: serving the user in time beats insisting on the same model | `3000` |
+| `fallbackAction` | What happens when the re-asks (and every cascade step) did not help: `fallback` serves the [fallback](#fallback-answers-and-onerror), `error` fails the turn, `warn` keeps the reply | `fallback` |
+
+**What a re-ask sends.** For an invalid-JSON reply: the original messages, then the model's own bad reply as an **assistant** message (cut at 16,000 characters), then the corrective **user** message. Showing the model what to fix is standard corrective prompting; its words stay in the assistant role, and the user-role text is only what you configured plus EDDI's reason, so neither model output nor user input ever reaches a user- or system-role message. Empty, truncated and content-filtered replies are re-asked with the original request unchanged (a truncation with the larger token cap): there is nothing a corrective sentence would add. `onContentFilter: "retry"` is one more sample of the same request; it rarely helps.
+
+**Tools are never re-run.** In tool mode only the **final** model call is re-asked, over a transcript that already holds the tool calls and results. A tool request in the re-asked answer is ignored. Truncation and context-too-long retries are not available in tool mode (the loop reports no finish reason, and shrinking the prompt after tools ran would mean replaying them); empty and invalid-JSON re-asks are.
+
+**Streaming.** A task that may re-ask is **buffered**, not streamed: the tokens of an attempt that is then retried cannot be taken back. The final answer reaches the client once. An SSE event `llm_retry` with `{reason, attempt}` (`reason`: `empty`, `truncated`, `content_filter`, `invalid_json`, `context_too_long`) is sent before each re-ask so a UI can show "retrying…".
+
+**Cost.** Every attempt's tokens are summed into the turn's token usage and cost, so re-asks show up in the audit ledger and in `maxCostPerRun`. The step records `llm:retry:<taskId>` = `{reasks, unresolved}`. Metrics: `eddi.llm.recovery{action=retry|escalate, outcome, trigger}` (see [metrics](metrics.md)).
+
+**Not covered:** the resume path after a human-in-the-loop tool approval gets the parser's local repair but no re-asks. The circuit breaker (R8) is not built yet; the re-ask path has a hook (`ReaskGate`) it will use to skip a model that has been failing the same way for most recent turns.
 
 ### Debugging
 
