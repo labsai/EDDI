@@ -49,6 +49,12 @@ public final class LegacyDocumentMigrations {
 
     private static final Logger LOGGER = Logger.getLogger(LegacyDocumentMigrations.class);
 
+    static final String FIELD_NAME_TASKS = "tasks";
+    static final String FIELD_NAME_PARAMETERS = "parameters";
+    static final String FIELD_NAME_RESPONSE_FORMAT = "responseFormat";
+    static final String FIELD_NAME_CONVERT_TO_OBJECT = "convertToObject";
+    static final String FIELD_NAME_ENABLE_HTTP_CALL_TOOLS = "enableHttpCallTools";
+    static final String FIELD_NAME_ENABLE_MCP_CALL_TOOLS = "enableMcpCallTools";
     static final String FIELD_NAME_HTTP_CALLS = "httpCalls";
     static final String FIELD_NAME_OUTPUTS = "outputs";
     static final String FIELD_NAME_OUTPUT_SET = "outputSet";
@@ -353,6 +359,68 @@ public final class LegacyDocumentMigrations {
         }
 
         toBeRemoved.forEach(outputValue::remove);
+    }
+
+    /**
+     * Carries a <strong>5.x</strong> LLM task document ({@code langchain.json})
+     * over to the v6 defaults, keeping what the document did on 5.x.
+     * <p>
+     * Unlike the other transforms here this one is only correct for a document that
+     * is known to come from 5.x — on a document authored for v6, an absent tools
+     * flag means "on" and {@code responseFormat} is not a JSON switch — so the
+     * callers apply it only where that is certain: the v6 collection sweep
+     * ({@code V6RenameMigration}, which runs once over a database that 5.x wrote)
+     * and the import of a ZIP whose references use the 5.x URIs. It is idempotent:
+     * every rewrite fires only while its field is absent, and writes it.
+     * <ul>
+     * <li><b>JSON mode.</b> 5.x read {@code parameters.responseFormat: "json"}; v6
+     * ignores that key and switches JSON mode on with {@code convertToObject:
+     * "true"}. Without the mapping the model answers in a Markdown code fence.
+     * {@code responseFormat} itself stays in place, and an explicit
+     * {@code convertToObject} is never touched.</li>
+     * <li><b>Tools.</b> 5.x had no auto-discovery of API-call and MCP tools. In v6
+     * the two flags default to {@code true}, which turns a plain chat task into a
+     * tool-calling one (and, for providers that cannot combine tools with JSON
+     * mode, drops JSON mode). An absent flag is written as {@code false}.</li>
+     * </ul>
+     *
+     * @return the document when something changed, {@code null} otherwise
+     */
+    @SuppressWarnings("unchecked")
+    public static IDocumentMigration llm() {
+        return document -> {
+            try {
+                if (!(document.get(FIELD_NAME_TASKS) instanceof List<?> tasks)) {
+                    return null;
+                }
+                boolean converted = false;
+                for (Object taskObject : tasks) {
+                    if (!(taskObject instanceof Map<?, ?>)) {
+                        continue;
+                    }
+                    var task = (Map<String, Object>) taskObject;
+                    if (task.get(FIELD_NAME_PARAMETERS) instanceof Map<?, ?> parameters) {
+                        var params = (Map<String, Object>) parameters;
+                        Object responseFormat = params.get(FIELD_NAME_RESPONSE_FORMAT);
+                        if (responseFormat != null && "json".equalsIgnoreCase(responseFormat.toString().trim())
+                                && isNullOrEmpty(params.get(FIELD_NAME_CONVERT_TO_OBJECT))) {
+                            params.put(FIELD_NAME_CONVERT_TO_OBJECT, "true");
+                            converted = true;
+                        }
+                    }
+                    for (String toolFlag : new String[]{FIELD_NAME_ENABLE_HTTP_CALL_TOOLS, FIELD_NAME_ENABLE_MCP_CALL_TOOLS}) {
+                        if (!task.containsKey(toolFlag) || task.get(toolFlag) == null) {
+                            task.put(toolFlag, Boolean.FALSE);
+                            converted = true;
+                        }
+                    }
+                }
+                return converted ? document : null;
+            } catch (Exception e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                return null;
+            }
+        };
     }
 
     @SuppressWarnings("unchecked")

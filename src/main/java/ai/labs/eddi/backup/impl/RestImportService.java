@@ -819,6 +819,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         Path workflowPath = workflowFilePath.getParent();
                         String workflowFileString = readFile(workflowFilePath);
 
+                        // A workflow that still names its LLM step by the 5.x authority was
+                        // exported by 5.x: its LLM documents get the 5.x defaults carried
+                        // over (JSON mode, tools off). Decided before the URIs are normalized.
+                        boolean v5Llm = workflowFileString.contains(LEGACY_LLM_AUTHORITY);
+
                         // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
                         workflowFileString = normalizeLegacyUris(workflowFileString);
                         // Normalize legacy ${eddivault:...} → ${vault:...}
@@ -889,7 +894,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // ... for langchain
                         List<URI> langchainUris = extractResourcesUris(workflowFileString, LANGCHAIN_URI_PATTERN);
                         List<URI> newLangchainUris = createOrUpdateResources(
-                                readResources(langchainUris, workflowPath, LLM_EXT, LlmConfiguration.class, isMerge), langchainUris,
+                                readResources(langchainUris, workflowPath, LLM_EXT, LlmConfiguration.class, isMerge, v5Llm), langchainUris,
                                 isMerge, selectedSet,
                                 this::createNewLlm, this::updateLangchain, transaction);
 
@@ -2919,13 +2924,24 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      */
     private <T> List<T> readResources(List<URI> uris, Path workflowPath, String extension, Class<T> clazz,
                                       boolean isMerge) {
+        return readResources(uris, workflowPath, extension, clazz, isMerge, false);
+    }
+
+    /**
+     * @param v5Llm
+     *            the archive was exported by 5.x, so an LLM document in it is
+     *            migrated with the 5.x defaults
+     *            ({@code LegacyDocumentMigrations#llm})
+     */
+    private <T> List<T> readResources(List<URI> uris, Path workflowPath, String extension, Class<T> clazz,
+                                      boolean isMerge, boolean v5Llm) {
         return uris.stream()
-                .map(uri -> readResource(uri, workflowPath, extension, clazz, isMerge))
+                .map(uri -> readResource(uri, workflowPath, extension, clazz, isMerge, v5Llm))
                 .collect(Collectors.toList());
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T readResource(URI uri, Path workflowPath, String extension, Class<T> clazz, boolean isMerge) {
+    private <T> T readResource(URI uri, Path workflowPath, String extension, Class<T> clazz, boolean isMerge, boolean v5Llm) {
         IResourceId resourceId = RestUtilities.extractResourceId(uri);
         if (resourceId == null || resourceId.getId() == null) {
             throw new BadRequestException("The archive references '" + uri + "', which carries no resource id.");
@@ -2979,6 +2995,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                 if (migratedOutputDocument != null) {
                     resourceContent = jsonSerialization.serialize(migratedOutputDocument);
+                }
+            } else if (v5Llm && uri.toString().startsWith(IRestLlmStore.resourceBaseType)) {
+                var resourceAsMap = jsonSerialization.deserialize(resourceContent, Map.class);
+                var migratedLlmDocument = migrationManager.migrateLlm().migrate(new Document(resourceAsMap));
+
+                if (migratedLlmDocument != null) {
+                    resourceContent = jsonSerialization.serialize(migratedLlmDocument);
                 }
             }
 
