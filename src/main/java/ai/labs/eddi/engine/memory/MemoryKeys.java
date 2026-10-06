@@ -189,6 +189,22 @@ public final class MemoryKeys {
      */
     public static final String AUDIT_CASCADE_MODEL = "audit:cascade_model";
 
+    // ---- LLM task failure handling ----
+
+    /**
+     * Prefix of the step flag {@code llm:fallback:<taskId>} = {@code true}, set
+     * when the LLM task served its configured fallback instead of a model answer.
+     * The conversation history built for the model skips the assistant turn of a
+     * step carrying it, so the model never learns from its own apology.
+     */
+    public static final String LLM_FALLBACK_PREFIX = "llm:fallback:";
+
+    /**
+     * Prefix of {@code llm:error:<taskId>} = {@code {class, message}} (redacted,
+     * truncated), recorded when {@code onError: fallback} absorbed a failure.
+     */
+    public static final String LLM_ERROR_PREFIX = "llm:error:";
+
     // ---- Output ----
 
     /**

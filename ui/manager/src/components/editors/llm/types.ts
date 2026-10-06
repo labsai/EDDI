@@ -153,6 +153,12 @@ export interface LlmTask {
    */
   responseValidation?: ResponseValidation;
   /**
+   * What the task does when its model phase fails outright. `fallback` serves
+   * the configured fallback (see `ResponseValidation.fallbackMessage`) and
+   * completes the turn; `error` (the default) fails it.
+   */
+  onError?: TaskOnError;
+  /**
    * Timeout (seconds) for streaming chat completions. Overrides the engine
    * default (120s). Only applies while streaming is active.
    */
@@ -215,6 +221,29 @@ export interface ResponseValidation {
   onRefusal?: ResponseValidationAction;
   /** Action when a streaming response timed out. */
   onStreamingTimeout?: ResponseValidationAction;
+  /**
+   * Template (Qute) rendered with the task's template data and served by the
+   * `fallback` action and by `onError: fallback`. Blank = the default sentence.
+   */
+  fallbackMessage?: string;
+  /**
+   * Under convertToObject, the fallback is stored as
+   * `{"<fallbackField>": "<message>"}` so existing output templates render it.
+   */
+  fallbackField?: string;
+  /** Quick replies added next to the fallback; value/expressions are templates. */
+  fallbackQuickReplies?: FallbackQuickReply[];
+}
+
+export interface FallbackQuickReply {
+  value?: string;
+  expressions?: string;
+  isDefault?: boolean;
+}
+
+/** Task-level failure policy — mirrors backend `LlmConfiguration.OnError`. */
+export interface TaskOnError {
+  action?: "fallback" | "error";
 }
 
 export interface ConversationSummaryConfig {
