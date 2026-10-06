@@ -6,7 +6,13 @@ import type { ResponseValidation, ResponseValidationAction } from "./types";
 import { RESPONSE_VALIDATION_ACTIONS } from "./types";
 
 /** Policy fields on `responseValidation`, in display order. */
-type PolicyField = keyof Omit<ResponseValidation, "enabled">;
+type PolicyField = {
+  [K in keyof ResponseValidation]-?: ResponseValidation[K] extends
+    | ResponseValidationAction
+    | undefined
+    ? K
+    : never;
+}[keyof ResponseValidation];
 
 interface PolicyMeta {
   field: PolicyField;

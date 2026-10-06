@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -30,6 +31,7 @@ import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.model.output.FinishReason;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.BeforeEach;
@@ -280,7 +282,7 @@ class LlmTaskFallbackTest {
         @DisplayName("the recorded failure carries no URL or secret")
         void failureRecordIsSanitized() throws Exception {
             liveModelReplies(Step.fail(new IllegalStateException(
-                    "401 from https://api.example.test/v1?key=AIzaSyA-1234567890abcdefghijklmnopqrstuv body={\"x\":1}")));
+                    "401 from https://api.example.test/v1?key=not-a-real-key body={\"x\":1}")));
 
             run(withOnError(task(false), "fallback"));
 
@@ -288,7 +290,7 @@ class LlmTaskFallbackTest {
             verify(dataFactory).createData(eq("llm:error:taskA"), error.capture());
             String message = String.valueOf(((Map<?, ?>) error.getValue()).get("message"));
             assertFalse(message.contains("https://"), message);
-            assertFalse(message.contains("AIzaSy"), message);
+            assertFalse(message.contains("not-a-real-key"), message);
         }
     }
 
@@ -453,6 +455,34 @@ class LlmTaskFallbackTest {
             var item = (TextOutputItem) items.getValue().getFirst();
             assertEquals("Please try again.", item.getText());
             assertEquals(Boolean.TRUE, item.getFallback());
+        }
+
+        @Test
+        @DisplayName("a live stream that got no model text receives the fallback text")
+        void streamGetsFallbackText() throws Exception {
+            var sink = mock(ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(sink);
+            when(chatModelRegistry.getOrCreate(anyString(), any())).thenThrow(new IllegalStateException("boom"));
+
+            run(withOnError(task(false), "fallback"));
+
+            verify(sink).onToken(LlmConfiguration.ResponseValidation.DEFAULT_FALLBACK_MESSAGE);
+        }
+
+        @Test
+        @DisplayName("a model answer already streamed is not followed by a validation fallback")
+        void noFallbackAfterStreamedText() throws Exception {
+            var sink = mock(ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(sink);
+            liveModelReplies(Step.finishReason("partial", FinishReason.LENGTH));
+            var task = task(false);
+            var v = validation(null, null);
+            v.setOnTruncation("fallback");
+            task.setResponseValidation(v);
+
+            run(task);
+
+            verify(sink, never()).onToken(LlmConfiguration.ResponseValidation.DEFAULT_FALLBACK_MESSAGE);
         }
 
         @Test
