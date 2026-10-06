@@ -1,9 +1,9 @@
-import { memo, useEffect, useState } from "react";
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Eye } from "lucide-react";
-import { useUpdateAgent } from "@/hooks/use-agents";
 import { getAgentUsage, type Agent } from "@/lib/api/agents";
+import type { AgentEdit } from "@/lib/agent-draft";
 import { EditorSection } from "./editor-section";
 
 /**
@@ -18,20 +18,21 @@ import { EditorSection } from "./editor-section";
 export const ConversationReviewSection = memo(function ConversationReviewSection({
   agent,
   agentId,
-  version,
+  onChange,
+  disabled = false,
+  modified = false,
 }: {
+  /** The page's draft of the agent document. */
   agent: Agent;
+  /** For the usage figures, which are read live rather than from the draft. */
   agentId: string;
-  version: number;
+  /** Records an edit in the draft — nothing is saved until the page's Save. */
+  onChange: AgentEdit;
+  disabled?: boolean;
+  modified?: boolean;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
   const review = agent.conversationReview ?? {};
-  const [notice, setNotice] = useState(review.notice ?? "");
-
-  useEffect(() => {
-    setNotice(agent.conversationReview?.notice ?? "");
-  }, [agent.conversationReview?.notice]);
 
   const { data: usage } = useQuery({
     queryKey: ["agents", "usage", agentId],
@@ -41,11 +42,7 @@ export const ConversationReviewSection = memo(function ConversationReviewSection
   });
 
   function patch(updates: { enabled?: boolean; notice?: string | null }) {
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: { ...agent, conversationReview: { ...review, ...updates } },
-    });
+    onChange({ ...agent, conversationReview: { ...review, ...updates } });
   }
 
   return (
@@ -54,6 +51,7 @@ export const ConversationReviewSection = memo(function ConversationReviewSection
       icon={Eye}
       accent="text-sky-500"
       variant="card"
+      modified={modified}
       defaultOpen={review.enabled ?? false}
     >
       <div className="space-y-4" data-testid="conversation-review-section">
@@ -86,7 +84,7 @@ export const ConversationReviewSection = memo(function ConversationReviewSection
             type="checkbox"
             checked={review.enabled ?? false}
             onChange={() => patch({ enabled: !(review.enabled ?? false) })}
-            disabled={updateAgent.isPending}
+            disabled={disabled}
             className="h-3.5 w-3.5 rounded border-input accent-primary"
             data-testid="conversation-review-enabled"
           />
@@ -100,12 +98,8 @@ export const ConversationReviewSection = memo(function ConversationReviewSection
             </label>
             <textarea
               id="review-notice"
-              value={notice}
-              onChange={(e) => setNotice(e.target.value)}
-              onBlur={() => {
-                const next = notice.trim() || null;
-                if (next !== (review.notice ?? null)) patch({ notice: next });
-              }}
+              value={review.notice ?? ""}
+              onChange={(e) => patch({ notice: e.target.value.trim() ? e.target.value : null })}
               rows={2}
               maxLength={300}
               className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"

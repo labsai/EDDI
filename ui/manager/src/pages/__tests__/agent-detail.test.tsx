@@ -571,7 +571,7 @@ describe("AgentDetailPage", () => {
   });
 
   // ─── Remove workflow mutation ─────────────────────────────────────────
-  it("clicking remove workflow button triggers mutation", async () => {
+  it("removing a workflow is saved by Save, not on click", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -596,6 +596,11 @@ describe("AgentDetailPage", () => {
     const trashButtons = screen.getAllByTitle("Delete");
     expect(trashButtons.length).toBeGreaterThan(0);
     await user.click(trashButtons[0]!);
+
+    // Recorded in the draft only — nothing is written until Save.
+    expect(updateCalled).toBe(false);
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    await user.click(screen.getByTestId("save-btn"));
 
     await waitFor(() => {
       expect(updateCalled).toBe(true);
@@ -626,13 +631,16 @@ describe("AgentDetailPage", () => {
     });
   });
 
-  // ─── No save feedback initially ───────────────────────────────────────
-  it("does not show save feedback initially", async () => {
+  // ─── Clean on load ───────────────────────────────────────────────────
+  it("opens clean: no unsaved marker, and Save and Discard are disabled", async () => {
     renderAgentDetail("agent1");
     await waitFor(() => {
       expect(screen.getByText("Support Agent")).toBeInTheDocument();
     });
-    expect(screen.queryByTestId("save-feedback")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("unsaved-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("save-btn")).toBeDisabled();
+    expect(screen.getByTestId("discard-btn")).toBeDisabled();
   });
 
   // ─── Deployed agent shows external chat link ──────────────────────────
@@ -702,7 +710,7 @@ describe("AgentDetailPage", () => {
   });
 
   // ─── A2A description save mutation ────────────────────────────────────
-  it("saving A2A description on blur calls update mutation", async () => {
+  it("an edited A2A description is saved by Save, not on blur", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -730,8 +738,12 @@ describe("AgentDetailPage", () => {
     const descInput = screen.getByTestId("a2a-description");
     await user.clear(descInput);
     await user.type(descInput, "Updated description");
-    // Blur triggers handleDescriptionSave
     await user.tab();
+
+    // Recorded in the draft only — nothing is written until Save.
+    expect(updateCalled).toBe(false);
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    await user.click(screen.getByTestId("save-btn"));
 
     await waitFor(() => {
       expect(updateCalled).toBe(true);
@@ -739,7 +751,7 @@ describe("AgentDetailPage", () => {
   });
 
   // ─── A2A add skill ────────────────────────────────────────────────────
-  it("adding a skill calls update mutation with new skill", async () => {
+  it("an added skill is in the document Save writes", async () => {
     let updatePayload: Record<string, unknown> | null = null;
     server.use(
       http.put("*/agentstore/agents/:id", async ({ request }) => {
@@ -764,6 +776,9 @@ describe("AgentDetailPage", () => {
     const skillInput = screen.getByTestId("a2a-skill-input");
     await user.type(skillInput, "new-skill{Enter}");
 
+    expect(updatePayload).toBeNull();
+    await user.click(screen.getByTestId("save-btn"));
+
     await waitFor(() => {
       expect(updatePayload).toBeTruthy();
       const skills = (updatePayload as Record<string, unknown>)?.a2aSkills;
@@ -772,7 +787,7 @@ describe("AgentDetailPage", () => {
   });
 
   // ─── A2A remove skill ────────────────────────────────────────────────
-  it("removing a skill calls update mutation", async () => {
+  it("a removed skill is saved by Save, not on click", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -796,6 +811,11 @@ describe("AgentDetailPage", () => {
     // Click the × button on a skill badge using aria-label
     const removeBtn = screen.getByRole("button", { name: /Remove order-tracking/ });
     await user.click(removeBtn);
+
+    // Recorded in the draft only — nothing is written until Save.
+    expect(updateCalled).toBe(false);
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    await user.click(screen.getByTestId("save-btn"));
 
     await waitFor(() => {
       expect(updateCalled).toBe(true);

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 /**
- * Unit test for the parseFloat-based number parsing used by DebouncedNumberInput.
+ * Unit test for the parseFloat-based number parsing used by DraftNumberInput.
  *
  * This validates the fix where parseInt was replaced with parseFloat to preserve
  * decimal precision for fields like maxCostPerRun (step=0.01).
  */
-describe("DebouncedNumberInput — parseFloat logic", () => {
-  // This mirrors the exact logic from agent-config-sections.tsx line 95:
+describe("DraftNumberInput — parseFloat logic", () => {
+  // This mirrors the exact logic from agent-config-sections.tsx (DraftNumberInput):
   //   onCommit(parseFloat(raw) || fallback)
   function parseNumber(raw: string, fallback: number): number {
     return parseFloat(raw) || fallback;

@@ -350,9 +350,6 @@
     "userMemory": "Memória do usuário",
     "userMemoryDesc": "Memória persistente por usuário com ferramentas de LLM (remember/recall/forget). A persistência básica de propriedades longTerm sempre funciona, independentemente desta opção.",
     "viewingOldVersion": "Você está visualizando a versão {{current}}. A mais recente é a versão {{latest}}.",
-    "workflowAdded": "Workflow adicionado",
-    "workflowRemoved": "Workflow removido",
-    "workflowUpdated": "Workflow atualizado para a versão mais recente",
     "title": "Detalhes do agent",
     "backToAgents": "Voltar para Agents",
     "packages": "Fluxos de trabalho",
@@ -459,7 +456,17 @@
       "notice": "O que o chat informa às pessoas (deixe vazio para o texto padrão)",
       "noticePlaceholder": "As conversas com este agente podem ser lidas pelas pessoas que o mantêm, para melhorá-lo.",
       "versionNote": "Abrange conversas na versão criada por esta alteração e nas posteriores — nunca o que foi dito antes. Slack, Teams e clientes da API não conseguem exibir o aviso; se as pessoas usarem este agente por esses meios, mencione isso na saudação."
-    }
+    },
+    "savedAsVersion": "Salvo como versão {{version}}",
+    "saved": "Agente salvo",
+    "saveConflict": "Este agente foi alterado em outro lugar desde que você o abriu. Suas edições foram mantidas: revise-as e salve novamente.",
+    "saveBeforeDeploy": "Salve ou descarte suas alterações antes de implantar",
+    "reviewChanges": "Revisar alterações",
+    "unsavedSections": "Seções com alterações não salvas: {{count}}",
+    "reviewChangesTitle": "Alterações não salvas na versão {{version}}",
+    "savedVersion": "Salvo v{{version}}",
+    "yourChanges": "Suas alterações",
+    "discardMessage": "Todas as alterações não salvas nesta página voltam ao que a versão {{version}} contém."
   },
   "wizard": {
     "title": "Assistente de Agent"
@@ -897,7 +904,13 @@
     "savedNotLive": "Guardado — ainda não ativo",
     "savedNotLiveDescription": "O agente em execução continua a servir a versão implementada. Implemente para aplicar esta alteração.",
     "deployNow": "Implementar",
-    "deployStarted": "Implementação iniciada"
+    "deployStarted": "Implementação iniciada",
+    "leaveTitle": "Sair com alterações não salvas?",
+    "leaveMessage": "Esta página tem alterações que ainda não foram salvas. Salve, descarte ou continue editando.",
+    "keepEditing": "Continuar editando",
+    "discardChanges": "Descartar alterações",
+    "saveAndLeave": "Salvar e sair",
+    "modified": "Modificado"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5290,7 +5303,7 @@
     "compatibleHint": "Apenas para alterações que não podem quebrar uma conversa em andamento, p. ex. a redação do prompt ou outro modelo. Deixe desmarcado se propriedades, ações ou etapas do workflow foram renomeadas ou removidas.",
     "compatibleLegacyNote": "A versão atual é anterior ao acompanhamento de versões, então as conversas que já a usam permanecem nela. O próximo salvamento compatível liga a cadeia.",
     "compatibleUnknownNote": "Conversas em uma versão anterior ao acompanhamento de versões permanecem nela.",
-    "generationBadge": "ger. compat. {{generation}}",
+    "generationBadge": "Geração {{generation}}",
     "generationTooltip": "Geração de compatibilidade {{generation}}: versões deste agente com a mesma geração são compatíveis, então uma conversa em andamento passa para a mais recente implantada no próximo turno. Um salvamento incompatível inicia uma nova geração.",
     "impactTitle": "Implantar v{{version}} em {{environment}} — conversas em andamento",
     "impactFollow_one": "{{count}} conversa ativa na v{{from}} continuará na v{{to}}",

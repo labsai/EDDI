@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react";
+import { requestNavigation } from "@/lib/unsaved-changes-registry";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Command } from "cmdk";
@@ -77,7 +78,9 @@ export function CommandPalette() {
     (path: string, label: string) => {
       close();
       addRecentPage(path, label);
-      navigate(path);
+      // Through the unsaved-changes guard — a palette jump leaves the page
+      // just as a link does, but no link click is there to intercept.
+      requestNavigation(() => navigate(path));
     },
     [close, addRecentPage, navigate],
   );

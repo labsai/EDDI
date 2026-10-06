@@ -85,7 +85,7 @@ describe("CompatibilityGenerationBadge", () => {
   it("shows the generation with an explaining tooltip", () => {
     renderWithProviders(<CompatibilityGenerationBadge generation={4} />);
     const badge = screen.getByTestId("compatibility-generation-badge");
-    expect(badge).toHaveTextContent("compat. gen 4");
+    expect(badge).toHaveTextContent("Generation 4");
     expect(badge.getAttribute("title")).toMatch(/Compatibility generation 4/);
   });
 

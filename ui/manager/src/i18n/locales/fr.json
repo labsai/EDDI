@@ -350,9 +350,6 @@
     "userMemory": "Mémoire utilisateur",
     "userMemoryDesc": "Mémoire persistante par utilisateur avec outils LLM (remember/recall/forget). La persistance de base des propriétés longTerm fonctionne toujours, quel que soit ce réglage.",
     "viewingOldVersion": "Vous consultez la version {{current}}. La dernière est la version {{latest}}.",
-    "workflowAdded": "Workflow ajouté",
-    "workflowRemoved": "Workflow retiré",
-    "workflowUpdated": "Workflow mis à jour vers la dernière version",
     "title": "Détails de l'agent",
     "backToAgents": "Retour aux Agents",
     "packages": "Workflows",
@@ -459,7 +456,17 @@
       "notice": "Ce que le chat indique aux utilisateurs (laisser vide pour le texte standard)",
       "noticePlaceholder": "Les conversations avec cet agent peuvent être lues par les personnes qui le maintiennent, afin de l'améliorer.",
       "versionNote": "S'applique aux conversations sur la version créée par cette modification et les suivantes — jamais à ce qui a été dit auparavant. Slack, Teams et les clients API ne peuvent pas afficher l'avis ; si des personnes utilisent cet agent par ces canaux, mentionnez-le dans le message d'accueil."
-    }
+    },
+    "savedAsVersion": "Enregistré comme version {{version}}",
+    "saved": "Agent enregistré",
+    "saveConflict": "Cet agent a été modifié ailleurs depuis son ouverture. Vos modifications sont conservées : vérifiez-les et enregistrez à nouveau.",
+    "saveBeforeDeploy": "Enregistrez ou abandonnez vos modifications avant de déployer",
+    "reviewChanges": "Vérifier les modifications",
+    "unsavedSections": "Sections avec des modifications non enregistrées : {{count}}",
+    "reviewChangesTitle": "Modifications non enregistrées de la version {{version}}",
+    "savedVersion": "Enregistré v{{version}}",
+    "yourChanges": "Vos modifications",
+    "discardMessage": "Toutes les modifications non enregistrées de cette page reviennent à l’état de la version {{version}}."
   },
   "wizard": {
     "title": "Assistant Agent"
@@ -897,7 +904,13 @@
     "savedNotLive": "Enregistré — pas encore actif",
     "savedNotLiveDescription": "L'agent en cours d'exécution sert toujours la version déployée. Déployez pour appliquer ce changement.",
     "deployNow": "Déployer",
-    "deployStarted": "Déploiement lancé"
+    "deployStarted": "Déploiement lancé",
+    "leaveTitle": "Quitter avec des modifications non enregistrées ?",
+    "leaveMessage": "Cette page contient des modifications qui ne sont pas encore enregistrées. Enregistrez-les, abandonnez-les ou continuez à modifier.",
+    "keepEditing": "Continuer à modifier",
+    "discardChanges": "Abandonner les modifications",
+    "saveAndLeave": "Enregistrer et quitter",
+    "modified": "Modifié"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5290,7 +5303,7 @@
     "compatibleHint": "Uniquement pour des modifications qui ne peuvent pas casser une conversation en cours, p. ex. la formulation du prompt ou un autre modèle. Laissez décoché si des propriétés, des actions ou des étapes du workflow ont été renommées ou supprimées.",
     "compatibleLegacyNote": "La version actuelle est antérieure au suivi de version : les conversations qui l’utilisent déjà y restent. La prochaine sauvegarde compatible relie la chaîne.",
     "compatibleUnknownNote": "Les conversations sur une version antérieure au suivi de version y restent.",
-    "generationBadge": "gén. compat. {{generation}}",
+    "generationBadge": "Génération {{generation}}",
     "generationTooltip": "Génération de compatibilité {{generation}} : les versions de cet agent ayant la même génération sont compatibles, une conversation en cours passe donc à la plus récente déployée lors de son prochain tour. Une sauvegarde incompatible démarre une nouvelle génération.",
     "impactTitle": "Déploiement de v{{version}} en {{environment}} — conversations en cours",
     "impactFollow_one": "{{count}} conversation active sur v{{from}} continuera sur v{{to}}",

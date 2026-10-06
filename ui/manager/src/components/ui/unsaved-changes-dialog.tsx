@@ -10,6 +10,14 @@ interface UnsavedChangesDialogProps {
   message?: string;
   /** Title. Defaults to "Unsaved Changes" */
   title?: string;
+  /** Label of the button that stays. Defaults to "Cancel" */
+  cancelLabel?: string;
+  /** Label of the destructive button. Defaults to "Discard & Leave" */
+  confirmLabel?: string;
+  /** Offers a primary "Save & leave" button when given */
+  onSave?: () => void;
+  /** Disables the buttons while `onSave` runs */
+  isSaving?: boolean;
 }
 
 /**
@@ -22,6 +30,10 @@ export function UnsavedChangesDialog({
   onCancel,
   message,
   title,
+  cancelLabel,
+  confirmLabel,
+  onSave,
+  isSaving = false,
 }: UnsavedChangesDialogProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -89,7 +101,7 @@ export function UnsavedChangesDialog({
           aria-modal="true"
           aria-labelledby="unsaved-dialog-title"
           aria-describedby="unsaved-dialog-desc"
-          className="w-full max-w-sm rounded-xl border bg-card shadow-2xl"
+          className="w-full max-w-md rounded-xl border bg-card shadow-2xl"
           onKeyDown={handleKeyDown}
         >
           <div className="flex items-center gap-3 border-b border-border p-5">
@@ -111,21 +123,38 @@ export function UnsavedChangesDialog({
             </p>
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-border p-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border p-4">
             <button
               onClick={onCancel}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              disabled={isSaving}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
               data-testid="unsaved-cancel"
             >
-              {t("common.cancel", "Cancel")}
+              {cancelLabel ?? t("common.cancel", "Cancel")}
             </button>
             <button
               onClick={onConfirm}
-              className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors"
+              disabled={isSaving}
+              className={
+                // With a Save button beside it, Discard is the secondary choice.
+                onSave
+                  ? "rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
+                  : "rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
+              }
               data-testid="unsaved-confirm"
             >
-              {t("editor.discardAndLeave", "Discard & Leave")}
+              {confirmLabel ?? t("editor.discardAndLeave", "Discard & Leave")}
             </button>
+            {onSave && (
+              <button
+                onClick={onSave}
+                disabled={isSaving}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                data-testid="unsaved-save"
+              >
+                {isSaving ? t("editor.saving", "Saving...") : t("editor.saveAndLeave", "Save & leave")}
+              </button>
+            )}
           </div>
         </div>
       </div>

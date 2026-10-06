@@ -349,9 +349,6 @@
     "userMemory": "Nutzerspeicher",
     "userMemoryDesc": "Persistenter Speicher pro Nutzer mit LLM-Tools (merken/abrufen/vergessen). Die grundlegende longTerm-Eigenschaftspersistenz funktioniert unabhängig von diesem Schalter immer.",
     "viewingOldVersion": "Sie sehen Version {{current}}. Neueste ist Version {{latest}}.",
-    "workflowAdded": "Workflow hinzugefügt",
-    "workflowRemoved": "Workflow entfernt",
-    "workflowUpdated": "Workflow auf neueste Version aktualisiert",
     "title": "Agent-Details",
     "backToAgents": "Zurück zu Agents",
     "packages": "Workflows",
@@ -458,7 +455,17 @@
       "notice": "Was der Chat den Personen mitteilt (leer lassen für den Standardtext)",
       "noticePlaceholder": "Gespräche mit diesem Agenten können von den Personen gelesen werden, die ihn betreuen, um ihn zu verbessern.",
       "versionNote": "Gilt für Gespräche mit der Version, die diese Änderung erzeugt, und allen späteren — nie für bereits Gesagtes. Slack, Teams und API-Clients können den Hinweis nicht anzeigen; wenn Personen diesen Agenten dort nutzen, erwähnen Sie es in der Begrüßung."
-    }
+    },
+    "savedAsVersion": "Als Version {{version}} gespeichert",
+    "saved": "Agent gespeichert",
+    "saveConflict": "Dieser Agent wurde seit dem Öffnen an anderer Stelle geändert. Ihre Änderungen bleiben erhalten: prüfen Sie sie und speichern Sie erneut.",
+    "saveBeforeDeploy": "Speichern oder verwerfen Sie Ihre Änderungen vor dem Deployment",
+    "reviewChanges": "Änderungen prüfen",
+    "unsavedSections": "Abschnitte mit ungespeicherten Änderungen: {{count}}",
+    "reviewChangesTitle": "Ungespeicherte Änderungen an Version {{version}}",
+    "savedVersion": "Gespeichert v{{version}}",
+    "yourChanges": "Ihre Änderungen",
+    "discardMessage": "Alle ungespeicherten Änderungen auf dieser Seite werden auf den Stand von Version {{version}} zurückgesetzt."
   },
   "wizard": {
     "title": "Agent-Assistent"
@@ -883,7 +890,13 @@
     "savedNotLive": "Gespeichert — noch nicht aktiv",
     "savedNotLiveDescription": "Der laufende Agent liefert weiterhin die bereitgestellte Version. Zum Aktivieren bereitstellen.",
     "deployNow": "Bereitstellen",
-    "deployStarted": "Bereitstellung gestartet"
+    "deployStarted": "Bereitstellung gestartet",
+    "leaveTitle": "Mit ungespeicherten Änderungen verlassen?",
+    "leaveMessage": "Auf dieser Seite gibt es noch nicht gespeicherte Änderungen. Speichern, verwerfen oder weiter bearbeiten.",
+    "keepEditing": "Weiter bearbeiten",
+    "discardChanges": "Änderungen verwerfen",
+    "saveAndLeave": "Speichern & verlassen",
+    "modified": "Geändert"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5233,7 +5246,7 @@
     "compatibleHint": "Nur für Änderungen, die eine laufende Unterhaltung nicht beschädigen können, z. B. andere Prompt-Formulierungen oder ein anderes Modell. Nicht ankreuzen, wenn Properties, Actions oder Workflow-Schritte umbenannt oder entfernt wurden.",
     "compatibleLegacyNote": "Die aktuelle Version stammt aus der Zeit vor der Versionsfolge, daher bleiben bereits laufende Unterhaltungen auf ihr. Ab dem nächsten kompatiblen Speichern ist die Kette verbunden.",
     "compatibleUnknownNote": "Unterhaltungen auf einer Version aus der Zeit vor der Versionsfolge bleiben auf ihr.",
-    "generationBadge": "Kompat.-Gen. {{generation}}",
+    "generationBadge": "Generation {{generation}}",
     "generationTooltip": "Kompatibilitätsgeneration {{generation}}: Versionen dieses Agents mit derselben Generation sind kompatibel, sodass eine laufende Unterhaltung bei ihrem nächsten Zug zur neuesten bereitgestellten wechselt. Ein inkompatibles Speichern beginnt eine neue Generation.",
     "impactTitle": "Bereitstellung von v{{version}} in {{environment}} — laufende Unterhaltungen",
     "impactFollow_one": "{{count}} aktive Unterhaltung auf v{{from}} wird auf v{{to}} fortgesetzt",

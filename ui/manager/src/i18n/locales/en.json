@@ -376,9 +376,6 @@
     "userMemory": "User Memory",
     "userMemoryDesc": "Persistent per-user memory with LLM tools (remember/recall/forget). Basic longTerm property persistence always works regardless of this toggle.",
     "viewingOldVersion": "You are viewing version {{current}}. Latest is version {{latest}}.",
-    "workflowAdded": "Workflow added",
-    "workflowRemoved": "Workflow removed",
-    "workflowUpdated": "Workflow updated to latest version",
     "title": "Agent Detail",
     "backToAgents": "Back to Agents",
     "packages": "Workflows",
@@ -485,7 +482,17 @@
       "notice": "What the chat tells people (leave empty for the standard wording)",
       "noticePlaceholder": "Conversations with this agent may be read by the people who maintain it, to improve it.",
       "versionNote": "Covers conversations on the version this change creates and later ones — never what was said before. Slack, Teams and API clients cannot show the notice; if people reach this agent there, say it in the greeting."
-    }
+    },
+    "savedAsVersion": "Saved as version {{version}}",
+    "saved": "Agent saved",
+    "saveConflict": "This agent was changed elsewhere since you opened it. Your edits are kept: review them and save again.",
+    "saveBeforeDeploy": "Save or discard your changes before deploying",
+    "reviewChanges": "Review changes",
+    "unsavedSections": "Sections with unsaved changes: {{count}}",
+    "reviewChangesTitle": "Unsaved changes to version {{version}}",
+    "savedVersion": "Saved v{{version}}",
+    "yourChanges": "Your changes",
+    "discardMessage": "Every unsaved change on this page goes back to what version {{version}} holds."
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -923,7 +930,13 @@
     "savedNotLive": "Saved — not yet live",
     "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
     "deployNow": "Deploy",
-    "deployStarted": "Deployment started"
+    "deployStarted": "Deployment started",
+    "leaveTitle": "Leave with unsaved changes?",
+    "leaveMessage": "You have changes on this page that are not saved yet. Save them, discard them, or keep editing.",
+    "keepEditing": "Keep editing",
+    "discardChanges": "Discard changes",
+    "saveAndLeave": "Save & leave",
+    "modified": "Modified"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5233,7 +5246,7 @@
     "compatibleHint": "Only for changes that cannot break a conversation in progress, e.g. prompt wording or a different model. Leave unticked if properties, actions or workflow steps were renamed or removed.",
     "compatibleLegacyNote": "The current version predates version following, so conversations already running on it stay on it. The next compatible save links up.",
     "compatibleUnknownNote": "Conversations on a version that predates version following stay on it.",
-    "generationBadge": "compat. gen {{generation}}",
+    "generationBadge": "Generation {{generation}}",
     "generationTooltip": "Compatibility generation {{generation}}: versions of this agent with the same generation are compatible, so a running conversation moves to the newest deployed one on its next turn. A breaking save starts a new generation.",
     "impactTitle": "Deploying v{{version}} to {{environment}} — running conversations",
     "impactFollow_one": "{{count}} active conversation on v{{from}} will continue on v{{to}}",
