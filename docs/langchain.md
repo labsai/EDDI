@@ -1127,6 +1127,7 @@ The Langchain task supports advanced pre-request and post-response processing fo
 - **postResponse.propertyInstructions**: Defines properties to be set based on the LLM response
   - **name**: The property name
   - **valueString**: The value to be assigned (supports templating)
+  - **fromObjectPath**: Read the value from the template data instead, e.g. the task's own response object (named by `responseObjectName`, or the task id). With `convertToObject: "true"` on the task that object is a map, and `"fromObjectPath": "aiOutput"` stores the whole object as the property, so `{properties.aiOutputObject.htmlResponseText}` resolves; a dotted path such as `aiOutput.htmlResponseText` stores a single field. The value is data and is never rendered as a template. A path that resolves to nothing stores an empty string.
   - **scope**: The scope of the property
 
 - **postResponse.outputBuildInstructions**: Configures how the response should be transformed into output (alternative to `addToOutput`)
