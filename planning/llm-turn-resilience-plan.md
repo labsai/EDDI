@@ -1,5 +1,11 @@
 # Handoff: LLM turn resilience in EDDI — recover from every failure class, always serve the user
 
+## Status
+
+- **R3 + R14 implemented** (PR for branch `feat/llm-output-parsing-never-throws`): fence stripping and prose recovery of **objects** (a non-empty object extracted from surrounding text), arrays accepted **only as the whole reply**; parsing never throws; outcome recorded under `llm:output:outcome:<taskId>` and `eddi.llm.output{outcome}`. `FaultInjectingChatModel` is test scope only.
+- Everything else below is still to do.
+
+
 **Repo:** `labsai/EDDI` (Java backend). Branch from `origin/main` (AGENTS.md §2 rule 3), for example
 `feat/llm-turn-resilience`. Copy this file to `planning/llm-turn-resilience-plan.md` on that branch.
 Add a changelog fragment under `docs/changelog.d/` (§2 rule 8). Read first:
@@ -162,7 +168,7 @@ Plus, for the program-content HTTP call: `timeoutInMillis 10000` and
 - **Normalisation:**
   - trim;
   - strip one surrounding fence (```` ``` ```` / ```` ```json ````);
-  - if it still doesn't parse, extract the outermost balanced `{…}`/`[…]` and parse that, string-
+  - if it still doesn't parse, extract the outermost balanced `{…}`/`[…]` and parse that (implemented as objects only: an extracted fragment must be a non-empty object; arrays count only as the whole reply), string-
     and escape-aware;
   - no "fixing" of invalid JSON (no trailing-comma repair). Either it parses or it is `INVALID`.
 - **`INVALID`/`EMPTY` keep today's observable behaviour** (raw string in `responseObjectName`) unless
@@ -176,6 +182,7 @@ Plus, for the program-content HTTP call: `timeoutInMillis 10000` and
      `minLength`), in-house unless `pom.xml` already has a validator. A mismatch is
      `INVALID(schema: <path> <rule>)`.
   2. **Native enforcement** where the provider supports it, via `JsonResponseFormatPolicy`:
+     (applied per outgoing `ChatRequest`, never baked into a cached model)
      - Gemini: `responseSchema` / `responseJsonSchema` on the langchain4j builder;
      - OpenAI and Azure OpenAI: `response_format: json_schema` with `strict: true`;
      - Mistral, if supported.
