@@ -366,6 +366,11 @@ export async function runDeployManyWithGrants(options: DeployManyOptions): Promi
 
   const results: DeployManyResult[] = [];
   for (const target of targets) {
+    // Left the page (or the caller gave up): deploy nothing more.
+    if (options.signal?.aborted) {
+      results.push({ target, outcome: { kind: "cancelled" } });
+      continue;
+    }
     let outcome: DeployWithGrantsOutcome;
     try {
       outcome = await deployAndSettle(baseOf(target), options.signal);

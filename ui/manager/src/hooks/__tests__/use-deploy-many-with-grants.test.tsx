@@ -6,6 +6,7 @@ import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import {
   mergeGrantIssues,
+  runDeployManyWithGrants,
   useDeployWithGrants,
   type DeployManyResult,
   type DeployTarget,
@@ -174,6 +175,15 @@ describe("runDeployManyWithGrants", () => {
       expect(screen.getByTestId("outcomes")).toHaveTextContent(`${A}:cancelled,${B}:cancelled,${C}:cancelled`),
     );
     expect(calls.filter((c) => c.startsWith("deploy") || c.startsWith("grant"))).toEqual([]);
+  });
+
+  it("deploys nothing more once the caller aborts", async () => {
+    serve({ preflights: {} });
+    const controller = new AbortController();
+    controller.abort();
+    const results = await runDeployManyWithGrants({ targets: TARGETS, signal: controller.signal });
+    expect(results.map((r) => r.outcome.kind)).toEqual(["cancelled", "cancelled", "cancelled"]);
+    expect(calls.filter((c) => c.startsWith("deploy"))).toEqual([]);
   });
 
   it("deploys without asking when no agent has a grant issue", async () => {
