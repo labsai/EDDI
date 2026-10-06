@@ -96,7 +96,7 @@ final class TurnResilienceWarnings {
         int attempts = retry != null && retry.getMaxAttempts() != null ? RetryConfiguration.clampAttempts(retry.getMaxAttempts()) : 3;
         attempts = Math.max(1, attempts);
         long delay = retry != null && retry.getBackoffDelayMs() != null ? Math.max(0, retry.getBackoffDelayMs()) : 1000L;
-        double multiplier = retry != null && retry.getBackoffMultiplier() != null ? retry.getBackoffMultiplier() : 2.0;
+        double multiplier = retry != null && retry.getBackoffMultiplier() != null ? Math.max(1.0, retry.getBackoffMultiplier()) : 2.0;
         long maxDelay = Math.min(MAX_BACKOFF_CEILING_MS,
                 retry != null && retry.getMaxBackoffDelayMs() != null ? retry.getMaxBackoffDelayMs() : 10_000L);
         long backoff = 0;
