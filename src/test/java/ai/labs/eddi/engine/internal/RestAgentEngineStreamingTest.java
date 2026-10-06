@@ -292,6 +292,10 @@ class RestAgentEngineStreamingTest {
             handler.onCascadeEscalation(0, 1, 0.4, 0.7, "low_confidence", 42L);
             verify(eventBuilder).name("cascade_escalation");
             verify(eventSink, times(2)).send(sseEvent);
+
+            handler.onLlmRetry("invalid_json", 1);
+            verify(eventBuilder).name("llm_retry");
+            verify(eventSink, times(3)).send(sseEvent);
         }
 
         @Test

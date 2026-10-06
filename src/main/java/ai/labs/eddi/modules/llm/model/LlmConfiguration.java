@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
+import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
@@ -488,6 +489,19 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private String jsonResponseFormat;
 
+        /**
+         * Fields of the parsed {@code convertToObject} reply that must hold a non-blank
+         * string — top-level ({@code htmlResponseText}) or dotted
+         * ({@code answer.text}). A missing, non-string or blank ({@code ""}) value is a
+         * shape violation (outcome {@code schema_mismatch}), the shortcut for "an empty
+         * bubble is not an answer" without writing a {@code responseSchema}. Null or
+         * empty (default) checks nothing; it is independent of
+         * {@code responseValidation.enabled}.
+         *
+         * @since 6.6.0
+         */
+        private List<String> nonBlankFields;
+
         // === Multi-Model Cascade ===
 
         /**
@@ -543,6 +557,21 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.0.0
          */
         private ResponseValidation responseValidation;
+
+        /**
+         * What the task does when the model phase fails outright (provider error after
+         * its retries and cascade, an unusable model configuration, a validation policy
+         * of {@code "error"}). Absent means {@code {"action": "error"}}: the failure
+         * ends the turn, as it always did.
+         */
+        private OnError onError;
+
+        /**
+         * Per-model circuit breaker for systemic failures (R8). Absent or
+         * {@code enabled: false} (the default) means no breaker: behaviour is exactly
+         * what it was. See {@link CircuitBreakerConfig}.
+         */
+        private CircuitBreakerConfig circuitBreaker;
 
         /**
          * Overall wall-clock backstop, in seconds, for a streaming chat completion.
@@ -983,6 +1012,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.jsonResponseFormat = jsonResponseFormat;
         }
 
+        public List<String> getNonBlankFields() {
+            return nonBlankFields;
+        }
+
+        public void setNonBlankFields(List<String> nonBlankFields) {
+            this.nonBlankFields = nonBlankFields != null ? new ArrayList<>(nonBlankFields) : null;
+        }
+
         public ModelCascadeConfig getModelCascade() {
             return modelCascade;
         }
@@ -1039,6 +1076,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.responseValidation = responseValidation;
         }
 
+        public OnError getOnError() {
+            return onError;
+        }
+
+        public void setOnError(OnError onError) {
+            this.onError = onError;
+        }
+
+        public CircuitBreakerConfig getCircuitBreaker() {
+            return circuitBreaker;
+        }
+
+        public void setCircuitBreaker(CircuitBreakerConfig circuitBreaker) {
+            this.circuitBreaker = circuitBreaker;
+        }
+
         public Integer getStreamingTimeoutSeconds() {
             return streamingTimeoutSeconds;
         }
@@ -1068,11 +1121,182 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      * <li>{@code "fallback"} — substitute a static fallback message</li>
      * <li>{@code "error"} — throw a LifecycleException (triggers strict-write +
      * error digest)</li>
+     * <li>{@code "retry"} — only for {@link #onEmpty}, {@link #onTruncation},
+     * {@link #onContentFilter}, {@link #onInvalidJson} and
+     * {@link #onContextTooLong}: re-ask the same model (see {@link #maxRetries}),
+     * then, once the re-asks are spent, escalate to the next cascade step and
+     * finally apply {@link #fallbackAction}</li>
      * </ul>
      *
      * @since 6.0.0
      */
     public static class ResponseValidation {
+
+        /** Upper bound of {@link #maxRetries}: a retry is a billed model call. */
+        public static final int MAX_RETRIES_CEILING = 3;
+        /** Default of {@link #maxRetries}. */
+        public static final int DEFAULT_MAX_RETRIES = 1;
+        /** Default of {@link #truncationRetryFactor}. */
+        public static final double DEFAULT_TRUNCATION_RETRY_FACTOR = 2.0;
+        /** Upper bound of {@link #truncationRetryFactor}. */
+        public static final double MAX_TRUNCATION_RETRY_FACTOR = 4.0;
+        /** Default of {@link #minAttemptMs}. */
+        public static final long DEFAULT_MIN_ATTEMPT_MS = 3000L;
+        /** Default of {@link #correctiveMessage} for a {@code convertToObject} task. */
+        public static final String DEFAULT_CORRECTIVE_MESSAGE = "Your previous reply could not be used: {reason}. "
+                + "Reply again with only the JSON object described in the instructions.";
+        /**
+         * Default of {@link #correctiveMessage} for a task that does not return JSON.
+         */
+        public static final String DEFAULT_CORRECTIVE_MESSAGE_TEXT = "Your previous reply could not be used: {reason}. Please answer again.";
+
+        /**
+         * Action when a {@code convertToObject} reply is not valid JSON even after the
+         * local repair ({@code ModelOutputParser}: fence stripping, extraction).
+         * {@code "retry"} re-asks the same model with a corrective message. Default:
+         * "ignore" — the raw reply is stored as a string, as before.
+         */
+        private String onInvalidJson = "ignore";
+
+        /**
+         * Action when a reply parses as JSON but breaks the response shape
+         * ({@code responseSchema} or {@code nonBlankFields}). {@code "retry"} re-asks
+         * the same model with the corrective message, whose {@code {reason}} is the
+         * violation ({@code schema: $.x required}). {@code "ignore"} / {@code "warn"}
+         * keep the parsed object. Default: "ignore".
+         */
+        private String onSchemaMismatch = "ignore";
+
+        /**
+         * Action when the provider rejects the request because the prompt exceeds the
+         * context window. {@code "retry"} sends the request once more with the history
+         * window halved (anchored first steps are kept). Anything else lets the failure
+         * propagate as before. Not available once tools have run in the turn (a retry
+         * would have to replay them). Default: "error".
+         */
+        private String onContextTooLong = "error";
+
+        /**
+         * How many corrective re-asks one model (one cascade step) gets in total,
+         * shared by every {@code "retry"} policy. 0 disables the re-asks (a cascade
+         * still escalates on invalid output). Clamped to 0..3; default 1. A cascade
+         * step can override it with {@code maxFormatRetries}.
+         */
+        private int maxRetries = DEFAULT_MAX_RETRIES;
+
+        /**
+         * Factor applied to the output-token cap for the one truncation re-ask
+         * ({@code onTruncation: "retry"}). Clamped to 1..4 and, whatever the factor,
+         * the new cap never exceeds a fixed ceiling. Default 2.
+         */
+        private double truncationRetryFactor = DEFAULT_TRUNCATION_RETRY_FACTOR;
+
+        /**
+         * Text of the corrective user message sent with a re-ask after an invalid JSON
+         * reply. {@code {reason}} is replaced literally with EDDI's own reason ("not
+         * JSON", "truncated JSON", ...), never with model output or user input. The
+         * text is not run through the template engine. Null uses
+         * {@link #DEFAULT_CORRECTIVE_MESSAGE} (or the text variant when the task does
+         * not return JSON).
+         */
+        private String correctiveMessage;
+
+        /**
+         * Optional dollar cap on what the re-asks of one model may cost in total. A
+         * re-ask that would start at or above the cap is skipped (the cascade
+         * escalates, otherwise the fallback applies). Priced from the step's / task's
+         * configured per-1M-token prices; with no prices configured the cap cannot
+         * fire. Null = no cap beyond {@link #maxRetries}.
+         */
+        private Double maxRetryCostUsd;
+
+        /**
+         * A re-ask only starts if the model's remaining time (cascade step timeout, and
+         * the turn deadline once there is one) is at least this many milliseconds;
+         * otherwise the cascade escalates at once. Default 3000.
+         */
+        private long minAttemptMs = DEFAULT_MIN_ATTEMPT_MS;
+
+        /**
+         * What happens when every re-ask and every cascade step ended in a reply the
+         * policy rejected: {@code "fallback"} (default) serves the configured fallback,
+         * {@code "error"} fails the turn, {@code "warn"} keeps the reply and logs.
+         */
+        private String fallbackAction = "fallback";
+
+        public String getOnInvalidJson() {
+            return onInvalidJson;
+        }
+
+        public void setOnInvalidJson(String onInvalidJson) {
+            this.onInvalidJson = onInvalidJson;
+        }
+
+        public String getOnSchemaMismatch() {
+            return onSchemaMismatch;
+        }
+
+        public void setOnSchemaMismatch(String onSchemaMismatch) {
+            this.onSchemaMismatch = onSchemaMismatch;
+        }
+
+        public String getOnContextTooLong() {
+            return onContextTooLong;
+        }
+
+        public void setOnContextTooLong(String onContextTooLong) {
+            this.onContextTooLong = onContextTooLong;
+        }
+
+        public int getMaxRetries() {
+            return maxRetries;
+        }
+
+        public void setMaxRetries(int maxRetries) {
+            this.maxRetries = Math.max(0, Math.min(MAX_RETRIES_CEILING, maxRetries));
+        }
+
+        public double getTruncationRetryFactor() {
+            return truncationRetryFactor;
+        }
+
+        public void setTruncationRetryFactor(double truncationRetryFactor) {
+            this.truncationRetryFactor = Double.isNaN(truncationRetryFactor)
+                    ? DEFAULT_TRUNCATION_RETRY_FACTOR
+                    : Math.max(1.0, Math.min(MAX_TRUNCATION_RETRY_FACTOR, truncationRetryFactor));
+        }
+
+        public String getCorrectiveMessage() {
+            return correctiveMessage;
+        }
+
+        public void setCorrectiveMessage(String correctiveMessage) {
+            this.correctiveMessage = correctiveMessage;
+        }
+
+        public Double getMaxRetryCostUsd() {
+            return maxRetryCostUsd;
+        }
+
+        public void setMaxRetryCostUsd(Double maxRetryCostUsd) {
+            this.maxRetryCostUsd = maxRetryCostUsd;
+        }
+
+        public long getMinAttemptMs() {
+            return minAttemptMs;
+        }
+
+        public void setMinAttemptMs(long minAttemptMs) {
+            this.minAttemptMs = Math.max(0L, minAttemptMs);
+        }
+
+        public String getFallbackAction() {
+            return fallbackAction;
+        }
+
+        public void setFallbackAction(String fallbackAction) {
+            this.fallbackAction = fallbackAction;
+        }
 
         /**
          * The prefixes refusal detection used before it was configurable. Kept as the
@@ -1123,6 +1347,65 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * unaffected. Set it to an empty list to disable refusal detection outright.
          */
         private List<String> refusalPatterns = new ArrayList<>(DEFAULT_REFUSAL_PATTERNS);
+
+        /**
+         * The fixed sentence served when no {@link #fallbackMessage} is configured —
+         * what the {@code "fallback"} action always substituted.
+         */
+        public static final String DEFAULT_FALLBACK_MESSAGE = "I'm sorry, I wasn't able to generate a complete response. Please try again.";
+
+        /**
+         * The text served when a {@code "fallback"} action fires or the task's
+         * {@link OnError} is {@code fallback}. A Qute template rendered with the task's
+         * template data — it is author-written config, so {@code {#if
+         * properties.language == 'de'}}, {@code {snippets.fallback_text}} and
+         * {@code {properties.name}} all work. Null or blank means
+         * {@link #DEFAULT_FALLBACK_MESSAGE}; so does a template that fails to render.
+         * The rendered text is shown and stored, but never fed back to the model (see
+         * the {@code llm:fallback:<taskId>} step flag).
+         */
+        private String fallbackMessage;
+
+        /**
+         * Under {@code convertToObject}, the field the fallback is wrapped in:
+         * {@code {"<fallbackField>": "<message>"}} is stored under the task's response
+         * object name, so a {@code postResponse} output template that reads
+         * {@code {properties.aiOutputObject.htmlResponseText}} renders the fallback
+         * unchanged. Null leaves the fallback a plain string, as before.
+         */
+        private String fallbackField;
+
+        /**
+         * Quick replies added to the step next to the fallback text, e.g.
+         * {@code [{"value":"Try again","expressions":"retry_last"}]}. Their
+         * {@code value} and {@code expressions} are templates like
+         * {@link #fallbackMessage}.
+         */
+        private List<QuickReply> fallbackQuickReplies;
+
+        public String getFallbackMessage() {
+            return fallbackMessage;
+        }
+
+        public void setFallbackMessage(String fallbackMessage) {
+            this.fallbackMessage = fallbackMessage;
+        }
+
+        public String getFallbackField() {
+            return fallbackField;
+        }
+
+        public void setFallbackField(String fallbackField) {
+            this.fallbackField = fallbackField;
+        }
+
+        public List<QuickReply> getFallbackQuickReplies() {
+            return fallbackQuickReplies;
+        }
+
+        public void setFallbackQuickReplies(List<QuickReply> fallbackQuickReplies) {
+            this.fallbackQuickReplies = fallbackQuickReplies;
+        }
 
         public boolean isEnabled() {
             return enabled;
@@ -1180,6 +1463,119 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             // An explicit empty list means "do not detect refusals" and must survive;
             // only null falls back to the defaults.
             this.refusalPatterns = refusalPatterns != null ? new ArrayList<>(refusalPatterns) : new ArrayList<>(DEFAULT_REFUSAL_PATTERNS);
+        }
+    }
+
+    /**
+     * Task-level failure policy. {@code "error"} (the default) lets a failed model
+     * phase fail the turn; {@code "fallback"} serves the configured fallback
+     * ({@link ResponseValidation#getFallbackMessage()} and friends, or their
+     * defaults) instead, so the turn completes and the conversation stays
+     * {@code READY}. The failure is recorded under {@code llm:error:<taskId>}.
+     */
+    public static class OnError {
+        public static final String ACTION_ERROR = "error";
+        public static final String ACTION_FALLBACK = "fallback";
+
+        private String action = ACTION_ERROR;
+
+        public String getAction() {
+            return action;
+        }
+
+        public void setAction(String action) {
+            this.action = action;
+        }
+
+        /** True only for an explicit {@code "fallback"}; anything else is today's. */
+        @JsonIgnore
+        public boolean isFallback() {
+            return ACTION_FALLBACK.equalsIgnoreCase(action);
+        }
+    }
+
+    /**
+     * Circuit breaker for a model that keeps failing the same <em>permanent</em>
+     * way (R8). The breaker is keyed by (agent, agent version, provider, model),
+     * lives in memory on each node and is shared by every conversation of that
+     * agent version.
+     * <p>
+     * It trips when {@code threshold} of the last {@code window} counted turns
+     * failed with the same class — {@code INVALID_OUTPUT} (a reply that is still
+     * not valid JSON, or still breaks the response shape, after its re-asks),
+     * {@code BAD_REQUEST} or {@code MODEL_NOT_FOUND} — or at once on {@code AUTH} /
+     * {@code QUOTA_EXHAUSTED}. Transient, timeout and rate-limit failures are never
+     * counted: they are the retry layer's job. While open, the model is skipped for
+     * {@code coolDownMs}: a cascade goes straight to its next step, a task without
+     * one takes its {@code onError} path. After the cool-down one probe turn is let
+     * through; success closes the breaker, failure re-opens it.
+     * <p>
+     * Disabled by default so a stored configuration behaves as it always did.
+     *
+     * @since 6.6.0
+     */
+    public static class CircuitBreakerConfig {
+        public static final int DEFAULT_WINDOW = 10;
+        public static final int DEFAULT_THRESHOLD = 8;
+        public static final long DEFAULT_COOL_DOWN_MS = 60_000L;
+        /** Upper bound of {@code window}: the breaker keeps this many outcomes. */
+        public static final int MAX_WINDOW = 1_000;
+        /** Upper bound of {@code coolDownMs}: one hour. */
+        public static final long MAX_COOL_DOWN_MS = 3_600_000L;
+
+        private boolean enabled = false;
+        private int window = DEFAULT_WINDOW;
+        private int threshold = DEFAULT_THRESHOLD;
+        private long coolDownMs = DEFAULT_COOL_DOWN_MS;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getWindow() {
+            return window;
+        }
+
+        public void setWindow(int window) {
+            this.window = window;
+        }
+
+        public int getThreshold() {
+            return threshold;
+        }
+
+        public void setThreshold(int threshold) {
+            this.threshold = threshold;
+        }
+
+        public long getCoolDownMs() {
+            return coolDownMs;
+        }
+
+        public void setCoolDownMs(long coolDownMs) {
+            this.coolDownMs = coolDownMs;
+        }
+
+        /** The window, clamped to 1..{@link #MAX_WINDOW}. */
+        @JsonIgnore
+        public int effectiveWindow() {
+            return Math.max(1, Math.min(MAX_WINDOW, window));
+        }
+
+        /** The threshold, clamped to 1..{@link #effectiveWindow()}. */
+        @JsonIgnore
+        public int effectiveThreshold() {
+            return Math.max(1, Math.min(effectiveWindow(), threshold));
+        }
+
+        /** The cool-down, clamped to 0..{@link #MAX_COOL_DOWN_MS}. */
+        @JsonIgnore
+        public long effectiveCoolDownMs() {
+            return Math.max(0L, Math.min(MAX_COOL_DOWN_MS, coolDownMs));
         }
     }
 
@@ -1732,6 +2128,23 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * default. Null = no price (contributes $0 to the run cost).
          */
         private Double outputPricePer1M;
+
+        /**
+         * Overrides {@code responseValidation.maxRetries} for this step: how many
+         * corrective same-model re-asks it gets before the cascade escalates. 0 for an
+         * expensive last-resort model. Null inherits the task's value. Clamped to 0..3.
+         */
+        private Integer maxFormatRetries;
+
+        public Integer getMaxFormatRetries() {
+            return maxFormatRetries;
+        }
+
+        public void setMaxFormatRetries(Integer maxFormatRetries) {
+            this.maxFormatRetries = maxFormatRetries != null
+                    ? Math.max(0, Math.min(ResponseValidation.MAX_RETRIES_CEILING, maxFormatRetries))
+                    : null;
+        }
 
         public String getType() {
             return type;

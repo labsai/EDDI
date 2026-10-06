@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.output.model;
 
 import ai.labs.eddi.modules.output.model.types.*;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
@@ -32,6 +33,17 @@ import java.util.function.UnaryOperator;
 public abstract class OutputItem {
     protected String type;
 
+    /**
+     * Set to {@code true} on an item the engine substituted for a failed model
+     * answer (the LLM task's configured fallback). Absent otherwise, so no stored
+     * output document changes shape. The LLM history builder uses the step-level
+     * {@code llm:fallback:<taskId>} flag, which also covers fallbacks rendered by a
+     * {@code postResponse}; this flag is for consumers that only see the output
+     * item.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean fallback;
+
     protected abstract void initType();
 
     /**
@@ -53,6 +65,7 @@ public abstract class OutputItem {
     public final OutputItem applyTemplating(UnaryOperator<String> templating) {
         OutputItem templated = templatedCopy(templating);
         templated.setType(this.type);
+        templated.setFallback(this.fallback);
         return templated;
     }
 
@@ -64,6 +77,14 @@ public abstract class OutputItem {
 
     public String getType() {
         return type;
+    }
+
+    public Boolean getFallback() {
+        return fallback;
+    }
+
+    public void setFallback(Boolean fallback) {
+        this.fallback = fallback;
     }
 
     public void setType(String type) {

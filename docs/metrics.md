@@ -438,6 +438,7 @@ eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMo
 eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
 eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
 eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
+eddi_llm_failure_total                      # Failed cascade steps by failure class; tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
@@ -450,10 +451,28 @@ eddi_llm_cascade_confidence                 # Confidence scores (distribution su
 Mass at the last step means every turn pays for the cheap attempt *and* the
 expensive one.
 
+### LLM Circuit Breaker Metrics
+
+Full guide: [langchain.md](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing). Only recorded for tasks that set `circuitBreaker.enabled`.
+
+```text
+eddi_llm_circuit_total                      # State changes of a model's circuit; tags: state (open|half_open|closed), class (INVALID_OUTPUT|BAD_REQUEST|MODEL_NOT_FOUND|AUTH|QUOTA_EXHAUSTED — what opened it; none on a close)
+eddi_llm_circuit_skipped_total              # Turns that did not call the model because its circuit was open; tag: class
+eddi_llm_circuit_open                       # Gauge: circuits open or half-open on this node right now
+```
+
+Every `state="open"` is also one ERROR log line (`LLM circuit OPEN …`) naming the agent, version, provider, model, the class and EDDI's reason (never model output). Alert on `increase(eddi_llm_circuit_total{state="open"}[5m]) > 0`, or on `eddi_llm_circuit_open > 0` for a standing condition. The breakers are per node and in memory: with several nodes, each opens on its own traffic.
+
 ### Streaming Metrics
 
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
+eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty|schema_mismatch)
+eddi_llm_recovery_total                     # Recovery actions of the LLM task; tags: action, outcome, trigger
+                                            #   action=fallback, outcome=served,  trigger=onError|validation   (a turn answered with the configured fallback)
+                                            #   action=retry,    outcome=recovered|still_invalid|failed|skipped_budget|skipped_no_time|skipped_cost|skipped_breaker,
+                                            #                    trigger=empty|truncated|content_filter|invalid_json|context_too_long   (a same-model re-ask)
+                                            #   action=escalate, outcome=invalid_output, trigger=...            (a cascade step handed over after its re-asks)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)

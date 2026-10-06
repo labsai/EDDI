@@ -59,6 +59,22 @@ public class ConversationLogGenerator {
      *            the visible transcript stays clean.
      */
     public ConversationLog generate(int logSize, boolean includeFirstAgentMessage, boolean stitchAttachmentExtracts) {
+        return generate(logSize, includeFirstAgentMessage, stitchAttachmentExtracts, false);
+    }
+
+    /**
+     * @param skipFallbackOutputs
+     *            when {@code true} and backed by a live
+     *            {@link IConversationMemory}, the assistant message of a step
+     *            flagged {@code llm:fallback:<taskId>} is left out, and the user
+     *            message of the following turn is merged into the user message
+     *            before it so the history keeps strictly alternating roles
+     *            (Anthropic rejects two user messages in a row). Used only for the
+     *            LLM-facing message build: the transcript shown to people keeps the
+     *            fallback.
+     */
+    public ConversationLog generate(int logSize, boolean includeFirstAgentMessage, boolean stitchAttachmentExtracts,
+                                    boolean skipFallbackOutputs) {
         if (conversationMemory == null && memorySnapshot == null) {
             throw new IllegalStateException(
                     "ConversationMemory was null. " + "You need to either set IConversationMemory or ConversationMemorySnapshot");
@@ -70,9 +86,11 @@ public class ConversationLogGenerator {
                     ? conversationMemory.getConversationOutputs()
                     : memorySnapshot.getConversationOutputs();
 
-            var allSteps = (stitchAttachmentExtracts && conversationMemory != null)
+            var allSteps = ((stitchAttachmentExtracts || skipFallbackOutputs) && conversationMemory != null)
                     ? conversationMemory.getAllSteps()
                     : null;
+            var extractSteps = stitchAttachmentExtracts ? allSteps : null;
+            boolean mergeNextUser = false;
 
             var startIndex = 0;
             if (logSize > 0) {
@@ -101,10 +119,23 @@ public class ConversationLogGenerator {
                 if (input != null) {
                     var inputText = new Content();
                     inputText.setType(text);
-                    inputText.setValue(withAttachmentExtracts(allSteps, index, input));
+                    inputText.setValue(withAttachmentExtracts(extractSteps, index, input));
                     var inputs = new ArrayList<>(contentList);
                     inputs.add(inputText);
-                    conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_USER, inputs));
+                    var previous = conversationLog.getMessages().isEmpty() ? null : conversationLog.getMessages().getLast();
+                    if (mergeNextUser && previous != null && KEY_ROLE_USER.equals(previous.getRole())) {
+                        // The assistant turn between the two was a fallback and is gone:
+                        // fold this input into the one before so roles keep alternating.
+                        previous.setContent(joined(previous.getContent(), inputs));
+                    } else {
+                        conversationLog.getMessages().add(new ConversationPart(KEY_ROLE_USER, inputs));
+                    }
+                    mergeNextUser = false;
+                }
+
+                if (skipFallbackOutputs && isFallbackStep(allSteps, index)) {
+                    mergeNextUser = true;
+                    continue;
                 }
 
                 // Every item is inspected, whatever its type. Deciding the list's shape
@@ -172,6 +203,27 @@ public class ConversationLogGenerator {
             return input;
         }
         return input + "\n\n" + String.join("\n\n", data.getResult());
+    }
+
+    /**
+     * Whether the turn at {@code stepIndex} (a forward index into the conversation
+     * outputs) was answered with an LLM task's fallback rather than by the model.
+     * Reads the {@code llm:fallback:<taskId>} flag off the aligned step; false when
+     * there is no step stack or the index is out of range.
+     */
+    public static boolean isFallbackStep(IConversationMemory.IConversationStepStack allSteps, int stepIndex) {
+        if (allSteps == null || stepIndex < 0 || stepIndex >= allSteps.size()) {
+            return false;
+        }
+        IConversationMemory.IConversationStep step = allSteps.get(allSteps.size() - 1 - stepIndex);
+        List<IData<Object>> flags = step.getAllData(MemoryKeys.LLM_FALLBACK_PREFIX);
+        return flags != null && flags.stream().anyMatch(flag -> Boolean.TRUE.equals(flag.getResult()));
+    }
+
+    private static List<Content> joined(List<Content> first, List<Content> second) {
+        var merged = new LinkedList<Content>(first);
+        merged.addAll(second);
+        return merged;
     }
 
     private static ContentType getContentType(String type) {
