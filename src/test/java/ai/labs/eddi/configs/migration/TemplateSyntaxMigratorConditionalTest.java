@@ -122,4 +122,20 @@ class TemplateSyntaxMigratorConditionalTest {
         assertNull(migrator.quteParseError("plain text {\"json\": 1}"));
         assertNull(migrator.quteParseError(null));
     }
+
+    /**
+     * The check is built from the runtime engine, whose parse-level additions are
+     * exactly the sections below (no user tags, no parser hooks). Every one of them
+     * must pass, and a section the runtime does not register must not.
+     */
+    @Test
+    @DisplayName("every section the runtime engine registers parses; one it does not is rejected")
+    void runtimeSectionsParse() {
+        assertNull(migrator.quteParseError("{#if a}x{#else if b}y{#else}z{/if}"));
+        assertNull(migrator.quteParseError("{#for i in list}{i_index}{/for}{#each list}{it}{/each}"));
+        assertNull(migrator.quteParseError("{#with user}{name}{/with}"));
+        assertNull(migrator.quteParseError("{#let x=1}{x}{/let}{#set y=2}{y}{/set}"));
+        assertNull(migrator.quteParseError("{#when a}{#is 1}one{#else}other{/when}{#switch a}{#case 1}one{/switch}"));
+        assertNotNull(migrator.quteParseError("{#include other /}"));
+    }
 }

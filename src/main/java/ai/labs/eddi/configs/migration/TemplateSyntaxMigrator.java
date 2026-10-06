@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.modules.templating.TemplateEscaping;
+import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory;
 import io.quarkus.qute.Engine;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -478,12 +479,17 @@ public class TemplateSyntaxMigrator {
     }
 
     /**
-     * The one parser the check below uses. Only the default section helpers are
-     * registered, enough to read {@code #if}, {@code #for}, {@code #when} and
-     * {@code #let}; namespaces are resolved at render time, so an unknown one such
-     * as {@code vars:} or {@code json:} does not fail a parse.
+     * The parser the check below uses: the runtime template engine itself, built
+     * with its default settings from a plain Qute engine. What it adds at parse
+     * level is the section set of {@code RuntimeTemplateEngineFactory} ({@code if},
+     * {@code for}/{@code each}, {@code with}, {@code let}/{@code set},
+     * {@code when}/{@code switch}; no includes, no user tags) and its parser
+     * settings, so a template passes the check exactly when the runtime can read
+     * it. Namespaces are resolved at render time, so an unknown one such as
+     * {@code vars:} or {@code json:} does not fail a parse.
      */
-    private static final Engine PARSE_ENGINE = Engine.builder().addDefaults().build();
+    private static final Engine PARSE_ENGINE = RuntimeTemplateEngineFactory.build(Engine.builder().addDefaults().build(),
+            RuntimeTemplateEngineFactory.Settings.defaults());
 
     /**
      * Why {@code template} is not valid Qute, or {@code null} when it parses. Parse
