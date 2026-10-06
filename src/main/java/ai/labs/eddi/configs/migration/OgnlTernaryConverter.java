@@ -340,7 +340,11 @@ final class OgnlTernaryConverter {
         if (!literal.matches("\\d{1,9}(\\.\\d{1,9})?")) {
             throw new Unsure();
         }
-        return Double.parseDouble(literal);
+        try {
+            return Double.parseDouble(literal);
+        } catch (NumberFormatException e) {
+            throw new Unsure();
+        }
     }
 
     private static boolean isComparison(String op) {
