@@ -42,6 +42,22 @@ class ConfidenceEvaluator {
     private static final Logger LOGGER = Logger.getLogger(ConfidenceEvaluator.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /**
+     * The judge runs inside the cascade step's timeout and has a heuristic to fall
+     * back on, so it gets a short policy: one retry, a sub-second backoff, and no
+     * provider-requested wait above two seconds (it gives up instead of sleeping).
+     */
+    private static final RetryConfiguration JUDGE_RETRY = judgeRetry();
+
+    private static RetryConfiguration judgeRetry() {
+        var retry = new RetryConfiguration();
+        retry.setMaxAttempts(2);
+        retry.setBackoffDelayMs(300L);
+        retry.setMaxBackoffDelayMs(1000L);
+        retry.setMaxRetryAfterMs(2000L);
+        return retry;
+    }
+
     // JSON extraction patterns (regex fallback only — a real JSON parse is tried
     // first)
     private static final Pattern CONFIDENCE_JSON_PATTERN = Pattern.compile("\"confidence\"\\s*:\\s*(-?\\d+\\.?\\d*)", Pattern.CASE_INSENSITIVE);
@@ -255,9 +271,9 @@ class ConfidenceEvaluator {
                     + "to 1.0 (fully confident, complete, and accurate). " + "Respond with ONLY a JSON object: {\"confidence\": <score>}\n\n"
                     + "Response to evaluate:\n%s", response);
 
-            var judgeResponse = RetryConfiguration.executeWithDefaultRetry(() -> judgeModel.chat(
+            var judgeResponse = RetryConfiguration.executeWithRetryUnwrapped(() -> judgeModel.chat(
                     List.of(SystemMessage.from("You are a response quality evaluator. Output only valid JSON."), UserMessage.from(judgePrompt))),
-                    "Judge model");
+                    JUDGE_RETRY, "Judge model");
 
             if (judgeResponse.metadata() != null && judgeResponse.metadata().tokenUsage() != null) {
                 judgeUsage = ToolContextBudget.tokenUsageMap(judgeResponse.metadata().tokenUsage());

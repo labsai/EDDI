@@ -159,8 +159,16 @@ public class RetryConfiguration {
      *             attempts are spent (unwrapped, so callers' handling is unchanged)
      */
     public static <T> T executeWithDefaultRetry(Callable<T> action, String actionDescription) {
+        return executeWithRetryUnwrapped(action, null, actionDescription);
+    }
+
+    /**
+     * As {@link #executeWithDefaultRetry}, with an explicit (typically tighter)
+     * policy for callers that run inside a time budget of their own.
+     */
+    public static <T> T executeWithRetryUnwrapped(Callable<T> action, RetryConfiguration retryConfig, String actionDescription) {
         try {
-            return executeWithRetry(action, null, actionDescription);
+            return executeWithRetry(action, retryConfig, actionDescription);
         } catch (LifecycleException e) {
             if (e.getCause() instanceof RuntimeException runtime) {
                 throw runtime;

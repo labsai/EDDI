@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.shared;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import dev.langchain4j.exception.AuthenticationException;
+import dev.langchain4j.exception.ContentFilteredException;
 import dev.langchain4j.exception.HttpException;
 import dev.langchain4j.exception.InternalServerException;
 import dev.langchain4j.exception.InvalidRequestException;
@@ -74,6 +75,10 @@ class LlmFailureClassifierTest {
                 Arguments.of("anthropic-404-not-found", 404, FailureClass.MODEL_NOT_FOUND, NONE));
     }
 
+    static Stream<Arguments> providerErrorsWithoutDelay() {
+        return providerErrors().map(a -> Arguments.of(a.get()[0], a.get()[1], a.get()[2]));
+    }
+
     @ParameterizedTest(name = "{0} (HTTP {1}) -> {2}")
     @MethodSource("providerErrors")
     void bareHttpException(String fixture, int status, FailureClass expected, long retryAfterMs) throws IOException {
@@ -95,9 +100,8 @@ class LlmFailureClassifierTest {
     }
 
     @ParameterizedTest(name = "{0} -> {2} retryable={2}")
-    @MethodSource("providerErrors")
-    void isRetryableErrorIsTheTransientRateLimitedTimeoutWrapper(String fixture, int status, FailureClass expected, long ignored)
-            throws IOException {
+    @MethodSource("providerErrorsWithoutDelay")
+    void isRetryableErrorIsTheTransientRateLimitedTimeoutWrapper(String fixture, int status, FailureClass expected) throws IOException {
         boolean retryable = expected == FailureClass.TRANSIENT || expected == FailureClass.RATE_LIMITED || expected == FailureClass.TIMEOUT;
         assertEquals(retryable, RetryConfiguration.isRetryableError(typed(new HttpException(status, body(fixture)))), fixture);
     }
@@ -187,6 +191,41 @@ class LlmFailureClassifierTest {
     void jsonInPlainMessage() throws IOException {
         var failure = LlmFailureClassifier.classify(new RuntimeException("call failed: " + body("gemini-429-per-day")));
         assertEquals(FailureClass.QUOTA_EXHAUSTED, failure.cls());
+    }
+
+    @Test
+    @DisplayName("a delay so large it overflows to infinity is capped at 24h, not read as short or thrown on")
+    void overflowingDelayIsCapped() {
+        String huge = "9".repeat(400);
+        var fromMessage = LlmFailureClassifier.classify(new HttpException(429, "Please retry in " + huge + "s."));
+        assertEquals(FailureClass.RATE_LIMITED, fromMessage.cls());
+        assertEquals(86_400_000L, fromMessage.retryAfterMs());
+
+        var fromRetryInfo = LlmFailureClassifier.classify(new HttpException(429,
+                "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.RetryInfo\",\"retryDelay\":\""
+                        + huge + "s\"}]}}"));
+        assertEquals(86_400_000L, fromRetryInfo.retryAfterMs());
+    }
+
+    @Test
+    @DisplayName("a known non-429 status is not turned into RATE_LIMITED by rate-limit wording in the body")
+    void bodySignalsDoNotOverrideAKnownStatus() {
+        var failure = LlmFailureClassifier.classify(new HttpException(503,
+                "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"upstream\"}}"));
+        assertEquals(FailureClass.TRANSIENT, failure.cls());
+        // ...while the same body with no HTTP status (embedded in a message) is still a
+        // rate limit.
+        assertEquals(FailureClass.RATE_LIMITED, LlmFailureClassifier
+                .classify(new RuntimeException("{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\"}}")).cls());
+    }
+
+    @Test
+    @DisplayName("ContentFilteredException (an InvalidRequestException) is classified as content filtered, not a generic bad request")
+    void contentFiltered() {
+        var failure = LlmFailureClassifier.classify(new ContentFilteredException("blocked"));
+        assertEquals(FailureClass.UNKNOWN, failure.cls());
+        assertEquals("content filtered", failure.reason());
+        assertFalse(failure.isRetryable());
     }
 
     @Test
