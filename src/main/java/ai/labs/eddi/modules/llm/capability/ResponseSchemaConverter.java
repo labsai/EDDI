@@ -114,7 +114,12 @@ public final class ResponseSchemaConverter {
 
     private static JsonSchemaElement stringElement(JsonNode node, String description) {
         JsonNode enumNode = node.get("enum");
-        if (enumNode != null && enumNode.isArray() && enumNode.size() > 0) {
+        if (enumNode != null) {
+            // An enum we cannot carry (not an array, empty) must not silently become a
+            // plain string: all or nothing.
+            if (!enumNode.isArray() || enumNode.isEmpty()) {
+                return null;
+            }
             List<String> values = new ArrayList<>();
             for (JsonNode member : enumNode) {
                 if (!member.isTextual()) {

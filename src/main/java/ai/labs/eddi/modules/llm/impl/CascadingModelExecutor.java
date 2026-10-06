@@ -424,9 +424,8 @@ class CascadingModelExecutor {
                         convertToObject, FormatRetryRunner.resolveBaseMaxOutputTokens(mergedParams, modelType),
                         step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M(),
                         step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M(),
-                        // the task-level schema: what the request enforces natively and what LlmTask
-                        // validates last
-                        baseParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
+                        // the step's merged params, so a step-level responseSchema override applies
+                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
                 boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept && isLastStep;
@@ -457,7 +456,7 @@ class CascadingModelExecutor {
                 // default, so an escalation from e.g. mistral to gemini stops sending the
                 // JSON format the moment it would be paired with tools.
                 var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat(),
-                        baseParams.get("responseSchema"));
+                        mergedParams.get("responseSchema"));
 
                 // Time this step still has for another attempt: its own timeout, and the
                 // turn's remaining time (R1 feeds turnBudget).
