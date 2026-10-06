@@ -57,8 +57,8 @@ public class AgentFactory implements IAgentFactory {
     /**
      * Deploy-time compatibility lint: advisory findings about configuration that
      * behaves differently than it did in 5.x. Field-injected and null-checked for
-     * the same reason as the gate above. It runs before the agent is published and
-     * can never fail or delay a deployment beyond the few reads it makes.
+     * the same reason as the gate above. It runs after the agent is published and
+     * reported READY, so it can neither fail a deployment nor delay READY.
      */
     @Inject
     AgentCompatibilityLint compatibilityLint;
@@ -304,7 +304,6 @@ public class AgentFactory implements IAgentFactory {
         try {
             IAgent agent = agentStoreClientLibrary.getAgent(agentId, version);
             ((Agent) agent).setDeploymentStatus(Deployment.Status.READY);
-            lintCompatibility((Agent) agent, agentId, version);
 
             // replace(key, OUR placeholder, agent), never put(key, agent).
             //
@@ -327,6 +326,10 @@ public class AgentFactory implements IAgentFactory {
 
             finalDeploymentProcess.completed(Deployment.Status.READY);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.READY);
+            // After the agent is published and the caller told: the lint reads stores and
+            // must never delay READY. The warnings land on the already-published agent
+            // (the field is volatile).
+            lintCompatibility((Agent) agent, agentId, version);
         } catch (ServiceException e) {
             log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + e.getMessage(), e);
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);

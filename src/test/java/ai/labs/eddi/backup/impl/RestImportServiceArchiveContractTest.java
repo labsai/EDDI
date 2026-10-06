@@ -52,6 +52,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -265,6 +266,15 @@ class RestImportServiceArchiveContractTest {
             assertEquals("json", task.getParameters().get("responseFormat"));
             assertFalse(task.getEnableHttpCallTools());
             assertFalse(task.getEnableMcpCallTools());
+        }
+
+        @Test
+        @DisplayName("in a workflow mixing 5.x and v6 LLM references only the 5.x one is marked for migration")
+        void onlyLegacyReferencesAreMarked() {
+            String workflow = "{\"workflowSteps\":[{\"config\":{\"uri\":\"eddi://ai.labs.langchain/langchainstore/langchains/aaa111?version=1\"}},"
+                    + "{\"config\":{\"uri\":\"eddi://ai.labs.llm/llmstore/llms/bbb222?version=1\"}}]}";
+
+            assertEquals(Set.of("eddi://ai.labs.llm/llmstore/llms/aaa111?version=1"), RestImportService.legacyLlmUris(workflow));
         }
 
         @Test
