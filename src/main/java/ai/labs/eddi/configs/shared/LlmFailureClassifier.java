@@ -221,7 +221,13 @@ public final class LlmFailureClassifier {
         if (signals.contains("deadline_exceeded") || effectiveStatus == 408 || effectiveStatus == 504) {
             return new LlmFailure(FailureClass.TIMEOUT, null, "timeout (" + describe(effectiveStatus, signals) + ")");
         }
-        if (signals.contains("overloaded") || signals.contains("unavailable") || signals.contains("internal") || signals.contains("api_error")
+        // Substring signals count only when the status is unknown or 5xx: an explicit
+        // 4xx
+        // outranks them ("internal_error" on a 400, "model_unavailable" on a 404 are
+        // not transient).
+        boolean transientSignal = (effectiveStatus <= 0 || effectiveStatus >= 500) && (signals.contains("overloaded")
+                || signals.contains("unavailable") || signals.contains("internal") || signals.contains("api_error"));
+        if (transientSignal
                 || effectiveStatus == 500 || effectiveStatus == 502 || effectiveStatus == 503 || effectiveStatus == 529) {
             return new LlmFailure(FailureClass.TRANSIENT, null, "provider error (" + describe(effectiveStatus, signals) + ")");
         }

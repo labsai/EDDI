@@ -220,6 +220,24 @@ class LlmFailureClassifierTest {
     }
 
     @Test
+    @DisplayName("an explicit 4xx status outranks transient-sounding body signals")
+    void clientErrorBeatsTransientSounding() {
+        var internal400 = LlmFailureClassifier.classify(new HttpException(400,
+                "{\"error\":{\"type\":\"internal_error\",\"message\":\"bad field\"}}"));
+        assertEquals(FailureClass.BAD_REQUEST, internal400.cls());
+        assertFalse(internal400.isRetryable());
+
+        var unavailable404 = LlmFailureClassifier.classify(new HttpException(404,
+                "{\"error\":{\"code\":\"model_unavailable\",\"message\":\"gone\"}}"));
+        assertEquals(FailureClass.MODEL_NOT_FOUND, unavailable404.cls());
+        assertFalse(unavailable404.isRetryable());
+
+        // ...while the same tokens with no status or a 5xx remain transient.
+        assertEquals(FailureClass.TRANSIENT, LlmFailureClassifier.classify(new HttpException(502,
+                "{\"error\":{\"type\":\"internal_error\"}}")).cls());
+    }
+
+    @Test
     @DisplayName("ContentFilteredException (an InvalidRequestException) is classified as content filtered, not a generic bad request")
     void contentFiltered() {
         var failure = LlmFailureClassifier.classify(new ContentFilteredException("blocked"));
