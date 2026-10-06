@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.capability;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.langchain4j.model.chat.request.json.JsonArraySchema;
 import dev.langchain4j.model.chat.request.json.JsonBooleanSchema;
 import dev.langchain4j.model.chat.request.json.JsonEnumSchema;
@@ -54,6 +55,11 @@ public final class ResponseSchemaConverter {
     static final String SCHEMA_NAME = "response";
 
     private static final int MAX_DEPTH = 16;
+    /**
+     * Meta keywords Gemini's JSON-schema path rejects; none of them constrains a
+     * value.
+     */
+    private static final List<String> UNSUPPORTED_RAW_KEYWORDS = List.of("$schema", "$id", "$comment");
     private static final int MAX_CACHED = 256;
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -93,8 +99,38 @@ public final class ResponseSchemaConverter {
      * falls back to schemaless JSON exactly as {@link #convert} does.
      */
     public static Optional<JsonSchema> convertRaw(String responseSchemaJson) {
-        return convert(responseSchemaJson)
-                .map(typed -> JsonSchema.builder().name(SCHEMA_NAME).rootElement(JsonRawSchema.from(responseSchemaJson)).build());
+        if (convert(responseSchemaJson).isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode tree = MAPPER.readTree(responseSchemaJson);
+            stripUnsupportedKeywords(tree, 0);
+            return Optional.of(JsonSchema.builder().name(SCHEMA_NAME).rootElement(JsonRawSchema.from(MAPPER.writeValueAsString(tree))).build());
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Gemini rejects meta keywords such as {@code $schema} with HTTP 400, and they
+     * carry no constraint, so they are removed (at schema positions only, never
+     * from a property that happens to be called {@code $schema}) before the text is
+     * sent raw.
+     */
+    private static void stripUnsupportedKeywords(JsonNode node, int depth) {
+        if (!(node instanceof ObjectNode object) || depth > MAX_DEPTH) {
+            return;
+        }
+        for (String keyword : UNSUPPORTED_RAW_KEYWORDS) {
+            object.remove(keyword);
+        }
+        JsonNode properties = object.get("properties");
+        if (properties != null && properties.isObject()) {
+            for (JsonNode child : properties) {
+                stripUnsupportedKeywords(child, depth + 1);
+            }
+        }
+        stripUnsupportedKeywords(object.get("items"), depth + 1);
     }
 
     /**
