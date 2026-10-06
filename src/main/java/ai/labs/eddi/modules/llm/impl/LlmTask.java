@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -121,6 +122,13 @@ public class LlmTask implements ILifecycleTask {
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final CascadingModelExecutor cascadingModelExecutor;
     private final FormatRetryRunner formatRetryRunner;
+    /**
+     * The per-model circuit breakers (R8). Initializer-injected, so the many
+     * direct-construction unit tests are unaffected; null leaves every task
+     * unguarded, which is also what a task without {@code circuitBreaker.enabled}
+     * gets.
+     */
+    private LlmCircuitBreakers circuitBreakers;
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
@@ -222,6 +230,12 @@ public class LlmTask implements ILifecycleTask {
         this.formatRetryRunner = new FormatRetryRunner(modelOutputParser, meterRegistry);
         this.cascadingModelExecutor = new CascadingModelExecutor(chatModelRegistry, globalVariableResolver, templatingEngine, legacyChatExecutor,
                 streamingLegacyChatExecutor, meterRegistry, callerIdentityContext, formatRetryRunner);
+    }
+
+    @Inject
+    void setCircuitBreakers(LlmCircuitBreakers circuitBreakers) {
+        this.circuitBreakers = circuitBreakers;
+        this.cascadingModelExecutor.setCircuitBreakers(circuitBreakers);
     }
 
     @Override
@@ -543,7 +557,24 @@ public class LlmTask implements ILifecycleTask {
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        // R8: the circuit of the task's single model. A cascade guards each of its
+        // steps itself, so this is only for the non-cascade paths.
+        boolean circuitGuarded = !cascadeActive && circuitBreakers != null && task.getCircuitBreaker() != null
+                && task.getCircuitBreaker().isEnabled();
+        var circuitKey = circuitGuarded
+                ? new LlmCircuitBreakers.Key(memory.getAgentId(), memory.getAgentVersion(), resolvedType,
+                        resolveModelName(processedParams, resolvedType))
+                : null;
+        final LlmCircuitBreakers.Ticket circuitTicket = circuitGuarded
+                ? circuitBreakers.acquire(circuitKey, task.getCircuitBreaker())
+                : LlmCircuitBreakers.Ticket.DISABLED;
+        FormatRetryRunner.ReaskGate circuitGate = circuitTicket::reaskAllowed;
         try {
+            if (!circuitTicket.allowed()) {
+                // Nothing else can serve this task: onError=fallback absorbs it below, the
+                // default fails the turn fast with the class that opened the circuit.
+                throw new LlmCircuitOpenException(circuitTicket.denial().message(circuitKey), circuitTicket.denial().failure());
+            }
             var chatModel = cascadeActive ? null : chatModelRegistry.getOrCreate(resolvedType, processedParams);
             prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
@@ -642,14 +673,15 @@ public class LlmTask implements ILifecycleTask {
                 // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
                 var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
                         effectiveToolApprovals, llmTaskIndex, jsonPolicy, retryPolicy != null ? null : eventSink, addToOutputExplicitlyFalse,
-                        resolvedType, processedParams, retryPolicy, retryListener, currentStep);
+                        resolvedType, processedParams, retryPolicy, retryListener, currentStep, circuitGate);
                 if (outcome != null) {
                     responseContent = outcome.response();
                     toolTrace = outcome.trace();
                     responseMetadata = outcome.responseMetadata();
                     usedToolMode = true;
                 } else {
-                    var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep);
+                    var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep,
+                            circuitGate);
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                     // Forward the buffered response to the stream so an SSE client is not left
@@ -663,7 +695,7 @@ public class LlmTask implements ILifecycleTask {
                 // === Standard (non-cascade) execution path ===
                 var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
                         effectiveToolApprovals, llmTaskIndex, jsonPolicy, retryPolicy != null ? null : eventSink, addToOutputExplicitlyFalse,
-                        resolvedType, processedParams, retryPolicy, retryListener, currentStep);
+                        resolvedType, processedParams, retryPolicy, retryListener, currentStep, circuitGate);
 
                 if (outcome != null) {
                     responseContent = outcome.response();
@@ -683,7 +715,7 @@ public class LlmTask implements ILifecycleTask {
                         // Streaming not supported by this builder (or buffered for R5) — fall back
                         // to sync, emit as single chunk
                         var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener,
-                                currentStep);
+                                currentStep, circuitGate);
                         responseContent = chatResult.response();
                         responseMetadata = chatResult.responseMetadata();
                         if (!addToOutputExplicitlyFalse && retryPolicy == null) {
@@ -692,13 +724,16 @@ public class LlmTask implements ILifecycleTask {
                     }
                 } else {
                     // Standard non-streaming legacy mode
-                    var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep);
+                    var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep,
+                            circuitGate);
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                 }
             }
+            settleCircuit(circuitTicket, responseContent, convertObject, processedParams, task);
 
         } catch (Exception e) {
+            settleCircuit(circuitTicket, e);
             if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(e)) {
                 throw e;
             }
@@ -888,6 +923,47 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
+     * Settles the task's circuit ticket (R8) for a model phase that returned: a
+     * reply that is still invalid JSON or off-shape is a counted failure, anything
+     * else a success. The reply is looked at directly rather than through
+     * {@code responseValidation}, so a model that never produces valid JSON is seen
+     * whatever the validation settings are.
+     */
+    private void settleCircuit(LlmCircuitBreakers.Ticket ticket, String responseContent, boolean convertObject,
+                               Map<String, String> processedParams, Task task) {
+        if (ticket == LlmCircuitBreakers.Ticket.DISABLED) {
+            return;
+        }
+        var detection = convertObject
+                ? formatRetryRunner.classifyJsonReply(responseContent, processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(),
+                        task.getId())
+                : null;
+        if (detection != null) {
+            ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, detection.trigger().label() + ": " + detection.reason());
+        } else {
+            ticket.success();
+        }
+    }
+
+    /**
+     * Settles the ticket (R8) for a model phase that threw: a permanent provider
+     * failure is counted; a pause, a cancel, a transient error or anything
+     * unclassified is not.
+     */
+    private static void settleCircuit(LlmCircuitBreakers.Ticket ticket, Exception failure) {
+        if (ticket == LlmCircuitBreakers.Ticket.DISABLED) {
+            return;
+        }
+        var counted = LlmFallbackHandler.isControlFlow(failure) ? null : LlmFailureClassifier.classify(failure);
+        var circuitFailure = counted != null ? LlmCircuitBreakers.Failure.of(counted.cls()) : null;
+        if (circuitFailure != null) {
+            ticket.failure(circuitFailure, counted.reason());
+        } else {
+            ticket.release();
+        }
+    }
+
+    /**
      * One plain chat completion, with the same-model recovery of
      * {@code responseValidation} (R5) when a {@code "retry"} policy applies;
      * exactly {@link LegacyChatExecutor#execute} otherwise.
@@ -895,7 +971,7 @@ public class LlmTask implements ILifecycleTask {
     private LegacyChatExecutor.ChatResult executePlain(FormatRetryRunner.Policy policy, ChatModel chatModel, List<ChatMessage> messages,
                                                        Task task, JsonResponseFormatPolicy jsonPolicy,
                                                        FormatRetryRunner.ContextShrinker shrinker, FormatRetryRunner.ReaskListener listener,
-                                                       IWritableConversationStep currentStep)
+                                                       IWritableConversationStep currentStep, FormatRetryRunner.ReaskGate gate)
             throws LifecycleException {
         if (policy == null) {
             return legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
@@ -903,7 +979,7 @@ public class LlmTask implements ILifecycleTask {
         var outcome = formatRetryRunner.run(policy, messages, (msgs, maxTokens) -> {
             var result = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens);
             return new FormatRetryRunner.Attempt(result.response(), result.responseMetadata());
-        }, shrinker, FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskGate.ALWAYS, listener);
+        }, shrinker, FormatRetryRunner.RemainingBudget.UNBOUNDED, gate, listener);
         recordRetry(currentStep, task, outcome);
         return new LegacyChatExecutor.ChatResult(outcome.attempt().text(), outcome.attempt().metadata());
     }
@@ -1929,7 +2005,8 @@ public class LlmTask implements ILifecycleTask {
                                                   JsonResponseFormatPolicy jsonPolicy, ConversationEventSink eventSink,
                                                   boolean addToOutputExplicitlyFalse, String resolvedType,
                                                   Map<String, String> processedParams, FormatRetryRunner.Policy retryPolicy,
-                                                  FormatRetryRunner.ReaskListener retryListener, IWritableConversationStep currentStep)
+                                                  FormatRetryRunner.ReaskListener retryListener, IWritableConversationStep currentStep,
+                                                  FormatRetryRunner.ReaskGate gate)
             throws LifecycleException, ChatModelRegistry.UnsupportedLlmTaskException {
         // R5: a task that may re-ask its final answer buffers it (no streaming bridge).
         var toolLoopBridge = retryPolicy != null
@@ -1953,7 +2030,7 @@ public class LlmTask implements ILifecycleTask {
                             throw new LifecycleException("The tool loop cannot re-ask its final answer");
                         }
                         return new FormatRetryRunner.Attempt(reply.response(), reply.responseMetadata());
-                    }, FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskGate.ALWAYS, retryListener);
+                    }, FormatRetryRunner.RemainingBudget.UNBOUNDED, gate, retryListener);
             recordRetry(currentStep, task, recovered);
             if (recovered.reasks() > 0) {
                 Map<String, Object> metadata = new HashMap<>(agentResult.responseMetadata());

@@ -167,6 +167,12 @@ export interface LlmTask {
    */
   onError?: TaskOnError;
   /**
+   * Opt-in per-model circuit breaker (off by default): skips a model that
+   * keeps failing with the same permanent class — invalid output, bad request,
+   * model not found; auth or quota at once — for `coolDownMs`, then probes once.
+   */
+  circuitBreaker?: TaskCircuitBreaker;
+  /**
    * Top-level or dotted fields (`"htmlResponseText"`, `"answer.text"`) of the
    * parsed `convertToObject` reply that must hold a non-blank string. A
    * violation is outcome `schema_mismatch`; the parsed object is still stored.
@@ -298,6 +304,18 @@ export interface FallbackQuickReply {
   value?: string;
   expressions?: string;
   isDefault?: boolean;
+}
+
+/** Mirrors backend `LlmConfiguration.CircuitBreakerConfig`. */
+export interface TaskCircuitBreaker {
+  /** Default false: without it a task behaves exactly as before. */
+  enabled?: boolean;
+  /** How many of the latest counted turns are looked at. Default 10, 1..1000. */
+  window?: number;
+  /** How many of them must fail with the same class to open it. Default 8. */
+  threshold?: number;
+  /** Milliseconds an open circuit is skipped before one probe. Default 60000. */
+  coolDownMs?: number;
 }
 
 /** Task-level failure policy — mirrors backend `LlmConfiguration.OnError`. */

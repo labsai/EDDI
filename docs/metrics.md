@@ -451,6 +451,18 @@ eddi_llm_cascade_confidence                 # Confidence scores (distribution su
 Mass at the last step means every turn pays for the cheap attempt *and* the
 expensive one.
 
+### LLM Circuit Breaker Metrics
+
+Full guide: [langchain.md](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing). Only recorded for tasks that set `circuitBreaker.enabled`.
+
+```text
+eddi_llm_circuit_total                      # State changes of a model's circuit; tags: state (open|half_open|closed), class (INVALID_OUTPUT|BAD_REQUEST|MODEL_NOT_FOUND|AUTH|QUOTA_EXHAUSTED — what opened it; none on a close)
+eddi_llm_circuit_skipped_total              # Turns that did not call the model because its circuit was open; tag: class
+eddi_llm_circuit_open                       # Gauge: circuits open or half-open on this node right now
+```
+
+Every `state="open"` is also one ERROR log line (`LLM circuit OPEN …`) naming the agent, version, provider, model, the class and EDDI's reason (never model output). Alert on `increase(eddi_llm_circuit_total{state="open"}[5m]) > 0`, or on `eddi_llm_circuit_open > 0` for a standing condition. The breakers are per node and in memory: with several nodes, each opens on its own traffic.
+
 ### Streaming Metrics
 
 ```text

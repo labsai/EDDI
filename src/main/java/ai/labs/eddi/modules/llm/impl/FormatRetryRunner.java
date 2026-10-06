@@ -373,7 +373,28 @@ final class FormatRetryRunner {
         }
     }
 
-    private record Detection(Trigger trigger, String reason) {
+    /**
+     * Whether a reply is still invalid JSON or off-shape, looked at directly — the
+     * circuit breaker (R8) needs it for tasks whose policy does not re-ask. Returns
+     * the detection ({@code INVALID_JSON} or {@code SCHEMA_MISMATCH} and EDDI's
+     * reason), or null when the reply is usable (or this runner has no parser).
+     */
+    Detection classifyJsonReply(String text, String responseSchema, List<String> nonBlankFields, String taskId) {
+        if (parser == null || text == null || text.isBlank()) {
+            return null;
+        }
+        ModelOutputParser.JsonOutcome outcome = parser.parse(text, true, responseSchema, nonBlankFields, taskId);
+        if (outcome.kind() == ModelOutputParser.Kind.INVALID) {
+            return new Detection(Trigger.INVALID_JSON, outcome.reason());
+        }
+        if (outcome.kind() == ModelOutputParser.Kind.SCHEMA_MISMATCH) {
+            return new Detection(Trigger.SCHEMA_MISMATCH, outcome.reason());
+        }
+        return null;
+    }
+
+    /** A rejected reply: which policy it breaks and EDDI's reason. */
+    record Detection(Trigger trigger, String reason) {
     }
 
     /**

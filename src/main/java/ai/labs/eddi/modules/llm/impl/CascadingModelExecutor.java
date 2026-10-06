@@ -100,6 +100,11 @@ class CascadingModelExecutor {
      * proceed. Defaults to always.
      */
     private volatile FormatRetryRunner.ReaskGate reaskGate = FormatRetryRunner.ReaskGate.ALWAYS;
+    /**
+     * The per-model circuit breakers (R8); null leaves every step unguarded. A task
+     * only uses them when its {@code circuitBreaker.enabled} is true.
+     */
+    private volatile LlmCircuitBreakers circuitBreakers;
 
     CascadingModelExecutor(ChatModelRegistry registry, GlobalVariableResolver globalVariableResolver, ITemplatingEngine templatingEngine,
             LegacyChatExecutor legacyChatExecutor, StreamingLegacyChatExecutor streamingLegacyChatExecutor, MeterRegistry meterRegistry,
@@ -125,6 +130,10 @@ class CascadingModelExecutor {
         this.reaskGate = reaskGate != null ? reaskGate : FormatRetryRunner.ReaskGate.ALWAYS;
     }
 
+    void setCircuitBreakers(LlmCircuitBreakers circuitBreakers) {
+        this.circuitBreakers = circuitBreakers;
+    }
+
     /**
      * What one step needs to recover from an unusable reply on its own model (R5):
      * the policy, the time the step has left for another attempt, the way to
@@ -132,9 +141,9 @@ class CascadingModelExecutor {
      * means no {@code "retry"} policy applies to the step.
      */
     private record StepRecovery(FormatRetryRunner.Policy policy, FormatRetryRunner.RemainingBudget budget,
-            FormatRetryRunner.ContextShrinker shrinker, FormatRetryRunner.ReaskListener listener) {
+            FormatRetryRunner.ContextShrinker shrinker, FormatRetryRunner.ReaskListener listener, FormatRetryRunner.ReaskGate gate) {
         static final StepRecovery NONE = new StepRecovery(null, FormatRetryRunner.RemainingBudget.UNBOUNDED, null,
-                FormatRetryRunner.ReaskListener.NONE);
+                FormatRetryRunner.ReaskListener.NONE, FormatRetryRunner.ReaskGate.ALWAYS);
     }
 
     /**
@@ -372,6 +381,42 @@ class CascadingModelExecutor {
             Map<String, String> mergedParams = stepModel.params();
             String modelName = resolveModelName(mergedParams, modelType);
 
+            // R8: a model whose circuit is open is not called; the cascade goes straight
+            // to its next step, which is what makes a systemically failing cheap model
+            // cost nothing instead of a deadline per turn.
+            LlmCircuitBreakers.Ticket ticket = circuitBreakers != null
+                    ? circuitBreakers.acquire(new LlmCircuitBreakers.Key(memory.getAgentId(), memory.getAgentVersion(), modelType, modelName),
+                            task.getCircuitBreaker())
+                    : LlmCircuitBreakers.Ticket.DISABLED;
+            if (!ticket.allowed()) {
+                var denial = ticket.denial();
+                Map<String, Object> skipped = new LinkedHashMap<>();
+                skipped.put("step", i);
+                skipped.put("model", modelName);
+                skipped.put("modelType", modelType);
+                skipped.put("status", "circuit_open");
+                skipped.put("failureClass", denial.failure().label());
+                trace.add(skipped);
+                String denialMessage = denial.message(new LlmCircuitBreakers.Key(memory.getAgentId(), memory.getAgentVersion(), modelType,
+                        modelName));
+                errors.add(String.format("Step %d (%s): %s", i, modelName, denialMessage));
+                increment("eddi.llm.cascade.escalations", "reason", "circuit_open");
+                LOGGER.warnf("Cascade step %d (%s/%s) skipped: circuit open (%s)", i, modelType, modelName, denial.failure().label());
+                if (!isLastStep) {
+                    if (eventSink != null) {
+                        eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
+                                "circuit_open", 0L);
+                    }
+                    continue;
+                }
+                if (bestSoFar != null) {
+                    LOGGER.warn("All cascade steps exhausted (last circuit open), returning best response");
+                    return withRun(bestSoFar, totals, trace);
+                }
+                throw new LlmCircuitOpenException("Model cascade failed: " + denialMessage + ". Errors: " + String.join("; ", errors),
+                        denial.failure());
+            }
+
             if (eventSink != null) {
                 eventSink.onCascadeStepStart(i, modelType, modelName, steps.size());
             }
@@ -468,7 +513,7 @@ class CascadingModelExecutor {
                                     if (eventSink != null) {
                                         eventSink.onLlmRetry(trigger.label(), attempt);
                                     }
-                                });
+                                }, trigger -> reaskGate.allowReask(trigger) && ticket.reaskAllowed(trigger));
 
                 StepResult stepResult;
                 try {
@@ -552,6 +597,7 @@ class CascadingModelExecutor {
                     stepTrace.put("invalidOutput", unusable.label());
                     stepTrace.put("formatRetries", stepResult.reasks);
                 }
+                settleTicket(ticket, stepTimedOut, unusable, stepResult.response, convertToObject, mergedParams, task);
 
                 if (!stepTimedOut && (bestSoFar == null || rankedConfidence > bestSoFar.confidence())) {
                     bestSoFar = new CascadeResult(stepResult.response, rankedConfidence, i, modelType, modelName, stepResult.tokenUsage, 0.0,
@@ -655,6 +701,7 @@ class CascadingModelExecutor {
                         step.getConfidenceThreshold(), modelName);
 
             } catch (TimeoutException e) {
+                ticket.release();
                 // The step's tools ran and were charged even though its result is lost.
                 totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
                 carryCompletedExchange(cascade, totals, carried, stepExchange, stepTrace);
@@ -688,6 +735,7 @@ class CascadingModelExecutor {
                 // the pause signal reaches LifecycleManager (never demoted to
                 // confidence 0 or swallowed into "best so far").
                 if (e instanceof ToolApprovalRequiredException tare) {
+                    ticket.release();
                     // Record WHICH step paused (M-L1): the batch is the object already
                     // set on memory, persisted at the end of this turn. Without it the
                     // resume rebuilt the task's base model and an escalated step's
@@ -712,6 +760,12 @@ class CascadingModelExecutor {
                 }
                 long durationMs = System.currentTimeMillis() - stepStart;
                 LlmFailure failure = LlmFailureClassifier.classify(e);
+                var circuitFailure = LlmCircuitBreakers.Failure.of(failure.cls());
+                if (circuitFailure != null) {
+                    ticket.failure(circuitFailure, failure.reason());
+                } else {
+                    ticket.release();
+                }
                 String errorType = failure.isRetryable() ? "retryable_error" : "error";
                 String failureDescription = describeFailure(e);
                 stepTrace.put("status", errorType);
@@ -747,6 +801,37 @@ class CascadingModelExecutor {
 
         // Should be unreachable — last step always accepted or throws.
         return finalizeBest(bestSoFar, totals, trace, errors);
+    }
+
+    /**
+     * Settles a step's circuit ticket (R8) with how the step's reply turned out. A
+     * reply the R5 runner rejected for good counts as invalid output; with no
+     * re-ask policy the reply is looked at directly when the task converts it to an
+     * object, so a model that never produces valid JSON is seen whatever the
+     * {@code responseValidation} settings are. A timed-out or otherwise uncounted
+     * step settles nothing.
+     */
+    private void settleTicket(LlmCircuitBreakers.Ticket ticket, boolean stepTimedOut, FormatRetryRunner.Trigger unusable, String response,
+                              boolean convertToObject, Map<String, String> params, LlmConfiguration.Task task) {
+        if (ticket == LlmCircuitBreakers.Ticket.DISABLED) {
+            return;
+        }
+        if (stepTimedOut) {
+            ticket.release();
+        } else if (unusable == FormatRetryRunner.Trigger.INVALID_JSON || unusable == FormatRetryRunner.Trigger.SCHEMA_MISMATCH) {
+            ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, unusable.label());
+        } else if (unusable != null) {
+            ticket.release();
+        } else {
+            var detection = convertToObject
+                    ? formatRetryRunner.classifyJsonReply(response, params.get("responseSchema"), task.getNonBlankFields(), task.getId())
+                    : null;
+            if (detection != null) {
+                ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, detection.trigger().label() + ": " + detection.reason());
+            } else {
+                ticket.success();
+            }
+        }
     }
 
     /**
@@ -1062,7 +1147,7 @@ class CascadingModelExecutor {
             var outcome = formatRetryRunner.run(recovery.policy(), messages, (msgs, maxTokens) -> {
                 var r = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens);
                 return new FormatRetryRunner.Attempt(r.response() != null ? r.response() : "", r.responseMetadata());
-            }, shrinker, recovery.budget(), reaskGate, recovery.listener());
+            }, shrinker, recovery.budget(), recovery.gate(), recovery.listener());
             responseText = outcome.attempt().text();
             responseMetadata = outcome.attempt().metadata();
             tokenUsage = extractTokenUsage(responseMetadata);
@@ -1171,7 +1256,7 @@ class CascadingModelExecutor {
                         throw new LifecycleException("The tool loop cannot re-ask its final answer");
                     }
                     return new FormatRetryRunner.Attempt(reply.response() != null ? reply.response() : "", reply.responseMetadata());
-                }, recovery.budget(), reaskGate, recovery.listener());
+                }, recovery.budget(), recovery.gate(), recovery.listener());
     }
 
     /**

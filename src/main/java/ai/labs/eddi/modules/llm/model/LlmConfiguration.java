@@ -567,6 +567,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private OnError onError;
 
         /**
+         * Per-model circuit breaker for systemic failures (R8). Absent or
+         * {@code enabled: false} (the default) means no breaker: behaviour is exactly
+         * what it was. See {@link CircuitBreakerConfig}.
+         */
+        private CircuitBreakerConfig circuitBreaker;
+
+        /**
          * Overall wall-clock backstop, in seconds, for a streaming chat completion.
          * Only applies when streaming is active.
          * <p>
@@ -1077,6 +1084,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.onError = onError;
         }
 
+        public CircuitBreakerConfig getCircuitBreaker() {
+            return circuitBreaker;
+        }
+
+        public void setCircuitBreaker(CircuitBreakerConfig circuitBreaker) {
+            this.circuitBreaker = circuitBreaker;
+        }
+
         public Integer getStreamingTimeoutSeconds() {
             return streamingTimeoutSeconds;
         }
@@ -1476,6 +1491,91 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         @JsonIgnore
         public boolean isFallback() {
             return ACTION_FALLBACK.equalsIgnoreCase(action);
+        }
+    }
+
+    /**
+     * Circuit breaker for a model that keeps failing the same <em>permanent</em>
+     * way (R8). The breaker is keyed by (agent, agent version, provider, model),
+     * lives in memory on each node and is shared by every conversation of that
+     * agent version.
+     * <p>
+     * It trips when {@code threshold} of the last {@code window} counted turns
+     * failed with the same class — {@code INVALID_OUTPUT} (a reply that is still
+     * not valid JSON, or still breaks the response shape, after its re-asks),
+     * {@code BAD_REQUEST} or {@code MODEL_NOT_FOUND} — or at once on {@code AUTH} /
+     * {@code QUOTA_EXHAUSTED}. Transient, timeout and rate-limit failures are never
+     * counted: they are the retry layer's job. While open, the model is skipped for
+     * {@code coolDownMs}: a cascade goes straight to its next step, a task without
+     * one takes its {@code onError} path. After the cool-down one probe turn is let
+     * through; success closes the breaker, failure re-opens it.
+     * <p>
+     * Disabled by default so a stored configuration behaves as it always did.
+     *
+     * @since 6.6.0
+     */
+    public static class CircuitBreakerConfig {
+        public static final int DEFAULT_WINDOW = 10;
+        public static final int DEFAULT_THRESHOLD = 8;
+        public static final long DEFAULT_COOL_DOWN_MS = 60_000L;
+        /** Upper bound of {@code window}: the breaker keeps this many outcomes. */
+        public static final int MAX_WINDOW = 1_000;
+        /** Upper bound of {@code coolDownMs}: one hour. */
+        public static final long MAX_COOL_DOWN_MS = 3_600_000L;
+
+        private boolean enabled = false;
+        private int window = DEFAULT_WINDOW;
+        private int threshold = DEFAULT_THRESHOLD;
+        private long coolDownMs = DEFAULT_COOL_DOWN_MS;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getWindow() {
+            return window;
+        }
+
+        public void setWindow(int window) {
+            this.window = window;
+        }
+
+        public int getThreshold() {
+            return threshold;
+        }
+
+        public void setThreshold(int threshold) {
+            this.threshold = threshold;
+        }
+
+        public long getCoolDownMs() {
+            return coolDownMs;
+        }
+
+        public void setCoolDownMs(long coolDownMs) {
+            this.coolDownMs = coolDownMs;
+        }
+
+        /** The window, clamped to 1..{@link #MAX_WINDOW}. */
+        @JsonIgnore
+        public int effectiveWindow() {
+            return Math.max(1, Math.min(MAX_WINDOW, window));
+        }
+
+        /** The threshold, clamped to 1..{@link #effectiveWindow()}. */
+        @JsonIgnore
+        public int effectiveThreshold() {
+            return Math.max(1, Math.min(effectiveWindow(), threshold));
+        }
+
+        /** The cool-down, clamped to 0..{@link #MAX_COOL_DOWN_MS}. */
+        @JsonIgnore
+        public long effectiveCoolDownMs() {
+            return Math.max(0L, Math.min(MAX_COOL_DOWN_MS, coolDownMs));
         }
     }
 
