@@ -52,6 +52,11 @@ abstract class AbstractBackupService {
     static final Pattern RAG_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.rag/ragstore/rags/.*?\"");
 
     /**
+     * How a 5.x workflow references an LLM document - the marker of a 5.x archive.
+     */
+    static final String LEGACY_LLM_AUTHORITY = "eddi://ai.labs.langchain/langchainstore/langchains/";
+
+    /**
      * Legacy → v6 URI authority + store path rewrites for import normalization.
      * <p>
      * This table is the <em>only</em> v5 compatibility mechanism. A parallel set of

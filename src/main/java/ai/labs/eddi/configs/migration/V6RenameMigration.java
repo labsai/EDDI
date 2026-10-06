@@ -129,6 +129,7 @@ public class V6RenameMigration {
     private static final String FIELD_STEP_TYPE = "type";
 
     private static final String COLLECTION_WORKFLOWS = "workflows";
+    private static final String COLLECTION_LLMS = "llms";
 
     /** Store path rewrites (old → new) — applied inside URI strings. */
     private static final String[][] STORE_PATH_REWRITES = {{"regulardictionarystore/regulardictionaries", "dictionarystore/dictionaries"},
@@ -572,10 +573,16 @@ public class V6RenameMigration {
 
         boolean isWorkflowCollection = collectionName.equals(COLLECTION_WORKFLOWS)
                 || collectionName.equals(COLLECTION_WORKFLOWS + ".history");
+        // Every document in the LLM collection at this point was written by 5.x (this
+        // migration runs once, before anything v6 can have stored there), so the 5.x
+        // behaviour of an LLM task can be carried over: JSON mode, and tools off.
+        boolean isLlmCollection = collectionName.equals(COLLECTION_LLMS) || collectionName.equals(COLLECTION_LLMS + ".history");
+        var llmMigration = LegacyDocumentMigrations.llm();
         int migrated = 0;
         int failed = 0;
         for (Document doc : collection.find()) {
             boolean stepTypesRewritten = isWorkflowCollection && rewriteStepTypes(doc);
+            stepTypesRewritten |= isLlmCollection && llmMigration.migrate(doc) != null;
             Document rewritten = rewriteUrisInDocument(doc);
             if (rewritten != null || stepTypesRewritten) {
                 if (saveDocument(collection, doc, collectionName.endsWith(".history"))) {

@@ -142,6 +142,78 @@ store replaces it with the non-unique 6.x one when it starts, and logs that at W
   intent you had.
 - **Templates.** Render a converted one with `POST /administration/preview/template`.
 
+### 6.1 Configuration that behaves differently in 6.x
+
+These 5.x configurations are valid in 6.x, the agent deploys READY, and the first real turn behaves
+differently or fails. Rehearse with real conversation turns against the migrated copy, not only with
+the deployment status. Where the old behaviour can be carried over safely the migration does it
+(and an imported 5.x ZIP gets the same treatment); where it cannot, the deployment check below
+tells you.
+
+| What | 5.x | 6.x | Handled by |
+| --- | --- | --- | --- |
+| `apiKey` as a template | `{properties.geminiToken}` was rendered | credentials are never templated; the text goes to the provider literally ("API key not valid") | **you**: put the key in the [vault](secrets-vault.md); the deployment check warns |
+| `responseFormat: "json"` | switched JSON mode on | ignored; only `convertToObject: "true"` switches JSON mode on | the migration |
+| No `enableHttpCallTools` / `enableMcpCallTools` | no tools | both default to `true`, so a plain chat task becomes a tool-calling one, and a provider that cannot combine tools with JSON mode (Gemini) drops JSON mode | the migration |
+| Templated host in an API call's `targetServerUrl` | worked | worked in 6.x too, but a templated host was percent-encoded (`api%2Eexample%2Ecom`) until 6.6 | fixed in the engine |
+| Nested ternary in a Thymeleaf template | worked | converted by the template migration, or reported and left unchanged | the template migration |
+
+**JSON mode.** For a migrated LLM task that had `responseFormat: "json"` and no `convertToObject`:
+
+```json
+// 5.x, and before the migration
+{"parameters": {"responseFormat": "json", "systemMessage": "..."}}
+
+// after the migration (responseFormat stays where it was)
+{"parameters": {"responseFormat": "json", "convertToObject": "true", "systemMessage": "..."},
+ "enableHttpCallTools": false, "enableMcpCallTools": false}
+```
+
+**Tools.** A migrated task that did not carry `enableHttpCallTools` / `enableMcpCallTools` gets both
+set to `false`, which is what 5.x did. Set one to `true` to hand the agent its API calls or MCP calls
+as tools. Only documents that come from 5.x are touched: tasks you write in 6.x keep the new
+defaults. The rewrite fires only while the field is missing, so running it again changes nothing.
+
+**API keys.**
+
+```json
+// 5.x: a property carried the key
+{"parameters": {"apiKey": "{properties.geminiToken}"}}
+
+// 6.x: the key lives in the vault
+{"parameters": {"apiKey": "${vault:gemini-api-key}"}}
+```
+
+`${vault:…}`, `${vars:…}` and `${connection:…}` are resolved for credentials; anything else in
+braces is not.
+
+**Templated host.** `https://{properties.apiHost}` now renders with the host's dots intact. A
+substituted value keeps only letters, digits, `.`, `-`, `_` and `:`; any other character
+(`/`, `@`, `?`, `#`, spaces) is percent-encoded, so a value cannot add a path, credentials or a query
+to the host. The resolved URL still goes through the SSRF checks: with
+`eddi.security.ssrf-protection.enabled=true` private and loopback hosts are refused, and the cloud
+metadata address is refused always. Do not template a host from text a user typed: whoever controls
+the value chooses where the call, and its headers, go. Take it from a global
+variable (`{vars.name}`) or from a property only your own configuration sets.
+
+**Deployment check.** Each time an agent is deployed, EDDI inspects its configuration and logs one
+`WARN` line per finding (`Agent <id> v<n> compatibility check: [CODE] <where>: <what to do>`). The
+same lines are returned as `warnings` for that agent by
+`GET /administration/production/deploymentstatus`. They never change the deployment status and never
+block a deployment. What it reports:
+
+| Code | Meaning |
+| --- | --- |
+| `LLM_API_KEY_TEMPLATE` | an LLM task, cascade step or judge model has a template in `apiKey` |
+| `LLM_RESPONSE_FORMAT_WITHOUT_CONVERT` | `responseFormat` is `json` but `convertToObject` is not `true` |
+| `LLM_JSON_MODE_WITH_TOOLS` | `convertToObject` is `true`, tools are on, and the provider cannot combine them (`jsonResponseFormat: "on"` silences it) |
+| `TEMPLATE_DOES_NOT_PARSE` | a string in an LLM, API-call, property-setter or output config does not parse as a Qute template, so every render fails |
+| `THYMELEAF_NOT_CONVERTED` | a string still holds 5.x `[[${…}]]` syntax, which 6.x prints literally |
+
+It does not report a templated API-call host or a `fromObjectPath` naming the task's
+`responseObjectName`: the engine handles both now. A preflight that lists these problems for a 5.x
+database *before* the migration is not available yet.
+
 ## 7. What is not migrated automatically
 
 - **Plaintext credentials in agent configs** (API keys in `httpcalls`, `langchain` parameters)

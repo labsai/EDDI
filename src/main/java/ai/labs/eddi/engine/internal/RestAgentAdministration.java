@@ -632,8 +632,10 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 var agentId = latestAgent.getAgentId();
                 var agentVersion = latestAgent.getAgentVersion();
                 var documentDescriptor = documentDescriptorStore.readDescriptor(agentId, agentVersion);
-                agentDeploymentStatuses
-                        .add(new AgentDeploymentStatus(environment, agentId, agentVersion, latestAgent.getDeploymentStatus(), documentDescriptor));
+                var deploymentStatus = new AgentDeploymentStatus(environment, agentId, agentVersion, latestAgent.getDeploymentStatus(),
+                        documentDescriptor);
+                deploymentStatus.setWarnings(latestAgent.getDeploymentWarnings());
+                agentDeploymentStatuses.add(deploymentStatus);
             }
 
             agentDeploymentStatuses.sort(Comparator.comparing(o -> o.getDescriptor().getLastModifiedOn()));

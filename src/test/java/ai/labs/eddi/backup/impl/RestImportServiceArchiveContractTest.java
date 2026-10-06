@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
@@ -51,6 +52,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -86,6 +88,7 @@ class RestImportServiceArchiveContractTest {
     private IRestScheduleStore restScheduleStore;
     private SpaceContext spaceContext;
     private RestImportService importService;
+    private IMigrationManager migrationManager;
 
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private int createdSchedules;
@@ -112,9 +115,13 @@ class RestImportServiceArchiveContractTest {
         var templateSyntaxMigrator = mock(TemplateSyntaxMigrator.class);
         when(templateSyntaxMigrator.migrate(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
+        // A mock answers null for the interface's default methods; the LLM transform is
+        // the real one, because what an archive carries into the store is the point.
+        migrationManager = mock(IMigrationManager.class);
+        when(migrationManager.migrateLlm()).thenCallRealMethod();
         importService = new RestImportService(
                 zipArchive, jsonSerialization,
-                mock(IMigrationManager.class), documentDescriptorStore,
+                migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, mock(StructuralMatcher.class),
                 mock(UpgradeExecutor.class), scheduleStore, mock(BackupMetrics.class), mock(ResourceAccessGuard.class),
                 spaceContext, mock(RagSourceIngestionService.class),
@@ -201,6 +208,84 @@ class RestImportServiceArchiveContractTest {
             verify(workflowStore).create(storedWorkflow.capture());
             assertFalse(storedWorkflow.getValue().getWorkflowSteps().isEmpty(),
                     "a v5 workflow must not be imported as an empty pipeline");
+        }
+
+        /**
+         * Writes a workflow with one LLM step whose reference is spelled the way the
+         * given authority spells it, and returns the LLM document the importer stored.
+         */
+        private LlmConfiguration importLlm(String llmAuthority, String llmStoreSegment, String stepType, String llmJson) throws Exception {
+            String workflowId = "5af59eca9bcb0f31b4b3b938";
+            String llmId = "5af59e929bcb0f31b4b3b936";
+
+            stubUnzip(dir -> {
+                Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(),
+                        "{\"workflows\":[\"eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=1\"]}");
+                File versionDir = new File(dir, workflowId + "/1");
+                assertTrue(versionDir.mkdirs());
+                Files.writeString(new File(versionDir, workflowId + ".workflow.json").toPath(),
+                        "{\"workflowSteps\":[{\"type\":\"" + stepType + "\",\"extensions\":{},"
+                                + "\"config\":{\"uri\":\"" + llmAuthority + "/" + llmStoreSegment + "/" + llmId + "?version=1\"}}]}");
+                Files.writeString(new File(versionDir, llmId + ".langchain.json").toPath(), llmJson);
+            });
+
+            when(jsonSerialization.deserialize(anyString(), eq(WorkflowConfiguration.class)))
+                    .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), WorkflowConfiguration.class));
+            when(jsonSerialization.deserialize(anyString(), eq(Map.class)))
+                    .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), Map.class));
+            when(jsonSerialization.serialize(any())).thenAnswer(inv -> mapper.writeValueAsString(inv.getArgument(0)));
+            when(jsonSerialization.deserialize(anyString(), eq(LlmConfiguration.class)))
+                    .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), LlmConfiguration.class));
+
+            var agentStore = stubAgentCreation();
+            var workflowStore = mock(IWorkflowStore.class);
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            var llmStore = mock(ILlmStore.class);
+            when(llmStore.create(any())).thenReturn(resourceId("1111111122223333444455dd", 1));
+
+            var storedLlm = ArgumentCaptor.forClass(LlmConfiguration.class);
+            try (var cdi = stubCdi(IAgentStore.class, agentStore, IWorkflowStore.class, workflowStore, ILlmStore.class, llmStore)) {
+                Response response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                assertEquals(201, response.getStatus());
+            }
+            verify(llmStore).create(storedLlm.capture());
+            return storedLlm.getValue();
+        }
+
+        private static final String V5_LLM_DOCUMENT = "{\"tasks\":[{\"id\":\"chat\",\"type\":\"gemini\",\"actions\":[\"send\"],"
+                + "\"parameters\":{\"responseFormat\":\"json\",\"systemMessage\":\"hi\"}}]}";
+
+        @Test
+        @DisplayName("a 5.x archive's LLM task keeps its 5.x behaviour: JSON mode on, tool auto-discovery off")
+        void v5LlmDocumentIsCarriedToV6Defaults() throws Exception {
+            LlmConfiguration stored = importLlm("eddi://ai.labs.langchain", "langchainstore/langchains", "eddi://ai.labs.langchain",
+                    V5_LLM_DOCUMENT);
+
+            var task = stored.tasks().get(0);
+            assertEquals("true", task.getParameters().get("convertToObject"));
+            assertEquals("json", task.getParameters().get("responseFormat"));
+            assertFalse(task.getEnableHttpCallTools());
+            assertFalse(task.getEnableMcpCallTools());
+        }
+
+        @Test
+        @DisplayName("in a workflow mixing 5.x and v6 LLM references only the 5.x one is marked for migration")
+        void onlyLegacyReferencesAreMarked() {
+            String workflow = "{\"workflowSteps\":[{\"config\":{\"uri\":\"eddi://ai.labs.langchain/langchainstore/langchains/aaa111?version=1\"}},"
+                    + "{\"config\":{\"uri\":\"eddi://ai.labs.llm/llmstore/llms/bbb222?version=1\"}}]}";
+
+            assertEquals(Set.of("eddi://ai.labs.llm/llmstore/llms/aaa111?version=1"), RestImportService.legacyLlmUris(workflow));
+        }
+
+        @Test
+        @DisplayName("a v6 archive's LLM task is stored as written: tools stay on by default")
+        void v6LlmDocumentIsNotMigrated() throws Exception {
+            LlmConfiguration stored = importLlm("eddi://ai.labs.llm", "llmstore/llms", "eddi://ai.labs.llm", V5_LLM_DOCUMENT);
+
+            var task = stored.tasks().get(0);
+            assertNull(task.getParameters().get("convertToObject"));
+            assertTrue(task.getEnableHttpCallTools());
+            assertTrue(task.getEnableMcpCallTools());
         }
 
         @Test
