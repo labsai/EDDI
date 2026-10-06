@@ -101,8 +101,11 @@ final class TurnResilienceWarnings {
                 retry != null && retry.getMaxBackoffDelayMs() != null ? retry.getMaxBackoffDelayMs() : 10_000L);
         long backoff = 0;
         long current = Math.min(delay, maxDelay);
+        // A provider-requested wait replaces the backoff when it is larger, up to
+        // maxRetryAfterMs, so the worst case per retry is the larger of the two.
+        long providerWait = RetryConfiguration.honorRetryAfter(retry) ? RetryConfiguration.effectiveMaxRetryAfterMs(retry) : 0L;
         for (int i = 1; i < attempts; i++) {
-            backoff += current;
+            backoff += Math.max(current, providerWait);
             current = Math.min((long) (current * multiplier), maxDelay);
         }
         return attempts * timeout + Math.min(backoff, MAX_TOTAL_BACKOFF_MS);
