@@ -471,6 +471,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 eddi_attachment_forwarded_total             # Attachments converted to LLM content
 eddi_attachment_reinlined_total             # Extracted text stitched back into history
 eddi_attachment_errors_total                # Drops, cap-skips and capability gates
+eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: scope (conversation, user)
 ```
 
 ### HITL Metrics
@@ -573,6 +574,8 @@ eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; t
 eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
 eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
+eddi_openai_conversations_rolled_over_total # /v1 conversations ended at max-conversation-steps
+eddi_openai_chat_keys_total                 # Stateful /v1 requests by chat-key source; tag: source
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 ```

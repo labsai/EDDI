@@ -142,10 +142,12 @@ Content-Type: multipart/form-data
 **Response (201):**
 ```json
 {
-  "storageRef": "gridfs://68abc123def456",
+  "storageRef": "3f2b9c1e-6d4a-4f0e-9b7a-2c8d5e1f0a93",
   "fileName": "report.pdf",
   "mimeType": "application/pdf",
-  "sizeBytes": 524288
+  "sizeBytes": 524288,
+  "conversationId": "…",
+  "forwardableInline": true
 }
 ```
 
@@ -155,17 +157,34 @@ The returned `storageRef` can then be used in subsequent conversation turns by s
 {
   "attachment_0": {
     "type": "object",
-    "value": { "storageRef": "gridfs://68abc123def456", "fileName": "report.pdf" }
+    "value": { "storageRef": "3f2b9c1e-6d4a-4f0e-9b7a-2c8d5e1f0a93", "fileName": "report.pdf" }
   }
 }
 ```
 
-The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
+The `storageRef` is a random UUID — unguessable, and only readable from the owning conversation or one it was explicitly granted to. The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
+
+#### Content check
+
+The declared type is checked against the file's content. Images and PDFs must carry their signature (a "PNG" without one is refused). Text declared as a text type — `text/*`, JSON, XML, YAML, CSV — is accepted when it reads as text (no NUL bytes, almost no control characters), whatever short signature it happens to start with: a CSV whose first column is `BMI` starts with the bitmap magic `BM`, and Markdown can quote `%PDF-1.7`, and neither is an image or a PDF. A real binary declared as text is still refused.
+
+#### Quotas
+
+| Quota | Default |
+|---|---|
+| `eddi.attachments.max-per-conversation` | 50 files |
+| `eddi.attachments.max-total-bytes-per-conversation` | 100 MB |
+| `eddi.attachments.max-per-user` | off |
+| `eddi.attachments.max-total-bytes-per-user` | off |
+
+The per-user quotas count every blob owned by the conversation's **owner**, across all of their conversations — an admin uploading into a user's conversation fills that user's quota. Blobs stored before the owner was recorded on them (earlier releases) do not count towards it.
+
+Quotas are enforced atomically: the usage is counted and the blob stored under one lock per scope — a transaction-scoped advisory lock on PostgreSQL (`hashtextextended`, so PostgreSQL 11 or newer), a lease document in `attachments.quota_locks` on MongoDB — so concurrent uploads cannot each see room and together overshoot the limit. A refusal is a `400` with `"code": "ATTACHMENT_REJECTED"` and `"quota": "conversation"` or `"user"`, counted on `eddi_attachments_quota_rejected_total{scope}`.
 
 | Response Code | Meaning |
 |---|---|
 | `201` | File stored successfully |
-| `400` | No file provided, file exceeds `eddi.attachments.max-size-bytes`, or the store rejected the file |
+| `400` | No file provided, file exceeds `eddi.attachments.max-size-bytes`, the content does not match the declared type, or a quota is full (`quota` names which) |
 | `413` / `411` | The request body passed the HTTP body limit, or arrived without a `Content-Length`. The limit is `eddi.http.limits.default-max-body-size`, raised automatically to fit an attachment at `eddi.attachments.max-size-bytes` base64-encoded — so raising the attachment limit raises it too, up to `quarkus.http.limits.max-body-size` (60 MB), which it cannot exceed. Above about 44 MB of attachment, raise that ceiling as well; a WARN at startup names the value needed. See [configuration-reference.md](configuration-reference.md#security--authentication) |
 | `500` | Storage or I/O error |
 

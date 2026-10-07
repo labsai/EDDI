@@ -37,9 +37,12 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import jakarta.annotation.security.RolesAllowed;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -647,6 +650,48 @@ class RestConversationStoreTest {
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-old");
             verify(documentDescriptorStore).deleteAllDescriptor("conv-old");
             verify(conversationDescriptorStore).deleteAllDescriptor("conv-old");
+        }
+
+        @SuppressWarnings("unchecked")
+        private IUserConversationStore givenMappings(UserConversation... mappings) throws Exception {
+            IUserConversationStore store = mock(IUserConversationStore.class);
+            Instance<IUserConversationStore> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(store);
+            restConversationStore.userConversationStoreInstance = instance;
+            when(store.getAllForUser("owner-1")).thenReturn(List.of(mappings));
+            var conversationDescriptor = new ConversationDescriptor();
+            conversationDescriptor.setUserId("owner-1");
+            when(conversationDescriptorStore.readDescriptor("conv-old", 0)).thenReturn(conversationDescriptor);
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of("conv-old"));
+            var descriptor = new DocumentDescriptor();
+            descriptor.setLastModifiedOn(new Date(System.currentTimeMillis() - 100L * 24 * 60 * 60 * 1000));
+            when(documentDescriptorStore.readDescriptor("conv-old", 0)).thenReturn(descriptor);
+            return store;
+        }
+
+        @Test
+        @DisplayName("deletes the channel mappings of a swept conversation, and only those")
+        void deletesTheSweptConversationsMappings() throws Exception {
+            IUserConversationStore mappings = givenMappings(
+                    new UserConversation("channel:openai:a:h:1", "owner-1", Environment.production, "a", "conv-old"),
+                    new UserConversation("channel:openai:a:h:2", "owner-1", Environment.production, "a", "conv-live"));
+
+            assertEquals(1, restConversationStore.permanentlyDeleteEndedConversationLogs(30));
+
+            verify(mappings).deleteUserConversationIfMatches("channel:openai:a:h:1", "owner-1", "conv-old");
+            verify(mappings, never()).deleteUserConversationIfMatches(eq("channel:openai:a:h:2"), any(), any());
+        }
+
+        @Test
+        @DisplayName("a failing mapping store does not stop the sweep")
+        void aFailingMappingStoreDoesNotStopTheSweep() throws Exception {
+            IUserConversationStore mappings = givenMappings();
+            when(mappings.getAllForUser("owner-1")).thenThrow(new ResourceStoreException("down"));
+
+            assertEquals(1, restConversationStore.permanentlyDeleteEndedConversationLogs(30));
+
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-old");
         }
 
         @Test

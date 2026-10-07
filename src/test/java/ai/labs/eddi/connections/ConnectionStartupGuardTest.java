@@ -728,7 +728,7 @@ class ConnectionStartupGuardTest {
 
     private static OpenAiCompatConfig openAiCompat(boolean enabled, String httpPolicy, boolean trustUserHeaders) {
         return new OpenAiCompatConfig(enabled, Optional.of("sk-eddi-test"), httpPolicy, trustUserHeaders, false, "openai-anonymous",
-                Environment.production, 120, 64, 30, true, false);
+                Environment.production, 120, 64, 30, true, false, OpenAiCompatConfig.CHAT_KEY_FALLBACK_HISTORY, 0);
     }
 
     private static OpenAiCompatConfig openAiCompatOff() {

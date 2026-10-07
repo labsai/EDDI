@@ -134,7 +134,9 @@ public class RestOpenAiAdapter {
     @Operation(summary = "Create a chat completion",
                description = "Sends the last user message to the agent behind the requested model. "
                        + "Set stream=true for an SSE token stream. Prior messages in the array are "
-                       + "ignored: EDDI keeps its own conversation memory.")
+                       + "not replayed: EDDI keeps its own conversation memory. The conversation is chosen by "
+                       + "X-OpenWebUI-Chat-Id, X-EDDI-Chat-Id, metadata.chat_id or user, else by a hash of "
+                       + "the opening messages.")
     public Response chatCompletions(ChatCompletionRequest request,
                                     @Context HttpHeaders httpHeaders,
                                     @Context ContainerRequestContext requestContext) {
@@ -158,7 +160,7 @@ public class RestOpenAiAdapter {
 
             var outcome = bridge.say(turn, model, userId, headers, request);
             var response = ChatCompletionResponse.of(completionId, request.model(), created,
-                    new Choice(0, ChatMessage.assistant(outcome.text(), objectMapper), Choice.FINISH_STOP),
+                    new Choice(0, ChatMessage.assistant(outcome.text(), objectMapper), outcome.finishReason()),
                     outcome.usage());
             return Response.ok(response)
                     .type(MediaType.APPLICATION_JSON)
@@ -182,17 +184,17 @@ public class RestOpenAiAdapter {
      * response completed — which looks exactly like a hung agent.
      * <p>
      * The body takes its own permit, acquired and released inside one try/finally
-     * so neither can be orphaned. A stream that cannot get one degrades to a busy
-     * notice in-band rather than an HTTP error, because by the time the body runs
-     * the 200 status has already been committed.
+     * so neither can be orphaned. A stream that cannot get one ends with an in-band
+     * rate-limit error event rather than an HTTP error, because by the time the
+     * body runs the 200 status has already been committed.
      */
     private Response streamingResponse(OpenAiConversationBridge.PreparedTurn turn,
                                        String completionId, String model, long created, boolean includeUsage) {
         StreamingOutput body = out -> {
             var writer = new OpenAiSseWriter(out, objectMapper, completionId, model, created, includeUsage);
             if (!inFlight.tryAcquire()) {
-                writer.content("⚠️ Too many concurrent requests. Please retry shortly.");
-                writer.finish(Choice.FINISH_STOP);
+                writer.error(OpenAiApiException.busy("Too many concurrent requests. Please retry shortly.")
+                        .toErrorResponse());
                 return;
             }
             try {
@@ -226,7 +228,8 @@ public class RestOpenAiAdapter {
     /** The subset of request headers the bridge inspects. */
     private Map<String, String> flatten(HttpHeaders httpHeaders) {
         Map<String, String> headers = new HashMap<>();
-        for (String name : List.of(OpenAiAuthFilter.HEADER_CHAT_ID, OpenAiAuthFilter.HEADER_USER_ID)) {
+        for (String name : List.of(OpenAiAuthFilter.HEADER_CHAT_ID, OpenAiAuthFilter.HEADER_USER_ID,
+                OpenAiConversationBridge.HEADER_EDDI_CHAT_ID)) {
             String value = httpHeaders.getHeaderString(name);
             if (value != null) {
                 headers.put(name, value);
