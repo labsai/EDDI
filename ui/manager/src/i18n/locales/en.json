@@ -720,6 +720,7 @@
     "totalCost": "Total Cost",
     "cacheHitRate": "Cache Hit Rate",
     "endReasonRetired": "Ended: the agent version was retired",
+    "waitingForPause": "Waiting for the pause to be saved…",
     "stepAgentVersion": "Answered by agent version {{version}}"
   },
   "chat": {

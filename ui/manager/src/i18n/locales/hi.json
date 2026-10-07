@@ -693,6 +693,7 @@
     "totalCost": "कुल लागत",
     "cacheHitRate": "कैश हिट दर",
     "endReasonRetired": "समाप्त: एजेंट संस्करण को सेवानिवृत्त कर दिया गया",
+    "waitingForPause": "विराम सहेजे जाने की प्रतीक्षा है…",
     "stepAgentVersion": "एजेंट संस्करण {{version}} द्वारा उत्तर दिया गया"
   },
   "chat": {

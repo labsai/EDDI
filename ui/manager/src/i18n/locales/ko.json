@@ -693,6 +693,7 @@
     "totalCost": "총 비용",
     "cacheHitRate": "캐시 적중률",
     "endReasonRetired": "종료됨: 에이전트 버전이 폐기되었습니다",
+    "waitingForPause": "일시 중지가 저장되기를 기다리는 중…",
     "stepAgentVersion": "에이전트 버전 {{version}}이(가) 응답함"
   },
   "chat": {

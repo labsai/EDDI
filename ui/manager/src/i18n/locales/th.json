@@ -693,6 +693,7 @@
     "totalCost": "ต้นทุนรวม",
     "cacheHitRate": "อัตราการใช้แคช",
     "endReasonRetired": "สิ้นสุดแล้ว: เวอร์ชันของเอเจนต์ถูกยกเลิกการใช้งาน",
+    "waitingForPause": "กำลังรอการบันทึกการหยุดชั่วคราว…",
     "stepAgentVersion": "ตอบโดยเอเจนต์เวอร์ชัน {{version}}"
   },
   "chat": {

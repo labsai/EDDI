@@ -22,7 +22,7 @@ import { getErrorMessage } from "@/lib/api-client";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { ApprovalCard } from "@/components/hitl/approval-card";
 import { RequestPreview } from "@/components/operator/request-preview";
 import {
   usePendingApprovals,
@@ -125,7 +125,11 @@ function ApprovalQueueRow({
   // that size has no place in an endpoint that lists every pending approval at
   // once. `enabled: expanded` means collapsing and re-expanding re-fetches
   // rather than trusting a stale cache, matching every other pause surface.
-  const approvalStatus = useApprovalStatus(item.conversationId, expanded);
+  // The inbox row knows when the pause started, so the same verify-the-pause
+  // rule applies as on every other approval surface (see useApprovalStatus).
+  const approvalStatus = useApprovalStatus(item.conversationId, expanded, item.pausedAt, {
+    verifyPause: true,
+  });
 
   const isSubmitting = busy;
   /** This row's own group decision, so one busy row does not disable the queue. */
@@ -366,8 +370,11 @@ function ApprovalQueueRow({
                 `min-width: 100%` then fills the cell the OTHER rows sized.
                 The inner panels keep scrolling within themselves as before. */}
             <div className="w-0 min-w-full px-4 py-4">
-              <ApprovalBanner
+              <ApprovalCard
                 surface="regular"
+                cardKey={`${item.conversationId}:${item.pausedAt}`}
+                isResolving={busy}
+                expectToolCall
                 pauseReason={item.pauseReason ?? undefined}
                 pausedAt={item.pausedAt}
                 timeoutPolicy={item.timeoutPolicy ?? undefined}
@@ -379,9 +386,9 @@ function ApprovalQueueRow({
                 // the surface where an approver has the LEAST context, while
                 // the operator chat blocked it for the same pause. All three
                 // approval surfaces now derive this identically.
-                pauseDetailsPending={approvalStatus.isLoading}
-                pauseDetailsError={approvalStatus.isError}
-                onRetryPauseDetails={() => void approvalStatus.refetch()}
+                pauseDetailsPending={approvalStatus.detailsPending}
+                pauseDetailsError={approvalStatus.detailsError}
+                onRetryPauseDetails={() => void approvalStatus.retry()}
                 isSubmitting={isSubmitting}
                 requireExplicitPerCall
                 blockedCalls={blockedCalls}

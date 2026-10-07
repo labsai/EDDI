@@ -353,3 +353,33 @@ describe("ApprovalsPage — confirmation gate on irreversible queue actions", ()
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledTimes(1));
   });
 });
+
+describe("ApprovalsPage — an expanded row verifies the pause it shows", () => {
+  it("does not offer Approve when approval-status describes a different pause than the row", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/agents/pending-approvals", () => HttpResponse.json([toolPause])),
+      http.get("*/groups/pending-approvals", () => HttpResponse.json([])),
+      http.get("*/agents/conv-tool-1/approval-status", () =>
+        HttpResponse.json({
+          conversationId: "conv-tool-1",
+          state: "AWAITING_HUMAN",
+          pausedAt: "2026-07-01T09:00:00.000Z",
+          pauseId: String(Date.parse("2026-07-01T09:00:00.000Z")),
+          pauseDetails: {
+            type: "TOOL_CALL",
+            calls: [{ callId: "old-call", toolName: "sendEmail", source: "builtin", arguments: "{}", argsTruncated: false, requestPinned: false }],
+            executedUngatedCalls: [],
+            outcomeUnknown: [],
+          },
+        }),
+      ),
+    );
+    renderWithProviders(<ApprovalsPage />);
+
+    await user.click(await screen.findByTestId("review-conv-tool-1"));
+    expect(await screen.findByTestId("approval-details-pending")).toBeInTheDocument();
+    expect(screen.queryByTestId("tool-call-old-call")).not.toBeInTheDocument();
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+  });
+});

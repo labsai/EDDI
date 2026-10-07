@@ -725,6 +725,7 @@
     "totalCost": "التكلفة الإجمالية",
     "cacheHitRate": "معدل إصابة التخزين المؤقت",
     "endReasonRetired": "انتهت: تم سحب إصدار الوكيل",
+    "waitingForPause": "في انتظار حفظ الإيقاف المؤقت…",
     "stepAgentVersion": "أجاب عنه إصدار الوكيل {{version}}"
   },
   "chat": {

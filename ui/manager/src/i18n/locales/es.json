@@ -701,6 +701,7 @@
     "totalCost": "Coste total",
     "cacheHitRate": "Tasa de acierto de caché",
     "endReasonRetired": "Finalizada: la versión del agente fue retirada",
+    "waitingForPause": "Esperando a que se guarde la pausa…",
     "stepAgentVersion": "Respondido por la versión {{version}} del agente"
   },
   "chat": {

@@ -693,6 +693,7 @@
     "totalCost": "Gesamtkosten",
     "cacheHitRate": "Cache-Trefferquote",
     "endReasonRetired": "Beendet: Die Agent-Version wurde außer Betrieb genommen",
+    "waitingForPause": "Warten, bis die Pause gespeichert ist…",
     "stepAgentVersion": "Beantwortet von Agent-Version {{version}}"
   },
   "chat": {

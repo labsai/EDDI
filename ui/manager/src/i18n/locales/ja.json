@@ -693,6 +693,7 @@
     "totalCost": "合計コスト",
     "cacheHitRate": "キャッシュヒット率",
     "endReasonRetired": "終了：エージェントのバージョンが廃止されました",
+    "waitingForPause": "一時停止の保存を待っています…",
     "stepAgentVersion": "エージェントのバージョン {{version}} が応答"
   },
   "chat": {

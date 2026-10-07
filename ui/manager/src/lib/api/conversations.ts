@@ -117,6 +117,8 @@ export interface SimpleConversationMemorySnapshot {
   hitlPausedWorkflowId?: string;
   hitlPausedAbsoluteTaskIndex?: number;
   hitlPausedAt?: string;
+  /** "TOOL_CALL" or "RULE" (absent/null on older paths) — what kind of pause this is. */
+  hitlPauseType?: string | null;
   // NOTE deliberately ABSENT: hitlPauseReason. The simple snapshot never
   // carries it — SimpleConversationMemorySnapshot has only hitlPausedAt and
   // hitlPauseType, and the converter sets no reason. The field used to be

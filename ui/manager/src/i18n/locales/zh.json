@@ -693,6 +693,7 @@
     "totalCost": "总成本",
     "cacheHitRate": "缓存命中率",
     "endReasonRetired": "已结束：该智能体版本已被停用",
+    "waitingForPause": "正在等待暂停状态保存…",
     "stepAgentVersion": "由智能体版本 {{version}} 回答"
   },
   "chat": {
