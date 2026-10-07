@@ -25,9 +25,9 @@ data:
         # on") walks through both.
         #
         # a) OAuth2 client credentials — Prometheus fetches and refreshes the
-        #    token itself. The client needs a service account, the
-        #    eddi-backend audience mapper and the openid scope (EDDI calls
-        #    userinfo on every request):
+        #    token itself. The client needs a service account carrying the
+        #    eddi-metrics realm role, the eddi-backend audience mapper and the
+        #    openid scope (EDDI calls userinfo on every request):
         # oauth2:
         #   client_id: eddi-metrics
         #   client_secret_file: /etc/prometheus/secrets/client-secret

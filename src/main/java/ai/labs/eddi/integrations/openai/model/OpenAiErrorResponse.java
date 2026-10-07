@@ -25,6 +25,8 @@ public record OpenAiErrorResponse(OpenAiError error) {
 
     // --- code values (adapter-specific, stable) ---
     public static final String CODE_INVALID_API_KEY = "invalid_api_key";
+    /** An authenticated caller whose token holds no EDDI role that may converse. */
+    public static final String CODE_INSUFFICIENT_PERMISSIONS = "insufficient_permissions";
     public static final String CODE_MODEL_NOT_FOUND = "model_not_found";
     public static final String CODE_AMBIGUOUS_MODEL = "ambiguous_model";
     public static final String CODE_NO_USER_MESSAGE = "no_user_message";

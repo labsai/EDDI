@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces;
 
+import ai.labs.eddi.configs.descriptors.ConfigResourceTypes;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -68,17 +69,51 @@ public class ResourceSharingService {
     private final UserDirectory directory;
     private final WorkspaceNotifications notifications;
     private final Event<SharingChangedEvent> sharingChanged;
+    private final ConfigResourceTypes configTypes;
 
     @Inject
     public ResourceSharingService(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard,
             ConfigGraphResolver graphResolver, UserDirectory directory, WorkspaceNotifications notifications,
-            Event<SharingChangedEvent> sharingChanged) {
+            Event<SharingChangedEvent> sharingChanged, ConfigResourceTypes configTypes) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.accessGuard = accessGuard;
         this.graphResolver = graphResolver;
         this.directory = directory;
         this.notifications = notifications;
         this.sharingChanged = sharingChanged;
+        this.configTypes = configTypes;
+    }
+
+    /**
+     * Answers "not found" unless {@code resourceId} names a configuration resource.
+     * <p>
+     * Sharing is a property of configuration — agents, workflows, the resources
+     * beneath them. Conversation descriptors sit in the same collection, and this
+     * service used to take their ids as readily as any other: a share or a
+     * visibility change read one as a configuration descriptor and wrote it back
+     * without its owner, and an access request on one notified nobody of anything
+     * meaningful. Decided before any access check, so the refusal is the same for
+     * every caller. Also called by the access-request endpoint.
+     *
+     * @throws NotFoundException
+     *             when the id's descriptor is not a configuration descriptor
+     */
+    public void requireShareable(String resourceId) {
+        if (resourceId == null || resourceId.isBlank()) {
+            return;
+        }
+        VersionedDescriptor loaded;
+        try {
+            loaded = loadOrNull(resourceId);
+        } catch (ResourceNotFoundException e) {
+            return; // the operation answers its own 404
+        } catch (ResourceStoreException e) {
+            LOGGER.errorf(e, "Could not read the descriptor of resource %s", sanitize(resourceId));
+            throw new ServiceUnavailableException("Unable to read this resource right now");
+        }
+        if (loaded != null && !configTypes.isConfigDescriptor(loaded.descriptor())) {
+            throw new NotFoundException("No configuration resource with id " + resourceId);
+        }
     }
 
     /**
@@ -183,6 +218,7 @@ public class ResourceSharingService {
      * recipient to understand why they can see something and whom to ask about it.
      */
     public ShareInfo describe(String resourceId) {
+        requireShareable(resourceId);
         accessGuard.requireAccess(resourceId, AccessLevel.VIEW, RESOURCE_TYPE);
         DocumentDescriptor descriptor = loadOrThrow(resourceId);
         AccessLevel level = accessGuard.effectiveLevel(descriptor);
@@ -252,6 +288,7 @@ public class ResourceSharingService {
     public ShareResult share(String resourceId, String subject, AccessLevel level, boolean cascade, boolean dryRun) {
         // Re-sharing changes who can reach the resource, which is an owner's decision
         // — EDIT deliberately does not carry it. See AccessLevel.
+        requireShareable(resourceId);
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
 
         String grantedBy = accessGuard.currentPrincipal();
@@ -275,6 +312,7 @@ public class ResourceSharingService {
 
     /** As {@link #revoke(String, String, boolean)}; a dry run writes nothing. */
     public ShareResult revoke(String resourceId, String subject, boolean cascade, boolean dryRun) {
+        requireShareable(resourceId);
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
 
         List<ShareTarget> updated = new ArrayList<>();
@@ -302,6 +340,7 @@ public class ResourceSharingService {
      * writes nothing.
      */
     public ShareResult setVisibility(String resourceId, ResourceVisibility visibility, boolean cascade, boolean dryRun) {
+        requireShareable(resourceId);
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
 
         List<ShareTarget> updated = new ArrayList<>();
@@ -332,6 +371,7 @@ public class ResourceSharingService {
      *             target space
      */
     public ShareResult moveToSpace(String resourceId, String spaceId, boolean cascade, boolean dryRun) {
+        requireShareable(resourceId);
         accessGuard.requireAccess(resourceId, AccessLevel.OWN, RESOURCE_TYPE);
         if (spaceId == null || spaceId.isBlank()) {
             throw new IllegalArgumentException("A target space is required");
@@ -376,6 +416,7 @@ public class ResourceSharingService {
         if (!accessGuard.isAdmin()) {
             throw new ForbiddenException("Only an administrator may transfer ownership");
         }
+        requireShareable(resourceId);
         // Validated here rather than only at the REST edge, because this is a public
         // bean any in-process caller can reach. A blank owner combined with cascade
         // would make the agent and its entire config graph unowned — which under the
@@ -396,7 +437,7 @@ public class ResourceSharingService {
         for (String id : all) {
             try {
                 VersionedDescriptor loaded = loadOrNull(id);
-                if (loaded == null) {
+                if (loaded == null || !configTypes.isConfigDescriptor(loaded.descriptor())) {
                     skipped.add(new ShareTarget(id, null));
                     continue;
                 }
@@ -509,7 +550,10 @@ public class ResourceSharingService {
             skipped.add(new ShareTarget(id, null));
             return;
         }
-        if (loaded == null) {
+        if (loaded == null || !configTypes.isConfigDescriptor(loaded.descriptor())) {
+            // Only configuration is shared — see requireShareable. A cascade target is
+            // resolved from a configuration graph and so never anything else, but the
+            // check costs nothing and keeps a write of a foreign shape impossible here.
             skipped.add(new ShareTarget(id, null));
             return;
         }

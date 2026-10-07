@@ -310,11 +310,49 @@ class RestGroupConversationTest {
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
-                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "group conversation");
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(identity, "other-user", "group conversation");
 
             assertThrows(ForbiddenException.class,
                     () -> restGroupConversation.deleteGroupConversation("group-1", "gc-1"));
             verify(groupService, never()).deleteGroupConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("F6: a legacy record with no owner is not deletable by just any authenticated caller")
+        void deleteGroupConversation_legacyUnowned_refusedToNonAdmin() throws Exception {
+            var realValidator = new OwnershipValidator(true);
+            var caller = mock(SecurityIdentity.class);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn("mallory");
+            when(caller.getPrincipal()).thenReturn(principal);
+            when(caller.hasRole("eddi-admin")).thenReturn(false);
+            var rest = new RestGroupConversation(groupService, jsonSerialization, caller, realValidator, mock(HitlAccessGuard.class),
+                    resourceAccessGuard);
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setUserId(null);
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+
+            assertThrows(ForbiddenException.class, () -> rest.deleteGroupConversation("group-1", "gc-1"));
+            verify(groupService, never()).deleteGroupConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("F6: an administrator may still delete a legacy record with no owner")
+        void deleteGroupConversation_legacyUnowned_adminAllowed() throws Exception {
+            var realValidator = new OwnershipValidator(true);
+            var admin = mock(SecurityIdentity.class);
+            when(admin.hasRole("eddi-admin")).thenReturn(true);
+            var rest = new RestGroupConversation(groupService, jsonSerialization, admin, realValidator, mock(HitlAccessGuard.class),
+                    resourceAccessGuard);
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+
+            assertEquals(200, rest.deleteGroupConversation("group-1", "gc-1").getStatus());
+            verify(groupService).deleteGroupConversation("gc-1");
         }
 
         @Test

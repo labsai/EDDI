@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.configs.properties.rest;
 
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -37,23 +37,23 @@ class RestUserMemoryStoreTest {
     private SecurityIdentity identity;
     private OwnershipValidator ownershipValidator;
     private RestUserMemoryStore rest;
-    private ResourceAccessGuard resourceAccessGuard;
+    private GroupMemoryAccessGuard groupMemoryAccessGuard;
 
     @BeforeEach
     void setUp() {
         store = mock(IUserMemoryStore.class);
         identity = mock(SecurityIdentity.class);
         ownershipValidator = mock(OwnershipValidator.class);
-        resourceAccessGuard = mock(ResourceAccessGuard.class);
-        rest = new RestUserMemoryStore(store, identity, ownershipValidator, resourceAccessGuard);
+        groupMemoryAccessGuard = mock(GroupMemoryAccessGuard.class);
+        rest = new RestUserMemoryStore(store, identity, ownershipValidator, groupMemoryAccessGuard);
     }
 
     // === group scoping of a recall (H3) ===
 
     @Test
     void getVisibleMemories_namingAGroupTheCallerMayNotUse_isRefusedBeforeTheStoreIsRead() throws Exception {
-        doThrow(new ForbiddenException("no")).when(resourceAccessGuard)
-                .requireUseAccessToEach(List.of("other-team"), "group");
+        doThrow(new ForbiddenException("no")).when(groupMemoryAccessGuard)
+                .requireEntitledToEach(List.of("other-team"));
 
         assertThrows(ForbiddenException.class,
                 () -> rest.getVisibleMemories("user-1", "agent-1", List.of("other-team"), "most_recent", 50));
@@ -67,7 +67,7 @@ class RestUserMemoryStoreTest {
 
         rest.getVisibleMemories("user-1", "agent-1", List.of("g1", "g2"), "most_recent", 50);
 
-        verify(resourceAccessGuard).requireUseAccessToEach(List.of("g1", "g2"), "group");
+        verify(groupMemoryAccessGuard).requireEntitledToEach(List.of("g1", "g2"));
     }
 
     // === getAllMemories ===

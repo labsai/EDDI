@@ -5,7 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import io.quarkus.security.ForbiddenException;
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -27,7 +27,7 @@ class McpMemoryToolsTest {
     private McpMemoryTools tools;
     private IUserMemoryStore userMemoryStore;
     private IJsonSerialization jsonSerialization;
-    private ResourceAccessGuard resourceAccessGuard;
+    private GroupMemoryAccessGuard groupMemoryAccessGuard;
 
     @BeforeEach
     void setUp() {
@@ -35,9 +35,9 @@ class McpMemoryToolsTest {
         jsonSerialization = mock(IJsonSerialization.class);
         var identity = mock(SecurityIdentity.class);
         var ownershipValidator = mock(OwnershipValidator.class);
-        resourceAccessGuard = mock(ResourceAccessGuard.class);
+        groupMemoryAccessGuard = mock(GroupMemoryAccessGuard.class);
         // authEnabled=false so no role checks
-        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, resourceAccessGuard, false);
+        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, groupMemoryAccessGuard, false);
     }
 
     // ==================== listUserMemories ====================
@@ -82,8 +82,8 @@ class McpMemoryToolsTest {
 
     @Test
     void getVisibleMemories_namingAGroupTheCallerMayNotUse_isRefused() throws Exception {
-        doThrow(new ForbiddenException("no")).when(resourceAccessGuard)
-                .requireUseAccessToEach(List.of("g1", "other-team"), "group");
+        doThrow(new ForbiddenException("no")).when(groupMemoryAccessGuard)
+                .requireEntitledToEach(List.of("g1", "other-team"));
 
         var result = tools.getVisibleMemories("user1", "agent1", "g1, other-team", null, null);
 

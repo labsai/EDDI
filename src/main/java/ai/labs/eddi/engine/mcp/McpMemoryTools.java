@@ -9,8 +9,8 @@ import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.ForbiddenException;
@@ -47,14 +47,14 @@ public class McpMemoryTools {
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
-    private final ResourceAccessGuard resourceAccessGuard;
+    private final GroupMemoryAccessGuard groupMemoryAccessGuard;
     private final boolean authEnabled;
 
     @Inject
     public McpMemoryTools(IUserMemoryStore userMemoryStore, IJsonSerialization jsonSerialization, SecurityIdentity identity,
-            OwnershipValidator ownershipValidator, ResourceAccessGuard resourceAccessGuard,
+            OwnershipValidator ownershipValidator, GroupMemoryAccessGuard groupMemoryAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
-        this.resourceAccessGuard = resourceAccessGuard;
+        this.groupMemoryAccessGuard = groupMemoryAccessGuard;
         this.userMemoryStore = userMemoryStore;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
@@ -109,7 +109,7 @@ public class McpMemoryTools {
                     : List.of();
             try {
                 // Same rule as REST: naming a group must not unlock its team memories.
-                resourceAccessGuard.requireUseAccessToEach(groups, "group");
+                groupMemoryAccessGuard.requireEntitledToEach(groups);
             } catch (ForbiddenException e) {
                 return errorJson("Access denied: you do not have access to one of the named groups");
             }

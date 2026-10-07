@@ -145,7 +145,8 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 | Path Pattern | Policy |
 | --- | --- |
 | `/q/health/*` | **Permit** (GET only) — required for k8s probes |
-| `/q/metrics/*` | **Authenticated** — deliberately not permitted (metrics leak deployment shape); a Prometheus scraper must present a Bearer token |
+| `/q/metrics/*` | **Role `eddi-admin` or `eddi-metrics`** (policy `eddi.metrics.http-policy`, default `eddi-metrics-reader`; roles from `eddi.metrics.roles-allowed`) — metrics leak deployment shape, so a scraper presents a Bearer token **carrying one of those roles**. `authenticated` (any token, the 6.5 default) and `permit` remain selectable; see [Scraping with authentication on](monitoring/monitoring-guide.md#scraping-with-authentication-on) |
+| `/openapi`, `/q/openapi`, `/q/swagger-ui` (and below) | **Any EDDI role** (policy `eddi.api-docs.http-policy`, default `eddi-api-docs-reader`; roles from `eddi.api-docs.roles-allowed`) — the API description names every endpoint and model; a token with no EDDI role gets `403` |
 | `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points. The Manager loads and handles Keycloak login via keycloak-js; the Chat UI widget has no login flow and takes its Bearer token from its host (config / `postMessage`) |
 | `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
 | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource${quarkus.mcp.server.http.root-path}` | **Permit** (GET/HEAD) — the RFC 9728 document that tells an MCP client where to authenticate. Two exact paths, never a `/*` under the prefix, and the second interpolates the MCP root path so the rule follows the endpoint rather than stranding the document behind the catch-all if that path moves. It must be anonymously readable or discovery cannot start, and it discloses only the public Keycloak URL, which `/manage/__auth_config__.js` already serves unauthenticated. See [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance) |
@@ -157,6 +158,23 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 > **`@PermitAll` does not make a path public.** Quarkus evaluates these path policies *before* declarative RBAC, so an endpoint annotated `@PermitAll` but not named in a `permit` rule still answers `401`. That ordering is also why the discovery document above needs its own rule: quarkus-oidc serves it from a Vert.x filter at priority 50, and authorization runs at 100 — higher first.
 
 > **Note:** there is no HTTP-layer permit for conversation endpoints — `/agents/production/*` is caught by the catch-all `authenticated` policy and answers `401` before any resource method runs. The production exemption in `RestAgentManagement.checkUserAuthIfApplicable` (below) is an inner check only; to expose a production conversation surface anonymously you must add your own `quarkus.http.auth.permission.*` permit rule.
+
+### Deny by default, and what a role-less token reaches
+
+A valid token from your realm is not, by itself, a reason to answer. Two layers make sure of that:
+
+- **`quarkus.security.jaxrs.deny-unannotated-endpoints=true`.** A JAX-RS resource method with no security annotation — `@RolesAllowed`, `@PermitAll`, `@Authenticated` or `@DenyAll`, on the method, its class, or the resource interface — is refused to everyone. Every deliberately public endpoint says so with `@PermitAll`: the SPA shells (`/manage`, `/chat`, `/welcome`, `/workforce`), the OAuth callback `/connections/callback`, the Slack webhook (signature-verified in the handler) and A2A discovery. `EndpointSecurityAnnotationsTest` walks every compiled resource and fails the build on a method that says nothing, so the safe default cannot turn into an outage. Like every rule here it applies only while authorization is on.
+- **Roles on the surfaces that used to ask only for a token:** `/q/metrics` and the API description (table above), `GET /a2a/agents` (`eddi-admin`, `eddi-editor`, `eddi-user` — the tier the A2A JSON-RPC endpoint requires), the per-conversation `/conversationstore/conversations/**` operations (any EDDI role, on top of the owner check), and `/v1` in `authenticated` mode — see below.
+
+**`/v1` in OIDC mode.** With `eddi.openai-compat.http-policy=authenticated`, `OpenAiAuthFilter` now requires `eddi-admin`, `eddi-editor` or `eddi-user` — the roles `POST /agents/{id}/start` and A2A require — and answers `403` (`insufficient_permissions`) to any other token. It used to accept any token the realm issued. The default `permit` mode is unchanged: its credential is the shared API key, and the caller is Open WebUI acting for its own users, who hold no EDDI identity.
+
+### Conversations are not configuration
+
+Conversation descriptors share the `descriptors` collection with configuration descriptors, and the generic descriptor API used to take either. Since this release:
+
+- `GET /descriptorstore/descriptors` requires `type` to name a configuration type (one of the types the configuration stores declare, e.g. `ai.labs.agent`); anything else — `ai.labs.conversation`, a blank type, a prefix — is a `400`.
+- `GET`/`PATCH /descriptorstore/descriptors/{id}` and every `/descriptorstore/descriptors/{id}/shares/**` operation (including access requests) answer `404` for an id whose descriptor is not configuration. The configuration descriptor store also refuses to write a conversation descriptor at all, because its whole-document write would drop the fields only a conversation descriptor has — its owner among them.
+- **Conversation ownership fails closed.** When a conversation's descriptor records no owner, the owner recorded in the conversation memory is used (the pre-v5.1.6 fallback the listing always had); when neither records one, only an administrator may read, continue, list or delete it. It used to be open to every authenticated caller.
 
 ### RestAgentManagement Gate
 

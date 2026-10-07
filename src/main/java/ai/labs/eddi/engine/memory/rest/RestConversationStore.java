@@ -406,7 +406,8 @@ public class RestConversationStore implements IRestConversationStore {
      * so a foreign row is rejected here without its conversation ever being read; a
      * legacy row with no recorded owner is decided in {@link #conversationAdmits},
      * once the conversation supplies its owner. A fully unowned (null both ways)
-     * conversation stays visible, matching OwnershipValidator.requireOwnerOrAdmin.
+     * conversation is listed to administrators only, matching
+     * ConversationAccessGuard.
      *
      * @return the conversation's id, or {@code null} when the row is not listed
      */

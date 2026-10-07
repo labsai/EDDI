@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.ui;
 
+import jakarta.annotation.security.PermitAll;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
@@ -17,6 +18,10 @@ import org.jboss.resteasy.reactive.Cache;
  */
 @Path("/workforce")
 @Produces(MediaType.TEXT_HTML)
+// Explicitly public — the Workforce SPA shell: loaded by the browser before it
+// holds a token. quarkus.security.jaxrs.deny-unannotated-endpoints denies
+// anything unannotated.
+@PermitAll
 public interface IRestWorkforceResource {
 
     @GET

@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -476,6 +477,30 @@ class RestAgentAdministrationTest {
             assertThrows(InternalServerErrorException.class,
                     () -> restAgentAdmin.undeployAgent(
                             Deployment.Environment.test, "agent-1", 1, false, false));
+        }
+    }
+
+    @Nested
+    @DisplayName("F5: getDeploymentStatus is gated like the listing")
+    class GetDeploymentStatusGate {
+
+        @Test
+        @DisplayName("an agent the caller may not use is refused before anything is looked up")
+        void refusesAnAgentTheCallerMayNotUse() throws Exception {
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("theirs", "agent");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentAdmin.getDeploymentStatus(Deployment.Environment.production, "theirs", 1, "json"));
+            verify(agentFactory, never()).getAgent(any(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an agent the caller may use is answered")
+        void answersAnAgentTheCallerMayUse() throws Exception {
+            Response response = restAgentAdmin.getDeploymentStatus(Deployment.Environment.production, "mine", 1, "json");
+
+            assertEquals(200, response.getStatus());
+            verify(resourceAccessGuard).requireUseAccess("mine", "agent");
         }
     }
 }
