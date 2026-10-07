@@ -556,6 +556,7 @@ eddi_vault_rotate_count_total               # Key rotations
 eddi_vault_grant_update_count_total         # allowedAgents edited without the value (PUT .../grant)
 eddi_vault_delete_count_total               # Secrets deleted
 eddi_vault_errors_count_total               # Vault operation failures
+eddi_vault_reseal_failures_total            # Sealed rows a DEK rotation could not open and skipped; tag: participant
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits
 eddi_vault_cache_misses_total               # Resolved-secret cache misses
 eddi_vault_resolve_errors_total             # Resolution failures seen by SecretResolver

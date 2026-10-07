@@ -10099,7 +10099,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_vault_errors_count_total` (provider) and `eddi_vault_resolve_errors_total` (resolver). A resolve error means a `${vault:...}` reference did not resolve — the dependent HTTP call or model provider is now failing.",
+          "description": "`eddi_vault_errors_count_total` (provider) and `eddi_vault_resolve_errors_total` (resolver). A resolve error means a `${vault:...}` reference did not resolve — the dependent HTTP call or model provider is now failing. `eddi_vault_reseal_failures_total` counts sealed rows (OAuth grants) a DEK rotation could not open and skipped — each is a linked account that may need reconnecting.",
           "gridPos": {
             "h": 6,
             "w": 10,
@@ -10128,6 +10128,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "resolve errors"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (participant) (rate(eddi_vault_reseal_failures_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rows a DEK rotation skipped/s ({{participant}})"
             }
           ],
           "fieldConfig": {

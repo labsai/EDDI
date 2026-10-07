@@ -236,8 +236,7 @@ public class McpGroupTools {
             List<DocumentDescriptor> descriptors = groupStore.readGroupDescriptors(flt, idx, lim);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
-            LOGGER.errorf("list_groups failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "list_groups", e);
         }
     }
 
@@ -253,8 +252,7 @@ public class McpGroupTools {
             AgentGroupConfiguration config = groupStore.readGroup(groupId, ver);
             return jsonSerialization.serialize(config);
         } catch (Exception e) {
-            LOGGER.errorf("read_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "read_group", e);
         }
     }
 
@@ -328,7 +326,11 @@ public class McpGroupTools {
                     TaskDefinition[] taskArray = jsonSerialization.deserialize(tasks, TaskDefinition[].class);
                     config.setTasks(List.of(taskArray));
                 } catch (Exception ex) {
-                    return errorJson("Invalid tasks JSON", ex);
+                    // Curated: the parser's own message names model classes and field
+                    // paths (CWE-209), which is not the caller's business.
+                    LOGGER.debugf("create_group: tasks JSON rejected: %s", ex.getMessage());
+                    return errorJson("Invalid tasks JSON: expected a JSON array of task definitions "
+                            + "(subject, description, assignToRole, dependsOn, priority, assignmentMode)");
                 }
             }
 
@@ -351,8 +353,7 @@ public class McpGroupTools {
             return ("Created group '%s' (style=%s, %d members, " + "moderator=%s)\nID: %s\nPhases: %s").formatted(name, discussionStyle,
                     members.size(), moderatorAgentId != null ? moderatorAgentId : "none", groupId, String.join(" → ", phaseNames));
         } catch (Exception e) {
-            LOGGER.errorf("create_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "create_group", e);
         }
     }
 
@@ -370,10 +371,7 @@ public class McpGroupTools {
             groupStore.updateGroup(groupId, ver, config);
             return "Updated group " + groupId;
         } catch (Exception e) {
-            LOGGER.errorf("update_group failed: %s", e.getMessage());
-            // describe(), not getMessage(): the strict parser's rejection travels as a
-            // response entity, and getMessage() on that is just "HTTP 400 Bad Request".
-            return errorJson("Failed to update group", e);
+            return toolFailure(LOGGER, "update_group", e);
         }
     }
 
@@ -386,8 +384,7 @@ public class McpGroupTools {
             groupStore.deleteGroup(groupId, ver, false);
             return "Deleted group " + groupId;
         } catch (Exception e) {
-            LOGGER.errorf("delete_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "delete_group", e);
         }
     }
 
@@ -419,8 +416,7 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return errorJson("Access denied: you cannot start a conversation as another user");
         } catch (Exception e) {
-            LOGGER.errorf("discuss_with_group failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "discuss_with_group", e);
         }
     }
 
@@ -443,8 +439,7 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return accessDenied("read_group_conversation", groupConversationId);
         } catch (Exception e) {
-            LOGGER.errorf("read_group_conversation failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "read_group_conversation", e);
         }
     }
 
@@ -477,8 +472,7 @@ public class McpGroupTools {
             }
             return jsonSerialization.serialize(conversations);
         } catch (Exception e) {
-            LOGGER.errorf("list_group_conversations failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "list_group_conversations", e);
         }
     }
 
@@ -510,8 +504,7 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return errorJson("Access denied: you cannot start a conversation as another user");
         } catch (Exception e) {
-            LOGGER.errorf("start_group_discussion failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "start_group_discussion", e);
         }
     }
 
@@ -528,8 +521,7 @@ public class McpGroupTools {
         } catch (ForbiddenException e) {
             return accessDenied("delete_group_conversation", groupConversationId);
         } catch (Exception e) {
-            LOGGER.errorf("delete_group_conversation failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "delete_group_conversation", e);
         }
     }
 
@@ -668,8 +660,7 @@ public class McpGroupTools {
             }
             return errorJson("The workspace is being modified concurrently — retry the request");
         } catch (Exception e) {
-            LOGGER.errorf("add_team_task failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "add_team_task", e);
         }
     }
 
@@ -689,8 +680,7 @@ public class McpGroupTools {
             return jsonSerialization.serialize(
                     workspace != null ? workspace.getBacklog().getTasks() : List.of());
         } catch (Exception e) {
-            LOGGER.errorf("list_team_backlog failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "list_team_backlog", e);
         }
     }
 
@@ -706,8 +696,7 @@ public class McpGroupTools {
         try {
             return jsonSerialization.serialize(templateService.list());
         } catch (Exception e) {
-            LOGGER.errorf("list_group_templates failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            return toolFailure(LOGGER, "list_group_templates", e);
         }
     }
 
@@ -731,11 +720,11 @@ public class McpGroupTools {
             String location = response.getLocation() != null ? response.getLocation().toString() : "";
             return "Created group '" + config.getName() + "' from template '" + templateId + "'"
                     + (location.isEmpty() ? "" : " at " + location);
-        } catch (IllegalArgumentException e) {
-            return errorJson(e.getMessage());
         } catch (Exception e) {
-            LOGGER.errorf("create_group_from_template failed: %s", e.getMessage());
-            return errorJson(e.getMessage());
+            // toolFailure, not errorJson(e.getMessage()): it still describes the
+            // validation refusals EDDI raises (unknown template, missing roles, a
+            // repeated member) but not an IllegalArgumentException a library raised.
+            return toolFailure(LOGGER, "create_group_from_template", e);
         }
     }
 }
