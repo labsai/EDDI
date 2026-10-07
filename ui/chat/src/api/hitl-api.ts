@@ -147,6 +147,23 @@ export function isSettledState(state: ConversationState | null | undefined): boo
   return !!state && SETTLED_STATES.includes(state);
 }
 
+/**
+ * How long a "settled" read is distrusted before the pause has ever been seen
+ * stored (see `useHitlPolling`). The stream's `done` announces a pause BEFORE the
+ * paused memory is persisted, and approval-status reads the store, so the first
+ * read can say READY for a conversation that is, in fact, about to be paused.
+ */
+export const UNOBSERVED_PAUSE_WINDOW_MS = 10_000;
+
+/** Poll delays while the pause has not been seen stored yet; the last repeats. */
+const UNOBSERVED_POLL_BACKOFF_MS = [500, 1_000, 2_000];
+
+/** Delay before the next poll while the pause has not been seen stored yet. */
+export function nextUnobservedPollDelay(attempt: number): number {
+  const n = Math.min(Math.max(0, attempt), UNOBSERVED_POLL_BACKOFF_MS.length - 1);
+  return UNOBSERVED_POLL_BACKOFF_MS[n];
+}
+
 const POLL_BASE_MS = 3_000;
 const POLL_MAX_MS = 30_000;
 
