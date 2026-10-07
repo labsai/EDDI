@@ -826,10 +826,14 @@ describe("batched changes: the plan shape the operator is taught", () => {
       // Before this, the same binding was five single-call approvals: llm write,
       // workflow write, workflow repoint, agent repoint, deploy.
       expect(text).toContain("Connecting a knowledge base is also two");
-      expect(text).toContain("batch 1 is the LLM\n  config write");
-      expect(text).toContain("together with the workflow write");
-      expect(text).toContain("as parallel calls in one turn");
-      expect(text).toContain("batch 2 is one\n  cascade carrying both new versions plus the redeploy");
+      expect(text).toContain("batch 1 is the config\n  edits");
+      expect(text).toContain("the workflow gaining the\n  rag step");
+      // The write METHOD is deliberately not named: a full-document PUT of an LLM
+      // config echoes its ${vault:…} apiKey and is refused by the vault-reference
+      // guard, and the editing rules are where the right method is taught.
+      expect(text).not.toMatch(/\bPUT\b|\bPATCH\b/);
+      expect(text).toContain("issued as parallel\n  calls in one turn");
+      expect(text).toContain("batch 2 is one cascade carrying both new versions plus\n  the redeploy");
       expect(text).toContain('Say "2 approvals" up');
     });
 

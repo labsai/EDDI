@@ -677,7 +677,7 @@ const BODY_BATCHED_CHANGES = `Planning and batching changes:
  * it is the long chain that motivated batching — five calls, five approvals,
  * before this.
  */
-const BODY_BATCHED_CASCADE = `- Landing an edit is ONE call, not three: once the config writes are done and you
+const BODY_BATCHED_CASCADE = `- Landing an edit is ONE call, not three: once the config edits are done and you
   hold the new versions they returned, call cascadeAgentChanges once instead of
   separate workflow-repoint, agent-repoint and deploy calls. It takes the agent id
   and its current version, and a body of \`resourceMappings\` (a list of pairs,
@@ -689,12 +689,12 @@ const BODY_BATCHED_CASCADE = `- Landing an edit is ONE call, not three: once the
   and answers with the new agent and workflow versions and the deployment
   status. A 400 means a pair did not match what the agent holds and NOTHING was
   written: re-read the agent and its workflow and use the exact URIs.
-- Typical plans: changing one config is two approvals — the config write, then
-  the cascade. Connecting a knowledge base is also two — batch 1 is the LLM
-  config write (naming the knowledge base) together with the workflow write (adding
-  the rag step), issued as parallel calls in one turn, and batch 2 is one
-  cascade carrying both new versions plus the redeploy. Say "2 approvals" up
-  front; a plan that needs more should say why.`;
+- Typical plans: changing one config is two approvals — the config edit, then
+  the cascade. Connecting a knowledge base is also two — batch 1 is the config
+  edits (the LLM config naming the knowledge base, and the workflow gaining the
+  rag step), each made as the editing rules above describe and issued as parallel
+  calls in one turn, and batch 2 is one cascade carrying both new versions plus
+  the redeploy. Say "2 approvals" up front; a plan that needs more should say why.`;
 
 function buildBatchingSection(endpoints: readonly string[]): string {
   const lines = [BODY_BATCHED_CHANGES];
