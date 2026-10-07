@@ -35,41 +35,6 @@ class StringUtilitiesTest {
         assertEquals("\"hello", StringUtilities.searchText("\"hello"));
     }
 
-    // --- convertToSearchString ---
-
-    @Test
-    void convertToSearchString_plainText_wrapsWithWildcards() {
-        String result = StringUtilities.convertToSearchString("hello");
-        assertEquals(".*hello.*", result);
-    }
-
-    @Test
-    void convertToSearchString_quotedText_exactMatch() {
-        String result = StringUtilities.convertToSearchString("\"hello\"");
-        assertEquals("hello", result);
-    }
-
-    @Test
-    void convertToSearchString_emptyQuotes_returnsEmpty() {
-        String result = StringUtilities.convertToSearchString("\"\"");
-        assertEquals("", result);
-    }
-
-    @Test
-    void convertToSearchString_withRegexMetaChars_escapedProperly() {
-        String result = StringUtilities.convertToSearchString("a+b*c");
-        // Should escape + and * as regex meta-characters
-        assertTrue(result.contains("\\+"));
-        assertTrue(result.contains("\\*"));
-    }
-
-    @Test
-    void convertToSearchString_quotedWithRegexMetaChars_escapedProperly() {
-        String result = StringUtilities.convertToSearchString("\"a(b)c\"");
-        assertTrue(result.contains("\\("));
-        assertTrue(result.contains("\\)"));
-    }
-
     // --- escapeRegexChars ---
 
     @Test

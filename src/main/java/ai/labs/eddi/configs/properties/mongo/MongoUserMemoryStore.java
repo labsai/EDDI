@@ -327,12 +327,20 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     @Override
     public void deleteEntry(String entryId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(entryId, "entryId");
+        if (!ObjectId.isValid(entryId)) {
+            // Names no entry here (the PostgreSQL store's ids are UUID text): nothing
+            // to delete, the same answer as for an unknown ObjectId.
+            return;
+        }
         memoriesCollection.deleteOne(eq("_id", new ObjectId(entryId)));
     }
 
     @Override
     public Optional<UserMemoryEntry> findEntryById(String entryId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(entryId, "entryId");
+        if (!ObjectId.isValid(entryId)) {
+            return Optional.empty();
+        }
         Document doc = memoriesCollection.find(eq("_id", new ObjectId(entryId))).first();
         return doc != null ? Optional.of(documentToEntry(doc)) : Optional.empty();
     }
@@ -462,7 +470,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         Bson filter = and(eq(FIELD_USER_ID, userId), and(termFilters));
 
         List<UserMemoryEntry> entries = new ArrayList<>();
-        for (Document doc : memoriesCollection.find(filter).sort(descending(FIELD_UPDATED_AT))) {
+        for (Document doc : memoriesCollection.find(filter).sort(descending(FIELD_UPDATED_AT)).limit(MAX_FILTER_RESULTS)) {
             entries.add(documentToEntry(doc));
         }
         return entries;

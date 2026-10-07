@@ -55,6 +55,13 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     /** How long the background build waits after boot; tests shorten it. */
     long substringIndexStartDelayMillis = PostgresSubstringSearchIndexes.START_DELAY_MILLIS;
 
+    /**
+     * Replacements of earlier releases' ascending field indexes that initSchema
+     * found and left for {@link #startFieldIndexSwaps}; {@code null} when there are
+     * none.
+     */
+    private PostgresFieldIndexSwaps fieldIndexSwaps;
+
     // collection_name FIRST: every query in this class filters on it, and a
     // btree index can only be used from its leading column. With (id,
     // collection_name) — the original order — a descriptor listing could not use
@@ -179,6 +186,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     }
 
     private void initSchema(String... indexes) {
+        List<PostgresFieldIndexSwaps.Swap> swaps = new ArrayList<>();
         try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_RESOURCES_TABLE);
             stmt.execute(CREATE_HISTORY_TABLE);
@@ -186,11 +194,30 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
                 createIndexQuietly(stmt, createIndex);
             }
             for (String index : indexes) {
-                createFieldIndex(stmt, index);
+                createFieldIndex(conn, stmt, index, swaps);
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize PostgreSQL schema", e);
         }
+        fieldIndexSwaps = swaps.isEmpty() ? null : new PostgresFieldIndexSwaps(dataSource, swaps);
+    }
+
+    /**
+     * Starts the replacement of earlier releases' ascending field indexes on a
+     * background thread, if this database has any; see
+     * {@link PostgresFieldIndexSwaps}. The factory calls it; a storage built
+     * directly (tests, tools) never starts a thread.
+     */
+    PostgresResourceStorage<T> startFieldIndexSwaps() {
+        if (fieldIndexSwaps != null) {
+            fieldIndexSwaps.runInBackground(substringIndexStartDelayMillis);
+        }
+        return this;
+    }
+
+    /** Test seam: the pending replacements, run synchronously by a test. */
+    PostgresFieldIndexSwaps fieldIndexSwaps() {
+        return fieldIndexSwaps;
     }
 
     /**
@@ -200,14 +227,51 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
      * (scoped to one collection in the shared table). Dotted paths are skipped:
      * they address values inside arrays, which a btree expression index cannot
      * represent — those queries are served by the GIN index instead.
+     * <p>
+     * The field is indexed {@code DESC NULLS LAST} — exactly the order
+     * {@link #findResources} sorts by — so a sorted, limited page is read off the
+     * index in order instead of sorting every row of the collection. The same index
+     * still serves equality filters. It replaces the ascending index this method
+     * used to build (under {@link #LEGACY_INDEX_NAME_PREFIX}): scanned backwards
+     * that one yields {@code DESC NULLS FIRST}, PostgreSQL's default for
+     * {@code DESC}, which put documents without the field at the top of every
+     * listing while MongoDB puts them at the bottom.
+     * <p>
+     * Where the legacy index exists — a database an earlier release built — the
+     * replacement is not built here: a plain {@code CREATE INDEX} blocks every
+     * write to the shared table for the whole build, and that table holds a
+     * descriptor per conversation. It is left to {@link PostgresFieldIndexSwaps},
+     * which builds it concurrently in the background and drops the legacy index
+     * only once the replacement is valid. On a fresh database, or once the swap is
+     * done, the index is created here as before.
      */
-    private void createFieldIndex(Statement stmt, String field) {
+    private void createFieldIndex(Connection conn, Statement stmt, String field, List<PostgresFieldIndexSwaps.Swap> swaps) {
         String sanitized = sanitizeJsonPath(field);
         if (sanitized.isEmpty() || sanitized.contains(".")) {
             return;
         }
-        createIndexQuietly(stmt, "CREATE INDEX IF NOT EXISTS " + fieldIndexName(sanitized) + " ON resources (collection_name, (data ->> '"
-                + sanitized + "'))");
+        String name = fieldIndexName(INDEX_NAME_PREFIX, sanitized);
+        String target = "resources (collection_name, (data ->> '" + sanitized + "') DESC NULLS LAST)";
+        String legacyName = fieldIndexName(LEGACY_INDEX_NAME_PREFIX, sanitized);
+        if (legacyIndexMayExist(conn, legacyName)) {
+            swaps.add(new PostgresFieldIndexSwaps.Swap(name, target, legacyName));
+            return;
+        }
+        createIndexQuietly(stmt, "CREATE INDEX IF NOT EXISTS " + name + " ON " + target);
+    }
+
+    /**
+     * Whether the legacy index exists. When the catalogue cannot be asked, assume
+     * it does: the background swap is the path that never blocks writes, and it
+     * does nothing harmful when there is nothing to replace.
+     */
+    private static boolean legacyIndexMayExist(Connection conn, String legacyName) {
+        try {
+            return PostgresFieldIndexSwaps.isValid(conn, legacyName) != null;
+        } catch (SQLException e) {
+            LOGGER.debugf("Could not look up index %s: %s", legacyName, e.getMessage());
+            return true;
+        }
     }
 
     /**
@@ -229,9 +293,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
      * fixed-width digest kept at the end — server-side truncation would cut the
      * digest off and collapse distinct hints back together.
      */
-    private static String fieldIndexName(String sanitizedField) {
+    private static String fieldIndexName(String prefix, String sanitizedField) {
         String lowerCased = sanitizedField.toLowerCase(Locale.ROOT);
-        String historical = INDEX_NAME_PREFIX + lowerCased;
+        String historical = prefix + lowerCased;
         if (lowerCased.equals(sanitizedField) && historical.length() <= MAX_IDENTIFIER_LENGTH) {
             return historical;
         }
@@ -249,15 +313,22 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         // it is needed. Truncate the BASE ourselves and keep a fixed-width digest of
         // the full expression at the end.
         String digest = String.format("%08x", sanitizedField.hashCode());
-        int room = MAX_IDENTIFIER_LENGTH - INDEX_NAME_PREFIX.length() - 1 - digest.length();
+        int room = MAX_IDENTIFIER_LENGTH - prefix.length() - 1 - digest.length();
         String base = lowerCased.substring(0, Math.min(lowerCased.length(), Math.max(room, 0)));
-        return INDEX_NAME_PREFIX + base + "_" + digest;
+        return prefix + base + "_" + digest;
     }
 
     /** PostgreSQL silently truncates identifiers beyond this many bytes. */
     private static final int MAX_IDENTIFIER_LENGTH = 63;
 
-    private static final String INDEX_NAME_PREFIX = "idx_resources_field_";
+    /**
+     * Field indexes, ordered {@code DESC NULLS LAST}; see
+     * {@link #createFieldIndex}.
+     */
+    private static final String INDEX_NAME_PREFIX = "idx_resources_fdesc_";
+
+    /** The ascending field indexes built before {@link #INDEX_NAME_PREFIX}. */
+    private static final String LEGACY_INDEX_NAME_PREFIX = "idx_resources_field_";
 
     private void createIndexQuietly(Statement stmt, String createIndexSql) {
         try {
@@ -402,6 +473,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public IResource<T> read(String id, Integer version) {
+        if (!PostgresIds.isStorableId(id)) {
+            return null;
+        }
         String sql = "SELECT id, version, data FROM resources " + "WHERE id = ?::uuid AND collection_name = ? AND version = ?";
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -420,12 +494,15 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public List<IResource<T>> readMany(List<IResourceStore.IResourceId> ids) {
-        if (ids.isEmpty()) {
+        // An id that cannot be a UUID names nothing; one in the batch must not cost
+        // the others their answer.
+        List<String> storable = ids.stream().map(IResourceStore.IResourceId::getId).filter(PostgresIds::isStorableId).toList();
+        if (storable.isEmpty()) {
             return List.of();
         }
 
         StringBuilder sql = new StringBuilder("SELECT id, version, data FROM resources WHERE collection_name = ? AND id IN (");
-        for (int i = 0; i < ids.size(); i++) {
+        for (int i = 0; i < storable.size(); i++) {
             sql.append(i == 0 ? "?::uuid" : ", ?::uuid");
         }
         sql.append(')');
@@ -433,8 +510,8 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         Map<String, Resource> byId = new HashMap<>();
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
             ps.setString(1, collectionName);
-            for (int i = 0; i < ids.size(); i++) {
-                ps.setString(i + 2, ids.get(i).getId());
+            for (int i = 0; i < storable.size(); i++) {
+                ps.setString(i + 2, storable.get(i));
             }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -461,6 +538,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public void remove(String id) {
+        if (!PostgresIds.isStorableId(id)) {
+            return;
+        }
         String sql = "DELETE FROM resources WHERE id = ?::uuid AND collection_name = ?";
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -602,6 +682,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public void removeAllPermanently(String id) {
+        if (!PostgresIds.isStorableId(id)) {
+            return;
+        }
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -627,6 +710,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public IHistoryResource<T> readHistory(String id, Integer version) {
+        if (!PostgresIds.isStorableId(id)) {
+            return null;
+        }
         String sql = "SELECT id, version, data, deleted FROM resources_history " + "WHERE id = ?::uuid AND collection_name = ? AND version = ?";
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -645,6 +731,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public IHistoryResource<T> readHistoryLatest(String id) {
+        if (!PostgresIds.isStorableId(id)) {
+            return null;
+        }
         String sql = "SELECT id, version, data, deleted FROM resources_history " + "WHERE id = ?::uuid AND collection_name = ? "
                 + "ORDER BY version DESC LIMIT 1";
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -679,6 +768,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public Integer getCurrentVersion(String id) {
+        if (!PostgresIds.isStorableId(id)) {
+            return -1;
+        }
         String sql = "SELECT version FROM resources " + "WHERE id = ?::uuid AND collection_name = ?";
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -690,8 +782,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
                 return -1;
             }
         } catch (SQLException e) {
-            // Invalid UUID format (e.g., MongoDB ObjectId) → treat as not found
-            if (e.getMessage() != null && e.getMessage().contains("invalid input syntax for type uuid")) {
+            // A form isStorableId let through that the server still refuses: an id that
+            // cannot exist. Matched on the SQLSTATE — the message is localised.
+            if (PostgresIds.isInvalidTextRepresentation(e)) {
                 return -1;
             }
             throw new RuntimeException("Failed to get current version", e);
@@ -890,7 +983,11 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         }
 
         if (sortField != null) {
-            sql.append(" ORDER BY ").append(toTextPathExpression(sortField)).append(" DESC");
+            // NULLS LAST: a document without the sort field goes to the end, as on
+            // MongoDB, whose descending sort orders a missing field lowest. PostgreSQL's
+            // own default for DESC is NULLS FIRST. The field indexes are built in this
+            // exact order (createFieldIndex), so the page is still read off the index.
+            sql.append(" ORDER BY ").append(toTextPathExpression(sortField)).append(" DESC NULLS LAST");
         }
 
         int effectiveLimit = IResourceStorage.resolveLimit(limit);

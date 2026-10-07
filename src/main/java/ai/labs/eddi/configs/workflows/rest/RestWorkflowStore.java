@@ -412,10 +412,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         } catch (Exception e) {
             // Fails closed PER RESOURCE, like the reference check below, rather than
             // letting the throwable out of planCascade. getCurrentResourceId only
-            // absorbs ResourceNotFoundException: the Mongo store's getCurrentVersion
-            // does `new ObjectId(id)`, which raises IllegalArgumentException for the
-            // 18-23 char hex and UUID-shaped ids RestUtilities.isValidId accepts, and
-            // a transport failure surfaces as MongoException. Uncaught, ONE
+            // absorbs ResourceNotFoundException. Both storages answer "not found" for
+            // an id they cannot hold (an ObjectId on PostgreSQL, a UUID on MongoDB),
+            // but a transport failure still surfaces as MongoException or as the
+            // PostgreSQL store's RuntimeException. Uncaught, ONE
             // hand-written or imported step reference turned the whole
             // cascade=true delete into a 500 — before the workflow itself was
             // deleted, so the workflow became undeletable-with-cascade until someone

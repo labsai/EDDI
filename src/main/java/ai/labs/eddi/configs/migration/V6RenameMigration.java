@@ -187,6 +187,19 @@ public class V6RenameMigration {
     private final boolean enabled;
 
     /**
+     * True on a PostgreSQL deployment ({@code eddi.datastore.type=postgres}). This
+     * migration renames EDDI 5 MongoDB collections, and EDDI 5 never ran on
+     * PostgreSQL, so there it has nothing to do — and must not touch
+     * {@link #database} at all: the injected {@code MongoDatabase} is a lazy client
+     * proxy, and its first use creates a MongoClient against
+     * {@code mongodb.connectionString} (by default
+     * {@code mongodb://mongodb:27017}), which on a PostgreSQL-only deployment times
+     * out after 30 seconds and, in {@link #holdsRetention()}, held the conversation
+     * retention sweep for ever with a false "this database comes from EDDI 5" log.
+     */
+    private final boolean postgres;
+
+    /**
      * Latches once the migration is known not to be pending, so that
      * {@link #isPending()} stops reading the migration log on every call. Only ever
      * set from false to true, and only after a completed migration has been
@@ -196,10 +209,19 @@ public class V6RenameMigration {
 
     @Inject
     public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore,
-            @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled) {
+            @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled,
+            @ConfigProperty(name = "eddi.datastore.type", defaultValue = "mongodb") String datastoreType) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;
         this.enabled = enabled;
+        this.postgres = "postgres".equals(datastoreType);
+    }
+
+    /**
+     * A MongoDB deployment — what every existing caller of this constructor means.
+     */
+    public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore, boolean enabled) {
+        this(database, migrationLogStore, enabled, "mongodb");
     }
 
     /**
@@ -227,7 +249,7 @@ public class V6RenameMigration {
      * </p>
      */
     public boolean isPending() {
-        if (!enabled || knownNotPending) {
+        if (!enabled || postgres || knownNotPending) {
             return false;
         }
         try {
@@ -260,6 +282,11 @@ public class V6RenameMigration {
      * </p>
      */
     public boolean holdsRetention() {
+        if (postgres) {
+            // No EDDI 5 database can be a PostgreSQL one, and nothing here may open a
+            // MongoClient on a deployment that has no MongoDB (see #postgres).
+            return false;
+        }
         try {
             return isPending() || migrationLogStore.readMigrationLog(RETENTION_HOLD_KEY) != null
                     || database.getCollection(V5_MARKER_COLLECTION).estimatedDocumentCount() > 0;
@@ -273,6 +300,12 @@ public class V6RenameMigration {
      * Run the v6 rename migration if enabled and not already applied.
      */
     public void runIfNeeded() {
+        if (postgres) {
+            if (enabled) {
+                LOGGER.info("V6 rename migration skipped: it migrates EDDI 5 MongoDB collections, and this deployment uses PostgreSQL");
+            }
+            return;
+        }
         if (!enabled) {
             LOGGER.info("V6 rename migration is disabled (eddi.migration.v6-rename.enabled=false)");
             return;
