@@ -24,7 +24,7 @@ import {
   type ToolCallDecision,
 } from "@/lib/api/hitl";
 
-interface ApprovalBannerProps {
+export interface ApprovalBannerProps {
   /** What kind of surface this approval is for. */
   surface: "regular" | "group";
   /** Why the conversation/discussion paused. */
