@@ -27,8 +27,6 @@ import {
 } from "@/hooks/use-gdpr";
 import {
   useUserMemories,
-  useSearchMemories,
-  useCountMemories,
   useDeleteMemory,
   useDeleteAllMemories,
 } from "@/hooks/use-user-memory";
@@ -287,50 +285,6 @@ describe("useUserMemories", () => {
 
   it("is disabled when userId is empty", () => {
     const { result } = renderHook(() => useUserMemories(""), {
-      wrapper: createWrapper(),
-    });
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useSearchMemories", () => {
-  it("searches user memories", async () => {
-    const { result } = renderHook(
-      () => useSearchMemories("user-123", "language"),
-      { wrapper: createWrapper() }
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
-  });
-
-  it("is disabled when query is empty", () => {
-    const { result } = renderHook(
-      () => useSearchMemories("user-123", ""),
-      { wrapper: createWrapper() }
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-
-  it("is disabled when userId is empty", () => {
-    const { result } = renderHook(
-      () => useSearchMemories("", "test"),
-      { wrapper: createWrapper() }
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useCountMemories", () => {
-  it("counts user memories", async () => {
-    const { result } = renderHook(() => useCountMemories("user-123"), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(typeof result.current.data).toBe("number");
-  });
-
-  it("is disabled when userId is empty", () => {
-    const { result } = renderHook(() => useCountMemories(""), {
       wrapper: createWrapper(),
     });
     expect(result.current.fetchStatus).toBe("idle");

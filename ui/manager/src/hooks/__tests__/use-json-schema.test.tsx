@@ -4,8 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import {
   useJsonSchema,
-  useAgentJsonSchema,
-  useWorkflowJsonSchema,
 } from "@/hooks/use-json-schema";
 
 function createWrapper() {
@@ -48,25 +46,5 @@ describe("useJsonSchema", () => {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
-  });
-});
-
-describe("useAgentJsonSchema", () => {
-  it("fetches agent JSON schema", async () => {
-    const { result } = renderHook(() => useAgentJsonSchema(), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
-  });
-});
-
-describe("useWorkflowJsonSchema", () => {
-  it("fetches workflow JSON schema", async () => {
-    const { result } = renderHook(() => useWorkflowJsonSchema(), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
   });
 });

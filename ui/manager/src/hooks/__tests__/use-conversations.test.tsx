@@ -8,9 +8,7 @@ import { type ReactNode } from "react";
 import {
   useConversationDescriptors,
   useSimpleConversation,
-  useRawConversation,
   useDeleteConversation,
-  useConversationStepCount,
 } from "@/hooks/use-conversations";
 
 function createWrapper() {
@@ -67,24 +65,6 @@ describe("useSimpleConversation", () => {
   });
 });
 
-describe("useRawConversation", () => {
-  it("fetches raw conversation log", async () => {
-    const { result } = renderHook(
-      () => useRawConversation("conv1"),
-      { wrapper: createWrapper() }
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-
-  it("is disabled when id is empty", () => {
-    const { result } = renderHook(
-      () => useRawConversation(""),
-      { wrapper: createWrapper() }
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
 describe("useDeleteConversation", () => {
   it("deletes a conversation", async () => {
     const { result } = renderHook(() => useDeleteConversation(), {
@@ -104,24 +84,5 @@ describe("useDeleteConversation", () => {
       result.current.mutate({ id: "conv1", permanent: true });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-});
-
-describe("useConversationStepCount", () => {
-  it("fetches step count for a conversation", async () => {
-    const { result } = renderHook(
-      () => useConversationStepCount("conv1"),
-      { wrapper: createWrapper() }
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(typeof result.current.data).toBe("number");
-  });
-
-  it("is disabled when id is empty", () => {
-    const { result } = renderHook(
-      () => useConversationStepCount(""),
-      { wrapper: createWrapper() }
-    );
-    expect(result.current.fetchStatus).toBe("idle");
   });
 });

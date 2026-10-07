@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getJsonSchema, getAgentJsonSchema, getWorkflowJsonSchema } from "@/lib/api/schemas";
+import { getJsonSchema } from "@/lib/api/schemas";
 import { getResourceType } from "@/lib/api/resources";
 
 /**
@@ -17,32 +17,6 @@ export function useJsonSchema(typeSlug: string | undefined) {
       return getJsonSchema(rt);
     },
     enabled: !!typeSlug,
-    staleTime: Infinity,
-    gcTime: Infinity,
-    retry: 1,
-  });
-}
-
-/**
- * Fetch the JSON Schema for agent configurations.
- */
-export function useAgentJsonSchema() {
-  return useQuery({
-    queryKey: ["jsonSchema", "agent"],
-    queryFn: getAgentJsonSchema,
-    staleTime: Infinity,
-    gcTime: Infinity,
-    retry: 1,
-  });
-}
-
-/**
- * Fetch the JSON Schema for package configurations.
- */
-export function useWorkflowJsonSchema() {
-  return useQuery({
-    queryKey: ["jsonSchema", "package"],
-    queryFn: getWorkflowJsonSchema,
     staleTime: Infinity,
     gcTime: Infinity,
     retry: 1,

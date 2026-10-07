@@ -5,7 +5,6 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { type ReactNode } from "react";
 import {
-  useQuotas,
   useQuota,
   useQuotaUsage,
   useUpdateQuota,
@@ -14,7 +13,6 @@ import {
 import {
   useAuditTrail,
   useAuditTrailByAgent,
-  useAuditEntryCount,
 } from "@/hooks/use-audit";
 import {
   useOrphanScan,
@@ -22,9 +20,6 @@ import {
 } from "@/hooks/use-orphans";
 import {
   useConversationCosts,
-  useToolRateLimit,
-  useCacheStats,
-  useToolHistory,
 } from "@/hooks/use-tool-metrics";
 
 function createWrapper() {
@@ -45,16 +40,6 @@ function createWrapper() {
 }
 
 // ─── Quotas ─────────────────────────────────────────────────────────
-
-describe("useQuotas", () => {
-  it("fetches all quotas", async () => {
-    const { result } = renderHook(() => useQuotas(), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
-  });
-});
 
 describe("useQuota", () => {
   it("fetches single tenant quota", async () => {
@@ -166,22 +151,6 @@ describe("useAuditTrailByAgent", () => {
   });
 });
 
-describe("useAuditEntryCount", () => {
-  it("fetches count for a conversation", async () => {
-    const { result } = renderHook(() => useAuditEntryCount("conv1"), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-
-  it("is disabled when conversationId is empty", () => {
-    const { result } = renderHook(() => useAuditEntryCount(""), {
-      wrapper: createWrapper(),
-    });
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
 // ─── Orphans ────────────────────────────────────────────────────────
 
 describe("useOrphanScan", () => {
@@ -237,74 +206,6 @@ describe("useConversationCosts", () => {
   it("is disabled when enabled is false", () => {
     const { result } = renderHook(
       () => useConversationCosts("conv1", false),
-      { wrapper: createWrapper() }
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useToolRateLimit", () => {
-  it("fetches rate limit for a tool", async () => {
-    const { result } = renderHook(
-      () => useToolRateLimit("fetch_weather"),
-      { wrapper: createWrapper() }
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toHaveProperty("limit");
-    expect(result.current.data).toHaveProperty("remaining");
-  });
-
-  it("is disabled when toolName is null", () => {
-    const { result } = renderHook(
-      () => useToolRateLimit(null),
-      { wrapper: createWrapper() }
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useCacheStats", () => {
-  it("starts disabled by default", () => {
-    const { result } = renderHook(
-      () => useCacheStats(),
-      { wrapper: createWrapper() }
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-
-  it("fetches when enabled", async () => {
-    const { result } = renderHook(
-      () => useCacheStats(true),
-      { wrapper: createWrapper() }
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toHaveProperty("hits");
-    expect(result.current.data).toHaveProperty("misses");
-  });
-});
-
-describe("useToolHistory", () => {
-  it("fetches tool history when enabled", async () => {
-    const { result } = renderHook(
-      () => useToolHistory("conv1", true),
-      { wrapper: createWrapper() }
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
-    expect(result.current.data!.toolCalls.length).toBeGreaterThan(0);
-  });
-
-  it("is disabled when conversationId is null", () => {
-    const { result } = renderHook(
-      () => useToolHistory(null, true),
-      { wrapper: createWrapper() }
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-
-  it("is disabled by default", () => {
-    const { result } = renderHook(
-      () => useToolHistory("conv1"),
       { wrapper: createWrapper() }
     );
     expect(result.current.fetchStatus).toBe("idle");

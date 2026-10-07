@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
 import { cn, getInitials } from "@/lib/utils";
-import { Plus } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -65,38 +64,6 @@ export function AgentWorkforceCard({
           {t("workforce.ready", "Ready")}
         </span>
       )}
-    </button>
-  );
-}
-
-// ─── "Add Agent" Placeholder Card ────────────────────────────────
-
-export interface AddAgentCardProps {
-  onClick?: () => void;
-  className?: string;
-}
-
-export function AddAgentCard({ onClick, className }: AddAgentCardProps) {
-  const { t } = useTranslation();
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border p-4",
-        "text-muted-foreground hover:text-foreground hover:border-muted-foreground/50 hover:bg-muted/30",
-        "transition-all duration-200",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        className,
-      )}
-    >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-dashed border-current transition-transform duration-200 hover:scale-105">
-        <Plus className="h-5 w-5" />
-      </div>
-      <p className="text-xs font-medium">
-        {t("workforce.addAgent", "Deploy Agent")}
-      </p>
     </button>
   );
 }

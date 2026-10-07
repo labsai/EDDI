@@ -464,20 +464,3 @@ export const TOUR_CHAPTERS: Record<TourChapterId, TourChapter> = {
   orphans: orphansChapter,
 };
 
-export const TOUR_CHAPTER_ORDER: TourChapterId[] = [
-  "dashboard",
-  "agents",
-  "workflows",
-  "chat",
-  "resources",
-  "conversations",
-  "groups",
-  "logs",
-  "secrets",
-  "audit",
-  "schedules",
-  "quotas",
-  "coordinator",
-  "orphans",
-];
-
