@@ -44,7 +44,7 @@ const paused = (state: string) => ({
   groupId: "grp1",
   userId: "manager-user",
   state,
-  pausedAt: state === "AWAITING_APPROVAL" ? new Date(Date.now() - 60_000).toISOString() : null,
+  pausedAt: state === "AWAITING_APPROVAL" ? "2026-07-01T10:00:00.000Z" : null,
   hitlPauseType: state === "AWAITING_APPROVAL" ? "PHASE" : null,
   pausedPhaseName: state === "AWAITING_APPROVAL" ? "Synthesis" : null,
   originalQuestion: "Fund it?",

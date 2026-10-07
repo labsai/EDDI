@@ -5431,9 +5431,13 @@ export const backupSyncHandlers = [
   }),
 
   http.get("*/groups/:groupId/conversations/:gcId/approval-status", () => {
+    // A fixed pause start, so a group page's decision (bound to the stored
+    // conversation's pause) can match it: a group fixture that is paused uses
+    // the same instant. PHASE is the default granularity.
     return HttpResponse.json({
       state: "AWAITING_APPROVAL",
-      pausedAt: new Date(Date.now() - 60_000).toISOString(),
+      pausedAt: "2026-07-01T10:00:00.000Z",
+      pauseType: "PHASE",
     });
   }),
 
