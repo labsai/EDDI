@@ -68,6 +68,24 @@ conversation data — user input, a model reply, an API response, client context
 instead of being resolved, with an error naming the field. Grants are checked at deploy time, so
 without this rule a user could have a template substitute any secret of the tenant.
 
+**Who typed it does not matter.** The rule is about where the reference came from, not who wrote
+it, so there is no way to make a conversation-supplied reference acceptable: an admin pasting
+`${vault:openai-prod}` into a chat, a model copying one out of a configuration it read, and a
+reference in a tool call all arrive as conversation data and are refused the same way. The error
+says so, and says what to do instead: **send the credential's NAME in a field the endpoint documents
+for that, or edit with a partial update that does not repeat the credential — never a reference.**
+For creating an agent over REST that field is [`vaultKeyName`](#reusing-one-key-across-agents): a
+bare name (`"openai-prod"`) with `apiKey` left empty requires the entry to already exist and points
+the new agent at it. A bare name contains no `${…}`, so this guard has nothing to refuse, and the
+[deploy-time grant check](#agent-grants-allowedagents) still applies — the new agent must be on the
+secret's `allowedAgents` (or the secret open to `["*"]`) before it can deploy. Both tools the Platform Operator writes agents with, `setupAgent` and
+`createApiAgent`, carry `vaultKeyName` for exactly this reason; the operator cannot read the vault or
+grant secrets, so it asks the admin for the name and says when a grant is needed.
+
+For a tool call that needs a human's approval, the same refusal is made **before** the approval is
+requested: a call certain to be refused is returned to the model with the explanation instead of
+being put in front of a person (see [Request pinning](hitl.md#request-pinning--approval-binds-to-a-request-not-a-tool-name)).
+
 This holds through `${vars:…}` as well. A global variable may itself hold a vault or connection
 reference, so a `${vars:…}` the configuration wrote still resolves through to the secret, while one
 that arrived through conversation data refuses the call — the check runs again after variable

@@ -18,7 +18,9 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -29,6 +31,7 @@ import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -42,6 +45,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -432,5 +436,98 @@ class AgentOrchestratorToolPauseTest {
         var d = mock(IData.class);
         when(d.getResult()).thenReturn(v);
         return d;
+    }
+
+    // ─── A gated call that is certain to be refused never reaches a human ───
+
+    private static final String DOOMED_MESSAGE = "a request body contains the reference ${vault:anthropic-api-key}, which the agent "
+            + "configuration does not write there: it came from conversation data. Send the credential's NAME in a field the "
+            + "endpoint documents (for example vaultKeyName).";
+
+    /**
+     * Routes {@code calculate} to the given resolver, as an httpcall tool's would
+     * be.
+     */
+    private AgentOrchestrator withResolver(ToolRequestResolver resolver) {
+        var spied = spy(orchestrator);
+        doAnswer(invocation -> {
+            var real = (AgentOrchestrator.ToolSetup) invocation.callRealMethod();
+            return new AgentOrchestrator.ToolSetup(real.toolSpecs(), real.toolExecutors(), real.toolSources(),
+                    real.builtInSpecs(), real.toolCanonicalNames(), real.toolEndpoints(), Map.of("calculate", resolver));
+        }).when(spied).buildToolSetup(any(), any());
+        return spied;
+    }
+
+    @Test
+    @DisplayName("a gated call whose request the credential-reference guard refuses is refused BEFORE the pause — no approval is asked for it")
+    void doomedGatedCall_isRefusedWithoutPausing() throws Exception {
+        var task = twoToolTask();
+        ChatModel chatModel = mock(ChatModel.class);
+        var gatedReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var ungatedReq = ToolExecutionRequest.builder().id("c2").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+        var captor = ArgumentCaptor.forClass(ChatRequest.class);
+        when(chatModel.chat(captor.capture())).thenReturn(toolBatch(gatedReq, ungatedReq))
+                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("I will correct the request.")).build());
+
+        var spied = withResolver(req -> {
+            throw new ConfigReferenceRefusedException(DOOMED_MESSAGE);
+        });
+
+        // No ToolApprovalRequiredException: the loop carried on to the model.
+        var result = spied.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory, gateCalculate(), 0);
+
+        assertEquals("I will correct the request.", result.response());
+        verify(calculatorTool, never()).calculate(anyString());
+        verify(dateTimeTool, times(1)).getCurrentDateTime(anyString());
+        // The model is told why, in the guard's own words, as the tool result.
+        var refusal = captor.getAllValues().get(1).messages().stream()
+                .filter(m -> m instanceof ToolExecutionResultMessage)
+                .map(m -> (ToolExecutionResultMessage) m)
+                .filter(m -> "c1".equals(m.id()))
+                .map(ToolExecutionResultMessage::text)
+                .findFirst().orElse(null);
+        assertNotNull(refusal, "the refused call must receive a tool result");
+        assertTrue(refusal.contains("vaultKeyName"), refusal);
+        assertTrue(refusal.contains("conversation data"), refusal);
+    }
+
+    @Test
+    @DisplayName("a gated call whose request merely fails to resolve for any other reason still pauses (approved unpinned, as before)")
+    void unresolvableGatedCall_stillPauses() {
+        var task = twoToolTask();
+        ChatModel chatModel = mock(ChatModel.class);
+        var gatedReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(gatedReq));
+
+        var spied = withResolver(req -> {
+            throw new LifecycleException("could not resolve the request");
+        });
+
+        var ex = assertThrows(ToolApprovalRequiredException.class,
+                () -> spied.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory, gateCalculate(), 0));
+        assertEquals(1, ex.getBatch().getCalls().size());
+        assertFalse(ex.getBatch().getCalls().get(0).isRequestPinned());
+    }
+
+    @Test
+    @DisplayName("in a batch of two gated calls only the refused one is dropped; the other still pauses for approval")
+    void doomedAndHealthyGatedCalls_onlyTheHealthyOnePauses() {
+        var task = twoToolTask();
+        ChatModel chatModel = mock(ChatModel.class);
+        var doomed = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1\"}").build();
+        var healthy = ToolExecutionRequest.builder().id("c2").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(doomed, healthy));
+
+        var cfg = new ToolApprovalsConfig();
+        cfg.setRequireApproval(List.of("calculate", "getCurrentDateTime"));
+        var spied = withResolver(req -> {
+            throw new ConfigReferenceRefusedException(DOOMED_MESSAGE);
+        });
+
+        var ex = assertThrows(ToolApprovalRequiredException.class,
+                () -> spied.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory, cfg, 0));
+
+        assertEquals(List.of("c2"), ex.getBatch().getCalls().stream().map(PendingToolCallBatch.PendingToolCall::getCallId).toList());
+        verify(calculatorTool, never()).calculate(anyString());
     }
 }

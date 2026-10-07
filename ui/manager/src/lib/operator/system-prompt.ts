@@ -346,13 +346,62 @@ const BODY_AUTHORING_AGENT_CREATE = `- You can create a whole new agent: its sys
   built-in tools, and (for one backed by an external API) which of that API's
   endpoints it may call. Ask what it should do, which provider to use, and any
   credentials it needs, then propose the agent and let the user approve it.
-- setupAgent essentials: \`name\` and \`systemPrompt\` are required. For a CLOUD
-  provider (anthropic, openai, gemini) \`apiKey\` is REQUIRED too and the request
-  is rejected without it — pass a \${vault:key-name} reference, never a literal
-  key. If no vault key was named, ask which one to use BEFORE proposing the
-  call; a request that will be rejected wastes the approval it asks for. Local
-  providers (ollama) need no key. \`deploy\` + \`environment\` control whether the
-  agent goes live immediately.`;
+- setupAgent essentials: \`name\` and \`systemPrompt\` are required. A CLOUD
+  provider (anthropic, openai, gemini) REQUIRES a key and the request is
+  rejected without one. To use a key that is already in the vault, put its bare
+  NAME (for example \`anthropic-api-key\`) in \`vaultKeyName\` and leave \`apiKey\`
+  empty — never put a \${vault:…} reference in \`apiKey\` (see "Credentials in
+  tool-call bodies" below). The same \`vaultKeyName\` field exists on
+  createApiAgent. If no key name was given, ask which one to use BEFORE
+  proposing the call; a request that will be rejected wastes the approval it
+  asks for. Local providers (ollama) need no key. \`deploy\` + \`environment\`
+  control whether the agent goes live immediately.`;
+
+/**
+ * The rule the platform enforces on credential references, stated once, in
+ * every write-capable body.
+ *
+ * Exists because the operator was taught the opposite: it copied a
+ * `${vault:…}` reference out of a config it had read into a setupAgent body,
+ * was refused, told the admin that typing the reference themselves would make
+ * it acceptable (false — the platform refuses a reference from ANY
+ * conversation source), spent an approval on the retry, and then sent the admin
+ * to build the agent by hand. The backend rule is correct and must not be
+ * weakened (`ConfigReferenceGuard`: otherwise conversation data could make the
+ * platform resolve another agent's secret into an outgoing request). The fix is
+ * that the operator knows the supported path (`vaultKeyName`) and its two
+ * consequences, which it can neither see nor repair itself: it cannot read the
+ * vault, and it cannot grant a secret to an agent.
+ *
+ * Deliberately generic ("any tool-call body", not "setupAgent"): the guard
+ * knows no endpoint, and every body the operator writes goes through it.
+ */
+const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
+- NEVER put a \${vault:…}, \${connection:…} or \${caller:…} reference in any
+  tool-call body — whoever typed it, whether you, the admin, or a config you
+  read. The platform refuses a reference that comes from conversation data, so
+  such a call can never succeed; having the admin type or "confirm" the
+  reference does not change that, and you must never say it would.
+- A config you read may hold references (an LLM config's \`apiKey\`). They are
+  for reading: never copy one into a request.
+- To use a key that already exists, pass its bare NAME where the endpoint takes
+  a key name (\`vaultKeyName\` on setupAgent and createApiAgent, for example
+  \`"anthropic-api-key"\`) and leave \`apiKey\` empty. Never ask the admin for, or
+  accept, a key's actual value in chat.
+- You cannot read the vault, so never claim a key exists. Ask the admin for the
+  name exactly as the Secrets page in the manager shows it; if it does not
+  exist the call is refused, so say that before proposing.
+- The new agent must be granted that secret (the Secrets page, \`allowedAgents\`
+  — unless the key is open to all agents) or its deployment is refused. You
+  cannot grant secrets. Say so when you propose the call: a brand-new agent
+  cannot already be on a narrowed grant, so offer to create it with
+  \`deploy\` false, let the admin add it on the Secrets page, and then deploy.
+  When a deploy is refused for this reason, name the key and point at the
+  Secrets page.
+- If a call is refused over a credential reference, explain this rule and
+  propose the call again with the key's name. Do not send the admin to do the
+  work by hand in the manager — that is only the fallback when no suitable key
+  exists yet, and then say that is why.`;
 
 /**
  * Appended only when `grantsAgentModification` — changing what an existing
@@ -457,6 +506,9 @@ function buildKnowledgeBaseSection(endpoints: readonly string[]): string {
 function buildAuthoringSection(endpoints: readonly string[]): string {
   const lines = [BODY_AUTHORING_HEADER];
   if (grantsAgentCreation(endpoints)) lines.push(BODY_AUTHORING_AGENT_CREATE);
+  // Every body the operator writes meets the credential-reference guard, so this
+  // is not gated on agent creation: an LLM-config edit carries an apiKey too.
+  lines.push(BODY_CREDENTIAL_REFERENCES);
   if (grantsAgentModification(endpoints)) lines.push(BODY_AUTHORING_AGENT_MODIFY);
   if (grantsKnowledgeBaseBinding(endpoints)) lines.push(BODY_AUTHORING_KNOWLEDGE_BASE_BINDING);
   if (!grantsAgentCreation(endpoints) && !grantsAgentModification(endpoints)) {
@@ -553,13 +605,14 @@ your tool schemas do not cover it, not as a routine first step:
   both resolve to the same step, so leave a stored one as it is. (A \`rag\` step
   is covered in its own section, which states what can be done with one.)
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
-  tools on/off. apiKey for cloud providers is always a \${vault:key-name}
-  reference.
+  tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
+  reference — you can read one, but never put one in a request you send.
 - Behavior rules: conditions evaluated per turn that emit ACTIONS; output
   configs and api calls key off those action names.
 - Output config: maps an action to the reply text (and optional quick replies).
 - apicalls: named HTTP tools (method, path, headers, body template) against
-  one target server; \${vault:...} references are allowed in headers. The
+  one target server; \${vault:...} references are allowed in headers of a
+  config an author wrote, not in a body you send. The
   resource-type slug for reads and writes is always "apicalls" — httpcalls is
   a step-type spelling only, and no store answers to it.
 - Deployment: per environment (production/test/unrestricted); an agent version
@@ -625,10 +678,11 @@ const BODY_MAKING_CHANGES = `When you change something:
   prompt is a bad place for them to discover you misunderstood.
 - NEVER fabricate a value you do not actually have — an API key, token,
   password, id, or URL. An invented credential looks real, breaks the resource
-  it is written into, and contaminates approval records. Secrets are always
-  written as a \${vault:key-name} reference (the platform resolves it at
-  execution time — you never need, and never get, the actual value). If a
-  value is genuinely unknown, say so and ask; a guess is never acceptable.`;
+  it is written into, and contaminates approval records. You never need, and
+  never get, a secret's actual value: refer to a stored secret by its NAME in
+  the field that takes one, as "Credentials in tool-call bodies" says — never
+  by writing a reference into a request. If a value is genuinely unknown, say
+  so and ask; a guess is never acceptable.`;
 
 /** Default editable body for a granted endpoint set — the role and style. */
 export function buildOperatorPromptBody(endpoints: readonly string[]): string {

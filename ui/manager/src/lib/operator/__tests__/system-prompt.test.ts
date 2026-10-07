@@ -537,14 +537,73 @@ describe("prompt corrections from dev testing", () => {
     const body = defaultOperatorPromptBody("read_write");
     // Anchored to the cloud-provider sentence itself — a bare /apiKey.*REQUIRED/
     // could be satisfied by an unrelated later "REQUIRED".
-    expect(body).toMatch(/For a CLOUD\s+provider \(anthropic, openai, gemini\) `apiKey` is REQUIRED/);
-    expect(body).toContain("${vault:key-name}");
+    expect(body).toMatch(/A CLOUD\s+provider \(anthropic, openai, gemini\) REQUIRES a key/);
     // ...and the local exception, so the operator does not demand a key ollama
     // does not need.
     expect(body).toMatch(/Local\s+providers \(ollama\) need no key/);
-    expect(body).toMatch(/ask which one to use BEFORE proposing the\s+call/);
+    expect(body).toMatch(/ask which one to use BEFORE\s+proposing the call/);
     // And the read-only scope, which cannot create agents, does not carry it.
     expect(defaultOperatorPromptBody("read_only")).not.toContain("setupAgent essentials");
+  });
+});
+
+/**
+ * The platform refuses any `${vault:…}`/`${connection:…}`/`${caller:…}` reference
+ * that reaches a request body from conversation data (`ConfigReferenceGuard`).
+ * Observed: the operator copied its own LLM config's reference into setupAgent,
+ * told the admin that typing the reference would make it acceptable (false),
+ * burned an approval on the retry, and sent the admin to build the agent by
+ * hand. The prompt must teach the supported path instead.
+ */
+describe("credential references in tool-call bodies", () => {
+  const body = defaultOperatorPromptBody("read_write");
+  const flat = body.replace(/\s+/g, " ");
+
+  it("forbids a reference in any tool-call body, whoever typed it", () => {
+    expect(flat).toContain("NEVER put a ${vault:…}, ${connection:…} or ${caller:…} reference in any tool-call body");
+    expect(flat).toContain("whoever typed it");
+    expect(flat).toContain("The platform refuses a reference that comes from conversation data");
+  });
+
+  it("says that having the admin type the reference does not help — the exact false claim it made", () => {
+    expect(flat).toContain('having the admin type or "confirm" the reference does not change that');
+  });
+
+  it("points at vaultKeyName with a bare name and an empty apiKey, on both creation tools", () => {
+    expect(flat).toContain("pass its bare NAME where the endpoint takes a key name");
+    expect(flat).toContain("`vaultKeyName` on setupAgent and createApiAgent");
+    expect(flat).toContain("leave `apiKey` empty");
+    // The creation bullet states it where the operator decides the call.
+    expect(flat).toContain("put its bare NAME (for example `anthropic-api-key`) in `vaultKeyName` and leave `apiKey` empty");
+  });
+
+  it("never advertises writing a reference — the sentences that taught the opposite are gone", () => {
+    expect(flat).not.toContain("pass a ${vault:key-name} reference");
+    expect(flat).not.toContain("Secrets are always written as a ${vault:key-name} reference");
+    expect(flat).not.toContain("is always a ${vault:key-name} reference");
+  });
+
+  it("says it cannot read the vault, so it never claims a key exists", () => {
+    expect(flat).toContain("You cannot read the vault, so never claim a key exists");
+  });
+
+  it("says the new agent must be granted the secret, that it cannot grant, and the deploy-false route", () => {
+    expect(flat).toContain("must be granted that secret (the Secrets page, `allowedAgents`");
+    expect(flat).toContain("You cannot grant secrets");
+    expect(flat).toContain("create it with `deploy` false");
+  });
+
+  it("tells it to explain and retry with the name — not to send the admin off to do it by hand", () => {
+    expect(flat).toContain("explain this rule and propose the call again with the key's name");
+    expect(flat).toContain("Do not send the admin to do the work by hand in the manager");
+  });
+
+  it("appears once — an amendment of the existing sections, not a second copy", () => {
+    expect(body.split("Credentials in tool-call bodies:").length - 1).toBe(1);
+  });
+
+  it("is a write-scope rule: the read-only body has no use for it", () => {
+    expect(defaultOperatorPromptBody("read_only")).not.toContain("Credentials in tool-call bodies:");
   });
 });
 

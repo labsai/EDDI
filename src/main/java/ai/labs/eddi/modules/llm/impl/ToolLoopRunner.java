@@ -19,6 +19,7 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
@@ -28,6 +29,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
@@ -444,8 +446,10 @@ class ToolLoopRunner {
                     // calls. clearedCallIds carries the human-approved ids on resume so
                     // they are never re-gated. Inert when effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
-                    var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources, setup.toolEndpoints(),
-                            effectiveToolApprovals, clearedCallIds);
+                    var gateResult = refuseDoomedGatedCalls(
+                            toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources, setup.toolEndpoints(),
+                                    effectiveToolApprovals, clearedCallIds),
+                            setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
 
                     if (!gateResult.gated().isEmpty()) {
                         int pausesSoFar = ToolApprovalGateSupport.readToolPauseCount(memory);
@@ -607,6 +611,77 @@ class ToolLoopRunner {
             throw e;
         } catch (Exception e) {
             throw wrapLoopFailure(e);
+        }
+    }
+
+    /**
+     * Refuses, before a human is asked, every gated call that is certain to be
+     * refused when it runs: one whose rendered request carries a credential
+     * reference conversation data supplied
+     * ({@link ConfigReferenceRefusedException}, the {@code ConfigReferenceGuard}
+     * rule).
+     * <p>
+     * <b>Why here.</b> Gate time already resolves each gated http call to pin it
+     * ({@code ToolApprovalGateSupport#pinResolvedRequest}), and that resolution
+     * runs the same request build — the guard included — as execution. But the
+     * pinning step is deliberately never allowed to fail a pause, so the guard's
+     * refusal was swallowed there ("approved unpinned") and the approver was shown
+     * a card for a call that was refused the instant they approved it: an approval
+     * spent on nothing, and a model told "refused" only afterwards. Refusing first
+     * costs the human nothing, and the refusal — which names the reference and the
+     * field, never a value — goes back to the model as the tool result so it can
+     * correct the request instead of waiting on a decision.
+     * <p>
+     * Only {@link ConfigReferenceRefusedException} counts. Any other failure to
+     * resolve is not known to be deterministic (and its message may quote the
+     * material being rendered), so those calls stay gated and are approved
+     * unpinned, exactly as before.
+     */
+    private static ToolApprovalGate.GateResult refuseDoomedGatedCalls(ToolApprovalGate.GateResult gateResult,
+                                                                      Map<String, ToolRequestResolver> resolvers,
+                                                                      List<ChatMessage> currentMessages, AiMessage aiMessage,
+                                                                      List<Map<String, Object>> trace,
+                                                                      ToolExchangeRecorder exchangeRecorder) {
+        if (resolvers == null || resolvers.isEmpty() || gateResult.gated().isEmpty()) {
+            return gateResult;
+        }
+        List<ToolExecutionRequest> stillGated = new ArrayList<>();
+        for (ToolExecutionRequest req : gateResult.gated()) {
+            var resolver = resolvers.get(req.name());
+            if (resolver == null) {
+                stillGated.add(req);
+                continue;
+            }
+            try {
+                resolver.resolve(req);
+                stillGated.add(req);
+            } catch (ConfigReferenceRefusedException refused) {
+                LOGGER.warnf("Refusing gated tool '%s' before asking for approval: a credential reference in its request came "
+                        + "from conversation data.", sanitize(req.name()));
+                addResult(currentMessages, aiMessage, req, errorJson(refused.getMessage()), exchangeRecorder);
+                Map<String, Object> step = new HashMap<>();
+                step.put("type", "tool_error");
+                step.put("tool", req.name());
+                step.put("error", "credential_reference_refused");
+                trace.add(step);
+            } catch (Exception e) {
+                // Not known to be deterministic: leave it to the pause, which pins it
+                // best-effort and approves it unpinned.
+                stillGated.add(req);
+            }
+        }
+        if (stillGated.size() == gateResult.gated().size()) {
+            return gateResult;
+        }
+        return new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
+    }
+
+    /** One JSON object with an {@code error} string, escaped. */
+    private static String errorJson(String message) {
+        try {
+            return new ObjectMapper().writeValueAsString(Map.of("error", message != null ? message : "refused"));
+        } catch (Exception e) {
+            return "{\"error\":\"refused\"}";
         }
     }
 
