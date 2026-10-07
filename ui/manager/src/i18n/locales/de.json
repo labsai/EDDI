@@ -218,7 +218,8 @@
     "removeItem": "{{item}} entfernen",
     "stepOf": "Schritt {{current}} von {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} in der Größe ändern"
+    "resizePanel": "{{panel}} in der Größe ändern",
+    "rename": "Umbenennen"
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",
@@ -267,7 +268,9 @@
     "deployToProduction": "In Produktion bereitstellen",
     "undeployFromProduction": "Aus Produktion entfernen",
     "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen",
-    "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr."
+    "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr.",
+    "sortLoadingAll": "Alle Agents werden geladen, damit die Sortierung vollständig ist…",
+    "createNamingFailed": "Agent erstellt, aber sein Name konnte nicht gespeichert werden. Benennen Sie ihn auf seiner Seite um."
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -300,7 +303,7 @@
     "enableSwd": "Strikte Schreibdisziplin aktivieren",
     "forkingDisabledTooltip": "In einer zukünftigen Version verfügbar",
     "forkingEnabled": "Sitzungs-Forking",
-    "forkingNote": "Der Endpunkt für Sitzungs-Forking (POST /v6/conversations/{{id}}/fork) ist noch nicht verfügbar.",
+    "forkingNote": "Der Endpunkt für Sitzungs-Forking (POST /v6/conversations/:id/fork) ist noch nicht verfügbar.",
     "guardrails": "Schreib-Leitplanken",
     "identity": "Kryptografische Identität",
     "keyExpired": "Abgelaufen",
@@ -458,7 +461,15 @@
       "notice": "Was der Chat den Personen mitteilt (leer lassen für den Standardtext)",
       "noticePlaceholder": "Gespräche mit diesem Agenten können von den Personen gelesen werden, die ihn betreuen, um ihn zu verbessern.",
       "versionNote": "Gilt für Gespräche mit der Version, die diese Änderung erzeugt, und allen späteren — nie für bereits Gesagtes. Slack, Teams und API-Clients können den Hinweis nicht anzeigen; wenn Personen diesen Agenten dort nutzen, erwähnen Sie es in der Begrüßung."
-    }
+    },
+    "liveElsewhere": "Aktiv: v{{live}} · Ansicht v{{viewing}} (nicht bereitgestellt)",
+    "removeWorkflow": "Workflow vom Agent entfernen",
+    "confirmRemoveWorkflow": "Workflow von diesem Agent entfernen?",
+    "confirmRemoveWorkflowDescription": "{{name}} wird als neue, noch nicht aktive Agent-Version von diesem Agent entfernt. Der Workflow selbst wird nicht gelöscht.",
+    "removeWorkflowConfirm": "Entfernen",
+    "a2aRemoveSkill": "{{skill}} entfernen",
+    "a2aAddSkill": "Skill hinzufügen",
+    "a2aCopyUrl": "URL kopieren"
   },
   "wizard": {
     "title": "Agent-Assistent"
@@ -611,7 +622,26 @@
     "saved": "Workflow erfolgreich gespeichert",
     "saveError": "Speichern fehlgeschlagen",
     "noTasks": "Keine Aufgaben in diesem Workflow",
-    "addTask": "Aufgabe hinzufügen"
+    "addTask": "Aufgabe hinzufügen",
+    "stepUnsaved": "Noch nicht gespeichert",
+    "saveAndEditHint": "Dieser Schritt ist noch nicht gespeichert. Speichern Sie zuerst den Workflow und bearbeiten Sie dann seine Konfiguration.",
+    "saveAndEdit": "Workflow speichern & bearbeiten",
+    "removeStep": "Aufgabe entfernen",
+    "configCreatedUnsaved": "Konfiguration erstellt — speichern Sie den Workflow, damit sie in der Pipeline bleibt",
+    "configNameFailed": "Konfiguration erstellt, aber ihr Name konnte nicht gespeichert werden. Benennen Sie sie später um.",
+    "newConfigName": "Name für die neue Konfiguration",
+    "newConfigNamePlaceholder": "z. B. Support-Begrüßung",
+    "agentPinsOtherVersion": "Agent-Version {{agentVer}} verwendet diesen Workflow in Version {{found}}, nicht in Version {{version}}; ein Speichern hier würde den Agent also nicht ändern. Es wurde nichts gespeichert. Öffnen Sie Version {{found}} oder lassen Sie den Agent auf Version {{version}} zeigen.",
+    "agentMissingWorkflow": "Agent-Version {{agentVer}} verwendet diesen Workflow nicht; ein Speichern hier würde den Agent also nicht ändern. Es wurde nichts gespeichert.",
+    "noVersionReturned": "Der Server hat die neue Workflow-Version nicht gemeldet.",
+    "agentUpdateFailed": "Workflow als Version {{version}} gespeichert, aber die Aktualisierung des Agents ist fehlgeschlagen: {{error}}",
+    "agentPinMismatch": "Agent-Version {{agentVer}} verwendet diesen Workflow in Version {{found}}. Sie sehen Version {{version}}; ein Speichern hier würde den Agent also nicht ändern.",
+    "switchToPinned": "Version {{version}} öffnen",
+    "pointAgentAt": "Agent auf Version {{version}} zeigen lassen",
+    "createdDeleteFailed_one": "{{count}} bei dieser Bearbeitung erstellte Konfiguration konnte nicht gelöscht werden",
+    "createdDeleteFailed_other": "{{count}} bei dieser Bearbeitung erstellte Konfigurationen konnten nicht gelöscht werden",
+    "discardDeleteCreated_one": "Auch die bei dieser Bearbeitung erstellte Konfiguration löschen ({{count}})",
+    "discardDeleteCreated_other": "Auch die {{count}} bei dieser Bearbeitung erstellten Konfigurationen löschen"
   },
   "conversations": {
     "confirmDeleteSoft": "Standardmäßig ist dies ein weiches Löschen – die Unterhaltung wird aus den Listen ausgeblendet, ihre gespeicherten Daten bleiben aber auf dem Server.",
@@ -839,7 +869,9 @@
       }
     },
     "emptyDescription": "Erstellen Sie Ihre erste {{type}}, um sie in Workflows zu verwenden.",
-    "descriptionPlaceholder": "Beschreiben Sie diese {{type}}-Konfiguration …"
+    "descriptionPlaceholder": "Beschreiben Sie diese {{type}}-Konfiguration …",
+    "viewingOldVersion": "Sie sehen Version {{current}}. Die neueste ist Version {{latest}}.",
+    "switchToLatest": "Zur neuesten wechseln"
   },
   "editor": {
     "compare": "Vergleichen",
@@ -883,7 +915,12 @@
     "savedNotLive": "Gespeichert — noch nicht aktiv",
     "savedNotLiveDescription": "Der laufende Agent liefert weiterhin die bereitgestellte Version. Zum Aktivieren bereitstellen.",
     "deployNow": "Bereitstellen",
-    "deployStarted": "Bereitstellung gestartet"
+    "deployStarted": "Bereitstellung gestartet",
+    "invalidJsonSave": "Nicht gespeichert — das JSON ist ungültig. Korrigieren Sie es im JSON-Tab.",
+    "invalidJsonShort": "Ungültiges JSON",
+    "versionLockedDirty": "Speichern oder verwerfen Sie Ihre Änderungen, um die Version zu wechseln",
+    "savedAsVersion": "Als v{{version}} gespeichert — noch nicht aktiv",
+    "updateAgentAndSave": "Agent aktualisieren und speichern"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2081,7 +2118,12 @@
     "backToAgent": "Zurück zum Agenten",
     "selectStageHint": "Wählen Sie eine Erweiterung in der Pipeline, um deren Konfiguration direkt zu bearbeiten",
     "noConfig": "Diese Pipeline-Stufe hat keine Konfigurations-URI",
-    "unsupportedType": "Für diesen Erweiterungstyp ist kein Editor verfügbar"
+    "unsupportedType": "Für diesen Erweiterungstyp ist kein Editor verfügbar",
+    "testReady": "Als v{{version}} gespeichert und bereitgestellt — der Chat ist bereit",
+    "workflow": "Workflow",
+    "unsavedTitle": "Ungespeicherte Änderungen in dieser Stufe",
+    "unsavedMessage": "Beim Wechsel der Stufe wird der Editor ersetzt. Speichern Sie Ihre Änderungen zuerst, verwerfen Sie sie oder bleiben Sie auf dieser Stufe.",
+    "discardAndSwitch": "Verwerfen & wechseln"
   },
   "ragEditor": {
     "general": "Allgemein",
@@ -5207,7 +5249,7 @@
     "workflowChanged": "Workflow {{workflowId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
     "agentChanged": "Agent {{agentId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
     "workflowMissingResource": "Workflow {{workflowId}} (Version {{version}}) verweist nicht auf {{resource}}, daher würde das Speichern hier den Agenten nicht ändern. Es wurde nichts gespeichert.",
-    "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verweist auf Workflow {{workflowId}} in Version {{found}}, nicht in Version {{expected}}. Der Agent wurde geändert, seit diese Seite geöffnet wurde. Laden Sie sie neu. Es wurde nichts gespeichert.",
+    "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verwendet Workflow {{workflowId}} in Version {{found}}, diese Seite wurde aber in Version {{expected}} geöffnet. Es wurde nichts gespeichert. Aktualisieren Sie den Agent auf die neue Workflow-Version oder öffnen Sie Version {{found}}.",
     "agentMissingWorkflow": "Agent {{agentId}} (Version {{version}}) verweist nicht auf Workflow {{workflowId}}. Es wurde nichts gespeichert."
   },
   "llmProviders": {

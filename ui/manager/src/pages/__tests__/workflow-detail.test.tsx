@@ -321,8 +321,9 @@ describe("WorkflowDetailPage", () => {
         expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
       });
 
-      // Click discard
+      // Click discard, and confirm — discarding is destructive and asks first
       await user.click(screen.getByTestId("discard-btn"));
+      await user.click(await screen.findByTestId("unsaved-confirm"));
 
       // Dirty indicator should disappear
       await waitFor(() => {

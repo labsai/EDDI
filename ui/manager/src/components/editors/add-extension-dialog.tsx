@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Plus,
@@ -25,6 +25,7 @@ import {
   type ResourceTypeConfig,
 } from "@/lib/api/resources";
 import { parseResourceUri } from "@/lib/api/agents";
+import { updateDescriptor } from "@/lib/api/descriptors";
 
 /** Build an eddi:// resource URI from resource type, ID, and version */
 function buildEddiUri(rt: ResourceTypeConfig, id: string, version: number): string {
@@ -45,6 +46,13 @@ function buildEddiUri(rt: ResourceTypeConfig, id: string, version: number): stri
 export interface AddExtensionResult {
   descriptor: ExtensionDescriptor;
   configUri?: string; // eddi:// URI if resource was created/selected
+  /**
+   * Set when this call just CREATED the resource (rather than picking an
+   * existing one). The new resource exists on the server even though the step
+   * referencing it only exists in unsaved workflow state, so the caller can
+   * offer to remove it again if that state is discarded.
+   */
+  created?: { resourceType: ResourceTypeConfig; id: string; version: number; name: string };
 }
 
 export interface AddExtensionDialogProps {
@@ -85,6 +93,8 @@ export function AddExtensionDialog({
   const [existingResources, setExistingResources] = useState<ResourceDescItem[]>([]);
   const [loadingResources, setLoadingResources] = useState(false);
   const [creatingResource, setCreatingResource] = useState(false);
+  const [newName, setNewName] = useState("");
+  const nameInputId = useId();
 
   const resetDialog = useCallback(() => {
     setStep("pick-type");
@@ -94,6 +104,7 @@ export function AddExtensionDialog({
     setFilter("");
     setLoadingResources(false);
     setCreatingResource(false);
+    setNewName("");
   }, []);
 
   const handleClose = useCallback(() => {
@@ -162,7 +173,8 @@ export function AddExtensionDialog({
 
   // Step 2a: Create a new empty resource config
   const handleCreateNew = useCallback(async () => {
-    if (!selectedType || !resourceType) return;
+    const name = newName.trim();
+    if (!selectedType || !resourceType || !name) return;
     setCreatingResource(true);
     try {
       const response = await createResource(resourceType, {});
@@ -172,18 +184,32 @@ export function AddExtensionDialog({
       const id = parts[parts.length - 1]!;
       const version = parseInt(url.searchParams.get("version") || "1", 10);
 
+      // An unnamed resource is indistinguishable from every other one in the
+      // list, and nothing ever asks for the name later.
+      try {
+        await updateDescriptor(id, version, { name });
+      } catch {
+        toast.warning(
+          t("packageEditor.configNameFailed", "Config created, but its name could not be saved. Rename it later.")
+        );
+      }
+
       const configUri = buildEddiUri(resourceType, id, version);
       toast.success(
-        t("packageEditor.configCreated", "Config created — added to pipeline")
+        t("packageEditor.configCreatedUnsaved", "Config created — save the workflow to keep it in the pipeline")
       );
-      onSelect({ descriptor: selectedType, configUri });
+      onSelect({
+        descriptor: selectedType,
+        configUri,
+        created: { resourceType, id, version, name },
+      });
       handleClose();
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
       setCreatingResource(false);
     }
-  }, [selectedType, resourceType, onSelect, handleClose, t]);
+  }, [selectedType, resourceType, newName, onSelect, handleClose, t]);
 
   // Step 2b: Use an existing resource
   const handlePickExisting = useCallback(
@@ -359,9 +385,29 @@ export function AddExtensionDialog({
 
             {/* Create New button */}
             <div className="p-4 space-y-3">
+              <div>
+                <label htmlFor={nameInputId} className="mb-1 block text-xs font-medium text-foreground">
+                  {t("packageEditor.newConfigName", "Name for the new config")}
+                </label>
+                <input
+                  id={nameInputId}
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newName.trim() && !creatingResource) {
+                      e.preventDefault();
+                      void handleCreateNew();
+                    }
+                  }}
+                  placeholder={t("packageEditor.newConfigNamePlaceholder", "e.g. Support greeting")}
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  data-testid="new-config-name"
+                />
+              </div>
               <button
                 onClick={handleCreateNew}
-                disabled={creatingResource}
+                disabled={creatingResource || !newName.trim()}
                 className="flex w-full items-center gap-3 rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 px-4 py-4 text-start hover:bg-primary/10 hover:border-primary/50 transition-all disabled:opacity-50"
                 data-testid="create-new-config"
               >

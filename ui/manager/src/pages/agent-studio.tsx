@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useId, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -8,6 +8,12 @@ import { getWorkflow } from "@/lib/api/workflows";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
 import { StudioEditorPanel, StudioEditorEmpty } from "@/components/studio/studio-editor-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { useChatStore } from "@/hooks/use-chat";
+import { useStudioSaveAndTest } from "@/components/studio/use-studio-save-and-test";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { useWorkflowDescriptors } from "@/hooks/use-workflows";
+import { useSpaces } from "@/hooks/use-spaces";
+import { accessForDetail } from "@/lib/access";
 import { ResizeHandle } from "@/components/ui/resize-handle";
 import { ErrorState } from "@/components/shared/error-state";
 import {
@@ -55,7 +61,42 @@ export function AgentStudioPage() {
   const { t } = useTranslation();
   const { agentId } = useParams<{ agentId: string }>();
   const [selectedStageIndex, setSelectedStageIndex] = useState<number | null>(null);
+  // The studio edits one of the agent's workflows at a time; the first is the default.
+  const [selectedWorkflowIndex, setSelectedWorkflowIndex] = useState(0);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const workflowSelectId = useId();
+
+  /*
+   * Unsaved edits, per mounted editor panel (the desktop and the mobile layout
+   * each mount one). Replacing a panel — by choosing another stage or workflow —
+   * discards what was typed, so the page asks first.
+   */
+  const [dirtyPanels, setDirtyPanels] = useState<ReadonlySet<string>>(new Set());
+  const savers = useRef(new Map<string, () => Promise<boolean>>());
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
+  const handleDirtyChange = useCallback((panelId: string, dirty: boolean) => {
+    setDirtyPanels((prev) => {
+      if (prev.has(panelId) === dirty) return prev;
+      const next = new Set(prev);
+      if (dirty) next.add(panelId);
+      else next.delete(panelId);
+      return next;
+    });
+  }, []);
+  const registerSaver = useCallback((panelId: string, save: (() => Promise<boolean>) | null) => {
+    if (save) savers.current.set(panelId, save);
+    else savers.current.delete(panelId);
+  }, []);
+  const hasUnsavedEdits = dirtyPanels.size > 0;
+  /** Run `action` now, or after the user has decided what to do with their edits. */
+  const guardUnsaved = useCallback(
+    (action: () => void) => {
+      if (hasUnsavedEdits) setPendingNavigation(() => action);
+      else action();
+    },
+    [hasUnsavedEdits],
+  );
+  const { saveAndTest, isRunning: isSaveAndTesting } = useStudioSaveAndTest();
 
   // Resizable panel widths. The handle reports a logical delta — positive means
   // "this panel grows" — so RTL needs no special case here.
@@ -84,6 +125,9 @@ export function AgentStudioPage() {
     enabled: !!agentId,
     staleTime: 60_000,
   });
+
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(descriptors, agentId, workspacesEnforced);
 
   const agentDescriptor = useMemo(() => {
     if (!descriptors || !agentId) return null;
@@ -150,8 +194,18 @@ export function AgentStudioPage() {
       previousQuery?.queryKey[2] === agentId ? previous : undefined,
   });
 
-  // Get the first workflow URI and fetch its pipeline
-  const workflowUri = agentConfig?.workflows?.[0];
+  // The selected workflow's URI (clamped: the agent may have fewer workflows
+  // after a switch to another agent or version)
+  const agentWorkflows = agentConfig?.workflows ?? [];
+  const workflowUri = agentWorkflows[Math.min(selectedWorkflowIndex, Math.max(agentWorkflows.length - 1, 0))];
+  const { data: workflowDescriptors } = useWorkflowDescriptors(100, 0, "");
+  const workflowLabels = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const d of workflowDescriptors ?? []) {
+      if (d.name) names.set(parseResourceUri(d.resource).id, d.name);
+    }
+    return names;
+  }, [workflowDescriptors]);
   const { workflowId, workflowVersion, agentWorkflowVersion } = useMemo(() => {
     if (!workflowUri) {
       return { workflowId: null, workflowVersion: 1, agentWorkflowVersion: undefined };
@@ -189,11 +243,76 @@ export function AgentStudioPage() {
 
   const workflowSteps = (workflowConfig?.workflowSteps ?? []) as WorkflowStep[];
 
-  const handleSelectStage = useCallback((index: number) => {
-    setSelectedStageIndex(index);
-    // On mobile, auto-switch to editor tab
-    setMobileTab("editor");
-  }, []);
+  const handleSelectStage = useCallback(
+    (index: number) => {
+      if (index === selectedStageIndex) {
+        setMobileTab("editor");
+        return;
+      }
+      guardUnsaved(() => {
+        setSelectedStageIndex(index);
+        // On mobile, auto-switch to editor tab
+        setMobileTab("editor");
+      });
+    },
+    [selectedStageIndex, guardUnsaved],
+  );
+
+  const handleSelectWorkflow = useCallback(
+    (index: number) => {
+      if (index === selectedWorkflowIndex) return;
+      guardUnsaved(() => {
+        setSelectedWorkflowIndex(index);
+        setSelectedStageIndex(null);
+      });
+    },
+    [selectedWorkflowIndex, guardUnsaved],
+  );
+
+  // Another agent: start from its first workflow, with nothing selected.
+  useEffect(() => {
+    setSelectedWorkflowIndex(0);
+    setSelectedStageIndex(null);
+  }, [agentId]);
+
+  // The chat beside the editor follows the studio's agent. It reads the global
+  // chat store, which still held whichever agent was chatted with last — the
+  // studio then tested the wrong agent without saying so. Only preselects: a
+  // conversation is started by the user (or by Save & Test), never here.
+  const agentDisplayName = agentDescriptor?.name ?? agentId ?? "";
+  useEffect(() => {
+    if (!agentId) return;
+    if (useChatStore.getState().selectedAgentId !== agentId) {
+      useChatStore.getState().setSelectedAgent(agentId, agentDisplayName);
+    }
+  }, [agentId, agentDisplayName]);
+
+  const runSaveAndTest = useCallback(
+    (save: () => Promise<{ newAgentVersion: number }>) => {
+      if (!agentId) return;
+      void saveAndTest({ agentId, agentName: agentDisplayName, save });
+    },
+    [agentId, agentDisplayName, saveAndTest],
+  );
+
+  const confirmSaveThenLeave = useCallback(async () => {
+    const action = pendingNavigation;
+    if (!action) return;
+    // Only panels that actually hold edits, one after the other: two saves in
+    // parallel would race on the same resource, workflow and agent versions.
+    let ok = true;
+    for (const panelId of dirtyPanels) {
+      const save = savers.current.get(panelId);
+      if (save && !(await save())) {
+        ok = false;
+        break;
+      }
+    }
+    setPendingNavigation(null);
+    // A failed save keeps the edits in place — the error is already on screen
+    // as a toast.
+    if (ok) action();
+  }, [pendingNavigation, dirtyPanels]);
 
   if (!agentId) {
     return (
@@ -247,6 +366,36 @@ export function AgentStudioPage() {
       </div>
     );
   }
+
+  const renderWorkflowSwitcher = (idSuffix: string) => {
+    const selectId = workflowSelectId + idSuffix;
+    return agentWorkflows.length > 1 ? (
+      <div className="px-3 pb-2">
+        <label
+          htmlFor={selectId}
+          className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60"
+        >
+          {t("studio.workflow", "Workflow")}
+        </label>
+        <select
+          id={selectId}
+          value={Math.min(selectedWorkflowIndex, agentWorkflows.length - 1)}
+          onChange={(e) => handleSelectWorkflow(Number(e.target.value))}
+          className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          data-testid="studio-workflow-switcher"
+        >
+          {agentWorkflows.map((uri, i) => {
+            const wfId = parseResourceUri(uri).id;
+            return (
+              <option key={uri} value={i}>
+                {workflowLabels.get(wfId) ?? wfId}
+              </option>
+            );
+          })}
+        </select>
+      </div>
+    ) : null;
+  };
 
   const selectedStep = selectedStageIndex !== null ? workflowSteps[selectedStageIndex] : null;
   const selectedResourceId = resourceIdOf(selectedStep?.config?.uri);
@@ -308,6 +457,7 @@ export function AgentStudioPage() {
               {t("studio.pipeline", "Pipeline")}
             </h2>
           </div>
+          {renderWorkflowSwitcher("-desktop")}
           <PipelineRailroad
             workflowSteps={workflowSteps}
             selectedIndex={selectedStageIndex}
@@ -342,6 +492,12 @@ export function AgentStudioPage() {
                 onCascadeContextChange={setSavedContext}
                 savedResourceVersion={savedResourceVersions[selectedResourceId]}
                 onResourceVersionSaved={handleResourceVersionSaved}
+                panelId="desktop"
+                onDirtyChange={handleDirtyChange}
+                registerSaver={registerSaver}
+                onSaveAndTest={runSaveAndTest}
+                isSaveAndTesting={isSaveAndTesting}
+                readOnly={!access.canEdit}
               />
             ) : (
               <StudioEditorEmpty />
@@ -357,6 +513,7 @@ export function AgentStudioPage() {
                     {t("studio.pipeline", "Pipeline")}
                   </h2>
                 </div>
+                {renderWorkflowSwitcher("-mobile")}
                 <PipelineRailroad
                   workflowSteps={workflowSteps}
                   selectedIndex={selectedStageIndex}
@@ -378,6 +535,12 @@ export function AgentStudioPage() {
                     onCascadeContextChange={setSavedContext}
                     savedResourceVersion={savedResourceVersions[selectedResourceId]}
                     onResourceVersionSaved={handleResourceVersionSaved}
+                    panelId="mobile"
+                    onDirtyChange={handleDirtyChange}
+                    registerSaver={registerSaver}
+                    onSaveAndTest={runSaveAndTest}
+                    isSaveAndTesting={isSaveAndTesting}
+                    readOnly={!access.canEdit}
                   />
                 ) : (
                   <StudioEditorEmpty />
@@ -414,6 +577,24 @@ export function AgentStudioPage() {
         )}
       </div>
 
+      {/* Leaving a stage with unsaved edits: save, discard or stay */}
+      <UnsavedChangesDialog
+        open={pendingNavigation !== null}
+        onCancel={() => setPendingNavigation(null)}
+        onConfirm={() => {
+          const action = pendingNavigation;
+          setPendingNavigation(null);
+          action?.();
+        }}
+        onSave={() => void confirmSaveThenLeave()}
+        title={t("studio.unsavedTitle", "Unsaved changes in this stage")}
+        message={t(
+          "studio.unsavedMessage",
+          "Switching stages replaces the editor. Save your changes first, discard them, or stay on this stage."
+        )}
+        confirmLabel={t("studio.discardAndSwitch", "Discard & switch")}
+      />
+
       {/* Mobile: bottom tab bar */}
       <div className="flex border-t border-border lg:hidden">
         {([
@@ -423,7 +604,11 @@ export function AgentStudioPage() {
         ]).map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setMobileTab(tab.id)}
+            onClick={() => {
+              // Leaving the editor tab unmounts the editor: ask about unsaved edits first.
+              if (mobileTab === "editor" && tab.id !== "editor") guardUnsaved(() => setMobileTab(tab.id));
+              else setMobileTab(tab.id);
+            }}
             className={cn(
               "flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium transition-colors",
               mobileTab === tab.id

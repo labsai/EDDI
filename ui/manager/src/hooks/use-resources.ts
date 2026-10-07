@@ -53,6 +53,12 @@ export function useResource<T = unknown>(
     queryKey: [...resourceKeys(slug), id, version],
     queryFn: () => getResource<T>(rt!, id, version),
     enabled: !!rt && !!id && version > 0,
+    // Moving onto another version of the SAME resource (after a save, or via the
+    // version picker) keeps the current editor mounted — and with it the active
+    // tab, scroll position and form state — instead of flashing a skeleton.
+    // A different resource never borrows the previous one's data.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === id ? previous : undefined,
   });
 }
 
@@ -90,6 +96,27 @@ export function useCreateResource(slug: string) {
       }
       return response;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
+    },
+  });
+}
+
+/** Rename a resource — its name and description live on the descriptor. */
+export function useUpdateResourceDescriptor(slug: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      version,
+      name,
+      description,
+    }: {
+      id: string;
+      version: number;
+      name: string;
+      description: string;
+    }) => updateDescriptor(id, version, { name, description }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
     },

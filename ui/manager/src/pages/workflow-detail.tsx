@@ -20,18 +20,28 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { accessForDetail } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { getErrorMessage } from "@/lib/api-client";
+import { describeSaveError } from "@/lib/save-error";
+import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { EditableTitle } from "@/components/shared/editable-title";
 import {
   useWorkflow,
   useUpdateWorkflow,
+  useUpdateWorkflowDescriptor,
   useDeleteWorkflow,
   useWorkflowVersions,
 } from "@/hooks/use-workflows";
+import { useAgent } from "@/hooks/use-agents";
+import { deleteResource, type ResourceTypeConfig } from "@/lib/api/resources";
+import { buildStepResourceLink } from "@/lib/workflow-step-links";
 
 import { parseResourceUri } from "@/lib/api/agents";
 import type { WorkflowExtension } from "@/lib/api/workflows";
 import { addWorkflowStep } from "@/lib/workflow-steps";
+import { parseVersionFromLocation } from "@/lib/api/location-version";
 import {
   PipelineBuilder,
   type PipelineItem,
@@ -43,7 +53,7 @@ import {
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
-import { getAgent, updateAgent } from "@/lib/api/agents";
+import { getAgent, updateAgent, type Agent } from "@/lib/api/agents";
 import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
 import {
   ParserEditor,
@@ -52,6 +62,37 @@ import {
   createDefaultParserData,
   type ParserData,
 } from "@/components/editors/parser-editor-types";
+
+/** A resource created by "Add Task → Create new" during this edit. */
+interface CreatedResource {
+  resourceType: ResourceTypeConfig;
+  id: string;
+  version: number;
+  name: string;
+}
+
+function parseVersionParam(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const n = parseInt(raw, 10);
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+}
+
+/** The versions of `workflowId` that an agent's workflow references name. */
+function pinnedWorkflowVersions(agent: Agent | undefined, workflowId: string): number[] {
+  const out: number[] = [];
+  for (const uri of agent?.workflows ?? []) {
+    try {
+      const ref = parseResourceUri(uri);
+      if (ref.id === workflowId) out.push(ref.version);
+    } catch {
+      // an unparseable reference cannot be this workflow
+    }
+  }
+  return out;
+}
+
+/** Thrown before anything is written when the agent does not reference what is being saved. */
+class AgentReferenceError extends Error {}
 
 /* ─── Main page ─── */
 export function WorkflowDetailPage() {
@@ -64,7 +105,11 @@ export function WorkflowDetailPage() {
   const agentId = searchParams.get("agentId") ?? undefined;
   const agentVer = searchParams.get("agentVer") ?? undefined;
 
-  const [version, setVersion] = useState<number | undefined>(undefined);
+  // The workflow version the link named. From an agent that pins an older
+  // workflow this is that version, not the newest: opening the latest instead
+  // made every save here unable to change the agent.
+  const urlVersion = parseVersionParam(searchParams.get("version"));
+  const [version, setVersion] = useState<number | undefined>(urlVersion);
   const [currentAgentVer, setCurrentAgentVer] = useState<number | undefined>(
     agentVer ? parseInt(agentVer, 10) : undefined
   );
@@ -73,6 +118,11 @@ export function WorkflowDetailPage() {
   // this. Reset after each such save — every save is its own decision.
   const [agentCompatible, setAgentCompatible] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+  // Resources created through "Add Task → Create new" in this edit. They exist
+  // on the server although the steps that reference them do not yet.
+  const [createdResources, setCreatedResources] = useState<CreatedResource[]>([]);
+  const [deleteCreatedOnDiscard, setDeleteCreatedOnDiscard] = useState(true);
   const [localExtensions, setLocalExtensions] = useState<
     WorkflowExtension[] | null
   >(null);
@@ -85,12 +135,16 @@ export function WorkflowDetailPage() {
   const [parserEditIndex, setParserEditIndex] = useState<number | null>(null);
   const [parserEditData, setParserEditData] = useState<ParserData | null>(null);
 
+  const queryClient = useQueryClient();
+  const renameMutation = useUpdateWorkflowDescriptor();
   const { data: versionDescriptors } = useWorkflowVersions(id!);
   // Deleting a workflow needs OWN; an EDIT grantee may still change it.
   // Only consulted when no descriptor for this id came back — see accessForDetail.
   // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
   const workspacesEnforced = useSpaces().enforcement;
   const access = accessForDetail(versionDescriptors, id, workspacesEnforced);
+  // A viewer gets the pipeline to look at, not to edit.
+  const readOnly = !access.canEdit;
 
   // Version picker data
   const versions = useMemo(() => {
@@ -116,12 +170,25 @@ export function WorkflowDetailPage() {
   const updateMutation = useUpdateWorkflow();
   const deleteMutation = useDeleteWorkflow();
 
+  // The agent this page was opened from, to see whether it references THIS
+  // workflow version — see `agentMismatch` below.
+  const { data: contextAgent } = useAgent(agentId ?? "", currentAgentVer);
+  const pinnedVersions = useMemo(
+    () => (agentId && contextAgent ? pinnedWorkflowVersions(contextAgent, id!) : null),
+    [agentId, contextAgent, id],
+  );
+  // The agent pins a different version of this workflow than the one on screen:
+  // a save here would not change the agent (and Save & Test used to deploy an
+  // unchanged agent version without saying so).
+  const agentMismatch =
+    pinnedVersions !== null && pinnedVersions.length > 0 && !pinnedVersions.includes(resolvedVersion);
+
   // Use local state if user has made edits, otherwise use server data
   const currentExtensions = useMemo(
     () => localExtensions ?? workflow?.workflowSteps ?? [],
     [localExtensions, workflow?.workflowSteps]
   );
-  const serverExtensions = workflow?.workflowSteps ?? [];
+  const serverExtensions = useMemo(() => workflow?.workflowSteps ?? [], [workflow?.workflowSteps]);
   const isDirty =
     localExtensions !== null &&
     JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
@@ -149,6 +216,15 @@ export function WorkflowDetailPage() {
   );
   const { data: latestVersions } = useLatestVersions(configUris);
 
+  // What the SAVED workflow references — a step outside it cannot be edited yet.
+  const savedStepUris = useMemo(
+    () =>
+      serverExtensions
+        .map((ext) => ext.config?.uri)
+        .filter((uri): uri is string => typeof uri === "string" && uri.includes("://")),
+    [serverExtensions],
+  );
+
   // Reset local state when server data changes (version switch)
   useEffect(() => {
     setLocalExtensions(null);
@@ -162,6 +238,11 @@ export function WorkflowDetailPage() {
     setAgentCompatible(false);
     setCurrentAgentVer(agentVer ? parseInt(agentVer, 10) : undefined);
   }, [agentId, agentVer]);
+
+  // Same for the workflow version a link names, and for a different workflow.
+  useEffect(() => {
+    setVersion(urlVersion);
+  }, [urlVersion, id]);
 
   // Clear save message after 3s
   useEffect(() => {
@@ -204,6 +285,10 @@ export function WorkflowDetailPage() {
             : {},
       };
       setLocalExtensions(addWorkflowStep(currentExtensions, newExt));
+      if (result.created) {
+        const created = result.created;
+        setCreatedResources((prev) => [...prev, created]);
+      }
       setShowAddDialog(false);
     },
     [currentExtensions]
@@ -225,76 +310,248 @@ export function WorkflowDetailPage() {
   );
 
 
-  const handleSave = useCallback(async () => {
-    if (!isDirty || !localExtensions) return;
-    try {
-      const result = await updateMutation.mutateAsync({
-        id: id!,
-        version: resolvedVersion,
-        config: { workflowSteps: localExtensions },
+  /**
+   * Write the edited steps as a new workflow version and, when this page was
+   * opened from an agent, point that agent at it.
+   *
+   * The agent is read and checked BEFORE anything is written. Replacing a
+   * reference that is not there used to be a silent no-op: the agent was re-saved
+   * unchanged as a new version, reported as saved and — by Save & Test —
+   * deployed, without the edit.
+   */
+  const persist = useCallback(async (): Promise<{
+    newWorkflowVersion: number;
+    newAgentVersion?: number;
+  }> => {
+    if (!localExtensions) throw new Error("Nothing to save");
+    let agent: Agent | undefined;
+    let refIndex = -1;
+    if (agentId && currentAgentVer) {
+      agent = await getAgent(agentId, currentAgentVer);
+      refIndex = (agent.workflows ?? []).findIndex((u) => {
+        try {
+          const ref = parseResourceUri(u);
+          return ref.id === id && ref.version === resolvedVersion;
+        } catch {
+          return false;
+        }
       });
-      // Track the new version so subsequent saves target the correct version
-      const wfUrl = new URL(result.location, "http://dummy");
-      const newVersion = parseInt(wfUrl.searchParams.get("version") ?? "1", 10);
-      setVersion(newVersion);
+      if (refIndex < 0) {
+        const found = pinnedWorkflowVersions(agent, id!);
+        throw new AgentReferenceError(
+          found.length > 0
+            ? t(
+                "packageEditor.agentPinsOtherVersion",
+                "Agent version {{agentVer}} uses this workflow at version {{found}}, not version {{version}}, so saving here would not change the agent. Nothing was saved. Open version {{found}}, or point the agent at version {{version}}.",
+                { agentVer: currentAgentVer, found: found.join(", "), version: resolvedVersion },
+              )
+            : t(
+                "packageEditor.agentMissingWorkflow",
+                "Agent version {{agentVer}} does not use this workflow, so saving here would not change the agent. Nothing was saved.",
+                { agentVer: currentAgentVer },
+              ),
+        );
+      }
+    }
+
+    const wfResult = await updateMutation.mutateAsync({
+      id: id!,
+      version: resolvedVersion,
+      config: { workflowSteps: localExtensions },
+    });
+    const newWorkflowVersion = parseVersionFromLocation(wfResult.location);
+    if (newWorkflowVersion === null) {
+      throw new Error(t("packageEditor.noVersionReturned", "The server did not report the new workflow version."));
+    }
+    // Track the new version so subsequent saves target the correct version
+    setVersion(newWorkflowVersion);
+    setLocalExtensions(null);
+    setCreatedResources([]);
+
+    if (!agent || !agentId || !currentAgentVer) return { newWorkflowVersion };
+
+    const newWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${newWorkflowVersion}`;
+    const updatedAgent: Agent = {
+      ...agent,
+      workflows: (agent.workflows ?? []).map((u, i) => (i === refIndex ? newWfUri : u)),
+    };
+    try {
+      const agentResult = agentCompatible
+        ? await updateAgent(agentId, currentAgentVer, updatedAgent, { compatible: true })
+        : await updateAgent(agentId, currentAgentVer, updatedAgent);
+      const newAgentVersion = parseVersionFromLocation(agentResult.location);
+      if (newAgentVersion === null) {
+        throw new Error(t("packageEditor.noVersionReturned", "The server did not report the new workflow version."));
+      }
+      setAgentCompatible(false);
+      setCurrentAgentVer(newAgentVersion);
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      return { newWorkflowVersion, newAgentVersion };
+    } catch (err) {
+      // The workflow is written; only the agent still points at the old one.
+      // The mismatch banner offers the way forward.
+      throw new AgentReferenceError(
+        t(
+          "packageEditor.agentUpdateFailed",
+          "Workflow saved as version {{version}}, but updating the agent failed: {{error}}",
+          { version: newWorkflowVersion, error: getErrorMessage(err) },
+        ),
+      );
+    }
+  }, [localExtensions, agentId, currentAgentVer, id, resolvedVersion, updateMutation, agentCompatible, queryClient, t]);
+
+  const reportSaveError = useCallback(
+    (err: unknown) => {
+      const text = err instanceof AgentReferenceError ? err.message : describeSaveError(err, t);
+      setSaveMessage({ type: "error", text });
+      toast.error(text);
+    },
+    [t],
+  );
+
+  const handleSave = useCallback(async () => {
+    if (!isDirty || !localExtensions || readOnly) return;
+    try {
+      const result = await persist();
+      if (agentId && result.newAgentVersion !== undefined) {
+        showSavedNotLiveToast({ t, queryClient, agentId, newAgentVersion: result.newAgentVersion });
+      }
       setSaveMessage({
         type: "success",
         text: t("packageEditor.saved", "Workflow saved successfully"),
       });
-      setLocalExtensions(null);
-    } catch {
-      setSaveMessage({
-        type: "error",
-        text: t("packageEditor.saveError", "Failed to save workflow"),
-      });
+    } catch (err) {
+      reportSaveError(err);
     }
-  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, t]);
+  }, [isDirty, localExtensions, readOnly, persist, agentId, queryClient, reportSaveError, t]);
 
   const handleSaveAndDeploy = useCallback(async () => {
-    if (!isDirty || !localExtensions || !agentId || !currentAgentVer) return;
+    if (!isDirty || !localExtensions || !agentId || !currentAgentVer || readOnly) return;
 
     await saveAndDeploy({
       agentId,
       save: async () => {
-        // 1. Save workflow
-        const wfResult = await updateMutation.mutateAsync({
-          id: id!,
-          version: resolvedVersion,
-          config: { workflowSteps: localExtensions },
-        });
-
-        // Parse new workflow version from location header
-        const wfUrl = new URL(wfResult.location, "http://dummy");
-        const newWfVersion = parseInt(wfUrl.searchParams.get("version") ?? "1", 10);
-        setVersion(newWfVersion);
-        setLocalExtensions(null);
-
-        // 2. Update parent agent's workflow reference
-        const agent = await getAgent(agentId, currentAgentVer);
-        const oldWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${resolvedVersion}`;
-        const newWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${newWfVersion}`;
-        const updatedAgent = {
-          ...agent,
-          workflows: (agent.workflows ?? []).map((u) =>
-            u === oldWfUri ? newWfUri : u
-          ),
-        };
-        const agentResult = agentCompatible
-          ? await updateAgent(agentId, currentAgentVer, updatedAgent, { compatible: true })
-          : await updateAgent(agentId, currentAgentVer, updatedAgent);
-        setAgentCompatible(false);
-        const agentUrl = new URL(agentResult.location, "http://dummy");
-        const newAgentVersion = parseInt(agentUrl.searchParams.get("version") ?? "1", 10);
-        setCurrentAgentVer(newAgentVersion);
-
-        return { newAgentVersion };
+        try {
+          const { newAgentVersion } = await persist();
+          if (newAgentVersion === undefined) throw new Error("The agent was not updated");
+          return { newAgentVersion };
+        } catch (err) {
+          // Save & Test shows the error's message as it stands.
+          throw new Error(err instanceof AgentReferenceError ? err.message : describeSaveError(err, t), { cause: err });
+        }
       },
     });
-  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, currentAgentVer, agentCompatible, saveAndDeploy]);
+  }, [isDirty, localExtensions, agentId, currentAgentVer, readOnly, saveAndDeploy, persist, t]);
 
+  // An unsaved step cannot be edited: its resource is not in the saved workflow,
+  // so the resource editor could not cascade into it. Save first, then open it.
+  const handleSaveAndEdit = useCallback(
+    async (index: number) => {
+      const uri = currentExtensions[index]?.config?.uri;
+      if (typeof uri !== "string" || readOnly) return;
+      try {
+        const result = await persist();
+        const link = buildStepResourceLink(uri, {
+          workflowId: id,
+          workflowVersion: result.newWorkflowVersion,
+          agentId,
+          agentVer:
+            agentId !== undefined
+              ? String(result.newAgentVersion ?? currentAgentVer ?? agentVer ?? "")
+              : undefined,
+        });
+        if (link) navigate(link);
+      } catch (err) {
+        reportSaveError(err);
+      }
+    },
+    [currentExtensions, readOnly, persist, id, agentId, currentAgentVer, agentVer, navigate, reportSaveError],
+  );
+
+  // The agent pins another version of this workflow than the one on screen:
+  // repoint it, as a new (not yet live) agent version.
+  const handlePointAgent = useCallback(async () => {
+    if (!agentId || !currentAgentVer) return;
+    try {
+      const agent = await getAgent(agentId, currentAgentVer);
+      const newWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${resolvedVersion}`;
+      let replaced = false;
+      const updatedAgent: Agent = {
+        ...agent,
+        workflows: (agent.workflows ?? []).map((u) => {
+          if (replaced) return u;
+          try {
+            if (parseResourceUri(u).id !== id) return u;
+          } catch {
+            return u;
+          }
+          replaced = true;
+          return newWfUri;
+        }),
+      };
+      // Nothing to repoint: do not write an unchanged agent version and call it saved.
+      if (!replaced) {
+        toast.error(
+          t(
+            "packageEditor.agentMissingWorkflow",
+            "Agent version {{agentVer}} does not use this workflow, so saving here would not change the agent. Nothing was saved.",
+            { agentVer: currentAgentVer },
+          ),
+        );
+        return;
+      }
+      const result = agentCompatible
+        ? await updateAgent(agentId, currentAgentVer, updatedAgent, { compatible: true })
+        : await updateAgent(agentId, currentAgentVer, updatedAgent);
+      const newAgentVersion = parseVersionFromLocation(result.location);
+      setAgentCompatible(false);
+      if (newAgentVersion !== null) setCurrentAgentVer(newAgentVersion);
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      showSavedNotLiveToast({ t, queryClient, agentId, newAgentVersion });
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    }
+  }, [agentId, currentAgentVer, id, resolvedVersion, agentCompatible, queryClient, t]);
+
+  // Discarding is destructive and used to be one click.
   const handleDiscard = useCallback(() => {
-    setLocalExtensions(null);
+    setDeleteCreatedOnDiscard(true);
+    setShowDiscardConfirm(true);
   }, []);
+
+  const confirmDiscard = useCallback(async () => {
+    setShowDiscardConfirm(false);
+    setLocalExtensions(null);
+    const created = createdResources;
+    setCreatedResources([]);
+    if (!deleteCreatedOnDiscard || created.length === 0) return;
+    const results = await Promise.allSettled(
+      created.map((c) => deleteResource(c.resourceType, c.id, c.version)),
+    );
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed > 0) {
+      toast.warning(
+        t("packageEditor.createdDeleteFailed", {
+          count: failed,
+          defaultValue: "{{count}} config created during this edit could not be deleted",
+          defaultValue_other: "{{count}} configs created during this edit could not be deleted",
+        }),
+      );
+    }
+  }, [createdResources, deleteCreatedOnDiscard, t]);
+
+  // Ctrl/Cmd+S saves, as in the config editors.
+  useEffect(() => {
+    if (readOnly) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (isDirty && !updateMutation.isPending && !isSaveAndDeploying) void handleSave();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [readOnly, isDirty, updateMutation.isPending, isSaveAndDeploying, handleSave]);
 
   // Parser inline editing handlers
   const handleEditInline = useCallback(
@@ -389,6 +646,11 @@ export function WorkflowDetailPage() {
     );
   }
 
+  const currentDescriptor = versionDescriptors?.find((d) => {
+    const match = d.resource?.match(/\?version=(\d+)/);
+    return match ? parseInt(match[1]!, 10) === resolvedVersion : false;
+  });
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -398,15 +660,16 @@ export function WorkflowDetailPage() {
           <div className="flex items-center gap-3">
             <Workflow className="h-8 w-8 text-primary" />
             <div>
-              <h1 className="text-3xl font-bold text-foreground">
-                {(() => {
-                  const desc = versionDescriptors?.find(d => {
-                    const match = d.resource?.match(/\?version=(\d+)/);
-                    return match ? parseInt(match[1]!, 10) === resolvedVersion : false;
-                  });
-                  return desc?.name || t("packageEditor.title", "Workflow Editor");
-                })()}
-              </h1>
+              <EditableTitle
+                name={currentDescriptor?.name}
+                description={currentDescriptor?.description}
+                fallback={t("packageEditor.title", "Workflow Editor")}
+                canEdit={access.canEdit}
+                onSave={({ name, description }) =>
+                  renameMutation.mutateAsync({ id: id!, version: resolvedVersion, name, description })
+                }
+                data-testid="workflow-title"
+              />
               <p className="font-mono text-sm text-muted-foreground">
                 {id}
                 <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
@@ -456,6 +719,7 @@ export function WorkflowDetailPage() {
           )}
 
           {/* Discard */}
+          {!readOnly && (
           <button
             onClick={handleDiscard}
             disabled={!isDirty || updateMutation.isPending}
@@ -465,8 +729,10 @@ export function WorkflowDetailPage() {
             <Undo2 className="h-4 w-4" />
             {t("editor.discard", "Discard")}
           </button>
+          )}
 
           {/* Save */}
+          {!readOnly && (
           <button
             onClick={handleSave}
             disabled={!isDirty || updateMutation.isPending || isSaveAndDeploying}
@@ -478,9 +744,10 @@ export function WorkflowDetailPage() {
               ? t("editor.saving", "Saving...")
               : t("editor.save", "Save")}
           </button>
+          )}
 
           {/* Save & Test */}
-          {agentId && agentVer && (
+          {!readOnly && agentId && agentVer && (
             <button
               onClick={handleSaveAndDeploy}
               disabled={!isDirty || updateMutation.isPending || isSaveAndDeploying}
@@ -500,6 +767,8 @@ export function WorkflowDetailPage() {
               onClick={() => setShowDeleteDialog(true)}
               className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
               data-testid="delete-wf-btn"
+              aria-label={t("packages.confirmDelete", "Delete Workflow")}
+              title={t("packages.confirmDelete", "Delete Workflow")}
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -507,8 +776,46 @@ export function WorkflowDetailPage() {
         </div>
       </div>
 
+      {/* The agent this page was opened from pins another version of this workflow */}
+      {!readOnly && agentMismatch && pinnedVersions && (
+        <div
+          className="flex flex-col gap-3 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 sm:flex-row sm:items-center"
+          role="alert"
+          data-testid="agent-pin-mismatch"
+        >
+          <AlertCircle className="h-5 w-5 shrink-0 text-warning" aria-hidden="true" />
+          <p className="flex-1 text-sm text-foreground">
+            {t(
+              "packageEditor.agentPinMismatch",
+              "Agent version {{agentVer}} uses this workflow at version {{found}}. You are viewing version {{version}}, so saving here would not change the agent.",
+              { agentVer: currentAgentVer, found: pinnedVersions.join(", "), version: resolvedVersion },
+            )}
+          </p>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={() => handleVersionChange(pinnedVersions[0]!)}
+              disabled={isDirty}
+              className="rounded-lg border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-50"
+              data-testid="agent-pin-switch"
+            >
+              {t("packageEditor.switchToPinned", "Open version {{version}}", { version: pinnedVersions[0] })}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handlePointAgent()}
+              disabled={isDirty}
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              data-testid="agent-pin-update"
+            >
+              {t("packageEditor.pointAgentAt", "Point agent at version {{version}}", { version: resolvedVersion })}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Save & Test also writes a new version of the agent */}
-      {agentId && agentVer && (
+      {!readOnly && agentId && agentVer && (
         <CompatibleVersionCheckbox
           checked={agentCompatible}
           onChange={setAgentCompatible}
@@ -530,6 +837,7 @@ export function WorkflowDetailPage() {
               {currentExtensions.length}
             </span>
           </div>
+          {!readOnly && (
           <button
             onClick={() => setShowAddDialog(true)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
@@ -538,6 +846,7 @@ export function WorkflowDetailPage() {
             <Plus className="h-4 w-4" />
             {t("packageEditor.addTask", "Add Task")}
           </button>
+          )}
 
         </div>
 
@@ -545,14 +854,16 @@ export function WorkflowDetailPage() {
           items={pipelineItems}
           onChange={handleReorder}
           onRemove={handleRemoveExtension}
-          disabled={updateMutation.isPending}
+          disabled={updateMutation.isPending || readOnly}
           workflowId={id}
           workflowVersion={resolvedVersion}
           agentId={agentId}
-          agentVer={agentVer}
+          agentVer={currentAgentVer !== undefined ? String(currentAgentVer) : agentVer}
           latestVersions={latestVersions}
-          onUpdateVersion={handleUpdateVersion}
-          onEditInline={handleEditInline}
+          onUpdateVersion={readOnly ? undefined : handleUpdateVersion}
+          onEditInline={readOnly ? undefined : handleEditInline}
+          savedStepUris={savedStepUris}
+          onSaveAndEdit={readOnly ? undefined : handleSaveAndEdit}
         />
       </section>
 
@@ -576,6 +887,37 @@ export function WorkflowDetailPage() {
 
       {/* Raw config (collapsible) */}
       <RawConfigSection config={workflow} />
+
+      {/* Discard confirmation */}
+      <UnsavedChangesDialog
+        open={showDiscardConfirm}
+        onConfirm={() => void confirmDiscard()}
+        onCancel={() => setShowDiscardConfirm(false)}
+        title={t("editor.discardTitle", "Discard Changes?")}
+        message={t(
+          "editor.discardMessage",
+          "Are you sure you want to discard all unsaved changes? This action cannot be undone."
+        )}
+      >
+        {createdResources.length > 0 && (
+          <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4"
+              checked={deleteCreatedOnDiscard}
+              onChange={(e) => setDeleteCreatedOnDiscard(e.target.checked)}
+              data-testid="discard-delete-created"
+            />
+            <span>
+              {t("packageEditor.discardDeleteCreated", {
+                count: createdResources.length,
+                defaultValue: "Also delete the {{count}} config created during this edit",
+                defaultValue_other: "Also delete the {{count}} configs created during this edit",
+              })}
+            </span>
+          </label>
+        )}
+      </UnsavedChangesDialog>
 
       {/* Delete confirmation dialog */}
       <AlertDialog
@@ -633,6 +975,7 @@ function VersionSelect({
   onChange: (v: number) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   if (versions.length <= 1) {
     return (
       <span
@@ -649,6 +992,8 @@ function VersionSelect({
       value={current}
       onChange={(e) => onChange(Number(e.target.value))}
       disabled={disabled}
+      aria-label={t("editor.versionPicker", "Select version")}
+      title={disabled ? t("editor.versionLockedDirty", "Save or discard your changes to switch versions") : undefined}
       className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:opacity-50"
       data-testid="version-picker"
     >
@@ -679,6 +1024,7 @@ function RawConfigSection({
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center justify-between p-5 text-start"
+        aria-expanded={expanded}
       >
         <div className="flex items-center gap-2">
           <Settings className="h-5 w-5 text-muted-foreground" />

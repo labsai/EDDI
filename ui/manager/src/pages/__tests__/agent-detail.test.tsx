@@ -593,9 +593,13 @@ describe("AgentDetailPage", () => {
 
     // Find the delete button within the workflow row
     // Each workflow card has a trash button
-    const trashButtons = screen.getAllByTitle("Delete");
+    const trashButtons = screen.getAllByRole("button", { name: "Remove workflow from agent" });
     expect(trashButtons.length).toBeGreaterThan(0);
     await user.click(trashButtons[0]!);
+
+    // Removing a workflow asks first: nothing is written until it is confirmed.
+    expect(updateCalled).toBe(false);
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
 
     await waitFor(() => {
       expect(updateCalled).toBe(true);

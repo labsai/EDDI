@@ -80,6 +80,14 @@ export function AgentsPage() {
     });
   }, [data, sortField, sortDir]);
 
+  // Sorting reorders only what is loaded, and the list loads page by page: a
+  // name or version sort over the first page would put "A..." agents from page
+  // two nowhere near the top. Anything but the default order loads every page.
+  const sortNeedsAllPages = !(sortField === "modified" && sortDir === "desc");
+  useEffect(() => {
+    if (sortNeedsAllPages && hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [sortNeedsAllPages, hasNextPage, isFetchingNextPage, fetchNextPage, data]);
+
   const toggleSort = useCallback((field: SortField) => {
     if (sortField === field) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -244,6 +252,11 @@ export function AgentsPage() {
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {t("agents.count", { count: groupedAgents.length })}
             {hasNextPage && "+"}
+            {sortNeedsAllPages && hasNextPage && (
+              <span className="ms-2 font-normal normal-case tracking-normal" data-testid="sort-loading-all">
+                {t("agents.sortLoadingAll", "Loading every agent so the sort is complete…")}
+              </span>
+            )}
           </p>
 
           {view === "card" ? (

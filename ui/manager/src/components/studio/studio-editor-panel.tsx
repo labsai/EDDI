@@ -1,6 +1,8 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
 import { describeSaveError } from "@/lib/save-error";
 import { parseResourceUri } from "@/lib/api/agents";
 import { getResourceType, type ResourceTypeConfig } from "@/lib/api/resources";
@@ -66,6 +68,25 @@ interface StudioEditorPanelProps {
   savedResourceVersion?: number;
   /** Called with every resource version a save creates (see `savedResourceVersion`). */
   onResourceVersionSaved?: (resourceId: string, version: number) => void;
+  /** Identifies this panel to the page (the desktop and mobile layouts each mount one). */
+  panelId?: string;
+  /** Whether this panel has unsaved edits — the page asks before replacing it. */
+  onDirtyChange?: (panelId: string, dirty: boolean) => void;
+  /**
+   * Hands the page a function that saves this panel's unsaved edits and resolves
+   * whether it worked, so "Save" in the page's leave-this-stage prompt can keep
+   * them. Called with `null` when the panel goes away.
+   */
+  registerSaver?: (panelId: string, save: (() => Promise<boolean>) | null) => void;
+  /**
+   * Runs Save & Test: the page saves through `save`, deploys what it created and
+   * opens the chat beside the editor on it. Without it there is no such button.
+   */
+  onSaveAndTest?: (save: () => Promise<{ newAgentVersion: number }>) => void;
+  /** A Save & Test is running — disables the buttons. */
+  isSaveAndTesting?: boolean;
+  /** Viewers see the editor, not its save buttons. */
+  readOnly?: boolean;
 }
 
 // ==================== Component ====================
@@ -80,8 +101,15 @@ export function StudioEditorPanel({
   onCascadeContextChange,
   savedResourceVersion,
   onResourceVersionSaved,
+  panelId = "panel",
+  onDirtyChange,
+  registerSaver,
+  onSaveAndTest,
+  isSaveAndTesting = false,
+  readOnly = false,
 }: StudioEditorPanelProps) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
 
   // Parse the extension type and URI
   const slug = EXTENSION_TO_SLUG[workflowStep.type] ?? "";
@@ -168,48 +196,104 @@ export function StudioEditorPanel({
     ...(agentWorkflowVersion !== undefined ? { agentWorkflowVersion } : {}),
   }), [workflowId, workflowVersion, agentId, agentVersion, agentWorkflowVersion]);
 
-  const handleSave = useCallback(
-    (jsonString: string) => {
+  /**
+   * Save through the cascade. Rejects with a readable message after adopting the
+   * versions a partly-failed cascade already wrote (or every retry 409s).
+   */
+  const performSave = useCallback(
+    async (jsonString: string) => {
+      const parsed = JSON.parse(jsonString);
       try {
-        const parsed = JSON.parse(jsonString);
-        cascadeSave.mutate(
-          {
-            id: resourceId,
-            version: currentVersion,
-            body: parsed,
-            context: cascadeContext,
-            compatible,
-          },
-          {
-            onSuccess: (result) => {
-              toast.success(t("editor.saved", "Saved successfully"));
-              setCompatible(false);
-              setSaveSuccess(true);
-              setCurrentVersion(result.newResourceVersion);
-              onResourceVersionSaved?.(resourceId, result.newResourceVersion);
-              // The next save — of this stage or any other — builds on these.
-              onCascadeContextChange?.(nextCascadeContext(cascadeContext, result));
-            },
-            onError: (err) => {
-              // A cascade that failed partway already bumped the resource (and
-              // perhaps the workflow): adopt those, or every retry 409s.
-              const partial = cascadePartialResult(err);
-              if (partial?.newResourceVersion !== undefined) {
-                setCurrentVersion(partial.newResourceVersion);
-                onResourceVersionSaved?.(resourceId, partial.newResourceVersion);
-              }
-              if (partial?.retryContext) {
-                onCascadeContextChange?.(partial.retryContext);
-              }
-              toast.error(describeSaveError(err, t));
-            },
-          },
-        );
-      } catch {
-        toast.error(t("editor.invalidJson", "Invalid JSON"));
+        const result = await cascadeSave.mutateAsync({
+          id: resourceId,
+          version: currentVersion,
+          body: parsed,
+          context: cascadeContext,
+          compatible,
+        });
+        setCompatible(false);
+        setSaveSuccess(true);
+        setCurrentVersion(result.newResourceVersion);
+        onResourceVersionSaved?.(resourceId, result.newResourceVersion);
+        // The next save, of this stage or any other, builds on these.
+        onCascadeContextChange?.(nextCascadeContext(cascadeContext, result));
+        return result;
+      } catch (err) {
+        const partial = cascadePartialResult(err);
+        if (partial?.newResourceVersion !== undefined) {
+          setCurrentVersion(partial.newResourceVersion);
+          onResourceVersionSaved?.(resourceId, partial.newResourceVersion);
+        }
+        if (partial?.retryContext) {
+          onCascadeContextChange?.(partial.retryContext);
+        }
+        throw new Error(describeSaveError(err, t), { cause: err });
       }
     },
     [resourceId, currentVersion, cascadeSave, cascadeContext, compatible, onCascadeContextChange, onResourceVersionSaved, t],
+  );
+
+  /** Plain save: the agent gets a new version that is NOT what is running. */
+  const saveJson = useCallback(
+    async (jsonString: string): Promise<boolean> => {
+      try {
+        const result = await performSave(jsonString);
+        showSavedNotLiveToast({
+          t,
+          queryClient,
+          agentId,
+          newAgentVersion: result.newAgentVersion,
+        });
+        return true;
+      } catch (err) {
+        toast.error(err instanceof SyntaxError ? t("editor.invalidJson", "Invalid JSON") : (err as Error).message);
+        return false;
+      }
+    },
+    [performSave, t, queryClient, agentId],
+  );
+
+  const handleSave = useCallback((jsonString: string) => void saveJson(jsonString), [saveJson]);
+
+  const handleSaveAndTest = useCallback(
+    (jsonString: string) => {
+      onSaveAndTest?.(async () => {
+        const result = await performSave(jsonString);
+        return { newAgentVersion: result.newAgentVersion ?? agentVersion };
+      });
+    },
+    [onSaveAndTest, performSave, agentVersion],
+  );
+
+  // The layout reports its working copy; the page asks about it before it
+  // replaces this editor with another stage's.
+  const draftRef = useRef<{ data: string; dirty: boolean }>({ data: "", dirty: false });
+  const busyRef = useRef(false);
+  busyRef.current = isSaveAndTesting || cascadeSave.isPending;
+  const handleDraftChange = useCallback(
+    (draft: { data: string; dirty: boolean }) => {
+      const wasDirty = draftRef.current.dirty;
+      draftRef.current = draft;
+      if (draft.dirty !== wasDirty) onDirtyChange?.(panelId, draft.dirty);
+    },
+    [onDirtyChange, panelId],
+  );
+  useEffect(() => {
+    registerSaver?.(panelId, async () => {
+      const { data: draft, dirty } = draftRef.current;
+      if (!dirty) return true;
+      // A save or Save & Test is already writing: starting a second would race
+      // it on the same versions. Report "not saved" so the page stays put.
+      if (busyRef.current) return false;
+      return saveJson(draft);
+    });
+    return () => registerSaver?.(panelId, null);
+  }, [registerSaver, panelId, saveJson]);
+  useEffect(
+    () => () => {
+      if (draftRef.current.dirty) onDirtyChange?.(panelId, false);
+    },
+    [onDirtyChange, panelId],
   );
 
   // ---- No URI / unsupported type ----
@@ -260,13 +344,15 @@ export function StudioEditorPanel({
 
   return (
     <div className="flex-1 overflow-y-auto p-4" data-testid="studio-editor-panel">
+      {!readOnly && (
       <CompatibleVersionCheckbox
         checked={compatible}
         onChange={setCompatible}
-        disabled={cascadeSave.isPending}
+        disabled={cascadeSave.isPending || isSaveAndTesting}
         previousGeneration={currentAgent ? (currentAgent.compatibilityGeneration ?? null) : undefined}
         className="mb-3"
       />
+      )}
       <ConfigEditorLayout
         typeName={typeName}
         resourceId={resourceId}
@@ -275,6 +361,10 @@ export function StudioEditorPanel({
         currentVersion={currentVersion}
         onVersionChange={setCurrentVersion}
         onSave={handleSave}
+        onSaveAndDeploy={onSaveAndTest && !readOnly ? handleSaveAndTest : undefined}
+        isSaveAndDeploying={isSaveAndTesting}
+        readOnly={readOnly}
+        onDraftChange={handleDraftChange}
         isSaving={cascadeSave.isPending}
         saveSuccess={saveSuccess}
         saveError={

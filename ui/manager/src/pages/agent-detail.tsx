@@ -1,7 +1,7 @@
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
 import type { Environment } from "@/lib/constants";
@@ -50,7 +50,9 @@ import {
   useDeleteAgent,
   useDuplicateAgent,
   useAgentVersions,
+  useUpdateAgentDescriptor,
 } from "@/hooks/use-agents";
+import { EditableTitle } from "@/components/shared/editable-title";
 import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
@@ -92,7 +94,8 @@ export function AgentDetailPage() {
 
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [showAddWorkflow, setShowAddWorkflow] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  // The workflow being removed — confirmed in a dialog before anything is written.
+  const [removeWorkflowUri, setRemoveWorkflowUri] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   // Undeploy confirmation — tracks which environment is being undeployed plus
@@ -143,6 +146,12 @@ export function AgentDetailPage() {
   const startConversationMutation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
+  // Production may be live at ANOTHER version than the one on screen (an inline
+  // edit creates a new version nobody has deployed). Say so, rather than
+  // describing only the viewed version as "Not deployed" while v5 serves.
+  const productionEntry = envStatuses?.find((e) => e.environment === "production");
+  const liveElsewhereVersion =
+    status === "NOT_FOUND" && productionEntry?.status === "READY" ? productionEntry.deployedVersion : undefined;
   const config = statusIcons[status];
   const StatusIcon = config.icon;
   const statusLabels: Record<string, string> = {
@@ -151,7 +160,13 @@ export function AgentDetailPage() {
     ERROR: t("status.error", "Error"),
     NOT_FOUND: t("status.notDeployed", "Not deployed"),
   };
-  const statusLabel = statusLabels[status] ?? status;
+  const statusLabel =
+    liveElsewhereVersion !== undefined
+      ? t("agentDetail.liveElsewhere", "Live: v{{live}} · Viewing v{{viewing}} (not deployed)", {
+          live: liveElsewhereVersion,
+          viewing: resolvedVersion,
+        })
+      : (statusLabels[status] ?? status);
   const isDeployed = status === "READY";
   const isBusy = deployMutation.isPending || undeployMutation.isPending || status === "IN_PROGRESS";
 
@@ -165,14 +180,21 @@ export function AgentDetailPage() {
     [agent?.workflows]
   );
   const { data: latestVersions } = useLatestVersions(workflowUris);
-
-  // Clear save message after 3s
-  useEffect(() => {
-    if (saveMessage) {
-      const timer = setTimeout(() => setSaveMessage(null), 3000);
-      return () => clearTimeout(timer);
+  // Workflow rows show names, not raw ids.
+  const { data: workflowDescriptors } = useWorkflowDescriptors(100, 0, "");
+  const workflowNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const d of workflowDescriptors ?? []) {
+      if (!d.name) continue;
+      try {
+        names.set(parseResourceUri(d.resource).id, d.name);
+      } catch {
+        // an unparseable descriptor cannot name a row
+      }
     }
-  }, [saveMessage]);
+    return names;
+  }, [workflowDescriptors]);
+  const renameMutation = useUpdateAgentDescriptor();
 
   function handleDeploy() {
     deployMutation.mutate(
@@ -249,7 +271,10 @@ export function AgentDetailPage() {
     updateWorkflowsMutation.mutate(
       { agentId: id!, version: resolvedVersion, workflows: updated },
       {
-        onSuccess: () => toast.success(t("agentDetail.workflowRemoved", "Workflow removed")),
+        onSuccess: () => {
+          setRemoveWorkflowUri(null);
+          toast.success(t("agentDetail.workflowRemoved", "Workflow removed"));
+        },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
@@ -346,14 +371,31 @@ export function AgentDetailPage() {
           <div className="flex items-center gap-3">
             <Bot className="h-8 w-8 text-primary" />
             <div>
-              <h1 className="text-3xl font-bold text-foreground">
-                {versions?.find(v => v.version === resolvedVersion)?.name || t("agentDetail.title", "Agent Detail")}
-              </h1>
+              <EditableTitle
+                name={versions?.find((v) => v.version === resolvedVersion)?.name}
+                description={versions?.find((v) => v.version === resolvedVersion)?.description}
+                fallback={t("agentDetail.title", "Agent Detail")}
+                canEdit={access.canEdit}
+                onSave={async ({ name, description }) => {
+                  // The list reads the newest version's descriptor, the header
+                  // the viewed one: keep both in step.
+                  const latest = versions?.[0]?.version ?? resolvedVersion;
+                  await renameMutation.mutateAsync({ id: id!, version: latest, name, description });
+                  if (latest !== resolvedVersion) {
+                    await renameMutation.mutateAsync({ id: id!, version: resolvedVersion, name, description });
+                  }
+                }}
+                data-testid="agent-title"
+              />
               <p className="font-mono text-sm text-muted-foreground">
                 {id}
-                <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
-                  v{resolvedVersion}
-                </span>
+                {/* The version selector below already names the version; a second
+                    "v1" beside the id said the same thing twice. */}
+                {!(versions && versions.length > 0) && (
+                  <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
+                    v{resolvedVersion}
+                  </span>
+                )}
                 <CompatibilityGenerationBadge generation={agent.compatibilityGeneration} />
               </p>
             </div>
@@ -401,7 +443,9 @@ export function AgentDetailPage() {
               {isBusy
                 ? t("common.loading")
                 : isDeployed
-                  ? t("agents.undeploy")
+                  ? liveEnvironments.length > 1
+                    ? t("agents.undeployFromProduction", "Undeploy from production")
+                    : t("agents.undeploy")
                   : t("agents.deploy")}
             </button>
 
@@ -417,12 +461,19 @@ export function AgentDetailPage() {
                   drawerStore.setStep("deploying");
                   try {
                     await deployAgent("production", id!, resolvedVersion);
+                    let ready = false;
                     for (let i = 0; i < 15; i++) {
                       await new Promise(r => setTimeout(r, 2000));
                       const s = await getDeploymentStatus("production", id!, resolvedVersion);
-                      if (s.status === "READY") break;
-                      if (s.status === "ERROR") throw new Error("Deploy failed");
+                      if (s.status === "READY") {
+                        ready = true;
+                        break;
+                      }
+                      if (s.status === "ERROR") throw new Error(t("agents.deployError", "Deploy failed"));
                     }
+                    // Starting a conversation on an agent that never came up
+                    // fails further on with a message about something else.
+                    if (!ready) throw new Error(t("chatDrawer.timeout", "Deploy timed out"));
                     // Invalidate immediately after deployment is confirmed so
                     // caches are fresh even if the conversation start fails.
                     queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -557,23 +608,6 @@ export function AgentDetailPage() {
         </div>
       )}
 
-      {/* Save feedback */}
-      {saveMessage && (
-        <div
-          className={cn(
-            "rounded-lg px-4 py-2 text-sm font-medium transition-all",
-            saveMessage.type === "success"
-              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-              : "bg-destructive/10 text-destructive"
-          )}
-          data-testid="save-feedback"
-          role="status"
-          aria-live="polite"
-        >
-          {saveMessage.text}
-        </div>
-      )}
-
       {/* Environment Status Badges */}
       {envStatuses && envStatuses.length > 0 && (
         <EnvironmentBadges
@@ -626,7 +660,10 @@ export function AgentDetailPage() {
             const { id: wfId, version: wfVersion } = parseResourceUri(wfUri);
             const latestVer = latestVersions?.[wfId];
             const isStale = latestVer !== undefined && latestVer > wfVersion;
-            const workflowLink = `/manage/workflowview/${wfId}?agentId=${id}&agentVer=${resolvedVersion}`;
+            // The version THIS agent references, not whatever is newest: opened at
+            // the latest, a save could not change an agent pinned to an older one.
+            const workflowLink = `/manage/workflowview/${wfId}?version=${wfVersion}&agentId=${id}&agentVer=${resolvedVersion}`;
+            const workflowName = workflowNames.get(wfId);
             return (
               <div
                 key={wfUri}
@@ -645,8 +682,11 @@ export function AgentDetailPage() {
                   className="flex-1 min-w-0"
                 >
                   <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors truncate">
-                    {wfId}
+                    {workflowName ?? wfId}
                   </p>
+                  {workflowName && (
+                    <p className="font-mono text-[10px] text-muted-foreground truncate">{wfId}</p>
+                  )}
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                       v{wfVersion}
@@ -679,12 +719,14 @@ export function AgentDetailPage() {
                     <ExternalLink className="h-3 w-3" />
                   </Link>
                   <button
-                    onClick={() => handleRemoveWorkflow(wfUri)}
+                    onClick={() => setRemoveWorkflowUri(wfUri)}
                     disabled={updateWorkflowsMutation.isPending}
                     className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-                    title={t("common.delete")}
+                    title={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
+                    aria-label={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
+                    data-testid={`remove-workflow-${wfId}`}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -706,6 +748,7 @@ export function AgentDetailPage() {
       <A2ASection
         agent={agent}
         agentId={id!}
+        agentName={versions?.find((v) => v.version === resolvedVersion)?.name}
         version={resolvedVersion}
       />
 
@@ -809,6 +852,28 @@ export function AgentDetailPage() {
         </div>
       </AlertDialog>
 
+      {/* Remove-workflow confirmation */}
+      <AlertDialog
+        open={removeWorkflowUri !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveWorkflowUri(null);
+        }}
+        title={t("agentDetail.confirmRemoveWorkflow", "Remove workflow from this agent?")}
+        description={t(
+          "agentDetail.confirmRemoveWorkflowDescription",
+          "{{name}} is removed from this agent as a new, not yet live agent version. The workflow itself is not deleted.",
+          {
+            name: removeWorkflowUri
+              ? (workflowNames.get(parseResourceUri(removeWorkflowUri).id) ?? parseResourceUri(removeWorkflowUri).id)
+              : "",
+          }
+        )}
+        confirmLabel={t("agentDetail.removeWorkflowConfirm", "Remove")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={() => removeWorkflowUri && handleRemoveWorkflow(removeWorkflowUri)}
+        isPending={updateWorkflowsMutation.isPending}
+      />
+
       {/* Delete confirmation dialog */}
       <AlertDialog
         open={showDeleteDialog}
@@ -857,6 +922,7 @@ function VersionSelect({
   current: number;
   onChange: (v: number) => void;
 }) {
+  const { t } = useTranslation();
   if (versions.length <= 1) {
     return (
       <span
@@ -872,6 +938,7 @@ function VersionSelect({
     <select
       value={current}
       onChange={(e) => onChange(Number(e.target.value))}
+      aria-label={t("editor.versionPicker", "Select version")}
       className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
       data-testid="version-picker"
     >
@@ -1164,10 +1231,13 @@ function RawConfigSection({ agent }: { agent: Agent }) {
 function A2ASection({
   agent,
   agentId,
+  agentName,
   version,
 }: {
   agent: Agent;
   agentId: string;
+  /** The agent's name from its descriptor — the document does not carry it. */
+  agentName?: string;
   version: number;
 }) {
   const { t } = useTranslation();
@@ -1235,11 +1305,13 @@ function A2ASection({
 
   // Build a preview of the Agent Card (mirrors AgentCardService.java)
   const agentCard = {
-    name: `EDDI Agent ${agentId}`,
+    name: agentName || `EDDI Agent ${agentId}`,
     description: agent.description || "EDDI conversational AI agent",
     url: rpcUrl,
     provider: "EDDI",
-    version: "6.0.0",
+    // The agent version being edited — the card the server serves carries the
+    // platform's own version, which this page does not know.
+    version: String(version),
     capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: true },
     skills: (agent.a2aSkills && agent.a2aSkills.length > 0)
       ? agent.a2aSkills.map((s) => ({
@@ -1251,35 +1323,41 @@ function A2ASection({
   };
 
   const [isOpen, setIsOpen] = useState(false);
+  const panelId = useId();
+  const descriptionId = useId();
+  const skillsId = useId();
+  const skillInputId = useId();
 
   return (
     <section className="rounded-xl border bg-card shadow-sm" data-testid="a2a-section">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn(
-          "flex w-full items-center gap-2 p-5 text-start",
-          isOpen && "border-b border-border"
-        )}
-      >
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-        <Handshake className="h-5 w-5 text-primary" />
-        <h2 className="text-lg font-semibold text-foreground">
+      <h2 className="text-lg font-semibold text-foreground">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          aria-expanded={isOpen}
+          aria-controls={panelId}
+          className={cn(
+            "flex w-full items-center gap-2 p-5 text-start",
+            isOpen && "border-b border-border"
+          )}
+        >
+          {isOpen ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          )}
+          <Handshake className="h-5 w-5 text-primary" aria-hidden="true" />
           {t("agentDetail.a2aSection", "Agent-to-Agent (A2A)")}
-        </h2>
-        {isEnabled && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <Link2 className="h-3 w-3" />
-            {t("agentDetail.a2aEnabled", "Enabled")}
-          </span>
-        )}
-      </button>
+          {isEnabled && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <Link2 className="h-3 w-3" aria-hidden="true" />
+              {t("agentDetail.a2aEnabled", "Enabled")}
+            </span>
+          )}
+        </button>
+      </h2>
 
-      {isOpen && <div className="p-5">
+      {isOpen && <div id={panelId} className="p-5">
         {!isEnabled ? (
           /* ── Disabled state: CTA ── */
           <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -1305,10 +1383,11 @@ function A2ASection({
           <div className="space-y-5">
             {/* Description */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <label htmlFor={descriptionId} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aDescription", "Agent Description")}
               </label>
               <input
+                id={descriptionId}
                 type="text"
                 value={localDesc}
                 onChange={(e) => setLocalDesc(e.target.value)}
@@ -1330,7 +1409,7 @@ function A2ASection({
 
             {/* Skills */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <label htmlFor={skillInputId} id={skillsId} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aSkills", "A2A Skills")}
               </label>
               <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1344,7 +1423,7 @@ function A2ASection({
                       type="button"
                       onClick={() => handleRemoveSkill(i)}
                       className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                      aria-label={`Remove ${skill}`}
+                      aria-label={t("agentDetail.a2aRemoveSkill", "Remove {{skill}}", { skill })}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -1358,6 +1437,7 @@ function A2ASection({
               </div>
               <div className="flex gap-1.5">
                 <input
+                  id={skillInputId}
                   type="text"
                   value={skillInput}
                   onChange={(e) => setSkillInput(e.target.value)}
@@ -1375,18 +1455,20 @@ function A2ASection({
                   type="button"
                   onClick={handleAddSkill}
                   className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                  aria-label={t("agentDetail.a2aAddSkill", "Add skill")}
+                  data-testid="a2a-add-skill"
                 >
-                  <Plus className="h-3 w-3" />
+                  <Plus className="h-3 w-3" aria-hidden="true" />
                 </button>
               </div>
             </div>
 
             {/* Endpoints */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <p id={`${panelId}-endpoints`} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aEndpoints", "Endpoints")}
-              </label>
-              <div className="space-y-1.5">
+              </p>
+              <div className="space-y-1.5" role="group" aria-labelledby={`${panelId}-endpoints`}>
                 {[
                   { method: "GET", url: cardUrl, label: "card" },
                   { method: "POST", url: rpcUrl, label: "rpc" },
@@ -1405,7 +1487,7 @@ function A2ASection({
                       type="button"
                       onClick={() => copyToClipboard(url, label)}
                       className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
-                      aria-label="Copy URL"
+                      aria-label={t("agentDetail.a2aCopyUrl", "Copy URL")}
                       data-testid={`copy-url-${label}`}
                     >
                       {copied === label ? (
@@ -1424,6 +1506,7 @@ function A2ASection({
               <button
                 type="button"
                 onClick={() => setShowCard(!showCard)}
+                aria-expanded={showCard}
                 className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                 data-testid="a2a-card-toggle"
               >

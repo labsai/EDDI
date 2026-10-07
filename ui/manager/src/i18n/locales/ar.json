@@ -218,7 +218,8 @@
     "removeItem": "إزالة {{item}}",
     "stepOf": "الخطوة {{current}} من {{total}}",
     "versionShort": "الإصدار {{version}}",
-    "resizePanel": "تغيير حجم {{panel}}"
+    "resizePanel": "تغيير حجم {{panel}}",
+    "rename": "إعادة التسمية"
   },
   "agents": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة الوكيل وجميع بياناته نهائياً.",
@@ -271,7 +272,9 @@
     "deployToProduction": "النشر في الإنتاج",
     "undeployFromProduction": "الإزالة من الإنتاج",
     "deployFailedIn": "فشل النشر في {{environment}}",
-    "undeployCompatibleHint": "المحادثات التي يمكن لإصدار منشور متوافق متابعتها لا تُنهى: تنتقل إليه في دورها التالي."
+    "undeployCompatibleHint": "المحادثات التي يمكن لإصدار منشور متوافق متابعتها لا تُنهى: تنتقل إليه في دورها التالي.",
+    "sortLoadingAll": "جارٍ تحميل جميع الوكلاء ليكتمل الفرز…",
+    "createNamingFailed": "تم إنشاء الوكيل لكن تعذّر حفظ اسمه. غيّر الاسم من صفحته."
   },
   "agentDetail": {
     "a2aDescHint": "يظهر في بطاقة الوكيل — يساعد الوكلاء الآخرين على فهم ما يفعله هذا الوكيل",
@@ -304,7 +307,7 @@
     "enableSwd": "تفعيل انضباط الكتابة الصارم",
     "forkingDisabledTooltip": "متاح في إصدار مستقبلي",
     "forkingEnabled": "تفريع الجلسة",
-    "forkingNote": "نقطة نهاية تفريع الجلسة (POST /v6/conversations/{{id}}/fork) غير متاحة بعد.",
+    "forkingNote": "نقطة نهاية تفريع الجلسة (POST /v6/conversations/:id/fork) غير متاحة بعد.",
     "guardrails": "ضوابط الكتابة",
     "identity": "الهوية التشفيرية",
     "keyExpired": "منتهي الصلاحية",
@@ -462,7 +465,15 @@
       "notice": "ما تُبلغ به المحادثة الأشخاص (اتركه فارغاً لاستخدام الصياغة القياسية)",
       "noticePlaceholder": "قد يقرأ الأشخاص الذين يشرفون على هذا الوكيل المحادثات معه، بهدف تحسينه.",
       "versionNote": "يشمل المحادثات على الإصدار الذي ينشئه هذا التغيير وما يليه — وليس أبداً ما قيل من قبل. لا تستطيع Slack وTeams وعملاء API عرض الإشعار؛ إذا كان الأشخاص يصلون إلى هذا الوكيل من خلالها، فاذكر ذلك في رسالة الترحيب."
-    }
+    },
+    "liveElsewhere": "مُفعَّل: v{{live}} · عرض v{{viewing}} (غير منشور)",
+    "removeWorkflow": "إزالة سير العمل من الوكيل",
+    "confirmRemoveWorkflow": "إزالة سير العمل من هذا الوكيل؟",
+    "confirmRemoveWorkflowDescription": "تتم إزالة {{name}} من هذا الوكيل في إصدار جديد للوكيل غير مُفعَّل بعد. لا يُحذف سير العمل نفسه.",
+    "removeWorkflowConfirm": "إزالة",
+    "a2aRemoveSkill": "إزالة {{skill}}",
+    "a2aAddSkill": "إضافة مهارة",
+    "a2aCopyUrl": "نسخ عنوان URL"
   },
   "wizard": {
     "title": "معالج Agent"
@@ -619,7 +630,34 @@
     "saved": "تم حفظ Workflow بنجاح",
     "saveError": "فشل حفظ Workflow",
     "noTasks": "[EN] No tasks in this workflow",
-    "addTask": "[EN] Add Task"
+    "addTask": "إضافة مهمة",
+    "stepUnsaved": "لم يُحفظ بعد",
+    "saveAndEditHint": "لم تُحفظ هذه الخطوة بعد. احفظ سير العمل أولاً ثم عدّل إعداده.",
+    "saveAndEdit": "حفظ سير العمل والتعديل",
+    "removeStep": "إزالة المهمة",
+    "configCreatedUnsaved": "تم إنشاء الإعداد — احفظ سير العمل للإبقاء عليه في المسار",
+    "configNameFailed": "تم إنشاء الإعداد لكن تعذّر حفظ اسمه. غيّر الاسم لاحقاً.",
+    "newConfigName": "اسم الإعداد الجديد",
+    "newConfigNamePlaceholder": "مثال: تحية الدعم",
+    "agentPinsOtherVersion": "الإصدار {{agentVer}} من الوكيل يستخدم سير العمل هذا في الإصدار {{found}} وليس الإصدار {{version}}، لذا لن يغيّر الحفظ هنا الوكيل. لم يُحفظ شيء. افتح الإصدار {{found}} أو وجّه الوكيل إلى الإصدار {{version}}.",
+    "agentMissingWorkflow": "الإصدار {{agentVer}} من الوكيل لا يستخدم سير العمل هذا، لذا لن يغيّر الحفظ هنا الوكيل. لم يُحفظ شيء.",
+    "noVersionReturned": "لم يُبلغ الخادم عن إصدار سير العمل الجديد.",
+    "agentUpdateFailed": "تم حفظ سير العمل كالإصدار {{version}}، لكن فشل تحديث الوكيل: {{error}}",
+    "agentPinMismatch": "الإصدار {{agentVer}} من الوكيل يستخدم سير العمل هذا في الإصدار {{found}}. أنت تعرض الإصدار {{version}}، لذا لن يغيّر الحفظ هنا الوكيل.",
+    "switchToPinned": "فتح الإصدار {{version}}",
+    "pointAgentAt": "توجيه الوكيل إلى الإصدار {{version}}",
+    "createdDeleteFailed_zero": "تعذّر حذف {{count}} من الإعدادات التي أُنشئت أثناء هذا التعديل",
+    "createdDeleteFailed_one": "تعذّر حذف {{count}} من الإعدادات التي أُنشئت أثناء هذا التعديل",
+    "createdDeleteFailed_two": "تعذّر حذف {{count}} من الإعدادات التي أُنشئت أثناء هذا التعديل",
+    "createdDeleteFailed_few": "تعذّر حذف {{count}} من الإعدادات التي أُنشئت أثناء هذا التعديل",
+    "createdDeleteFailed_many": "تعذّر حذف {{count}} من الإعدادات التي أُنشئت أثناء هذا التعديل",
+    "createdDeleteFailed_other": "تعذّر حذف {{count}} من الإعدادات التي أُنشئت أثناء هذا التعديل",
+    "discardDeleteCreated_zero": "حذف الإعدادات التي أُنشئت أثناء هذا التعديل أيضاً ({{count}})",
+    "discardDeleteCreated_one": "حذف الإعدادات التي أُنشئت أثناء هذا التعديل أيضاً ({{count}})",
+    "discardDeleteCreated_two": "حذف الإعدادات التي أُنشئت أثناء هذا التعديل أيضاً ({{count}})",
+    "discardDeleteCreated_few": "حذف الإعدادات التي أُنشئت أثناء هذا التعديل أيضاً ({{count}})",
+    "discardDeleteCreated_many": "حذف الإعدادات التي أُنشئت أثناء هذا التعديل أيضاً ({{count}})",
+    "discardDeleteCreated_other": "حذف الإعدادات التي أُنشئت أثناء هذا التعديل أيضاً ({{count}})"
   },
   "conversations": {
     "confirmDeleteSoft": "افتراضيًا هذا حذف مبدئي — تُخفى المحادثة من القوائم لكن تبقى بياناتها على الخادم.",
@@ -887,7 +925,9 @@
     "count_two": "موردان",
     "count_few": "{{count}} موارد",
     "count_many": "{{count}} مورد",
-    "descriptionPlaceholder": "صف إعداد {{type}} هذا…"
+    "descriptionPlaceholder": "صف إعداد {{type}} هذا…",
+    "viewingOldVersion": "أنت تعرض الإصدار {{current}}. أحدث إصدار هو {{latest}}.",
+    "switchToLatest": "التبديل إلى الأحدث"
   },
   "editor": {
     "compare": "مقارنة",
@@ -939,7 +979,12 @@
     "savedNotLive": "تم الحفظ — غير مُفعَّل بعد",
     "savedNotLiveDescription": "لا يزال الوكيل قيد التشغيل يقدّم النسخة المنشورة. انشر لتفعيل هذا التغيير.",
     "deployNow": "نشر",
-    "deployStarted": "بدأ النشر"
+    "deployStarted": "بدأ النشر",
+    "invalidJsonSave": "لم يتم الحفظ — ملف JSON غير صالح. صحّحه في تبويب JSON.",
+    "invalidJsonShort": "JSON غير صالح",
+    "versionLockedDirty": "احفظ تغييراتك أو تجاهلها للتبديل بين الإصدارات",
+    "savedAsVersion": "تم الحفظ كـ v{{version}} — غير مُفعَّل بعد",
+    "updateAgentAndSave": "تحديث الوكيل والحفظ"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -2169,7 +2214,12 @@
     "backToAgent": "العودة إلى الوكيل",
     "selectStageHint": "اختر أي إضافة في مسار العمل لعرض وتعديل إعداداتها مباشرة",
     "noConfig": "هذه المرحلة ليس لها عنوان تكوين",
-    "unsupportedType": "المحرر غير متاح لهذا النوع من الإضافات"
+    "unsupportedType": "المحرر غير متاح لهذا النوع من الإضافات",
+    "testReady": "تم الحفظ والنشر كـ v{{version}} — المحادثة جاهزة",
+    "workflow": "سير العمل",
+    "unsavedTitle": "تغييرات غير محفوظة في هذه المرحلة",
+    "unsavedMessage": "يؤدي التبديل بين المراحل إلى استبدال المحرر. احفظ تغييراتك أولاً أو تجاهلها أو ابقَ في هذه المرحلة.",
+    "discardAndSwitch": "تجاهل والتبديل"
   },
   "ragEditor": {
     "general": "عام",
@@ -5435,7 +5485,7 @@
     "workflowChanged": "تم تغيير سير العمل {{workflowId}} في مكان آخر (الإصدار الحالي {{current}}، وهذه الصفحة تعرض الإصدار {{version}}). أعد تحميل الصفحة. لم يُحفظ شيء.",
     "agentChanged": "تم تغيير الوكيل {{agentId}} في مكان آخر (الإصدار الحالي {{current}}، وهذه الصفحة تعرض الإصدار {{version}}). أعد تحميل الصفحة. لم يُحفظ شيء.",
     "workflowMissingResource": "سير العمل {{workflowId}} (الإصدار {{version}}) لا يشير إلى {{resource}}، لذا فإن الحفظ هنا لن يغيّر الوكيل. لم يُحفظ شيء.",
-    "agentWorkflowMismatch": "الوكيل {{agentId}} (الإصدار {{version}}) يشير إلى سير العمل {{workflowId}} في الإصدار {{found}} وليس الإصدار {{expected}}. تغيّر الوكيل منذ فتح هذه الصفحة. أعد تحميلها. لم يُحفظ شيء.",
+    "agentWorkflowMismatch": "الوكيل {{agentId}} (الإصدار {{version}}) يستخدم سير العمل {{workflowId}} في الإصدار {{found}}، لكن هذه الصفحة فُتحت على الإصدار {{expected}}. لم يُحفظ شيء. حدّث الوكيل ليستخدم إصدار سير العمل الجديد، أو افتح الإصدار {{found}}.",
     "agentMissingWorkflow": "الوكيل {{agentId}} (الإصدار {{version}}) لا يشير إلى سير العمل {{workflowId}}. لم يُحفظ شيء."
   },
   "llmProviders": {

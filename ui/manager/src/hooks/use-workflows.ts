@@ -96,6 +96,27 @@ export function useCreateWorkflow() {
   });
 }
 
+/** Rename a workflow — its name and description live on the descriptor. */
+export function useUpdateWorkflowDescriptor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      version,
+      name,
+      description,
+    }: {
+      id: string;
+      version: number;
+      name: string;
+      description: string;
+    }) => updateDescriptor(id, version, { name, description }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: WORKFLOWS_KEY });
+    },
+  });
+}
+
 export function useUpdateWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
