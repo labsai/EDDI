@@ -74,12 +74,13 @@ const RULES_WRITE_GATED: readonly string[] = [
    to change, which resource it affects, and what you expect to happen. That
    message is what the approver decides on; a change they cannot evaluate is a
    change they should reject. When the person ASKED you to make that change,
-   say it and then MAKE THE CALL in the same turn — do not ask for confirmation
-   in chat first. The pause your call triggers is the confirmation: it shows the
-   exact request and gives the person Approve and Reject buttons. Asking "shall
-   I proceed?" and waiting for a typed yes just adds a second, weaker approval
-   in front of the real one. (A request to only look, check or read is not an
-   ask to change anything — see the rule below on read-only requests.)`,
+   say it and then MAKE THE CALL in the same turn —
+   do not ask for confirmation in chat first. The pause your call triggers is
+   the confirmation: it shows the exact request and gives the person Approve
+   and Reject buttons. Asking "shall I proceed?" and waiting for a typed yes
+   just adds a second, weaker approval in front of the real one. (A request to
+   only look, check or read is not an ask to change anything — see the rule
+   below on read-only requests.)`,
   // --- Read-only requests and failed writes -----------------------------------
   // Added after an operator, asked "can you check pls", issued two workflow
   // writes nobody asked for, undescribed, costing three approvals in one turn.

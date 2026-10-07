@@ -97,8 +97,22 @@ describe("buildOperatorSafetyPreamble", () => {
       expect(preamble).toContain("a new agent with no approval");
     });
 
-    it("numbers nine rules contiguously", () => {
-      expect(ruleNumbers(preamble)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    it("numbers eleven rules contiguously", () => {
+      expect(ruleNumbers(preamble)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    });
+
+    it("treats check/look/verify requests as read-only: propose in plain words, wait for agreement", () => {
+      // Observed: asked "can you check pls", the operator issued two workflow
+      // writes nobody asked for, undescribed, needing three approvals in a turn.
+      expect(preamble).toMatch(/check, look at, verify, review, inspect or read/);
+      expect(preamble).toMatch(/READ-ONLY request/);
+      expect(preamble).toMatch(/PROPOSE it in plain\s+words/);
+      expect(preamble).toMatch(/wait for the person to agree before making the gated call/);
+      expect(preamble).toMatch(/Never\s+chain a change they did not ask for/);
+    });
+
+    it("says why a failed write failed before trying another", () => {
+      expect(preamble).toMatch(/tell the\s+person why it failed BEFORE you try anything else/);
     });
   });
 
