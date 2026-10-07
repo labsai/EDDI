@@ -232,6 +232,34 @@ export function DiscussionTranscript({
     [effectiveState, pendingTaskIds],
   );
 
+  // The approval card's props, held while a decision is carried out. Approving
+  // switches the transcript from the stored conversation to the live resumed
+  // stream, which would unmount the card and lose the reviewer's per-task
+  // choices if the resume then fails. The card stays mounted (hidden behind its
+  // receipt) from the last props it had, and comes back when the stream fails.
+  const awaitingNow = effectiveState === "AWAITING_APPROVAL";
+  const liveCardProps = awaitingNow
+    ? {
+        cardKey: `${gcId ?? ""}:${conversation?.pausedAt ?? ""}`,
+        pending: conversation?.state !== "AWAITING_APPROVAL",
+        pauseReason: streamState?.hitlPause?.reason || conversation?.hitlPauseReason,
+        pausedAt: conversation?.pausedAt,
+        timeoutPolicy: conversation?.hitlTimeoutPolicy,
+        approvalTimeout: conversation?.hitlApprovalTimeout,
+        pausedPhaseName: streamState?.hitlPause?.phaseName || conversation?.pausedPhaseName,
+        granularity: streamState?.hitlPause?.granularity || conversation?.hitlPauseType,
+        pendingTaskIds,
+      }
+    : null;
+  const [frozenCard, setFrozenCard] = useState<typeof liveCardProps>(null);
+  if (liveCardProps && !liveCardProps.pending && frozenCard?.cardKey !== liveCardProps.cardKey) {
+    setFrozenCard(liveCardProps);
+  }
+  const streamFailed = streamState?.state === "FAILED";
+  const cardProps =
+    liveCardProps ?? (frozenCard && (isDeciding || streamFailed) ? { ...frozenCard, pending: false } : null);
+  const cardHidden = !liveCardProps && !!cardProps && !!isDeciding;
+
   // Memoize phases to avoid re-grouping on every render
   const phases = useMemo(() => groupByPhase(effectiveTranscript), [effectiveTranscript]);
 
@@ -633,26 +661,26 @@ export function DiscussionTranscript({
         )}
 
         {/* HITL Approval Banner */}
-        {effectiveState === "AWAITING_APPROVAL" && (
-          <div className="px-6 py-4">
+        {cardProps && (
+          <div className={cn("px-6 py-4", cardHidden && "hidden")} data-testid="group-approval-slot">
             <ApprovalCard
               surface="group"
               // The same card, receipt and verify-the-pause rule as every other
               // deciding surface. Identity is the persisted pause start.
-              cardKey={`${gcId ?? ""}:${conversation?.pausedAt ?? ""}`}
+              cardKey={cardProps.cardKey}
               isResolving={!!isDeciding}
               // The stream announces AWAITING_APPROVAL BEFORE the paused
               // conversation is stored. Until the persisted conversation says so
               // too, there is no phase/task data to decide from: Approve would
               // resume a pause nobody can see the particulars of.
-              pauseDetailsPending={conversation?.state !== "AWAITING_APPROVAL"}
-              pauseReason={streamState?.hitlPause?.reason || conversation?.hitlPauseReason}
-              pausedAt={conversation?.pausedAt}
-              timeoutPolicy={conversation?.hitlTimeoutPolicy}
-              approvalTimeout={conversation?.hitlApprovalTimeout}
-              pausedPhaseName={streamState?.hitlPause?.phaseName || conversation?.pausedPhaseName}
-              granularity={streamState?.hitlPause?.granularity || conversation?.hitlPauseType}
-              pendingTaskIds={pendingTaskIds}
+              pauseDetailsPending={cardProps.pending}
+              pauseReason={cardProps.pauseReason}
+              pausedAt={cardProps.pausedAt}
+              timeoutPolicy={cardProps.timeoutPolicy}
+              approvalTimeout={cardProps.approvalTimeout}
+              pausedPhaseName={cardProps.pausedPhaseName}
+              granularity={cardProps.granularity}
+              pendingTaskIds={cardProps.pendingTaskIds}
               isSubmitting={isDeciding}
               onDecide={(verdict, note, taskApprovals) => {
                 if (gcId) onApprove?.(gcId, verdict, note, taskApprovals);
