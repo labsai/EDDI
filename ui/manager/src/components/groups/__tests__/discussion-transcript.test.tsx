@@ -380,3 +380,78 @@ describe("DiscussionTranscript", () => {
     });
   });
 });
+
+describe("DiscussionTranscript — the group approval card", () => {
+  const paused = (over: Partial<GroupConversation> = {}): GroupConversation => ({
+    ...mockConversation,
+    id: "gc-1",
+    state: "AWAITING_APPROVAL",
+    pausedAt: "2026-06-09T12:05:00Z",
+    pausedPhaseName: "Review",
+    hitlPauseType: "PHASE",
+    ...over,
+  });
+
+  it("holds Approve while only the stream says AWAITING_APPROVAL (the pause is not stored yet), Reject stays available", () => {
+    const streamOnly = {
+      conversationId: "gc-1",
+      isStreaming: false,
+      state: "AWAITING_APPROVAL",
+      transcript: [],
+      activeSpeakers: new Set<string>(),
+      convergence: new Map(),
+      taskVerifications: new Map(),
+      tasksInProgress: new Set<string>(),
+      tasksCompleted: new Set<string>(),
+      hitlPause: { reason: "Needs sign-off", phaseName: "Review", granularity: "TASK" },
+      memberCosts: new Map(),
+      stances: new Map(),
+      retroRecorded: [],
+      artifactUpdates: [],
+    } as unknown as GroupStreamState;
+    renderWithProviders(
+      <DiscussionTranscript conversation={null} streamState={streamOnly} discussionStyle="ROUND_TABLE" onApprove={vi.fn()} />,
+    );
+    expect(screen.getByTestId("approval-details-pending")).toBeInTheDocument();
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    expect(screen.getByTestId("reject-button")).not.toBeDisabled();
+  });
+
+  it("PHASE: Approve + confirm (two steps), then collapses into a receipt naming the phase", () => {
+    const onApprove = vi.fn();
+    const { rerender } = renderWithProviders(
+      <DiscussionTranscript conversation={paused()} discussionStyle="ROUND_TABLE" onApprove={onApprove} />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("approve-button"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
+    expect(onApprove).toHaveBeenCalledWith("gc-1", "APPROVED", undefined, undefined);
+    rerender(
+      <DiscussionTranscript conversation={paused()} discussionStyle="ROUND_TABLE" onApprove={onApprove} isDeciding />,
+    );
+    expect(screen.getByTestId("approval-decision-summary")).toHaveAttribute("data-verdict", "APPROVED");
+    expect(screen.getByTestId("approval-decision-summary-phase")).toHaveTextContent("Review");
+  });
+
+  it("TASK: per-task toggles are optional; the receipt lists per-task outcomes", () => {
+    const tasks = {
+      ...mockConversation.taskList,
+      tasks: [
+        { id: "t1", status: "AWAITING_APPROVAL" },
+        { id: "t2", status: "AWAITING_APPROVAL" },
+      ],
+    } as unknown as GroupConversation["taskList"];
+    const conv = paused({ hitlPauseType: "TASK", taskList: tasks });
+    const onApprove = vi.fn();
+    const { rerender } = renderWithProviders(
+      <DiscussionTranscript conversation={conv} discussionStyle="ROUND_TABLE" onApprove={onApprove} />,
+    );
+    fireEvent.click(screen.getByTestId("task-reject-t2"));
+    fireEvent.click(screen.getByTestId("approve-button"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
+    expect(onApprove).toHaveBeenCalledWith("gc-1", "APPROVED", undefined, { t1: "APPROVED", t2: "REJECTED" });
+    rerender(<DiscussionTranscript conversation={conv} discussionStyle="ROUND_TABLE" onApprove={onApprove} isDeciding />);
+    expect(screen.getByTestId("approval-decision-summary-call-t1")).toHaveAttribute("data-outcome", "APPROVED");
+    expect(screen.getByTestId("approval-decision-summary-call-t2")).toHaveAttribute("data-outcome", "REJECTED");
+  });
+});

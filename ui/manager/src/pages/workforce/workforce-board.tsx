@@ -1127,8 +1127,9 @@ function WorkforceBoard() {
             )}
           </span>
           <Link
-            to={`/manage/groups/${boardId}${version ? `?version=${version}` : ""}`}
+            to={`/manage/groups/${boardId}?${version ? `version=${version}&` : ""}conversation=${selectedConversation.id}`}
             className="font-medium text-amber-500 underline-offset-2 hover:underline"
+            data-testid="board-awaiting-approval-review"
           >
             {t("Workforce.board.reviewInManager", "Review it")}
           </Link>

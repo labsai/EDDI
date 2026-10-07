@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { PhaseHeader } from "./phase-header";
-import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { ApprovalCard } from "@/components/hitl/approval-card";
 import { HumanTurnBanner } from "./human-turn-banner";
 import { DiscussionInsights } from "./discussion-insights";
 import { AgentResponseCard } from "./agent-response-card";
@@ -635,8 +635,17 @@ export function DiscussionTranscript({
         {/* HITL Approval Banner */}
         {effectiveState === "AWAITING_APPROVAL" && (
           <div className="px-6 py-4">
-            <ApprovalBanner
+            <ApprovalCard
               surface="group"
+              // The same card, receipt and verify-the-pause rule as every other
+              // deciding surface. Identity is the persisted pause start.
+              cardKey={`${gcId ?? ""}:${conversation?.pausedAt ?? ""}`}
+              isResolving={!!isDeciding}
+              // The stream announces AWAITING_APPROVAL BEFORE the paused
+              // conversation is stored. Until the persisted conversation says so
+              // too, there is no phase/task data to decide from: Approve would
+              // resume a pause nobody can see the particulars of.
+              pauseDetailsPending={conversation?.state !== "AWAITING_APPROVAL"}
               pauseReason={streamState?.hitlPause?.reason || conversation?.hitlPauseReason}
               pausedAt={conversation?.pausedAt}
               timeoutPolicy={conversation?.hitlTimeoutPolicy}

@@ -250,6 +250,9 @@ export function GroupDetailPage() {
   // Track an in-flight HITL decision so we can toast on the ACTUAL outcome
   // (hitl_resume ack / FAILED) rather than optimistically.
   const pendingDecisionRef = useRef<HitlVerdict | null>(null);
+  // An approve/reject is in flight, from submit until the resumed stream confirms
+  // or fails. Drives the approval card's receipt.
+  const [isApproving, setIsApproving] = useState(false);
 
   /**
    * Set when the user explicitly asked for an empty composer ("New Discussion"),
@@ -353,6 +356,7 @@ export function GroupDetailPage() {
       // Feedback is driven off the resume outcome (see effect below), not fired
       // optimistically — the resume can fail (409 stale, 400 invalid decision).
       pendingDecisionRef.current = verdict;
+      setIsApproving(true);
       userClearedRef.current = true; // hold the clear until the stream takes over
       const paused = selectedConversation?.id === gcId ? selectedConversation : null;
       setResumedConversation(paused);
@@ -382,9 +386,11 @@ export function GroupDetailPage() {
       // Approvals inbox now (mirrors the cancel path) rather than waiting for the poll.
       queryClient.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
       pendingDecisionRef.current = null;
+      setIsApproving(false);
     } else if (streamState.state === "FAILED") {
       toast.error(streamState.error || t("common.error", "Something went wrong"));
       pendingDecisionRef.current = null;
+      setIsApproving(false);
     }
   }, [streamState.hitlResume, streamState.state, streamState.error, queryClient, t]);
 
@@ -962,7 +968,7 @@ export function GroupDetailPage() {
                 rosterDisplayNames={rosterDisplayNames}
                 onApprove={handleApproveDiscussion}
                 onCancelDiscussion={handleCancelDiscussion}
-                isDeciding={cancelDiscussionMutation.isPending}
+                isDeciding={cancelDiscussionMutation.isPending || isApproving}
                 onSubmitHumanInput={handleSubmitHumanInput}
                 isSubmittingHumanInput={submitHumanInputMutation.isPending}
                 humanTurnTimeout={groupConfig.humanMemberConfig?.turnTimeout}

@@ -375,3 +375,14 @@ describe("useDeleteGroupWithMembers", () => {
     );
   });
 });
+
+describe("isAwaitingHumanConversationState", () => {
+  it("is true for the two states that wait on a human, false otherwise", async () => {
+    const { isAwaitingHumanConversationState } = await import("@/hooks/use-groups");
+    expect(isAwaitingHumanConversationState("AWAITING_APPROVAL")).toBe(true);
+    expect(isAwaitingHumanConversationState("AWAITING_HUMAN_INPUT")).toBe(true);
+    for (const s of ["IN_PROGRESS", "COMPLETED", "REJECTED", undefined] as const) {
+      expect(isAwaitingHumanConversationState(s)).toBe(false);
+    }
+  });
+});
