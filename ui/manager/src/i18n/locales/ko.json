@@ -477,7 +477,7 @@
     "backToAgents": "Agents로 돌아가기",
     "next": "다음",
     "back": "이전",
-    "createOnly": "생성만",
+    "createOnly": "배포 없이 생성",
     "createAndDeploy": "생성 및 배포",
     "typeTitle": "어떤 유형의 Agent를?",
     "typeDesc": "생성할 Agent 유형을 선택하세요",
@@ -567,7 +567,25 @@
     "specUrlScheme": "http:// 및 https:// URL만 지원됩니다",
     "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 기본 제공 도구를 끄세요.",
     "hfToken": "Hugging Face 토큰",
-    "hfTokenHint": "제한되거나 비공개인 저장소에만 필요합니다. API 키처럼 보관소에 저장됩니다."
+    "hfTokenHint": "제한되거나 비공개인 저장소에만 필요합니다. API 키처럼 보관소에 저장됩니다.",
+    "stepLabel": "{{total}}단계 중 {{n}}단계: {{name}}",
+    "createAndDeployProduction": "생성 후 프로덕션에 배포",
+    "createAndDeployTest": "생성 후 테스트에 배포",
+    "reviewKeyNotNeeded": "이 제공자에는 필요하지 않음",
+    "reviewKeyNone": "없음",
+    "reviewKeyVault": "볼트 참조 {{ref}}",
+    "reviewKeyEntered": "여기에 입력함",
+    "reviewApiKey": "API 키",
+    "reviewBaseUrl": "기본 URL",
+    "deployTarget": "배포 대상",
+    "deployNoteProduction": "'생성 후 배포'를 누르면 에이전트가 즉시 프로덕션에서 실행됩니다.",
+    "deployNoteTest": "'생성 후 배포'는 에이전트를 테스트 환경에서 시작합니다. 만족스러우면 프로덕션으로 승격하세요.",
+    "step_type": "유형",
+    "step_info": "정체성",
+    "step_llm": "모델",
+    "step_apispec": "API 사양",
+    "step_features": "기능",
+    "step_review": "검토"
   },
   "packages": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 워크플로와 모든 데이터가 영구적으로 제거됩니다.",
@@ -918,7 +936,21 @@
     "noRules": "이 그룹에 규칙이 없습니다",
     "noConditions": "조건 없음",
     "sizeNoBound": "제한 없음",
-    "sizeBoundInvalid": "-2147483648에서 2147483647 사이의 정수여야 하며, 제한이 없으면 비워 두세요."
+    "sizeBoundInvalid": "-2147483648에서 2147483647 사이의 정수여야 하며, 제한이 없으면 비워 두세요.",
+    "moveUp": "{{name}} 위로 이동",
+    "moveDown": "{{name}} 아래로 이동",
+    "configValueOf": "{{key}}의 값",
+    "removeConfig": "{{key}} 제거",
+    "toggleCondition": "조건 세부 정보 표시 또는 숨기기",
+    "commaActionsWarning": "여기서 쉼표로 구분한 목록은 AND를 의미합니다. 나열된 모든 액션이 해당 순서대로 발생해야 합니다. 여러 액션 중 하나와 일치시키려면 OR 커넥터 아래에 액션마다 조건을 추가하거나 공통 액션을 내보내세요.",
+    "changeTypeTitle": "조건 유형을 변경할까요?",
+    "changeTypeDescription": "{{type}}(으)로 전환하면 이 조건의 설정이 해당 유형의 기본값으로 바뀌고, 입력한 값은 사라집니다.",
+    "changeTypeConfirm": "유형 변경",
+    "toggleRule": "규칙 세부 정보 표시 또는 숨기기",
+    "thisRule": "이 규칙",
+    "noLastStepWarning": "lastStep에 actionmatcher가 없습니다. 이 규칙은 예상한 액션 직후뿐 아니라 대화의 어느 단계에서든 실행될 수 있습니다. occurrence가 lastStep인 actionmatcher 조건을 추가하세요.",
+    "toggleGroup": "그룹 표시 또는 숨기기",
+    "thisGroup": "이 그룹"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "사양에서 엔드포인트를 찾을 수 없습니다",
@@ -1356,7 +1388,22 @@
     "compatibleEndpointOverridden": "엔드포인트: {{url}}",
     "modelType": "모델 유형",
     "paramName": "매개변수 이름",
-    "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 '기본 제공 도구 사용'을 선택 해제하세요."
+    "lastToolHint": "도구를 하나 이상 선택해야 합니다. 모두 비활성화하려면 '기본 제공 도구 사용'을 선택 해제하세요.",
+    "toggleTask": "작업 세부 정보 표시 또는 숨기기",
+    "noActionsWarning": "이 작업에는 트리거 액션이 없어 실행되지 않습니다. 동작 규칙이 내보내는 액션(예: send_message)을 추가하세요.",
+    "model": "모델",
+    "deploymentName": "배포 이름",
+    "modelName": "모델",
+    "modelMissing": "모델이 설정되지 않았습니다. 제공자가 모든 요청을 거부합니다.",
+    "apiKey": "API 키",
+    "apiKeyNotNeeded": "이 제공자는 일반적으로 API 키가 필요하지 않습니다.",
+    "temperature": "온도",
+    "temperaturePlaceholder": "제공자 기본값",
+    "temperatureInvalid": "숫자를 입력하세요(예: 0.7).",
+    "paramValueOf": "{{key}}의 값",
+    "removeParam": "매개변수 {{key}} 제거",
+    "accessToken": "액세스 토큰",
+    "authToken": "Hugging Face 토큰(선택)"
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",
@@ -1397,7 +1444,14 @@
     "maxLength": "최대 길이",
     "maxLengthShort": "최대",
     "validationMsgPlaceholder": "유효성 검사 오류 메시지...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "저장되지 않았습니다. 수정하거나 필드를 비우세요",
+    "itemType": "출력 유형",
+    "removeItem": "출력 항목 제거",
+    "removeQuickReply": "빠른 답장 제거",
+    "toggleOutput": "출력 세부 정보 표시 또는 숨기기",
+    "timesOccurredLabel": "발생 횟수",
+    "removeAlternativeGroup": "대체 그룹 {{n}} 제거"
   },
   "propertySetterEditor": {
     "setters": "속성 설정기",
@@ -1421,7 +1475,10 @@
     "visibilityTitle": "이 longTerm 속성을 볼 수 있는 Agent",
     "editValue": "값 편집",
     "toggleGroup": "속성 그룹 토글",
-    "secretFromPathWarning": "시크릿은 값 필드에서 온 경우에만 볼트에 저장됩니다. \"원본 경로\"에서 읽거나 다른 방식으로 지정하면 평문으로 저장되므로 값 필드에 입력하거나 다른 범위를 선택하세요."
+    "secretFromPathWarning": "시크릿은 값 필드에서 온 경우에만 볼트에 저장됩니다. \"원본 경로\"에서 읽거나 다른 방식으로 지정하면 평문으로 저장되므로 값 필드에 입력하거나 다른 범위를 선택하세요.",
+    "scope": "범위",
+    "visibility": "공개 범위",
+    "removeProperty": "속성 제거"
   },
   "dictionaryEditor": {
     "language": "언어",
@@ -5244,5 +5301,11 @@
     "switchNotice": "에이전트가 v{{from}}에서 v{{to}}(으)로 이동했습니다",
     "impactFollow_one": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
     "impactStay_one": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다"
+  },
+  "actionTags": {
+    "remove": "{{action}} 제거",
+    "none": "액션 없음",
+    "inputLabel": "새 액션",
+    "add": "액션 추가"
   }
 }

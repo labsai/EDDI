@@ -478,7 +478,7 @@
     "backToAgents": "Volver a Agents",
     "next": "Siguiente",
     "back": "Atrás",
-    "createOnly": "Solo crear",
+    "createOnly": "Crear sin implementar",
     "createAndDeploy": "Crear y desplegar",
     "typeTitle": "¿Qué tipo de agent?",
     "typeDesc": "Elija el tipo de agent que desea crear",
@@ -568,7 +568,25 @@
     "specUrlScheme": "Solo se admiten URL http:// y https://",
     "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desactiva las herramientas integradas para desactivarlas todas.",
     "hfToken": "Token de Hugging Face",
-    "hfTokenHint": "Solo es necesario para repositorios restringidos o privados. Se guarda en la bóveda como una clave de API."
+    "hfTokenHint": "Solo es necesario para repositorios restringidos o privados. Se guarda en la bóveda como una clave de API.",
+    "stepLabel": "Paso {{n}} de {{total}}: {{name}}",
+    "createAndDeployProduction": "Crear e implementar en producción",
+    "createAndDeployTest": "Crear e implementar en prueba",
+    "reviewKeyNotNeeded": "No necesaria para este proveedor",
+    "reviewKeyNone": "Ninguna",
+    "reviewKeyVault": "Referencia de la bóveda {{ref}}",
+    "reviewKeyEntered": "Introducida aquí",
+    "reviewApiKey": "Clave de API",
+    "reviewBaseUrl": "URL base",
+    "deployTarget": "Destino de implementación",
+    "deployNoteProduction": "«Crear e implementar» pone el agente en producción de inmediato.",
+    "deployNoteTest": "«Crear e implementar» inicia el agente en el entorno de prueba; pásalo a producción cuando estés conforme.",
+    "step_type": "Tipo",
+    "step_info": "Identidad",
+    "step_llm": "Modelo",
+    "step_apispec": "Especificación de API",
+    "step_features": "Funciones",
+    "step_review": "Revisión"
   },
   "packages": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El workflow y todos sus datos se eliminarán permanentemente.",
@@ -932,7 +950,21 @@
     "noRules": "No hay reglas en este grupo",
     "noConditions": "Sin condiciones",
     "sizeNoBound": "sin límite",
-    "sizeBoundInvalid": "Debe ser un número entero entre -2147483648 y 2147483647, o vacío para no tener límite."
+    "sizeBoundInvalid": "Debe ser un número entero entre -2147483648 y 2147483647, o vacío para no tener límite.",
+    "moveUp": "Subir {{name}}",
+    "moveDown": "Bajar {{name}}",
+    "configValueOf": "Valor de {{key}}",
+    "removeConfig": "Quitar {{key}}",
+    "toggleCondition": "Mostrar u ocultar los detalles de la condición",
+    "commaActionsWarning": "Una lista separada por comas significa Y: todas las acciones indicadas deben haberse producido, en ese orden. Para coincidir con cualquiera de varias acciones, añade una condición por acción bajo un conector O, o emite una acción compartida.",
+    "changeTypeTitle": "¿Cambiar el tipo de condición?",
+    "changeTypeDescription": "Cambiar a {{type}} sustituye los ajustes de esta condición por los valores predeterminados de ese tipo. Los valores que introdujiste se perderán.",
+    "changeTypeConfirm": "Cambiar tipo",
+    "toggleRule": "Mostrar u ocultar los detalles de la regla",
+    "thisRule": "esta regla",
+    "noLastStepWarning": "No hay ningún actionmatcher en lastStep: esta regla puede activarse en cualquier paso de la conversación, no solo tras la acción esperada. Añade una condición actionmatcher con occurrence lastStep.",
+    "toggleGroup": "Mostrar u ocultar el grupo",
+    "thisGroup": "este grupo"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No se encontraron endpoints en la especificación",
@@ -1370,7 +1402,22 @@
     "compatibleEndpointOverridden": "Punto de conexión: {{url}}",
     "modelType": "Tipo de modelo",
     "paramName": "Nombre del parámetro",
-    "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desmarca «Activar herramientas integradas» para desactivarlas todas."
+    "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desmarca «Activar herramientas integradas» para desactivarlas todas.",
+    "toggleTask": "Mostrar u ocultar los detalles de la tarea",
+    "noActionsWarning": "Esta tarea no tiene ninguna acción de activación, así que nunca se ejecuta. Añade la acción que emiten tus reglas de comportamiento, por ejemplo send_message.",
+    "model": "Modelo",
+    "deploymentName": "Nombre de la implementación",
+    "modelName": "Modelo",
+    "modelMissing": "No hay modelo definido: el proveedor rechazará todas las solicitudes.",
+    "apiKey": "Clave de API",
+    "apiKeyNotNeeded": "Este proveedor normalmente no necesita clave de API.",
+    "temperature": "Temperatura",
+    "temperaturePlaceholder": "Valor predeterminado del proveedor",
+    "temperatureInvalid": "Introduce un número, por ejemplo 0.7.",
+    "paramValueOf": "Valor de {{key}}",
+    "removeParam": "Quitar el parámetro {{key}}",
+    "accessToken": "Token de acceso",
+    "authToken": "Token de Hugging Face (opcional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",
@@ -1411,7 +1458,14 @@
     "maxLength": "Longitud máx.",
     "maxLengthShort": "máx",
     "validationMsgPlaceholder": "Mensaje de error de validación...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "no guardado; corrígelo o vacía el campo",
+    "itemType": "Tipo de salida",
+    "removeItem": "Quitar el elemento de salida",
+    "removeQuickReply": "Quitar la respuesta rápida",
+    "toggleOutput": "Mostrar u ocultar los detalles de la salida",
+    "timesOccurredLabel": "Veces ocurrido",
+    "removeAlternativeGroup": "Quitar el grupo de alternativas {{n}}"
   },
   "propertySetterEditor": {
     "setters": "Definidores de propiedades",
@@ -1435,7 +1489,10 @@
     "visibilityTitle": "Qué agents pueden ver esta propiedad longTerm",
     "editValue": "Editar valor",
     "toggleGroup": "Alternar grupo de propiedades",
-    "secretFromPathWarning": "Un secreto solo se guarda en la bóveda si proviene del campo de valor. Leído desde una «Ruta de origen» o dado de otra forma, se almacena en texto plano: introdúzcalo en el campo de valor o elija otro ámbito."
+    "secretFromPathWarning": "Un secreto solo se guarda en la bóveda si proviene del campo de valor. Leído desde una «Ruta de origen» o dado de otra forma, se almacena en texto plano: introdúzcalo en el campo de valor o elija otro ámbito.",
+    "scope": "Ámbito",
+    "visibility": "Visibilidad",
+    "removeProperty": "Quitar la propiedad"
   },
   "dictionaryEditor": {
     "language": "Idioma",
@@ -5303,5 +5360,11 @@
     "impactReasonLegacy": "anterior al seguimiento de versiones",
     "impactReasonBreaking": "cambio incompatible",
     "switchNotice": "El agente pasó de v{{from}} a v{{to}}"
+  },
+  "actionTags": {
+    "remove": "Quitar {{action}}",
+    "none": "Sin acciones",
+    "inputLabel": "Nueva acción",
+    "add": "Añadir acción"
   }
 }

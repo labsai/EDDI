@@ -472,7 +472,7 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.maxAttempts", "Max Attempts")}
           </label>
-          <NumberInput placeholder="3" integer
+          <NumberInput aria-label={t("mcpcallsEditor.maxAttempts", "Max Attempts")} placeholder="3" integer
             min={1}
             value={retry.maxAttempts}
             onChange={(v) =>
@@ -487,7 +487,7 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.backoffDelayMs", "Backoff Delay (ms)")}
           </label>
-          <NumberInput placeholder="1000" integer
+          <NumberInput aria-label={t("mcpcallsEditor.backoffDelayMs", "Backoff Delay (ms)")} placeholder="1000" integer
             min={0}
             value={retry.backoffDelayMs}
             onChange={(v) =>
@@ -502,7 +502,7 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.backoffMultiplier", "Backoff Multiplier")}
           </label>
-          <NumberInput placeholder="2.0"
+          <NumberInput aria-label={t("mcpcallsEditor.backoffMultiplier", "Backoff Multiplier")} placeholder="2.0"
             min={1}
             step={0.1}
             value={retry.backoffMultiplier}
@@ -518,7 +518,7 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.maxBackoffDelayMs", "Max Backoff (ms)")}
           </label>
-          <NumberInput placeholder="10000" integer
+          <NumberInput aria-label={t("mcpcallsEditor.maxBackoffDelayMs", "Max Backoff (ms)")} placeholder="10000" integer
             min={0}
             value={retry.maxBackoffDelayMs}
             onChange={(v) =>
@@ -655,7 +655,7 @@ function McpCallEditor({
               <FileText className="h-3 w-3" />
               {t("mcpcallsEditor.description", "Description")}
             </label>
-            <input
+            <input aria-label={t("mcpcallsEditor.description", "Description")}
               type="text"
               value={call.description ?? ""}
               onChange={(e) => onChange({ ...call, description: e.target.value })}
@@ -674,7 +674,7 @@ function McpCallEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.toolName", "Tool Name")}
             </label>
-            <input
+            <input aria-label={t("mcpcallsEditor.toolName", "Tool Name")}
               type="text"
               value={call.toolName ?? ""}
               onChange={(e) =>
@@ -1044,7 +1044,7 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.displayName", "Display Name")}
             </label>
-            <input
+            <input aria-label={t("mcpcallsEditor.displayName", "Display Name")}
               type="text"
               value={data.name ?? ""}
               onChange={(e) => update({ name: e.target.value })}
@@ -1092,7 +1092,7 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.transport", "Transport")}
             </label>
-            <select
+            <select aria-label={t("mcpcallsEditor.transport", "Transport")}
               value={data.transport ?? "http"}
               onChange={(e) => update({ transport: e.target.value })}
               disabled={readOnly}
@@ -1107,7 +1107,7 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.timeoutMs", "Timeout (ms)")}
             </label>
-            <NumberInput placeholder="30000" integer
+            <NumberInput aria-label={t("mcpcallsEditor.timeoutMs", "Timeout (ms)")} placeholder="30000" integer
               value={data.timeoutMs}
               onChange={(v) =>
                 update({ timeoutMs: v })

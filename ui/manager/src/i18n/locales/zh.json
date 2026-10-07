@@ -477,7 +477,7 @@
     "backToAgents": "返回 Agents",
     "next": "下一步",
     "back": "上一步",
-    "createOnly": "仅创建",
+    "createOnly": "仅创建，不部署",
     "createAndDeploy": "创建并部署",
     "typeTitle": "选择 Agent 类型",
     "typeDesc": "选择您要创建的 Agent 类型",
@@ -567,7 +567,25 @@
     "specUrlScheme": "仅支持 http:// 和 https:// 网址",
     "lastToolHint": "至少必须保留一个已选工具。关闭内置工具即可全部禁用。",
     "hfToken": "Hugging Face 令牌",
-    "hfTokenHint": "仅在访问受限或私有仓库时需要。它会像 API 密钥一样存储在保管库中。"
+    "hfTokenHint": "仅在访问受限或私有仓库时需要。它会像 API 密钥一样存储在保管库中。",
+    "stepLabel": "第 {{n}} 步，共 {{total}} 步：{{name}}",
+    "createAndDeployProduction": "创建并部署到生产环境",
+    "createAndDeployTest": "创建并部署到测试环境",
+    "reviewKeyNotNeeded": "此提供商不需要",
+    "reviewKeyNone": "无",
+    "reviewKeyVault": "保管库引用 {{ref}}",
+    "reviewKeyEntered": "已在此输入",
+    "reviewApiKey": "API 密钥",
+    "reviewBaseUrl": "基础 URL",
+    "deployTarget": "部署目标",
+    "deployNoteProduction": "“创建并部署”会立即让代理在生产环境上线。",
+    "deployNoteTest": "“创建并部署”会在测试环境中启动代理；满意后再将其提升到生产环境。",
+    "step_type": "类型",
+    "step_info": "身份",
+    "step_llm": "模型",
+    "step_apispec": "API 规范",
+    "step_features": "功能",
+    "step_review": "检查"
   },
   "packages": {
     "confirmDeleteDescription": "此操作无法撤销。该工作流及其所有数据将被永久删除。",
@@ -918,7 +936,21 @@
     "noRules": "此组中没有规则",
     "noConditions": "无条件",
     "sizeNoBound": "无限制",
-    "sizeBoundInvalid": "必须是 -2147483648 到 2147483647 之间的整数，留空表示无限制。"
+    "sizeBoundInvalid": "必须是 -2147483648 到 2147483647 之间的整数，留空表示无限制。",
+    "moveUp": "上移 {{name}}",
+    "moveDown": "下移 {{name}}",
+    "configValueOf": "{{key}} 的值",
+    "removeConfig": "移除 {{key}}",
+    "toggleCondition": "显示或隐藏条件详情",
+    "commaActionsWarning": "此处以逗号分隔的列表表示“与”：所列的每个动作都必须已按该顺序发生。若要匹配多个动作中的任意一个，请在 OR 连接器下为每个动作添加一个条件，或发出一个共用动作。",
+    "changeTypeTitle": "更改条件类型？",
+    "changeTypeDescription": "切换到 {{type}} 会用该类型的默认值替换此条件的设置，您输入的值将丢失。",
+    "changeTypeConfirm": "更改类型",
+    "toggleRule": "显示或隐藏规则详情",
+    "thisRule": "此规则",
+    "noLastStepWarning": "lastStep 上没有 actionmatcher：此规则可能在对话的任意步骤触发，而不仅限于预期动作之后。请添加 occurrence 为 lastStep 的 actionmatcher 条件。",
+    "toggleGroup": "显示或隐藏分组",
+    "thisGroup": "此分组"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "在规范中未找到端点",
@@ -1356,7 +1388,22 @@
     "compatibleEndpointOverridden": "端点：{{url}}",
     "modelType": "模型类型",
     "paramName": "参数名称",
-    "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。"
+    "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。",
+    "toggleTask": "显示或隐藏任务详情",
+    "noActionsWarning": "此任务没有触发动作，因此永远不会运行。请添加行为规则发出的动作，例如 send_message。",
+    "model": "模型",
+    "deploymentName": "部署名称",
+    "modelName": "模型",
+    "modelMissing": "未设置模型：提供商将拒绝所有请求。",
+    "apiKey": "API 密钥",
+    "apiKeyNotNeeded": "此提供商通常不需要 API 密钥。",
+    "temperature": "温度",
+    "temperaturePlaceholder": "提供商默认值",
+    "temperatureInvalid": "请输入数字，例如 0.7。",
+    "paramValueOf": "{{key}} 的值",
+    "removeParam": "移除参数 {{key}}",
+    "accessToken": "访问令牌",
+    "authToken": "Hugging Face 令牌（可选）"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -1397,7 +1444,14 @@
     "maxLength": "最大长度",
     "maxLengthShort": "最大",
     "validationMsgPlaceholder": "验证错误消息...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "未保存；请修正或清空该字段",
+    "itemType": "输出类型",
+    "removeItem": "移除输出项",
+    "removeQuickReply": "移除快捷回复",
+    "toggleOutput": "显示或隐藏输出详情",
+    "timesOccurredLabel": "出现次数",
+    "removeAlternativeGroup": "移除备选组 {{n}}"
   },
   "propertySetterEditor": {
     "setters": "属性设置器",
@@ -1421,7 +1475,10 @@
     "visibilityTitle": "哪些 Agent 可以看到此 longTerm 属性",
     "editValue": "编辑值",
     "toggleGroup": "切换属性组",
-    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。通过“来源路径”读取或以其他方式提供时，它会以明文存储——请在值字段中输入，或选择其他作用域。"
+    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。通过“来源路径”读取或以其他方式提供时，它会以明文存储——请在值字段中输入，或选择其他作用域。",
+    "scope": "作用域",
+    "visibility": "可见性",
+    "removeProperty": "移除属性"
   },
   "dictionaryEditor": {
     "language": "语言",
@@ -5244,5 +5301,11 @@
     "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
     "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
     "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
+  },
+  "actionTags": {
+    "remove": "移除 {{action}}",
+    "none": "无动作",
+    "inputLabel": "新动作",
+    "add": "添加动作"
   }
 }

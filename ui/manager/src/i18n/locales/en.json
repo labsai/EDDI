@@ -504,7 +504,7 @@
     "backToAgents": "Back to Agents",
     "next": "Next",
     "back": "Back",
-    "createOnly": "Create Only",
+    "createOnly": "Create without deploying",
     "createAndDeploy": "Create & Deploy",
     "typeTitle": "What kind of agent?",
     "typeDesc": "Choose the type of agent you want to create",
@@ -594,7 +594,25 @@
     "specUrlScheme": "Only http:// and https:// URLs are supported",
     "lastToolHint": "At least one tool must stay selected. Turn built-in tools off to disable them all.",
     "hfToken": "Hugging Face token",
-    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key."
+    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key.",
+    "stepLabel": "Step {{n}} of {{total}}: {{name}}",
+    "createAndDeployProduction": "Create & deploy to production",
+    "createAndDeployTest": "Create & deploy to test",
+    "reviewKeyNotNeeded": "Not needed for this provider",
+    "reviewKeyNone": "None",
+    "reviewKeyVault": "Vault reference {{ref}}",
+    "reviewKeyEntered": "Entered here",
+    "reviewApiKey": "API key",
+    "reviewBaseUrl": "Base URL",
+    "deployTarget": "Deploy target",
+    "deployNoteProduction": "Create & deploy puts the agent live in production right away.",
+    "deployNoteTest": "Create & deploy starts the agent in the test environment; promote it to production when you are happy with it.",
+    "step_type": "Type",
+    "step_info": "Identity",
+    "step_llm": "Model",
+    "step_apispec": "API Spec",
+    "step_features": "Features",
+    "step_review": "Review"
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -958,7 +976,21 @@
     "noRules": "No rules in this group",
     "noConditions": "No conditions",
     "sizeNoBound": "no limit",
-    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit."
+    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit.",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "configValueOf": "Value of {{key}}",
+    "removeConfig": "Remove {{key}}",
+    "toggleCondition": "Show or hide condition details",
+    "commaActionsWarning": "A comma list here means AND: every listed action must have occurred, in that order. To match any one of several actions, add one condition per action under an OR connector, or emit a shared action.",
+    "changeTypeTitle": "Change condition type?",
+    "changeTypeDescription": "Switching to {{type}} replaces this condition's settings with that type's defaults. The values you entered are lost.",
+    "changeTypeConfirm": "Change type",
+    "toggleRule": "Show or hide rule details",
+    "thisRule": "this rule",
+    "noLastStepWarning": "No actionmatcher on lastStep: this rule can fire on any step of the conversation, not just after the action you expect. Add an actionmatcher condition with occurrence lastStep.",
+    "toggleGroup": "Show or hide group",
+    "thisGroup": "this group"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No endpoints found in the spec",
@@ -1396,7 +1428,22 @@
     "compatibleEndpointOverridden": "Endpoint: {{url}}",
     "modelType": "Model type",
     "paramName": "Parameter name",
-    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
+    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all.",
+    "toggleTask": "Show or hide task details",
+    "noActionsWarning": "This task has no trigger action, so it never runs. Add the action your behavior rules emit, for example send_message.",
+    "model": "Model",
+    "deploymentName": "Deployment name",
+    "modelName": "Model",
+    "modelMissing": "No model set: the provider will reject every request.",
+    "apiKey": "API key",
+    "apiKeyNotNeeded": "This provider usually needs no API key.",
+    "temperature": "Temperature",
+    "temperaturePlaceholder": "Provider default",
+    "temperatureInvalid": "Enter a number, for example 0.7.",
+    "paramValueOf": "Value of {{key}}",
+    "removeParam": "Remove parameter {{key}}",
+    "accessToken": "Access token",
+    "authToken": "Hugging Face token (optional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -1437,7 +1484,14 @@
     "maxLength": "Max length",
     "maxLengthShort": "max",
     "validationMsgPlaceholder": "Validation error message...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "not saved; fix it or clear the field",
+    "itemType": "Output type",
+    "removeItem": "Remove output item",
+    "removeQuickReply": "Remove quick reply",
+    "toggleOutput": "Show or hide output details",
+    "timesOccurredLabel": "Times occurred",
+    "removeAlternativeGroup": "Remove alternative group {{n}}"
   },
   "propertySetterEditor": {
     "setters": "Property Setters",
@@ -1461,7 +1515,10 @@
     "visibilityTitle": "Which agents can see this longTerm property",
     "editValue": "Edit Value",
     "toggleGroup": "Toggle property group",
-    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope."
+    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope.",
+    "scope": "Scope",
+    "visibility": "Visibility",
+    "removeProperty": "Remove property"
   },
   "dictionaryEditor": {
     "language": "Language",
@@ -5244,5 +5301,11 @@
     "impactReasonLegacy": "predates version following",
     "impactReasonBreaking": "breaking change",
     "switchNotice": "Agent moved from v{{from}} to v{{to}}"
+  },
+  "actionTags": {
+    "remove": "Remove {{action}}",
+    "none": "No actions",
+    "inputLabel": "New action",
+    "add": "Add action"
   }
 }

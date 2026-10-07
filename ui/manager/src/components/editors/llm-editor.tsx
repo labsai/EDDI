@@ -1,6 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useId } from "react";
 import { PromptPreview } from "./prompt-preview";
 import { useTranslation } from "react-i18next";
+import { ActionTags } from "./action-tags";
+import { Field } from "./editor-field";
+import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
+import { getProviderConfig } from "@/lib/api/agent-setup";
+import { dedicatedParamKeys, modelParamSpec } from "./llm/model-params";
 import { NumberInput } from "./number-input";
 import { RenamableKeyInput } from "./renamable-key-input";
 import { hasOwnKey, nextFreeKey, renameKey } from "./editor-value-utils";
@@ -29,6 +34,7 @@ import {
   Eye,
   Shield,
   EyeOff,
+  AlertTriangle,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -83,85 +89,17 @@ import { getDefaultBaseUrl, getProviderRegions } from "@/lib/llm-provider-catalo
 /** Parameter keys whose values should use SecretKeyPicker (case-insensitive match) */
 const SENSITIVE_LLM_PARAM_KEYS = new Set(["apikey", "password", "secret", "token"]);
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
-function ActionTags({
-  actions,
-  onChange,
-  readOnly,
-}: {
-  actions: string[];
-  onChange: (a: string[]) => void;
-  readOnly?: boolean;
-}) {
-  const { t } = useTranslation();
-  const [input, setInput] = useState("");
-
-  const addAction = () => {
-    const trimmed = input.trim();
-    if (trimmed && !actions.includes(trimmed)) {
-      onChange([...actions, trimmed]);
-      setInput("");
-    }
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap gap-1.5">
-        {actions.map((a) => (
-          <span
-            key={a}
-            className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
-          >
-            {a}
-            {!readOnly && (
-              <button
-                type="button"
-                onClick={() => onChange(actions.filter((x) => x !== a))}
-                className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                aria-label={`Remove ${a}`}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </span>
-        ))}
-        {actions.length === 0 && (
-          <span className="text-xs text-muted-foreground italic">
-            {t("llmEditor.noActions", "No actions")}
-          </span>
-        )}
-      </div>
-      {!readOnly && (
-        <div className="flex gap-1.5">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addAction();
-              }
-            }}
-            placeholder={t(
-              "llmEditor.actionPlaceholder",
-              "e.g. help, chat"
-            )}
-            className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <button
-            type="button"
-            onClick={addAction}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-        </div>
-      )}
-    </div>
-  );
+/** The model a freshly chosen provider starts with, so a new task is never model-less. */
+function defaultModelFor(type: string | undefined): string {
+  return getProviderConfig(type ?? "")?.defaultModel ?? "";
 }
+
+/** Whether `value` is a number the backend can parse as a sampling temperature. */
+function isTemperature(value: string): boolean {
+  return value.trim() === "" || (Number.isFinite(Number(value)) && Number(value) >= 0);
+}
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
 
 function SkillsFilterInput({
   skills,
@@ -172,6 +110,7 @@ function SkillsFilterInput({
   onChange: (s: string[]) => void;
   readOnly?: boolean;
 }) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
 
   const addSkill = () => {
@@ -195,9 +134,10 @@ function SkillsFilterInput({
               <button
                 type="button"
                 onClick={() => onChange(skills.filter((x) => x !== s))}
+                aria-label={t("actionTags.remove", "Remove {{action}}", { action: s })}
                 className="rounded p-0.5 hover:bg-primary/20 transition-colors"
               >
-                <X className="h-2.5 w-2.5" />
+                <X className="h-2.5 w-2.5" aria-hidden="true" />
               </button>
             )}
           </span>
@@ -241,13 +181,17 @@ function TaskEditor({
   onChange,
   onRemove,
   readOnly,
+  actionSuggestions,
 }: {
   task: LangchainTask;
   onChange: (t: LangchainTask) => void;
   onRemove: () => void;
   readOnly?: boolean;
+  /** Actions other tasks in this config already listen for. */
+  actionSuggestions?: readonly string[];
 }) {
   const { t } = useTranslation();
+  const uid = useId();
   const [expanded, setExpanded] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
   // The endpoint the backend will use, in its own order of precedence: an explicit
@@ -273,6 +217,40 @@ function TaskEditor({
     });
   };
 
+  const spec = modelParamSpec(task.type);
+  const modelKey = spec.modelKey;
+  const credentialKey = spec.credentialKey;
+  const dedicatedKeys = dedicatedParamKeys(task.type);
+  const modelValue = task.parameters?.[modelKey] ?? "";
+  const temperatureValue = task.parameters?.temperature ?? "";
+  const providerInfo = getProviderConfig(task.type ?? "");
+  const modelListId = `${uid}-models`;
+
+  /**
+   * Changing the provider keeps the parameters (the grid shows what carries
+   * over), except that a model that is exactly the previous provider's default
+   * becomes the new provider's default: a model id that belongs to another
+   * provider is a guaranteed failure at the first message. A model the user
+   * chose, or none at all, is left alone.
+   */
+  const changeType = (type: string) => {
+    const previousDefault = defaultModelFor(task.type);
+    const swapModel = modelValue !== "" && modelValue === previousDefault;
+    const nextKey = modelParamSpec(type).modelKey;
+    const parameters = { ...task.parameters };
+    if (swapModel) {
+      delete parameters[modelKey];
+      const next = defaultModelFor(type);
+      if (next) parameters[nextKey] = next;
+    } else if (nextKey !== modelKey && modelKey in parameters) {
+      // modelName <-> model / modelId / deploymentName: carry the user's value to the key the
+      // new provider reads rather than leaving it where nothing looks.
+      parameters[nextKey] = parameters[modelKey] ?? "";
+      delete parameters[modelKey];
+    }
+    onChange({ ...task, type, parameters });
+  };
+
   return (
     <div
       className="rounded-xl border border-border bg-card shadow-sm"
@@ -283,6 +261,8 @@ function TaskEditor({
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          aria-label={t("llmEditor.toggleTask", "Show or hide task details")}
           className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
         >
           {expanded ? (
@@ -315,7 +295,7 @@ function TaskEditor({
             carries over (apiKey, modelName, baseUrl, ...) and can adjust it. */}
         <ProviderSelect
           value={task.type ?? "openai"}
-          onChange={(type) => onChange({ ...task, type })}
+          onChange={changeType}
           ariaLabel={t("llmEditor.modelType", "Model type")}
           disabled={readOnly}
           className="h-8 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
@@ -342,6 +322,7 @@ function TaskEditor({
           value={task.id ?? ""}
           onChange={(e) => onChange({ ...task, id: e.target.value })}
           readOnly={readOnly}
+          aria-label={t("llmEditor.taskId", "Task ID")}
           placeholder={t("llmEditor.taskId", "Task ID")}
           className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
@@ -361,24 +342,24 @@ function TaskEditor({
       {expanded && (
         <div className="space-y-4 border-t px-4 py-3">
           {/* Description */}
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              {t("llmEditor.description", "Description")}
-            </label>
-            <input
-              type="text"
-              value={task.description ?? ""}
-              onChange={(e) =>
-                onChange({ ...task, description: e.target.value })
-              }
-              readOnly={readOnly}
-              placeholder={t(
-                "llmEditor.descriptionPlaceholder",
-                "What this task does"
-              )}
-              className="h-8 w-full rounded-md border border-input bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-          </div>
+          <Field label={t("llmEditor.description", "Description")}>
+            {(control) => (
+              <input
+                {...control}
+                type="text"
+                value={task.description ?? ""}
+                onChange={(e) =>
+                  onChange({ ...task, description: e.target.value })
+                }
+                readOnly={readOnly}
+                placeholder={t(
+                  "llmEditor.descriptionPlaceholder",
+                  "What this task does"
+                )}
+                className="h-8 w-full rounded-md border border-input bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            )}
+          </Field>
 
           {/* Actions */}
           <EditorSection label={t("llmEditor.triggerActions", "Trigger Actions")}>
@@ -386,7 +367,123 @@ function TaskEditor({
               actions={task.actions ?? []}
               onChange={(a) => onChange({ ...task, actions: a })}
               readOnly={readOnly}
+              suggestions={actionSuggestions}
+              placeholder={t("llmEditor.actionPlaceholder", "e.g. help, chat")}
+              emptyLabel={t("llmEditor.noActions", "No actions")}
+              ariaLabel={t("llmEditor.triggerActions", "Trigger Actions")}
             />
+            {(task.actions ?? []).length === 0 && (
+              <p
+                className="mt-1.5 flex items-start gap-1.5 text-[11px] text-warning"
+                data-testid="llm-no-actions-warning"
+              >
+                <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />
+                {t(
+                  "llmEditor.noActionsWarning",
+                  "This task has no trigger action, so it never runs. Add the action your behavior rules emit, for example send_message."
+                )}
+              </p>
+            )}
+          </EditorSection>
+
+          {/* Model — the three parameters every provider needs, up front rather than
+              in the generic grid below. */}
+          <EditorSection label={t("llmEditor.model", "Model")}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="llm-model-fields">
+              <Field
+                label={
+                  modelKey === "deploymentName"
+                    ? t("llmEditor.deploymentName", "Deployment name")
+                    : t("llmEditor.modelName", "Model")
+                }
+              >
+                {(control) => (
+                  <>
+                    <input
+                      {...control}
+                      type="text"
+                      list={modelListId}
+                      value={modelValue}
+                      onChange={(e) => updateParam(modelKey, e.target.value)}
+                      readOnly={readOnly}
+                      placeholder={providerInfo?.defaultModel ?? ""}
+                      aria-invalid={modelValue.trim() === "" ? true : undefined}
+                      className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      data-testid="llm-model-name"
+                    />
+                    <datalist id={modelListId}>
+                      {(MODEL_SUGGESTIONS[task.type ?? ""] ?? []).map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                    {modelValue.trim() === "" && (
+                      <p className="text-[11px] text-warning" data-testid="llm-model-missing">
+                        {t("llmEditor.modelMissing", "No model set: the provider will reject every request.")}
+                      </p>
+                    )}
+                  </>
+                )}
+              </Field>
+              {credentialKey && (
+                <Field
+                  label={
+                    credentialKey === "accessToken"
+                      ? t("llmEditor.accessToken", "Access token")
+                      : credentialKey === "authToken"
+                        ? t("llmEditor.authToken", "Hugging Face token (optional)")
+                        : t("llmEditor.apiKey", "API key")
+                  }
+                >
+                  {(control) => (
+                    // No `connections`: a model needs a bare credential, and the
+                    // backend refuses a connection reference in every model parameter.
+                    <>
+                      <SecretKeyPicker
+                        {...control}
+                        value={task.parameters?.[credentialKey] ?? ""}
+                        onChange={(val) => updateParam(credentialKey, val)}
+                        readOnly={readOnly}
+                        placeholder={"${vault:...}"}
+                        testId={`llm-param-${credentialKey}`}
+                      />
+                      <ConnectionReferenceWarning
+                        value={task.parameters?.[credentialKey] ?? ""}
+                        refused="model"
+                        testId={`llm-param-connection-warning-${credentialKey}`}
+                      />
+                    </>
+                  )}
+                </Field>
+              )}
+              <Field label={t("llmEditor.temperature", "Temperature")}>
+                {(control) => (
+                  <>
+                    <input
+                      {...control}
+                      type="text"
+                      inputMode="decimal"
+                      value={temperatureValue}
+                      onChange={(e) => {
+                        const next = { ...task.parameters };
+                        if (e.target.value === "") delete next.temperature;
+                        else next.temperature = e.target.value;
+                        onChange({ ...task, parameters: next });
+                      }}
+                      readOnly={readOnly}
+                      placeholder={t("llmEditor.temperaturePlaceholder", "Provider default")}
+                      aria-invalid={isTemperature(temperatureValue) ? undefined : true}
+                      className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      data-testid="llm-temperature"
+                    />
+                    {!isTemperature(temperatureValue) && (
+                      <p className="text-[11px] text-destructive" role="alert">
+                        {t("llmEditor.temperatureInvalid", "Enter a number, for example 0.7.")}
+                      </p>
+                    )}
+                  </>
+                )}
+              </Field>
+            </div>
           </EditorSection>
 
           {/* System Prompt */}
@@ -444,7 +541,7 @@ function TaskEditor({
           >
             <div className="grid grid-cols-2 gap-2">
               {Object.entries(task.parameters ?? {})
-                .filter(([k]) => !HIDDEN_PARAM_KEYS.has(k))
+                .filter(([k]) => !HIDDEN_PARAM_KEYS.has(k) && !dedicatedKeys.has(k))
                 .map(([k, v], i) => {
                   const isSensitive = SENSITIVE_LLM_PARAM_KEYS.has(k.toLowerCase());
                   return (
@@ -461,6 +558,7 @@ function TaskEditor({
                           readOnly={readOnly}
                           isAvailable={(next) =>
                             !HIDDEN_PARAM_KEYS.has(next) &&
+                            !dedicatedKeys.has(next) &&
                             !hasOwnKey(task.parameters ?? {}, next)
                           }
                           onRename={(next) =>
@@ -484,6 +582,7 @@ function TaskEditor({
                               readOnly={readOnly}
                               placeholder={"${vault:...}"}
                               testId={`llm-param-${k}`}
+                              ariaLabel={t("llmEditor.paramValueOf", "Value of {{key}}", { key: k })}
                             />
                           </div>
                         ) : (
@@ -492,6 +591,7 @@ function TaskEditor({
                             value={v}
                             onChange={(e) => updateParam(k, e.target.value)}
                             readOnly={readOnly}
+                            aria-label={t("llmEditor.paramValueOf", "Value of {{key}}", { key: k })}
                             className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                           />
                         )}
@@ -503,9 +603,10 @@ function TaskEditor({
                               delete next[k];
                               onChange({ ...task, parameters: next });
                             }}
+                            aria-label={t("llmEditor.removeParam", "Remove parameter {{key}}", { key: k })}
                             className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
                           >
-                            <X className="h-3 w-3" />
+                            <X className="h-3 w-3" aria-hidden="true" />
                           </button>
                         )}
                       </div>
@@ -1014,10 +1115,10 @@ function TaskEditor({
 
               {/* History limit */}
               <div className="flex items-center gap-2">
-                <label className="text-xs text-foreground whitespace-nowrap">
+                <label htmlFor={`${uid}-f1`} className="text-xs text-foreground whitespace-nowrap">
                   {t("llmEditor.historyLimit", "History Limit")}
                 </label>
-                <NumberInput placeholder="10" integer
+                <NumberInput id={`${uid}-f1`} placeholder="10" integer
                   value={task.conversationHistoryLimit}
                   onChange={(v) =>
                     onChange({
@@ -1076,10 +1177,10 @@ function TaskEditor({
                   <div className="space-y-3 ps-5">
                     {/* Level */}
                     <div className="flex items-center gap-2">
-                      <label className="text-xs text-foreground whitespace-nowrap">
+                      <label htmlFor={`${uid}-f2`} className="text-xs text-foreground whitespace-nowrap">
                         {t("llmEditor.counterweightLevel", "Safety Level")}
                       </label>
-                      <select
+                      <select id={`${uid}-f2`}
                         value={task.counterweight?.level ?? "normal"}
                         onChange={(e) =>
                           onChange({
@@ -1108,10 +1209,10 @@ function TaskEditor({
 
                     {/* Placement */}
                     <div className="flex items-center gap-2">
-                      <label className="text-xs text-foreground whitespace-nowrap">
+                      <label htmlFor={`${uid}-f3`} className="text-xs text-foreground whitespace-nowrap">
                         {t("llmEditor.counterweightPlacement", "Placement")}
                       </label>
-                      <select
+                      <select id={`${uid}-f3`}
                         value={task.counterweight?.placement ?? "suffix"}
                         onChange={(e) =>
                           onChange({
@@ -1391,10 +1492,10 @@ function TaskEditor({
           >
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <label className="text-xs text-foreground whitespace-nowrap">
+                <label htmlFor={`${uid}-f4`} className="text-xs text-foreground whitespace-nowrap">
                   {t("llmEditor.maxBudget", "Max Budget ($)")}
                 </label>
-                <input
+                <input id={`${uid}-f4`}
                   type="number"
                   step="0.1"
                   value={task.maxBudgetPerConversation ?? ""}
@@ -1455,10 +1556,10 @@ function TaskEditor({
           >
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <label className="text-xs text-foreground whitespace-nowrap">
+                <label htmlFor={`${uid}-f5`} className="text-xs text-foreground whitespace-nowrap">
                   {t("llmEditor.maxToolIterations", "Max Tool Iterations")}
                 </label>
-                <input
+                <input id={`${uid}-f5`}
                   type="number"
                   value={task.maxToolIterations ?? ""}
                   onChange={(e) =>
@@ -1496,10 +1597,10 @@ function TaskEditor({
                 {task.enableRateLimiting && (
                   <>
                     <div className="flex items-center gap-2 ps-5">
-                      <label className="text-xs text-foreground whitespace-nowrap">
+                      <label htmlFor={`${uid}-f6`} className="text-xs text-foreground whitespace-nowrap">
                         {t("llmEditor.defaultRate", "Default Rate (req/min)")}
                       </label>
-                      <NumberInput placeholder="100" integer
+                      <NumberInput id={`${uid}-f6`} placeholder="100" integer
                         value={task.defaultRateLimit}
                         onChange={(v) =>
                           onChange({
@@ -1601,10 +1702,10 @@ function TaskEditor({
                   {t("llmEditor.toolResponseLimitsDesc", "Truncate verbose tool outputs before re-injection into the LLM context window. Prevents context bloat.")}
                 </p>
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-foreground whitespace-nowrap">
+                  <label htmlFor={`${uid}-f7`} className="text-xs text-foreground whitespace-nowrap">
                     {t("llmEditor.defaultMaxChars", "Default Max Chars")}
                   </label>
-                  <input
+                  <input id={`${uid}-f7`}
                     type="number"
                     value={task.toolResponseLimits?.defaultMaxChars ?? ""}
                     onChange={(e) =>
@@ -1630,10 +1731,10 @@ function TaskEditor({
 
                 {/* Strategy */}
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-foreground whitespace-nowrap">
+                  <label htmlFor={`${uid}-f8`} className="text-xs text-foreground whitespace-nowrap">
                     {t("llmEditor.truncationStrategy", "Strategy")}
                   </label>
-                  <select
+                  <select id={`${uid}-f8`}
                     value={task.toolResponseLimits?.truncationStrategy ?? "truncate"}
                     onChange={(e) => {
                       const strategy = e.target.value;
@@ -1676,10 +1777,10 @@ function TaskEditor({
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <label className="text-xs text-foreground whitespace-nowrap">
+                      <label htmlFor={`${uid}-f9`} className="text-xs text-foreground whitespace-nowrap">
                         {t("llmEditor.summarizerModel", "Summarizer Model")}
                       </label>
-                      <input
+                      <input id={`${uid}-f9`}
                         type="text"
                         value={task.toolResponseLimits?.summarizerModel ?? ""}
                         onChange={(e) =>
@@ -1946,10 +2047,13 @@ export function LlmEditor({
   const { t } = useTranslation();
 
   const addTask = useCallback(() => {
+    // A task with no actions never fires and one with no model fails its first
+    // request, so start from the engine's usual trigger and the provider's
+    // default model; both are visible and editable right away.
     const newTask: LangchainTask = {
-      actions: [],
+      actions: ["send_message"],
       type: "openai",
-      parameters: { systemMessage: "" },
+      parameters: { systemMessage: "", [modelParamSpec("openai").modelKey]: defaultModelFor("openai") },
     };
     onChange({ ...data, tasks: [...(data.tasks ?? []), newTask] });
   }, [data, onChange]);
@@ -1986,6 +2090,7 @@ export function LlmEditor({
           <TaskEditor
             key={ti}
             task={task}
+            actionSuggestions={[...new Set((data.tasks ?? []).flatMap((x) => x.actions ?? []))]}
             onChange={(updated) => {
               const tasks = [...(data.tasks ?? [])];
               tasks[ti] = updated;

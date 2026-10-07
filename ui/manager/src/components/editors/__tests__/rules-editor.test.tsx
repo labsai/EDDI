@@ -36,6 +36,11 @@ const populatedConfig: RulesConfig = {
   ],
 };
 
+/** The type switch asks first when the condition holds user input. */
+async function confirmTypeChange(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "Change type" }));
+}
+
 describe("RulesEditor", () => {
   const onChange = vi.fn();
 
@@ -321,6 +326,7 @@ describe("RulesEditor", () => {
       screen.getByTestId("condition-type-select"),
       "contentTypeMatcher"
     );
+    await confirmTypeChange(user);
 
     const arg = onChange.mock.lastCall![0] as RulesConfig;
     const group = arg.behaviorGroups[0]!;
@@ -342,6 +348,7 @@ describe("RulesEditor", () => {
       screen.getByTestId("condition-type-select"),
       "contentTypeMatcher"
     );
+    await confirmTypeChange(user);
     const arg = onChange.mock.lastCall![0] as RulesConfig;
     const cond = arg.behaviorGroups[0]!.behaviorRules[0]!.conditions[0]!;
     expect(cond.type).toBe("contentTypeMatcher");
@@ -363,6 +370,7 @@ describe("RulesEditor sizematcher preset", () => {
     const user = userEvent.setup();
     renderWithProviders(<RulesEditor data={populatedConfig} onChange={onChange} />);
     await user.selectOptions(screen.getByTestId("condition-type-select"), "sizematcher");
+    await confirmTypeChange(user);
     const saved = onChange.mock.lastCall![0] as RulesConfig;
     const configs = saved.behaviorGroups[0]!.behaviorRules![0]!.conditions![0]!.configs!;
     for (const key of ["min", "max", "equal"]) {
@@ -435,5 +443,172 @@ describe("RulesEditor sizematcher bounds", () => {
     );
     expect(screen.getByDisplayValue("2147483647")).not.toHaveAttribute("aria-invalid");
     expect(screen.getByDisplayValue("-2147483648")).not.toHaveAttribute("aria-invalid");
+  });
+});
+
+const ruleWith = (name: string, conditions: RulesConfig["behaviorGroups"][number]["behaviorRules"][number]["conditions"], actions: string[] = []) => ({
+  name,
+  actions,
+  conditions,
+});
+const configWith = (...groups: RulesConfig["behaviorGroups"]): RulesConfig => ({
+  appendActions: false,
+  expressionsAsActions: false,
+  behaviorGroups: groups,
+});
+const lastSaved = (fn: ReturnType<typeof vi.fn>) => fn.mock.lastCall![0] as RulesConfig;
+
+describe("RulesEditor condition type switch", () => {
+  const pristine = configWith({
+    name: "g",
+    executionStrategy: "executeUntilFirstSuccess",
+    behaviorRules: [
+      ruleWith("r", [{ type: "inputmatcher", configs: { expressions: "", occurrence: "currentStep" } }]),
+    ],
+  });
+
+  it("switches at once when the condition still holds only its presets", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={pristine} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("condition-type-select"), "dependency");
+    expect(screen.queryByRole("button", { name: "Change type" })).not.toBeInTheDocument();
+    expect(lastSaved(onChange).behaviorGroups[0]!.behaviorRules[0]!.conditions[0]!.type).toBe("dependency");
+  });
+
+  it("asks before wiping what the user entered, and keeps it on cancel", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={populatedConfig} onChange={onChange} />);
+    await user.selectOptions(screen.getByTestId("condition-type-select"), "dependency");
+    expect(await screen.findByRole("button", { name: "Change type" })).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("condition-type-select")).toHaveValue("inputmatcher");
+  });
+});
+
+describe("RulesEditor config keys and enums", () => {
+  it("adds a config under a free key instead of overwriting one", async () => {
+    // key${entries.length} with {key1} (key0 deleted) produced key1 again.
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const cfg = configWith({
+      name: "g",
+      behaviorRules: [ruleWith("r", [{ type: "dependency", configs: { key1: "keep" } }])],
+    });
+    renderWithProviders(<RulesEditor data={cfg} onChange={onChange} />);
+    await user.click(screen.getByRole("button", { name: "Add config" }));
+    const configs = lastSaved(onChange).behaviorGroups[0]!.behaviorRules[0]!.conditions[0]!.configs!;
+    expect(configs).toEqual({ key1: "keep", key2: "" });
+  });
+
+  it("offers the engine's occurrence values as a select, not free text", () => {
+    renderWithProviders(<RulesEditor data={populatedConfig} onChange={vi.fn()} />);
+    const select = screen.getByTestId("config-select-occurrence") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["currentStep", "lastStep", "anyStep", "never"]);
+  });
+
+  it("keeps a custom value selectable rather than rewriting it", () => {
+    const cfg = configWith({
+      name: "g",
+      behaviorRules: [ruleWith("r", [{ type: "capabilityMatch", configs: { skill: "s", strategy: "{properties.strategy}" } }])],
+    });
+    renderWithProviders(<RulesEditor data={cfg} onChange={vi.fn()} />);
+    expect(screen.getByTestId("config-select-strategy")).toHaveValue("{properties.strategy}");
+  });
+});
+
+describe("RulesEditor lint warnings", () => {
+  it("warns about a rule without an actionmatcher on lastStep", () => {
+    renderWithProviders(<RulesEditor data={populatedConfig} onChange={vi.fn()} />);
+    expect(screen.getByTestId("no-lastStep-actionmatcher-warning")).toBeInTheDocument();
+  });
+
+  it("does not warn once one exists, even nested in a connector", () => {
+    const cfg = configWith({
+      name: "g",
+      behaviorRules: [
+        ruleWith("direct", [{ type: "actionmatcher", configs: { actions: "a", occurrence: "lastStep" } }]),
+        ruleWith("nested", [
+          { type: "connector", configs: {}, conditions: [{ type: "actionmatcher", configs: { actions: "b", occurrence: "lastStep" } }] },
+        ]),
+      ],
+    });
+    renderWithProviders(<RulesEditor data={cfg} onChange={vi.fn()} />);
+    expect(screen.queryByTestId("no-lastStep-actionmatcher-warning")).not.toBeInTheDocument();
+  });
+
+  it("warns that a comma list in an actionmatcher means AND", () => {
+    const cfg = configWith({
+      name: "g",
+      behaviorRules: [ruleWith("r", [{ type: "actionmatcher", configs: { actions: "a,b", occurrence: "lastStep" } }])],
+    });
+    renderWithProviders(<RulesEditor data={cfg} onChange={vi.fn()} />);
+    expect(screen.getByTestId("comma-actionmatcher-warning")).toHaveTextContent(/AND/);
+  });
+
+  it("does not warn about a single action", () => {
+    const cfg = configWith({
+      name: "g",
+      behaviorRules: [ruleWith("r", [{ type: "actionmatcher", configs: { actions: "a", occurrence: "lastStep" } }])],
+    });
+    renderWithProviders(<RulesEditor data={cfg} onChange={vi.fn()} />);
+    expect(screen.queryByTestId("comma-actionmatcher-warning")).not.toBeInTheDocument();
+  });
+});
+
+describe("RulesEditor ordering", () => {
+  const two = configWith(
+    { name: "first", behaviorRules: [ruleWith("a", []), ruleWith("b", [])] },
+    { name: "second", behaviorRules: [] },
+  );
+
+  it("moves a rule down, and disables the buttons at the edges", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={two} onChange={onChange} />);
+    expect(screen.getAllByTestId("rule-move-up")[0]).toBeDisabled();
+    expect(screen.getAllByTestId("rule-move-down")[1]).toBeDisabled();
+    await user.click(screen.getAllByTestId("rule-move-down")[0]!);
+    expect(lastSaved(onChange).behaviorGroups[0]!.behaviorRules.map((r) => r.name)).toEqual(["b", "a"]);
+  });
+
+  it("moves a rule up", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={two} onChange={onChange} />);
+    await user.click(screen.getAllByTestId("rule-move-up")[1]!);
+    expect(lastSaved(onChange).behaviorGroups[0]!.behaviorRules.map((r) => r.name)).toEqual(["b", "a"]);
+  });
+
+  it("moves a group", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={two} onChange={onChange} />);
+    expect(screen.getAllByTestId("group-move-down")[1]).toBeDisabled();
+    await user.click(screen.getAllByTestId("group-move-down")[0]!);
+    expect(lastSaved(onChange).behaviorGroups.map((g) => g.name)).toEqual(["second", "first"]);
+  });
+});
+
+describe("RulesEditor action tags", () => {
+  it("commits text left in the box when the user clicks away", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<RulesEditor data={populatedConfig} onChange={onChange} />);
+    await user.type(screen.getByRole("textbox", { name: "Actions" }), "farewell");
+    expect(onChange).not.toHaveBeenCalled();
+    await user.tab();
+    expect(lastSaved(onChange).behaviorGroups[0]!.behaviorRules[0]!.actions).toEqual(["greet", "welcome", "farewell"]);
+  });
+
+  it("splits a comma list into separate actions", () => {
+    const onChange = vi.fn();
+    renderWithProviders(<RulesEditor data={populatedConfig} onChange={onChange} />);
+    // A paste (or a typed comma) arrives as one change event.
+    fireEvent.change(screen.getByRole("textbox", { name: "Actions" }), { target: { value: "x, y" } });
+    expect(lastSaved(onChange).behaviorGroups[0]!.behaviorRules[0]!.actions).toEqual(["greet", "welcome", "x", "y"]);
   });
 });

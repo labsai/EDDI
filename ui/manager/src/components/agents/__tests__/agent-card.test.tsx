@@ -35,6 +35,16 @@ describe("AgentCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("lets the footer wrap instead of clipping the deploy button at phone width", async () => {
+    // jsdom has no layout, so assert the contract that prevents the clip: the
+    // footer and its action group wrap, and the button label does not break.
+    renderWithProviders(<AgentCard {...defaultProps} />);
+    const button = await screen.findByTestId("agent-deploy-toggle-agent-test-1");
+    expect(button).toHaveClass("whitespace-nowrap");
+    expect(button.parentElement).toHaveClass("flex-wrap");
+    expect(button.parentElement!.parentElement).toHaveClass("flex-wrap");
+  });
+
   it("renders agent ID", () => {
     renderWithProviders(<AgentCard {...defaultProps} />);
     expect(screen.getByText("agent-test-1")).toBeInTheDocument();

@@ -478,7 +478,7 @@
     "backToAgents": "Voltar para Agents",
     "next": "Próximo",
     "back": "Voltar",
-    "createOnly": "Apenas criar",
+    "createOnly": "Criar sem implantar",
     "createAndDeploy": "Criar e implantar",
     "typeTitle": "Que tipo de agent?",
     "typeDesc": "Escolha o tipo de agent que deseja criar",
@@ -568,7 +568,25 @@
     "specUrlScheme": "Apenas URLs http:// e https:// são suportados",
     "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desative as ferramentas integradas para as desativar todas.",
     "hfToken": "Token do Hugging Face",
-    "hfTokenHint": "Só é necessário para repositórios restritos ou privados. É guardado no cofre como uma chave de API."
+    "hfTokenHint": "Só é necessário para repositórios restritos ou privados. É guardado no cofre como uma chave de API.",
+    "stepLabel": "Etapa {{n}} de {{total}}: {{name}}",
+    "createAndDeployProduction": "Criar e implantar em produção",
+    "createAndDeployTest": "Criar e implantar em teste",
+    "reviewKeyNotNeeded": "Não necessária para este provedor",
+    "reviewKeyNone": "Nenhuma",
+    "reviewKeyVault": "Referência do cofre {{ref}}",
+    "reviewKeyEntered": "Inserida aqui",
+    "reviewApiKey": "Chave de API",
+    "reviewBaseUrl": "URL base",
+    "deployTarget": "Destino da implantação",
+    "deployNoteProduction": "“Criar e implantar” coloca o agente no ar em produção imediatamente.",
+    "deployNoteTest": "“Criar e implantar” inicia o agente no ambiente de teste; promova-o para produção quando estiver satisfeito.",
+    "step_type": "Tipo",
+    "step_info": "Identidade",
+    "step_llm": "Modelo",
+    "step_apispec": "Especificação da API",
+    "step_features": "Recursos",
+    "step_review": "Revisão"
   },
   "packages": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O workflow e todos os seus dados serão removidos permanentemente.",
@@ -932,7 +950,21 @@
     "noRules": "Sem regras neste grupo",
     "noConditions": "Sem condições",
     "sizeNoBound": "sem limite",
-    "sizeBoundInvalid": "Deve ser um número inteiro entre -2147483648 e 2147483647, ou vazio para sem limite."
+    "sizeBoundInvalid": "Deve ser um número inteiro entre -2147483648 e 2147483647, ou vazio para sem limite.",
+    "moveUp": "Mover {{name}} para cima",
+    "moveDown": "Mover {{name}} para baixo",
+    "configValueOf": "Valor de {{key}}",
+    "removeConfig": "Remover {{key}}",
+    "toggleCondition": "Mostrar ou ocultar os detalhes da condição",
+    "commaActionsWarning": "Uma lista separada por vírgulas significa E: todas as ações listadas devem ter ocorrido, nessa ordem. Para corresponder a qualquer uma de várias ações, adicione uma condição por ação sob um conector OU, ou emita uma ação compartilhada.",
+    "changeTypeTitle": "Alterar o tipo de condição?",
+    "changeTypeDescription": "Mudar para {{type}} substitui as configurações desta condição pelos padrões desse tipo. Os valores que você inseriu serão perdidos.",
+    "changeTypeConfirm": "Alterar tipo",
+    "toggleRule": "Mostrar ou ocultar os detalhes da regra",
+    "thisRule": "esta regra",
+    "noLastStepWarning": "Nenhum actionmatcher em lastStep: esta regra pode disparar em qualquer etapa da conversa, não apenas após a ação esperada. Adicione uma condição actionmatcher com occurrence lastStep.",
+    "toggleGroup": "Mostrar ou ocultar o grupo",
+    "thisGroup": "este grupo"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Nenhum endpoint encontrado na especificação",
@@ -1370,7 +1402,22 @@
     "compatibleEndpointOverridden": "Ponto de extremidade: {{url}}",
     "modelType": "Tipo de modelo",
     "paramName": "Nome do parâmetro",
-    "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desmarque \"Ativar ferramentas integradas\" para as desativar todas."
+    "lastToolHint": "Pelo menos uma ferramenta tem de continuar selecionada. Desmarque \"Ativar ferramentas integradas\" para as desativar todas.",
+    "toggleTask": "Mostrar ou ocultar os detalhes da tarefa",
+    "noActionsWarning": "Esta tarefa não tem ação de disparo, portanto nunca é executada. Adicione a ação que suas regras de comportamento emitem, por exemplo send_message.",
+    "model": "Modelo",
+    "deploymentName": "Nome da implantação",
+    "modelName": "Modelo",
+    "modelMissing": "Nenhum modelo definido: o provedor rejeitará todas as solicitações.",
+    "apiKey": "Chave de API",
+    "apiKeyNotNeeded": "Este provedor normalmente não precisa de chave de API.",
+    "temperature": "Temperatura",
+    "temperaturePlaceholder": "Padrão do provedor",
+    "temperatureInvalid": "Digite um número, por exemplo 0.7.",
+    "paramValueOf": "Valor de {{key}}",
+    "removeParam": "Remover o parâmetro {{key}}",
+    "accessToken": "Token de acesso",
+    "authToken": "Token do Hugging Face (opcional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",
@@ -1411,7 +1458,14 @@
     "maxLength": "Comprimento máx.",
     "maxLengthShort": "máx",
     "validationMsgPlaceholder": "Mensagem de erro de validação...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "não salvo; corrija ou limpe o campo",
+    "itemType": "Tipo de saída",
+    "removeItem": "Remover item de saída",
+    "removeQuickReply": "Remover resposta rápida",
+    "toggleOutput": "Mostrar ou ocultar os detalhes da saída",
+    "timesOccurredLabel": "Número de ocorrências",
+    "removeAlternativeGroup": "Remover grupo de alternativas {{n}}"
   },
   "propertySetterEditor": {
     "setters": "Definidores",
@@ -1435,7 +1489,10 @@
     "visibilityTitle": "Quais agents podem ver esta propriedade longTerm",
     "editValue": "Editar valor",
     "toggleGroup": "Alternar grupo de propriedades",
-    "secretFromPathWarning": "Um segredo só é guardado no cofre quando vem do campo de valor. Lido de um \"Caminho de origem\" ou fornecido de outra forma, é armazenado em texto simples — insira-o no campo de valor ou escolha outro escopo."
+    "secretFromPathWarning": "Um segredo só é guardado no cofre quando vem do campo de valor. Lido de um \"Caminho de origem\" ou fornecido de outra forma, é armazenado em texto simples — insira-o no campo de valor ou escolha outro escopo.",
+    "scope": "Escopo",
+    "visibility": "Visibilidade",
+    "removeProperty": "Remover propriedade"
   },
   "dictionaryEditor": {
     "language": "Idioma",
@@ -5303,5 +5360,11 @@
     "impactReasonLegacy": "anterior ao acompanhamento de versões",
     "impactReasonBreaking": "alteração incompatível",
     "switchNotice": "O agente passou da v{{from}} para a v{{to}}"
+  },
+  "actionTags": {
+    "remove": "Remover {{action}}",
+    "none": "Sem ações",
+    "inputLabel": "Nova ação",
+    "add": "Adicionar ação"
   }
 }

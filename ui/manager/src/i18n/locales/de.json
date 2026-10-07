@@ -477,7 +477,7 @@
     "backToAgents": "Zurück zu Agents",
     "next": "Weiter",
     "back": "Zurück",
-    "createOnly": "Nur erstellen",
+    "createOnly": "Erstellen ohne Bereitstellung",
     "createAndDeploy": "Erstellen & Bereitstellen",
     "typeTitle": "Welche Art von Agent?",
     "typeDesc": "Wählen Sie den gewünschten Agent-Typ",
@@ -567,7 +567,25 @@
     "specUrlScheme": "Nur http://- und https://-URLs werden unterstützt",
     "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Schalten Sie die integrierten Werkzeuge aus, um alle zu deaktivieren.",
     "hfToken": "Hugging-Face-Token",
-    "hfTokenHint": "Nur für geschützte oder private Repositorys erforderlich. Es wird wie ein API-Schlüssel im Tresor gespeichert."
+    "hfTokenHint": "Nur für geschützte oder private Repositorys erforderlich. Es wird wie ein API-Schlüssel im Tresor gespeichert.",
+    "stepLabel": "Schritt {{n}} von {{total}}: {{name}}",
+    "createAndDeployProduction": "Erstellen und in Produktion bereitstellen",
+    "createAndDeployTest": "Erstellen und in Test bereitstellen",
+    "reviewKeyNotNeeded": "Für diesen Anbieter nicht erforderlich",
+    "reviewKeyNone": "Keiner",
+    "reviewKeyVault": "Tresor-Referenz {{ref}}",
+    "reviewKeyEntered": "Hier eingegeben",
+    "reviewApiKey": "API-Schlüssel",
+    "reviewBaseUrl": "Basis-URL",
+    "deployTarget": "Bereitstellungsziel",
+    "deployNoteProduction": "„Erstellen und bereitstellen“ schaltet den Agenten sofort in der Produktion live.",
+    "deployNoteTest": "„Erstellen und bereitstellen“ startet den Agenten in der Testumgebung; überführen Sie ihn in die Produktion, wenn Sie zufrieden sind.",
+    "step_type": "Typ",
+    "step_info": "Identität",
+    "step_llm": "Modell",
+    "step_apispec": "API-Spezifikation",
+    "step_features": "Funktionen",
+    "step_review": "Überprüfen"
   },
   "packages": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Workflow und alle seine Daten werden dauerhaft entfernt.",
@@ -918,7 +936,21 @@
     "noRules": "Keine Regeln in dieser Gruppe",
     "noConditions": "Keine Bedingungen",
     "sizeNoBound": "kein Limit",
-    "sizeBoundInvalid": "Muss eine ganze Zahl von -2147483648 bis 2147483647 sein oder leer für kein Limit."
+    "sizeBoundInvalid": "Muss eine ganze Zahl von -2147483648 bis 2147483647 sein oder leer für kein Limit.",
+    "moveUp": "{{name}} nach oben verschieben",
+    "moveDown": "{{name}} nach unten verschieben",
+    "configValueOf": "Wert von {{key}}",
+    "removeConfig": "{{key}} entfernen",
+    "toggleCondition": "Bedingungsdetails ein- oder ausblenden",
+    "commaActionsWarning": "Eine kommagetrennte Liste bedeutet hier UND: Alle aufgeführten Aktionen müssen in dieser Reihenfolge aufgetreten sein. Um eine von mehreren Aktionen zu treffen, fügen Sie unter einem ODER-Konnektor je Aktion eine Bedingung hinzu oder geben Sie eine gemeinsame Aktion aus.",
+    "changeTypeTitle": "Bedingungstyp ändern?",
+    "changeTypeDescription": "Der Wechsel zu {{type}} ersetzt die Einstellungen dieser Bedingung durch die Standardwerte dieses Typs. Die von Ihnen eingegebenen Werte gehen verloren.",
+    "changeTypeConfirm": "Typ ändern",
+    "toggleRule": "Regeldetails ein- oder ausblenden",
+    "thisRule": "diese Regel",
+    "noLastStepWarning": "Kein actionmatcher auf lastStep: Diese Regel kann in jedem Schritt der Konversation ausgelöst werden, nicht nur nach der erwarteten Aktion. Fügen Sie eine actionmatcher-Bedingung mit occurrence lastStep hinzu.",
+    "toggleGroup": "Gruppe ein- oder ausblenden",
+    "thisGroup": "diese Gruppe"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Keine Endpunkte in der Spezifikation gefunden",
@@ -1356,7 +1388,22 @@
     "compatibleEndpointOverridden": "Endpunkt: {{url}}",
     "modelType": "Modelltyp",
     "paramName": "Parametername",
-    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren."
+    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren.",
+    "toggleTask": "Aufgabendetails ein- oder ausblenden",
+    "noActionsWarning": "Diese Aufgabe hat keine Auslöseaktion und wird daher nie ausgeführt. Fügen Sie die Aktion hinzu, die Ihre Verhaltensregeln ausgeben, z. B. send_message.",
+    "model": "Modell",
+    "deploymentName": "Bereitstellungsname",
+    "modelName": "Modell",
+    "modelMissing": "Kein Modell festgelegt: Der Anbieter lehnt jede Anfrage ab.",
+    "apiKey": "API-Schlüssel",
+    "apiKeyNotNeeded": "Dieser Anbieter benötigt in der Regel keinen API-Schlüssel.",
+    "temperature": "Temperatur",
+    "temperaturePlaceholder": "Standard des Anbieters",
+    "temperatureInvalid": "Geben Sie eine Zahl ein, z. B. 0.7.",
+    "paramValueOf": "Wert von {{key}}",
+    "removeParam": "Parameter {{key}} entfernen",
+    "accessToken": "Zugriffstoken",
+    "authToken": "Hugging-Face-Token (optional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -1397,7 +1444,14 @@
     "maxLength": "Max. Länge",
     "maxLengthShort": "Max.",
     "validationMsgPlaceholder": "Validierungsfehlermeldung...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "nicht gespeichert; korrigieren Sie es oder leeren Sie das Feld",
+    "itemType": "Ausgabetyp",
+    "removeItem": "Ausgabeelement entfernen",
+    "removeQuickReply": "Schnellantwort entfernen",
+    "toggleOutput": "Ausgabedetails ein- oder ausblenden",
+    "timesOccurredLabel": "Anzahl Vorkommen",
+    "removeAlternativeGroup": "Alternativgruppe {{n}} entfernen"
   },
   "propertySetterEditor": {
     "setters": "Eigenschafts-Setter",
@@ -1421,7 +1475,10 @@
     "visibilityTitle": "Welche Agents diese longTerm-Eigenschaft sehen können",
     "editValue": "Wert bearbeiten",
     "toggleGroup": "Eigenschaftsgruppe umschalten",
-    "secretFromPathWarning": "Ein Secret wird nur im Tresor abgelegt, wenn es aus dem Wertfeld stammt. Über „Von Pfad“ gelesen oder anders angegeben, wird es im Klartext gespeichert – geben Sie es im Wertfeld ein oder wählen Sie einen anderen Bereich."
+    "secretFromPathWarning": "Ein Secret wird nur im Tresor abgelegt, wenn es aus dem Wertfeld stammt. Über „Von Pfad“ gelesen oder anders angegeben, wird es im Klartext gespeichert – geben Sie es im Wertfeld ein oder wählen Sie einen anderen Bereich.",
+    "scope": "Geltungsbereich",
+    "visibility": "Sichtbarkeit",
+    "removeProperty": "Eigenschaft entfernen"
   },
   "dictionaryEditor": {
     "language": "Sprache",
@@ -5244,5 +5301,11 @@
     "impactReasonLegacy": "älter als die Versionsfolge",
     "impactReasonBreaking": "inkompatible Änderung",
     "switchNotice": "Agent wechselte von v{{from}} zu v{{to}}"
+  },
+  "actionTags": {
+    "remove": "{{action}} entfernen",
+    "none": "Keine Aktionen",
+    "inputLabel": "Neue Aktion",
+    "add": "Aktion hinzufügen"
   }
 }

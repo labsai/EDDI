@@ -471,3 +471,46 @@ describe("OutputEditor with an unexpected config shape", () => {
     expect((onChange.mock.lastCall![0] as OutputConfig).outputSet[0]!.timesOccurred).toBe(2);
   });
 });
+
+describe("OutputEditor invalid JSON and accessible names", () => {
+  const cfg: OutputConfig = {
+    outputSet: [
+      {
+        action: "a",
+        timesOccurred: 0,
+        outputs: [{ valueAlternatives: [{ type: "agentFace", value: "smile" }] }],
+        quickReplies: [{ value: "Yes", expressions: "yes" }],
+      },
+    ],
+  };
+
+  it("keeps invalid JSON in the field on blur and says why, instead of reverting it", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<OutputEditor data={cfg} onChange={onChange} />);
+    const input = screen.getByTestId("output-json-fallback");
+    await user.click(input);
+    await user.clear(input);
+    onChange.mockClear();
+    await user.type(input, "{{oops");
+    await user.tab();
+    expect(input).toHaveValue("{oops");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent(/Invalid JSON/);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("gives every icon-only remove button a name", () => {
+    renderWithProviders(<OutputEditor data={cfg} onChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Remove output item" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove quick reply" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Remove alternative group 1/ })).toBeInTheDocument();
+  });
+
+  it("labels the language field and the item inputs by name, not placeholder", () => {
+    renderWithProviders(<OutputEditor data={cfg} onChange={vi.fn()} />);
+    expect(screen.getByLabelText("Language")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Button text" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Output type" })).toBeInTheDocument();
+  });
+});
