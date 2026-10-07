@@ -2987,7 +2987,24 @@
       "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
       "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
       "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
-    }
+    },
+    "transcriptLabel": "ディスカッションの記録",
+    "announceAwaitingApproval": "ディスカッションは一時停止中で、あなたの承認を待っています。",
+    "announceAwaitingHuman": "ディスカッションはメンバーの応答を待っています。",
+    "newMessages": "新着メッセージ",
+    "finishEditingFirst": "先に、編集中のセクションを保存するか取り消してください",
+    "editBasics": "名前、メンバー、設定を編集",
+    "humanTurnResuming": "あなたの応答を記録しました。ディスカッションを再開しています。このページは進行を追跡し、数秒ごとに更新されます。",
+    "composerMode": "メッセージをどうしますか",
+    "composerModeNew": "新しいディスカッション",
+    "composerModeContinue": "このディスカッションを続ける",
+    "loadMoreDiscussions": "以前のディスカッションを読み込む",
+    "confirmDeleteLiveDiscussionDescription": "このディスカッションはまだ実行中です。停止され、記録とその内容はすべて完全に削除されます。この操作は元に戻せません。",
+    "discardEditsTitle": "保存されていない編集を破棄しますか？",
+    "discardEditsDescription": "設定のセクションがまだ編集中です。パネルを閉じると、そこでの変更は破棄されます。",
+    "discardEditsConfirm": "破棄",
+    "keepEditing": "編集を続ける",
+    "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -3560,7 +3577,10 @@
     "groupLinkUnavailable": "このグループが見つからないため、確実なリンクを表示できません。",
     "confirmApproveGroupDescription": "停止中のフェーズ全体を承認し、ディスカッションを再開します。保留中のタスクもすべて併せて承認されます。個別に判断するにはグループを開いてください。",
     "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。",
-    "pauseChanged": "開いた後にこのリクエストが変更されました。何も決定されていません。もう一度確認してください。"
+    "pauseChanged": "開いた後にこのリクエストが変更されました。何も決定されていません。もう一度確認してください。",
+    "conversationColumn": "会話",
+    "groupReviewLoadError": "ディスカッションを読み込めませんでした。",
+    "groupReviewNoEntries": "まだ発言はありません。"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",

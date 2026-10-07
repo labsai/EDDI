@@ -216,11 +216,11 @@ export function useCancelGroupDiscussion() {
 
 /**
  * Submit a HUMAN group member's turn (I6). Unlike the approve/stream resume,
- * this is a plain synchronous REST call — the backend has no `/human-input/stream`
- * variant, so the discussion resumes on the request thread and the response is
- * the settled `GroupConversation` (the next pause point, or COMPLETED). There is
- * no live token-by-token progress to show while it's in flight, only a loading
- * state until it resolves.
+ * this is a plain REST call — the backend has no `/human-input/stream` variant,
+ * so there is no live token-by-token progress to attach to. The call returns
+ * once the turn is recorded; the discussion resumes on the server from there, so
+ * callers follow it by polling the persisted conversation and should say it is
+ * resuming rather than imply it has settled.
  */
 export function useSubmitHumanInput() {
   const qc = useQueryClient();
@@ -236,9 +236,15 @@ export function useSubmitHumanInput() {
       memberId: string;
       content: string;
     }) => submitHumanInput(groupId, gcId, memberId, content),
-    onSuccess: (_data, { groupId }) => {
-      qc.invalidateQueries({ queryKey: ["groupConversations", groupId] });
-      qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+    // Awaited, so the mutation stays pending until the refetched conversation
+    // is in: the backend resumes the discussion asynchronously, and without
+    // this the banner re-enabled for an instant on the stale AWAITING_HUMAN_INPUT
+    // document, with the typed text still in it.
+    onSuccess: async (_data, { groupId }) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["groupConversations", groupId] }),
+        qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] }),
+      ]);
     },
   });
 }

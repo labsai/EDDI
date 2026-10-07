@@ -3023,7 +3023,24 @@
       "humanNeedsId_many": "{{count}} miembros humanos necesitan el id de usuario de la persona.",
       "humanNeedsId_one": "{{count}} miembro humano necesita el id de usuario de la persona.",
       "humanNeedsId_other": "{{count}} miembros humanos necesitan el id de usuario de la persona."
-    }
+    },
+    "transcriptLabel": "Transcripción de la discusión",
+    "announceAwaitingApproval": "La discusión está en pausa y espera tu aprobación.",
+    "announceAwaitingHuman": "La discusión está esperando la respuesta de un miembro.",
+    "newMessages": "Mensajes nuevos",
+    "finishEditingFirst": "Guarda o cancela primero la sección que estás editando",
+    "editBasics": "Editar nombre, miembros y ajustes",
+    "humanTurnResuming": "Se registró tu respuesta. La discusión se está reanudando: esta página la sigue y se actualiza cada pocos segundos.",
+    "composerMode": "Qué hacer con tu mensaje",
+    "composerModeNew": "Nueva discusión",
+    "composerModeContinue": "Continuar esta discusión",
+    "loadMoreDiscussions": "Cargar discusiones anteriores",
+    "confirmDeleteLiveDiscussionDescription": "Esta discusión sigue en curso. Se detiene y la transcripción con todo su contenido se elimina de forma permanente. No se puede deshacer.",
+    "discardEditsTitle": "¿Descartar los cambios sin guardar?",
+    "discardEditsDescription": "Aún se está editando una sección de la configuración. Si cierras el panel, se descartan los cambios que hiciste en ella.",
+    "discardEditsConfirm": "Descartar",
+    "keepEditing": "Seguir editando",
+    "streamInterrupted": "Se perdió la conexión en directo. Se muestra la discusión guardada, que se sigue actualizando mientras está en curso."
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -3598,7 +3615,10 @@
     "groupLinkUnavailable": "No se ha encontrado este grupo, así que no hay un enlace fiable hacia él.",
     "confirmApproveGroupDescription": "Aprobar toda la fase en pausa y reanudar el debate. Cada tarea pendiente se aprueba con ella; abre el grupo para decidirlas una por una.",
     "confirmRejectGroupDescription": "Rechazar toda la fase en pausa. Cada tarea pendiente se rechaza con ella y el debate no continúa más allá; abre el grupo para decidirlas una por una.",
-    "pauseChanged": "Esta solicitud cambió desde que la abriste: no se decidió nada. Revísala de nuevo."
+    "pauseChanged": "Esta solicitud cambió desde que la abriste: no se decidió nada. Revísala de nuevo.",
+    "conversationColumn": "Conversación",
+    "groupReviewLoadError": "No se pudo cargar la discusión.",
+    "groupReviewNoEntries": "Todavía no se ha dicho nada."
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",

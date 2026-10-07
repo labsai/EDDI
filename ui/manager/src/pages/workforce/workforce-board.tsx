@@ -14,7 +14,12 @@ import {
   isActiveConversationState,
   GROUP_CONVERSATIONS_KEY,
 } from "@/hooks/use-groups";
-import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import {
+  persistedHasCaughtUp,
+  streamErrorOf,
+  useGroupDiscussionStream,
+  whenStreamAccepted,
+} from "@/hooks/use-group-discussion-stream";
 import { BoardTranscript } from "@/components/workforce/board-transcript";
 import { BoardInput } from "@/components/workforce/board-input";
 import { SessionHistory } from "@/components/workforce/session-history";
@@ -407,6 +412,11 @@ function WorkforceBoard() {
   }, [isStreaming, selectedConvId, selectedConversation, t]);
 
   // ─── Handlers ──────────────────────────────────────────────────
+  const [refusedDraft, setRefusedDraft] = useState<{
+    boardId?: string;
+    message: string;
+    attachments?: GroupAttachmentRef[];
+  }>({ message: "" });
   const handleSend = useCallback(
     (question: string, attachments?: GroupAttachmentRef[]) => {
       if (!boardId) return;
@@ -418,12 +428,29 @@ function WorkforceBoard() {
         // The stored document seeds the stream: the continue endpoint replays
         // nothing, so after a reload the live view would otherwise hold only
         // the new round.
-        continueStream(boardId, selectedConvId, question, selectedConversation);
-        toast.success(t("groups.continueStreamStarted", "Continuation started — streaming live"));
-      } else {
-        setSelectedConvId(null);
-        startStream(boardId, question, attachments);
+        void continueStream(boardId, selectedConvId, question, selectedConversation);
+        // Confirmed on the first frame, not on the click: a refused request
+        // (a 409, a 403) used to toast "streaming live" over a failure. The
+        // composer keeps the draft until this settles.
+        return whenStreamAccepted(boardId).then((ok) => {
+          if (ok) toast.success(t("groups.continueStreamStarted", "Continuation started — streaming live"));
+          else toast.error(streamErrorOf(boardId) ?? t("common.error", "Something went wrong"));
+          return ok;
+        });
       }
+      setSelectedConvId(null);
+      void startStream(boardId, question, attachments);
+      return whenStreamAccepted(boardId).then((ok) => {
+        if (ok) {
+          setRefusedDraft({ message: "" });
+        } else {
+          // The refused-start screen replaces the composer; hand the question
+          // back when it returns (see `BoardInput.defaultMessage`).
+          setRefusedDraft({ boardId, message: question, attachments });
+          toast.error(streamErrorOf(boardId) ?? t("common.error", "Something went wrong"));
+        }
+        return ok;
+      });
     },
     [boardId, inputMode, selectedConvId, selectedConversation, continueStream, startStream, setSelectedConvId, t],
   );
@@ -646,7 +673,11 @@ function WorkforceBoard() {
   const handleFollowupMember = useCallback(
     (targetAgentId: string, question: string) => {
       if (!boardId || !selectedConvId) return;
-      followupMutation.mutate({ gcId: selectedConvId, targetAgentId, question });
+      // Settles to whether it landed, so the composer keeps the question on a
+      // failure (the mutation's own onError has already toasted it).
+      return followupMutation
+        .mutateAsync({ gcId: selectedConvId, targetAgentId, question })
+        .then(() => true, () => false);
     },
     [boardId, selectedConvId, followupMutation],
   );
@@ -1127,7 +1158,12 @@ function WorkforceBoard() {
             )}
           </span>
           <Link
-            to={`/manage/groups/${boardId}${version ? `?version=${version}` : ""}`}
+            // The paused discussion's id rides along: without it the group page
+            // opens its NEWEST discussion, which is not necessarily this one.
+            to={`/manage/groups/${boardId}?${new URLSearchParams({
+              ...(version ? { version: String(version) } : {}),
+              conversation: selectedConversation.id,
+            }).toString()}`}
             className="font-medium text-amber-500 underline-offset-2 hover:underline"
           >
             {t("Workforce.board.reviewInManager", "Review it")}
@@ -1137,6 +1173,12 @@ function WorkforceBoard() {
 
       {/* Input bar */}
       <BoardInput
+        // Keyed by board: this page stays mounted when the route moves to
+        // another board, and a draft (typed or handed back after a refused
+        // start) belongs to the board it was written for.
+        key={boardId}
+        defaultMessage={refusedDraft.boardId === boardId ? refusedDraft.message : ""}
+        defaultAttachments={refusedDraft.boardId === boardId ? refusedDraft.attachments : undefined}
         onSend={handleSend}
         disabled={inputMode === "disabled"}
         mode={inputMode === "continue" ? "continue" : "new"}

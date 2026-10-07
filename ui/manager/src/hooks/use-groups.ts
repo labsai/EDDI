@@ -228,6 +228,11 @@ export function useGroupConversations(groupId: string, limit = 20, index = 0) {
     queryKey: [...GROUP_CONVERSATIONS_KEY, groupId, { limit, index }],
     queryFn: () => listGroupConversations(groupId, limit, index),
     enabled: !!groupId,
+    // Asking for a longer list ("load more") keeps the shorter one on screen
+    // until it lands, instead of blanking to a skeleton — but only within the
+    // SAME group: another group's list must never stand in for this one.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === groupId ? previous : undefined,
     // Keep the list live while any discussion is still running, so its state
     // badge flips on its own instead of needing a manual reload.
     refetchInterval: (query) =>

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, type KeyboardEvent } from "react";
+import { useState, useRef, useCallback, useEffect, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
@@ -41,8 +41,13 @@ interface BoardInputProps {
    * paperclip staged a file, rendered a chip, and dropped it on send with no
    * error. The shape now matches `DiscussionInput`'s, which the group endpoint
    * actually takes.
+   *
+   * May return a promise: the draft is then kept, and the composer locked,
+   * until it resolves, and is cleared only if it resolves to anything but
+   * `false` — a start that fails before the server accepts it leaves the
+   * question where it was typed.
    */
-  onSend: (message: string, attachments?: GroupAttachmentRef[]) => void;
+  onSend: (message: string, attachments?: GroupAttachmentRef[]) => void | Promise<boolean | void>;
   disabled?: boolean;
   placeholder?: string;
   className?: string;
@@ -52,6 +57,14 @@ interface BoardInputProps {
   mode?: "new" | "continue";
   /** Shown as placeholder when disabled (e.g. "Discussion is closed"). */
   disabledMessage?: string;
+  /**
+   * What the composer starts with. The board swaps the whole view for an error
+   * screen when a start is refused, which unmounts this component and with it
+   * the question; the board hands it back here when the composer returns.
+   */
+  defaultMessage?: string;
+  /** The files that went with `defaultMessage`, re-staged on mount. */
+  defaultAttachments?: GroupAttachmentRef[];
 }
 
 // ─── Send Icon ───────────────────────────────────────────────────
@@ -76,9 +89,27 @@ function SendIcon() {
 
 // ─── Component ───────────────────────────────────────────────────
 
-function BoardInput({ onSend, disabled = false, placeholder, className, mode = "new", disabledMessage }: BoardInputProps) {
+function BoardInput({
+  onSend,
+  disabled = false,
+  placeholder,
+  className,
+  mode = "new",
+  disabledMessage,
+  defaultMessage = "",
+  defaultAttachments,
+}: BoardInputProps) {
   const { t } = useTranslation();
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(defaultMessage);
+  // A send whose acceptance is still being awaited — see `onSend`.
+  const [sending, setSending] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -90,8 +121,14 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
     addFiles,
     remove: removeAttachment,
     clear: clearAttachments,
+    restore: restoreAttachments,
     toRefs: attachmentRefs,
   } = useGroupAttachmentStaging(canAttach);
+  // Once, on mount: the board hands a refused start's files back with its text.
+  useEffect(() => {
+    if (defaultAttachments?.length) restoreAttachments(defaultAttachments);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const trimmed = message.trim();
   // The backend caps the question and fans it out to every member in every
@@ -106,7 +143,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
   // required"). Accepting an attachment-only send turned that 400 into a
   // full-board error screen with no way back to the composer.
   const needsQuestion = attachments.length > 0 && trimmed.length === 0;
-  const canSend = trimmed.length > 0 && !disabled && !tooLong && !isStaging;
+  const canSend = trimmed.length > 0 && !disabled && !tooLong && !isStaging && !sending;
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
@@ -114,13 +151,29 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
     // One argument when there is nothing to attach: the message-only call is
     // the overwhelming case and its shape should not change because the
     // signature grew.
-    if (files) onSend(trimmed, files);
-    else onSend(trimmed);
-    setMessage("");
-    clearAttachments();
-    // Reset textarea height
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
+    const result = files ? onSend(trimmed, files) : onSend(trimmed);
+    const clearDraft = () => {
+      setMessage("");
+      clearAttachments();
+      // Reset textarea height
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+    };
+    if (result && typeof (result as Promise<unknown>).then === "function") {
+      setSending(true);
+      (result as Promise<boolean | void>)
+        .then((ok) => {
+          if (ok !== false && mountedRef.current) clearDraft();
+        })
+        .catch(() => {
+          // Rejected: the draft stays for another try.
+        })
+        .finally(() => {
+          if (mountedRef.current) setSending(false);
+        });
+    } else {
+      clearDraft();
     }
   }, [canSend, onSend, trimmed, attachmentRefs, clearAttachments]);
 
@@ -168,13 +221,15 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
         }
         return true;
       });
-      if (allowed.length) void addFiles(allowed);
+      // Not while a send is pending: that request does not include it, and a
+      // successful send clears the staged list, silently dropping it.
+      if (allowed.length && !sending) void addFiles(allowed);
       // Reset so re-picking the same file fires change again.
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     },
-    [t, addFiles],
+    [t, addFiles, sending],
   );
 
   return (
@@ -204,6 +259,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
                 variant="ghost"
                 size="iconSm"
                 onClick={() => removeAttachment(a.id)}
+                disabled={sending}
                 className="ms-0.5 rounded-full hover:bg-muted-foreground/20"
                 aria-label={t("groups.removeAttachment", "Remove {{name}}", { name: a.fileName })}
               >
@@ -259,7 +315,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
             variant="ghost"
             size="icon"
             onClick={handleFileSelect}
-            disabled={disabled || isStaging}
+            disabled={disabled || isStaging || sending}
             className="h-10 w-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
             aria-label={t("Workforce.board.attachFile", "Attach file")}
           >
@@ -296,7 +352,7 @@ function BoardInput({ onSend, disabled = false, placeholder, className, mode = "
                   ? t("Workforce.board.continuePlaceholder", "Continue this discussion…")
                   : t("Workforce.board.askYourBoard", "Ask your task force..."))
           }
-          disabled={disabled}
+          disabled={disabled || sending}
           rows={1}
           className={cn(
             "flex-1 min-h-10 max-h-32 resize-none rounded-xl ps-4 pe-4 py-2.5",

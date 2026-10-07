@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { GroupConfigPanel } from "../group-config-panel";
@@ -292,17 +292,48 @@ describe("GroupConfigPanel", () => {
       expect(screen.queryByText("Models")).not.toBeInTheDocument();
     });
 
-    /** Both inline editors write the whole config at the same version. */
-    it("closes the approval editor when the phase editor is opened", async () => {
+    /**
+     * The inline editors write the whole config at the same version, so only one
+     * may be open — but opening a second used to close the first and discard
+     * what was typed into it. The others' Edit buttons are disabled instead.
+     */
+    it("does not offer the phase editor while the approval editor is open, and keeps its draft", async () => {
       const user = userEvent.setup();
       renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
 
       await user.click(screen.getByTestId("group-hitl-edit"));
       expect(screen.getByTestId("group-hitl-editor")).toBeInTheDocument();
 
+      expect(screen.getByTestId("group-phase-edit")).toBeDisabled();
       await user.click(screen.getByTestId("group-phase-edit"));
-      expect(screen.getByTestId("group-phase-editor")).toBeInTheDocument();
-      expect(screen.queryByTestId("group-hitl-editor")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("group-phase-editor")).not.toBeInTheDocument();
+      expect(screen.getByTestId("group-hitl-editor")).toBeInTheDocument();
+    });
+
+    it("reports whether an editor is open, and clears the report on unmount", async () => {
+      const user = userEvent.setup();
+      const onEditingChange = vi.fn();
+      const { unmount } = renderWithProviders(
+        <GroupConfigPanel
+          config={mockConfig}
+          groupId="g1"
+          groupVersion={2}
+          onEditingChange={onEditingChange}
+        />,
+      );
+      expect(onEditingChange).toHaveBeenLastCalledWith(false);
+      await user.click(screen.getByTestId("group-hitl-edit"));
+      expect(onEditingChange).toHaveBeenLastCalledWith(true);
+      unmount();
+      expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("points at the Workforce settings for name, members and the rest", () => {
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
+      expect(screen.getByTestId("group-edit-basics")).toHaveAttribute(
+        "href",
+        "/workforce/g1/settings?version=2",
+      );
     });
 
     /**
@@ -333,15 +364,16 @@ describe("GroupConfigPanel", () => {
       expect(screen.getByText("Transcript window")).toBeInTheDocument();
     });
 
-    it("closes the advanced editor when another editor is opened", async () => {
+    it("keeps the advanced editor open when another editor is requested", async () => {
       const user = userEvent.setup();
       renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
 
       await user.click(screen.getByTestId("group-advanced-edit"));
       expect(screen.getByTestId("group-advanced-editor")).toBeInTheDocument();
 
+      expect(screen.getByTestId("group-hitl-edit")).toBeDisabled();
       await user.click(screen.getByTestId("group-hitl-edit"));
-      expect(screen.queryByTestId("group-advanced-editor")).not.toBeInTheDocument();
+      expect(screen.getByTestId("group-advanced-editor")).toBeInTheDocument();
     });
   });
 });
