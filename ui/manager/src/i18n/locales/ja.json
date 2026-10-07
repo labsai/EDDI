@@ -2411,7 +2411,8 @@
     "quickCreateTitle": "クイック作成 {{type}}",
     "quickCreateDesc": "名前と説明を設定し、詳細は後で設定します。",
     "guidedSetup": "ガイド付きセットアップ",
-    "guidedSetupDesc": "LLMプロバイダー、プロンプトを含むステップバイステップのウィザード。"
+    "guidedSetupDesc": "LLMプロバイダー、プロンプトを含むステップバイステップのウィザード。",
+    "guidedSetupDescGroup": "チーム、ディスカッションスタイル、任意の承認を順に設定するウィザードです。メンバーのエージェントも作成できます。"
   },
   "groups": {
     "actionConflict": "別の操作がまだ進行中か、このディスカッションはそのアクションを受け付けなくなりました。再試行してください。",
@@ -3329,10 +3330,60 @@
     "humanPrincipalIdPlaceholder": "ユーザーのログイン/プリンシパル ID",
     "humanTurnSettingsHint": "人間のメンバーの発言順になると、ディスカッションは一時停止して待機します。時間内に応答がない場合の動作を選択してください。",
     "humanTurnSettingsTitle": "人間メンバーのターン設定",
-    "humanTurnTimeoutInvalid": "有効な ISO-8601 期間ではありません（例: PT24H や P1D）。",
-    "humanTurnTimeoutLabel": "ターンのタイムアウト（ISO-8601 期間）",
-    "humanTurnTimeoutPlaceholder": "例: PT24H — 空欄の場合は無期限に待機します",
-    "memberTypeHuman": "人間"
+    "humanTurnTimeoutInvalid": "0 より大きい数値を入力してください。",
+    "humanTurnTimeoutLabel": "ターンのタイムアウト",
+    "humanTurnTimeoutPlaceholder": "空のままにすると無期限に待機します。",
+    "memberTypeHuman": "人間",
+    "stepTemplate": "プリセット",
+    "stepConfig": "設定",
+    "stepMembers": "メンバー",
+    "stepReview": "確認",
+    "stepsLabel": "ウィザードの進行状況",
+    "stepAria": "ステップ {{n}}：{{title}}",
+    "blockersTitle": "続行するには：",
+    "blockerName": "グループ名を入力してください。",
+    "blockerHitlPhases": "一時停止するフェーズを 1 つ以上選択するか、人による承認をオフにしてください。",
+    "blockerHitlTimeout": "有効な承認タイムアウト（例：PT15M）を入力するか、別のタイムアウトポリシーを選択してください。",
+    "blockerStyle": "このサーバーが対応しているディスカッションスタイルを選択してください。",
+    "blockerMemberName": "{{member}}：表示名を追加してください。",
+    "blockerMemberPrincipal": "{{member}}：担当者のプリンシパル ID を入力してください。",
+    "blockerMemberGroup": "{{member}}：ネストするグループを選択してください。",
+    "blockerMemberAgent": "{{member}}：既存のエージェントを選ぶか、「新規作成」に切り替えてください。",
+    "blockerMemberKey": "{{member}}：{{provider}} の API キーを追加するか、キー不要のプロバイダー（例：Ollama）を選択してください。",
+    "blockerModeratorKey": "モデレーター：{{provider}} の API キーを追加するか、キー不要のプロバイダー（例：Ollama）を選択してください。",
+    "blockerTurnTimeout": "人の発言ターンのタイムアウトを 0 より大きい数値にするか、空にしてください。",
+    "memberFallbackName": "メンバー {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "自由なブレインストーミング。ひとつの問いに対するあらゆる視点を集めます。",
+      "PEER_REVIEW": "草案や提案を複数の観点からレビューします。",
+      "DEVIL_ADVOCATE": "決定する前に計画を徹底的に検証します。",
+      "DELPHI": "独立した意見が収束していくことを期待する予測や見積もり。",
+      "DEBATE": "対立する 2 つの立場で判断を比較検討します。",
+      "TASK_FORCE": "割り当てられたタスクで複数ステップの作業を計画し実行します。",
+      "NEGOTIATION": "利害の異なる当事者間で合意に至ります。"
+    },
+    "howItRuns": "進め方",
+    "roundsExplain": "1 ラウンドは全メンバーが 1 回ずつ発言することです。ラウンドが増えるとメンバー同士が反応し合えますが、ラウンドごとに LLM 呼び出しとコストが増えます。",
+    "roundsEstimate": "目安：1 回のディスカッションで LLM 呼び出しは約 {{calls}} 回（{{members}} メンバー × {{rounds}} ラウンド）。",
+    "roundsEstimateModerator": "目安：1 回のディスカッションで LLM 呼び出しは約 {{calls}} 回（{{members}} メンバー × {{rounds}} ラウンド + モデレーター 1 回）。",
+    "unitMinutes": "分",
+    "unitHours": "時間",
+    "unitDays": "日",
+    "durationNoLimit": "制限なし",
+    "durationUnit": "単位",
+    "defaultMemberPrompt": "あなたは {{name}} です。専門分野の視点から、明確で実行可能な洞察を提供してください。",
+    "defaultMemberPromptRole": "あなたは {{role}} を専門とする {{name}} です。専門分野の視点から、明確で実行可能な洞察を提供してください。",
+    "defaultMemberPromptNoName": "あなたはこのグループのメンバーです。専門分野の視点から、明確で実行可能な洞察を提供してください。",
+    "defaultModeratorPrompt": "あなたは熟練したモデレーターです。グループの議論を、重要な洞察、合意点、残る意見の相違をまとめた、明確でバランスの取れた要約にしてください。",
+    "memberNameLabel": "表示名",
+    "memberRoleLabel": "ロール",
+    "memberTypeLabel": "メンバーの種類",
+    "bulkTitle": "すべての新規エージェントに同じプロバイダーとキーを使用",
+    "bulkHint": "新しいエージェントにはそれぞれ LLM プロバイダーと、多くの場合 API キーが必要です。ここで一度入力してすべてに適用できます。その後、個別のエージェントを変更することもできます。",
+    "bulkApply": "すべての新規エージェントに適用",
+    "apiKeyRequired": "このエージェントを作成するには、{{provider}} の API キーが必要です。",
+    "presetsNote": "これはこのウィザードに内容を入力するスターターのプリセットです。調整済みのパッケージ化されたディスカッションを使い、既存のエージェントをそのロールに割り当てるには、次をご覧ください：",
+    "presetsLink": "グループテンプレート"
   },
   "groupTemplates": {
     "advisoryBoard": "アドバイザリーボード",
@@ -3388,7 +3439,9 @@
     "roleCount_other": "割り当てが必要な役割: {{count}} 件",
     "roleCount_one": "割り当てが必要な役割: {{count}} 件",
     "empty": "利用できるテンプレートがありません",
-    "emptyDescription": "このサーバーにはグループテンプレートが同梱されていません。ウィザードで一から作成できます。"
+    "emptyDescription": "このサーバーにはグループテンプレートが同梱されていません。ウィザードで一から作成できます。",
+    "wizardNote": "進めながら新しいエージェントを作る、またはゼロから構築したい場合は、グループウィザードにより軽量なスターターのプリセットがあります。",
+    "wizardLink": "グループウィザードを開く"
   },
   "channels": {
     "agentIdPlaceholder": "メッセージを処理するエージェント ID",
@@ -4650,7 +4703,13 @@
     "inputTemplateTooLong": "プロンプトテンプレートは {{max}} 文字までです。",
     "cronInvalid": "有効な cron 式ではありません。",
     "scheduleUnknown": "スケジュールを取得できません",
-    "nextRun": "次回 {{when}}"
+    "nextRun": "次回 {{when}}",
+    "taskSubjectLabel": "件名",
+    "taskDescriptionLabel": "説明",
+    "inputTemplateLabel": "プロンプトテンプレート",
+    "priorityTitle": "優先度 {{n}} — 数値が大きいほど先に選ばれます",
+    "backlogNote": "各ケイデンス実行は優先度の高いタスクから先に選びます（P5 は P1 より先）。追加したタスクは編集も削除もできません。実行によって完了します。",
+    "priorityHint": "数値が大きいほど、ケイデンス実行で先に選ばれます。0 が既定値です。"
   },
   "workforceWizard": {
     "title": "新しいチーム"
@@ -5201,7 +5260,9 @@
     "legacyAdminOnly": "管理者のみに表示 — 所有者が割り当てられた後",
     "lastChanged": "最終変更者: {{who}}",
     "neverChanged": "まだここで変更されていません",
-    "saved": "設定を保存しました"
+    "saved": "設定を保存しました",
+    "deleteVariableTitle": "この変数を削除しますか？",
+    "deleteVariableDescription": "この変数を参照しているエージェントは解決できなくなります。この操作は元に戻せません。"
   },
   "cascadeSave": {
     "workflowChanged": "ワークフロー {{workflowId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
@@ -5244,5 +5305,9 @@
     "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
     "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
     "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
+  },
+  "wizardLeave": {
+    "title": "作成せずに離れますか？",
+    "message": "入力したプロンプトや API キーを含むチームの設定はまだ作成されておらず、失われます。"
   }
 }

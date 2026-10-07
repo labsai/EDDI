@@ -1,5 +1,6 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   ArrowLeft,
   ArrowRight,
@@ -66,6 +67,12 @@ import {
   LLM_PROVIDERS,
   type SetupAgentRequest,
 } from "@/lib/api/agent-setup";
+import { isProvisionableBySetup } from "@/lib/model-suggestions";
+import { providerNeedsKey, providerLabel } from "@/components/workforce/wizard/member-validation";
+import { useLeaveConfirm } from "@/components/workforce/wizard/use-leave-confirm";
+import { DurationField } from "@/components/shared/duration-field";
+import { BackLink } from "@/components/shared/back-link";
+import { summarizeRoles } from "@/lib/role-labels";
 
 /* ================================================================
    Types & Constants
@@ -141,7 +148,9 @@ function createModeratorSlot(): MemberSlot {
     role: "MODERATOR",
     memberType: "AGENT",
     mode: "new",
-    systemPrompt: "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
+    // Blank on purpose: the localized default prompt is shown as the
+    // placeholder and used when this stays empty (see `defaultModeratorPrompt`).
+    systemPrompt: "",
     provider: "anthropic",
     model: "",
     apiKey: "",
@@ -166,6 +175,165 @@ function createModeratorSlot(): MemberSlot {
  */
 function needsAgentCreation(slot: MemberSlot): boolean {
   return slot.memberType === "AGENT" && slot.mode === "new" && !slot.created && !slot.agentId;
+}
+
+const DEFAULT_PROVIDER = "anthropic";
+
+/**
+ * The prompt a new member gets when its prompt box is left empty — also shown
+ * as that box's placeholder, so what you see is what is sent. Worded without an
+ * article before the role ("a Engineering expert"), which no language-neutral
+ * template can get right for every role.
+ */
+function defaultMemberPrompt(t: TFunction, name: string, role: string | null): string {
+  const n = name.trim();
+  const r = (role ?? "").trim();
+  if (n && r) {
+    return t(
+      "groupWizard.defaultMemberPromptRole",
+      "You are {{name}}, specialising in {{role}}. Provide clear, actionable insights from your domain perspective.",
+      { name: n, role: r },
+    );
+  }
+  if (n) {
+    return t(
+      "groupWizard.defaultMemberPrompt",
+      "You are {{name}}. Provide clear, actionable insights from your domain perspective.",
+      { name: n },
+    );
+  }
+  return t(
+    "groupWizard.defaultMemberPromptNoName",
+    "You are a member of this group. Provide clear, actionable insights from your domain perspective.",
+  );
+}
+
+function defaultModeratorPrompt(t: TFunction): string {
+  return t(
+    "groupWizard.defaultModeratorPrompt",
+    "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
+  );
+}
+
+/**
+ * The `setup` request for one slot. A key is only sent when the provider takes
+ * one: the slot carries whatever was typed last, and a keyless provider would
+ * otherwise have the backend vault it for nothing.
+ */
+function buildSetupRequest(slot: MemberSlot, name: string, systemPrompt: string): SetupAgentRequest {
+  const provider = slot.provider || DEFAULT_PROVIDER;
+  return {
+    name,
+    systemPrompt,
+    provider,
+    model: slot.model || (LLM_PROVIDERS.find((p) => p.id === provider)?.defaultModel ?? "claude-sonnet-5-5"),
+    apiKey: providerNeedsKey(provider) ? slot.apiKey.trim() || undefined : undefined,
+    deploy: true,
+  };
+}
+
+/**
+ * A slot that is about to be provisioned on a provider that needs an API key it
+ * does not have. The backend refuses it (`AgentSetupService.setupAgent`), and
+ * by then the members ahead of it in the list are already deployed.
+ */
+function missingApiKey(slot: MemberSlot): boolean {
+  if (!needsAgentCreation(slot)) return false;
+  return providerNeedsKey(slot.provider || DEFAULT_PROVIDER) && !slot.apiKey.trim();
+}
+
+/** What a member is called in messages: its name, else its seat number. */
+function memberLabel(m: MemberSlot, index: number, t: TFunction): string {
+  return m.displayName.trim() || t("groupWizard.memberFallbackName", "Member {{n}}", { n: index + 1 });
+}
+
+/**
+ * Why the user cannot leave this step yet, as sentences. Empty means they can.
+ * The same list gates Next and is shown under it, so a disabled button always
+ * says what is missing instead of just looking broken.
+ */
+function stepBlockers(
+  stepId: (typeof STEPS)[number]["id"],
+  state: WizardState,
+  availableStyles: readonly DiscussionStyle[],
+  t: TFunction,
+): string[] {
+  const out: string[] = [];
+  if (stepId === "config") {
+    if (!state.name.trim()) out.push(t("groupWizard.blockerName", "Enter a group name."));
+    if (state.hitlEnabled) {
+      if (state.approvalPhases.length === 0) {
+        out.push(
+          t(
+            "groupWizard.blockerHitlPhases",
+            "Select at least one phase to pause at, or turn off human approval.",
+          ),
+        );
+      } else if (!isHitlConfigValid(state)) {
+        out.push(
+          t(
+            "groupWizard.blockerHitlTimeout",
+            "Enter a valid approval timeout (for example PT15M), or choose a different timeout policy.",
+          ),
+        );
+      }
+    }
+    if (!isStyleSupported(state.style, availableStyles)) {
+      out.push(
+        t("groupWizard.blockerStyle", "Pick a discussion style this server supports."),
+      );
+    }
+  }
+  if (stepId === "members") {
+    if (state.members.length < 2) {
+      out.push(t("groupWizard.needMembers"));
+    }
+    state.members.forEach((m, i) => {
+      const who = memberLabel(m, i, t);
+      if (!m.displayName.trim()) {
+        out.push(t("groupWizard.blockerMemberName", "{{member}}: add a display name.", { member: who }));
+      }
+      if (m.memberType === "HUMAN") {
+        if (!m.agentId.trim()) {
+          out.push(t("groupWizard.blockerMemberPrincipal", "{{member}}: enter the person's principal ID.", { member: who }));
+        }
+      } else if (m.memberType === "GROUP") {
+        if (!m.agentId.trim()) {
+          out.push(t("groupWizard.blockerMemberGroup", "{{member}}: pick the nested group.", { member: who }));
+        }
+      } else if (m.mode === "existing" && !m.agentId) {
+        out.push(
+          t("groupWizard.blockerMemberAgent", "{{member}}: pick an existing agent, or switch to Create New.", { member: who }),
+        );
+      } else if (missingApiKey(m)) {
+        out.push(
+          t(
+            "groupWizard.blockerMemberKey",
+            "{{member}}: add an API key for {{provider}}, or choose a provider that needs none (for example Ollama).",
+            { member: who, provider: providerLabel(m.provider || DEFAULT_PROVIDER) },
+          ),
+        );
+      }
+    });
+    if (state.moderator && missingApiKey(state.moderator)) {
+      out.push(
+        t(
+          "groupWizard.blockerModeratorKey",
+          "Moderator: add an API key for {{provider}}, or choose a provider that needs none (for example Ollama).",
+          { provider: providerLabel(state.moderator.provider || DEFAULT_PROVIDER) },
+        ),
+      );
+    }
+    // An explicitly-typed turn timeout must be a duration the backend can
+    // parse — an unparseable one is silently treated as "wait indefinitely"
+    // there, which is not what the user meant by typing it.
+    if (state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout)) {
+      out.push(
+        t("groupWizard.blockerTurnTimeout", "Set the human turn timeout to a number greater than zero, or clear it."),
+      );
+    }
+  }
+  return out;
 }
 
 /**
@@ -210,11 +378,27 @@ const INITIAL_STATE: WizardState = {
 };
 
 const STEPS = [
-  { id: "template", icon: LayoutTemplate },
-  { id: "config", icon: Settings2 },
-  { id: "members", icon: Users },
-  { id: "review", icon: ClipboardCheck },
+  { id: "template", icon: LayoutTemplate, labelKey: "groupWizard.stepTemplate", fallback: "Preset" },
+  { id: "config", icon: Settings2, labelKey: "groupWizard.stepConfig", fallback: "Setup" },
+  { id: "members", icon: Users, labelKey: "groupWizard.stepMembers", fallback: "Members" },
+  { id: "review", icon: ClipboardCheck, labelKey: "groupWizard.stepReview", fallback: "Review" },
 ] as const;
+
+/** Per-style "best for" line, shown on the style cards. */
+const STYLE_BEST_FOR: Record<string, string> = {
+  ROUND_TABLE: "Open brainstorming — every perspective on a question.",
+  PEER_REVIEW: "Reviewing a draft or proposal from several angles.",
+  DEVIL_ADVOCATE: "Stress-testing a plan before you commit to it.",
+  DELPHI: "Forecasts and estimates where independent opinions should converge.",
+  DEBATE: "Weighing a decision with two opposing sides.",
+  TASK_FORCE: "Planning and carrying out multi-step work with assigned tasks.",
+  NEGOTIATION: "Reaching agreement between parties with different interests.",
+};
+
+function styleBestFor(style: string, t: TFunction): string {
+  const fallback = STYLE_BEST_FOR[style];
+  return fallback ? t(`groupWizard.styleBestFor.${style}`, fallback) : "";
+}
 
 /** Style-specific accent colors */
 const STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; text: string; accent: string }> = {
@@ -249,6 +433,12 @@ export function GroupWizardPage() {
   const isCreating = createMutation.isPending || isBatchCreating;
   const step = STEPS[currentStep];
 
+  // Anything the user configured — prompts and API keys included — is lost on
+  // reload or when leaving, until the group exists. `update`/`setState` always
+  // produce a new object, so identity with the initial state is "untouched".
+  const isDirty = state !== INITIAL_STATE && !resultId;
+  const { requestLeave, dialog: leaveDialog } = useLeaveConfirm(isDirty);
+
   const update = useCallback(
     (patch: Partial<WizardState>) => setState((s) => ({ ...s, ...patch })),
     [],
@@ -267,45 +457,11 @@ export function GroupWizardPage() {
     setCurrentStep(1);
   }
 
-  function canProceed(): boolean {
-    if (!step) return false;
-    switch (step.id) {
-      case "template":
-        return true;
-      case "config":
-        return (
-          state.name.trim().length > 0 &&
-          isHitlConfigValid(state) &&
-          isStyleSupported(state.style, availableStyles)
-        );
-      case "members": {
-        if (state.members.length < 2) return false;
-        // Every member must have a displayName, plus an identity appropriate to
-        // its type. HUMAN needs a principal id and GROUP a nested group id, both
-        // typed or picked directly — only an AGENT may go without one, because
-        // only an AGENT can still be created on the way out (`needsAgentCreation`).
-        const membersValid = state.members.every((m) => {
-          if (!m.displayName.trim()) return false;
-          if (m.memberType === "HUMAN" || m.memberType === "GROUP") return !!m.agentId.trim();
-          return !!m.agentId || m.mode === "new";
-        });
-        if (!membersValid) return false;
-        // An explicitly-typed turn timeout must be a duration the backend can
-        // parse — an unparseable one is silently treated as "wait indefinitely"
-        // there, which is not what typing "abc" or "3h" (missing the P/T grammar) meant.
-        if (state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout)) {
-          return false;
-        }
-        return true;
-      }
-      case "review":
-        return true;
-      default:
-        return false;
-    }
-  }
+  const blockers = step ? stepBlockers(step.id, state, availableStyles, t) : [];
+  const canProceed = blockers.length === 0;
 
   function handleNext() {
+    if (!canProceed) return;
     if (currentStep < STEPS.length - 1) setCurrentStep(currentStep + 1);
   }
 
@@ -319,6 +475,18 @@ export function GroupWizardPage() {
     const updatedMembers = [...state.members];
     let updatedModerator = state.moderator ? { ...state.moderator } : null;
 
+    // Every exit that leaves agents behind must write them back into state.
+    // Provisioning is not idempotent: a retry that does not know which slots
+    // already have a deployed agent creates and deploys a second copy of each.
+    const persistProgress = () =>
+      setState((s) => ({ ...s, members: updatedMembers, moderator: updatedModerator }));
+    const abort = (err: unknown) => {
+      toast.error(t("groupWizard.agentCreateFailed", { error: getErrorMessage(err) }));
+      setIsBatchCreating(false);
+      setCreationProgress(null);
+      persistProgress();
+    };
+
     // --- Phase 1: Auto-create all uncreated "new" agents ---
     const uncreatedMembers = updatedMembers
       .map((m, i) => ({ slot: m, index: i }))
@@ -327,22 +495,16 @@ export function GroupWizardPage() {
     for (const { slot, index } of uncreatedMembers) {
       setCreationProgress(t("groupWizard.creatingSlot", { name: slot.displayName }));
       try {
-        const result = await setupAgent({
-          name: `${state.name} — ${slot.displayName}`.trim(),
-          systemPrompt: slot.systemPrompt || `You are ${slot.displayName}${slot.role ? `, a ${slot.role} expert` : ""}. Provide clear, actionable insights.`,
-          provider: slot.provider || "anthropic",
-          model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5-5"),
-          apiKey: slot.apiKey || undefined,
-          deploy: true,
-        });
+        const result = await setupAgent(
+          buildSetupRequest(
+            slot,
+            `${state.name} — ${slot.displayName}`.trim(),
+            slot.systemPrompt || defaultMemberPrompt(t, slot.displayName, slot.role ?? null),
+          ),
+        );
         updatedMembers[index] = { ...updatedMembers[index]!, agentId: result.agentId, created: true };
       } catch (err) {
-        toast.error(t("groupWizard.agentCreateFailed", {
-          error: err instanceof Error ? err.message : String(err),
-        }));
-        setIsBatchCreating(false);
-        setCreationProgress(null);
-        setState((s) => ({ ...s, members: updatedMembers }));
+        abort(err);
         return; // Stop on first failure
       }
     }
@@ -351,21 +513,16 @@ export function GroupWizardPage() {
     if (updatedModerator && needsAgentCreation(updatedModerator)) {
       setCreationProgress(t("groupWizard.creatingModerator"));
       try {
-        const result = await setupAgent({
-          name: `${state.name} — Moderator`.trim(),
-          systemPrompt: updatedModerator.systemPrompt || "You are a skilled moderator. Synthesize the discussion into a clear, balanced summary.",
-          provider: updatedModerator.provider || "anthropic",
-          model: updatedModerator.model || (LLM_PROVIDERS.find(p => p.id === (updatedModerator!.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5-5"),
-          apiKey: updatedModerator.apiKey || undefined,
-          deploy: true,
-        });
+        const result = await setupAgent(
+          buildSetupRequest(
+            updatedModerator,
+            `${state.name} — ${t("groupWizard.moderator")}`.trim(),
+            updatedModerator.systemPrompt || defaultModeratorPrompt(t),
+          ),
+        );
         updatedModerator = { ...updatedModerator, agentId: result.agentId, created: true };
       } catch (err) {
-        toast.error(t("groupWizard.agentCreateFailed", {
-          error: err instanceof Error ? err.message : String(err),
-        }));
-        setIsBatchCreating(false);
-        setCreationProgress(null);
+        abort(err);
         return;
       }
     }
@@ -501,13 +658,11 @@ export function GroupWizardPage() {
     <div className="mx-auto max-w-3xl space-y-8">
       {/* Header */}
       <div className="space-y-2">
-        <Link
+        <BackLink
           to="/manage/groups"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t("groupWizard.backToGroups")}
-        </Link>
+          label={t("groupWizard.backToGroups")}
+          onNavigate={requestLeave}
+        />
         <h1 className="flex items-center gap-3 text-3xl font-bold text-foreground">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
             <Wand2 className="h-5 w-5 text-primary" />
@@ -520,45 +675,69 @@ export function GroupWizardPage() {
       </div>
 
       {/* Step progress */}
-      <div className="flex items-center gap-2" data-testid="group-wizard-steps">
+      <ol
+        className="flex items-start gap-2"
+        data-testid="group-wizard-steps"
+        aria-label={t("groupWizard.stepsLabel", "Wizard progress")}
+      >
         {STEPS.map((s, i) => {
           const Icon = s.icon;
           const isActive = i === currentStep;
           const isComplete = i < currentStep;
+          const title = t(s.labelKey, s.fallback);
           return (
-            <div key={s.id} className="flex flex-1 items-center gap-2">
-              <button
-                onClick={() => i < currentStep && setCurrentStep(i)}
-                disabled={i > currentStep}
-                className={cn(
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-300",
-                  isActive &&
-                    "border-primary bg-primary text-primary-foreground shadow-md shadow-primary/25 scale-110",
-                  isComplete &&
-                    "border-emerald-500 bg-emerald-500 text-white",
-                  !isActive &&
-                    !isComplete &&
-                    "border-border bg-card text-muted-foreground",
-                )}
-              >
-                {isComplete ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Icon className="h-4 w-4" />
-                )}
-              </button>
+            <li
+              key={s.id}
+              className={cn("flex items-start gap-2", i < STEPS.length - 1 && "flex-1")}
+            >
+              <div className="flex flex-col items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => i < currentStep && setCurrentStep(i)}
+                  disabled={i > currentStep}
+                  aria-label={t("groupWizard.stepAria", "Step {{n}}: {{title}}", { n: i + 1, title })}
+                  aria-current={isActive ? "step" : undefined}
+                  data-testid={`group-wizard-step-${s.id}`}
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-300",
+                    isActive &&
+                      "border-primary bg-primary text-primary-foreground shadow-md shadow-primary/25 scale-110",
+                    isComplete &&
+                      "border-emerald-500 bg-emerald-500 text-white",
+                    !isActive &&
+                      !isComplete &&
+                      "border-border bg-card text-muted-foreground",
+                  )}
+                >
+                  {isComplete ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Icon className="h-4 w-4" />
+                  )}
+                </button>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "hidden text-xs sm:block",
+                    isActive ? "font-medium text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  {title}
+                </span>
+              </div>
               {i < STEPS.length - 1 && (
                 <div
+                  aria-hidden="true"
                   className={cn(
-                    "h-0.5 flex-1 rounded-full transition-colors duration-300",
+                    "mt-5 h-0.5 flex-1 rounded-full transition-colors duration-300",
                     isComplete ? "bg-emerald-500" : "bg-border",
                   )}
                 />
               )}
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ol>
 
       {/* Step content */}
       <div className="rounded-xl border bg-card p-6 shadow-sm">
@@ -567,6 +746,26 @@ export function GroupWizardPage() {
         {step?.id === "members" && <MembersStep state={state} onChange={update} styleColors={styleColors} />}
         {step?.id === "review" && <ReviewStep state={state} />}
       </div>
+
+      {/* Why Next is disabled — a disabled button alone never says what is missing. */}
+      {step?.id !== "review" && blockers.length > 0 && (
+        <div
+          id="group-wizard-blockers"
+          className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+          role="status"
+          data-testid="group-wizard-blockers"
+        >
+          <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("groupWizard.blockersTitle", "To continue:")}
+          </p>
+          <ul className="mt-1 list-disc space-y-0.5 ps-9 text-xs text-muted-foreground">
+            {blockers.map((b) => (
+              <li key={b}>{b}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Navigation */}
       <div className="flex items-center justify-between">
@@ -588,7 +787,8 @@ export function GroupWizardPage() {
         {step?.id !== "review" ? (
           <button
             onClick={handleNext}
-            disabled={!canProceed()}
+            disabled={!canProceed}
+            aria-describedby={!canProceed ? "group-wizard-blockers" : undefined}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]"
             data-testid="group-wizard-next"
           >
@@ -616,6 +816,7 @@ export function GroupWizardPage() {
           </button>
         )}
       </div>
+      {leaveDialog}
     </div>
   );
 }
@@ -647,10 +848,27 @@ function TemplateStep({
       <p className="mt-1 text-sm text-muted-foreground">
         {t("groupWizard.templateDesc")}
       </p>
+      {/* Two template systems exist: these client-side starter presets, which
+          pre-fill this wizard, and the packaged templates the server ships,
+          which are instantiated by assigning existing agents to their roles. */}
+      <p className="mt-2 text-xs text-muted-foreground" data-testid="presets-note">
+        {t(
+          "groupWizard.presetsNote",
+          "These are starter presets that fill in this wizard. To use a packaged, pre-tuned discussion and assign your existing agents to its roles instead, see",
+        )}{" "}
+        <Link
+          to="/manage/groups/templates"
+          className="font-medium text-primary underline-offset-2 hover:underline"
+        >
+          {t("groupWizard.presetsLink", "Group Templates")}
+        </Link>
+        .
+      </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="template-grid">
         {templates.map((tmpl) => {
           const styleInfo = styleDisplay(tmpl.style, t);
+          const roleChips = summarizeRoles(tmpl.roles.map((r) => r.role));
           return (
             <button
               key={tmpl.key}
@@ -673,14 +891,17 @@ function TemplateStep({
                 {tmpl.description}
               </p>
               <div className="flex flex-wrap gap-1.5">
-                  {tmpl.roles.slice(0, 4).map((r, ri) => (
-                  <Badge key={ri} variant="secondary" className="text-[10px]">
-                    {r.role}
+                {/* Roles collapse to "Label ×n" and lose their enum spelling:
+                    four "Forecasting" analysts are one chip, DEVIL_ADVOCATE
+                    reads as words. */}
+                {roleChips.slice(0, 4).map((r) => (
+                  <Badge key={r.label} variant="secondary" className="text-[10px]">
+                    {r.count > 1 ? `${r.label} ×${r.count}` : r.label}
                   </Badge>
                 ))}
-                {tmpl.roles.length > 4 && (
+                {roleChips.length > 4 && (
                   <Badge variant="outline" className="text-[10px]">
-                    +{tmpl.roles.length - 4}
+                    +{roleChips.length - 4}
                   </Badge>
                 )}
               </div>
@@ -729,6 +950,12 @@ function ConfigStep({
   // instead of being carried along.
   const availableStyles = useAvailableStyles();
   const styleSupported = isStyleSupported(state.style, availableStyles);
+  const styleColor = STYLE_COLORS[state.style] ?? STYLE_COLORS.CUSTOM;
+  // Rough call count: each member speaks once per round, plus one synthesis
+  // call when there is a moderator. Phases such as a final synthesis or an
+  // independent first pass shift it a little, so it is an estimate, not a quote.
+  const estimatedCalls =
+    state.members.length * state.maxRounds + (state.moderator ? 1 : 0);
 
   return (
     <div>
@@ -775,10 +1002,14 @@ function ConfigStep({
 
         {/* Discussion Style — visual cards */}
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-foreground">
+          <span id="gw-style-label" className="mb-1.5 block text-sm font-medium text-foreground">
             {t("groups.discussionStyle", "Discussion Style")}
-          </label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          </span>
+          <div
+            role="radiogroup"
+            aria-labelledby="gw-style-label"
+            className="grid grid-cols-2 sm:grid-cols-3 gap-2"
+          >
             {availableStyles.filter((s) => s !== "CUSTOM").map((s) => {
               const info = styleDisplay(s, t);
               const colors = STYLE_COLORS[s] ?? STYLE_COLORS.CUSTOM;
@@ -786,6 +1017,9 @@ function ConfigStep({
               return (
                 <button
                   key={s}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
                   onClick={() => onChange({ style: s, approvalPhases: [] })}
                   className={cn(
                     "group relative flex flex-col items-start rounded-lg border-2 p-3 text-start transition-all",
@@ -799,8 +1033,8 @@ function ConfigStep({
                     <span className="text-lg">{info?.icon}</span>
                     <span className={cn("text-xs font-semibold", selected ? colors.text : "text-foreground")}>{info?.label}</span>
                   </div>
-                  <p className="mt-1 text-[10px] text-muted-foreground leading-snug line-clamp-2">
-                    {info?.flow}
+                  <p className="mt-1 text-[10px] text-muted-foreground leading-snug line-clamp-3">
+                    {styleBestFor(s, t)}
                   </p>
                   {selected && (
                     <div className={cn("absolute inset-e-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-white", colors.accent)}>
@@ -811,6 +1045,25 @@ function ConfigStep({
               );
             })}
           </div>
+
+          {/* The full flow of the chosen style — the cards only have room for
+              what it is good for, not how it actually runs. */}
+          {styleDisplay(state.style, t).flow && (
+            <div
+              className={cn("mt-2 rounded-lg border p-3", styleColor.border, styleColor.bg)}
+              data-testid="gw-style-details"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {t("groupWizard.howItRuns", "How it runs")}
+              </p>
+              <p className={cn("mt-0.5 text-xs font-medium", styleColor.text)}>
+                {styleDisplay(state.style, t).flow}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {styleBestFor(state.style, t)}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* A template can preselect a style the running backend does not have —
@@ -852,10 +1105,33 @@ function ConfigStep({
                   approvalPhases: state.approvalPhases.filter((n) => validNames.has(n)),
                 });
               }}
+              aria-describedby="gw-rounds-hint"
               className="flex-1 accent-primary"
             />
             <span className="w-8 text-center text-sm font-bold text-foreground">{state.maxRounds}</span>
           </div>
+          <p id="gw-rounds-hint" className="mt-1.5 text-xs text-muted-foreground" data-testid="gw-rounds-hint">
+            {t(
+              "groupWizard.roundsExplain",
+              "One round is every member speaking once. More rounds let members respond to each other, but every extra round adds LLM calls and cost.",
+            )}
+            {state.members.length > 0 && (
+              <>
+                {" "}
+                {state.moderator
+                  ? t(
+                      "groupWizard.roundsEstimateModerator",
+                      "Estimated: about {{calls}} LLM calls per discussion ({{members}} members × {{rounds}} rounds + 1 moderator).",
+                      { calls: estimatedCalls, members: state.members.length, rounds: state.maxRounds },
+                    )
+                  : t(
+                      "groupWizard.roundsEstimate",
+                      "Estimated: about {{calls}} LLM calls per discussion ({{members}} members × {{rounds}} rounds).",
+                      { calls: estimatedCalls, members: state.members.length, rounds: state.maxRounds },
+                    )}
+              </>
+            )}
+          </p>
         </div>
 
         {/* Human-in-the-Loop approval */}
@@ -1128,18 +1404,15 @@ function MembersStep({
 
   async function createAgentForSlot(idx: number) {
     const slot = state.members[idx];
-    if (!slot || !slot.displayName.trim()) return;
+    if (!slot || !slot.displayName.trim() || missingApiKey(slot)) return;
 
     updateMember(idx, { creating: true });
 
-    const req: SetupAgentRequest = {
-      name: `${state.name} — ${slot.displayName}`.trim(),
-      systemPrompt: slot.systemPrompt || `You are ${slot.displayName}${slot.role ? `, a ${slot.role} expert` : ""}. Provide clear, actionable insights from your domain perspective.`,
-      provider: slot.provider || "anthropic",
-      model: slot.model || (LLM_PROVIDERS.find(p => p.id === (slot.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5-5"),
-      apiKey: slot.apiKey || undefined,
-      deploy: true,
-    };
+    const req = buildSetupRequest(
+      slot,
+      `${state.name} — ${slot.displayName}`.trim(),
+      slot.systemPrompt || defaultMemberPrompt(t, slot.displayName, slot.role ?? null),
+    );
 
     try {
       const result = await setupAgent(req);
@@ -1151,26 +1424,21 @@ function MembersStep({
       toast.success(t("groupWizard.agentCreated", { name: slot.displayName }));
     } catch (err) {
       updateMember(idx, { creating: false });
-      toast.error(t("groupWizard.agentCreateFailed", {
-        error: err instanceof Error ? err.message : String(err),
-      }));
+      toast.error(t("groupWizard.agentCreateFailed", { error: getErrorMessage(err) }));
     }
   }
 
   async function createModeratorAgent() {
     const mod = state.moderator;
-    if (!mod) return;
+    if (!mod || missingApiKey(mod)) return;
 
     onChange({ moderator: { ...mod, creating: true } });
 
-    const req: SetupAgentRequest = {
-      name: `${state.name} — Moderator`.trim(),
-      systemPrompt: mod.systemPrompt || "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
-      provider: mod.provider || "anthropic",
-      model: mod.model || (LLM_PROVIDERS.find(p => p.id === (mod.provider || "anthropic"))?.defaultModel ?? "claude-sonnet-5-5"),
-      apiKey: mod.apiKey || undefined,
-      deploy: true,
-    };
+    const req = buildSetupRequest(
+      mod,
+      `${state.name} — ${t("groupWizard.moderator")}`.trim(),
+      mod.systemPrompt || defaultModeratorPrompt(t),
+    );
 
     try {
       const result = await setupAgent(req);
@@ -1180,10 +1448,19 @@ function MembersStep({
       toast.success(t("groupWizard.moderatorCreated"));
     } catch (err) {
       onChange({ moderator: { ...mod, creating: false } });
-      toast.error(t("groupWizard.agentCreateFailed", {
-        error: err instanceof Error ? err.message : String(err),
-      }));
+      toast.error(t("groupWizard.agentCreateFailed", { error: getErrorMessage(err) }));
     }
+  }
+
+  /** Copy one provider/model/key onto every advisor that is still to be created. */
+  function applyToAllNew(llm: Pick<MemberSlot, "provider" | "model" | "apiKey">) {
+    onChange({
+      members: state.members.map((m) => (needsAgentCreation(m) ? { ...m, ...llm } : m)),
+      moderator:
+        state.moderator && needsAgentCreation(state.moderator)
+          ? { ...state.moderator, ...llm }
+          : state.moderator,
+    });
   }
 
   return (
@@ -1208,6 +1485,13 @@ function MembersStep({
       <p className="text-sm text-muted-foreground mb-4">
         {t("groupWizard.membersDesc")}
       </p>
+
+      {/* One provider/key for every advisor still to be created, instead of
+          typing the same key into each card. */}
+      {(state.members.some(needsAgentCreation) ||
+        (state.moderator && needsAgentCreation(state.moderator))) && (
+        <BulkLlmDefaults onApply={applyToAllNew} />
+      )}
 
       {/* Member Cards */}
       <div className="space-y-3 max-h-[500px] overflow-y-auto pe-1">
@@ -1301,33 +1585,35 @@ function MembersStep({
           </p>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
+              <span className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
                 <Clock className="h-3 w-3" />
-                {t("groupWizard.humanTurnTimeoutLabel", "Turn timeout (ISO-8601 duration)")}
-              </label>
-              <input
+                {t("groupWizard.humanTurnTimeoutLabel", "Turn timeout")}
+              </span>
+              {/* Number + unit; the ISO-8601 string is an implementation detail
+                  the picker writes for the user. */}
+              <DurationField
                 value={state.humanTurnTimeout}
-                onChange={(e) => onChange({ humanTurnTimeout: e.target.value })}
-                placeholder={t("groupWizard.humanTurnTimeoutPlaceholder", "e.g. PT24H — blank waits indefinitely")}
-                className={cn(
-                  "w-full rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
-                  state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout)
-                    ? "border-destructive"
-                    : "border-input",
-                )}
-                data-testid="human-turn-timeout-input"
+                onChange={(iso) => onChange({ humanTurnTimeout: iso })}
+                label={t("groupWizard.humanTurnTimeoutLabel", "Turn timeout")}
+                invalid={!!state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout)}
+                testId="human-turn-timeout-input"
               />
-              {state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout) && (
+              {state.humanTurnTimeout.trim() && !isValidIsoDuration(state.humanTurnTimeout) ? (
                 <p className="mt-1 text-[11px] text-destructive">
-                  {t("groupWizard.humanTurnTimeoutInvalid", "Not a valid ISO-8601 duration, e.g. PT24H or P1D.")}
+                  {t("groupWizard.humanTurnTimeoutInvalid", "Enter a number greater than zero.")}
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t("groupWizard.humanTurnTimeoutPlaceholder", "Leave empty to wait indefinitely.")}
                 </p>
               )}
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              <label htmlFor="gw-human-on-timeout" className="mb-1 block text-xs font-medium text-muted-foreground">
                 {t("groupWizard.humanOnTimeoutLabel", "On timeout")}
               </label>
               <select
+                id="gw-human-on-timeout"
                 value={state.humanOnTimeout}
                 onChange={(e) => onChange({ humanOnTimeout: e.target.value as OnHumanTimeout })}
                 disabled={!state.humanTurnTimeout.trim()}
@@ -1345,6 +1631,96 @@ function MembersStep({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ================================================================
+   Bulk provider / key for new agents
+   ================================================================ */
+
+function BulkLlmDefaults({
+  onApply,
+}: {
+  onApply: (llm: Pick<MemberSlot, "provider" | "model" | "apiKey">) => void;
+}) {
+  const { t } = useTranslation();
+  const id = useId();
+  const [provider, setProvider] = useState(DEFAULT_PROVIDER);
+  const [model, setModel] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const config = LLM_PROVIDERS.find((p) => p.id === provider);
+  const needsKey = providerNeedsKey(provider);
+
+  return (
+    <div
+      className="mb-4 space-y-2 rounded-xl border border-border bg-secondary/10 p-3"
+      data-testid="gw-bulk-defaults"
+    >
+      <p className="text-xs font-semibold text-foreground">
+        {t("groupWizard.bulkTitle", "Same provider and key for all new agents")}
+      </p>
+      <p className="text-[11px] text-muted-foreground">
+        {t(
+          "groupWizard.bulkHint",
+          "Every new agent needs an LLM provider and, for most providers, an API key. Fill it in once here and apply it to all of them; you can still change a single agent afterwards.",
+        )}
+      </p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div>
+          <label htmlFor={`${id}-provider`} className="mb-1 block text-xs font-medium text-muted-foreground">
+            {t("groupWizard.provider")}
+          </label>
+          <ProviderSelect
+            id={`${id}-provider`}
+            value={provider}
+            onChange={(next) => {
+              setProvider(next);
+              setModel("");
+              setApiKey("");
+            }}
+            include={isProvisionableBySetup}
+            testId="gw-bulk-provider"
+            className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div>
+          <label htmlFor={`${id}-model`} className="mb-1 block text-xs font-medium text-muted-foreground">
+            {t("groupWizard.model")}
+          </label>
+          <input
+            id={`${id}-model`}
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder={`e.g. ${config?.defaultModel ?? ""}`}
+            className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+      </div>
+      {needsKey && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            {t("groupWizard.apiKey")}
+          </label>
+          <SecretKeyPicker
+            value={apiKey}
+            onChange={setApiKey}
+            placeholder={t("groupWizard.apiKeyPlaceholder")}
+            testId="gw-bulk-apikey"
+            ariaLabel={t("groupWizard.apiKey")}
+          />
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => onApply({ provider, model, apiKey: needsKey ? apiKey : "" })}
+        disabled={needsKey && !apiKey.trim()}
+        className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+        data-testid="gw-bulk-apply"
+      >
+        <Wand2 className="h-3 w-3" aria-hidden="true" />
+        {t("groupWizard.bulkApply", "Apply to all new agents")}
+      </button>
     </div>
   );
 }
@@ -1373,6 +1749,9 @@ function MemberCard({
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const providerConfig = LLM_PROVIDERS.find((p) => p.id === member.provider);
+  const needsKey = providerNeedsKey(member.provider || DEFAULT_PROVIDER);
+  const keyMissing = missingApiKey(member);
+  const id = useId();
 
   /**
    * Switching a member's type must clear its identity. `agentId` means a
@@ -1431,6 +1810,7 @@ function MemberCard({
               onChange={(e) => onUpdate({ displayName: e.target.value })}
               className="w-full bg-transparent text-sm font-semibold text-foreground focus:outline-none placeholder:text-muted-foreground/60"
               placeholder={t("groupWizard.displayNamePlaceholder")}
+              aria-label={t("groupWizard.memberNameLabel", "Display name")}
               autoFocus={!member.displayName && !member.created}
               data-testid={`member-name-${index}`}
             />
@@ -1440,12 +1820,18 @@ function MemberCard({
             onChange={(e) => onUpdate({ role: e.target.value || null })}
             className="w-full bg-transparent text-xs text-muted-foreground ps-2.5 focus:outline-none placeholder:text-muted-foreground/50"
             placeholder={t("groupWizard.rolePlaceholder")}
+            aria-label={t("groupWizard.memberRoleLabel", "Role")}
           />
         </div>
 
         {/* Type toggle: Agent / Group / Human */}
-        <div className="flex items-center rounded-md border border-border bg-background overflow-hidden shrink-0">
+        <div
+          role="group"
+          aria-label={t("groupWizard.memberTypeLabel", "Member type")}
+          className="flex items-center rounded-md border border-border bg-background overflow-hidden shrink-0"
+        >
           <button
+            aria-pressed={member.memberType === "AGENT"}
             onClick={() => selectMemberType("AGENT")}
             className={cn(
               "px-2.5 py-1 text-[10px] font-medium transition-colors",
@@ -1454,9 +1840,10 @@ function MemberCard({
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            Agent
+            {t("common.agent", "Agent")}
           </button>
           <button
+            aria-pressed={member.memberType === "GROUP"}
             onClick={() => selectMemberType("GROUP")}
             className={cn(
               "px-2.5 py-1 text-[10px] font-medium transition-colors",
@@ -1466,9 +1853,10 @@ function MemberCard({
             )}
           >
             <Users className="inline h-2.5 w-2.5 me-0.5" />
-            Group
+            {t("common.group", "Group")}
           </button>
           <button
+            aria-pressed={member.memberType === "HUMAN"}
             onClick={() => selectMemberType("HUMAN")}
             className={cn(
               "px-2.5 py-1 text-[10px] font-medium transition-colors",
@@ -1505,10 +1893,11 @@ function MemberCard({
             />
           ) : member.memberType === "HUMAN" ? (
             <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-muted-foreground">
+              <label htmlFor={`${id}-principal`} className="block text-xs font-medium text-muted-foreground">
                 {t("groupWizard.humanPrincipalId", "Principal ID")}
               </label>
               <input
+                id={`${id}-principal`}
                 value={member.agentId}
                 onChange={(e) => onUpdate({ agentId: e.target.value })}
                 placeholder={t("groupWizard.humanPrincipalIdPlaceholder", "The user's login/principal id")}
@@ -1558,6 +1947,7 @@ function MemberCard({
                   <select
                     value={member.agentId}
                     onChange={(e) => onUpdate({ agentId: e.target.value })}
+                    aria-label={t("groupWizard.selectAgent")}
                     className={cn(
                       "w-full appearance-none rounded-lg border bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
                       !member.agentId ? "border-amber-400/50" : "border-input"
@@ -1579,13 +1969,14 @@ function MemberCard({
                 <div className="space-y-2.5">
                   {/* System prompt */}
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    <label htmlFor={`${id}-prompt`} className="mb-1 block text-xs font-medium text-muted-foreground">
                       {t("groupWizard.systemPrompt")}
                     </label>
                     <textarea
+                      id={`${id}-prompt`}
                       value={member.systemPrompt}
                       onChange={(e) => onUpdate({ systemPrompt: e.target.value })}
-                      placeholder={`You are ${member.displayName}${member.role ? `, a ${member.role} expert` : ""}. Provide insightful analysis from your domain perspective.`}
+                      placeholder={defaultMemberPrompt(t, member.displayName, member.role)}
                       rows={2}
                       className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                     />
@@ -1610,16 +2001,20 @@ function MemberCard({
                             });
                           }}
                           ariaLabel={t("groupWizard.provider")}
+                          // setup cannot configure every provider (Vertex AI needs a
+                          // project and location it has no field for).
+                          include={isProvisionableBySetup}
                           className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                         <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
                       </div>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                      <label htmlFor={`${id}-model`} className="mb-1 block text-xs font-medium text-muted-foreground">
                         {t("groupWizard.model")}
                       </label>
                       <input
+                        id={`${id}-model`}
                         value={member.model}
                         onChange={(e) => onUpdate({ model: e.target.value })}
                         className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -1629,7 +2024,7 @@ function MemberCard({
                   </div>
 
                   {/* API Key (only if provider needs it) */}
-                  {providerConfig?.needsKey && (
+                  {needsKey && (
                     <div>
                       <label className="mb-1 block text-xs font-medium text-muted-foreground">
                         {t("groupWizard.apiKey")}
@@ -1639,14 +2034,23 @@ function MemberCard({
                         onChange={(v) => onUpdate({ apiKey: v })}
                         placeholder={t("groupWizard.apiKeyPlaceholder")}
                         testId={`gw-apikey-${index}`}
+                        ariaLabel={t("groupWizard.apiKey")}
+                        aria-invalid={keyMissing || undefined}
                       />
+                      {keyMissing && (
+                        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400" data-testid={`gw-apikey-required-${index}`}>
+                          {t("groupWizard.apiKeyRequired", "{{provider}} needs an API key before this agent can be created.", {
+                            provider: providerLabel(member.provider || DEFAULT_PROVIDER),
+                          })}
+                        </p>
+                      )}
                     </div>
                   )}
 
                   {/* Create button */}
                   <button
                     onClick={onCreateAgent}
-                    disabled={member.creating || !member.displayName.trim()}
+                    disabled={member.creating || !member.displayName.trim() || keyMissing}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary/10 px-4 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {member.creating ? (
@@ -1699,6 +2103,9 @@ function ModeratorCard({
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const providerConfig = LLM_PROVIDERS.find((p) => p.id === moderator.provider);
+  const needsKey = providerNeedsKey(moderator.provider || DEFAULT_PROVIDER);
+  const keyMissing = missingApiKey(moderator);
+  const id = useId();
 
   if (moderator.created) {
     return (
@@ -1765,7 +2172,8 @@ function ModeratorCard({
           <textarea
             value={moderator.systemPrompt}
             onChange={(e) => onChange({ systemPrompt: e.target.value })}
-            placeholder="You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary…"
+            placeholder={defaultModeratorPrompt(t)}
+            aria-label={t("groupWizard.systemPrompt")}
             rows={2}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
           />
@@ -1778,18 +2186,21 @@ function ModeratorCard({
                   onChange({ provider, model: "", apiKey: "" });
                 }}
                 ariaLabel={t("groupWizard.provider")}
+                include={isProvisionableBySetup}
                 className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
               <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
             </div>
             <input
+              id={`${id}-model`}
               value={moderator.model}
               onChange={(e) => onChange({ model: e.target.value })}
+              aria-label={t("groupWizard.model")}
               className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
             />
           </div>
-          {providerConfig?.needsKey && (
+          {needsKey && (
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
                 {t("groupWizard.apiKey")}
@@ -1799,12 +2210,21 @@ function ModeratorCard({
                 onChange={(v) => onChange({ apiKey: v })}
                 placeholder={t("groupWizard.apiKeyPlaceholder")}
                 testId="gw-moderator-apikey"
+                ariaLabel={t("groupWizard.apiKey")}
+                aria-invalid={keyMissing || undefined}
               />
+              {keyMissing && (
+                <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                  {t("groupWizard.apiKeyRequired", "{{provider}} needs an API key before this agent can be created.", {
+                    provider: providerLabel(moderator.provider || DEFAULT_PROVIDER),
+                  })}
+                </p>
+              )}
             </div>
           )}
           <button
             onClick={onCreateAgent}
-            disabled={moderator.creating}
+            disabled={moderator.creating || keyMissing}
             className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary/10 px-4 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
           >
             {moderator.creating ? (

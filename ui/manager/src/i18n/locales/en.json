@@ -228,7 +228,8 @@
     "quickCreateTitle": "Quick Create {{type}}",
     "quickCreateDesc": "Set a name and description, configure details later.",
     "guidedSetup": "Guided Setup",
-    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
+    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment.",
+    "guidedSetupDescGroup": "Step-by-step wizard for the team, discussion style, and optional approvals — it can create the member agents too."
   },
   "platform": {
     "status": "Platform Status",
@@ -3165,15 +3166,65 @@
     "humanOnTimeoutAbort": "Abort the discussion",
     "humanOnTimeoutSkip": "Skip their turn and continue",
     "humanTurnSettingsTitle": "Human member turn settings",
-    "humanTurnTimeoutLabel": "Turn timeout (ISO-8601 duration)",
-    "humanTurnTimeoutPlaceholder": "e.g. PT24H — blank waits indefinitely",
-    "humanTurnTimeoutInvalid": "Not a valid ISO-8601 duration, e.g. PT24H or P1D.",
+    "humanTurnTimeoutLabel": "Turn timeout",
+    "humanTurnTimeoutPlaceholder": "Leave empty to wait indefinitely.",
+    "humanTurnTimeoutInvalid": "Enter a number greater than zero.",
     "humanOnTimeoutLabel": "On timeout",
     "memberTypeHuman": "Human",
     "humanPrincipalId": "Principal ID",
     "humanPrincipalIdPlaceholder": "The user's login/principal id",
     "humanTurnSettingsHint": "The discussion pauses and waits when it's a human member's turn to speak. Choose what happens if they don't respond in time.",
-    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak."
+    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak.",
+    "stepTemplate": "Preset",
+    "stepConfig": "Setup",
+    "stepMembers": "Members",
+    "stepReview": "Review",
+    "stepsLabel": "Wizard progress",
+    "stepAria": "Step {{n}}: {{title}}",
+    "blockersTitle": "To continue:",
+    "blockerName": "Enter a group name.",
+    "blockerHitlPhases": "Select at least one phase to pause at, or turn off human approval.",
+    "blockerHitlTimeout": "Enter a valid approval timeout (for example PT15M), or choose a different timeout policy.",
+    "blockerStyle": "Pick a discussion style this server supports.",
+    "blockerMemberName": "{{member}}: add a display name.",
+    "blockerMemberPrincipal": "{{member}}: enter the person's principal ID.",
+    "blockerMemberGroup": "{{member}}: pick the nested group.",
+    "blockerMemberAgent": "{{member}}: pick an existing agent, or switch to Create New.",
+    "blockerMemberKey": "{{member}}: add an API key for {{provider}}, or choose a provider that needs none (for example Ollama).",
+    "blockerModeratorKey": "Moderator: add an API key for {{provider}}, or choose a provider that needs none (for example Ollama).",
+    "blockerTurnTimeout": "Set the human turn timeout to a number greater than zero, or clear it.",
+    "memberFallbackName": "Member {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "Open brainstorming — every perspective on a question.",
+      "PEER_REVIEW": "Reviewing a draft or proposal from several angles.",
+      "DEVIL_ADVOCATE": "Stress-testing a plan before you commit to it.",
+      "DELPHI": "Forecasts and estimates where independent opinions should converge.",
+      "DEBATE": "Weighing a decision with two opposing sides.",
+      "TASK_FORCE": "Planning and carrying out multi-step work with assigned tasks.",
+      "NEGOTIATION": "Reaching agreement between parties with different interests."
+    },
+    "howItRuns": "How it runs",
+    "roundsExplain": "One round is every member speaking once. More rounds let members respond to each other, but every extra round adds LLM calls and cost.",
+    "roundsEstimate": "Estimated: about {{calls}} LLM calls per discussion ({{members}} members × {{rounds}} rounds).",
+    "roundsEstimateModerator": "Estimated: about {{calls}} LLM calls per discussion ({{members}} members × {{rounds}} rounds + 1 moderator).",
+    "unitMinutes": "minutes",
+    "unitHours": "hours",
+    "unitDays": "days",
+    "durationNoLimit": "No limit",
+    "durationUnit": "Unit",
+    "defaultMemberPrompt": "You are {{name}}. Provide clear, actionable insights from your domain perspective.",
+    "defaultMemberPromptRole": "You are {{name}}, specialising in {{role}}. Provide clear, actionable insights from your domain perspective.",
+    "defaultMemberPromptNoName": "You are a member of this group. Provide clear, actionable insights from your domain perspective.",
+    "defaultModeratorPrompt": "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
+    "memberNameLabel": "Display name",
+    "memberRoleLabel": "Role",
+    "memberTypeLabel": "Member type",
+    "bulkTitle": "Same provider and key for all new agents",
+    "bulkHint": "Every new agent needs an LLM provider and, for most providers, an API key. Fill it in once here and apply it to all of them; you can still change a single agent afterwards.",
+    "bulkApply": "Apply to all new agents",
+    "apiKeyRequired": "{{provider}} needs an API key before this agent can be created.",
+    "presetsNote": "These are starter presets that fill in this wizard. To use a packaged, pre-tuned discussion and assign your existing agents to its roles instead, see",
+    "presetsLink": "Group Templates"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -3229,7 +3280,9 @@
     "roleCount_one": "{{count}} role to assign",
     "roleCount_other": "{{count}} roles to assign",
     "empty": "No templates available",
-    "emptyDescription": "This server ships no group templates. You can still build a group from scratch with the wizard."
+    "emptyDescription": "This server ships no group templates. You can still build a group from scratch with the wizard.",
+    "wizardNote": "Prefer to create new agents as you go, or build from scratch? The group wizard offers lighter starter presets.",
+    "wizardLink": "Open the group wizard"
   },
   "memories": {
     "title": "User Memory",
@@ -4650,7 +4703,13 @@
     "inputTemplateTooLong": "The prompt template is limited to {{max}} characters.",
     "cronInvalid": "That is not a valid cron expression.",
     "scheduleUnknown": "Schedule unavailable",
-    "nextRun": "next {{when}}"
+    "nextRun": "next {{when}}",
+    "taskSubjectLabel": "Subject",
+    "taskDescriptionLabel": "Description",
+    "inputTemplateLabel": "Prompt template",
+    "priorityTitle": "Priority {{n}} — higher numbers are picked first",
+    "backlogNote": "Each cadence run picks the highest-priority tasks first (P5 before P1). A task cannot be edited or removed once it is added; a run completes it.",
+    "priorityHint": "Higher numbers are picked first by a cadence run. 0 is the default."
   },
   "workforceWizard": {
     "title": "New Team"
@@ -5201,7 +5260,9 @@
     "legacyAdminOnly": "Visible to administrators only — once owners have been assigned",
     "lastChanged": "Last changed by {{who}}",
     "neverChanged": "Not changed here yet",
-    "saved": "Settings saved"
+    "saved": "Settings saved",
+    "deleteVariableTitle": "Delete this variable?",
+    "deleteVariableDescription": "Agents that refer to it can no longer resolve it. This cannot be undone."
   },
   "cascadeSave": {
     "workflowChanged": "Workflow {{workflowId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
@@ -5244,5 +5305,9 @@
     "impactReasonLegacy": "predates version following",
     "impactReasonBreaking": "breaking change",
     "switchNotice": "Agent moved from v{{from}} to v{{to}}"
+  },
+  "wizardLeave": {
+    "title": "Leave without creating?",
+    "message": "Your team setup, including any prompts and API keys you entered, has not been created yet and will be lost."
   }
 }

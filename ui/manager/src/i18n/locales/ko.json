@@ -2411,7 +2411,8 @@
     "quickCreateTitle": "빠른 생성 {{type}}",
     "quickCreateDesc": "이름과 설명을 설정하고 세부 정보는 나중에 구성합니다.",
     "guidedSetup": "가이드 설정",
-    "guidedSetupDesc": "LLM 제공자, 프롬프트 및 배포를 포함한 단계별 마법사."
+    "guidedSetupDesc": "LLM 제공자, 프롬프트 및 배포를 포함한 단계별 마법사.",
+    "guidedSetupDescGroup": "팀, 토론 방식, 선택적 승인을 단계별로 설정하는 마법사입니다. 멤버 에이전트도 함께 만들 수 있습니다."
   },
   "groups": {
     "actionConflict": "다른 작업이 아직 진행 중이거나 이 토론이 더 이상 해당 작업을 수락하지 않습니다. 다시 시도하세요.",
@@ -3329,10 +3330,60 @@
     "humanPrincipalIdPlaceholder": "사용자의 로그인/주체 ID",
     "humanTurnSettingsHint": "사람 구성원이 발언할 차례가 되면 토론이 일시 중지되고 기다립니다. 제시간에 응답하지 않을 경우의 동작을 선택하세요.",
     "humanTurnSettingsTitle": "사람 구성원 차례 설정",
-    "humanTurnTimeoutInvalid": "유효한 ISO-8601 기간이 아닙니다(예: PT24H 또는 P1D).",
-    "humanTurnTimeoutLabel": "차례 시간 제한(ISO-8601 기간)",
-    "humanTurnTimeoutPlaceholder": "예: PT24H — 비워 두면 무기한 대기",
-    "memberTypeHuman": "사람"
+    "humanTurnTimeoutInvalid": "0보다 큰 숫자를 입력하세요.",
+    "humanTurnTimeoutLabel": "차례 제한 시간",
+    "humanTurnTimeoutPlaceholder": "비워 두면 무기한 기다립니다.",
+    "memberTypeHuman": "사람",
+    "stepTemplate": "프리셋",
+    "stepConfig": "설정",
+    "stepMembers": "멤버",
+    "stepReview": "검토",
+    "stepsLabel": "마법사 진행 상황",
+    "stepAria": "{{n}}단계: {{title}}",
+    "blockersTitle": "계속하려면:",
+    "blockerName": "그룹 이름을 입력하세요.",
+    "blockerHitlPhases": "일시 중지할 단계를 하나 이상 선택하거나 사람 승인을 끄세요.",
+    "blockerHitlTimeout": "올바른 승인 제한 시간(예: PT15M)을 입력하거나 다른 시간 초과 정책을 선택하세요.",
+    "blockerStyle": "이 서버가 지원하는 토론 방식을 선택하세요.",
+    "blockerMemberName": "{{member}}: 표시 이름을 추가하세요.",
+    "blockerMemberPrincipal": "{{member}}: 해당 사람의 프린시펄 ID를 입력하세요.",
+    "blockerMemberGroup": "{{member}}: 중첩할 그룹을 선택하세요.",
+    "blockerMemberAgent": "{{member}}: 기존 에이전트를 선택하거나 '새로 만들기'로 전환하세요.",
+    "blockerMemberKey": "{{member}}: {{provider}}의 API 키를 추가하거나 키가 필요 없는 공급자(예: Ollama)를 선택하세요.",
+    "blockerModeratorKey": "중재자: {{provider}}의 API 키를 추가하거나 키가 필요 없는 공급자(예: Ollama)를 선택하세요.",
+    "blockerTurnTimeout": "사람 차례 제한 시간을 0보다 큰 숫자로 설정하거나 비워 두세요.",
+    "memberFallbackName": "멤버 {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "열린 브레인스토밍 — 하나의 질문에 대한 모든 관점.",
+      "PEER_REVIEW": "초안이나 제안을 여러 각도에서 검토합니다.",
+      "DEVIL_ADVOCATE": "확정하기 전에 계획을 철저히 시험합니다.",
+      "DELPHI": "독립적인 의견이 수렴되어야 하는 예측과 추정.",
+      "DEBATE": "서로 반대되는 두 입장으로 결정을 따져 봅니다.",
+      "TASK_FORCE": "할당된 작업으로 여러 단계의 일을 계획하고 수행합니다.",
+      "NEGOTIATION": "이해관계가 다른 당사자 간에 합의에 도달합니다."
+    },
+    "howItRuns": "진행 방식",
+    "roundsExplain": "한 라운드는 모든 멤버가 한 번씩 발언하는 것입니다. 라운드가 많을수록 멤버끼리 서로 응답할 수 있지만, 라운드가 추가될 때마다 LLM 호출과 비용이 늘어납니다.",
+    "roundsEstimate": "예상: 토론당 LLM 호출 약 {{calls}}회({{members}}명 × {{rounds}}라운드).",
+    "roundsEstimateModerator": "예상: 토론당 LLM 호출 약 {{calls}}회({{members}}명 × {{rounds}}라운드 + 중재자 1회).",
+    "unitMinutes": "분",
+    "unitHours": "시간",
+    "unitDays": "일",
+    "durationNoLimit": "제한 없음",
+    "durationUnit": "단위",
+    "defaultMemberPrompt": "당신은 {{name}}입니다. 전문 분야의 관점에서 명확하고 실행 가능한 통찰을 제공하세요.",
+    "defaultMemberPromptRole": "당신은 {{role}} 전문가인 {{name}}입니다. 전문 분야의 관점에서 명확하고 실행 가능한 통찰을 제공하세요.",
+    "defaultMemberPromptNoName": "당신은 이 그룹의 멤버입니다. 전문 분야의 관점에서 명확하고 실행 가능한 통찰을 제공하세요.",
+    "defaultModeratorPrompt": "당신은 숙련된 중재자입니다. 그룹의 토론을 핵심 통찰, 합의된 부분, 남은 이견을 담은 명확하고 균형 잡힌 요약으로 정리하세요.",
+    "memberNameLabel": "표시 이름",
+    "memberRoleLabel": "역할",
+    "memberTypeLabel": "멤버 유형",
+    "bulkTitle": "모든 새 에이전트에 같은 공급자와 키 사용",
+    "bulkHint": "새 에이전트마다 LLM 공급자가 필요하며 대부분 API 키도 필요합니다. 여기에 한 번 입력해 모두에 적용할 수 있고, 이후 개별 에이전트는 따로 바꿀 수 있습니다.",
+    "bulkApply": "모든 새 에이전트에 적용",
+    "apiKeyRequired": "이 에이전트를 만들려면 {{provider}}의 API 키가 필요합니다.",
+    "presetsNote": "이 마법사를 채워 주는 스타터 프리셋입니다. 조정된 패키지 토론을 사용하고 기존 에이전트를 해당 역할에 지정하려면 다음을 참고하세요:",
+    "presetsLink": "그룹 템플릿"
   },
   "groupTemplates": {
     "advisoryBoard": "자문단",
@@ -3388,7 +3439,9 @@
     "roleCount_other": "할당할 역할 {{count}}개",
     "roleCount_one": "할당할 역할 {{count}}개",
     "empty": "사용 가능한 템플릿이 없습니다",
-    "emptyDescription": "이 서버에는 그룹 템플릿이 포함되어 있지 않습니다. 마법사로 처음부터 그룹을 만들 수 있습니다."
+    "emptyDescription": "이 서버에는 그룹 템플릿이 포함되어 있지 않습니다. 마법사로 처음부터 그룹을 만들 수 있습니다.",
+    "wizardNote": "진행하면서 새 에이전트를 만들거나 처음부터 구성하고 싶으신가요? 그룹 마법사는 더 가벼운 스타터 프리셋을 제공합니다.",
+    "wizardLink": "그룹 마법사 열기"
   },
   "channels": {
     "agentIdPlaceholder": "메시지를 처리할 에이전트 ID",
@@ -4650,7 +4703,13 @@
     "inputTemplateTooLong": "프롬프트 템플릿은 최대 {{max}}자입니다.",
     "cronInvalid": "유효한 cron 표현식이 아닙니다.",
     "scheduleUnknown": "일정을 가져올 수 없음",
-    "nextRun": "다음 {{when}}"
+    "nextRun": "다음 {{when}}",
+    "taskSubjectLabel": "제목",
+    "taskDescriptionLabel": "설명",
+    "inputTemplateLabel": "프롬프트 템플릿",
+    "priorityTitle": "우선순위 {{n}} — 숫자가 클수록 먼저 선택됩니다",
+    "backlogNote": "케이던스 실행은 우선순위가 높은 작업부터 선택합니다(P5가 P1보다 먼저). 작업은 추가한 뒤 수정하거나 삭제할 수 없으며, 실행으로 완료됩니다.",
+    "priorityHint": "케이던스 실행은 숫자가 큰 작업을 먼저 선택합니다. 0이 기본값입니다."
   },
   "workforceWizard": {
     "title": "새 팀"
@@ -5201,7 +5260,9 @@
     "legacyAdminOnly": "관리자에게만 표시 — 소유자가 지정된 후",
     "lastChanged": "마지막 변경: {{who}}",
     "neverChanged": "아직 여기서 변경되지 않음",
-    "saved": "설정을 저장했습니다"
+    "saved": "설정을 저장했습니다",
+    "deleteVariableTitle": "이 변수를 삭제할까요?",
+    "deleteVariableDescription": "이 변수를 참조하는 에이전트는 더 이상 값을 확인할 수 없습니다. 이 작업은 되돌릴 수 없습니다."
   },
   "cascadeSave": {
     "workflowChanged": "워크플로 {{workflowId}}이(가) 다른 곳에서 변경되었습니다(현재 버전 {{current}}, 이 페이지는 버전 {{version}}). 페이지를 새로 고치세요. 아무것도 저장되지 않았습니다.",
@@ -5244,5 +5305,9 @@
     "switchNotice": "에이전트가 v{{from}}에서 v{{to}}(으)로 이동했습니다",
     "impactFollow_one": "v{{from}}의 활성 대화 {{count}}개가 v{{to}}에서 계속됩니다",
     "impactStay_one": "v{{from}}의 활성 대화 {{count}}개가 v{{from}}에 남습니다"
+  },
+  "wizardLeave": {
+    "title": "만들지 않고 나갈까요?",
+    "message": "입력한 프롬프트와 API 키를 포함한 팀 설정이 아직 만들어지지 않았으며 사라집니다."
   }
 }

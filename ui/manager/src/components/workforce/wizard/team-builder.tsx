@@ -9,6 +9,7 @@ import { AgentPicker } from "@/components/shared/agent-picker";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 import { ProviderSelect } from "@/components/shared/provider-select";
+import { isProvisionableBySetup } from "@/lib/model-suggestions";
 import {
   memberIssue,
   effectiveLlm,
@@ -105,6 +106,9 @@ function LlmFields({
             onChange({ provider: providerId, model: prov?.defaultModel ?? "" });
           }}
           className={cn(inputClass, "border-input")}
+          // Setup cannot configure every provider (Vertex AI needs a project
+          // and location it has no field for).
+          include={isProvisionableBySetup}
           // Only a per-advisor field can be left blank (to inherit); the
           // defaults block always names a provider, since a blank one would
           // just be anthropic on the server anyway.

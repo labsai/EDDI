@@ -18,6 +18,7 @@ import {
   describeCron,
   formatInstantInZone,
   isValidCron,
+  listTimeZones,
   type ScheduleConfiguration,
 } from "@/lib/api/schedules";
 import {
@@ -55,6 +56,22 @@ const STATUS_BADGE: Record<string, string> = {
   BLOCKED: "bg-muted text-muted-foreground",
   AWAITING_APPROVAL: "bg-orange-500/10 text-orange-600",
 };
+
+/** The viewer's own IANA zone — what "9:00" means to them — or UTC when the runtime will not say. */
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/** Every zone the runtime knows, with UTC and the viewer's own always present. */
+function timeZoneOptions(current: string): string[] {
+  return [...new Set(["UTC", browserTimeZone(), current, ...listTimeZones()])].sort((a, b) =>
+    a === "UTC" ? -1 : b === "UTC" ? 1 : a.localeCompare(b),
+  );
+}
 
 export function GroupWorkspacePage() {
   const { id: groupId } = useParams<{ id: string }>();
@@ -112,7 +129,9 @@ export function GroupWorkspacePage() {
   const [taskError, setTaskError] = useState<string | null>(null);
 
   const [cron, setCron] = useState("");
-  const [timeZone, setTimeZone] = useState("UTC");
+  // Default to where the viewer is, not UTC: "0 9 * * MON" is read as 9am local.
+  const [timeZone, setTimeZone] = useState(browserTimeZone);
+  const timeZones = useMemo(() => timeZoneOptions(timeZone), [timeZone]);
   const [inputTemplate, setInputTemplate] = useState("");
   const [maxPerRun, setMaxPerRun] = useState(5);
   const [maxCostPerRun, setMaxCostPerRun] = useState("");
@@ -285,6 +304,12 @@ export function GroupWorkspacePage() {
         <h3 className="mb-3 flex items-center justify-between text-sm font-semibold text-foreground">
           <span>{t("groupWorkspace.backlogTitle", "Backlog ({{count}})", { count: workspace.backlog.tasks.length })}</span>
         </h3>
+        <p className="mb-3 text-xs text-muted-foreground" data-testid="workspace-backlog-note">
+          {t(
+            "groupWorkspace.backlogNote",
+            "Each cadence run picks the highest-priority tasks first (P5 before P1). A task cannot be edited or removed once it is added; a run completes it.",
+          )}
+        </p>
 
         <div className="mb-3 space-y-2">
           {workspace.backlog.tasks.length === 0 ? (
@@ -297,7 +322,13 @@ export function GroupWorkspacePage() {
                   <span className={cn("rounded-full px-1.5 py-0 text-[9px] font-medium", STATUS_BADGE[task.status] ?? "bg-muted")}>
                     {t(`groups.taskStatus.${task.status}`, STATUS_FALLBACK[task.status] ?? task.status)}
                   </span>
-                  <span className="text-[10px] text-muted-foreground">P{task.priority}</span>
+                  <span
+                    className="text-[10px] text-muted-foreground"
+                    title={t("groupWorkspace.priorityTitle", "Priority {{n}} — higher numbers are picked first", { n: task.priority })}
+                    data-testid={`backlog-task-priority-${task.id}`}
+                  >
+                    P{task.priority}
+                  </span>
                 </div>
                 {task.description && <p className="mt-1 text-[10px] text-muted-foreground line-clamp-2">{task.description}</p>}
               </div>
@@ -306,7 +337,11 @@ export function GroupWorkspacePage() {
         </div>
 
         <div className="space-y-2 border-t border-border pt-3">
+          <label htmlFor="workspace-task-subject" className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("groupWorkspace.taskSubjectLabel", "Subject")}
+          </label>
           <input
+            id="workspace-task-subject"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder={t("groupWorkspace.taskSubjectPlaceholder", "Task subject")}
@@ -314,7 +349,11 @@ export function GroupWorkspacePage() {
             className={inputCls}
             data-testid="workspace-task-subject"
           />
+          <label htmlFor="workspace-task-description" className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("groupWorkspace.taskDescriptionLabel", "Description")}
+          </label>
           <textarea
+            id="workspace-task-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={t("groupWorkspace.taskDescriptionPlaceholder", "Description (optional)")}
@@ -332,6 +371,7 @@ export function GroupWorkspacePage() {
               type="number"
               value={priority}
               onChange={(e) => setPriority(Number(e.target.value) || 0)}
+              aria-describedby="workspace-task-priority-hint"
               className="w-20 rounded-lg border border-input bg-background px-2 py-1 text-sm"
               data-testid="workspace-task-priority"
             />
@@ -346,6 +386,9 @@ export function GroupWorkspacePage() {
               {t("groupWorkspace.addTask", "Add Task")}
             </Button>
           </div>
+          <p id="workspace-task-priority-hint" className="text-[10px] text-muted-foreground">
+            {t("groupWorkspace.priorityHint", "Higher numbers are picked first by a cadence run. 0 is the default.")}
+          </p>
           {taskError && <p className="text-xs text-destructive" data-testid="workspace-task-error">{taskError}</p>}
         </div>
       </div>
@@ -454,17 +497,26 @@ export function GroupWorkspacePage() {
               <label htmlFor="workspace-timezone" className="mb-0.5 block text-[10px] text-muted-foreground">
                 {t("groupWorkspace.timeZoneLabel", "Time zone")}
               </label>
-              <input
+              <select
                 id="workspace-timezone"
                 value={timeZone}
                 onChange={(e) => setTimeZone(e.target.value)}
-                placeholder="UTC"
                 className={inputCls}
                 data-testid="workspace-timezone-input"
-              />
+              >
+                {timeZones.map((zone) => (
+                  <option key={zone} value={zone}>
+                    {zone}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
+          <label htmlFor="workspace-input-template" className="mb-0.5 block text-[10px] text-muted-foreground">
+            {t("groupWorkspace.inputTemplateLabel", "Prompt template")}
+          </label>
           <textarea
+            id="workspace-input-template"
             value={inputTemplate}
             onChange={(e) => setInputTemplate(e.target.value)}
             placeholder={t("groupWorkspace.inputTemplatePlaceholder", "Prompt template for each run (optional — a plain backlog listing is used otherwise)")}

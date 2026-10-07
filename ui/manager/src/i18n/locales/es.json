@@ -2433,7 +2433,8 @@
     "quickCreateTitle": "Creación rápida de {{type}}",
     "quickCreateDesc": "Establezca un nombre y descripción, configure los detalles más tarde.",
     "guidedSetup": "Configuración guiada",
-    "guidedSetupDesc": "Asistente paso a paso con proveedor de LLM, prompts y despliegue."
+    "guidedSetupDesc": "Asistente paso a paso con proveedor de LLM, prompts y despliegue.",
+    "guidedSetupDescGroup": "Asistente paso a paso para el equipo, el estilo de discusión y las aprobaciones opcionales; también puede crear los agentes miembro."
   },
   "groups": {
     "actionConflict": "Otra operación sigue en curso, o esta discusión ya no acepta esa acción. Vuelva a intentarlo.",
@@ -3366,10 +3367,60 @@
     "humanPrincipalIdPlaceholder": "ID de inicio de sesión/principal del usuario",
     "humanTurnSettingsHint": "La discusión se pausa y espera cuando le toca hablar a un miembro humano. Elija qué ocurre si no responde a tiempo.",
     "humanTurnSettingsTitle": "Configuración del turno de miembros humanos",
-    "humanTurnTimeoutInvalid": "No es una duración ISO-8601 válida, p. ej. PT24H o P1D.",
-    "humanTurnTimeoutLabel": "Tiempo de espera del turno (duración ISO-8601)",
-    "humanTurnTimeoutPlaceholder": "p. ej. PT24H — en blanco espera indefinidamente",
-    "memberTypeHuman": "Humano"
+    "humanTurnTimeoutInvalid": "Introduce un número mayor que cero.",
+    "humanTurnTimeoutLabel": "Tiempo de espera por turno",
+    "humanTurnTimeoutPlaceholder": "Déjalo vacío para esperar indefinidamente.",
+    "memberTypeHuman": "Humano",
+    "stepTemplate": "Plantilla",
+    "stepConfig": "Configuración",
+    "stepMembers": "Miembros",
+    "stepReview": "Revisión",
+    "stepsLabel": "Progreso del asistente",
+    "stepAria": "Paso {{n}}: {{title}}",
+    "blockersTitle": "Para continuar:",
+    "blockerName": "Introduce un nombre de grupo.",
+    "blockerHitlPhases": "Selecciona al menos una fase en la que pausar, o desactiva la aprobación humana.",
+    "blockerHitlTimeout": "Introduce un tiempo de espera de aprobación válido (por ejemplo, PT15M) o elige otra política de espera.",
+    "blockerStyle": "Elige un estilo de discusión compatible con este servidor.",
+    "blockerMemberName": "{{member}}: añade un nombre visible.",
+    "blockerMemberPrincipal": "{{member}}: introduce el ID principal de la persona.",
+    "blockerMemberGroup": "{{member}}: elige el grupo anidado.",
+    "blockerMemberAgent": "{{member}}: elige un agente existente o cambia a Crear nuevo.",
+    "blockerMemberKey": "{{member}}: añade una clave de API para {{provider}} o elige un proveedor que no la necesite (por ejemplo, Ollama).",
+    "blockerModeratorKey": "Moderador: añade una clave de API para {{provider}} o elige un proveedor que no la necesite (por ejemplo, Ollama).",
+    "blockerTurnTimeout": "Establece el tiempo de espera del turno humano en un número mayor que cero, o bórralo.",
+    "memberFallbackName": "Miembro {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "Lluvia de ideas abierta: todas las perspectivas sobre una cuestión.",
+      "PEER_REVIEW": "Revisar un borrador o propuesta desde varios ángulos.",
+      "DEVIL_ADVOCATE": "Poner a prueba un plan antes de comprometerse con él.",
+      "DELPHI": "Previsiones y estimaciones en las que las opiniones independientes deben converger.",
+      "DEBATE": "Sopesar una decisión con dos bandos opuestos.",
+      "TASK_FORCE": "Planificar y llevar a cabo trabajo de varios pasos con tareas asignadas.",
+      "NEGOTIATION": "Llegar a un acuerdo entre partes con intereses distintos."
+    },
+    "howItRuns": "Cómo funciona",
+    "roundsExplain": "Una ronda es cada miembro hablando una vez. Más rondas permiten que los miembros se respondan entre sí, pero cada ronda adicional suma llamadas al LLM y coste.",
+    "roundsEstimate": "Estimación: unas {{calls}} llamadas al LLM por discusión ({{members}} miembros × {{rounds}} rondas).",
+    "roundsEstimateModerator": "Estimación: unas {{calls}} llamadas al LLM por discusión ({{members}} miembros × {{rounds}} rondas + 1 moderador).",
+    "unitMinutes": "minutos",
+    "unitHours": "horas",
+    "unitDays": "días",
+    "durationNoLimit": "Sin límite",
+    "durationUnit": "Unidad",
+    "defaultMemberPrompt": "Eres {{name}}. Aporta ideas claras y accionables desde tu perspectiva de especialista.",
+    "defaultMemberPromptRole": "Eres {{name}}, especialista en {{role}}. Aporta ideas claras y accionables desde tu perspectiva de especialista.",
+    "defaultMemberPromptNoName": "Eres miembro de este grupo. Aporta ideas claras y accionables desde tu perspectiva de especialista.",
+    "defaultModeratorPrompt": "Eres un moderador experto. Sintetiza la discusión del grupo en un resumen claro y equilibrado que recoja las ideas clave, los puntos de acuerdo y los desacuerdos pendientes.",
+    "memberNameLabel": "Nombre visible",
+    "memberRoleLabel": "Rol",
+    "memberTypeLabel": "Tipo de miembro",
+    "bulkTitle": "Mismo proveedor y clave para todos los agentes nuevos",
+    "bulkHint": "Cada agente nuevo necesita un proveedor de LLM y, en la mayoría, una clave de API. Rellénalo una vez aquí y aplícalo a todos; después aún puedes cambiar un agente concreto.",
+    "bulkApply": "Aplicar a todos los agentes nuevos",
+    "apiKeyRequired": "{{provider}} necesita una clave de API antes de poder crear este agente.",
+    "presetsNote": "Son plantillas de inicio que rellenan este asistente. Para usar una discusión preconfigurada y asignar tus agentes existentes a sus roles, consulta",
+    "presetsLink": "Plantillas de grupo"
   },
   "groupTemplates": {
     "advisoryBoard": "Consejo asesor",
@@ -3426,7 +3477,9 @@
     "roleCount_one": "{{count}} rol por asignar",
     "roleCount_other": "{{count}} roles por asignar",
     "empty": "No hay plantillas disponibles",
-    "emptyDescription": "Este servidor no incluye plantillas de grupo. Aún puede crear un grupo desde cero con el asistente."
+    "emptyDescription": "Este servidor no incluye plantillas de grupo. Aún puede crear un grupo desde cero con el asistente.",
+    "wizardNote": "¿Prefieres crear agentes sobre la marcha o empezar desde cero? El asistente de grupo ofrece plantillas de inicio más ligeras.",
+    "wizardLink": "Abrir el asistente de grupo"
   },
   "channels": {
     "agentIdPlaceholder": "ID del agente para gestionar mensajes",
@@ -4699,7 +4752,13 @@
     "inputTemplateTooLong": "La plantilla de prompt está limitada a {{max}} caracteres.",
     "cronInvalid": "Esa no es una expresión cron válida.",
     "scheduleUnknown": "Programación no disponible",
-    "nextRun": "siguiente {{when}}"
+    "nextRun": "siguiente {{when}}",
+    "taskSubjectLabel": "Asunto",
+    "taskDescriptionLabel": "Descripción",
+    "inputTemplateLabel": "Plantilla de prompt",
+    "priorityTitle": "Prioridad {{n}}: los números más altos se eligen primero",
+    "backlogNote": "Cada ejecución de cadencia elige primero las tareas de mayor prioridad (P5 antes que P1). Una tarea no se puede editar ni eliminar una vez añadida; una ejecución la completa.",
+    "priorityHint": "Una ejecución de cadencia elige primero los números más altos. 0 es el valor por defecto."
   },
   "workforceWizard": {
     "title": "Equipo nuevo"
@@ -5258,7 +5317,9 @@
     "legacyAdminOnly": "Visibles solo para administradores — una vez asignados los propietarios",
     "lastChanged": "Última modificación por {{who}}",
     "neverChanged": "Aún no se ha modificado aquí",
-    "saved": "Configuración guardada"
+    "saved": "Configuración guardada",
+    "deleteVariableTitle": "¿Eliminar esta variable?",
+    "deleteVariableDescription": "Los agentes que hagan referencia a ella ya no podrán resolverla. Esta acción no se puede deshacer."
   },
   "cascadeSave": {
     "workflowChanged": "El flujo de trabajo {{workflowId}} se modificó en otro lugar (ahora versión {{current}}, esta página tiene la versión {{version}}). Recarga la página. No se guardó nada.",
@@ -5303,5 +5364,9 @@
     "impactReasonLegacy": "anterior al seguimiento de versiones",
     "impactReasonBreaking": "cambio incompatible",
     "switchNotice": "El agente pasó de v{{from}} a v{{to}}"
+  },
+  "wizardLeave": {
+    "title": "¿Salir sin crear?",
+    "message": "La configuración de tu equipo, incluidos los prompts y las claves de API introducidos, aún no se ha creado y se perderá."
   }
 }

@@ -40,6 +40,8 @@ describe("GroupWizardPage — a group the backend would refuse creates no agents
     await user.click(screen.getByTestId("member-type-human-0"));
     await user.type(screen.getByTestId("human-principal-id-0"), "director@acme.com");
     await user.type(screen.getByTestId("member-name-1"), "Agent Two");
+    await user.type(await screen.findByTestId("gw-bulk-apikey-input"), "sk-test-key");
+    await user.click(screen.getByTestId("gw-bulk-apply"));
     await user.click(screen.getByTestId("group-wizard-next"));
 
     expect(await screen.findByTestId("wizard-save-problems")).toHaveTextContent(/task-force group/);
