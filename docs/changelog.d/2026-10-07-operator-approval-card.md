@@ -26,3 +26,27 @@ The chat stream's `done` event (snapshot `conversationState: "AWAITING_HUMAN"` p
 ### Tests
 
 `hitl-pause-binding.test.ts` (`describesPause`), `hitl-format-args.test.ts`, `approval-card-pause-race.test.tsx` (not-yet-stored first read, different pause id, 10 s timeout and Retry, backoff, legacy backend), `approval-banner.test.tsx` (zero calls, `expectToolCall`, argument formatting and toggle, decision payload uses the original arguments), `operator.test.tsx` (page-level race), `operator-chat.test.tsx` (summary after approve and reject, failed resume restores the card, re-pause renders fresh).
+
+## 🐛 fix(manager,chat): every approval surface behaves the same (2026-10-07)
+
+**Repo:** EDDI (`fix/operator-approval-card`), `ui/manager` and `ui/chat`
+
+### What changed and why
+
+Phase 1 fixed the operator's approval card; this applies the same rules everywhere a pause is shown or decided, so no surface can drift.
+
+- **One deciding experience.** `ApprovalCard` ([`approval-card.tsx`](../../ui/manager/src/components/hitl/approval-card.tsx)) wraps `ApprovalBanner` and owns the lifecycle: pending, details, at most two steps, a `DecisionSummary` receipt while the resumed work runs, the card hidden but mounted so a failed resume brings it back with its choices. It is used by the operator chat, conversation-detail, the approvals inbox rows and the group transcript. `summariseDecision` ([`hitl-decision.ts`](../../ui/manager/src/lib/hitl-decision.ts)) covers tool calls, group tasks and group phases.
+- **Verify the pause everywhere.** conversation-detail and the inbox now use `useApprovalStatus(..., { verifyPause: true })`, so a not-yet-stored or different pause is never approvable. conversation-detail also re-reads for up to 10 s when opened from a pause link (`?awaiting=1`).
+- **Read-only surfaces share `PauseNotice`** ([`pause-notice.tsx`](../../ui/manager/src/components/hitl/pause-notice.tsx)): the Manager chat panel and the Workforce thread name the gated tools, link to that conversation's own review page, and clear when the pause is decided elsewhere (`onResolved`, 5 s watch). The chat store now remembers `pausedAt` to tell this pause from another.
+- **Group transcript:** Approve is held while only the stream says `AWAITING_APPROVAL` and the persisted conversation has not caught up (no phase or task data yet). A discussion waiting on a human is re-read every 5 s. The Workforce board's review link opens the specific conversation.
+- **ui/chat:** `useHitlPolling` took the first approval-status read of a pause that was not stored yet (READY) as "resolved", refreshed to the old snapshot and dropped the card. A READY read before the pause has been seen stored is now distrusted for 10 s (500 ms backing off to 2 s). `PausedCard` stays read-only, and shows tool names only, never arguments.
+
+### Design decisions
+
+- Client-side polling is defence in depth. The root cause (the stream's `done` is emitted before the pause is persisted) is being fixed on the backend separately; these windows then rarely trigger.
+- For ui/chat the pause identity is not available to the client (no `pauseId` in its approval-status type, no `hitlPausedAt` tracked), so the signal is "has this pause ever been seen stored". A pause decided before the first read looks identical to a not-yet-stored one, so the doubt ends after 10 s.
+- Every deciding 1:1 surface uses `requireExplicitPerCall`, so the single-call and multi-call flows are identical on all of them. Group cards have no tool calls and use Approve plus confirm.
+
+### Tests
+
+`approval-card.test.tsx`, `pause-notice.test.tsx`, `conversation-detail-pause-race.test.tsx`, additions to `approvals.test.tsx`, `discussion-transcript.test.tsx`, `use-groups.test.tsx`, and `useHitlPolling.test.ts` in `ui/chat`. Each safety fix was mutation-checked.
