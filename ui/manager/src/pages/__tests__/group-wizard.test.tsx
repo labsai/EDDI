@@ -827,4 +827,51 @@ describe("GroupWizardPage", () => {
       expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
     });
   });
+
+  // Review 2026-10-02: the members created before a failed moderator were not
+  // written back, so the retry created every member agent again.
+  it("does not create the members again when the moderator failed and the user retries", async () => {
+    const memberSetups: string[] = [];
+    let moderatorAttempts = 0;
+    let created = false;
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        const body = (await request.json()) as { name?: string };
+        if (body.name?.includes("Moderator")) {
+          moderatorAttempts += 1;
+          if (moderatorAttempts === 1) {
+            return HttpResponse.json({ message: "provider down" }, { status: 502 });
+          }
+        } else {
+          memberSetups.push(body.name ?? "");
+        }
+        return HttpResponse.json({
+          agentId: `auto-${memberSetups.length}-${moderatorAttempts}`, agentName: "Auto", provider: "anthropic",
+          model: "claude-sonnet-4-6", deployed: true, deploymentStatus: "deployed",
+        });
+      }),
+      http.post("*/groupstore/groups", () => {
+        created = true;
+        return new HttpResponse(null, { status: 201, headers: { Location: "/groupstore/groups/g?version=1" } });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<GroupWizardPage />, { initialRoute: "/manage/groups/wizard" });
+    await user.click(screen.getByTestId("template-advisory-board"));
+    await user.click(screen.getByTestId("group-wizard-next"));
+    await user.click(screen.getByTestId("group-wizard-next"));
+    await user.click(await screen.findByTestId("group-wizard-create"));
+
+    await waitFor(() => expect(moderatorAttempts).toBe(1), { timeout: 15000 });
+    const firstRun = memberSetups.length;
+    expect(firstRun).toBeGreaterThan(0);
+    expect(created).toBe(false);
+
+    await waitFor(() => expect(screen.getByTestId("group-wizard-create")).not.toBeDisabled());
+    await user.click(screen.getByTestId("group-wizard-create"));
+    await waitFor(() => expect(created).toBe(true), { timeout: 15000 });
+
+    expect(moderatorAttempts).toBe(2);
+    expect(memberSetups).toHaveLength(firstRun);
+  });
 });

@@ -18,6 +18,7 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { toast } from "sonner";
+import { describeGroupDeleteError } from "@/lib/group-delete-errors";
 import { cn } from "@/lib/utils";
 import {
   useGroup,
@@ -57,6 +58,7 @@ import { DEFAULT_AGENT_TIMEOUT_SECONDS } from "@/lib/group-templates";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -294,6 +296,8 @@ function WorkforceSettings() {
   // ─── UI state ────────────────────────────────────────────────────
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteMode, setDeleteMode] = useState<"group" | "all">("group");
+  /** Hard delete — an explicit opt-in in the dialog, reset every time it opens. */
+  const [deletePermanently, setDeletePermanently] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const toggleSection = useCallback((key: string) => setExpandedSections((p) => ({ ...p, [key]: !p[key] })), []);
@@ -513,7 +517,7 @@ function WorkforceSettings() {
 
     if (deleteMode === "all") {
       deleteWithMembersMutation.mutate(
-        { groupId: boardId, version, config },
+        { groupId: boardId, version, config, permanent: deletePermanently },
         {
           onSuccess: () => {
             toast.success(
@@ -524,16 +528,17 @@ function WorkforceSettings() {
             );
             navigate("/workforce");
           },
-          onError: () => {
+          onError: (err) => {
             toast.error(
-              t("Workforce.settings.deleteError", "Failed to delete task force")
+              t("Workforce.settings.deleteError", "Failed to delete task force"),
+              { description: describeGroupDeleteError(err, t) }
             );
           },
         }
       );
     } else {
       deleteMutation.mutate(
-        { id: boardId, version, permanent: true },
+        { id: boardId, version, permanent: deletePermanently },
         {
           onSuccess: () => {
             toast.success(
@@ -553,6 +558,7 @@ function WorkforceSettings() {
     boardId,
     config,
     deleteMode,
+    deletePermanently,
     version,
     deleteMutation,
     deleteWithMembersMutation,
@@ -1639,6 +1645,7 @@ function WorkforceSettings() {
               size="sm"
               onClick={() => {
                 setDeleteMode("group");
+                setDeletePermanently(false);
                 setShowDeleteDialog(true);
               }}
               className="shrink-0"
@@ -1661,7 +1668,7 @@ function WorkforceSettings() {
               <p className="text-xs text-muted-foreground mt-0.5">
                 {t(
                   "Workforce.settings.deleteBoardAllDesc",
-                  "Remove this task force and all member agents permanently."
+                  "Remove this task force and all of its member agents."
                 )}
               </p>
             </div>
@@ -1670,6 +1677,7 @@ function WorkforceSettings() {
               size="sm"
               onClick={() => {
                 setDeleteMode("all");
+                setDeletePermanently(false);
                 setShowDeleteDialog(true);
               }}
               className="shrink-0"
@@ -1755,19 +1763,29 @@ function WorkforceSettings() {
           deleteMode === "all"
             ? t(
                 "Workforce.settings.deleteAllConfirm",
-                "This will permanently dissolve this task force and remove all its member agents. This action cannot be undone."
+                "This dissolves this task force and deletes all of its member agents."
               )
             : t(
                 "Workforce.settings.deleteConfirm",
-                "This will permanently dissolve this task force configuration. Member agents will not be affected."
+                "This dissolves this task force. Member agents are not affected."
               )
         }
-        confirmLabel={t("common.delete", "Delete")}
+        confirmLabel={
+          deletePermanently
+            ? t("common.deletePermanently", "Delete permanently")
+            : t("common.delete", "Delete")
+        }
         cancelLabel={t("common.cancel", "Cancel")}
         onConfirm={handleDelete}
         variant="destructive"
         isPending={isDeleting}
-      />
+      >
+        <PermanentDeleteOption
+          checked={deletePermanently}
+          onChange={setDeletePermanently}
+          consequence={deleteMode === "all" ? t("groups.deletePermanentlyWithMembersHint", "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged.") : t("groups.deletePermanentlyHint", "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.")}
+        />
+      </AlertDialog>
     </div>
   );
 }

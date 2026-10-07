@@ -20,19 +20,24 @@ const KEYS = {
 
 // ==================== Queries ====================
 
-export function useCoordinatorStatus() {
+/**
+ * Polled at `refreshIntervalMs` — the page's refresh selector. Both queries
+ * used to hard-code their own intervals (5 s and 10 s), and the page layered
+ * a timer of its own on top, so choosing 30 s or 60 s still polled every 5 s.
+ */
+export function useCoordinatorStatus(refreshIntervalMs = 5000) {
   return useQuery({
     queryKey: KEYS.status,
     queryFn: getCoordinatorStatus,
-    refetchInterval: 5000,
+    refetchInterval: refreshIntervalMs,
   });
 }
 
-export function useDeadLetters() {
+export function useDeadLetters(refreshIntervalMs = 10000) {
   return useQuery({
     queryKey: KEYS.deadLetters,
     queryFn: getDeadLetters,
-    refetchInterval: 10000,
+    refetchInterval: refreshIntervalMs,
   });
 }
 

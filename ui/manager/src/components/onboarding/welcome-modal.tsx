@@ -262,7 +262,7 @@ export function WelcomeModal() {
                     ? "carousel-dot-active w-6 bg-primary"
                     : "w-2 bg-sidebar-foreground/30 hover:bg-sidebar-foreground/50"
                 )}
-                aria-label={`Panel ${i + 1}`}
+                aria-label={t("onboarding.welcome.panelN", "Panel {{n}}", { n: i + 1 })}
               />
             ))}
           </div>

@@ -256,6 +256,9 @@ function SpaceVariables({ space }: { space: SpaceInfo }) {
   const remove = useDeleteSpaceVariable(space.id);
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  // Asked first, as for a secret: an agent that reads `${vars:…}` loses the
+  // value the moment it is gone.
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const save = () => {
     store.mutate(
@@ -299,8 +302,9 @@ function SpaceVariables({ space }: { space: SpaceInfo }) {
                 variant="ghost"
                 size="sm"
                 disabled={remove.isPending}
-                onClick={() => remove.mutate(variable.key, { onError: (e) => toast.error(getErrorMessage(e)) })}
+                onClick={() => setDeleting(variable.key)}
                 aria-label={t("workspacesPage.deleteNamed", "Delete {{name}}", { name: variable.key })}
+                data-testid={`space-variable-delete-${variable.key}`}
               >
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
               </Button>
@@ -328,6 +332,26 @@ function SpaceVariables({ space }: { space: SpaceInfo }) {
           {t("common.save", "Save")}
         </Button>
       </div>
+      <AlertDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={t("workspacesPage.deleteVariableTitle", "Delete this variable?")}
+        description={t(
+          "workspacesPage.deleteVariableDescription",
+          "Agents that use it lose its value until it is stored again. This cannot be undone."
+        )}
+        onConfirm={() =>
+          deleting &&
+          remove.mutate(deleting, {
+            onSuccess: () => setDeleting(null),
+            onError: (e) => toast.error(getErrorMessage(e)),
+          })
+        }
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        isPending={remove.isPending}
+        variant="destructive"
+      />
     </section>
   );
 }
@@ -349,17 +373,29 @@ function SourceBadge({ setting }: { setting: WorkspaceSetting }) {
   );
 }
 
+type LegacyChoice = "default" | "shared" | "admin-only";
+
+/** What the radio group starts on: a stored choice, otherwise "use the default". */
+function legacyChoiceOf(setting: WorkspaceSetting): LegacyChoice {
+  if (setting.source !== "STORED") return "default";
+  return setting.value === "admin-only" ? "admin-only" : "shared";
+}
+
 function SettingsCard({ spaces }: { spaces: SpaceInfo[] }) {
   const { t } = useTranslation();
   const { data, isLoading, isError, error, refetch } = useWorkspaceSettings(true);
   const update = useUpdateWorkspaceSettings();
   const [defaultSpace, setDefaultSpace] = useState("");
-  const [legacy, setLegacy] = useState<"shared" | "admin-only">("shared");
+  // "default" stores nothing. Every save writes both fields and null unsets one,
+  // so this used to send the default's own value ("shared") back as a STORED
+  // choice: changing only the default space stored a legacy policy nobody had
+  // chosen, and there was no way back to "not set" short of the REST API.
+  const [legacy, setLegacy] = useState<LegacyChoice>("default");
 
   useEffect(() => {
     if (!data) return;
     setDefaultSpace(data.defaultSpace.value ?? "");
-    setLegacy(data.legacyVisibility.value === "admin-only" ? "admin-only" : "shared");
+    setLegacy(legacyChoiceOf(data.legacyVisibility));
   }, [data]);
 
   const teams = spaces.filter((s) => s.kind === "team");
@@ -427,7 +463,7 @@ function SettingsCard({ spaces }: { spaces: SpaceInfo[] }) {
                 {t("workspacesPage.legacy", "Resources created before ownership was recorded")}
                 <SourceBadge setting={data.legacyVisibility} />
               </legend>
-              {(["shared", "admin-only"] as const).map((option) => (
+              {(["default", "shared", "admin-only"] as const).map((option) => (
                 <label key={option} className="flex items-start gap-2 text-sm">
                   <input
                     type="radio"
@@ -440,9 +476,11 @@ function SettingsCard({ spaces }: { spaces: SpaceInfo[] }) {
                     data-testid={`legacy-${option}`}
                   />
                   <span>
-                    {option === "shared"
-                      ? t("workspacesPage.legacyShared", "Visible to everyone — nothing disappears after an upgrade")
-                      : t("workspacesPage.legacyAdminOnly", "Visible to administrators only — once owners have been assigned")}
+                    {option === "default"
+                      ? t("workspacesPage.legacyDefault", "Not set here — the default applies (visible to everyone)")
+                      : option === "shared"
+                        ? t("workspacesPage.legacyShared", "Visible to everyone — nothing disappears after an upgrade")
+                        : t("workspacesPage.legacyAdminOnly", "Visible to administrators only — once owners have been assigned")}
                   </span>
                 </label>
               ))}
@@ -467,7 +505,8 @@ function SettingsCard({ spaces }: { spaces: SpaceInfo[] }) {
                   update.mutate(
                     {
                       defaultSpace: data.defaultSpace.source === "PINNED" ? null : defaultSpace.trim() || null,
-                      legacyVisibility: data.legacyVisibility.source === "PINNED" ? null : legacy,
+                      legacyVisibility:
+                        data.legacyVisibility.source === "PINNED" || legacy === "default" ? null : legacy,
                     },
                     {
                       onSuccess: () => toast.success(t("workspacesPage.saved", "Settings saved")),

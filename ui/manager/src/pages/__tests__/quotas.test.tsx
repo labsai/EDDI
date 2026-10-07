@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -9,6 +9,7 @@ import { server } from "@/test/mocks/server";
 import { toast } from "sonner";
 
 import { QuotasPage } from "@/pages/quotas";
+import { parseQuotaLimit } from "@/lib/quota-limit";
 
 // Mock sonner toast so we can assert on toast calls
 vi.mock("sonner", () => ({
@@ -386,5 +387,61 @@ describe("QuotasPage", () => {
 
     // Should still render the page structure
     expect(screen.getByTestId("quotas-page")).toBeInTheDocument();
+  });
+
+  // ─── Empty and half-typed limits ──────────────────────────────
+
+  describe("empty and half-typed limits", () => {
+    it("parseQuotaLimit reads empty as unlimited and a lone '-' as not-a-number", () => {
+      expect(parseQuotaLimit("")).toBe(-1);
+      expect(parseQuotaLimit("  ")).toBe(-1);
+      expect(parseQuotaLimit("0")).toBe(0);
+      expect(parseQuotaLimit("250")).toBe(250);
+      expect(parseQuotaLimit("-")).toBeNull();
+    });
+
+    it("saves a cleared field as -1 (unlimited), never 0 (blocked)", async () => {
+      // Regression: Number("") is 0, so clearing a limit and saving blocked the
+      // whole tenant.
+      let body: Record<string, unknown> | null = null;
+      server.use(
+        http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+          body = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(body);
+        }),
+      );
+      const user = userEvent.setup();
+      renderQuotas();
+      await waitFor(() => expect(screen.getByTestId("quota-max-conversations")).toHaveValue(5000));
+
+      await user.clear(screen.getByTestId("quota-max-conversations"));
+      await user.click(screen.getByTestId("quotas-save"));
+
+      await waitFor(() => expect(body).not.toBeNull());
+      expect(body!.maxConversationsPerDay).toBe(-1);
+    });
+
+    it("blocks saving while a field holds a half-typed number", async () => {
+      renderQuotas();
+      await waitFor(() => expect(screen.getByTestId("quota-max-agents")).toHaveValue(100));
+      const input = screen.getByTestId("quota-max-agents") as HTMLInputElement;
+
+      // What a browser reports for a lone "-" in a number input: empty value,
+      // `validity.badInput` set. jsdom does not model badInput, so it is stubbed.
+      Object.defineProperty(input, "validity", {
+        configurable: true,
+        get: () => ({ badInput: true }),
+      });
+      fireEvent.change(input, { target: { value: "" } });
+
+      expect(screen.getByTestId("quota-max-agents-invalid")).toBeInTheDocument();
+      expect(screen.getByTestId("quotas-save")).toBeDisabled();
+    });
+
+    it("associates each limit label with its input", async () => {
+      renderQuotas();
+      await waitFor(() => expect(screen.getByTestId("quota-max-api-calls")).toBeInTheDocument());
+      expect(screen.getByLabelText("Max API Calls / Minute")).toBe(screen.getByTestId("quota-max-api-calls"));
+    });
   });
 });

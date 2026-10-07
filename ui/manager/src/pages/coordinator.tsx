@@ -54,20 +54,24 @@ export function CoordinatorPage() {
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("coordinator"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
-  const { data: status, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } = useCoordinatorStatus();
+  // The auto-refresh selector drives both polls. It used to set a page timer
+  // while the hooks kept their own fixed 5 s / 10 s intervals, so a longer
+  // choice changed nothing.
+  const [refreshInterval, setRefreshInterval] = useState(10);
+  const { data: status, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } =
+    useCoordinatorStatus(refreshInterval * 1000);
   const {
     data: deadLetters,
     isLoading: dlLoading,
     isError: dlError,
     refetch: refetchDL,
-  } = useDeadLetters();
+  } = useDeadLetters(refreshInterval * 1000);
   const { liveStatus, sseConnected, eventHistory } = useCoordinatorSSE();
   const replayMutation = useReplayDeadLetter();
   const discardMutation = useDiscardDeadLetter();
   const purgeMutation = usePurgeDeadLetters();
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<string | null>(null);
-  const [refreshInterval, setRefreshInterval] = useState(10);
   const [expandedPayloads, setExpandedPayloads] = useState<Set<string>>(new Set());
 
   // Live SSE status while the stream is up, polling otherwise. This used to be
@@ -80,18 +84,6 @@ export function CoordinatorPage() {
 
   const isNats = currentStatus?.coordinatorType === "nats";
   const isConnected = currentStatus?.connected ?? false;
-
-  // Auto-refresh status polling
-  const intervalRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = window.setInterval(() => {
-      refetchStatus();
-      refetchDL();
-    }, refreshInterval * 1000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [refreshInterval, refetchStatus, refetchDL]);
 
   // Throughput rate — approximate tasks/sec from totalProcessed
   const prevProcessed = useRef<{ count: number; time: number } | null>(null);
@@ -197,6 +189,7 @@ export function CoordinatorPage() {
         <div className="flex items-center gap-2">
           <RefreshCw className="h-4 w-4 text-muted-foreground animate-spin" style={{ animationDuration: `${refreshInterval}s` }} />
           <select
+            aria-label={t("coordinator.refreshInterval", "Auto-refresh interval")}
             value={refreshInterval}
             onChange={(e) => setRefreshInterval(Number(e.target.value))}
             className="h-8 appearance-none rounded-lg border border-input bg-background pe-6 ps-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"

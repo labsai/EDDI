@@ -160,4 +160,51 @@ describe("a conversation load in flight never overwrites what replaced it", () =
     expect(startedFor).toBeNull();
     expect(useChatStore.getState().conversationId).toBeNull();
   });
+
+  it("starts nothing for agent A when B was picked while A's failing resume was being read", async () => {
+    // The resume read is a second round trip after the history. When it fails,
+    // the fallback used to start a conversation for the agent the user had
+    // already left, and install it under the one they had moved to.
+    const readA = gate();
+    let startedFor: string | null = null;
+    server.use(
+      http.get("*/conversationstore/conversations", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv-a",
+            conversationState: "READY",
+            environment: "production",
+            lastModifiedOn: 1,
+          },
+        ]),
+      ),
+      http.get("*/agents/:conversationId", async () => {
+        readA.reached();
+        await readA.opened;
+        return new HttpResponse(null, { status: 404 });
+      }),
+      http.post("*/agents/:agentId/start", ({ params }) => {
+        startedFor = String(params.agentId);
+        return HttpResponse.json({ location: "/agents/conv-x" });
+      }),
+    );
+    const open = renderHook(() => useResumeOrStartConversation(), { wrapper }).result;
+
+    act(() => useChatStore.getState().setSelectedAgent("agent-a", "A"));
+    let opening!: Promise<unknown>;
+    act(() => {
+      opening = open.current.mutateAsync({ agentId: "agent-a", environment: "production" });
+    });
+    await readA.arrived;
+
+    act(() => useChatStore.getState().setSelectedAgent("agent-b", "B"));
+    await act(async () => {
+      readA.open();
+      await opening;
+    });
+
+    expect(startedFor).toBeNull();
+    expect(useChatStore.getState().selectedAgentId).toBe("agent-b");
+    expect(useChatStore.getState().conversationId).toBeNull();
+  });
 });

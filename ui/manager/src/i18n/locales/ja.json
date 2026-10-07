@@ -218,7 +218,9 @@
     "removeItem": "{{item}} を削除",
     "stepOf": "ステップ {{current}} / {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} のサイズを変更"
+    "resizePanel": "{{panel}} のサイズを変更",
+    "deletePermanently": "完全に削除",
+    "deletePermanentlyHint": "元に戻せません。オフの場合、項目は削除済みとしてマークされるだけで、パージされるまで復元できます。"
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",
@@ -458,7 +460,8 @@
       "notice": "チャットで利用者に伝える内容（空欄にすると標準の文言を使用）",
       "noticePlaceholder": "このエージェントとの会話は、改善のために管理者が閲覧する場合があります。",
       "versionNote": "この変更で作成されるバージョン以降の会話が対象です — それ以前の会話は対象外です。Slack、Teams、API クライアントでは通知を表示できません。利用者がそこからこのエージェントを使う場合は、あいさつ文でお知らせください。"
-    }
+    },
+    "copyUrl": "URL をコピー"
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -772,7 +775,9 @@
     "reviewNoticeLabel": "会話のレビュー",
     "sendRejected": "メッセージは送信されませんでした: {{reason}}",
     "sendWhileLoading": "メッセージは送信されませんでした: 会話はまだ読み込み中です。しばらくしてからもう一度お試しください。",
-    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。"
+    "turnFailed": "エージェントはこのメッセージに応答できませんでした。理由はサーバーログまたは会話の監査証跡を確認してください。",
+    "errorWithReason": "エラー: {{reason}}",
+    "endConversationFailed": "会話を終了できませんでした: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -883,7 +888,8 @@
     "savedNotLive": "保存しました — まだ反映されていません",
     "savedNotLiveDescription": "実行中のエージェントはデプロイ済みのバージョンを使用しています。この変更を反映するにはデプロイしてください。",
     "deployNow": "デプロイ",
-    "deployStarted": "デプロイを開始しました"
+    "deployStarted": "デプロイを開始しました",
+    "invalidJsonNotSaved": "保存されていません — JSON が無効です：{{reason}}"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1536,7 +1542,8 @@
     "purgeError": "削除に失敗しました",
     "empty": "コーディネーターのデータがありません",
     "emptyHint": "コーディネーターサービスはまだ起動中かもしれません。データは自動的に表示されます。",
-    "lastNSnapshots": "直近 {{count}} 件のスナップショット"
+    "lastNSnapshots": "直近 {{count}} 件のスナップショット",
+    "refreshInterval": "自動更新の間隔"
   },
   "contentEditor": {
     "expand": "展開",
@@ -2227,7 +2234,8 @@
       "readyTitle": "準備はできましたか？",
       "readySubtitle": "サイドバーの「ヘルプ」メニューからいつでもツアーを再開できます",
       "startTour": "ツアーを開始",
-      "exploreOwn": "自分で探索する"
+      "exploreOwn": "自分で探索する",
+      "panelN": "パネル {{n}}"
     },
     "tour": {
       "back": "戻る",
@@ -2495,7 +2503,7 @@
     "count_one": "{{count}} グループ",
     "count_other": "{{count}} グループ",
     "confirmDelete": "このグループを削除しますか？",
-    "confirmDeleteDesc": "グループの設定が完全に削除されます。",
+    "confirmDeleteDesc": "グループは削除済みとしてマークされ、この一覧から消えます。",
     "duplicateSuccess": "グループを複製しました",
     "noDescription": "説明なし",
     "members": "メンバー",
@@ -2617,8 +2625,8 @@
     "deleteGroupOnlySuccess": "グループを削除しました（エージェントは保持）",
     "deleteGroupOnlyWarning": "グループを削除します。すべてのメンバーエージェントは保持されます。",
     "deleteGroupAndAgents": "グループ + 全エージェントを削除",
-    "deleteWithMembersSuccess": "グループと全メンバーエージェントを削除しました（ソフトデリート）",
-    "deleteWithMembersWarning": "グループと {{count}} 名のメンバーエージェントすべてをソフトデリートします。復元可能です。",
+    "deleteWithMembersSuccess": "グループとすべてのメンバーエージェントを削除しました",
+    "deleteWithMembersWarning": "グループと {{count}} 名のメンバーエージェントすべてを削除します。",
     "hideDiscussions": "ディスカッションパネルを非表示",
     "showDiscussions": "ディスカッションパネルを表示",
     "hideConfig": "設定パネルを非表示",
@@ -2987,7 +2995,11 @@
       "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
       "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
       "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
-    }
+    },
+    "deletePermanentlyHint": "元に戻せません：グループとそのワークスペース（バックログ、ケイデンスとそのスケジュール）が完全に削除されます。オフの場合、グループは削除済みとしてマークされるだけで、パージされるまで復元できます。",
+    "deletePermanentlyWithMembersHint": "元に戻せません：グループ、そのワークスペース、すべてのメンバーエージェントが完全に削除されます。オフの場合、削除済みとしてマークされるだけで、パージされるまで復元できます。",
+    "deleteMembersFailedAfterGroup": "グループは削除されましたが、次のメンバーエージェントは削除できませんでした：{{ids}}。エージェントページから削除してください。",
+    "deleteMembersFailedGroupKept": "グループは保持されました：次のメンバーエージェントを削除できませんでした：{{ids}}。もう一度実行して完了してください。"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -3038,7 +3050,9 @@
     "created": "作成日",
     "updated": "更新日",
     "sourceConversation": "ソース会話",
-    "conflicted": "矛盾あり"
+    "conflicted": "矛盾あり",
+    "deleteEntryTitle": "このメモリーを削除しますか？",
+    "deleteEntryDesc": "「{{key}}」はこのユーザーから完全に削除されます。エージェントはこれを思い出さなくなります。この操作は元に戻せません。"
   },
   "properties": {
     "title": "ユーザープロパティ",
@@ -3149,7 +3163,9 @@
     "partialBody": "エージェントの残りの部分は書き込まれました。以下のリソースはそのまま残っており、対応が必要です。",
     "partialCounts": "{{created}} 件作成、{{updated}} 件更新、{{failed}} 件失敗。",
     "schedulesSkipped_other": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。",
-    "schedulesSkipped_one": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。"
+    "schedulesSkipped_one": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。",
+    "moveUp": "上へ移動",
+    "moveDown": "下へ移動"
   },
   "syncPage": {
     "title": "エージェントの同期",
@@ -3332,7 +3348,11 @@
     "humanTurnTimeoutInvalid": "有効な ISO-8601 期間ではありません（例: PT24H や P1D）。",
     "humanTurnTimeoutLabel": "ターンのタイムアウト（ISO-8601 期間）",
     "humanTurnTimeoutPlaceholder": "例: PT24H — 空欄の場合は無期限に待機します",
-    "memberTypeHuman": "人間"
+    "memberTypeHuman": "人間",
+    "memberPromptPlaceholder": "あなたは {{name}} です。専門分野の視点から洞察に富んだ分析を提供してください。",
+    "memberPromptPlaceholderRole": "あなたは {{role}} の専門家、{{name}} です。専門分野の視点から洞察に富んだ分析を提供してください。",
+    "moderatorPromptPlaceholder": "あなたは熟練したモデレーターです。グループの議論を明確でバランスの取れた要約にまとめてください…",
+    "modelPlaceholder": "例: {{model}}"
   },
   "groupTemplates": {
     "advisoryBoard": "アドバイザリーボード",
@@ -3560,7 +3580,8 @@
     "groupLinkUnavailable": "このグループが見つからないため、確実なリンクを表示できません。",
     "confirmApproveGroupDescription": "停止中のフェーズ全体を承認し、ディスカッションを再開します。保留中のタスクもすべて併せて承認されます。個別に判断するにはグループを開いてください。",
     "confirmRejectGroupDescription": "一時停止中のフェーズ全体を却下します。この一時停止を待っているタスクもすべて却下され、議論はこれ以上進みません。個別に判断するにはグループを開いてください。",
-    "pauseChanged": "開いた後にこのリクエストが変更されました。何も決定されていません。もう一度確認してください。"
+    "pauseChanged": "開いた後にこのリクエストが変更されました。何も決定されていません。もう一度確認してください。",
+    "regularTruncated": "会話の承認を最初の {{limit}} 件のみ表示しています — ほかにも保留中のものがあります。いくつか処理すると残りが表示されます。"
   },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",
@@ -3590,7 +3611,9 @@
     "secretVault": "シークレット保管庫",
     "vaultDown": "Vault 利用不可",
     "vaultUp": "Vault 準備完了",
-    "viewLogs": "ログを表示"
+    "viewLogs": "ログを表示",
+    "coordAdminOnly": "コーディネーター：管理者権限が必要",
+    "vaultAdminOnly": "Vault：管理者権限が必要"
   },
   "errorBoundary": {
     "retry": "再試行",
@@ -3671,7 +3694,10 @@
     "found_one": "{{count}} 件の孤立項目が見つかりました",
     "scanIncomplete": "このスキャンは完了しませんでした",
     "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。",
-    "confirmPurge": "孤立したリソース {{count}} 件をすべて完全に削除しますか？この操作は元に戻せません。"
+    "confirmPurge": "孤立したリソース {{count}} 件をすべて完全に削除しますか？この操作は元に戻せません。",
+    "purgeIncompleteScan": "何も削除されていません：EDDI は使用中のリソースの確認を完了できませんでした。再スキャンしてからもう一度お試しください。",
+    "purgeFailed": "パージに失敗しました",
+    "scanFailed": "スキャンに失敗しました：{{reason}}"
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",
@@ -3684,7 +3710,6 @@
     "enabled": "有効",
     "enforcementOff": "強制は無効です。",
     "enforcementOffHint": "クォータは強制されていません。強制を有効にして保存すると、制限の適用が開始されます。",
-    "limitHint": "-1 = 無制限",
     "liveUsage": "ライブ使用状況",
     "maxAgentsPerTenant": "最大エージェント数 / テナント",
     "maxApiCallsPerMinute": "最大 API 呼び出し数 / 分",
@@ -3697,7 +3722,9 @@
     "resetSuccess": "使用カウンターをリセットしました",
     "saveSuccess": "クォータを保存しました",
     "tenantId": "テナント ID",
-    "title": "テナントクォータ"
+    "title": "テナントクォータ",
+    "limitHintEmpty": "空欄または -1 = 無制限、0 = ブロック",
+    "invalidNumber": "数値を入力するか、無制限にする場合は空欄のままにしてください。"
   },
   "secretPicker": {
     "clearVault": "Vault 参照をクリア",
@@ -4086,7 +4113,7 @@
       "deleteBoard": "タスクフォースを解散",
       "deleteBoardDesc": "このタスクフォースの設定を削除します。エージェントは残ります。",
       "deleteBoardAll": "タスクフォースと全エージェントを解散",
-      "deleteBoardAllDesc": "このタスクフォースとすべてのメンバーエージェントを完全に削除します。",
+      "deleteBoardAllDesc": "このタスクフォースとすべてのメンバーエージェントを削除します。",
       "unsavedChanges": "未保存の変更があります",
       "templateSaved": "テンプレートとして保存しました",
       "saveAsTemplate": "テンプレートとして保存",
@@ -4094,8 +4121,8 @@
       "saveChanges": "変更を保存",
       "deleteAllTitle": "タスクフォースと全エージェントを解散しますか？",
       "deleteTitle": "タスクフォースを解散しますか？",
-      "deleteAllConfirm": "このタスクフォースとすべてのメンバーエージェントが完全に解散されます。この操作は取り消せません。",
-      "deleteConfirm": "このタスクフォースの設定が完全に解散されます。メンバーエージェントには影響しません。",
+      "deleteAllConfirm": "このタスクフォースを解散し、すべてのメンバーエージェントを削除します。",
+      "deleteConfirm": "このタスクフォースを解散します。メンバーエージェントには影響しません。",
       "title": "設定"
     },
     "nav": {
@@ -4151,11 +4178,11 @@
     },
     "dashboard": {
       "assembleTaskForce": "タスクフォースを編成",
-      "bulkDeleteConfirm": "選択したタスクフォースをすべて解散します。この操作は取り消せません。",
+      "bulkDeleteConfirm": "選択したすべてのタスクフォースを解散します。メンバーエージェントには影響しません。",
       "bulkDeleteTitle_one": "このタスクフォースを解散しますか？",
       "bulkDeleteTitle_other": "{{count}} 件のタスクフォースを解散しますか？",
       "cancel": "キャンセル",
-      "deleteConfirm": "このタスクフォースを解散してもよろしいですか？この操作は取り消せません。",
+      "deleteConfirm": "このタスクフォースを解散してもよろしいですか？メンバーエージェントには影響しません。",
       "deleteError": "タスクフォースの削除に失敗しました",
       "deletePartialFail": "{{success}} 件削除、{{fail}} 件失敗",
       "deleteSelected": "削除",
@@ -4220,7 +4247,8 @@
       "tryDifferent": "別の検索語をお試しください",
       "untitled": "無題の会話",
       "loadListError": "会話の読み込みに失敗しました",
-      "rejected": "却下"
+      "rejected": "却下",
+      "deleteFailed": "会話を削除できませんでした"
     },
     "insights": "インサイト",
     "memberCount": "{{count}} 名のメンバー",
@@ -5201,7 +5229,10 @@
     "legacyAdminOnly": "管理者のみに表示 — 所有者が割り当てられた後",
     "lastChanged": "最終変更者: {{who}}",
     "neverChanged": "まだここで変更されていません",
-    "saved": "設定を保存しました"
+    "saved": "設定を保存しました",
+    "deleteVariableTitle": "この変数を削除しますか？",
+    "deleteVariableDescription": "この変数を使うエージェントは、再保存されるまでその値を失います。この操作は元に戻せません。",
+    "legacyDefault": "ここでは未設定 — 既定値が適用されます（全員に表示）"
   },
   "cascadeSave": {
     "workflowChanged": "ワークフロー {{workflowId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",

@@ -235,11 +235,8 @@ describe("GroupsPage", () => {
     // Confirm dialog should appear
     await waitFor(() => {
       expect(screen.getByText("Delete this group?")).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          "This will permanently delete the group configuration."
-        )
-      ).toBeInTheDocument();
+      // Soft delete is the default; hard delete is an unticked opt-in.
+      expect(screen.getByTestId("permanent-delete-checkbox")).not.toBeChecked();
     });
 
     // Click cancel
@@ -338,6 +335,13 @@ describe("GroupsPage", () => {
   // ─── Confirm delete flow ───────────────────────────────────────────────
 
   it("confirms delete when confirm button is clicked", async () => {
+    const deleteUrls: URL[] = [];
+    server.use(
+      http.delete("*/groupstore/groups/:id", ({ request }) => {
+        deleteUrls.push(new URL(request.url));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
     renderPage();
     const user = userEvent.setup();
 
@@ -373,6 +377,33 @@ describe("GroupsPage", () => {
         screen.queryByText("Delete this group?")
       ).not.toBeInTheDocument();
     });
+    // A soft delete: the list's trash icon used to send permanent=true.
+    expect(deleteUrls).toHaveLength(1);
+    expect(deleteUrls[0]!.searchParams.get("permanent")).toBe("false");
+  });
+
+  it("sends permanent=true only when 'Delete permanently' is ticked", async () => {
+    const deleteUrls: URL[] = [];
+    server.use(
+      http.delete("*/groupstore/groups/:id", ({ request }) => {
+        deleteUrls.push(new URL(request.url));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPage();
+    const user = userEvent.setup();
+    await waitFor(
+      () => expect(screen.getAllByTestId(/^group-card-/).length).toBeGreaterThanOrEqual(1),
+      { timeout: 10000 },
+    );
+    await user.click(screen.getByTestId("view-toggle-list"));
+    await user.click((await screen.findAllByTitle(/delete/i))[0]!);
+    await user.click(await screen.findByTestId("permanent-delete-checkbox"));
+    expect(screen.getByTestId("alert-dialog-confirm")).toHaveTextContent("Delete permanently");
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
+
+    await waitFor(() => expect(deleteUrls).toHaveLength(1));
+    expect(deleteUrls[0]!.searchParams.get("permanent")).toBe("true");
   });
 
   // ─── Duplicate in list view ────────────────────────────────────────────

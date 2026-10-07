@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { StrictMode } from "react";
 import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
@@ -346,5 +347,93 @@ describe("ConfigEditorLayout", () => {
       />
     );
     expect(screen.getByText("Deploying…")).toBeInTheDocument();
+  });
+
+  // --- Review 2026-10-02 ---
+
+  /** A form editor whose button bumps a counter in the document. */
+  function counterEditor(parsed: unknown, onChange: (u: unknown) => void) {
+    const doc = parsed as { n?: number };
+    return (
+      <button data-testid="bump" onClick={() => onChange({ ...doc, n: (doc.n ?? 0) + 1 })}>
+        {String(doc.n ?? 0)}
+      </button>
+    );
+  }
+
+  it("keeps what was typed while a save was in flight when the saved version arrives", async () => {
+    const onSave = vi.fn();
+    const user = userEvent.setup();
+    const props = { ...defaultProps, data: JSON.stringify({ n: 0 }), onSave, renderFormEditor: counterEditor };
+    const { rerender } = renderWithProviders(<ConfigEditorLayout {...props} />);
+
+    await user.click(screen.getByTestId("bump")); // n = 1
+    await user.click(screen.getByTestId("save-btn"));
+    expect(onSave).toHaveBeenLastCalledWith(expect.stringContaining('"n": 1'));
+    // Typed while the PUT is in flight:
+    await user.click(screen.getByTestId("bump")); // n = 2
+
+    // The save lands and the parent hands down the saved document (as the
+    // server formats it — not byte-identical to what was sent).
+    rerender(<ConfigEditorLayout {...props} data={JSON.stringify({ n: 1 })} currentVersion={2} />);
+
+    expect(screen.getByTestId("bump")).toHaveTextContent("2");
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+  });
+
+  it("adopts the saved version when nothing was typed during the save", async () => {
+    const user = userEvent.setup();
+    const props = { ...defaultProps, data: JSON.stringify({ n: 0 }), renderFormEditor: counterEditor };
+    const { rerender } = renderWithProviders(<ConfigEditorLayout {...props} />);
+
+    await user.click(screen.getByTestId("bump"));
+    await user.click(screen.getByTestId("save-btn"));
+    rerender(<ConfigEditorLayout {...props} data={JSON.stringify({ n: 1 })} currentVersion={2} />);
+
+    expect(screen.getByTestId("bump")).toHaveTextContent("1");
+    expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
+  });
+
+  it("adopts a new source version under StrictMode, which runs state updaters twice", () => {
+    // The reset decision used to live inside a setState updater that also wrote
+    // the refs it reads. StrictMode (every `npm run dev`) calls updaters twice:
+    // the second call saw the refs the first had already moved and kept the OLD
+    // document, so a version switch or a reload showed stale text as dirty.
+    const props = { ...defaultProps, data: JSON.stringify({ n: 0 }), renderFormEditor: counterEditor };
+    const { rerender } = renderWithProviders(
+      <StrictMode>
+        <ConfigEditorLayout {...props} />
+      </StrictMode>,
+    );
+    rerender(
+      <StrictMode>
+        <ConfigEditorLayout {...props} data={JSON.stringify({ n: 5 })} currentVersion={2} />
+      </StrictMode>,
+    );
+
+    expect(screen.getByTestId("bump")).toHaveTextContent("5");
+    expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
+  });
+
+  it("says why Save did nothing when the JSON is invalid, instead of a silent no-op", async () => {
+    const onSave = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ConfigEditorLayout
+        {...defaultProps}
+        onSave={onSave}
+        renderFormEditor={(_parsed, onChange) => (
+          <button data-testid="break" onClick={() => onChange(undefined)}>break</button>
+        )}
+      />,
+    );
+    // JSON.stringify(undefined) is not a string of JSON — the edit buffer is now invalid.
+    await user.click(screen.getByTestId("break"));
+    await user.click(screen.getByTestId("save-btn"));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByTestId("save-invalid-json")).toBeInTheDocument();
+    // ...and the JSON tab, where it can be fixed, is opened.
+    expect(screen.getByTestId("json-view")).toBeInTheDocument();
   });
 });
