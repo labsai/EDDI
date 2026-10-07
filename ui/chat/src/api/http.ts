@@ -24,6 +24,29 @@ export function setAuthToken(token: string | null): void {
   _authToken = token && token.trim() ? token.trim() : null;
 }
 
+/** The bearer token currently sent, or null. */
+export function getAuthToken(): string | null {
+  return _authToken;
+}
+
+/**
+ * Called once when a request is answered 401, with the token that request
+ * carried. Resolve true when a different, fresh token is now set and the
+ * request should be repeated; false to let the 401 surface.
+ *
+ * The embedding handshake (embed-auth.ts) installs one: a host page hands the
+ * widget a short-lived OIDC access token, and an expired or not-yet-delivered
+ * token is answered by asking the host for a new one instead of failing the
+ * turn. A 401 is safe to repeat — the request was refused before anything ran.
+ */
+type UnauthorizedHandler = (rejectedToken: string | null) => Promise<boolean>;
+let _onUnauthorized: UnauthorizedHandler | null = null;
+
+/** Install (or with null remove) the 401 handler. */
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  _onUnauthorized = handler;
+}
+
 export function buildUrl(path: string): string {
   return `${_baseUrl}${path}`;
 }
@@ -96,7 +119,14 @@ export async function request(
   init: RequestInit | undefined,
   context: string,
 ): Promise<Response> {
-  const res = await fetch(buildUrl(path), withAuth(init));
+  const sentToken = _authToken;
+  let res = await fetch(buildUrl(path), withAuth(init));
+  if (res.status === 401 && _onUnauthorized) {
+    // One retry at most: a second 401 with a fresh token is a real refusal.
+    if (await _onUnauthorized(sentToken)) {
+      res = await fetch(buildUrl(path), withAuth(init));
+    }
+  }
   if (!res.ok) {
     let body = "";
     try {

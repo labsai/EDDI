@@ -7,7 +7,9 @@ import {
   createContext,
   useContext,
   useReducer,
+  useRef,
   type Dispatch,
+  type MutableRefObject,
   type ReactNode,
 } from "react";
 import type { ChatMessage, QuickReply, ConversationState, ChatConfig, InputField } from "@/types";
@@ -448,6 +450,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
 const ChatStateContext = createContext<ChatState>(initialState);
 const ChatDispatchContext = createContext<Dispatch<ChatAction>>(() => {});
+/**
+ * The conversation the composer was last mounted for. It is owned by the
+ * provider rather than by ChatInput, so that it outlives one ChatInput
+ * instance. ChatWidget swaps the composer out for SecretInput while an agent's
+ * input field is open, and mounts a fresh one afterwards. An upload started
+ * by an instance that has since unmounted must still be judged against the
+ * conversation the composer is on NOW. A ref owned by the dead instance would
+ * stay on its own conversation forever.
+ */
+const ComposerConversationContext = createContext<MutableRefObject<string | null | undefined> | null>(null);
 
 export function ChatProvider({
   children,
@@ -460,14 +472,25 @@ export function ChatProvider({
     ...initialState,
     config: { ...defaultConfig, ...config },
   });
+  const composerConversation = useRef<string | null | undefined>(undefined);
 
   return (
     <ChatStateContext.Provider value={state}>
       <ChatDispatchContext.Provider value={dispatch}>
-        {children}
+        <ComposerConversationContext.Provider value={composerConversation}>
+          {children}
+        </ComposerConversationContext.Provider>
       </ChatDispatchContext.Provider>
     </ChatStateContext.Provider>
   );
+}
+
+/**
+ * The provider's record of the composer's current conversation, or null
+ * outside a provider, where the caller keeps its own.
+ */
+export function useComposerConversationRef(): MutableRefObject<string | null | undefined> | null {
+  return useContext(ComposerConversationContext);
 }
 
 export function useChatState(): ChatState {

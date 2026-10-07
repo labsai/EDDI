@@ -176,6 +176,32 @@ class CspPolicyTest {
         }
     }
 
+    /**
+     * Agent designers configure image output items whose URLs are hosted elsewhere.
+     * Under {@code img-src 'self' data: blob:} alone the widget's own CSP refused
+     * every one of them. The extra sources are an operator setting, defaulting to
+     * {@code https:} so the feature works out of the box, and the widening stays on
+     * /chat: the Manager and Swagger UI keep their own img-src.
+     */
+    @Test
+    @DisplayName("the chat widget's img-src takes designer image hosts from config (https: by default), and only there")
+    void chatImgSrcIsConfigurableAndScopedToChat() throws Exception {
+        var properties = applicationProperties();
+        var chatImg = directive(properties.getProperty(CHAT_HEADER), "img-src");
+        assertTrue(allows(chatImg, "${eddi.chat.img-sources:}"),
+                "chat img-src must append eddi.chat.img-sources: " + chatImg);
+        assertTrue(allows(chatImg, "'self'") && allows(chatImg, "data:") && allows(chatImg, "blob:"),
+                "chat img-src must keep 'self' data: blob: " + chatImg);
+        assertEquals("https:", properties.getProperty("eddi.chat.img-sources"),
+                "designer images from https hosts must render by default");
+
+        for (var key : new String[]{DEFAULT_HEADER, SWAGGER_HEADER}) {
+            var img = directive(properties.getProperty(key), "img-src");
+            assertFalse(img.contains("eddi.chat.img-sources") || allows(img, "https:"),
+                    key + " must not inherit the chat widget's image sources: " + img);
+        }
+    }
+
     @Test
     @DisplayName("X-Frame-Options is DENY everywhere except /chat, and never set globally")
     void xFrameOptionsIsPerPathAndAbsentOnChat() throws Exception {
