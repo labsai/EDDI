@@ -1,5 +1,7 @@
+import { useCallback, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  type ApprovalStatusSummary,
   listPendingApprovals,
   listAllGroupPendingApprovals,
   getApprovalStatus,
@@ -15,6 +17,7 @@ import {
   bindDecisionToPause,
   currentGroupPauseOf,
   currentPauseOf,
+  describesPause,
   isPauseChanged,
   type ShownPause,
 } from "@/lib/hitl-pause-binding";
@@ -65,6 +68,22 @@ export function useAllGroupPendingApprovals(limit = 200) {
   };
 }
 
+/** How long a paused conversation's approval-status may fail to describe the pause before it is an error. */
+const APPROVAL_DETAILS_WINDOW_MS = 10_000;
+/** Poll delays while the stored pause has not caught up with the stream; the last repeats. */
+const APPROVAL_POLL_BACKOFF_MS = [500, 1000, 2000];
+
+export interface ApprovalStatusOptions {
+  /**
+   * The caller KNOWS the conversation is paused (it saw the stream's `done`),
+   * so a response that does not describe that pause is "not stored yet", not an
+   * answer. Turns on fast re-polling and the `detailsPending`/`detailsError`
+   * window, and withholds a non-matching response from `data`. See
+   * `describesPause`.
+   */
+  verifyPause?: boolean;
+}
+
 /**
  * Structured approval status of a paused 1:1 conversation — the only source of
  * `pauseDetails` (per-call tool name + redacted arguments for a TOOL_CALL pause,
@@ -81,17 +100,80 @@ export function useAllGroupPendingApprovals(limit = 200) {
  * makes the fresh fetch a cache-model guarantee instead of a removal
  * side-effect.) Callers without a pause timestamp omit it and keep the old
  * behaviour.
+ *
+ * Pass `{ verifyPause: true }` when the pause was announced by a stream: the
+ * `done` event is emitted before the paused memory is persisted, so the first
+ * read can say "not paused". The hook then re-polls (500 ms, backing off to 2 s)
+ * for up to 10 s until the response describes this pause, and exposes
+ * `detailsPending` / `detailsError` / `retry` for the approval card. Never an
+ * endless spinner: past the window it is `detailsError`.
  */
 export function useApprovalStatus(
   conversationId: string | undefined,
   enabled = true,
   pauseKey?: string | null,
+  options?: ApprovalStatusOptions,
 ) {
-  return useQuery({
+  const verifyPause = options?.verifyPause === true;
+  const active = enabled && !!conversationId;
+  const expectedPausedAt = pauseKey ?? null;
+  // One window per (conversation, pause, retry). It restarts when any of them
+  // changes, so a Retry gets a full window rather than the remainder of the last.
+  const [attempt, setAttempt] = useState(0);
+  const windowId = `${conversationId ?? ""}|${expectedPausedAt ?? ""}|${attempt}`;
+  const [timedOutWindow, setTimedOutWindow] = useState<string | null>(null);
+  const timedOut = verifyPause && timedOutWindow === windowId;
+
+  useEffect(() => {
+    if (!verifyPause || !active) return;
+    const id = setTimeout(() => setTimedOutWindow(windowId), APPROVAL_DETAILS_WINDOW_MS);
+    return () => clearTimeout(id);
+  }, [verifyPause, active, windowId]);
+
+  const query = useQuery({
     queryKey: ["approval-status", conversationId, pauseKey ?? null],
     queryFn: () => getApprovalStatus(conversationId!),
-    enabled: enabled && !!conversationId,
+    enabled: active,
+    // Poll fast until the response describes the pause, then stop. A function,
+    // so the answer is re-derived from each response rather than frozen at the
+    // render that created the query. `timedOut` is read from the closure: it is
+    // state, so flipping it re-renders and the observer picks up the new options.
+    refetchInterval: verifyPause
+      ? (q) => {
+          if (timedOut || describesPause(q.state.data, expectedPausedAt)) return false;
+          const polls = q.state.dataUpdateCount + q.state.errorUpdateCount;
+          // The interval is re-derived AFTER each response, so the first
+          // response (polls = 1) must already map to the first delay.
+          const step = Math.min(Math.max(polls - 1, 0), APPROVAL_POLL_BACKOFF_MS.length - 1);
+          return APPROVAL_POLL_BACKOFF_MS[step];
+        }
+      : undefined,
   });
+
+  const { refetch } = query;
+  const retry = useCallback(() => {
+    setAttempt((n) => n + 1);
+    return refetch();
+  }, [refetch]);
+
+  if (!verifyPause) {
+    return { ...query, detailsPending: active && query.isLoading, detailsError: active && query.isError, retry };
+  }
+
+  const describes = describesPause(query.data, expectedPausedAt);
+  // A failed read is an error only once it has stopped trying: while a Retry is
+  // in flight the card says "loading", not "failed" again.
+  const failed = query.isError && !query.isFetching;
+  return {
+    ...query,
+    // A response that does not describe THIS pause is not shown at all — its
+    // `pauseDetails` is null or belongs to an earlier pause, and passing it on
+    // would render a card with nothing on it to object to.
+    data: describes ? query.data : (undefined as ApprovalStatusSummary | undefined),
+    detailsPending: active && !describes && !timedOut && !failed,
+    detailsError: active && !describes && (timedOut || failed),
+    retry,
+  };
 }
 
 // ── Mutations ────────────────────────────────────────────────────

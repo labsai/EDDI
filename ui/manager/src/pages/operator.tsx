@@ -102,6 +102,11 @@ export function OperatorPage() {
     chat.conversationId ?? undefined,
     chat.isPaused,
     chat.decidedPausedAt,
+    // The stream announces the pause BEFORE the paused memory is stored, and
+    // approval-status reads the store: the first read can say "not paused".
+    // `data` is withheld until the response describes this pause, and the hook
+    // re-polls until it does — see useApprovalStatus.
+    { verifyPause: true },
   );
 
   /**
@@ -687,9 +692,10 @@ export function OperatorPage() {
           timeoutPolicy={approvalStatus.data?.timeoutPolicy}
           approvalTimeout={approvalStatus.data?.approvalTimeout}
           pauseDetails={chat.isPaused ? approvalStatus.data?.pauseDetails : undefined}
-          pauseDetailsPending={chat.isPaused && approvalStatus.isLoading}
-          pauseDetailsError={chat.isPaused && approvalStatus.isError}
-          onRetryPauseDetails={() => void approvalStatus.refetch()}
+          pauseDetailsPending={chat.isPaused && approvalStatus.detailsPending}
+          pauseDetailsError={chat.isPaused && approvalStatus.detailsError}
+          onRetryPauseDetails={() => void approvalStatus.retry()}
+          pauseKey={chat.decidedPausedAt}
           isResolvingPause={chat.isResolvingPause}
           resolveError={chat.resolveError}
           onDecide={handleDecide}

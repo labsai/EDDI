@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { formatToolArguments } from "@/lib/hitl-format-args";
 import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
 import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
 import {
@@ -61,6 +62,15 @@ interface ApprovalBannerProps {
    * flag, and `onRetryPauseDetails` to offer a way out.
    */
   pauseDetailsError?: boolean;
+  /**
+   * The caller knows this is a tool-call pause (the operator's gate is
+   * tool-call based) and so expects `pauseDetails` to be a TOOL_CALL with at
+   * least one call. Until it is, Approve stays disabled: a RULE-shaped (or
+   * absent) detail on such a pause means the details have not caught up, and
+   * the card would otherwise offer a blind batch Approve. Optional — every
+   * other caller keeps its own semantics.
+   */
+  expectToolCall?: boolean;
   /** Retries the pause-details read. Renders a Retry action when provided
    *  alongside `pauseDetailsError`. */
   onRetryPauseDetails?: () => void;
@@ -168,6 +178,7 @@ export function ApprovalBanner({
   pauseDetailsPending,
   pauseDetailsError,
   onRetryPauseDetails,
+  expectToolCall = false,
   onDecide,
   onCancel,
   requireExplicitPerCall = false,
@@ -208,8 +219,21 @@ export function ApprovalBanner({
   const decidedCount = isToolCall
     ? toolPause!.calls.filter((call) => callStates[call.callId]?.verdict !== undefined).length
     : 0;
-  const explicitReviewMissing =
-    requireExplicitPerCall && isToolCall && decidedCount < toolPause!.calls.length;
+  // ONE gated call needs no per-call verdict: the reviewer is looking at the one
+  // call, so Approve on the batch IS the explicit decision (and is sent as an
+  // explicit per-call APPROVED below). Two or more keep the deliberate per-call
+  // review, and that review is the confirmation, so the submit needs no dialog.
+  const singleCall = requireExplicitPerCall && isToolCall && toolPause!.calls.length === 1;
+  const perCallReview = requireExplicitPerCall && isToolCall && !singleCall;
+  const explicitReviewMissing = perCallReview && decidedCount < toolPause!.calls.length;
+
+  // A tool-call pause with nothing to review is never approvable: a TOOL_CALL
+  // detail with zero calls would otherwise have no per-call verdict to wait for
+  // (`decidedCount < 0` is false) and Approve would resume the whole batch; and
+  // when the caller expects a tool call but got anything else, the details are
+  // not what the pause is about. Reject stays available.
+  const toolCallsMissing =
+    (isToolCall && toolPause!.calls.length === 0) || (expectToolCall && !isToolCall);
 
   // A refusal, not a nudge. Any blocked call disables Approve for the whole
   // batch rather than only for itself: the per-call verdicts are submitted
@@ -237,8 +261,10 @@ export function ApprovalBanner({
     for (const call of toolPause.calls) {
       const s = callStates[call.callId];
       const amend = s?.amend?.trim();
-      if (!s || (!s.verdict && !amend)) continue; // inherits the top-level APPROVED
-      const verdict = s.verdict ?? "APPROVED";
+      // A call nobody touched inherits the top-level APPROVED — except the lone
+      // call under explicit review, which is always sent as its own decision.
+      if (!singleCall && (!s || (!s.verdict && !amend))) continue;
+      const verdict = s?.verdict ?? "APPROVED";
       const decision: ToolCallDecision = { verdict };
       if (verdict === "APPROVED" && amend) {
         if (call.argsTruncated) {
@@ -463,7 +489,7 @@ export function ApprovalBanner({
                 carries a verdict — and the per-call buttons are small enough that
                 an approver reads a disabled Approve as a broken button rather than
                 as unfinished work. This says how much is left. */}
-            {requireExplicitPerCall && (
+            {perCallReview && (
               <span
                 className={cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
@@ -498,7 +524,8 @@ export function ApprovalBanner({
               key={call.callId}
               call={call}
               state={callStates[call.callId] ?? {}}
-              awaitingDecision={requireExplicitPerCall && callStates[call.callId]?.verdict === undefined}
+              awaitingDecision={perCallReview && callStates[call.callId]?.verdict === undefined}
+              hideVerdict={singleCall}
               outcomeUnknown={outcomeUnknown.has(call.callId)}
               extra={renderCallExtra?.(call)}
               onToggle={(verdict) =>
@@ -522,8 +549,10 @@ export function ApprovalBanner({
             </p>
           )}
           <p className="text-[11px] text-muted-foreground">
-            {requireExplicitPerCall
-              ? t("hitl.toolApprovalHintExplicit", "Every call needs its own Approve or Reject before you can approve the batch. Reject rejects the whole batch.")
+            {singleCall
+              ? t("hitl.toolApprovalHintSingle", "Approve runs this call. Reject cancels it.")
+              : requireExplicitPerCall
+              ? t("hitl.toolApprovalHintExplicit", "Choose Approve or Reject for every call, then submit your decisions. Reject rejects the whole batch.")
               : t("hitl.toolApprovalHint", "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.")}
           </p>
           {explicitReviewMissing && (
@@ -667,6 +696,20 @@ export function ApprovalBanner({
         </p>
       )}
 
+      {toolCallsMissing && !pauseDetailsPending && !pauseDetailsError && (
+        <p
+          className="mb-2 flex items-center gap-1 text-xs text-destructive"
+          role="alert"
+          data-testid="approval-details-missing"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {t(
+            "hitl.toolDetailsMissing",
+            "This tool-call pause has no calls to review, so it can't be approved from here. Rejecting is still safe.",
+          )}
+        </p>
+      )}
+
       {pauseDetailsError && (
         <div
           className="mb-2 flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
@@ -710,14 +753,17 @@ export function ApprovalBanner({
             pauseDetailsPending ||
             pauseDetailsError ||
             explicitReviewMissing ||
-            approvalBlocked
+            approvalBlocked ||
+            toolCallsMissing
           }
-          onClick={() => setConfirmAction("APPROVED")}
+          // Per-call review is itself the confirmation for a multi-call batch, so
+          // its submit goes straight through; everything else confirms first.
+          onClick={() => (perCallReview ? handleSubmit("APPROVED") : setConfirmAction("APPROVED"))}
           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="approve-button"
         >
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-          {t("hitl.approve", "Approve")}
+          {perCallReview ? t("hitl.submitDecisions", "Submit decisions") : t("hitl.approve", "Approve")}
         </button>
         <button
           type="button"
@@ -768,6 +814,7 @@ function ToolCallRow({
   call,
   state,
   awaitingDecision,
+  hideVerdict,
   outcomeUnknown,
   extra,
   onToggle,
@@ -778,6 +825,8 @@ function ToolCallRow({
   state: CallState;
   /** Explicit per-call review is on and this call has no verdict yet. */
   awaitingDecision?: boolean;
+  /** Single gated call under explicit review: the batch Approve is the verdict. */
+  hideVerdict?: boolean;
   outcomeUnknown: boolean;
   /** Optional caller-supplied content rendered above the arguments block —
    *  see `ApprovalBannerProps.renderCallExtra`. */
@@ -787,6 +836,12 @@ function ToolCallRow({
   onAmendChange: (amend: string) => void;
 }) {
   const { t } = useTranslation();
+  // DISPLAY ONLY — the amend flow and the decision payload read `call.arguments`.
+  const formattedArguments = useMemo(
+    () => formatToolArguments(call.arguments ?? "", call.argsTruncated),
+    [call.arguments, call.argsTruncated],
+  );
+  const [showRaw, setShowRaw] = useState(false);
   return (
     <div
       className={cn(
@@ -829,6 +884,7 @@ function ToolCallRow({
             )}
           </div>
         </div>
+        {!hideVerdict && (
         <div className="flex shrink-0 gap-1">
           <button
             type="button"
@@ -865,15 +921,34 @@ function ToolCallRow({
             {t("hitl.reject", "Reject")}
           </button>
         </div>
+        )}
       </div>
       {extra}
       {call.arguments && (
-        <pre
-          className="max-h-40 max-w-full overflow-auto rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground"
-          data-testid={`tool-args-${call.callId}`}
-        >
-          {call.arguments}
-        </pre>
+        <div className="min-w-0">
+          {formattedArguments !== call.arguments && (
+            <div className="mb-1 flex justify-end">
+              <button
+                type="button"
+                aria-pressed={showRaw}
+                onClick={() => setShowRaw((v) => !v)}
+                className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                data-testid={`tool-args-view-toggle-${call.callId}`}
+                data-view={showRaw ? "raw" : "formatted"}
+              >
+                {showRaw
+                  ? t("hitl.argsShowFormatted", "Show formatted")
+                  : t("hitl.argsShowRaw", "Show raw")}
+              </button>
+            </div>
+          )}
+          <pre
+            className="max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
+            data-testid={`tool-args-${call.callId}`}
+          >
+            {showRaw ? call.arguments : formattedArguments}
+          </pre>
+        </div>
       )}
       {!call.argsTruncated && (
         <div className="mt-1.5">

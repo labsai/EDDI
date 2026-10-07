@@ -125,6 +125,75 @@ export interface OperatorChatProps {
    * already there.
    */
   pauseSurface?: "banner" | "compact";
+  /**
+   * Identity of the pause on screen (its `hitlPausedAt`). Keys the approval card
+   * and the decision summary, so a re-pause renders a fresh card and a summary
+   * can never describe a different pause.
+   */
+  pauseKey?: string | null;
+}
+
+/** What the reviewer agreed to, captured when the decision was submitted. */
+interface SubmittedDecision {
+  pauseKey: string;
+  verdict: HitlVerdict;
+  note?: string;
+  calls: { callId: string; toolName: string; outcome: HitlVerdict; amended: boolean }[];
+}
+
+/** The compact stand-in for the approval card while the decision is being carried out. */
+function DecisionSummary({ decision }: { decision: SubmittedDecision }) {
+  const { t } = useTranslation();
+  const approved = decision.verdict === "APPROVED";
+  return (
+    <div
+      className="min-w-0 max-w-full rounded-xl border border-border bg-muted/30 p-3 text-sm"
+      data-testid="approval-decision-summary"
+      data-verdict={decision.verdict}
+    >
+      <p className="flex items-center gap-1.5 font-medium text-foreground">
+        {approved ? (
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+        ) : (
+          <XCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+        )}
+        {approved
+          ? t("operator.chat.summaryApproved", "You approved this request")
+          : t("operator.chat.summaryRejected", "You rejected this request")}
+      </p>
+      {decision.calls.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5 ps-5 text-xs">
+          {decision.calls.map((call) => (
+            <li
+              key={call.callId}
+              className="flex flex-wrap items-center gap-1.5"
+              data-testid={`approval-decision-summary-call-${call.callId}`}
+              data-outcome={call.outcome}
+            >
+              <span className="font-mono text-foreground">{call.toolName}</span>
+              <span
+                className={call.outcome === "APPROVED" ? "text-emerald-600" : "text-destructive"}
+              >
+                {call.outcome === "APPROVED"
+                  ? t("operator.chat.summaryCallApproved", "approved")
+                  : t("operator.chat.summaryCallRejected", "rejected")}
+              </span>
+              {call.amended && (
+                <span className="text-muted-foreground">
+                  ({t("operator.chat.summaryAmended", "amended")})
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {decision.note && (
+        <p className="mt-1.5 break-words text-xs text-muted-foreground" data-testid="approval-decision-summary-note">
+          {t("operator.chat.summaryNote", "Note: {{note}}", { note: decision.note })}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function OperatorChat({
@@ -156,12 +225,43 @@ export function OperatorChat({
   blockedCalls,
   renderCallExtra,
   pauseSurface = "banner",
+  pauseKey,
   conversationId,
   onEnsureConversation,
 }: OperatorChatProps) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Which pause the card is for, and what was submitted for it. The summary is
+  // shown only while THAT pause's decision is being carried out: a different
+  // pause key (re-pause) or no pause at all makes it inert without any reset.
+  // From `pauseKey` ONLY: `pausedAt` comes from query data that is withheld
+  // whenever a response does not describe the pause, so keying on it would flip
+  // the identity mid-decision and drop the reviewer's per-call choices.
+  const cardKey = `${conversationId ?? ""}:${pauseKey ?? ""}`;
+  const [submitted, setSubmitted] = useState<SubmittedDecision | null>(null);
+  const showSummary = isPaused && isResolvingPause && submitted?.pauseKey === cardKey;
+  const handleBannerDecide = (
+    verdict: HitlVerdict,
+    note?: string,
+    toolDecisions?: Record<string, ToolCallDecision>,
+  ) => {
+    const calls =
+      pauseDetails?.type === "TOOL_CALL"
+        ? pauseDetails.calls.map((call) => ({
+            callId: call.callId,
+            toolName: call.toolName,
+            // A call not listed inherits the top-level verdict.
+            outcome:
+              verdict === "REJECTED"
+                ? ("REJECTED" as const)
+                : (toolDecisions?.[call.callId]?.verdict ?? "APPROVED"),
+            amended: verdict === "APPROVED" && !!toolDecisions?.[call.callId]?.amendedArguments,
+          }))
+        : [];
+    setSubmitted({ pauseKey: cardKey, verdict, note: note?.trim() || undefined, calls });
+    onDecide?.(verdict, note, toolDecisions);
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Smart auto-scroll: follows new content only while the user is AT the
@@ -459,7 +559,14 @@ export function OperatorChat({
           </div>
         )}
 
+        {isPaused && pauseSurface === "banner" && showSummary && submitted && (
+          <DecisionSummary decision={submitted} />
+        )}
         {isPaused && pauseSurface === "banner" && (
+          // Kept MOUNTED while the summary stands in for it: if the resume fails
+          // the card comes back with the reviewer's per-call choices intact. Keyed
+          // by the pause, so a different pause never inherits them.
+          <div key={cardKey} className={showSummary ? "hidden" : undefined} data-testid="approval-card-slot">
           <ApprovalBanner
             surface="regular"
             pauseReason={pauseReason ?? undefined}
@@ -479,10 +586,14 @@ export function OperatorChat({
             onRetryPauseDetails={onRetryPauseDetails}
             isSubmitting={isResolvingPause}
             requireExplicitPerCall
+            // The operator's gate is tool-call based: a pause with no TOOL_CALL
+            // detail means the details have not caught up, never "a rule pause".
+            expectToolCall
             blockedCalls={blockedCalls}
             renderCallExtra={renderCallExtra}
-            onDecide={(verdict, note, _taskApprovals, toolDecisions) => onDecide?.(verdict, note, toolDecisions)}
+            onDecide={(verdict, note, _taskApprovals, toolDecisions) => handleBannerDecide(verdict, note, toolDecisions)}
           />
+          </div>
         )}
 
         {/* The approved step is running, and it is NOT streamed — resolveApproval

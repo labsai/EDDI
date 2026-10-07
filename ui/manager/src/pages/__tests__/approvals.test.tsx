@@ -156,7 +156,9 @@ describe("ApprovalsPage — deciding a TOOL_CALL pause inline", () => {
     renderWithProviders(<ApprovalsPage />);
 
     await user.click(await screen.findByTestId("review-conv-tool-1"));
-    await user.click(await screen.findByTestId("tool-approve-call-1"));
+    // One gated call: no per-call buttons, Approve + confirm is the whole flow.
+    await screen.findByTestId("tool-call-call-1");
+    expect(screen.queryByTestId("tool-approve-call-1")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("approve-button"));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Approve" }));
@@ -212,10 +214,9 @@ describe("ApprovalsPage — deciding a TOOL_CALL pause inline", () => {
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledTimes(1));
   });
 
-  it("blocks Approve until every gated call has an explicit verdict — no batch rubber-stamp", async () => {
-    // The inbox is the surface where a call swept into someone ELSE's batch is
-    // most likely to be missed — requireExplicitPerCall is what stops "I clicked
-    // Approve" from silently meaning "I approved a call I never looked at."
+  it("a lone gated call needs no per-call verdict: Approve is available straight away", async () => {
+    // With ONE call on screen, Approve on the batch is explicit by itself. The
+    // per-call review requirement is for two or more (see approval-banner tests).
     const user = userEvent.setup();
     mockInbox([toolPause]);
     mockApprovalStatus();
@@ -224,8 +225,8 @@ describe("ApprovalsPage — deciding a TOOL_CALL pause inline", () => {
     await user.click(await screen.findByTestId("review-conv-tool-1"));
     await screen.findByTestId("tool-call-call-1");
 
-    expect(screen.getByTestId("approve-button")).toBeDisabled();
-    expect(screen.getByTestId("explicit-review-missing")).toBeInTheDocument();
+    expect(screen.getByTestId("approve-button")).toBeEnabled();
+    expect(screen.queryByTestId("explicit-review-missing")).not.toBeInTheDocument();
   });
 
   it("shows the server-verified request preview when a call carries one", async () => {
