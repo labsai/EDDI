@@ -50,3 +50,12 @@ Phase 1 fixed the operator's approval card; this applies the same rules everywhe
 ### Tests
 
 `approval-card.test.tsx`, `pause-notice.test.tsx`, `conversation-detail-pause-race.test.tsx`, additions to `approvals.test.tsx`, `discussion-transcript.test.tsx`, `use-groups.test.tsx`, and `useHitlPolling.test.ts` in `ui/chat`. Each safety fix was mutation-checked.
+
+### Follow-up: parity gaps closed (2026-10-07)
+
+- **Receipt scope:** `ApprovalCard` only shows a receipt for the submission that started the current resolution. A failed resume spends it, and a cancel clears it, so a later cancel never reads "You approved".
+- **Group approve is bound:** the group page's approve goes through `currentGroupPauseOf` + `bindDecisionToPause` like the inbox. A changed pause refuses, refreshes and does not approve. Group test fixtures use a fixed pause start.
+- **Group card keeps its choices:** the card stays mounted (hidden behind its receipt) while the stream takes over, and returns with the per-task toggles if the resume fails.
+- **One rule for read-only notices:** the Manager chat panel shows the same review link under `/workforce` (one SPA, so a plain router link), because `PauseNotice` has no per-surface hiding.
+- **ui/chat:** `PausedCard` renders at once from the stream's own news ("Waiting for approval", Cancel available, still read-only) and is enriched when approval-status arrives.
+- **conversation-detail:** a successful resume re-reads the conversation immediately (explicit refetch plus the hook's invalidation); a test now pins that the receipt hands over to the settled state promptly.

@@ -113,4 +113,32 @@ describe("conversation-detail while the stored pause catches up", () => {
     await screen.findByTestId("conversation-chat");
     expect(screen.queryByTestId("awaiting-pause-notice")).not.toBeInTheDocument();
   });
+
+  it("hands the receipt over to the settled state promptly after a successful resume", async () => {
+    let resumed = false;
+    let reads = 0;
+    server.use(
+      http.get("*/conversationstore/conversations/simple/:id", () => {
+        reads++;
+        return HttpResponse.json(conversation(resumed ? "READY" : "AWAITING_HUMAN"));
+      }),
+      http.get("*/agents/:conversationId/approval-status", () => HttpResponse.json(stored)),
+      http.post("*/agents/:conversationId/resume", () => {
+        resumed = true;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    const user = userEvent.setup();
+    render();
+
+    await waitFor(() => expect(screen.getByTestId("approve-button")).toBeEnabled());
+    const readsBefore = reads;
+    await user.click(screen.getByTestId("approve-button"));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }));
+
+    // The conversation is re-read straight away, and the card (with its receipt) gives way.
+    await waitFor(() => expect(reads).toBeGreaterThan(readsBefore), { timeout: 2000 });
+    await waitFor(() => expect(screen.queryByTestId("approval-banner")).not.toBeInTheDocument(), { timeout: 2000 });
+    expect(screen.queryByTestId("approval-decision-summary")).not.toBeInTheDocument();
+  });
 });
