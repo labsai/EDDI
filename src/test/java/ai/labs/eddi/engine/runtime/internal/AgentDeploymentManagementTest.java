@@ -294,7 +294,7 @@ class AgentDeploymentManagementTest {
 
             when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
                     .thenReturn(List.of(info));
-            doThrow(new IllegalAccessException("Access denied"))
+            doThrow(new IllegalStateException("Access denied"))
                     .when(agentFactory).deployAgent(any(), any(), anyInt(), any());
 
             assertDoesNotThrow(() -> management.checkDeployments());

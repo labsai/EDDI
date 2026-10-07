@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
@@ -191,7 +192,8 @@ class ToolLoopRunner {
         TokenUsage[] tokenHolder = new TokenUsage[1];
         List<ChatMessage> finalTranscript = new ArrayList<>();
         String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes, tokenHolder, jsonPolicy,
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, ClearedToolCalls.none(), transcriptMaxBytes, tokenHolder,
+                jsonPolicy,
                 finalTranscript, exchangeRecorder);
 
         Map<String, Object> responseMetadata = new HashMap<>();
@@ -290,11 +292,11 @@ class ToolLoopRunner {
      * The single shared tool-calling loop. Each model call inside it is wrapped in
      * {@link AgentExecutionHelper#executeWithRetry}; the loop itself never is, so a
      * retry can never re-execute a tool that already ran. Used by the live path
-     * (start iteration 0, empty {@code clearedCallIds}) and by
-     * {@link #resumeToolLoop} (start iteration {@code batch.getIterationIndex()+1},
-     * {@code clearedCallIds} = the human-approved ids so they are never re-gated).
-     * A fresh gated batch throws {@link ToolApprovalRequiredException} to re-pause
-     * — it escapes unchanged.
+     * (start iteration 0, no cleared calls) and by {@link #resumeToolLoop} (start
+     * iteration {@code batch.getIterationIndex()+1}, {@code clearedCalls} = the
+     * calls a human approved, so an identical reissue is not re-gated). A fresh
+     * gated batch throws {@link ToolApprovalRequiredException} to re-pause — it
+     * escapes unchanged.
      *
      * @param initialMessages
      *            the message list the loop starts from (defensively copied inside);
@@ -302,8 +304,9 @@ class ToolLoopRunner {
      *            verdict-applied tool results
      * @param startIteration
      *            first loop index — carries budget continuity across a pause
-     * @param clearedCallIds
-     *            call ids a human already approved this pause; never re-gated
+     * @param clearedCalls
+     *            calls a human already approved this pause, bound to id, tool and
+     *            arguments and consumed on first match
      * @param transcriptMaxBytes
      *            the configured cap (bytes) for freezing the transcript into a
      *            {@link PendingToolCallBatch} if this iteration re-pauses
@@ -321,7 +324,7 @@ class ToolLoopRunner {
     String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                            List<Map<String, Object>> trace, int startIteration, AgentOrchestrator.ToolSetup setup, boolean isLazy,
                            LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
-                           int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder,
+                           int llmTaskIndex, ClearedToolCalls clearedCalls, int transcriptMaxBytes, TokenUsage[] tokenHolder,
                            JsonResponseFormatPolicy jsonPolicy, List<ChatMessage> transcriptOut, ToolExchangeRecorder exchangeRecorder)
             throws LifecycleException {
 
@@ -441,11 +444,12 @@ class ToolLoopRunner {
                 if (aiMessage.hasToolExecutionRequests()) {
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
-                    // calls. clearedCallIds carries the human-approved ids on resume so
-                    // they are never re-gated. Inert when effectiveToolApprovals is
+                    // calls. clearedCalls carries the calls a human approved on resume
+                    // (bound to id + tool + arguments, each usable once). Inert when
+                    // effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
                     var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources, setup.toolEndpoints(),
-                            effectiveToolApprovals, clearedCallIds);
+                            effectiveToolApprovals, clearedCalls);
 
                     if (!gateResult.gated().isEmpty()) {
                         int pausesSoFar = ToolApprovalGateSupport.readToolPauseCount(memory);

@@ -115,14 +115,15 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.schedule.enabled` | `true` | Master switch for the poller |
 | `eddi.schedule.poll-interval` | `15s` | How often due schedules are looked for — the floor on firing punctuality |
 | `eddi.schedule.poll-batch-size` | `100` | Schedules claimed per cycle |
-| `eddi.schedule.lease-timeout` | `5m` | Claim lease before another instance may re-claim. **Set above your slowest fire**, or slow runs execute twice |
+| `eddi.schedule.lease-timeout` | `10m` | Claim lease before another instance may re-claim. Must outlast `fire-timeout` + 30 s, or a running fire becomes reclaimable and executes twice; a shorter value is raised at startup (to `fire-timeout + 30s + 1m`) with a warning |
 | `eddi.schedule.max-retries` | `5` | Attempts before `DEAD_LETTERED` |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` |
 | `eddi.schedule.backoff-multiplier` | `4` | Defaults give 15s, 60s, 4m, 16m, 64m |
 | `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request |
 | `eddi.schedule.instance-id` | *(hostname)* | Cluster claim identity. Set explicitly where hostnames are recycled |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone for schedules that name none |
-| `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. **Keep it at or below `lease-timeout`** — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.fire-timeout` | `5m` | How long one fire (conversation turn, Dream run, team cadence) may run before it is interrupted and recorded FAILED ("exceeded eddi.schedule.fire-timeout"). Raise it for long Dream runs; the lease follows |
+| `eddi.schedule.hitl-timeout-retry-interval` | `2m` | When a HITL approval timeout's decision cannot be applied yet (store blip, node draining, a decision in flight), when it is tried again. HITL timeouts are re-armed, never dead-lettered |
 | `eddi.schedule.persistent-conversation-max-steps` | `0` | Off by default. Steps after which a `conversationStrategy: persistent` schedule ends its (idle) conversation and starts a new one, carrying over its `conversation`-scoped properties but not the LLM history. Keeps the document clear of MongoDB's 16 MB limit; see [Scheduling](scheduling.md#long-running-persistent-schedules) |
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The `DELETE` is by timestamp and therefore idempotent, so it needs no cluster claim |

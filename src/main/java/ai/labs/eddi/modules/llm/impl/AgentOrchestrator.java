@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -870,11 +871,11 @@ class AgentOrchestrator implements IAgentOrchestrator {
     private String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                                    List<Map<String, Object>> trace, int startIteration, ToolSetup setup, boolean isLazy,
                                    LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
-                                   int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes, TokenUsage[] tokenHolder,
+                                   int llmTaskIndex, ClearedToolCalls clearedCalls, int transcriptMaxBytes, TokenUsage[] tokenHolder,
                                    JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
         return toolLoopRunner.runToolCallLoop(chatModel, initialMessages, activeSpecs, trace, startIteration, setup, isLazy,
-                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, transcriptMaxBytes, tokenHolder, jsonPolicy, null, null);
+                task, memory, effectiveToolApprovals, llmTaskIndex, clearedCalls, transcriptMaxBytes, tokenHolder, jsonPolicy, null, null);
     }
 
     // ─── In-turn tool-context budget (D6b) — extracted to ToolContextBudget (R2

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -176,6 +177,9 @@ class SchedulePollerServiceTest {
         var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
                 Duration.ofMillis(200), // leaseTimeout — the bound under test
                 5, 15, 4, Optional.of("test-instance"), "UTC", Duration.ofDays(90));
+        // The batch bound is the fire timeout (plus grace), not the lease.
+        shortLeasePoller.fireTimeout = Duration.ofMillis(200);
+        shortLeasePoller.batchGrace = Duration.ZERO;
         shortLeasePoller.init();
 
         var schedule = makeCronSchedule("sched-stalled", "0 9 * * *", "Hello");
@@ -204,6 +208,9 @@ class SchedulePollerServiceTest {
         var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
                 Duration.ofMillis(200), // leaseTimeout — the ONE shared batch bound
                 5, 15, 4, Optional.of("test-instance"), "UTC", Duration.ofDays(90));
+        // The batch bound is the fire timeout (plus grace), not the lease.
+        shortLeasePoller.fireTimeout = Duration.ofMillis(200);
+        shortLeasePoller.batchGrace = Duration.ZERO;
         shortLeasePoller.init();
 
         var s1 = makeCronSchedule("stall-1", "0 9 * * *", "a");
@@ -236,6 +243,9 @@ class SchedulePollerServiceTest {
         var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
                 Duration.ofMillis(200), // leaseTimeout — the per-fire bound
                 5, 15, 4, Optional.of("test-instance"), "UTC", Duration.ofDays(90));
+        // The batch bound is the fire timeout (plus grace), not the lease.
+        shortLeasePoller.fireTimeout = Duration.ofMillis(200);
+        shortLeasePoller.batchGrace = Duration.ZERO;
         shortLeasePoller.init();
 
         var schedule = makeCronSchedule("sched-wedged", "0 9 * * *", "Hello");
@@ -282,6 +292,66 @@ class SchedulePollerServiceTest {
         // Should mark failed with exponential backoff: 15 * 4^0 = 15 seconds
         verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
         verify(scheduleStore, never()).markDeadLettered(any(), any());
+    }
+
+    @Test
+    void poll_hitlTimeoutFailed_isReArmed_neverDeadLettered() throws Exception {
+        // A HITL approval timeout that could not be applied yet (agent undeployed)
+        // must stay armed — not COMPLETED-and-disabled, and not dead-lettered after
+        // max-retries — or a finite AUTO_REJECT/APPROVE/ABORT policy is lost.
+        var schedule = makeCronSchedule("hitl-1", null, null);
+        schedule.setCronExpression(null);
+        schedule.setOneTimeAt(Instant.now().minusSeconds(5).toString());
+        schedule.setMetadata(HitlSchedules.timeoutMetadata("AUTO_REJECT", HitlSchedules.SURFACE_REGULAR, "conv-1", "1"));
+        schedule.setFailCount(4); // would dead-letter an ordinary schedule
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hitl-1", FireStatus.FAILED.name()));
+        poller.hitlTimeoutRetryInterval = Duration.ofMinutes(2);
+
+        Instant before = Instant.now();
+        poller.pollDueSchedules();
+
+        var retryAt = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).markSkipped(eq("hitl-1"), any(), retryAt.capture());
+        assertTrue(!retryAt.getValue().isBefore(before.plus(Duration.ofMinutes(2))), "re-armed at the retry interval");
+        verify(scheduleStore, never()).markDeadLettered(any(), any());
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
+        verify(scheduleStore, never()).markCompleted(any(), any(), any());
+    }
+
+    @Test
+    void init_raisesALeaseThatDoesNotOutlastTheFireTimeout() {
+        // lease == fire timeout was the bug: the fire was interrupted at the very
+        // moment its claim became stealable, so long Dream runs double-ran.
+        var p = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true, Duration.ofMinutes(5), 5, 15, 4,
+                Optional.of("i"), "UTC", Duration.ofDays(90));
+        p.fireTimeout = Duration.ofMinutes(5);
+        p.batchGrace = Duration.ofSeconds(30);
+        p.init();
+        assertEquals(Duration.ofMinutes(5).plusSeconds(30).plus(SchedulePollerService.LEASE_MARGIN), p.getEffectiveLeaseTimeout());
+
+        var ok = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true, Duration.ofMinutes(10), 5, 15, 4,
+                Optional.of("i"), "UTC", Duration.ofDays(90));
+        ok.init();
+        assertEquals(Duration.ofMinutes(10), ok.getEffectiveLeaseTimeout(), "a lease that outlasts the fire timeout is kept");
+    }
+
+    @Test
+    void poll_claimsWithTheEffectiveLease() throws Exception {
+        var p = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true, Duration.ofMinutes(1), 5, 15, 4,
+                Optional.of("i"), "UTC", Duration.ofDays(90));
+        p.fireTimeout = Duration.ofMinutes(5);
+        p.init();
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of());
+
+        Instant before = Instant.now();
+        p.pollDueSchedules();
+
+        var leaseExpiry = ArgumentCaptor.forClass(Instant.class);
+        verify(scheduleStore).findDueSchedules(any(), leaseExpiry.capture(), anyInt());
+        assertTrue(leaseExpiry.getValue().isBefore(before.minus(Duration.ofMinutes(5))),
+                "a running fire's claim must not be stealable within the fire timeout");
     }
 
     @Test
@@ -710,7 +780,7 @@ class SchedulePollerServiceTest {
         var now = ArgumentCaptor.forClass(Instant.class);
         var leaseExpiry = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).tryClaim(eq("manual-1"), eq("test-instance"), now.capture(), leaseExpiry.capture());
-        assertEquals(now.getValue().minus(Duration.ofMinutes(5)), leaseExpiry.getValue(),
+        assertEquals(now.getValue().minus(poller.getEffectiveLeaseTimeout()), leaseExpiry.getValue(),
                 "a manual fire must not be able to steal a live claim");
         assertEquals("manual-1_" + now.getValue(), schedule.getFireId(), "the in-memory copy must mirror the persisted fireId");
     }

@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -33,13 +32,13 @@ public class ToolApprovalGate {
     }
 
     public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
-                               ToolApprovalsConfig cfg, Set<String> clearedCallIds) {
-        return classify(batch, toolSources, Map.of(), cfg, clearedCallIds);
+                               ToolApprovalsConfig cfg, ClearedToolCalls cleared) {
+        return classify(batch, toolSources, Map.of(), cfg, cleared);
     }
 
     /**
-     * As {@link #classify(List, Map, ToolApprovalsConfig, Set)}, additionally
-     * matching patterns against what an http tool actually calls.
+     * As {@link #classify(List, Map, ToolApprovalsConfig, ClearedToolCalls)},
+     * additionally matching patterns against what an http tool actually calls.
      * <p>
      * A pattern may address a tool three ways: its bare name, {@code source:name},
      * or — for httpcall tools — {@code source.method:path}, e.g.
@@ -51,9 +50,14 @@ public class ToolApprovalGate {
      *
      * @param toolEndpoints
      *            tool name to {@code method:path}; empty for non-http tools
+     * @param cleared
+     *            calls a human already decided this pause. A call is let through on
+     *            a clearance only when its id, tool name AND arguments match one,
+     *            and the clearance is used up by it — an id alone proves nothing,
+     *            because providers reuse ids
      */
     public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
-                               Map<String, String> toolEndpoints, ToolApprovalsConfig cfg, Set<String> clearedCallIds) {
+                               Map<String, String> toolEndpoints, ToolApprovalsConfig cfg, ClearedToolCalls cleared) {
         if (cfg == null || cfg.getRequireApproval() == null || cfg.getRequireApproval().isEmpty()) {
             return new GateResult(List.of(), List.copyOf(batch), Map.of());
         }
@@ -64,8 +68,8 @@ public class ToolApprovalGate {
         List<ToolExecutionRequest> allowed = new ArrayList<>();
         Map<String, String> reasons = new HashMap<>();
         for (ToolExecutionRequest request : batch) {
-            if (request.id() != null && clearedCallIds.contains(request.id())) {
-                allowed.add(request); // already approved by a human — never re-gate
+            if (cleared != null && cleared.consume(request)) {
+                allowed.add(request); // this exact call was already approved by a human
                 continue;
             }
             if (request.name() == null) {
@@ -85,7 +89,7 @@ public class ToolApprovalGate {
             CompiledPattern match = firstMatch(require, addresses);
             if (match != null) {
                 gated.add(request);
-                if (request.id() != null) {
+                if (request.id() != null && !request.id().isBlank()) {
                     reasons.put(request.id(), match.raw());
                 }
             } else {

@@ -24,7 +24,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
-import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.model.Deployment;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -161,8 +161,8 @@ class AgentDeploymentManagementExtendedTest {
         }
 
         @Test
-        @DisplayName("should handle ServiceException during deployment management gracefully")
-        void handlesServiceException() throws Exception {
+        @DisplayName("should handle a deployment that ends in ERROR gracefully")
+        void handlesFailedDeployment() throws Exception {
             var info = createDeploymentInfo("agent-1", 1);
             when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
                     .thenReturn(List.of(info));
@@ -170,8 +170,14 @@ class AgentDeploymentManagementExtendedTest {
             var latestResId = mockResourceId("agent-1", 1);
             when(agentStore.getCurrentResourceId("agent-1")).thenReturn(latestResId);
 
-            doThrow(new ServiceException("Deploy failed"))
-                    .when(agentFactory).deployAgent(any(), any(), anyInt(), any());
+            // deployAgent never throws for a failed deployment — it reports ERROR.
+            doAnswer(invocation -> {
+                IAgentFactory.DeploymentProcess callback = invocation.getArgument(3);
+                if (callback != null) {
+                    callback.completed(Deployment.Status.ERROR);
+                }
+                return null;
+            }).when(agentFactory).deployAgent(any(), any(), anyInt(), any());
 
             assertDoesNotThrow(() -> management.manageAgentDeployments());
         }

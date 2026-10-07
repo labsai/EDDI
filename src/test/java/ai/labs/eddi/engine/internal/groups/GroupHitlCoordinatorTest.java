@@ -622,6 +622,14 @@ class GroupHitlCoordinatorTest {
     }
 
     @Test
+    void skipHumanTurnOnTimeout_storeFailure_propagates_soTheTimeoutCanBeReArmed() throws Exception {
+        var coordinator = coordinator();
+        when(conversationStore.read(GC_ID)).thenThrow(new IResourceStore.ResourceStoreException("store blip"));
+
+        assertThrows(IllegalStateException.class, () -> coordinator.skipHumanTurnOnTimeout(GC_ID));
+    }
+
+    @Test
     void cancelDiscussion_awaitingHumanInput_cancelsAndClearsPending() throws Exception {
         var coordinator = coordinator();
         var gc = humanPausedGc();
