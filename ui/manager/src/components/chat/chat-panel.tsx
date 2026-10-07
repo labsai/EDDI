@@ -1,7 +1,7 @@
 import { ReviewNotice } from "@/components/chat/review-notice";
 import { useAgentReviewProfile } from "@/hooks/use-agent-review-profile";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { useSearchParams, useLocation } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { Environment } from "@/lib/constants";
 import { preferredChatEnvironment } from "@/lib/deployment-environments";
@@ -68,7 +68,6 @@ import {
 export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const location = useLocation();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -689,7 +688,6 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             pausedAt={pausedAt}
             fallbackReason={pauseReason}
             testIdBase="chat-pause"
-            hideReview={location.pathname.startsWith("/workforce")}
             // Decided elsewhere (another reviewer, or the timeout policy): unlock
             // the composer instead of leaving it stuck on "awaiting approval".
             onResolved={() => useChatStore.getState().setPaused(false, null)}

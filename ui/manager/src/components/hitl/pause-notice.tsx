@@ -20,8 +20,6 @@ export interface PauseNoticeProps {
   testIdBase?: string;
   /** Override for the review link's test id. */
   reviewTestId?: string;
-  /** Hide the link (a surface that cannot navigate to the Manager). */
-  hideReview?: boolean;
 }
 
 /**
@@ -41,7 +39,6 @@ export function PauseNotice({
   reviewHref,
   testIdBase = "pause-notice",
   reviewTestId,
-  hideReview,
 }: PauseNoticeProps) {
   const { t } = useTranslation();
   const status = useApprovalStatus(conversationId, true, pausedAt ?? null, {
@@ -87,15 +84,13 @@ export function PauseNotice({
           {t("hitl.noticeSaving", "Saving the pause…")}
         </span>
       )}
-      {!hideReview && (
-        <Link
-          to={href}
-          className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
-          data-testid={reviewTestId ?? `${testIdBase}-review`}
-        >
-          {t("hitl.review", "Review")}
-        </Link>
-      )}
+      <Link
+        to={href}
+        className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
+        data-testid={reviewTestId ?? `${testIdBase}-review`}
+      >
+        {t("hitl.review", "Review")}
+      </Link>
     </div>
   );
 }
