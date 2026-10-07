@@ -221,7 +221,8 @@ public class AgentCascadeService {
         if (!changes.isEmpty()) {
             // The ONLY agent field touched. Everything else — hitlConfig included — is
             // the stored document, written back unchanged.
-            agentConfig.setWorkflows(updatedWorkflowUris);            Response agentResponse = agentStore.updateAgent(agentId, agentVersion, agentConfig, compatible);
+            agentConfig.setWorkflows(updatedWorkflowUris);
+            Response agentResponse = agentStore.updateAgent(agentId, agentVersion, agentConfig, compatible);
             String agentLocation = agentResponse.getHeaderString("Location");
             newAgentVersion = agentLocation != null ? versionOf(agentLocation) : agentVersion + 1;
         }

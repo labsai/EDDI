@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -43,6 +44,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -160,9 +162,9 @@ class AgentCascadeServiceTest {
             // The step that was named moved; the one that was not stayed.
             assertEquals(LLM_V2, wf.getWorkflowSteps().get(0).getConfig().get("uri"));
             assertEquals(RULES_V1, wf.getWorkflowSteps().get(1).getConfig().get("uri"));
-            verify(workflowStore, org.mockito.Mockito.times(1)).updateWorkflow(eq(WF1_ID), eq(1), any());
+            verify(workflowStore, times(1)).updateWorkflow(eq(WF1_ID), eq(1), any());
             ArgumentCaptor<AgentConfiguration> saved = ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(agentStore, org.mockito.Mockito.times(1)).updateAgent(eq(AGENT_ID), eq(1), saved.capture(), eq(false));
+            verify(agentStore, times(1)).updateAgent(eq(AGENT_ID), eq(1), saved.capture(), eq(false));
             assertEquals(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WF1_ID + "?version=2")),
                     saved.getValue().getWorkflows());
         }
@@ -178,8 +180,8 @@ class AgentCascadeServiceTest {
             var result = cascade(List.of(map(LLM_V1, LLM_V2), map(RULES_V1, RULES_V2)));
 
             assertEquals(2, result.mappingsApplied());
-            verify(workflowStore, org.mockito.Mockito.times(1)).updateWorkflow(eq(WF1_ID), anyInt(), any());
-            verify(agentStore, org.mockito.Mockito.times(1)).updateAgent(eq(AGENT_ID), anyInt(), any(), anyBoolean());
+            verify(workflowStore, times(1)).updateWorkflow(eq(WF1_ID), anyInt(), any());
+            verify(agentStore, times(1)).updateAgent(eq(AGENT_ID), anyInt(), any(), anyBoolean());
         }
 
         @Test
@@ -219,7 +221,7 @@ class AgentCascadeServiceTest {
             var result = cascade(List.of(map(LLM_V1, LLM_V2), map(WF1_V1, WF1_V2)));
 
             verify(workflowStore, never()).readWorkflow(WF1_ID, 1);
-            verify(workflowStore, org.mockito.Mockito.times(1)).updateWorkflow(eq(WF1_ID), eq(2), any());
+            verify(workflowStore, times(1)).updateWorkflow(eq(WF1_ID), eq(2), any());
             assertEquals(LLM_V2, wfV2.getWorkflowSteps().get(0).getConfig().get("uri"));
             assertEquals(ragUri, wfV2.getWorkflowSteps().get(1).getConfig().get("uri"), "the rag step the patch added must survive");
             var change = result.workflows().get(0);
@@ -544,7 +546,7 @@ class AgentCascadeServiceTest {
         void refusedDeploy() throws Exception {
             cascadedAgent();
             when(agentAdmin.deployAgent(any(), eq(AGENT_ID), eq(2), anyBoolean(), anyBoolean()))
-                    .thenThrow(new jakarta.ws.rs.ForbiddenException("agent is not granted vault key 'k'"));
+                    .thenThrow(new ForbiddenException("agent is not granted vault key 'k'"));
 
             var result = service.cascade(AGENT_ID, 1, List.of(map(LLM_V1, LLM_V2)), true, Deployment.Environment.production, false);
 
