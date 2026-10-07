@@ -16,6 +16,9 @@ import {
   resolveAgentVersion,
   fetchOpenApiSpec,
   findMissingEndpoints,
+  findUnusableEndpoints,
+  unusableEndpointsFromResult,
+  unusableEndpointsMessage,
   defaultOperatorConfig,
   verifyGateInstalled,
   reportOperatorGateStatus,
@@ -201,6 +204,14 @@ export function useActivateOperator() {
           `This EDDI deployment does not expose ${missing.length} endpoint(s) the operator needs: ${missing.join(", ")}`,
         );
       }
+      // Present in the spec is not the same as usable: an endpoint whose request
+      // body is of a type the tool generator cannot send (the text/plain
+      // updateResourceUri once was) yields a tool that can only fail after the
+      // admin has approved it. Refused here, by name, like a missing endpoint.
+      const unusable = findUnusableEndpoints(spec, endpointsForScope(config.scope));
+      if (unusable.length > 0) {
+        throw new Error(unusableEndpointsMessage(unusable));
+      }
 
       // The address the generated tools will target. Resolved HERE, before
       // anything is created, because it is the single field that decides whether
@@ -230,6 +241,23 @@ export function useActivateOperator() {
       const result = await provisionOperator({ agentName, config: effectiveConfig, apiKey, baseUrl, spec });
       // 201 does not mean deployed, and the id can come back as "unknown".
       assertProvisioned(result);
+
+      // The backend's own report of operations it skipped because their tool
+      // could not send a required input. The spec pre-flight above normally
+      // catches the same set first; this is the authority when the two disagree
+      // (a body type the backend learns to refuse before the Manager does). An
+      // older backend reports nothing, and the pre-flight stands alone.
+      // The agent is already deployed, so it is rolled back like any other
+      // post-provision failure.
+      const reportedUnusable = unusableEndpointsFromResult(result);
+      if (reportedUnusable.length > 0) {
+        try {
+          await removeSupersededAgent({ ...effectiveConfig, agentId: result.agentId, version: 1 });
+        } catch {
+          // Left deployed; the error below is still the honest report.
+        }
+        throw new Error(unusableEndpointsMessage(reportedUnusable));
+      }
 
       // Everything from here to the config write is rolled back on failure.
       // provisionOperator DEPLOYS the agent, so a throw in any of these steps

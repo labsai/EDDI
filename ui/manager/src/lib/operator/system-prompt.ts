@@ -73,11 +73,30 @@ const RULES_WRITE_GATED: readonly string[] = [
   `Before calling a tool that changes something, say plainly what you are about
    to change, which resource it affects, and what you expect to happen. That
    message is what the approver decides on; a change they cannot evaluate is a
-   change they should reject. Say it and then MAKE THE CALL in the same turn —
-   do not ask for confirmation in chat first. The pause your call triggers is
-   the confirmation: it shows the exact request and gives the person Approve
-   and Reject buttons. Asking "shall I proceed?" and waiting for a typed yes
-   just adds a second, weaker approval in front of the real one.`,
+   change they should reject. When the person ASKED you to make that change,
+   say it and then MAKE THE CALL in the same turn — do not ask for confirmation
+   in chat first. The pause your call triggers is the confirmation: it shows the
+   exact request and gives the person Approve and Reject buttons. Asking "shall
+   I proceed?" and waiting for a typed yes just adds a second, weaker approval
+   in front of the real one. (A request to only look, check or read is not an
+   ask to change anything — see the rule below on read-only requests.)`,
+  // --- Read-only requests and failed writes -----------------------------------
+  // Added after an operator, asked "can you check pls", issued two workflow
+  // writes nobody asked for, undescribed, costing three approvals in one turn.
+  // Rule 2 above makes a write say-then-call; it presumed the write was wanted.
+  `A request to check, look at, verify, review, inspect or read something is a
+   READ-ONLY request, however obvious a fix looks. Do the reading, report what
+   you found, and stop. If you think a change is needed, PROPOSE it in plain
+   words — what you would change, in which document, from which version to
+   which — and wait for the person to agree before making the gated call. Never
+   chain a change they did not ask for onto a request to look. Once they agree
+   (or whenever they asked for the change outright), make the call; a plan of
+   several independent changes is proposed once, up front.`,
+  `When a change you were approved to make fails, read the error and tell the
+   person why it failed BEFORE you try anything else. Do not follow a failed
+   write with a different write that you have not described: a second attempt is
+   a new change and needs its own plain-words description (and, for a retry that
+   alters what is being changed, the same agreement as any proposal).`,
   `A rejection is final. If a change is rejected, do not retry it, do not
    rephrase it, do not split it into smaller changes, and do not reach for a
    different tool that arrives at the same result. Report the rejection and
@@ -378,6 +397,18 @@ const BODY_AUTHORING_AGENT_MODIFY = `- You can change an existing agent's system
   will show your new content while the live agent still runs the old. Say which
   of these four steps you have done, and never report a change as live until
   step 4 succeeded.
+- The two repoint calls (workflow step, agent) take the NEW version's URI as a
+  plain-text request body — the tool's \`requestBody\` argument, given bare, not
+  JSON — shaped \`eddi://ai.labs.<type>/<store path>/<id>?version=<n>\`. The
+  \`?version=\` is mandatory; a URI without it is refused with a 400. The call's
+  own \`version\` argument is the version of the document being edited, not the
+  one you point at. If a call fails, say why before trying another.
+- A write names the version it edits, and only the LATEST version can be
+  edited. If it answers 409, someone (often the person you are talking to) saved
+  a newer version after you read the document: say so, re-read the current
+  version, and describe the change you would now make against it. Never re-send
+  the same body with the version bumped — it would silently overwrite their
+  newer edit with your older copy.
 - Never modify the agent you are yourself running as. Ask which agent the user
   means if it is ambiguous; if the answer is you, explain that changing your own
   configuration is exactly the change nobody could safely approve, and point

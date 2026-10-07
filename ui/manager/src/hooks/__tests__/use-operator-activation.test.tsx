@@ -160,6 +160,90 @@ describe("useActivateOperator — gate read-back enforcement", () => {
     expect(spy.deleted).toBe(false);
   });
 
+  describe("endpoints whose generated tool could not send a required input", () => {
+    /** The spec with updateResourceUri's body declared as a type the generator cannot send. */
+    function specWithBody(bodyType: string) {
+      const spec = fullSpec();
+      spec.paths["/agentstore/agents/{id}/updateResourceUri"]!.put = {
+        requestBody: { required: true, content: { [bodyType]: {} } },
+      };
+      return spec;
+    }
+
+    it("refuses activation BEFORE provisioning and names the endpoint", async () => {
+      const spy = { undeployed: false, deleted: false };
+      serveProvisioning(GOOD_GATE, spy);
+      let provisioned = false;
+      server.use(
+        http.get("*/openapi", () => HttpResponse.json(specWithBody("application/zip"))),
+        http.post("*/administration/agents/setup-api", () => {
+          provisioned = true;
+          return HttpResponse.json({ agentId: AGENT_ID, deployed: true }, { status: 201 });
+        }),
+      );
+
+      const { result } = renderHook(() => useActivateOperator(), { wrapper });
+      result.current.mutate({
+        agentName: "EDDI Platform Operator",
+        config: config({ scope: "read_write" }),
+        apiKey: "sk-test",
+      });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error?.message).toMatch(
+        /PUT \/agentstore\/agents\/\{id\}\/updateResourceUri: .*application\/zip/,
+      );
+      expect(provisioned).toBe(false);
+    });
+
+    it("activates when the same endpoint takes text/plain (the supported shape)", async () => {
+      const spy = { undeployed: false, deleted: false };
+      serveProvisioning(GOOD_GATE, spy);
+      server.use(http.get("*/openapi", () => HttpResponse.json(specWithBody("text/plain"))));
+
+      const { result } = renderHook(() => useActivateOperator(), { wrapper });
+      result.current.mutate({
+        agentName: "EDDI Platform Operator",
+        config: config({ scope: "read_only" }),
+        apiKey: "sk-test",
+      });
+
+      await waitFor(() => expect(result.current.isSuccess || result.current.isError).toBe(true));
+      expect(result.current.isError).toBe(false);
+    });
+
+    it("rolls back when the backend itself reports a skipped endpoint", async () => {
+      // The pre-flight sees a spec it considers fine; the backend, which knows
+      // its own generator, disagrees. Its report wins and the deployed agent goes.
+      const spy = { undeployed: false, deleted: false };
+      serveProvisioning(GOOD_GATE, spy);
+      server.use(
+        http.post("*/administration/agents/setup-api", () =>
+          HttpResponse.json(
+            {
+              agentId: AGENT_ID,
+              deployed: true,
+              deploymentStatus: "READY",
+              resources: { unusableEndpoints: ["PUT /x/{id}: requires a request body of type application/x-tar"] },
+            },
+            { status: 201 },
+          ),
+        ),
+      );
+
+      const { result } = renderHook(() => useActivateOperator(), { wrapper });
+      result.current.mutate({
+        agentName: "EDDI Platform Operator",
+        config: config({ scope: "read_only" }),
+        apiKey: "sk-test",
+      });
+
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.error?.message).toMatch(/application\/x-tar/);
+      await waitFor(() => expect(spy.deleted).toBe(true));
+    });
+  });
+
   it("lets a read_only activation through when the gate does verify", async () => {
     const spy = { undeployed: false, deleted: false };
     serveProvisioning(GOOD_GATE, spy);
