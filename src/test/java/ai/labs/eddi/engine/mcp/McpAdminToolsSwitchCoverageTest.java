@@ -1042,7 +1042,8 @@ class McpAdminToolsSwitchCoverageTest {
         @DisplayName("agent not found → error")
         void agentNotFound() throws Exception {
             when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of(Map.of("oldUri", "old", "newUri", "new")));
+                    .thenReturn(List.of(Map.of("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1", "newUri",
+                            "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2")));
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(null);
             String result = tools.applyAgentChanges("agent1", 1, "[{}]", null, null, null);
             assertTrue(result.contains("error"));
@@ -1158,8 +1159,8 @@ class McpAdminToolsSwitchCoverageTest {
         @DisplayName("workflow config null → keep URI as-is")
         void workflowConfigNull() throws Exception {
             var mapping = new HashMap<String, String>();
-            mapping.put("oldUri", "old");
-            mapping.put("newUri", "new");
+            mapping.put("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
+            mapping.put("newUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
 
             var agent = new AgentConfiguration();

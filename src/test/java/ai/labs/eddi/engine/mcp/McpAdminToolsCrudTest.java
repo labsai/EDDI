@@ -407,10 +407,11 @@ class McpAdminToolsCrudTest {
     @Test
     void applyAgentChanges_agentNotFound_returnsError() throws IOException {
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(null);
-        List<Map<String, String>> mappings = List.of(Map.of("oldUri", "a", "newUri", "b"));
+        List<Map<String, String>> mappings = List.of(Map.of("oldUri", "eddi://ai.labs.llm/llmstore/llms/lc1?version=1", "newUri",
+                "eddi://ai.labs.llm/llmstore/llms/lc1?version=2"));
         when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(mappings);
 
-        String result = tools.applyAgentChanges(AGENT_ID, 1, "[{\"oldUri\":\"a\",\"newUri\":\"b\"}]", false, null, null);
+        String result = tools.applyAgentChanges(AGENT_ID, 1, "[{...}]", false, null, null);
 
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Agent not found"));

@@ -8,7 +8,9 @@ import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentCascadeRequest;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -34,7 +36,6 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
-import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
@@ -83,6 +84,7 @@ public class McpAdminTools {
 
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestAgentAdministration agentAdmin;
+    private final AgentCascadeService cascadeService;
     private final IJsonSerialization jsonSerialization;
 
     /**
@@ -100,11 +102,24 @@ public class McpAdminTools {
     private final SecurityIdentity identity;
     private final boolean authEnabled;
 
+    /**
+     * With a cascade service built over the same collaborators — what the CDI
+     * constructor below is handed. Kept so the tests that construct this class by
+     * hand need not know a service exists.
+     */
+    McpAdminTools(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin, IJsonSerialization jsonSerialization,
+            StrictConfigurationParser configParser, IScheduleStore scheduleStore, ScheduleFireExecutor scheduleFireExecutor,
+            SchedulePollerService schedulePollerService, SecurityIdentity identity, boolean authEnabled) {
+        this(restInterfaceFactory, agentAdmin, jsonSerialization, configParser, scheduleStore, scheduleFireExecutor, schedulePollerService, identity,
+                authEnabled, new AgentCascadeService(restInterfaceFactory, agentAdmin));
+    }
+
     @Inject
     public McpAdminTools(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin, IJsonSerialization jsonSerialization,
             StrictConfigurationParser configParser, IScheduleStore scheduleStore, ScheduleFireExecutor scheduleFireExecutor,
             SchedulePollerService schedulePollerService, SecurityIdentity identity,
-            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled, AgentCascadeService cascadeService) {
+        this.cascadeService = cascadeService;
         this.restInterfaceFactory = restInterfaceFactory;
         this.agentAdmin = agentAdmin;
         this.jsonSerialization = jsonSerialization;
@@ -553,7 +568,10 @@ public class McpAdminTools {
     @Tool(name = "apply_agent_changes", description = "Batch-cascade multiple resource URI changes through "
             + "package → Agent in ONE pass. After updating resources with update_resource, use this to wire "
             + "the new versions into the agent's packages and optionally redeploy. "
-            + "This replaces ALL URIs in-memory and saves each package/agent ONCE — no wasteful intermediate versions.")
+            + "This replaces ALL URIs in-memory and saves each package/agent ONCE — no wasteful intermediate versions. "
+            + "Each oldUri must be a reference the agent actually holds (a workflow step's resource or the workflow itself), "
+            + "and newUri the same kind of resource with a version; otherwise nothing is written. Shared with the REST "
+            + "endpoint POST /agentstore/agents/{id}/cascade.")
     public String applyAgentChanges(@ToolArg(description = "Agent ID (required)") String agentId,
                                     @ToolArg(description = "Current Agent version (required)") Integer agentVersion,
                                     @ToolArg(description = "JSON array of URI mappings: [{\"oldUri\":"
@@ -577,132 +595,23 @@ public class McpAdminTools {
         try {
             int ver = agentVersion != null ? agentVersion : 1;
 
-            // 1. Parse resource mappings
             @SuppressWarnings("unchecked")
-            List<Map<String, String>> mappings = jsonSerialization.deserialize(resourceMappings, List.class);
-            if (mappings == null || mappings.isEmpty()) {
+            List<Map<String, String>> parsed = jsonSerialization.deserialize(resourceMappings, List.class);
+            if (parsed == null || parsed.isEmpty()) {
                 return resultJson("no_changes", Map.of("agentId", agentId, "reason", "Empty resource mappings"));
             }
-
-            // 2. Read Agent config
-            var localAgentStore = getRestStore(IRestAgentStore.class);
-            AgentConfiguration agentConfig = localAgentStore.readAgent(agentId, ver);
-            if (agentConfig == null) {
-                return errorJson("Agent not found: " + agentId + " version " + ver);
+            List<AgentCascadeRequest.ResourceMapping> mappings = new ArrayList<>();
+            for (Map<String, String> mapping : parsed) {
+                mappings.add(new AgentCascadeRequest.ResourceMapping(mapping.get("oldUri"), mapping.get("newUri")));
             }
 
-            // 3. Process each workflow
-            var workflowStore = getRestStore(IRestWorkflowStore.class);
-            List<URI> originalWorkflowUris = new ArrayList<>(agentConfig.getWorkflows());
-            List<URI> updatedWorkflowUris = new ArrayList<>();
-            int updatedWorkflowCount = 0;
-
-            for (URI wfUri : originalWorkflowUris) {
-                String wfId = extractIdFromLocation(wfUri.toString());
-                int wfVersion = extractVersionFromLocation(wfUri.toString());
-                if (wfId == null) {
-                    updatedWorkflowUris.add(wfUri); // keep as-is
-                    continue;
-                }
-
-                WorkflowConfiguration wfConfig = workflowStore.readWorkflow(wfId, wfVersion);
-                if (wfConfig == null) {
-                    updatedWorkflowUris.add(wfUri);
-                    continue;
-                }
-
-                // Replace URIs in workflow extensions
-                boolean workflowModified = false;
-                for (var ext : wfConfig.getWorkflowSteps()) {
-                    Object uriObj = ext.getConfig().get("uri");
-                    if (uriObj != null) {
-                        String currentUri = uriObj.toString();
-                        for (var mapping : mappings) {
-                            String oldUri = mapping.get("oldUri");
-                            String newUri = mapping.get("newUri");
-                            if (oldUri != null && newUri != null && currentUri.equals(oldUri)) {
-                                ext.getConfig().put("uri", newUri);
-                                workflowModified = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (workflowModified) {
-                    // Save workflow ONCE with all replacements
-                    Response wfResponse = workflowStore.updateWorkflow(wfId, wfVersion, wfConfig);
-                    String wfLocation = wfResponse.getHeaderString("Location");
-                    if (wfLocation != null) {
-                        updatedWorkflowUris.add(URI.create(wfLocation));
-                    } else {
-                        // Construct new URI with incremented version
-                        int newWfVersion = wfVersion + 1;
-                        String newWfUri = wfUri.toString().replaceAll("version=\\d+", "version=" + newWfVersion);
-                        updatedWorkflowUris.add(URI.create(newWfUri));
-                    }
-                    updatedWorkflowCount++;
-                } else {
-                    updatedWorkflowUris.add(wfUri); // unchanged
-                }
-            }
-
-            // 4. Update Agent if any packages changed
-            int newAgentVersion = ver;
-            if (updatedWorkflowCount > 0) {
-                agentConfig.setWorkflows(updatedWorkflowUris);
-                Response agentResponse = localAgentStore.updateAgent(agentId, ver, agentConfig, Boolean.TRUE.equals(compatible));
-                String agentLocation = agentResponse.getHeaderString("Location");
-                newAgentVersion = agentLocation != null ? extractVersionFromLocation(agentLocation) : ver + 1;
-            }
-
-            // 5. Redeploy if requested
-            var result = new LinkedHashMap<String, Object>();
-            result.put("agentId", agentId);
-            result.put("previousAgentVersion", ver);
-            result.put("newAgentVersion", newAgentVersion);
-            result.put("updatedWorkflows", updatedWorkflowCount);
-            if (updatedWorkflowCount > 0) {
-                result.put("compatibleWithPreviousVersion", Boolean.TRUE.equals(compatible));
-            }
-            result.put("totalWorkflows", originalWorkflowUris.size());
-            result.put("mappingsApplied", mappings.size());
-
-            if (Boolean.TRUE.equals(redeploy) && updatedWorkflowCount > 0) {
-                var env = parseEnvironment(environment);
-                try {
-                    Response deployResponse = agentAdmin.deployAgent(env, agentId, newAgentVersion, true, true);
-                    // A waited deploy answers 200 whether or not it worked — a timeout or a
-                    // failed build is reported in the body (status + error). Reading the
-                    // HTTP status alone said "redeployed: true" for a deployment that had
-                    // failed.
-                    Object deployStatus = null;
-                    Object deployError = null;
-                    if (deployResponse.getEntity() instanceof Map<?, ?> body) {
-                        deployStatus = body.get("status");
-                        deployError = body.get("error");
-                    }
-                    boolean redeployed = deployResponse.getStatus() == 200 && deployError == null
-                            && Deployment.Status.READY.name().equals(String.valueOf(deployStatus));
-                    result.put("redeployed", redeployed);
-                    result.put("environment", env.name());
-                    if (deployStatus != null) {
-                        result.put("deploymentStatus", String.valueOf(deployStatus));
-                    }
-                    if (deployError != null) {
-                        result.put("deployError", String.valueOf(deployError));
-                    }
-                    // The previous version stays deployed (deploy never retires a
-                    // version; undeploying would also disable the agent's schedules), so
-                    // say so rather than leave the caller to discover it.
-                    result.put("previousVersionStillDeployed", redeployed);
-                } catch (Exception deployErr) {
-                    result.put("redeployed", false);
-                    result.put("deployError", "Redeployment failed: " + deployErr.getMessage());
-                }
-            }
-
-            return resultJson("cascaded", result);
+            // The cascade itself lives in AgentCascadeService, shared with
+            // POST /agentstore/agents/{id}/cascade so the two cannot drift.
+            var result = cascadeService.cascade(agentId, ver, mappings, Boolean.TRUE.equals(redeploy), parseEnvironment(environment),
+                    Boolean.TRUE.equals(compatible));
+            return resultJson("cascaded", result.toMap());
+        } catch (AgentCascadeService.CascadeException e) {
+            return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP apply_agent_changes failed for Agent " + agentId, e);
             return errorJson("Failed to apply Agent changes", e);
