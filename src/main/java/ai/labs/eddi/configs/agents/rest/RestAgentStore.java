@@ -37,6 +37,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
@@ -73,18 +74,6 @@ public class RestAgentStore implements IRestAgentStore {
     private final String defaultTenantId;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
-
-    /**
-     * Without a cascade service — the shape every caller had before
-     * {@code cascadeAgentChanges}; that one endpoint then refuses with a 500.
-     */
-    public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
-            IDeploymentStore deploymentStore, ResourceAccessGuard resourceAccessGuard, AgentSigningService agentSigningService,
-            IAgentFactory agentFactory, String defaultTenantId) {
-        this(agentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore,
-                resourceAccessGuard, agentSigningService, agentFactory, defaultTenantId, null);
-    }
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -252,9 +241,6 @@ public class RestAgentStore implements IRestAgentStore {
         if (version == null) {
             throw new BadRequestException("version is required");
         }
-        if (agentCascadeService == null) {
-            throw new IllegalStateException("No cascade service is wired into this store");
-        }
         // The agent's own EDIT check first, for the reason updateAgent gives: what
         // follows answers "exists / does not exist" for the agent and its workflows.
         restVersionInfo.requireEditAccess(id);
@@ -273,6 +259,8 @@ public class RestAgentStore implements IRestAgentStore {
                     throw new NotFoundException(e.getMessage());
                 case CONFLICT :
                     throw new ClientErrorException(e.getMessage(), Response.Status.CONFLICT);
+                case FAILED :
+                    throw new InternalServerErrorException(e.getMessage(), e);
                 default :
                     throw new BadRequestException(e.getMessage());
             }

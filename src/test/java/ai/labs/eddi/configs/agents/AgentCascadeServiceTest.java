@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -338,6 +339,18 @@ class AgentCascadeServiceTest {
         }
 
         @Test
+        @DisplayName("the agent's workflow reference can move to another VERSION of the same workflow, never to a different workflow")
+        void workflowIdSwapRefused() throws Exception {
+            agentReferencing(WF1_V1);
+            String otherWorkflow = "eddi://ai.labs.workflow/workflowstore/workflows/" + WF2_ID + "?version=1";
+
+            var ex = assertThrows(CascadeException.class, () -> cascade(List.of(map(WF1_V1, otherWorkflow))));
+
+            assertEquals(CascadeException.Kind.BAD_REQUEST, ex.kind());
+            assertTrue(ex.getMessage().contains("different workflow"), ex.getMessage());
+            assertNothingWritten();
+        }
+        @Test
         @DisplayName("both URIs must carry a version")
         void versionsRequired() throws Exception {
             String versionless = "eddi://ai.labs.llm/llmstore/llms/" + LLM_ID;
@@ -588,6 +601,137 @@ class AgentCascadeServiceTest {
             assertEquals("READY", flat.get("deploymentStatus"));
             assertEquals(true, flat.get("previousVersionStillDeployed"));
             assertTrue(flat.containsKey("workflows"));
+        }
+    }
+
+    // ── failure and edge cases ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("failures after the apply phase began, and degenerate agents")
+    class FailuresAndEdges {
+
+        @Test
+        @DisplayName("an agent update that fails names the workflow versions already written and says the agent was NOT changed")
+        void agentUpdateFailureNamesWrittenWorkflows() throws Exception {
+            agentReferencing(WF1_V1);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            workflowUpdateAnswers(WF1_ID, 1);
+            when(agentStore.updateAgent(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new IllegalStateException("validation blew up"));
+
+            var ex = assertThrows(CascadeException.class, () -> cascade(List.of(map(LLM_V1, LLM_V2))));
+
+            assertEquals(CascadeException.Kind.FAILED, ex.kind());
+            assertTrue(ex.getMessage().contains("workflows/" + WF1_ID + "?version=2"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("was NOT changed"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("Retry the cascade"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("validation blew up"), ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("a 409 from the agent update (a race after the pre-check) stays a conflict, still naming what was written")
+        void agentUpdateRaceIsConflict() throws Exception {
+            agentReferencing(WF1_V1);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            workflowUpdateAnswers(WF1_ID, 1);
+            when(agentStore.updateAgent(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new ClientErrorException("modified", 409));
+
+            var ex = assertThrows(CascadeException.class, () -> cascade(List.of(map(LLM_V1, LLM_V2))));
+
+            assertEquals(CascadeException.Kind.CONFLICT, ex.kind());
+            assertTrue(ex.getMessage().contains("version=2"), ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("a workflow update that fails after an earlier one succeeded names the earlier one")
+        void secondWorkflowFails() throws Exception {
+            agentReferencing(WF1_V1, WF2_V1);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            when(workflowStore.readWorkflow(WF2_ID, 1)).thenReturn(workflow(LLM_V1));
+            workflowUpdateAnswers(WF1_ID, 1);
+            when(workflowStore.updateWorkflow(eq(WF2_ID), eq(1), any())).thenThrow(new IllegalStateException("boom"));
+
+            var ex = assertThrows(CascadeException.class, () -> cascade(List.of(map(LLM_V1, LLM_V2))));
+
+            assertEquals(CascadeException.Kind.FAILED, ex.kind());
+            assertTrue(ex.getMessage().contains("workflows/" + WF1_ID + "?version=2"), ex.getMessage());
+            verify(agentStore, never()).updateAgent(any(), anyInt(), any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("a workflow update with no Location is a failure, never a guessed version")
+        void workflowLocationMissing() throws Exception {
+            agentReferencing(WF1_V1);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            when(workflowStore.updateWorkflow(eq(WF1_ID), eq(1), any())).thenReturn(Response.ok().build());
+
+            var ex = assertThrows(CascadeException.class, () -> cascade(List.of(map(LLM_V1, LLM_V2))));
+
+            assertEquals(CascadeException.Kind.FAILED, ex.kind());
+            assertTrue(ex.getMessage().contains("did not report"), ex.getMessage());
+            verify(agentStore, never()).updateAgent(any(), anyInt(), any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("an agent update with no Location is a failure, never agentVersion + 1")
+        void agentLocationMissing() throws Exception {
+            agentReferencing(WF1_V1);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            workflowUpdateAnswers(WF1_ID, 1);
+            when(agentStore.updateAgent(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenReturn(Response.ok().build());
+
+            var ex = assertThrows(CascadeException.class,
+                    () -> service.cascade(AGENT_ID, 1, List.of(map(LLM_V1, LLM_V2)), true, Deployment.Environment.production, false));
+
+            assertEquals(CascadeException.Kind.FAILED, ex.kind());
+            verify(agentAdmin, never()).deployAgent(any(), any(), any(), anyBoolean(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("the same workflow referenced twice is read and written once, and the result is used at both positions")
+        void duplicateWorkflowReference() throws Exception {
+            agentReferencing(WF1_V1, WF1_V1);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            workflowUpdateAnswers(WF1_ID, 1);
+            agentUpdateAnswers(2);
+
+            var result = cascade(List.of(map(LLM_V1, LLM_V2)));
+
+            verify(workflowStore, times(1)).readWorkflow(WF1_ID, 1);
+            verify(workflowStore, times(1)).updateWorkflow(eq(WF1_ID), eq(1), any());
+            ArgumentCaptor<AgentConfiguration> saved = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(agentStore).updateAgent(eq(AGENT_ID), eq(1), saved.capture(), anyBoolean());
+            assertEquals(2, saved.getValue().getWorkflows().size());
+            assertEquals(saved.getValue().getWorkflows().get(0), saved.getValue().getWorkflows().get(1));
+            assertTrue(saved.getValue().getWorkflows().get(0).toString().endsWith("version=2"));
+            assertEquals(1, result.workflows().size());
+        }
+
+        @Test
+        @DisplayName("two references that a mapping sends to the same workflow version write it once")
+        void twoReferencesSameTarget() throws Exception {
+            agentReferencing(WF1_V1, WF1_V2);
+            when(workflowStore.readWorkflow(WF1_ID, 2)).thenReturn(workflow(LLM_V1));
+            workflowUpdateAnswers(WF1_ID, 2);
+            agentUpdateAnswers(2);
+
+            cascade(List.of(map(WF1_V1, WF1_V2), map(LLM_V1, LLM_V2)));
+
+            verify(workflowStore, times(1)).updateWorkflow(eq(WF1_ID), eq(2), any());
+        }
+
+        @Test
+        @DisplayName("two versions of one workflow where a mapping would rewrite one is refused up front")
+        void twoVersionsOfOneWorkflow() throws Exception {
+            agentReferencing(WF1_V1, WF1_V2);
+            when(workflowStore.readWorkflow(WF1_ID, 1)).thenReturn(workflow(LLM_V1));
+            when(workflowStore.readWorkflow(WF1_ID, 2)).thenReturn(workflow(LLM_V1));
+
+            var ex = assertThrows(CascadeException.class, () -> cascade(List.of(map(LLM_V1, LLM_V2))));
+
+            assertEquals(CascadeException.Kind.BAD_REQUEST, ex.kind());
+            assertTrue(ex.getMessage().contains("two versions of workflow"), ex.getMessage());
+            verify(workflowStore, never()).updateWorkflow(any(), anyInt(), any());
+            verify(agentStore, never()).updateAgent(any(), anyInt(), any(), anyBoolean());
         }
     }
 }

@@ -16,14 +16,17 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory.RestInterfaceFactoryException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -88,7 +91,12 @@ public class AgentCascadeService {
     public static final class CascadeException extends RuntimeException {
         /** The kind of refusal, which transports map to their own status. */
         public enum Kind {
-            BAD_REQUEST, NOT_FOUND, CONFLICT
+            BAD_REQUEST, NOT_FOUND, CONFLICT,
+            /**
+             * Something failed after the apply phase began; the message says what was and
+             * was not written.
+             */
+            FAILED
         }
 
         private final Kind kind;
@@ -145,7 +153,13 @@ public class AgentCascadeService {
 
         // ── Plan: read and rewrite in memory, write nothing. ────────────────────────
         List<URI> originalWorkflowUris = new ArrayList<>(agentConfig.getWorkflows());
-        List<PlannedWorkflow> plan = new ArrayList<>();
+        // Keyed by the workflow URI the agent will use BEFORE step rewrites. The same
+        // workflow can be referenced twice (or two references can be mapped to the same
+        // target); it is read, rewritten and written ONCE and the result reused for
+        // every
+        // position, since a second write of one workflow would 409 halfway through.
+        Map<String, PlannedWorkflow> plan = new LinkedHashMap<>();
+        List<String> positions = new ArrayList<>();
         Set<String> matched = new LinkedHashSet<>();
 
         for (URI referenced : originalWorkflowUris) {
@@ -154,9 +168,26 @@ public class AgentCascadeService {
             String repointTo = newByOld.get(referenced.toString());
             boolean repointed = repointTo != null;
             if (repointed) {
+                // The agent's own workflow list may only move to another VERSION of the
+                // same workflow — exactly what PUT .../updateResourceUri allows (it matches
+                // on the path without the version). Re-pointing the agent at a DIFFERENT
+                // workflow id is not something the granted endpoints can do, so it is not
+                // something the cascade adds. Step references are different: PUT on the
+                // workflow can already set any step to any resource, so they stay free.
+                if (!Objects.equals(idOf(referenced.toString()), idOf(repointTo))) {
+                    throw new CascadeException(CascadeException.Kind.BAD_REQUEST, "An agent's workflow reference can only move to another version"
+                            + " of the same workflow, not to a different workflow: " + referenced + " -> " + repointTo + ". Nothing was changed.");
+                }
                 matched.add(referenced.toString());
             }
             URI effective = repointed ? URI.create(repointTo) : referenced;
+            positions.add(effective.toString());
+
+            PlannedWorkflow existing = plan.get(effective.toString());
+            if (existing != null) {
+                plan.put(effective.toString(), existing.withRepointed(existing.repointed() || repointed));
+                continue;
+            }
 
             String workflowId = idOf(effective.toString());
             int workflowVersion = versionOf(effective.toString());
@@ -178,7 +209,25 @@ public class AgentCascadeService {
                     }
                 }
             }
-            plan.add(new PlannedWorkflow(referenced, effective, workflowId, workflowVersion, workflow, repointed, stepsUpdated));
+            plan.put(effective.toString(),
+                    new PlannedWorkflow(referenced, effective, workflowId, workflowVersion, workflow, repointed, stepsUpdated));
+        }
+
+        // Two VERSIONS of one workflow in the same agent, either needing a rewrite:
+        // only
+        // the latest version of a document can be updated, so the second write cannot
+        // succeed. Refused whole, like every other plan-time problem.
+        Map<String, String> versionById = new HashMap<>();
+        for (PlannedWorkflow planned : plan.values()) {
+            if (planned.workflowId() == null) {
+                continue;
+            }
+            String other = versionById.put(planned.workflowId(), planned.effective().toString());
+            if (other != null && (planned.stepsUpdated() || plan.get(other).stepsUpdated())) {
+                throw new CascadeException(CascadeException.Kind.BAD_REQUEST, "Agent " + agentId + " references two versions of workflow "
+                        + planned.workflowId() + " (" + other + " and " + planned.effective()
+                        + ") and a mapping would rewrite one of them. Nothing was changed. Point the agent at one version first.");
+            }
         }
 
         List<String> unmatched = new ArrayList<>(newByOld.keySet());
@@ -194,37 +243,61 @@ public class AgentCascadeService {
         }
 
         // ── Apply: each changed workflow once, then the agent once. ─────────────────
-        List<URI> updatedWorkflowUris = new ArrayList<>();
+        // Workflows are written first, so a failure from here on can leave NEW workflow
+        // versions that nothing references. `written` records them so the failure can
+        // say so.
+        List<String> written = new ArrayList<>();
+        Map<String, URI> resultingByEffective = new HashMap<>();
         List<WorkflowChange> changes = new ArrayList<>();
-        for (PlannedWorkflow planned : plan) {
+        for (PlannedWorkflow planned : plan.values()) {
             URI resulting = planned.effective();
             int newVersion = planned.version();
             if (planned.stepsUpdated()) {
-                Response response = workflowStore.updateWorkflow(planned.workflowId(), planned.version(), planned.workflow());
-                String location = response.getHeaderString("Location");
-                if (location != null) {
-                    resulting = URI.create(location);
-                    newVersion = versionOf(location);
-                } else {
-                    newVersion = planned.version() + 1;
-                    resulting = URI.create(planned.effective().toString().replaceAll("version=\\d+", "version=" + newVersion));
+                String location;
+                try {
+                    Response response = workflowStore.updateWorkflow(planned.workflowId(), planned.version(), planned.workflow());
+                    location = response.getHeaderString("Location");
+                } catch (RuntimeException failure) {
+                    throw partialFailure(agentId, agentVersion, written, "writing workflow " + planned.workflowId(), failure);
                 }
+                if (location == null || location.isBlank() || !location.contains("version=")) {
+                    // A store update that does not say where it wrote is a broken contract;
+                    // guessing "version + 1" would point the agent at a version that may not exist.
+                    throw partialFailure(agentId, agentVersion, written,
+                            "workflow " + planned.workflowId() + " was updated but the store did not report its new version", null);
+                }
+                resulting = URI.create(location);
+                newVersion = versionOf(location);
+                written.add(location);
             }
-            updatedWorkflowUris.add(resulting);
+            resultingByEffective.put(planned.effective().toString(), resulting);
             if (planned.repointed() || planned.stepsUpdated()) {
                 changes.add(new WorkflowChange(planned.workflowId(), versionOf(planned.referenced().toString()), newVersion, planned.repointed(),
                         planned.stepsUpdated()));
             }
         }
+        List<URI> updatedWorkflowUris = new ArrayList<>();
+        for (String position : positions) {
+            updatedWorkflowUris.add(resultingByEffective.get(position));
+        }
 
         int newAgentVersion = agentVersion;
         if (!changes.isEmpty()) {
             // The ONLY agent field touched. Everything else — hitlConfig included — is
-            // the stored document, written back unchanged.
+            // the stored document written back unchanged.
             agentConfig.setWorkflows(updatedWorkflowUris);
-            Response agentResponse = agentStore.updateAgent(agentId, agentVersion, agentConfig, compatible);
-            String agentLocation = agentResponse.getHeaderString("Location");
-            newAgentVersion = agentLocation != null ? versionOf(agentLocation) : agentVersion + 1;
+            String agentLocation;
+            try {
+                Response agentResponse = agentStore.updateAgent(agentId, agentVersion, agentConfig, compatible);
+                agentLocation = agentResponse.getHeaderString("Location");
+            } catch (RuntimeException failure) {
+                throw partialFailure(agentId, agentVersion, written, "saving the agent", failure);
+            }
+            if (agentLocation == null || agentLocation.isBlank() || !agentLocation.contains("version=")) {
+                throw new CascadeException(CascadeException.Kind.FAILED, "The agent update was accepted but the store did not report the new version"
+                        + " of agent " + agentId + "; read its current version before doing anything else." + writtenNote(written));
+            }
+            newAgentVersion = versionOf(agentLocation);
         }
 
         AgentCascadeResult.Deployment deployment = null;
@@ -234,6 +307,36 @@ public class AgentCascadeService {
 
         return new AgentCascadeResult(agentId, agentVersion, newAgentVersion, List.copyOf(changes), originalWorkflowUris.size(), matched.size(),
                 compatible, deployment);
+    }
+
+    /**
+     * What a failure after some workflow versions were written must tell the
+     * caller.
+     */
+    private static String writtenNote(List<String> written) {
+        if (written.isEmpty()) {
+            return " No workflow version had been written.";
+        }
+        return " Workflow versions already written (nothing references them yet): " + String.join(", ", written) + ".";
+    }
+
+    /**
+     * A failure in the apply phase. The agent was NOT changed, so the caller can
+     * retry from the same agent version; any workflow versions written first are
+     * harmless orphans. A 409 from a store (a concurrent edit that slipped in after
+     * the version pre-check) stays a conflict.
+     */
+    private static CascadeException partialFailure(String agentId, int agentVersion, List<String> written, String doing, Throwable cause) {
+        boolean conflict = cause instanceof WebApplicationException web && web.getResponse() != null
+                && web.getResponse().getStatus() == Response.Status.CONFLICT.getStatusCode();
+        String why = cause == null ? "" : ": " + (cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage());
+        String message = "Cascade stopped while " + doing + why + ". Agent " + agentId + " was NOT changed (still at version " + agentVersion
+                + ")." + writtenNote(written) + " Retry the cascade from the agent's current version; unreferenced workflow versions are harmless.";
+        CascadeException result = new CascadeException(conflict ? CascadeException.Kind.CONFLICT : CascadeException.Kind.FAILED, message);
+        if (cause != null) {
+            result.initCause(cause);
+        }
+        return result;
     }
 
     /**
@@ -352,5 +455,8 @@ public class AgentCascadeService {
      */
     private record PlannedWorkflow(URI referenced, URI effective, String workflowId, int version, WorkflowConfiguration workflow, boolean repointed,
             boolean stepsUpdated) {
+        PlannedWorkflow withRepointed(boolean value) {
+            return new PlannedWorkflow(referenced, effective, workflowId, version, workflow, value, stepsUpdated);
+        }
     }
 }

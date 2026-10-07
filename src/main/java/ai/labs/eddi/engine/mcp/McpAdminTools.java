@@ -102,18 +102,6 @@ public class McpAdminTools {
     private final SecurityIdentity identity;
     private final boolean authEnabled;
 
-    /**
-     * With a cascade service built over the same collaborators — what the CDI
-     * constructor below is handed. Kept so the tests that construct this class by
-     * hand need not know a service exists.
-     */
-    McpAdminTools(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin, IJsonSerialization jsonSerialization,
-            StrictConfigurationParser configParser, IScheduleStore scheduleStore, ScheduleFireExecutor scheduleFireExecutor,
-            SchedulePollerService schedulePollerService, SecurityIdentity identity, boolean authEnabled) {
-        this(restInterfaceFactory, agentAdmin, jsonSerialization, configParser, scheduleStore, scheduleFireExecutor, schedulePollerService, identity,
-                authEnabled, new AgentCascadeService(restInterfaceFactory, agentAdmin));
-    }
-
     @Inject
     public McpAdminTools(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin, IJsonSerialization jsonSerialization,
             StrictConfigurationParser configParser, IScheduleStore scheduleStore, ScheduleFireExecutor scheduleFireExecutor,

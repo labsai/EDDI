@@ -174,7 +174,7 @@ changed workflow and the agent **once**:
 ```
 
 - **Mappings.** An `oldUri` must be a reference the agent really holds — a step of one of its
-  workflows, or a workflow the agent itself references. A mapping naming a workflow repoints the
+  workflows, or a workflow the agent itself references. A mapping naming a workflow moves the agent to another *version of that same workflow* (a different workflow is refused, as it is for `updateResourceUri`) and repoints the
   agent at that version first and applies the step mappings to *its* steps, so a workflow you
   edited in the same batch is picked up rather than overwritten by a rewrite of the version the agent
   still points at.
@@ -188,6 +188,7 @@ changed workflow and the agent **once**:
 - **`redeploy`** goes through the normal deploy endpoint, so the tenant quota and the vault-grant
   check apply exactly as for `POST /administration/{environment}/deploy/{agentId}`. The documents are
   written either way; the response's `deployment` says whether it went live.
+- **Partial failure.** Workflows are written first, then the agent. If the agent save (or a later workflow write) fails, the error says the agent was **not** changed, names the workflow versions already written (unreferenced, harmless) and tells you to retry from the agent''s current version; a concurrent edit is a 409, anything else a 500. A store that does not report the version it wrote is an error, never a guessed version.
 - **`compatible`** is the flag described in the next section.
 - **Roles.** `eddi-admin` or `eddi-editor`, the same as the writes it composes, and the usual
   per-document edit access applies.

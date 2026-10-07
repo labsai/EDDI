@@ -4,29 +4,51 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import io.quarkus.security.identity.SecurityIdentity;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.BeforeEach;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Test;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.time.Instant;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.List;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.ArgumentMatchers.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 
 /**
@@ -60,7 +82,7 @@ class McpScheduleToolsTest {
 
         tools = new McpAdminTools(restInterfaceFactory, mock(IRestAgentAdministration.class), jsonSerialization,
                 mock(StrictConfigurationParser.class), scheduleStore, fireExecutor,
-                pollerService, mock(SecurityIdentity.class), false);
+                pollerService, mock(SecurityIdentity.class), false, mock(AgentCascadeService.class));
     }
 
     // --- createSchedule ---

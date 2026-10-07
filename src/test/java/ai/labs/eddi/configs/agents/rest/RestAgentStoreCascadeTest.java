@@ -27,6 +27,7 @@ import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -135,6 +136,19 @@ class RestAgentStoreCascadeTest {
         var ex = assertThrows(ClientErrorException.class, () -> store.cascadeAgentChanges(AGENT_ID, 2, request(null, null, null)));
 
         assertEquals(Response.Status.CONFLICT.getStatusCode(), ex.getResponse().getStatus());
+    }
+
+    @Test
+    @DisplayName("a failure after workflows were written is a 500 that carries the message naming them")
+    void partialFailure() {
+        when(cascadeService.cascade(any(), anyInt(), any(), anyBoolean(), any(), anyBoolean()))
+                .thenThrow(new CascadeException(CascadeException.Kind.FAILED, "Agent was NOT changed. Workflow versions already written: x"));
+
+        var ex = assertThrows(InternalServerErrorException.class,
+                () -> store.cascadeAgentChanges(AGENT_ID, 1, request(null, null, null)));
+
+        assertEquals(500, ex.getResponse().getStatus());
+        assertTrue(ex.getMessage().contains("Workflow versions already written"));
     }
 
     @Test
