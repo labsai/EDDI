@@ -270,6 +270,37 @@ export async function updateSecretGrant(args: {
   return api.put<SecretGrantResponse>(`${secretPath(args.tenantId, args.keyName)}/grant${query}`, body);
 }
 
+/** The answer of the append-one-agent grant call: the `PUT …/grant` shape plus whether anything changed. */
+export interface SecretGrantAppendResponse extends SecretGrantResponse {
+  /** False when the agent was already on the grant, or the secret already grants every agent. */
+  changed: boolean;
+}
+
+/**
+ * Add ONE agent to a secret's grant — `POST /{tenantId}/{keyName}/grant/agents/{agentId}`.
+ *
+ * Distinct from {@link updateSecretGrant} in the way that matters for a deploy
+ * flow: it never replaces the list, so it cannot drop an agent someone else
+ * added a moment ago (the backend appends with a compare-and-set and retries),
+ * and it never touches a secret that already grants every agent. Idempotent.
+ * `eddi-admin` only, like every grant change.
+ *
+ * @param dryRun writes nothing and answers what the append would do — the
+ *   Manager runs it first so `agentsLosingAccess` (empty for an append, by
+ *   construction) is seen before anything is written.
+ */
+export function grantAgentToSecret(
+  tenantId: string,
+  keyName: string,
+  agentId: string,
+  options?: { dryRun?: boolean },
+): Promise<SecretGrantAppendResponse> {
+  const query = options?.dryRun ? "?dryRun=true" : "";
+  return api.post<SecretGrantAppendResponse>(
+    `${secretPath(tenantId, keyName)}/grant/agents/${encodeURIComponent(agentId)}${query}`,
+  );
+}
+
 /** Delete a secret from the vault. */
 export async function deleteSecret(
   tenantId: string,

@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { OwningAgentContext } from "@/hooks/use-owning-agent";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { describeSaveError } from "@/lib/save-error";
@@ -267,6 +268,7 @@ export function StudioEditorPanel({
         previousGeneration={currentAgent ? (currentAgent.compatibilityGeneration ?? null) : undefined}
         className="mb-3"
       />
+      <OwningAgentContext.Provider value={agentId}>
       <ConfigEditorLayout
         typeName={typeName}
         resourceId={resourceId}
@@ -285,6 +287,7 @@ export function StudioEditorPanel({
         renderFormEditor={EDITOR_MAP[slug]}
         jsonSchema={jsonSchema}
       />
+      </OwningAgentContext.Provider>
     </div>
   );
 }

@@ -317,7 +317,7 @@ snippets the agent uses. Every reference between them is repointed at the
 target's own copies. A first promotion imports the source's own export archive,
 so it also lands the schedules and connection references that archive carries.
 
-Two things stay behind, by design or because they are not configuration:
+A few things stay behind, by design or because they are not configuration:
 
 **Secrets.** An API key is stored as a vault reference (`${vault:<name>}`), and
 on a first promotion the reference is what travels: the value never leaves the
@@ -331,6 +331,18 @@ working key with a placeholder or repoints production at staging's vault entry.
 The same applies to the embedding model's key of a knowledge base. A credential
 written in plain text on the source (in an `Authorization` header, say) is
 scrubbed on the way out and never reaches the target.
+
+**Grants.** A vault secret's grant (`allowedAgents`) lists agent ids, and a
+promoted or imported agent gets a new id on the target. If the target's vault
+entry is restricted to named agents, the promoted agent is not on it, and with
+`eddi.vault.grant-enforcement=enforce` (the default) its first deploy there is
+refused. The deploy response says which secret and gives the grant call; add the
+agent to the grant — the Manager's deploy dialog does it in one step — then
+deploy again. See [Secrets Vault → New agents always need adding](secrets-vault.md#new-agents-always-need-adding).
+
+**Agent triggers (intents).** The mapping from an intent to an agent is not part
+of the agent's export, so it is not promoted either. Recreate it on the target
+(`POST /AgentTriggerStore/agenttriggers`, or MCP `create_agent_trigger`).
 
 **What a knowledge base has ingested.** The knowledge-base configuration and its
 ingestion sources travel; the chunks already embedded into the source's vector

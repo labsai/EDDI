@@ -109,7 +109,9 @@ export function useAgent(id: string, version?: number) {
 export function useDeploymentStatus(agentId: string, version: number, environment = "production") {
   return useQuery({
     queryKey: [...agentKeys.all, "deployment", environment, agentId, version],
-    queryFn: () => getDeploymentStatus(environment, agentId, version),
+    // Detailed: an ERROR then carries the backend's reason (`failure`) for a
+    // caller who may edit the agent, so the page can say WHY instead of "Error".
+    queryFn: () => getDeploymentStatus(environment, agentId, version, { detailed: true }),
     enabled: !!agentId && version > 0,
     placeholderData: keepPreviousData,
     refetchInterval: (query) => {

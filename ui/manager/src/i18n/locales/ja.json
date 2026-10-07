@@ -458,7 +458,9 @@
       "notice": "チャットで利用者に伝える内容（空欄にすると標準の文言を使用）",
       "noticePlaceholder": "このエージェントとの会話は、改善のために管理者が閲覧する場合があります。",
       "versionNote": "この変更で作成されるバージョン以降の会話が対象です — それ以前の会話は対象外です。Slack、Teams、API クライアントでは通知を表示できません。利用者がそこからこのエージェントを使う場合は、あいさつ文でお知らせください。"
-    }
+    },
+    "deployed": "エージェントをデプロイしました",
+    "deployFailedTitle": "デプロイに失敗しました。"
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -883,7 +885,8 @@
     "savedNotLive": "保存しました — まだ反映されていません",
     "savedNotLiveDescription": "実行中のエージェントはデプロイ済みのバージョンを使用しています。この変更を反映するにはデプロイしてください。",
     "deployNow": "デプロイ",
-    "deployStarted": "デプロイを開始しました"
+    "deployStarted": "デプロイを開始しました",
+    "deployDone": "デプロイしました — 変更が反映されています"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -3723,7 +3726,12 @@
     "connectionForbidden": "あなたのロールでは接続を一覧できません。名前が分かる場合は ${connection:name} を手入力してください。",
     "connectionUnavailable": "このバックエンドは接続機能を提供していません。",
     "connectionFailed": "接続を読み込めませんでした。",
-    "connectionHint": "${connection:name} を値全体として挿入します。EDDI がリクエストごとに資格情報へ解決します。"
+    "connectionHint": "${connection:name} を値全体として挿入します。EDDI がリクエストごとに資格情報へ解決します。",
+    "restricted_one": "{{count}} 件のエージェントに制限",
+    "restricted_other": "{{count}} 件のエージェントに制限",
+    "restrictedTooltip": "許可先：{{agents}}",
+    "notGrantedAdmin": "このエージェントにはまだこのキーが許可されていません。デプロイ時に追加するか確認されます。",
+    "notGrantedNonAdmin": "このエージェントにはまだこのキーが許可されていません。デプロイする前に管理者に許可を依頼してください。"
   },
   "snippetEditor": {
     "category": "カテゴリ",
@@ -4417,7 +4425,8 @@
       "platformBaseUrlUnresolved": "このデプロイはランダムな HTTP ポートで動作しており eddi.self.base-url も未設定のため、自分自身に到達できるアドレスを示せません。ここにアドレスを入力してください。",
       "llmEndpoint": "モデルのエンドポイント",
       "promptBodyDiffers": "この指示は現在のデフォルトと異なります。編集されたか、以前のバージョンの Manager によって書かれたものです。",
-      "promptBodyReset": "デフォルトに戻す"
+      "promptBodyReset": "デフォルトに戻す",
+      "keyRestricted": "「{{key}}」は特定のエージェントに制限されています。オペレーターは {{key}} の許可に追加されます — デプロイ前に確認を求められます。"
     },
     "authMode": {
       "none": {
@@ -4439,7 +4448,8 @@
       "done": "完了",
       "longWait1": "オペレーターエージェントを構築してデプロイしています — これが最も時間のかかるステップです…",
       "longWait2": "新しいエージェントにツールと承認ゲートを設定しています…",
-      "longWait3": "処理中です — 混雑したプラットフォームではデプロイに時間がかかることがあります…"
+      "longWait3": "処理中です — 混雑したプラットフォームではデプロイに時間がかかることがあります…",
+      "deploying": "オペレーターエージェントをデプロイしています — モデルキーの許可を求められる場合があります…"
     },
     "status": {
       "title": "オペレーター",
@@ -4605,6 +4615,30 @@
       "hintAction": "アップグレード",
       "keepCurrent": "現在のテキストを維持する（新しいデフォルトで追加された内容は反映されません）",
       "title": "Platform Operator のアップデートがあります"
+    },
+    "unregistered": {
+      "title": "この画面で管理されていないオペレーターエージェント",
+      "description": "これらのエージェントは Platform Operator のように見えますが、オペレーター設定はこれらを指していません。ここで管理するには採用するか、削除してください。",
+      "adopt": "採用",
+      "adopted": "オペレーターを採用しました — この画面で管理されます。",
+      "fixAndDeploy": "許可を修正してデプロイ",
+      "remove": "削除",
+      "removeTitle": "このオペレーターエージェントを削除しますか？",
+      "removeBody": "エージェントはデプロイ解除され、会話は終了し、エージェントとそのために作成されたリソースは完全に削除されます。元に戻すことはできません。",
+      "removed": "オペレーターエージェントを削除しました",
+      "status": {
+        "READY": "デプロイ済み",
+        "IN_PROGRESS": "デプロイ中",
+        "ERROR": "エラー",
+        "NOT_FOUND": "未デプロイ"
+      }
+    },
+    "health": {
+      "missing": "オペレーター設定が指しているエージェント {{id}} はもう存在しません。",
+      "cleared": "オペレーター設定をクリアしました",
+      "clear": "設定をクリア",
+      "notDeployed": "オペレーターはオンですが、そのエージェントがデプロイされていません。",
+      "deploy": "再デプロイ"
     }
   },
   "groupWorkspace": {
@@ -5244,5 +5278,28 @@
     "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
     "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
     "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
+  },
+  "grantRequired": {
+    "title": "このエージェントには Vault キーの利用が許可されていません",
+    "titleRefused": "デプロイが拒否されました：Vault キーが許可されていません",
+    "copied": "リクエストをコピーしました — 管理者に送ってください",
+    "issueWithAgents": "「{{agent}}」は制限付きキー「{{key}}」を使用しています。現在許可されているのは {{agents}} です。",
+    "issueWithCount_one": "「{{agent}}」は制限付きキー「{{key}}」を使用しています。現在 {{count}} 件のエージェントに許可されています。",
+    "issueWithCount_other": "「{{agent}}」は制限付きキー「{{key}}」を使用しています。現在 {{count}} 件のエージェントに許可されています。",
+    "issue": "「{{agent}}」は制限付きキー「{{key}}」を使用していますが、このキーはほかのエージェントにのみ許可されています。",
+    "unfixable": "「{{reference}}」は単純な Vault 参照ではないため、ここでは許可できません。エージェントの設定を、利用が許可された Vault キーを使うように変更してください。",
+    "questionAll": "すべてのエージェントにこれらのキーの利用を許可しますか？",
+    "question": "「{{agent}}」を許可に追加しますか？",
+    "allowAll": "代わりにすべてのエージェントにこのキーの利用を許可する",
+    "allowAllWarning": "このデプロイメントのすべてのエージェント（今後作成されるものも含む）が利用できるようになります。このキーの利用範囲に対する唯一の制限がなくなります。",
+    "nonAdmin": "Vault キーを誰が使えるかを変更できるのは管理者だけです。管理者にこのエージェントを許可に追加してもらい、もう一度デプロイしてください。",
+    "copyRequest": "管理者向けのリクエストをコピー",
+    "losingAccess": "以下のデプロイ済みエージェントはこのキーにアクセスできなくなります：",
+    "deployAnyway": "このままデプロイ",
+    "applyAnyway": "このまま適用してデプロイ",
+    "allowAllAndDeploy": "すべて許可してデプロイ",
+    "addAndDeploy": "追加してデプロイ",
+    "cancelled": "デプロイしていません — Vault キーが許可されませんでした。",
+    "fix": "修正"
   }
 }

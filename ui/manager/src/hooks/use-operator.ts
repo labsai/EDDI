@@ -28,6 +28,17 @@ import {
   type FetchedSpec,
 } from "@/lib/api/operator";
 import { undeployAgent, deleteAgent, getAgentCurrentVersion } from "@/lib/api/agents";
+import {
+  adoptOperatorAgent,
+  findUnregisteredOperators,
+  removeOperatorAgent,
+  type DiscoveredOperator,
+} from "@/lib/api/operator-discovery";
+import {
+  runDeployWithGrants,
+  isGrantFailure,
+  type DeployWithGrantsOutcome,
+} from "@/hooks/use-deploy-with-grants";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
 import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
 import {
@@ -51,6 +62,8 @@ export const operatorKeys = {
     ["operator", "status", agentId, version] as const,
   gate: (agentId: string) => ["operator", "gate", agentId] as const,
   selfUrl: ["operator", "self-url"] as const,
+  unregistered: (registeredAgentId: string | null) => ["operator", "unregistered", registeredAgentId] as const,
+  presence: (agentId: string) => ["operator", "presence", agentId] as const,
 };
 
 /* ─── Config ─── */
@@ -128,6 +141,7 @@ export type ActivationStage =
   | "validating"
   | "provisioning"
   | "resolving-version"
+  | "deploying"
   | "saving"
   | "verifying-gate"
   | "done";
@@ -170,6 +184,106 @@ export interface ActivateParams {
   apiKey: string;
   baseUrl?: string;
   onStage?: (stage: ActivationStage) => void;
+  /**
+   * The agent a previous attempt kept because its vault grant was refused
+   * (`OperatorGrantPendingError.kept`). Reused when it still exists and was
+   * provisioned from the same settings, so a retry never creates a second one.
+   */
+  reuseAgent?: KeptOperatorAgent | null;
+}
+
+/** An operator agent a failed activation kept on purpose, for the retry to reuse. */
+export interface KeptOperatorAgent {
+  agentId: string;
+  version: number;
+  /** What it was provisioned from — a retry with different settings must not reuse it. */
+  fingerprint: string;
+}
+
+/**
+ * Activation stopped because the operator's vault key is not granted to the
+ * agent it created — the admin cancelled the grant, or is not allowed to make
+ * it. The agent is KEPT (not deployed, not registered), named here, and shown on
+ * the operator screen; activating again reuses it.
+ */
+export class OperatorGrantPendingError extends Error {
+  constructor(
+    readonly kept: KeptOperatorAgent,
+    /** The backend's refusal, when the deploy got as far as being refused. */
+    readonly reason: string | null,
+  ) {
+    super(
+      `The operator agent (${kept.agentId}) was created but not deployed, because its model key is not granted to it.` +
+        (reason ? ` ${reason}` : "") +
+        " Activate again to grant the key and reuse this agent, or remove it from the list below.",
+    );
+    this.name = "OperatorGrantPendingError";
+  }
+}
+
+/**
+ * Activation failed before it touched any agent — the endpoint check, the
+ * address resolution, or anything else ahead of the reuse decision. Carries the
+ * original message (and the original error as `cause`), so it reads the same.
+ *
+ * It exists so the page can tell this apart from a failure AFTER the reuse
+ * decision: there, a kept agent was either reused (and is cleaned up by the
+ * failure path that follows) or removed. Here, a kept agent is still exactly
+ * where it was, and forgetting it would make the next attempt create a second
+ * one — the leak the kept agent exists to prevent.
+ */
+export class OperatorActivationNotStartedError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "OperatorActivationNotStartedError";
+  }
+}
+
+/**
+ * Which kept agent the page should remember after a failed activation.
+ *
+ * A refused grant names the agent it kept; a failure before the reuse decision
+ * leaves the previous one untouched; any other failure removed what it had, so
+ * there is nothing left to reuse.
+ */
+export function keptAgentAfterFailure(err: unknown, previous: KeptOperatorAgent | null): KeptOperatorAgent | null {
+  if (err instanceof OperatorGrantPendingError) return err.kept;
+  if (err instanceof OperatorActivationNotStartedError) return previous;
+  return null;
+}
+
+/**
+ * Everything that went into provisioning, as one string — the operator's own
+ * agent name, the prompt, the model, the key, the addresses and the scope. Two
+ * activations with the same fingerprint would build the same agent.
+ */
+function provisioningFingerprint(params: ActivateParams, config: OperatorConfig): string {
+  // Hashed, because the inputs include the API key — which may be a pasted
+  // plaintext key, and must not sit in page state as long as the kept agent does.
+  return fnv1a(
+    JSON.stringify([
+      params.agentName,
+      params.apiKey,
+      params.baseUrl ?? "",
+      config.provider,
+      config.model,
+      config.scope,
+      config.authMode,
+      config.promptBody,
+      config.apiBaseUrl ?? "",
+      config.environment,
+    ]),
+  );
+}
+
+/** 32-bit FNV-1a, hex — an equality check, not a security boundary. */
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 /**
@@ -190,79 +304,138 @@ export function useActivateOperator() {
     mutationFn: async (params: ActivateParams) => {
       const { agentName, config, apiKey, baseUrl, onStage } = params;
 
-      // Fail before creating anything if the deployment's spec doesn't actually
-      // expose the endpoints we intend to bind — otherwise the operator would
-      // come up "READY" with silently missing tools.
-      onStage?.("validating");
-      const spec = await fetchOpenApiSpec();
-      const missing = findMissingEndpoints(spec, endpointsForScope(config.scope));
-      if (missing.length > 0) {
+      // Everything up to the reuse decision touches no agent. A failure here is
+      // wrapped so the page keeps any agent a previous attempt kept — see
+      // OperatorActivationNotStartedError.
+      let spec: Awaited<ReturnType<typeof fetchOpenApiSpec>>;
+      let effectiveConfig: OperatorConfig;
+      let previous: Awaited<ReturnType<typeof readOperatorConfig>> | null;
+      let fingerprint: string;
+      try {
+        // Fail before creating anything if the deployment's spec doesn't actually
+        // expose the endpoints we intend to bind — otherwise the operator would
+        // come up "READY" with silently missing tools.
+        onStage?.("validating");
+        spec = await fetchOpenApiSpec();
+        const missing = findMissingEndpoints(spec, endpointsForScope(config.scope));
+        if (missing.length > 0) {
+          throw new Error(
+            `This EDDI deployment does not expose ${missing.length} endpoint(s) the operator needs: ${missing.join(", ")}`,
+          );
+        }
+
+        // The address the generated tools will target. Resolved HERE, before
+        // anything is created, because it is the single field that decides whether
+        // the operator can function at all — and because the resolved value is then
+        // persisted on the config, so the operator screen can show it and a later
+        // reconfigure reuses the admin's choice instead of re-deriving it.
+        const apiBaseUrl = await resolveOperatorApiBaseUrl(config);
+        effectiveConfig = {
+          ...config,
+          apiBaseUrl,
+          // Stamped on EVERY activation path — the form, Reconfigure, and the
+          // one-click upgrade — so what is recorded is always what was actually
+          // provisioned. These four fields are what a later upgrade reads.
+          provisionedRevision: OPERATOR_REVISION,
+          provisionedEndpoints: [...endpointsForScope(config.scope)],
+          promptBodyIsDefault: config.promptBody === defaultOperatorPromptBody(config.scope),
+          llmBaseUrl: baseUrl?.trim() || null,
+        };
+
+        // The stored config this activation replaces, captured BEFORE anything is
+        // written, so a replacement that fails verification can hand the deployment
+        // back to it. Best-effort: without it, a failed reconfigure still rolls the
+        // new agent back, it just cannot re-point the config at the old one.
+        previous = config.agentId ? await readOperatorConfig().catch(() => null) : null;
+
+        // A retry after a refused grant reuses the agent the failed attempt
+        // kept, instead of creating another one that is just as ungranted — but
+        // only when nothing that went into provisioning it has changed since, and
+        // only while it still exists. A kept agent built from different settings
+        // is removed first, so a retry never leaves two behind.
+        fingerprint = provisioningFingerprint(params, effectiveConfig);
+      } catch (notStarted) {
+        throw new OperatorActivationNotStartedError(notStarted);
+      }
+      const kept = params.reuseAgent ?? null;
+      let agentId: string;
+      let version: number;
+      if (kept && kept.fingerprint === fingerprint && (await agentPresence(kept.agentId)) === "present") {
+        agentId = kept.agentId;
+        version = kept.version;
+      } else {
+        if (kept) await removeAgentQuietly({ ...effectiveConfig, agentId: kept.agentId, version: kept.version });
+        onStage?.("provisioning");
+        // Created WITHOUT deploying (see provisionOperator), so a restricted
+        // model key can be granted to THIS agent before its first deploy.
+        const result = await provisionOperator({ agentName, config: effectiveConfig, apiKey, baseUrl, spec });
+        // The id can come back as "unknown"; nothing can be cleaned up without it.
+        assertProvisioned(result);
+        agentId = result.agentId;
+        try {
+          onStage?.("resolving-version");
+          version = await resolveAgentVersion(result);
+        } catch (versionError) {
+          // `version` is unresolved — 1 is the version provisionOperator creates.
+          await removeAgentQuietly({ ...effectiveConfig, agentId, version: 1 });
+          throw versionError;
+        }
+      }
+      const keptAgent: KeptOperatorAgent = { agentId, version, fingerprint };
+
+      // Deploy through the grant flow: preflight, and — when the model key is
+      // restricted — the grant dialog for THIS agent, then a waited deploy.
+      onStage?.("deploying");
+      let outcome: DeployWithGrantsOutcome;
+      try {
+        outcome = await runDeployWithGrants({
+          agentId,
+          version,
+          environment: effectiveConfig.environment,
+          agentName,
+        });
+      } catch (deployError) {
+        await removeAgentQuietly({ ...effectiveConfig, agentId, version });
+        throw deployError;
+      }
+      if (outcome.kind === "cancelled" || (outcome.kind === "failed" && isGrantFailure(outcome.failure))) {
+        // Kept, not removed: the agent is fine, only its grant is missing, and
+        // the next attempt reuses it (`reuseAgent`) rather than creating a
+        // second one. It shows on the operator screen meanwhile, with a fix.
+        throw new OperatorGrantPendingError(
+          keptAgent,
+          outcome.kind === "failed" ? outcome.message : (outcome.failure?.message ?? null),
+        );
+      }
+      if (outcome.kind === "failed") {
+        // Any other failure: nothing to keep — the leak this used to be.
+        await removeAgentQuietly({ ...effectiveConfig, agentId, version });
+        const status = outcome.result.status;
         throw new Error(
-          `This EDDI deployment does not expose ${missing.length} endpoint(s) the operator needs: ${missing.join(", ")}`,
+          outcome.message
+            ? `The operator agent was created but failed to deploy: ${outcome.message} It has been removed.`
+            : `The operator agent was created but failed to deploy (status: ${status}). It has been removed.`,
         );
       }
 
-      // The address the generated tools will target. Resolved HERE, before
-      // anything is created, because it is the single field that decides whether
-      // the operator can function at all — and because the resolved value is then
-      // persisted on the config, so the operator screen can show it and a later
-      // reconfigure reuses the admin's choice instead of re-deriving it.
-      const apiBaseUrl = await resolveOperatorApiBaseUrl(config);
-      const effectiveConfig: OperatorConfig = {
-        ...config,
-        apiBaseUrl,
-        // Stamped on EVERY activation path — the form, Reconfigure, and the
-        // one-click upgrade — so what is recorded is always what was actually
-        // provisioned. These four fields are what a later upgrade reads.
-        provisionedRevision: OPERATOR_REVISION,
-        provisionedEndpoints: [...endpointsForScope(config.scope)],
-        promptBodyIsDefault: config.promptBody === defaultOperatorPromptBody(config.scope),
-        llmBaseUrl: baseUrl?.trim() || null,
-      };
-
-      // The stored config this activation replaces, captured BEFORE anything is
-      // written, so a replacement that fails verification can hand the deployment
-      // back to it. Best-effort: without it, a failed reconfigure still rolls the
-      // new agent back, it just cannot re-point the config at the old one.
-      const previous = config.agentId ? await readOperatorConfig().catch(() => null) : null;
-
-      onStage?.("provisioning");
-      const result = await provisionOperator({ agentName, config: effectiveConfig, apiKey, baseUrl, spec });
-      // 201 does not mean deployed, and the id can come back as "unknown".
-      assertProvisioned(result);
-
-      // Everything from here to the config write is rolled back on failure.
-      // provisionOperator DEPLOYS the agent, so a throw in any of these steps
-      // used to leave a live agent bound to the whole admin-API surface and
-      // running as the caller's identity — while the operator screen still said
-      // "off", because the config variable it reads was never written. It was
-      // invisible, unmanaged, and a retry made a second one:
-      // removeSupersededAgent only ever cleans up the agent recorded in the
-      // config. The gate checks below already roll back for exactly this
-      // reason; these three steps simply never got the same treatment.
-      let version: number;
+      // Everything from here to the config write is rolled back on failure, as
+      // is everything above. A throw used to leave a live agent bound to the
+      // whole admin-API surface and running as the caller's identity — while
+      // the operator screen still said "off", because the config variable it
+      // reads was never written. It was invisible, unmanaged, and a retry made a
+      // second one.
       let next: OperatorConfig;
       try {
-        onStage?.("resolving-version");
-        version = await resolveAgentVersion(result);
-
         onStage?.("saving");
         next = {
           ...effectiveConfig,
           enabled: true,
-          agentId: result.agentId,
+          agentId,
           version,
         };
         await writeOperatorConfig(next);
       } catch (provisioningError) {
-        // Best-effort: the original failure is what the admin needs to see, and
-        // a cleanup that itself fails must not replace it. `version` may be
-        // unresolved, so fall back to 1 — the version provisionOperator creates.
-        try {
-          await removeSupersededAgent({ ...effectiveConfig, agentId: result.agentId, version: 1 });
-        } catch {
-          // Left deployed; the rethrown error below is still the honest report.
-        }
+        await removeAgentQuietly({ ...effectiveConfig, agentId, version });
         throw provisioningError;
       }
 
@@ -294,7 +467,7 @@ export function useActivateOperator() {
       let gate: GateVerificationResult;
       let policyVerified: boolean | null;
       try {
-        gate = await verifyGateInstalled(result.agentId);
+        gate = await verifyGateInstalled(agentId);
         await reportOperatorGateStatus(gate.verified);
         if (next.scope === "read_write" && !gate.verified) {
           await rollBackUnsafeOperator(
@@ -323,7 +496,7 @@ export function useActivateOperator() {
         // the replacement has passed every check that can roll it back.
         policyVerified = await enforceGateDryRun(next, spec);
       } catch (verificationError) {
-        await handBackToPredecessor(verificationError, previous, config, result.agentId);
+        await handBackToPredecessor(verificationError, previous, config, agentId);
         throw verificationError;
       }
 
@@ -335,7 +508,7 @@ export function useActivateOperator() {
       // and tools, and without admitting anonymous callers. Best-effort: the
       // operator works for its activator either way, and an administrator can
       // still widen it from the share dialog.
-      await shareOperatorWithEveryoneSignedIn(result.agentId);
+      await shareOperatorWithEveryoneSignedIn(agentId);
 
       // Retire the agent this activation replaced, so repeated reconfiguration
       // doesn't accumulate deployed operators.
@@ -351,24 +524,24 @@ export function useActivateOperator() {
       // a hypothetical — it happened on a reconfigure that changed only the model,
       // and the ensuing debugging session repaired the abandoned agent.
       let supersededWarning: string | null = null;
-      if (config.agentId && config.agentId !== result.agentId && config.version == null) {
+      if (config.agentId && config.agentId !== agentId && config.version == null) {
         // A config that recorded the agent but not its version (written before
         // version tracking) cannot be undeployed or deleted — both endpoints need
         // the version. removeSupersededAgent would return silently and leave two
         // operators running, which is exactly the state this exists to report.
         supersededWarning =
-          `The new operator agent (${result.agentId}) is live, but the one it replaced (${config.agentId}) ` +
+          `The new operator agent (${agentId}) is live, but the one it replaced (${config.agentId}) ` +
           "has no recorded version, so it could not be removed automatically. It may still be deployed and answering. " +
           "Delete it from the Agents screen — and note that this screen now talks to the NEW agent, " +
           "so changes made to the old one will have no effect.";
-      } else if (config.agentId && config.agentId !== result.agentId) {
+      } else if (config.agentId && config.agentId !== agentId) {
         try {
           await removeSupersededAgent(config);
         } catch (removalError) {
           const detail =
             removalError instanceof Error ? removalError.message : String(removalError);
           supersededWarning =
-            `The new operator agent (${result.agentId}) is live, but the one it replaced (${config.agentId}) ` +
+            `The new operator agent (${agentId}) is live, but the one it replaced (${config.agentId}) ` +
             `could not be removed (${detail}). It may still be deployed and answering. ` +
             "Delete it from the Agents screen — and note that this screen now talks to the NEW agent, " +
             "so changes made to the old one will have no effect.";
@@ -579,6 +752,19 @@ async function removeSupersededAgent(config: OperatorConfig): Promise<void> {
   });
 }
 
+/**
+ * Remove an agent activation created and cannot use. Never throws: the failure
+ * that made it necessary is what the admin needs to see, and a cleanup that
+ * itself fails must not replace it.
+ */
+async function removeAgentQuietly(config: OperatorConfig): Promise<void> {
+  try {
+    await removeSupersededAgent(config);
+  } catch {
+    // Left behind; the operator screen lists it (it carries the marker).
+  }
+}
+
 /** Re-enable a configured-but-disabled operator by redeploying its agent. */
 export function useReactivateOperator() {
   const qc = useQueryClient();
@@ -625,6 +811,62 @@ export function useVerifyOperatorGate(config: OperatorConfig | null | undefined)
     },
     enabled: ready,
     staleTime: 0,
+  });
+}
+
+/* ─── Operators the config does not point at ─── */
+
+/**
+ * Operator agents on this deployment that `platform.operator` does not point
+ * at — see `findUnregisteredOperators` for how they are recognised. One cheap
+ * listing per load, so it runs on every visit to the operator screen.
+ */
+export function useUnregisteredOperators(config: OperatorConfig | null | undefined, enabled = true) {
+  return useQuery({
+    queryKey: operatorKeys.unregistered(config?.agentId ?? null),
+    queryFn: () => findUnregisteredOperators(config),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/** Register an existing operator agent as THE operator (writes `platform.operator`). */
+export function useAdoptOperator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ candidate, environment }: { candidate: DiscoveredOperator; environment?: string }) =>
+      adoptOperatorAgent(candidate, environment),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: operatorKeys.all });
+    },
+  });
+}
+
+/** Undeploy and delete an operator agent the config does not own. */
+export function useRemoveOperatorAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ candidate, environment }: { candidate: DiscoveredOperator; environment?: string }) =>
+      removeOperatorAgent(candidate, environment),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: operatorKeys.all });
+    },
+  });
+}
+
+/**
+ * Whether the agent the config points at still exists — the inverse of the
+ * listing above: a config left pointing at a deleted agent made every action on
+ * the operator screen a 404.
+ */
+export function useOperatorAgentPresence(config: OperatorConfig | null | undefined) {
+  const agentId = config?.agentId ?? "";
+  return useQuery({
+    queryKey: operatorKeys.presence(agentId),
+    queryFn: () => agentPresence(agentId),
+    enabled: Boolean(agentId),
+    staleTime: 30_000,
   });
 }
 

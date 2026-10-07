@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.setup;
 
+import ai.labs.eddi.engine.model.DeploymentFailure;
+
 import java.util.List;
 import java.util.Map;
 
@@ -43,12 +45,28 @@ import java.util.Map;
  *            no key, and null when the vault is disabled and the key was stored
  *            in plaintext: the plaintext is a secret and is deliberately never
  *            echoed back in a response body.
+ * @param deploymentFailure
+ *            why the deploy step failed, when it did — for a missing vault
+ *            grant it names each secret and the grant call that fixes it, for
+ *            THIS agent id. Grant and redeploy the same agent rather than
+ *            running the setup again, which would create another one
+ * @param grantedSecrets
+ *            the secrets whose grant this setup extended to the new agent
+ *            ({@code grantReferencedSecrets}); null when none
  *
  * @author ginccc
  */
 public record SetupResult(String action, String agentId, String agentName, String provider, String model, Boolean deployed, String deploymentStatus,
         Integer endpointCount, List<String> groups, Boolean quickRepliesEnabled, Boolean sentimentAnalysisEnabled, Map<String, Object> resources,
-        String apiKeyVaultReference) {
+        String apiKeyVaultReference, DeploymentFailure deploymentFailure, List<String> grantedSecrets) {
+
+    /** Without a deployment failure or granted secrets. */
+    public SetupResult(String action, String agentId, String agentName, String provider, String model, Boolean deployed, String deploymentStatus,
+            Integer endpointCount, List<String> groups, Boolean quickRepliesEnabled, Boolean sentimentAnalysisEnabled, Map<String, Object> resources,
+            String apiKeyVaultReference) {
+        this(action, agentId, agentName, provider, model, deployed, deploymentStatus, endpointCount, groups, quickRepliesEnabled,
+                sentimentAnalysisEnabled, resources, apiKeyVaultReference, null, null);
+    }
 
     /**
      * Builder for fluent construction.
@@ -71,6 +89,8 @@ public record SetupResult(String action, String agentId, String agentName, Strin
         private Boolean sentimentAnalysisEnabled;
         private Map<String, Object> resources;
         private String apiKeyVaultReference;
+        private DeploymentFailure deploymentFailure;
+        private List<String> grantedSecrets;
 
         public Builder action(String action) {
             this.action = action;
@@ -125,9 +145,18 @@ public record SetupResult(String action, String agentId, String agentName, Strin
             return this;
         }
 
+        public Builder deploymentFailure(DeploymentFailure deploymentFailure) {
+            this.deploymentFailure = deploymentFailure;
+            return this;
+        }
+        public Builder grantedSecrets(List<String> grantedSecrets) {
+            this.grantedSecrets = grantedSecrets;
+            return this;
+        }
+
         public SetupResult build() {
             return new SetupResult(action, agentId, agentName, provider, model, deployed, deploymentStatus, endpointCount, groups,
-                    quickRepliesEnabled, sentimentAnalysisEnabled, resources, apiKeyVaultReference);
+                    quickRepliesEnabled, sentimentAnalysisEnabled, resources, apiKeyVaultReference, deploymentFailure, grantedSecrets);
         }
     }
 }

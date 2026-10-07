@@ -37,6 +37,8 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
@@ -49,6 +51,8 @@ import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultGrantGate;
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -187,6 +191,22 @@ public class AgentSetupService {
     ILlmStore llmStore;
 
     /**
+     * The grant check a deploy runs, and the audited append that settles it — for
+     * {@code grantReferencedSecrets}. Field-injected so the constructor and its
+     * many test call sites stay as they are; a directly constructed instance
+     * (tests) without them simply grants nothing.
+     */
+    @Inject
+    VaultGrantGate vaultGrantGate;
+
+    @Inject
+    VaultGrantService vaultGrantService;
+
+    /** Who is calling: the flag is for administrators only. */
+    @Inject
+    ResourceAccessGuard resourceAccessGuard;
+
+    /**
      * Strict parse, same reasoning as {@code VaultGrantGate.Mode.parseStrict}: an
      * unrecognised value fails startup rather than degrading. The degraded
      * behaviour here would be "no reuse" — exactly the vault growth this setting
@@ -241,6 +261,7 @@ public class AgentSetupService {
      */
     public SetupResult setupAgent(SetupAgentRequest request, AgentConfiguration.DynamicOrigin dynamicOrigin) throws AgentSetupException {
         // Validate required params
+        requireAdminForGrants(request.grantReferencedSecrets());
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
         rejectUnprovisionableProvider(request.provider());
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
@@ -362,12 +383,7 @@ public class AgentSetupService {
             if (sentiment)
                 resultBuilder.sentimentAnalysisEnabled(true);
 
-            if (params.shouldDeploy && agentId != null) {
-                var deployResult = deployAndWait(params.env, agentId, agentVersion);
-                createdResources.putAll(deployResult);
-                resultBuilder.deployed((Boolean) deployResult.getOrDefault("deployed", false));
-                resultBuilder.deploymentStatus((String) deployResult.getOrDefault("deploymentStatus", "UNKNOWN"));
-            }
+            grantAndDeploy(resultBuilder, createdResources, params, agentId, agentVersion, request.grantReferencedSecrets());
 
             resultBuilder.resources(createdResources);
             return resultBuilder.build();
@@ -501,6 +517,7 @@ public class AgentSetupService {
      */
     public SetupResult createApiAgent(CreateApiAgentRequest request) throws AgentSetupException {
         // Validate required params
+        requireAdminForGrants(request.grantReferencedSecrets());
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
         if (request.openApiSpec() == null || request.openApiSpec().isBlank()) {
             throw new AgentSetupException("OpenAPI spec is required");
@@ -669,12 +686,7 @@ public class AgentSetupService {
                     // See setupAgent: hands the caller the reference to reuse next time.
                     .apiKeyVaultReference(vaultReferenceOrNull(effectiveApiKey));
 
-            if (params.shouldDeploy && agentId != null) {
-                var deployResult = deployAndWait(params.env, agentId, agentVersion);
-                createdResources.putAll(deployResult);
-                resultBuilder.deployed((Boolean) deployResult.getOrDefault("deployed", false));
-                resultBuilder.deploymentStatus((String) deployResult.getOrDefault("deploymentStatus", "UNKNOWN"));
-            }
+            grantAndDeploy(resultBuilder, createdResources, params, agentId, agentVersion, request.grantReferencedSecrets());
 
             resultBuilder.resources(createdResources);
             return resultBuilder.build();
@@ -1998,6 +2010,94 @@ public class AgentSetupService {
     }
 
     /**
+     * Refuses {@code grantReferencedSecrets} for anyone but an administrator,
+     * before anything is created. The REST resource is admin-only already; this
+     * holds for every in-process caller too, so the flag can never become a way for
+     * a non-admin, or a model, to widen a grant.
+     */
+    void requireAdminForGrants(Boolean grantReferencedSecrets) throws AgentSetupException {
+        if (Boolean.TRUE.equals(grantReferencedSecrets) && (resourceAccessGuard == null || !resourceAccessGuard.isAdmin())) {
+            throw new AgentSetupForbiddenException("grantReferencedSecrets adds the new agent to the grant of the vault secrets it uses, "
+                    + "which only an administrator (eddi-admin) may do. Leave it unset: the response then names each secret and the "
+                    + "grant call an administrator can make for this agent.");
+        }
+    }
+
+    /**
+     * The tail every setup shares: settle the grants when asked, then deploy.
+     * <p>
+     * The grant runs on the agent just created, so the deploy right after it
+     * succeeds. Without the flag a refused deploy now reports the structured
+     * failure — which secret, which call — together with the new agent's id, so the
+     * caller can grant and redeploy THIS agent instead of running the setup again
+     * and creating another one that is refused the same way.
+     */
+    private void grantAndDeploy(SetupResult.Builder resultBuilder, Map<String, Object> createdResources, ResolvedParams params, String agentId,
+                                int agentVersion, Boolean grantReferencedSecrets) {
+        if (agentId == null) {
+            return;
+        }
+        if (Boolean.TRUE.equals(grantReferencedSecrets)) {
+            List<String> granted = grantReferencedSecrets(agentId, agentVersion, createdResources);
+            if (!granted.isEmpty()) {
+                resultBuilder.grantedSecrets(granted);
+            }
+        }
+        if (params.shouldDeploy) {
+            var deployResult = deployAndWait(params.env, agentId, agentVersion);
+            if (deployResult.remove("deploymentFailure") instanceof DeploymentFailure failure) {
+                resultBuilder.deploymentFailure(failure);
+            }
+            createdResources.putAll(deployResult);
+            resultBuilder.deployed((Boolean) deployResult.getOrDefault("deployed", false));
+            resultBuilder.deploymentStatus((String) deployResult.getOrDefault("deploymentStatus", "UNKNOWN"));
+        }
+    }
+
+    /**
+     * Adds {@code agentId} to the grant of every restricted vault secret its
+     * configuration references and is not yet granted. A secret open to every agent
+     * is never in that set (the checker reports only real violations) and
+     * {@link VaultGrantService} would leave it untouched anyway. Each change is
+     * audited by the service.
+     * <p>
+     * A grant that fails is reported, not thrown: the agent exists, the deploy that
+     * follows names what is still missing, and rolling the whole setup back over it
+     * would throw away a correct agent.
+     *
+     * @return the references whose grant was extended
+     */
+    List<String> grantReferencedSecrets(String agentId, int agentVersion, Map<String, Object> createdResources) {
+        if (vaultGrantGate == null || vaultGrantService == null) {
+            return List.of();
+        }
+        List<String> granted = new ArrayList<>();
+        List<String> failed = new ArrayList<>();
+        String actor = resourceAccessGuard != null ? resourceAccessGuard.currentPrincipal() : null;
+        for (String reference : vaultGrantGate.check(agentId, agentVersion).ungranted()) {
+            SecretReference secret = VaultGrantGate.parseVaultReference(reference);
+            if (secret == null) {
+                failed.add(reference);
+                continue;
+            }
+            try {
+                if (vaultGrantService.grantAgent(secret, agentId, actor, "setup", false).changed()) {
+                    granted.add(reference);
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Could not add Agent %s to the grant of %s: %s", LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(reference),
+                        LogSanitizer.sanitize(e.getMessage()));
+                failed.add(reference);
+            }
+        }
+        if (!failed.isEmpty()) {
+            createdResources.put("grantWarning", "Could not add the agent to the grant of: " + String.join(", ", failed)
+                    + ". The deploy result names what is still missing.");
+        }
+        return granted;
+    }
+
+    /**
      * Deploy a Agent and wait for completion.
      */
     Map<String, Object> deployAndWait(Deployment.Environment env, String agentId, int agentVersion) {
@@ -2017,10 +2117,23 @@ public class AgentSetupService {
                     if (body != null && body.containsKey("error")) {
                         result.put("deployError", body.get("error").toString());
                     }
+                    DeploymentFailure failure = body != null && body.get("failure") instanceof DeploymentFailure f ? f : null;
+                    if (failure != null) {
+                        result.put("deploymentFailure", failure);
+                    }
                     if (!"READY".equals(deployStatus)) {
-                        String warning = "Agent created but deployment status is " + deployStatus + ". Check Agent configuration and credentials.";
-                        if (body != null && body.containsKey("error")) {
-                            warning += " Error: " + body.get("error");
+                        String warning;
+                        if (failure != null && failure.isGrantMissing()) {
+                            // Specific, and pointing at THIS agent: retrying the setup would
+                            // only create another agent that is refused the same way.
+                            warning = "Agent " + agentId + " was created but not deployed: " + failure.message()
+                                    + " Grant it and deploy this agent again (POST /administration/" + env + "/deploy/" + agentId + "?version="
+                                    + agentVersion + "); do not run the setup again, which would create another agent.";
+                        } else {
+                            warning = "Agent created but deployment status is " + deployStatus + ". Check Agent configuration and credentials.";
+                            if (body != null && body.containsKey("error")) {
+                                warning += " Error: " + body.get("error");
+                            }
                         }
                         result.put("deployWarning", warning);
                     }
@@ -2116,6 +2229,16 @@ public class AgentSetupService {
 
         public AgentSetupException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * The caller may not ask for what the request asks — mapped to 403, not the 400
+     * a plain {@link AgentSetupException} gets.
+     */
+    public static class AgentSetupForbiddenException extends AgentSetupException {
+        public AgentSetupForbiddenException(String message) {
+            super(message);
         }
     }
 }

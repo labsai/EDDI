@@ -31,6 +31,10 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
+import { useDeployWithGrants, isGrantFailure } from "@/hooks/use-deploy-with-grants";
+import { deployFailureMessage, fixGrantAndRedeploy } from "@/lib/deploy-outcome";
+import { parseVersionFromLocation } from "@/lib/api/location-version";
+import { getAgentCurrentVersion, type DeploymentFailure } from "@/lib/api/agents";
 import {
   getProviderConfig,
   type SetupAgentRequest,
@@ -155,8 +159,13 @@ export function AgentWizardPage() {
 
   const setupAgent = useSetupAgent();
   const createApiAgent = useCreateApiAgent();
+  const { deploy: deployWithGrants, isRunning: isDeploying } = useDeployWithGrants();
+  /** Why the first deploy did not happen — kept so the success view can offer Fix. */
+  const [deployFailure, setDeployFailure] = useState<DeploymentFailure | null>(null);
+  /** The created agent's version, for that Fix. */
+  const [createdVersion, setCreatedVersion] = useState<number>(1);
 
-  const isCreating = setupAgent.isPending || createApiAgent.isPending;
+  const isCreating = setupAgent.isPending || createApiAgent.isPending || isDeploying;
   const steps = state.mode === "api" ? STEPS_API : STEPS_STANDARD;
   const step = steps[currentStep];
 
@@ -217,6 +226,15 @@ export function AgentWizardPage() {
 
   async function handleCreate(deployOverride?: boolean) {
     setError("");
+    setDeployFailure(null);
+    /*
+     * Created WITHOUT deploying, then deployed through the grant flow. A vault
+     * grant names agent ids, so a brand-new agent is on no grant yet: a setup
+     * that deployed in the same call ended, for any restricted key, in a failed
+     * first deploy the user could do nothing about. Now the preflight runs on
+     * the created agent first and an admin is asked once to add it.
+     */
+    const wantsDeploy = deployOverride ?? state.deploy;
     try {
       let res: SetupResult;
       if (state.mode === "api") {
@@ -236,7 +254,7 @@ export function AgentWizardPage() {
           endpoints: state.endpoints || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          deploy: deployOverride ?? state.deploy,
+          deploy: false,
           environment: state.environment,
         };
         res = await createApiAgent.mutateAsync(req);
@@ -253,10 +271,13 @@ export function AgentWizardPage() {
           builtInToolsWhitelist: state.builtInToolsWhitelist || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          deploy: deployOverride ?? state.deploy,
+          deploy: false,
           environment: state.environment,
         };
         res = await setupAgent.mutateAsync(req);
+      }
+      if (wantsDeploy && res.agentId && res.agentId !== "unknown") {
+        res = await deployCreatedAgent(res);
       }
       setResult(res);
       toast.success(t("setupWizard.success", "Agent created successfully!"));
@@ -267,6 +288,57 @@ export function AgentWizardPage() {
           : t("common.error");
       setError(msg);
       toast.error(msg);
+    }
+  }
+
+  /**
+   * Deploy a just-created agent through the grant flow and fold the outcome
+   * into the result the success view renders. Never throws for a refused
+   * deploy — the agent exists either way, and the view says what happened.
+   */
+  async function deployCreatedAgent(res: SetupResult): Promise<SetupResult> {
+    const location = (res.resources as { agentLocation?: unknown } | undefined)?.agentLocation;
+    let version = parseVersionFromLocation(typeof location === "string" ? location : null);
+    if (version == null) {
+      version = await getAgentCurrentVersion(res.agentId).catch(() => 1);
+    }
+    setCreatedVersion(version);
+    const outcome = await deployWithGrants({
+      agentId: res.agentId,
+      agentName: res.agentName || state.name,
+      version,
+      environment: state.environment,
+    });
+    if (outcome.kind === "deployed") {
+      return { ...res, deployed: true, deploymentStatus: outcome.result.status };
+    }
+    if (outcome.kind === "cancelled") {
+      if (outcome.failure) setDeployFailure(outcome.failure);
+      return {
+        ...res,
+        deployed: false,
+        deploymentStatus: t("grantRequired.cancelled", "Not deployed — the vault key was not granted."),
+      };
+    }
+    if (outcome.failure) setDeployFailure(outcome.failure);
+    return { ...res, deployed: false, deploymentStatus: deployFailureMessage(outcome, t) };
+  }
+
+  async function handleFixDeploy() {
+    if (!result || !isGrantFailure(deployFailure)) return;
+    const outcome = await fixGrantAndRedeploy(
+      {
+        agentId: result.agentId,
+        agentName: result.agentName,
+        version: createdVersion,
+        environment: state.environment,
+        failure: deployFailure,
+      },
+      t,
+    );
+    if (outcome.kind === "deployed") {
+      setDeployFailure(null);
+      setResult({ ...result, deployed: true, deploymentStatus: outcome.result.status });
     }
   }
 
@@ -292,9 +364,25 @@ export function AgentWizardPage() {
             </div>
           )}
           {result.deployed === false && result.deploymentStatus && (
-            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+            <div
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-600 dark:text-amber-400"
+              data-testid="wizard-deploy-status"
+            >
               <AlertCircle className="h-3.5 w-3.5" />
               {result.deploymentStatus}
+            </div>
+          )}
+          {result.deployed === false && isGrantFailure(deployFailure) && (
+            <div className="mt-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleFixDeploy()}
+                disabled={isDeploying}
+                data-testid="wizard-deploy-fix"
+              >
+                {t("grantRequired.fix", "Fix")}
+              </Button>
             </div>
           )}
 

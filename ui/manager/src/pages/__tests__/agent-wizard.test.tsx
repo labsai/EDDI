@@ -224,21 +224,40 @@ describe("AgentWizardPage", () => {
 
   // ── Create & Deploy mutation ───────────────────────────────────────
 
-  it("calls setup API with deploy=true when Create & Deploy is clicked", async () => {
-    let deployFlag = false;
+  it("Create & Deploy creates WITHOUT deploying, then deploys through the grant flow", async () => {
+    // A vault grant names agent ids, so a brand-new agent is on no grant yet: a
+    // setup that deployed in the same call failed its first deploy for any
+    // restricted key. The wizard now creates (deploy:false), runs the preflight
+    // on the created agent, and only then deploys — waited.
+    const calls: string[] = [];
     server.use(
       http.post("*/administration/agents/setup", async ({ request }) => {
         const body = (await request.json()) as { deploy?: boolean };
-        deployFlag = body.deploy === true;
+        calls.push(`setup deploy=${body.deploy}`);
         return HttpResponse.json({
           agentId: "new-agent-2",
           agentName: "My Agent",
           provider: "anthropic",
           model: "claude-sonnet-4-6",
-          deployed: true,
-          deploymentStatus: "deployed",
+          deployed: false,
+          resources: { agentLocation: "/agentstore/agents/new-agent-2?version=1" },
         });
-      })
+      }),
+      http.get("*/administration/:env/deploy/:agentId/preflight", ({ params }) => {
+        calls.push(`preflight ${params.agentId}`);
+        return HttpResponse.json({
+          agentId: params.agentId,
+          version: 1,
+          enforcement: "ENFORCE",
+          checked: true,
+          ready: true,
+          grantIssues: [],
+        });
+      }),
+      http.post("*/administration/:env/deploy/:agentId", ({ request, params }) => {
+        calls.push(`deploy ${params.agentId} wait=${new URL(request.url).searchParams.get("waitForCompletion")}`);
+        return HttpResponse.json({ status: "READY", agentId: params.agentId, version: 1 });
+      }),
     );
 
     const user = userEvent.setup();
@@ -261,8 +280,72 @@ describe("AgentWizardPage", () => {
     await user.click(screen.getByTestId("wizard-create-deploy"));
 
     await waitFor(() => {
-      expect(deployFlag).toBe(true);
+      expect(calls).toEqual(["setup deploy=false", "preflight new-agent-2", "deploy new-agent-2 wait=true"]);
     });
+    expect(await screen.findByText(/Deployed/)).toBeInTheDocument();
+  });
+
+  it("a restricted key is granted to the NEW agent before its first deploy — no failed deploy in between", async () => {
+    const calls: string[] = [];
+    server.use(
+      http.post("*/administration/agents/setup", () => {
+        calls.push("setup");
+        return HttpResponse.json({
+          agentId: "fresh-agent",
+          agentName: "My Agent",
+          provider: "gemini",
+          model: "gemini-3.5-flash",
+          deployed: false,
+          resources: { agentLocation: "/agentstore/agents/fresh-agent?version=1" },
+        });
+      }),
+      http.get("*/administration/:env/deploy/:agentId/preflight", ({ params }) => {
+        calls.push("preflight");
+        return HttpResponse.json({
+          agentId: params.agentId,
+          version: 1,
+          enforcement: "ENFORCE",
+          checked: true,
+          ready: false,
+          grantIssues: [
+            {
+              tenantId: "default",
+              keyName: "google-gemini-key",
+              reference: "${vault:google-gemini-key}",
+              grantsAllAgents: false,
+              allowedAgentCount: 2,
+              allowedAgents: ["agent5", "agent7"],
+            },
+          ],
+        });
+      }),
+      http.post("*/administration/:env/deploy/:agentId", () => {
+        calls.push("deploy");
+        return HttpResponse.json({ status: "READY", agentId: "fresh-agent", version: 1 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, { initialRoute: "/manage/agents/wizard" });
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "My Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Be helpful");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-model"), "gemini-3.5-flash");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-test-key");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-deploy"));
+
+    // The admin is asked once, before anything is deployed.
+    await screen.findByTestId("grant-required-dialog");
+    expect(calls).toEqual(["setup", "preflight"]);
+    await user.click(screen.getByTestId("grant-required-confirm"));
+
+    await waitFor(() => expect(calls).toEqual(["setup", "preflight", "deploy"]));
+    expect(await screen.findByText(/Deployed/)).toBeInTheDocument();
+    expect(screen.queryByTestId("wizard-deploy-status")).not.toBeInTheDocument();
   });
 
   // ── Success state ──────────────────────────────────────────────────

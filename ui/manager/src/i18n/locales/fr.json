@@ -459,7 +459,9 @@
       "notice": "Ce que le chat indique aux utilisateurs (laisser vide pour le texte standard)",
       "noticePlaceholder": "Les conversations avec cet agent peuvent être lues par les personnes qui le maintiennent, afin de l'améliorer.",
       "versionNote": "S'applique aux conversations sur la version créée par cette modification et les suivantes — jamais à ce qui a été dit auparavant. Slack, Teams et les clients API ne peuvent pas afficher l'avis ; si des personnes utilisent cet agent par ces canaux, mentionnez-le dans le message d'accueil."
-    }
+    },
+    "deployed": "Agent déployé",
+    "deployFailedTitle": "Échec du déploiement."
   },
   "wizard": {
     "title": "Assistant Agent"
@@ -897,7 +899,8 @@
     "savedNotLive": "Enregistré — pas encore actif",
     "savedNotLiveDescription": "L'agent en cours d'exécution sert toujours la version déployée. Déployez pour appliquer ce changement.",
     "deployNow": "Déployer",
-    "deployStarted": "Déploiement lancé"
+    "deployStarted": "Déploiement lancé",
+    "deployDone": "Déployé — la modification est active"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -3764,7 +3767,13 @@
     "connectionForbidden": "Votre rôle ne peut pas lister les connexions. Si vous connaissez son nom, saisissez ${connection:name} à la main.",
     "connectionUnavailable": "Ce backend ne propose pas de connexions.",
     "connectionFailed": "Impossible de charger les connexions.",
-    "connectionHint": "Insère ${connection:name} comme valeur entière. EDDI la résout en identifiant à chaque requête."
+    "connectionHint": "Insère ${connection:name} comme valeur entière. EDDI la résout en identifiant à chaque requête.",
+    "restricted_one": "Réservée à {{count}} agent",
+    "restricted_many": "Réservée à {{count}} agents",
+    "restricted_other": "Réservée à {{count}} agents",
+    "restrictedTooltip": "Autorisée pour : {{agents}}",
+    "notGrantedAdmin": "Cet agent n'a pas encore accès à cette clé. Vous serez invité à l'ajouter lors du déploiement.",
+    "notGrantedNonAdmin": "Cet agent n'a pas encore accès à cette clé. Demandez à un administrateur de l'autoriser avant de déployer."
   },
   "snippetEditor": {
     "category": "Catégorie",
@@ -4461,7 +4470,8 @@
       "platformBaseUrlUnresolved": "Ce déploiement tourne sur un port HTTP aléatoire sans eddi.self.base-url : il ne peut pas indiquer où se joindre lui-même. Saisissez l'adresse ici.",
       "llmEndpoint": "Point de terminaison du modèle",
       "promptBodyDiffers": "Ces instructions diffèrent de la valeur par défaut actuelle — elles ont été modifiées ou écrites par une version antérieure du Manager.",
-      "promptBodyReset": "Rétablir la valeur par défaut"
+      "promptBodyReset": "Rétablir la valeur par défaut",
+      "keyRestricted": "« {{key}} » est réservée à certains agents. L'opérateur sera ajouté à l'autorisation de {{key}} — une confirmation vous sera demandée avant son déploiement."
     },
     "authMode": {
       "none": {
@@ -4483,7 +4493,8 @@
       "done": "Terminé",
       "longWait1": "L'agent opérateur est en cours de création et de déploiement — c'est l'étape la plus longue…",
       "longWait2": "Configuration des outils et de la barrière d'approbation sur le nouvel agent…",
-      "longWait3": "Toujours en cours — le déploiement peut prendre du temps sur une plateforme chargée…"
+      "longWait3": "Toujours en cours — le déploiement peut prendre du temps sur une plateforme chargée…",
+      "deploying": "Déploiement de l'agent opérateur — il vous sera peut-être demandé de lui autoriser sa clé de modèle…"
     },
     "status": {
       "title": "Opérateur",
@@ -4653,6 +4664,30 @@
       "hintAction": "Mettre à jour",
       "keepCurrent": "Conserver le texte actuel (il n'apprendra pas ce qu'ajoute la nouvelle valeur par défaut)",
       "title": "Une mise à jour du Platform Operator est disponible"
+    },
+    "unregistered": {
+      "title": "Agents opérateurs non gérés par cet écran",
+      "description": "Ces agents ressemblent à un Platform Operator, mais la configuration de l'opérateur ne pointe pas vers eux. Adoptez-en un pour le gérer ici, ou supprimez-le.",
+      "adopt": "Adopter",
+      "adopted": "Opérateur adopté — cet écran le gère désormais.",
+      "fixAndDeploy": "Corriger l'autorisation et déployer",
+      "remove": "Supprimer",
+      "removeTitle": "Supprimer cet agent opérateur ?",
+      "removeBody": "L'agent est retiré du déploiement, ses conversations sont terminées, et il est supprimé définitivement avec les ressources créées pour lui. Cette action est irréversible.",
+      "removed": "Agent opérateur supprimé",
+      "status": {
+        "READY": "Déployé",
+        "IN_PROGRESS": "Déploiement en cours",
+        "ERROR": "Erreur",
+        "NOT_FOUND": "Non déployé"
+      }
+    },
+    "health": {
+      "missing": "La configuration de l'opérateur pointe vers l'agent {{id}}, qui n'existe plus.",
+      "cleared": "Configuration de l'opérateur effacée",
+      "clear": "Effacer la configuration",
+      "notDeployed": "L'opérateur est activé, mais son agent n'est pas déployé.",
+      "deploy": "Redéployer"
     }
   },
   "groupWorkspace": {
@@ -5303,5 +5338,29 @@
     "impactReasonLegacy": "antérieure au suivi de version",
     "impactReasonBreaking": "modification incompatible",
     "switchNotice": "L’agent est passé de v{{from}} à v{{to}}"
+  },
+  "grantRequired": {
+    "title": "Cet agent n'a pas accès à ses clés du coffre",
+    "titleRefused": "Déploiement refusé : clé du coffre non autorisée",
+    "copied": "Demande copiée — envoyez-la à un administrateur",
+    "issueWithAgents": "« {{agent}} » utilise la clé restreinte « {{key}} », actuellement autorisée pour : {{agents}}.",
+    "issueWithCount_one": "« {{agent}} » utilise la clé restreinte « {{key}} », actuellement autorisée pour {{count}} agent.",
+    "issueWithCount_many": "« {{agent}} » utilise la clé restreinte « {{key}} », actuellement autorisée pour {{count}} agents.",
+    "issueWithCount_other": "« {{agent}} » utilise la clé restreinte « {{key}} », actuellement autorisée pour {{count}} agents.",
+    "issue": "« {{agent}} » utilise la clé restreinte « {{key}} », autorisée uniquement pour d'autres agents.",
+    "unfixable": "« {{reference}} » n'est pas une simple référence au coffre : elle ne peut donc pas être autorisée ici. Modifiez la configuration de l'agent pour utiliser une clé qu'il a le droit d'utiliser.",
+    "questionAll": "Autoriser tous les agents à utiliser ces clés ?",
+    "question": "Ajouter « {{agent}} » à l'autorisation ?",
+    "allowAll": "Autoriser plutôt tous les agents à utiliser cette clé",
+    "allowAllWarning": "Tous les agents de ce déploiement — y compris ceux créés plus tard — pourront l'utiliser. Cela supprime la seule limite à la portée de cette clé.",
+    "nonAdmin": "Seul un administrateur peut modifier qui peut utiliser une clé du coffre. Demandez-lui d'ajouter cet agent à l'autorisation, puis redéployez.",
+    "copyRequest": "Copier la demande pour un administrateur",
+    "losingAccess": "Ces agents déployés perdraient l'accès à la clé :",
+    "deployAnyway": "Déployer quand même",
+    "applyAnyway": "Appliquer quand même et déployer",
+    "allowAllAndDeploy": "Tout autoriser et déployer",
+    "addAndDeploy": "Ajouter et déployer",
+    "cancelled": "Non déployé — la clé du coffre n'a pas été autorisée.",
+    "fix": "Corriger"
   }
 }

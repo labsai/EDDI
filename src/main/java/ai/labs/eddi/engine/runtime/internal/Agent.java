@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -29,6 +30,7 @@ public class Agent implements IAgent {
     private final List<IExecutableWorkflow> executableWorkflows;
 
     private Deployment.Status deploymentStatus;
+    private DeploymentFailure deploymentFailure;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
     private boolean memoryToolsEnabled;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
@@ -95,6 +97,18 @@ public class Agent implements IAgent {
 
     public void setDeploymentStatus(Deployment.Status deploymentStatus) {
         this.deploymentStatus = deploymentStatus;
+    }
+
+    @Override
+    public DeploymentFailure getDeploymentFailure() {
+        return deploymentFailure;
+    }
+
+    /**
+     * Records why this deployment failed; see {@link IAgent#getDeploymentFailure}.
+     */
+    public void setDeploymentFailure(DeploymentFailure deploymentFailure) {
+        this.deploymentFailure = deploymentFailure;
     }
 
     @Override

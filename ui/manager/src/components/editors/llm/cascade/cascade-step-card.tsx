@@ -10,6 +10,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ProviderSelect } from "@/components/shared/provider-select";
 import { type CascadeStep } from "../types";
 import type { CascadeIssue } from "./cascade-validation";
@@ -55,6 +56,7 @@ export function CascadeStepCard({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
+  const owningAgentId = useOwningAgentId();
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const params = step.parameters ?? {};
@@ -180,6 +182,7 @@ export function CascadeStepCard({
           )}
         </label>
         <SecretKeyPicker
+          agentId={owningAgentId}
           value={params.apiKey ?? ""}
           onChange={(v) => setParam("apiKey", v)}
           readOnly={readOnly}
@@ -253,6 +256,7 @@ export function CascadeStepCard({
                       {sensitive ? (
                         <div className="flex-1">
                           <SecretKeyPicker
+                            agentId={owningAgentId}
                             value={v}
                             onChange={(val) => setParam(k, val)}
                             readOnly={readOnly}
