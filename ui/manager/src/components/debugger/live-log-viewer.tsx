@@ -18,6 +18,10 @@ import {
 const MAX_LOG_ENTRIES = 500;
 const SEED_LIMIT = 50;
 
+const ERROR_LEVELS = new Set(["ERROR", "SEVERE", "FATAL"]);
+/** Longest an unannounced error-count change waits before it is read out to assistive tech. */
+const ERROR_ANNOUNCE_MS = 3000;
+
 const LEVEL_COLORS: Record<string, string> = {
   ERROR: "text-destructive",
   WARN: "text-amber-500",
@@ -131,6 +135,34 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
 
   const shown = pausedSnapshot ?? logs;
 
+  // Screen readers: the log region itself is NOT live (a 500-line stream that
+  // announces every line is unusable). A separate status region reports the
+  // error count instead, throttled so a burst is read out once.
+  const errorCount = useMemo(
+    () => logs.filter((l) => ERROR_LEVELS.has((l.level ?? "").toUpperCase())).length,
+    [logs],
+  );
+  const [announcedErrors, setAnnouncedErrors] = useState(0);
+  // A trailing throttle, not a debounce: the timer is NOT restarted by further
+  // errors, so a sustained stream is still reported every ERROR_ANNOUNCE_MS
+  // rather than never. It reads the newest count when it fires.
+  const latestErrors = useRef(errorCount);
+  latestErrors.current = errorCount;
+  const announceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (errorCount === announcedErrors || announceTimer.current !== null) return;
+    announceTimer.current = setTimeout(() => {
+      announceTimer.current = null;
+      setAnnouncedErrors(latestErrors.current);
+    }, ERROR_ANNOUNCE_MS);
+  }, [errorCount, announcedErrors]);
+  useEffect(
+    () => () => {
+      if (announceTimer.current !== null) clearTimeout(announceTimer.current);
+    },
+    [],
+  );
+
   // Auto-scroll
   useEffect(() => {
     if (paused) return;
@@ -141,6 +173,13 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   }, [logs, paused]);
 
   const handleClear = useCallback(() => {
+    // Reset the announcement baseline too: a pending timer would otherwise
+    // write the old (already announced) count over the next new error.
+    if (announceTimer.current !== null) {
+      clearTimeout(announceTimer.current);
+      announceTimer.current = null;
+    }
+    setAnnouncedErrors(0);
     setLogs([]);
     setPausedSnapshot((s) => (s === null ? null : []));
   }, []);
@@ -249,10 +288,15 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
       </div>
 
       {/* Log entries */}
+      <div role="status" aria-live="polite" className="sr-only" data-testid="log-error-announcer">
+        {announcedErrors > 0
+          ? t("logViewer.errorsAnnounce", "{{count}} errors in the log", { count: announcedErrors })
+          : ""}
+      </div>
       <div
         ref={scrollRef}
         role="log"
-        aria-live="polite"
+        aria-live="off"
         aria-label={t("logViewer.logOutput", "Log output")}
         className="overflow-y-auto font-mono text-[10px] leading-relaxed"
         style={{ maxHeight: "35vh" }}

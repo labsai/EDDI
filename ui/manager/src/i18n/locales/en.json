@@ -245,7 +245,8 @@
   },
   "stream": {
     "live": "Live",
-    "reconnecting": "Reconnecting…"
+    "reconnecting": "Reconnecting…",
+    "disconnected": "Disconnected"
   },
   "agents": {
     "confirmDeleteDescription": "This action cannot be undone. The agent and all its data will be permanently removed.",
@@ -1620,7 +1621,7 @@
     "stepsCount": "{{count}} steps",
     "noConversationsFound": "No conversations found",
     "useConversationId": "Use ID: {{id}}",
-    "searchLogs": "Search logs…",
+    "searchLogs": "Search loaded entries…",
     "errors": "errors",
     "warnings": "warns",
     "infos": "info",
@@ -1632,7 +1633,17 @@
     "stateActive": "Active",
     "stateError": "Error",
     "stateEnded": "Ended",
-    "loadOlder": "Load older entries"
+    "loadOlder": "Load older entries",
+    "reconnect": "Reconnect",
+    "streamDisconnected": "Disconnected from the log stream.",
+    "errorCount_one": "{{count}} error",
+    "errorCount_other": "{{count}} errors",
+    "warnCount_one": "{{count}} warning",
+    "warnCount_other": "{{count}} warnings",
+    "copied": "Log entry copied",
+    "noMatches": "No loaded entries match your search.",
+    "noMatchesHint": "Search only covers the entries already loaded here. Load older entries or adjust the filters to look further back.",
+    "searchLogsLabel": "Search the loaded log entries"
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -1856,7 +1867,9 @@
       "reasonUncovered": "{{count}} loaded entry(ies) older than the checked window",
       "unverifiedTitle": "Not fully verified",
       "unverifiedDesc": "No signature was disproven, but not everything could be checked: {{reasons}}."
-    }
+    },
+    "agentsDeployed": "Deployed",
+    "agentsNotDeployed": "Not deployed"
   },
   "schedules": {
     "cronHelp": "5-field format: minute hour day-of-month month day-of-week",
@@ -1987,7 +2000,8 @@
     "systemManaged": "System",
     "systemManagedHint": "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
     "persistentConversationIdLocked": "Set when the schedule is created. The server keeps the conversation the fires have been appending to.",
-    "failedScheduleGone": "Schedule no longer exists"
+    "failedScheduleGone": "Schedule no longer exists",
+    "oneTimeHelpZone": "Fires once at this moment, then completes. Read as {{zone}} time (the Time Zone below)."
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -2080,7 +2094,9 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "logOutput": "Log output",
-    "noMatch": "No logs match your filter"
+    "noMatch": "No logs match your filter",
+    "errorsAnnounce_one": "{{count}} error in the log",
+    "errorsAnnounce_other": "{{count}} errors in the log"
   },
   "promptViewer": {
     "error": "Failed to load prompt data",
@@ -3294,7 +3310,9 @@
     "deleted": "Trigger deleted",
     "deleteTitle": "Delete Trigger",
     "deleteDesc": "Permanently delete the trigger for intent \"{{intent}}\"?",
-    "searchPlaceholder": "Filter by intent or agent ID..."
+    "searchPlaceholder": "Filter by intent or agent ID...",
+    "needIntent": "Enter an intent to save.",
+    "needAgent": "Choose at least one agent to save."
   },
   "capabilities": {
     "agentCount": "Agents",
@@ -3738,7 +3756,10 @@
     "resetSuccess": "Usage counters reset",
     "saveSuccess": "Quota saved",
     "tenantId": "Tenant ID",
-    "title": "Tenant Quotas"
+    "title": "Tenant Quotas",
+    "limitHintEmpty": "Leave empty or enter -1 for unlimited",
+    "invalidInteger": "Enter a whole number (0 or more), or leave empty for unlimited.",
+    "invalidAmount": "Enter an amount (0 or more), or leave empty for unlimited."
   },
   "secretPicker": {
     "clearVault": "Clear vault reference",
@@ -4991,7 +5012,9 @@
     "bindingCallerSuppliedBody": "The calling system hands over each user's own credential with the request and EDDI stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
     "confirmAuthChange": "Change how this connection authenticates?",
     "confirmAuthChangeDesc": "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. EDDI refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
-    "confirmAuthChangeAccept": "Change it"
+    "confirmAuthChangeAccept": "Change it",
+    "deleted": "Connection \"{{name}}\" deleted",
+    "confirmDeleteNamed": "Delete connection \"{{name}}\"?"
   },
   "extensionTypes": {
     "parser": "Input Parser",

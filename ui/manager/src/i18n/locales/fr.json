@@ -1594,7 +1594,7 @@
     "stepsCount": "{{count}} étapes",
     "noConversationsFound": "Aucune conversation trouvée",
     "useConversationId": "Utiliser l'ID: {{id}}",
-    "searchLogs": "Rechercher les logs…",
+    "searchLogs": "Rechercher dans les entrées chargées…",
     "errors": "erreurs",
     "warnings": "avertissements",
     "infos": "info",
@@ -1606,7 +1606,19 @@
     "stateActive": "Actif",
     "stateError": "Erreur",
     "stateEnded": "Terminé",
-    "loadOlder": "Charger les entrées plus anciennes"
+    "loadOlder": "Charger les entrées plus anciennes",
+    "reconnect": "Se reconnecter",
+    "streamDisconnected": "Déconnecté du flux de journaux.",
+    "errorCount_one": "{{count}} erreur",
+    "errorCount_many": "{{count}} d'erreurs",
+    "errorCount_other": "{{count}} erreurs",
+    "warnCount_one": "{{count}} avertissement",
+    "warnCount_many": "{{count}} d'avertissements",
+    "warnCount_other": "{{count}} avertissements",
+    "copied": "Entrée de journal copiée",
+    "noMatches": "Aucune entrée chargée ne correspond à votre recherche.",
+    "noMatchesHint": "La recherche ne porte que sur les entrées déjà chargées ici. Chargez des entrées plus anciennes ou ajustez les filtres pour remonter plus loin.",
+    "searchLogsLabel": "Rechercher dans les entrées de journal chargées"
   },
   "secrets": {
     "loadError": "Impossible de charger les secrets",
@@ -1797,7 +1809,9 @@
       "reasonUncovered": "{{count}} entrée(s) chargée(s) plus ancienne(s) que la plage vérifiée",
       "unverifiedTitle": "Pas entièrement vérifié",
       "unverifiedDesc": "Aucune signature n'a été invalidée, mais tout n'a pas pu être vérifié : {{reasons}}."
-    }
+    },
+    "agentsDeployed": "Déployés",
+    "agentsNotDeployed": "Non déployés"
   },
   "schedules": {
     "cronHelp": "Format à 5 champs : minute heure jour-du-mois mois jour-de-la-semaine",
@@ -1928,7 +1942,8 @@
     "systemManaged": "Système",
     "systemManagedHint": "Géré par EDDI (ingestion de base de connaissances, consolidation de la mémoire ou cadence d'équipe). Modifiez-le là où il est défini, pas ici.",
     "persistentConversationIdLocked": "Défini à la création de la planification. Le serveur conserve la conversation à laquelle les déclenchements ont été ajoutés.",
-    "failedScheduleGone": "La planification n'existe plus"
+    "failedScheduleGone": "La planification n'existe plus",
+    "oneTimeHelpZone": "Se déclenche une seule fois à cet instant, puis se termine. Interprété à l'heure de {{zone}} (le fuseau horaire ci-dessous)."
   },
   "cascadeTrace": {
     "title": "Cascade de modèles",
@@ -2021,7 +2036,10 @@
     "connected": "Connecté",
     "disconnected": "Déconnecté",
     "logOutput": "Sortie du journal",
-    "noMatch": "Aucun journal ne correspond à votre filtre"
+    "noMatch": "Aucun journal ne correspond à votre filtre",
+    "errorsAnnounce_one": "{{count}} erreur dans le journal",
+    "errorsAnnounce_many": "{{count}} d'erreurs dans le journal",
+    "errorsAnnounce_other": "{{count}} erreurs dans le journal"
   },
   "promptViewer": {
     "error": "Échec du chargement des données du prompt",
@@ -2423,7 +2441,8 @@
   },
   "stream": {
     "live": "En direct",
-    "reconnecting": "Reconnexion…"
+    "reconnecting": "Reconnexion…",
+    "disconnected": "Déconnecté"
   },
   "createOrWizard": {
     "title": "Nouveau {{type}}",
@@ -3110,7 +3129,9 @@
     "deleted": "Déclencheur supprimé",
     "deleteTitle": "Supprimer le déclencheur",
     "deleteDesc": "Supprimer définitivement le déclencheur pour l’intention « {{intent}} » ?",
-    "searchPlaceholder": "Filtrer par intention ou ID d’agent…"
+    "searchPlaceholder": "Filtrer par intention ou ID d’agent…",
+    "needIntent": "Saisissez une intention pour enregistrer.",
+    "needAgent": "Choisissez au moins un agent pour enregistrer."
   },
   "capabilities": {
     "agentCount": "Agents",
@@ -3738,7 +3759,10 @@
     "resetSuccess": "Compteurs d'usage réinitialisés",
     "saveSuccess": "Quota enregistré",
     "tenantId": "ID du locataire",
-    "title": "Quotas de locataire"
+    "title": "Quotas de locataire",
+    "limitHintEmpty": "Laissez vide ou saisissez -1 pour illimité",
+    "invalidInteger": "Saisissez un nombre entier (0 ou plus), ou laissez vide pour illimité.",
+    "invalidAmount": "Saisissez un montant (0 ou plus), ou laissez vide pour illimité."
   },
   "secretPicker": {
     "clearVault": "Effacer la référence vault",
@@ -5040,7 +5064,9 @@
     "bindingCallerSuppliedBody": "Le système appelant transmet l'identifiant de chaque utilisateur avec la requête et EDDI ne stocke rien. L'agent ne peut faire que ce que cet utilisateur peut faire sur la cible, et cette connexion est exclue de la découverte MCP et A2A.",
     "confirmAuthChange": "Changer la façon dont cette connexion s'authentifie ?",
     "confirmAuthChangeDesc": "Les comptes liés via cette connexion cesseront de se résoudre — une autorisation appartient au flux qui l'a produite. EDDI refuse le changement tant qu'un compte reste lié et indique combien ; déliez-les d'abord, ou créez une nouvelle connexion et laissez les gens lier celle-ci.",
-    "confirmAuthChangeAccept": "Changer"
+    "confirmAuthChangeAccept": "Changer",
+    "deleted": "Connexion \"{{name}}\" supprimée",
+    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?"
   },
   "extensionTypes": {
     "parser": "Analyseur d’entrée",

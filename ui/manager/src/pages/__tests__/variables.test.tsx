@@ -197,7 +197,7 @@ describe("VariablesPage", () => {
 
     await user.click(screen.getByTestId("delete-default-model"));
     expect(screen.getByText("Delete Variable")).toBeInTheDocument();
-    expect(screen.getByTestId("confirm-delete-button")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-dialog-confirm")).toBeInTheDocument();
   });
 
   it("filters variables when searching", async () => {

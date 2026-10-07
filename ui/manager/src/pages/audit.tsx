@@ -3,6 +3,9 @@ import { displayUserInput } from "@/lib/api/conversations";
 import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
+import { formatDateTimeWithZone, toIsoWithOffset } from "@/lib/date-format";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {
   ShieldCheck,
   Search,
@@ -115,29 +118,18 @@ function groupByConversation(entries: AuditEntry[]): Map<string, AuditEntry[]> {
   return groups;
 }
 
+/**
+ * Full date, seconds and UTC offset. Audit rows used to show a bare time of day,
+ * and conversation headers month/day/hour:minute: no year, no seconds, no zone,
+ * on a compliance screen where "when exactly" is the point. The ISO-8601 form
+ * is in each timestamp's title.
+ */
 function formatTimestamp(ts: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date(ts));
-  } catch {
-    return ts;
-  }
+  return formatDateTimeWithZone(ts);
 }
 
 function formatFullTimestamp(ts: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(ts));
-  } catch {
-    return ts;
-  }
+  return formatDateTimeWithZone(ts);
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -329,7 +321,7 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
             {entry.environment}
           </span>
         )}
-        <span>{formatTimestamp(entry.timestamp)}</span>
+        <span title={toIsoWithOffset(entry.timestamp)}>{formatTimestamp(entry.timestamp)}</span>
       </div>
 
       {/* Expandable detail sections */}
@@ -455,7 +447,7 @@ function ConversationGroup({
             {conversationId.length > 24 ? `${conversationId.slice(0, 12)}…${conversationId.slice(-8)}` : conversationId}
           </span>
           {firstTs && (
-            <span className="ms-2 text-xs text-muted-foreground">
+            <span className="ms-2 text-xs text-muted-foreground" title={toIsoWithOffset(firstTs)}>
               {formatFullTimestamp(firstTs)}
             </span>
           )}
@@ -538,15 +530,46 @@ export function AuditPage() {
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("audit"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
   // Default to agent mode (primary), conversation is secondary
-  const [mode, setMode] = useState<SearchMode>("agent");
-  const [conversationId, setConversationId] = useState("");
-  const [searchValue, setSearchValue] = useState("");
+  // The search lives in the URL (?mode=&agent=&version=&conversation=) so a
+  // reload keeps it and an audit view can be shared. Seeded once from the URL;
+  // the effect below writes changes back.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initial] = useState(() => {
+    const m: SearchMode = searchParams.get("mode") === "conversation" ? "conversation" : "agent";
+    const v = parseInt(searchParams.get("version") ?? "", 10);
+    return {
+      mode: m,
+      // `agentId` is the older name other pages still link with (the Workforce
+      // agent panel); `agent` wins and the URL is normalised to it on sync.
+      agent: searchParams.get("agent") ?? searchParams.get("agentId") ?? "",
+      version: searchParams.get("version") ?? "",
+      activeVersion: isNaN(v) ? undefined : v,
+      conversation: searchParams.get("conversation") ?? "",
+    };
+  });
+  const [mode, setMode] = useState<SearchMode>(initial.mode);
+  const [conversationId, setConversationId] = useState(initial.conversation);
+  const [searchValue, setSearchValue] = useState(initial.conversation);
 
   // Agent mode state — search triggers immediately on selection
-  const [selectedAgentId, setSelectedAgentId] = useState("");
-  const [agentVersion, setAgentVersion] = useState("");
-  const [activeAgentId, setActiveAgentId] = useState("");
-  const [activeAgentVersion, setActiveAgentVersion] = useState<number | undefined>();
+  const [selectedAgentId, setSelectedAgentId] = useState(initial.agent);
+  const [agentVersion, setAgentVersion] = useState(initial.version);
+  const [activeAgentId, setActiveAgentId] = useState(initial.agent);
+  const [activeAgentVersion, setActiveAgentVersion] = useState<number | undefined>(
+    initial.agent ? initial.activeVersion : undefined,
+  );
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (mode === "conversation") {
+      next.set("mode", "conversation");
+      if (searchValue) next.set("conversation", searchValue);
+    } else {
+      if (activeAgentId) next.set("agent", activeAgentId);
+      if (activeAgentId && agentVersion) next.set("version", agentVersion);
+    }
+    setSearchParams(next, { replace: true });
+  }, [mode, searchValue, activeAgentId, agentVersion, setSearchParams]);
 
   const [skip, setSkip] = useState(0);
 
@@ -744,13 +767,31 @@ export function AuditPage() {
   }, [entries, searchValue, activeAgentId]);
 
   // Data for dropdowns
+  // Every agent, not just the deployed ones: the ledger outlives deployments,
+  // so an agent that was undeployed last week still has an audit trail. The
+  // deployed ones are listed first, in their own group.
   const { data: deployedAgents } = useDeployedAgents();
+  const { data: allAgentPages } = useAllAgentDescriptors();
+  const agentOptions = useMemo(() => {
+    const deployedIds = new Set((deployedAgents ?? []).map((a) => a.id));
+    const all = allAgentPages ? groupAgentsByName(allAgentPages.pages.flat()) : [];
+    const known = new Set(all.map((a) => a.id));
+    // An agent in the URL that the list does not (yet) contain must stay selectable.
+    const extra = (deployedAgents ?? []).filter((a) => !known.has(a.id));
+    const merged = [...all, ...extra].map((a) => ({ id: a.id, name: a.name || a.id }));
+    const byName = (x: { name: string }, y: { name: string }) => x.name.localeCompare(y.name);
+    return {
+      deployed: merged.filter((a) => deployedIds.has(a.id)).sort(byName),
+      other: merged.filter((a) => !deployedIds.has(a.id)).sort(byName),
+      all: merged,
+    };
+  }, [deployedAgents, allAgentPages]);
 
   // Find agent name for display
   const activeAgentName = useMemo(() => {
-    if (!activeAgentId || !deployedAgents) return null;
-    return deployedAgents.find((a) => a.id === activeAgentId)?.name ?? null;
-  }, [activeAgentId, deployedAgents]);
+    if (!activeAgentId) return null;
+    return agentOptions.all.find((a) => a.id === activeAgentId)?.name ?? null;
+  }, [activeAgentId, agentOptions]);
 
   return (
     <div className="space-y-6" data-testid="audit-page">
@@ -834,11 +875,24 @@ export function AuditPage() {
                   data-testid="agent-input"
                 >
                   <option value="">{t("audit.selectAgent", "Select an agent…")}</option>
-                  {deployedAgents?.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name || agent.id}
-                    </option>
-                  ))}
+                  {agentOptions.deployed.length > 0 && (
+                    <optgroup label={t("audit.agentsDeployed", "Deployed")}>
+                      {agentOptions.deployed.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {agentOptions.other.length > 0 && (
+                    <optgroup label={t("audit.agentsNotDeployed", "Not deployed")}>
+                      {agentOptions.other.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
                 <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               </div>

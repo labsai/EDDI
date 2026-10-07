@@ -1580,7 +1580,7 @@
     "stepsCount": "{{count}} 단계",
     "noConversationsFound": "대화를 찾을 수 없습니다",
     "useConversationId": "ID 사용: {{id}}",
-    "searchLogs": "로그 검색…",
+    "searchLogs": "불러온 항목 검색…",
     "errors": "오류",
     "warnings": "경고",
     "infos": "정보",
@@ -1592,7 +1592,17 @@
     "stateActive": "활성",
     "stateError": "오류",
     "stateEnded": "종료",
-    "loadOlder": "이전 항목 불러오기"
+    "loadOlder": "이전 항목 불러오기",
+    "reconnect": "다시 연결",
+    "streamDisconnected": "로그 스트림 연결이 끊겼습니다.",
+    "errorCount_other": "오류 {{count}}개",
+    "warnCount_other": "경고 {{count}}개",
+    "copied": "로그 항목을 복사했습니다",
+    "noMatches": "불러온 항목 중 검색과 일치하는 항목이 없습니다.",
+    "noMatchesHint": "검색은 여기에 이미 불러온 항목만 대상으로 합니다. 더 이전 기록을 보려면 이전 항목을 불러오거나 필터를 조정하세요.",
+    "searchLogsLabel": "불러온 로그 항목 검색",
+    "errorCount_one": "오류 {{count}}개",
+    "warnCount_one": "경고 {{count}}개"
   },
   "secrets": {
     "loadError": "시크릿을 불러올 수 없습니다",
@@ -1775,7 +1785,9 @@
       "reasonUncovered": "확인 범위보다 오래된 로드된 항목 {{count}}개",
       "unverifiedTitle": "완전히 검증되지 않음",
       "unverifiedDesc": "반증된 서명은 없지만 모든 것을 확인하지는 못했습니다: {{reasons}}."
-    }
+    },
+    "agentsDeployed": "배포됨",
+    "agentsNotDeployed": "배포되지 않음"
   },
   "schedules": {
     "cronHelp": "5필드 형식: 분 시 일 월 요일",
@@ -1906,7 +1918,8 @@
     "systemManaged": "시스템",
     "systemManagedHint": "EDDI가 관리합니다(지식 베이스 수집, 메모리 통합 또는 팀 주기). 여기가 아니라 정의된 곳에서 변경하세요.",
     "persistentConversationIdLocked": "일정을 만들 때 설정됩니다. 서버는 실행이 계속 추가되어 온 대화를 유지합니다.",
-    "failedScheduleGone": "일정이 더 이상 존재하지 않습니다"
+    "failedScheduleGone": "일정이 더 이상 존재하지 않습니다",
+    "oneTimeHelpZone": "이 시각에 한 번만 실행된 후 완료됩니다. {{zone}} 시간으로 해석됩니다(아래의 시간대)."
   },
   "cascadeTrace": {
     "title": "모델 캐스케이드",
@@ -1999,7 +2012,9 @@
     "connected": "연결됨",
     "disconnected": "연결 끊김",
     "logOutput": "로그 출력",
-    "noMatch": "필터와 일치하는 로그가 없습니다"
+    "noMatch": "필터와 일치하는 로그가 없습니다",
+    "errorsAnnounce_one": "로그에 오류 {{count}}개",
+    "errorsAnnounce_other": "로그에 오류 {{count}}개"
   },
   "promptViewer": {
     "error": "프롬프트 데이터를 불러오지 못했습니다",
@@ -2401,7 +2416,8 @@
   },
   "stream": {
     "live": "실시간",
-    "reconnecting": "재연결 중…"
+    "reconnecting": "재연결 중…",
+    "disconnected": "연결 끊김"
   },
   "createOrWizard": {
     "title": "새 {{type}}",
@@ -3074,7 +3090,9 @@
     "deleted": "트리거가 삭제되었습니다",
     "deleteTitle": "트리거 삭제",
     "deleteDesc": "인텐트 「{{intent}}」의 트리거를 영구 삭제하시겠습니까?",
-    "searchPlaceholder": "인텐트 또는 에이전트 ID로 필터링…"
+    "searchPlaceholder": "인텐트 또는 에이전트 ID로 필터링…",
+    "needIntent": "저장하려면 인텐트를 입력하세요.",
+    "needAgent": "저장하려면 에이전트를 하나 이상 선택하세요."
   },
   "capabilities": {
     "agentCount": "에이전트",
@@ -3697,7 +3715,10 @@
     "resetSuccess": "사용량 카운터가 재설정되었습니다",
     "saveSuccess": "할당량이 저장되었습니다",
     "tenantId": "테넌트 ID",
-    "title": "테넌트 할당량"
+    "title": "테넌트 할당량",
+    "limitHintEmpty": "비워 두거나 -1을 입력하면 무제한",
+    "invalidInteger": "0 이상의 정수를 입력하거나 비워 두면 무제한입니다.",
+    "invalidAmount": "0 이상의 금액을 입력하거나 비워 두면 무제한입니다."
   },
   "secretPicker": {
     "clearVault": "볼트 참조 지우기",
@@ -4991,7 +5012,9 @@
     "bindingCallerSuppliedBody": "호출 시스템이 요청과 함께 각 사용자의 자격 증명을 전달하며 EDDI는 아무것도 저장하지 않습니다. 에이전트는 대상 시스템에서 그 사용자가 할 수 있는 일만 할 수 있고, 이 연결은 MCP 및 A2A 검색에서 제외됩니다.",
     "confirmAuthChange": "이 연결의 인증 방식을 변경할까요?",
     "confirmAuthChangeDesc": "이 연결을 통해 연동된 계정은 더 이상 확인되지 않습니다. 권한 부여는 그것을 만든 흐름에 속하기 때문입니다. 계정이 하나라도 연동되어 있는 동안 EDDI는 변경을 거부하고 그 수를 알려줍니다. 먼저 연동을 해제하거나, 새 연결을 만들어 그쪽에 연동하게 하세요.",
-    "confirmAuthChangeAccept": "변경"
+    "confirmAuthChangeAccept": "변경",
+    "deleted": "연결 \"{{name}}\"을(를) 삭제했습니다",
+    "confirmDeleteNamed": "연결 \"{{name}}\"을(를) 삭제하시겠습니까?"
   },
   "extensionTypes": {
     "parser": "입력 파서",

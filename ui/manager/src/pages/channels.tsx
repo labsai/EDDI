@@ -21,6 +21,8 @@ import {
   useDuplicateChannel,
 } from "@/hooks/use-channels";
 import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 
 export function ChannelsPage() {
   const { t } = useTranslation();
@@ -60,11 +62,16 @@ export function ChannelsPage() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    await deleteMutation.mutateAsync({
-      id: deleteTarget.id,
-      version: deleteTarget.version,
-    });
-    setDeleteTarget(null);
+    try {
+      await deleteMutation.mutateAsync({
+        id: deleteTarget.id,
+        version: deleteTarget.version,
+      });
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setDeleteTarget(null);
+    }
   };
 
   const handleDuplicate = (id: string, version: number) => {
@@ -249,7 +256,7 @@ export function ChannelsPage() {
         onOpenChange={() => setDeleteTarget(null)}
         title={t("channels.confirmDelete", "Delete channel?")}
         description={t("channels.confirmDeleteDesc", "This will permanently remove this channel integration.")}
-        onConfirm={confirmDelete}
+        onConfirm={() => void confirmDelete()}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         isPending={deleteMutation.isPending}
