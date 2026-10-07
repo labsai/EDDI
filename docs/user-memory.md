@@ -260,14 +260,16 @@ curl "http://localhost:7070/usermemorystore/memories/user-123/visible?agentId=ag
 
 | Tool | Role | Description |
 |---|---|---|
-| `list_user_memories` | `eddi-viewer` | List all entries for a user |
-| `get_visible_memories` | `eddi-viewer` | Get entries visible to a specific agent |
-| `search_user_memories` | `eddi-viewer` | Search by keyword |
-| `get_memory_by_key` | `eddi-viewer` | Look up by key name |
-| `count_user_memories` | `eddi-viewer` | Count entries |
+| `list_user_memories` | conversation tier¹ | List all entries for a user |
+| `get_visible_memories` | conversation tier¹ | Get entries visible to a specific agent |
+| `search_user_memories` | conversation tier¹ | Search by keyword |
+| `get_memory_by_key` | conversation tier¹ | Look up by key name |
+| `count_user_memories` | conversation tier¹ | Count entries |
 | `upsert_user_memory` | `eddi-admin` | Insert or update an entry (`groupIds` — comma-separated — for `group` visibility) |
 | `delete_user_memory` | `eddi-admin` | Delete a specific entry |
 | `delete_all_user_memories` | `eddi-admin` | Delete all memories except the `_gdpr_` bookkeeping entries (requires `CONFIRM`) |
+
+¹ Any of `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`; a non-admin reads only their own `userId`. See [MCP Server → Role Mapping](mcp-server.md#role-mapping).
 
 ### GDPR Compliance
 

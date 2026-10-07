@@ -299,15 +299,18 @@ class McpAdminToolsExtendedTest {
     }
 
     @Test
-    void readWorkflow_nullVersion_defaultsToOne() throws IOException {
+    void readWorkflow_nullVersion_defaultsToLatest() throws IOException {
+        // "default: latest" — the tool used to read version 1 whatever the workflow
+        // had become.
         var config = new WorkflowConfiguration();
         config.setWorkflowSteps(List.of());
-        when(workflowStore.readWorkflow("wf1", 1)).thenReturn(config);
+        when(workflowStore.getCurrentVersion("wf1")).thenReturn(4);
+        when(workflowStore.readWorkflow("wf1", 4)).thenReturn(config);
         when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         tools.readWorkflow("wf1", null);
 
-        verify(workflowStore).readWorkflow("wf1", 1);
+        verify(workflowStore).readWorkflow("wf1", 4);
     }
 
     @Test
@@ -427,13 +430,14 @@ class McpAdminToolsExtendedTest {
     }
 
     @Test
-    void readResource_nullVersion_defaultsToOne() throws IOException {
-        when(behaviorStore.readRuleSet(RESOURCE_ID, 1)).thenReturn(new RuleSetConfiguration());
+    void readResource_nullVersion_defaultsToLatest() throws IOException {
+        when(behaviorStore.getCurrentVersion(RESOURCE_ID)).thenReturn(3);
+        when(behaviorStore.readRuleSet(RESOURCE_ID, 3)).thenReturn(new RuleSetConfiguration());
         when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         tools.readResource("behavior", RESOURCE_ID, null);
 
-        verify(behaviorStore).readRuleSet(RESOURCE_ID, 1);
+        verify(behaviorStore).readRuleSet(RESOURCE_ID, 3);
     }
 
     // ==================== updateAgent ====================
@@ -833,15 +837,16 @@ class McpAdminToolsExtendedTest {
     }
 
     @Test
-    void listAgentResources_nullVersion_defaultsToOne() throws IOException {
+    void listAgentResources_nullVersion_defaultsToLatest() throws IOException {
         var agentConfig = new AgentConfiguration();
         agentConfig.setWorkflows(List.of());
-        when(agentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
+        when(agentStore.getCurrentVersion(AGENT_ID)).thenReturn(2);
+        when(agentStore.readAgent(AGENT_ID, 2)).thenReturn(agentConfig);
         when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         tools.listAgentResources(AGENT_ID, null);
 
-        verify(agentStore).readAgent(AGENT_ID, 1);
+        verify(agentStore).readAgent(AGENT_ID, 2);
     }
 
     @Test

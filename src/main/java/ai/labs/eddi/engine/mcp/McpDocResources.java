@@ -5,13 +5,20 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.docs.DocsService;
+import io.quarkiverse.mcp.server.JsonRpcErrorCodes;
+import io.quarkiverse.mcp.server.McpException;
 import io.quarkiverse.mcp.server.Resource;
 import io.quarkiverse.mcp.server.ResourceTemplate;
 import io.quarkiverse.mcp.server.ResourceTemplateArg;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.util.List;
+
+import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
 
 /**
  * Expose EDDI documentation as MCP resources.
@@ -25,6 +32,11 @@ import java.util.List;
  * <em>tools</em> ({@link McpDocTools}) — resources only reach clients that ask
  * for them, and agentic MCP clients (EDDI's own included) never do, so this
  * surface alone reached desktop clients and no agent.
+ * <p>
+ * Guarded by the same role set as {@link McpDocTools} and {@code IRestDocs}
+ * ({@link McpRoles#DOCS}): the pages are the same, so the door must be too. A
+ * resource has no {@code isError} result, so a refusal is a JSON-RPC error with
+ * {@link JsonRpcErrorCodes#SECURITY_ERROR}.
  *
  * @author ginccc
  */
@@ -32,10 +44,23 @@ import java.util.List;
 public class McpDocResources {
 
     private final DocsService docsService;
+    private final SecurityIdentity identity;
+    private final boolean authEnabled;
 
     @Inject
-    public McpDocResources(DocsService docsService) {
+    public McpDocResources(DocsService docsService, SecurityIdentity identity,
+            @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.docsService = docsService;
+        this.identity = identity;
+        this.authEnabled = authEnabled;
+    }
+
+    private void requireDocsRole() {
+        try {
+            requireAnyRole(identity, authEnabled, McpRoles.DOCS);
+        } catch (ForbiddenException e) {
+            throw new McpException(e.getMessage(), JsonRpcErrorCodes.SECURITY_ERROR);
+        }
     }
 
     /**
@@ -48,6 +73,7 @@ public class McpDocResources {
     @ResourceTemplate(uriTemplate = "eddi://docs/{name}", name = "eddi-doc", description = "Read an EDDI documentation page by name. "
             + "Pass the doc name without .md extension, " + "e.g. 'getting-started', 'architecture', 'langchain'")
     public String readDoc(@ResourceTemplateArg(name = "name") String name) {
+        requireDocsRole();
         String content = docsService.readDoc(name);
         if (content != null) {
             return content;
@@ -70,8 +96,11 @@ public class McpDocResources {
      */
     @Resource(uri = "eddi://docs/index", name = "eddi-docs-index", description = "List of all available EDDI documentation pages")
     public String listDocs() {
+        requireDocsRole();
         if (!docsService.isAvailable()) {
-            return "Docs directory not found: " + docsService.docsDirectory();
+            // The server-side directory is deliberately not named: it is deployment
+            // layout, not something a reader of the index can act on.
+            return "No documentation is available on this deployment.";
         }
         List<String> docs = docsService.listDocs();
         var sb = new StringBuilder();
