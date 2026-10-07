@@ -241,3 +241,49 @@ describe("self-start labeling", () => {
     expect(hits[0]?.target).toBe("agent");
   });
 });
+
+/**
+ * `POST /agentstore/agents/{id}/cascade` is the one-call form of the repoint hop
+ * `updateResourceUri` is, and closes the same self-ungating loop if aimed at the
+ * operator's own agent (repoint its workflow at an llm document carrying a
+ * permissive Task.toolApprovals, redeploy itself — all in one approved call). The
+ * agent id is a path segment, so the existing substring test covers it; this pins
+ * that it keeps doing so for the cascade's own path and body shape.
+ */
+describe("the cascade endpoint aimed at the operator's own agent", () => {
+  const cascadeBody = JSON.stringify({
+    resourceMappings: [
+      {
+        oldUri: "eddi://ai.labs.llm/llmstore/llms/112233445566778899aabbcc?version=1",
+        newUri: "eddi://ai.labs.llm/llmstore/llms/112233445566778899aabbcc?version=2",
+      },
+    ],
+    redeploy: true,
+  });
+  const cascade = (agentId: string) =>
+    call({
+      toolName: "cascadeAgentChanges",
+      requestPreview: {
+        method: "POST",
+        uri: `https://eddi.example/agentstore/agents/${agentId}/cascade?version=3`,
+        queryParams: { version: "3" },
+        headers: {},
+        body: cascadeBody,
+        bodyTruncated: false,
+      },
+    });
+
+  it("is refused, so the approval cannot be given", () => {
+    expect(findSelfTargetedCalls([cascade(OPERATOR_ID)], OPERATOR_ID)).toEqual([
+      { callId: "c1", agentId: OPERATOR_ID, target: "agent" },
+    ]);
+  });
+
+  it("is refused when the operator's id is spelled in a different case", () => {
+    expect(findSelfTargetedCalls([cascade(OPERATOR_ID.toUpperCase())], OPERATOR_ID)).toHaveLength(1);
+  });
+
+  it("is allowed against any other agent", () => {
+    expect(findSelfTargetedCalls([cascade(OTHER_ID)], OPERATOR_ID)).toEqual([]);
+  });
+});

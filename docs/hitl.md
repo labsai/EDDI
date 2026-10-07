@@ -374,6 +374,17 @@ A **REJECTED** call is not executed; instead the LLM receives a structured rejec
 
 `GET /agents/{id}/approval-status` returns a `TOOL_CALL` `pauseDetails` object (computed at read time; see the [`pauseDetails` shape](#pausedetails-shape) reference above for the full JSON). Its `calls[].arguments` is **always** the redacted, size-capped value (`argumentsRedacted`) — the raw arguments never appear. `executedUngatedCalls` names ungated calls in the same batch that already ran (see decision 4). `outcomeUnknown` lists callIds with an `EXECUTING` journal entry — a prior approval that crashed mid-execution — and is empty in the common case.
 
+### Batching — several calls, one pause
+
+The gate classifies **every tool call a model emits in one message** together (`ToolLoopRunner`, the `toolApprovalGate.classify` over the whole `toolExecutionRequests()` list). All the gated ones pause as **one batch**: one `AWAITING_HUMAN` state, one `pauseDetails.calls[]`, one decision (with a verdict per call if the reviewer wants one). Ungated calls in the same message execute immediately. Nothing is provider-specific here — the engine batches whatever the model emits; whether a given model emits several calls in one turn at all is up to the model, and a prompt that asks for it (the Platform Operator's does) is the lever.
+
+Two consequences when you design for fewer approvals:
+
+- **Independent calls can share a pause.** Writes that do not depend on each other's results can be issued together and approved in one sitting. One pause counts once toward `maxPausesPerTurn`, however many calls it holds, and the strictest governing rule applies to the whole batch (see [Per-tool approval rules](#per-tool-approval-rules)).
+- **Dependent calls cannot.** Approval binds to the resolved request ([below](#request-pinning--approval-binds-to-a-request-not-a-tool-name)), so a call whose arguments depend on an earlier call's *result* — a version number or id it returns — can only be proposed once that result exists. Approved calls run in the order the model emitted them, so a batch is for independent work, not for pipelining.
+
+The Platform Operator uses this for multi-step changes: it lists the whole plan first, sends the independent writes as parallel tool calls, and lands the edit with a single `POST /agentstore/agents/{id}/cascade` ([see](deployment-management-of-agents.md#landing-resource-changes-in-one-pass)) instead of separate repoint and deploy calls — connecting a knowledge base takes two approvals instead of five.
+
 ### Request pinning — approval binds to a request, not a tool name
 
 For an `http`-sourced call, the tool name alone tells an approver little: it comes from the endpoint's `operationId` (or a generated slug) and says nothing about which resource is targeted or with what body. So at gate time each gated httpcall tool is **resolved** — `IApiCallExecutor.resolve` builds the method, URL, query, headers and body it would send, without sending it — and both a **redacted preview** and a **SHA-256 fingerprint** of that resolved request are persisted on the pause (`PendingToolCall.requestPreview`, `.requestFingerprint`). The preview is what an approver should actually look at, not the raw tool arguments.

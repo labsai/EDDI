@@ -453,3 +453,78 @@ describe("RequestPreview — whole-document PUT diff", () => {
     expect(screen.queryByTestId("request-preview-diff-unavailable-c1")).not.toBeInTheDocument();
   });
 });
+
+describe("RequestPreview — cascade summary", () => {
+  const LLM = "112233445566778899aabbcc";
+  const WF = "ff00112233445566aa770011";
+  const cascade = (body: unknown, overrides: Partial<ResolvedRequestPreview> = {}) =>
+    preview({
+      uri: "https://eddi.example/agentstore/agents/68f1c2a9b34d5e6f70819a2b/cascade?version=4",
+      queryParams: { version: "4" },
+      body: JSON.stringify(body),
+      ...overrides,
+    });
+
+  it("lists each resource as old -> new and says it will redeploy, and where", () => {
+    renderWithProviders(
+      <RequestPreview
+        preview={cascade({
+          resourceMappings: [
+            {
+              oldUri: `eddi://ai.labs.llm/llmstore/llms/${LLM}?version=1`,
+              newUri: `eddi://ai.labs.llm/llmstore/llms/${LLM}?version=2`,
+            },
+            {
+              oldUri: `eddi://ai.labs.workflow/workflowstore/workflows/${WF}?version=3`,
+              newUri: `eddi://ai.labs.workflow/workflowstore/workflows/${WF}?version=4`,
+            },
+          ],
+          redeploy: true,
+          environment: "test",
+          compatible: false,
+        })}
+        pinned
+        callId="c1"
+      />,
+    );
+
+    const summary = screen.getByTestId("cascade-summary-c1");
+    expect(summary).toHaveTextContent("agent 68f1c2a9b34d5e6f70819a2b");
+    const rows = within(screen.getByTestId("cascade-mappings-c1")).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent(`llm${LLM}v1 → v2`);
+    expect(rows[1]).toHaveTextContent(`workflow${WF}v3 → v4`);
+    expect(screen.getByTestId("cascade-redeploy-c1")).toHaveTextContent("Will redeploy to test");
+    expect(screen.getByTestId("cascade-compatible-c1")).toHaveTextContent("breaking change");
+    // The raw body is still there to read in full — the summary never replaces it.
+    expect(screen.getByTestId("request-preview-body-c1")).toBeInTheDocument();
+  });
+
+  it("states when it will NOT redeploy", () => {
+    renderWithProviders(
+      <RequestPreview
+        preview={cascade({
+          resourceMappings: [
+            {
+              oldUri: `eddi://ai.labs.llm/llmstore/llms/${LLM}?version=1`,
+              newUri: `eddi://ai.labs.llm/llmstore/llms/${LLM}?version=2`,
+            },
+          ],
+        })}
+        pinned
+        callId="c1"
+      />,
+    );
+    expect(screen.getByTestId("cascade-redeploy-c1")).toHaveTextContent("Will not redeploy");
+  });
+
+  it("shows no summary for a truncated body, and no summary on any other request", () => {
+    renderWithProviders(<RequestPreview preview={cascade({ resourceMappings: [] }, { bodyTruncated: true })} pinned callId="c1" />);
+    expect(screen.queryByTestId("cascade-summary-c1")).not.toBeInTheDocument();
+  });
+
+  it("is not shown for an ordinary POST", () => {
+    renderWithProviders(<RequestPreview preview={preview({ body: '{"name":"foo"}' })} pinned callId="c2" />);
+    expect(screen.queryByTestId("cascade-summary-c2")).not.toBeInTheDocument();
+  });
+});

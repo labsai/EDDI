@@ -742,3 +742,112 @@ describe("test-drive: talking to another agent", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * Batched changes: plan first, batch the independent writes in one turn, land the
+ * edit with ONE cascade call. These pin the SHAPE of the guidance — the plan and
+ * the approval count a knowledge-base binding is told to produce — because the
+ * operator's behaviour is exactly what its prompt says, and the whole point of
+ * the change is fewer approvals.
+ */
+describe("batched changes: the plan shape the operator is taught", () => {
+  const full = buildOperatorPromptBody(endpointsForScope("read_write"));
+
+  /** The section as it is delimited in the body: from its heading to the next blank line. */
+  const section = (body: string) => {
+    const start = body.indexOf("Planning and batching changes:");
+    expect(body, "batching section missing").toContain("Planning and batching changes:");
+    const end = body.indexOf("\n\n", start);
+    return body.slice(start, end === -1 ? undefined : end);
+  };
+
+  it("tells it to list the whole plan before the first gated call, and to wait for agreement", () => {
+    const text = section(full);
+    expect(text).toContain("set out the WHOLE plan");
+    expect(text).toContain("before the\n  first gated call");
+    expect(text).toContain("how many approvals the user should expect");
+    // Composes with the read-only/propose-first rule: a plan is a proposal, and
+    // agreement is what releases the first write.
+    expect(text).toContain("wait for the\n  user's agreement");
+    expect(text).toContain("a plan is a proposal");
+  });
+
+  it("tells it to issue independent writes as parallel tool calls in the same turn", () => {
+    const text = section(full);
+    expect(text).toContain("do not depend on each other's results");
+    expect(text).toContain("parallel tool calls in the same turn");
+    expect(text).toContain("reviewed in one approval");
+  });
+
+  it("forbids batching a call that needs another call's result, and guessing versions to do so", () => {
+    // Approval is bound to the exact resolved request, so a dependent call cannot
+    // be pre-approved. An operator that guesses a version to batch it would burn
+    // the approval on a request that is wrong, or worse, right by accident.
+    const text = section(full);
+    expect(text).toContain("RESULT");
+    expect(text).toContain("cannot go in the same batch");
+    expect(text).toContain("Never guess a\n  version number");
+  });
+
+  it("says what to do when one call in a batch is rejected, and when a write fails", () => {
+    const text = section(full);
+    expect(text).toContain("If one call in a batch is rejected");
+    expect(text).toContain("say why before trying anything");
+  });
+
+  it("is present for any write-capable operator and absent for a read-only one", () => {
+    expect(buildOperatorPromptBody(WITH_A_WRITE)).toContain("Planning and batching changes:");
+    expect(buildOperatorPromptBody(READ_ENDPOINTS)).not.toContain("Planning and batching changes:");
+    expect(defaultOperatorPromptBody("read_only")).not.toContain("parallel tool calls");
+  });
+
+  describe("with the cascade tool granted", () => {
+    const text = section(full);
+
+    it("teaches ONE cascade call instead of separate repoint and deploy calls", () => {
+      expect(text).toContain("Landing an edit is ONE call");
+      expect(text).toContain("cascadeAgentChanges");
+      expect(text).toContain("instead of\n  separate workflow-repoint, agent-repoint and deploy calls");
+      expect(text).toContain("resourceMappings");
+      expect(text).toContain("redeploy");
+      expect(text).toContain("compatible");
+    });
+
+    it("teaches the workflow pair, so a workflow patched in the same plan is not overwritten", () => {
+      expect(text).toContain("add the pair for the workflow\n  itself");
+    });
+
+    it("tells it a 400 wrote nothing and to re-read rather than retry blind", () => {
+      expect(text).toContain("NOTHING was\n  written");
+      expect(text).toContain("re-read the agent");
+    });
+
+    it("plans a knowledge-base binding as TWO approvals: parallel config + workflow writes, then one cascade", () => {
+      // Before this, the same binding was five single-call approvals: llm write,
+      // workflow write, workflow repoint, agent repoint, deploy.
+      expect(text).toContain("Connecting a knowledge base is also two");
+      expect(text).toContain("batch 1 is the LLM\n  config write");
+      expect(text).toContain("together with the workflow write");
+      expect(text).toContain("as parallel calls in one turn");
+      expect(text).toContain("batch 2 is one\n  cascade carrying both new versions plus the redeploy");
+      expect(text).toContain('Say "2 approvals" up');
+    });
+
+    it("is not claimed when the cascade endpoint is not granted", () => {
+      const without = endpointsForScope("read_write").filter((e) => e !== "POST /agentstore/agents/{id}/cascade");
+      const body = buildOperatorPromptBody(without);
+      // The generic batching rules stay; the promise of a tool that was not
+      // generated does not — the module's rule that the prompt never describes a
+      // capability the agent lacks.
+      expect(body).toContain("Planning and batching changes:");
+      expect(body).not.toContain("cascadeAgentChanges");
+      expect(body).not.toContain("Landing an edit is ONE call");
+    });
+  });
+
+  it("contains no braces, which the runtime Qute templating would parse as expressions", () => {
+    // The body is rendered as a template on every turn. `{oldUri, newUri}` would
+    // be read as a variable reference and render empty or fail.
+    expect(section(full)).not.toMatch(/\{/);
+  });
+});

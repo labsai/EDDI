@@ -4567,6 +4567,13 @@
         "unchecked": "O corpo era demasiado longo para analisar concessões de capacidade — leia-o na íntegra antes de aprovar.",
         "inlineCredential": "Esta solicitação incorpora o que parece ser uma credencial literal em vez de uma referência ${vault:…}. Um segredo escrito diretamente fica em texto simples e não pode ser rotacionado pelo cofre — rejeite e peça a referência do cofre."
       },
+      "cascade": {
+        "heading": "Alterações de recursos aplicadas ao agente {{agentId}} (a partir da versão {{version}})",
+        "redeploy": "Será reimplantado em {{environment}} e aguardará o resultado. A versão substituída continua implantada.",
+        "noRedeploy": "Não será reimplantado: a nova versão do agente é gravada, mas só entra em produção depois de implantada.",
+        "compatible": "Marcada como compatível: as conversas em andamento passam para a nova versão no próximo turno.",
+        "breaking": "Marcada como alteração incompatível: as conversas em andamento permanecem na versão atual."
+      },
       "blockedSelfTarget": "Um agente não pode alterar a sua própria definição, e este pedido visa o próprio agente do operador ({{agentId}}). Enquanto estiver presente, todo o lote não pode ser aprovado — rejeite-o e faça esta alteração a partir da página desse agente.",
       "blockedSelfConversation": "Um agente não pode enviar uma mensagem para a conversa em que está a ser executado, e este pedido visa esta ({{agentId}}). Escreveria o seu próprio texto como se uma pessoa o tivesse dito. Enquanto estiver presente, todo o lote não pode ser aprovado: rejeite-o.",
       "blockedGateCarrying": "Esta solicitação grava uma configuração de LLM que define o seu próprio portão de aprovação (toolApprovals), o que substituiria o portão que a está a rever. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e altere o portão a partir da página do próprio agente.",

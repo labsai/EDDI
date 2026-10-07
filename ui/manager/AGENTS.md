@@ -249,6 +249,28 @@ what it finds. Off by default. Worth knowing before touching it:
   **Backend floor: operator activation requires EDDI 6.2.0+** — the allow-list
   includes `GET /administration/docs{,/{name}}` (`@since 6.2.0`), and
   `findMissingEndpoints` refuses activation when the spec lacks an entry.
+- **Multi-step changes cost two approvals, not one per step.** Two levers, both
+  stated to the operator by `buildBatchingSection` in `system-prompt.ts` (a
+  clearly delimited block — keep it that way): (1) it lists the WHOLE plan before
+  the first gated call and waits for agreement (a plan is a *proposal*, which is
+  what keeps it compatible with the "check/look/verify is read-only" rule), then
+  issues independent writes as **parallel tool calls in one turn** — the backend
+  gate classifies a whole model message as one batch and pauses it once
+  (`docs/hitl.md` → "Batching"), and `approval-banner.tsx` already decides it call
+  by call (`requireExplicitPerCall`); (2) it lands an edit with ONE
+  `POST /agentstore/agents/{id}/cascade` (`cascadeAgentChanges`) instead of
+  separate workflow-repoint, agent-repoint and deploy calls. A call whose
+  arguments need an earlier call's *result* (a version number) cannot be batched
+  with it — approval binds to the exact resolved request ("request pinning"). The
+  cascade is in `WRITE_ENDPOINTS` because its body is URI pairs only, so it cannot
+  carry `hitlConfig`; aimed at the operator's own agent it is the same
+  self-ungating hinge as `updateResourceUri`, and `self-guard.ts` covers it for
+  the same reason (the agent id is a path segment). `cascade-preview.ts` /
+  `cascade-summary.tsx` render a gated cascade as `llm <id> v1 → v2` plus
+  "will redeploy to <env>"; the raw body stays below it. Knowledge-base binding:
+  batch 1 = LLM config write + workflow write (parallel), batch 2 = one cascade
+  carrying both new versions plus the redeploy. (Once the credential-safe JSON
+  Patch endpoints land, batch 1 becomes two PATCH calls; the shape is unchanged.)
 - **Config is one atomic JSON blob** in the `platform.operator` global variable.
   Activation writes several values that must land together and the variable
   store has no transaction.
