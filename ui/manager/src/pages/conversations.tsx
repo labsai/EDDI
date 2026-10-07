@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   MessageSquare,
   Search,
@@ -60,20 +60,77 @@ const STATE_FILTER_VALUES: (ConversationState | "ALL")[] = [
 
 const SEARCH_DEBOUNCE_MS = 300;
 
+/** Agents fetched to resolve names on the rows (the same bound triggers.tsx uses). */
+const AGENT_NAME_LOOKUP_LIMIT = 1000;
+
 /** Page-size options offered to the user (backend clamps `limit` to 100). */
 const PAGE_SIZE_OPTIONS = [25, 50, MAX_CONVERSATION_LIMIT];
 
 export function ConversationsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
+  const location = useLocation();
+  // Filters and paging live in the URL so a reload, a shared link and the
+  // Back link on the detail page all return to the same filtered list.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSearch = searchParams.get("q") ?? "";
+  const stateParam = searchParams.get("state");
+  const stateFilter: ConversationState | "ALL" =
+    stateParam && (STATE_FILTER_VALUES as string[]).includes(stateParam)
+      ? (stateParam as ConversationState)
+      : "ALL";
+  const agentFilter = searchParams.get("agent") ?? "";
+  const versionParam = Number(searchParams.get("version"));
+  const versionFilter =
+    Number.isInteger(versionParam) && versionParam > 0 ? versionParam : undefined;
+  const sizeParam = Number(searchParams.get("size"));
+  const pageSize = PAGE_SIZE_OPTIONS.includes(sizeParam) ? sizeParam : 50;
+  const pageParam = Number(searchParams.get("page"));
+  // The URL shows a 1-based page; `page` maps directly to the backend `index`
+  // (a page index, not a row offset); `pageSize` maps to `limit`.
+  const page = Number.isInteger(pageParam) && pageParam > 1 ? pageParam - 1 : 0;
+
+  /** Patch the query string; null/empty removes a key. Replaces history so
+   *  typing and paging do not pile up Back entries. */
+  const updateParams = useCallback(
+    (patch: Record<string, string | null>) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const [k, v] of Object.entries(patch)) {
+            if (v === null || v === "") next.delete(k);
+            else next.set(k, v);
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+  // Any change to the query criteria resets to the first page, otherwise a
+  // stale high page index yields an empty result on the new criteria.
+  const setStateFilter = (v: ConversationState | "ALL") =>
+    updateParams({ state: v === "ALL" ? null : v, page: null });
+  const setAgentFilter = (v: string) =>
+    updateParams({ agent: v, version: null, page: null });
+  const setVersionFilter = (v: number | undefined) =>
+    updateParams({ version: v ? String(v) : null, page: null });
+  const setPageSize = (v: number) => updateParams({ size: String(v), page: null });
+  const setPage = (v: number) => updateParams({ page: v > 0 ? String(v + 1) : null });
+
+  const [search, setSearch] = useState(urlSearch);
   // The search is a server-side filter: without a debounce every keystroke was
   // a list request (each of which walks descriptors and loads their memory
   // snapshots on the backend).
   const debouncedSearch = useDebounce(search.trim(), SEARCH_DEBOUNCE_MS);
+  useEffect(() => {
+    if (debouncedSearch !== urlSearch) updateParams({ q: debouncedSearch, page: null });
+    // Only the debounced value drives the URL; urlSearch is its mirror.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("conversations"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
-  const [stateFilter, setStateFilter] = useState<ConversationState | "ALL">("ALL");
 
   // i18n labels for conversation states
   const stateLabels: Record<ConversationState | "ALL", string> = {
@@ -88,25 +145,8 @@ export function ConversationsPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deletePermanent, setDeletePermanent] = useState(false);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("conversations"));
-
-  // Filters + pagination. `page` maps directly to the backend `index` (a page
-  // index, not a row offset); `pageSize` maps to `limit`.
-  const [agentFilter, setAgentFilter] = useState("");
-  const [versionFilter, setVersionFilter] = useState<number | undefined>(undefined);
-  const [pageSize, setPageSize] = useState(50);
-  const [page, setPage] = useState(0);
-
-  // Any change to the query criteria must reset to the first page, otherwise a
-  // stale high page index yields an empty result on the new criteria.
-  useEffect(() => {
-    setPage(0);
-  }, [debouncedSearch, stateFilter, agentFilter, versionFilter, pageSize]);
-
-  // Reset the version sub-filter whenever the agent changes (versions belong to
-  // a specific agent).
-  useEffect(() => {
-    setVersionFilter(undefined);
-  }, [agentFilter]);
+  // Where the detail page sends its Back link: this very list, filters intact.
+  const listState = { from: location.pathname + location.search };
 
   const { data: versions } = useAgentVersions(agentFilter);
   // Dedupe by version number — one <option> per distinct version.
@@ -124,7 +164,12 @@ export function ConversationsPage() {
       stateFilter === "ALL" ? undefined : stateFilter,
       versionFilter
     );
-  const { data: agents = [] } = useAgentDescriptors(50);
+  // Enough agents to name every row; the listing only carries agent ids.
+  const { data: agents = [] } = useAgentDescriptors(AGENT_NAME_LOOKUP_LIMIT);
+  const agentNames = useMemo(
+    () => new Map(groupAgentsByName(agents).map((a) => [a.id, a.name])),
+    [agents]
+  );
   const deleteMutation = useDeleteConversation();
 
   const hasActiveFilters =
@@ -134,8 +179,10 @@ export function ConversationsPage() {
   const rangeStart = pageCount > 0 ? page * pageSize + 1 : 0;
   const rangeEnd = page * pageSize + pageCount;
   // Offset pagination without a total count: a full page implies more may
-  // follow; a short page is the last one.
+  // follow (the last page of an exact multiple is only discovered empty, see
+  // the "no more results" state); a short page is the last one.
   const hasNextPage = pageCount === pageSize;
+  const pastTheEnd = page > 0 && !isLoading && !isError && pageCount === 0;
   const hasPrevPage = page > 0;
 
   function confirmDelete() {
@@ -151,6 +198,8 @@ export function ConversationsPage() {
             );
             setDeleteTarget(null);
             setDeletePermanent(false);
+            // Deleting the only row of a later page would leave it empty: step back.
+            if (page > 0 && pageCount === 1) setPage(page - 1);
           },
           onError: (err) => toast.error(getErrorMessage(err)),
         }
@@ -278,7 +327,16 @@ export function ConversationsPage() {
         />
       )}
 
-      {!isLoading && !isError && (!conversations || conversations.length === 0) && (
+      {pastTheEnd && (
+        <EmptyState
+          icon={MessageSquare}
+          title={t("conversations.noMoreResults", "No more results")}
+          actionLabel={t("conversations.backToPreviousPage", "Back to previous page")}
+          onAction={() => setPage(page - 1)}
+        />
+      )}
+
+      {!pastTheEnd && !isLoading && !isError && (!conversations || conversations.length === 0) && (
         <EmptyState
           icon={MessageSquare}
           title={
@@ -317,17 +375,17 @@ export function ConversationsPage() {
                 const config = stateIcons[state];
                 const stateLabel = stateLabels[state];
                 const StateIcon = config.icon;
-                const agentName = agents ? groupAgentsByName(agents).find(a => a.id === conv.agentId)?.name : null;
+                const agentName = conv.agentId ? agentNames.get(conv.agentId) : null;
 
                 return (
-                  <Link
+                  // The card link is a stretched overlay on the id, so the delete
+                  // button is a sibling rather than a button nested inside a link.
+                  <div
                     key={conv.resource}
-                    to={`/manage/conversationview/${convId}`}
                     className={cn(
-                      "group flex flex-col rounded-xl border bg-card p-5 shadow-sm transition-all duration-200",
-                      "hover:shadow-md hover:border-primary/30"
+                      "group relative flex flex-col rounded-xl border bg-card p-5 shadow-sm transition-all duration-200",
+                      "hover:shadow-md hover:border-primary/30 focus-within:border-primary/30"
                     )}
-                    data-testid={`conversation-card-${convId}`}
                   >
                     {/* State badge */}
                     <div className="flex items-start justify-between">
@@ -342,12 +400,9 @@ export function ConversationsPage() {
                         {stateLabel}
                       </span>
                       <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setDeleteTarget(convId);
-                        }}
-                        className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive hover:bg-destructive/10 group-hover:opacity-100 focus:opacity-100"
+                        type="button"
+                        onClick={() => setDeleteTarget(convId)}
+                        className="relative z-10 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive hover:bg-destructive/10 group-hover:opacity-100 focus:opacity-100"
                         aria-label={t("conversations.deleteConversation", "Delete conversation")}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -356,9 +411,15 @@ export function ConversationsPage() {
 
                     {/* ID */}
                     <div className="mt-3">
-                      <p className="font-mono text-sm font-medium text-foreground truncate" title={convId}>
+                      <Link
+                        to={`/manage/conversationview/${convId}`}
+                        state={listState}
+                        className="block truncate font-mono text-sm font-medium text-foreground after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                        title={convId}
+                        data-testid={`conversation-card-${convId}`}
+                      >
                         {convId}
-                      </p>
+                      </Link>
                     </div>
 
                     {/* Agent info + Step count */}
@@ -385,7 +446,7 @@ export function ConversationsPage() {
                           : "—"}
                       </span>
                     </div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
@@ -424,7 +485,7 @@ export function ConversationsPage() {
                     const state = conv.conversationState || "READY";
                     const config = stateIcons[state];
                     const StateIcon = config.icon;
-                    const agentName = agents ? groupAgentsByName(agents).find(a => a.id === conv.agentId)?.name || conv.agentId : conv.agentId;
+                    const agentName = (conv.agentId && agentNames.get(conv.agentId)) || conv.agentId;
 
                     return (
                       <tr
@@ -434,6 +495,7 @@ export function ConversationsPage() {
                         <td className="px-5 py-3">
                           <Link
                             to={`/manage/conversationview/${convId}`}
+                            state={listState}
                             className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-primary transition-colors"
                           >
                             <span className="font-mono" title={convId}>
@@ -525,7 +587,7 @@ export function ConversationsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              onClick={() => setPage(Math.max(0, page - 1))}
               disabled={!hasPrevPage || isFetching}
               data-testid="pagination-prev"
               aria-label={t("common.previous", "Previous")}
@@ -536,7 +598,7 @@ export function ConversationsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => p + 1)}
+              onClick={() => setPage(page + 1)}
               disabled={!hasNextPage || isFetching}
               data-testid="pagination-next"
               aria-label={t("common.next", "Next")}

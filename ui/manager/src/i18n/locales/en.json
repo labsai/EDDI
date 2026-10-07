@@ -702,7 +702,13 @@
     "purgeSuccess_one": "Purged {{count}} ended conversation",
     "purgeSuccess_other": "Purged {{count}} ended conversations",
     "endStateUnavailable": "Could not re-check the conversations' current state, so nothing was ended. Try again.",
-    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again."
+    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again.",
+    "noMoreResults": "No more results",
+    "backToPreviousPage": "Back to previous page",
+    "purgeTitleAll": "Purge ended conversations — all agents",
+    "purgeScopeNote": "This is not limited to the agent selected above: it deletes ended conversations of every agent.",
+    "confirmPurgeScope": "Applies to ALL agents, not only the one selected above.",
+    "purgeDaysInvalid": "Enter a whole number of days, 1 or more."
   },
   "conversationDetail": {
     "backToConversations": "Back to Conversations",
@@ -720,7 +726,9 @@
     "totalCost": "Total Cost",
     "cacheHitRate": "Cache Hit Rate",
     "endReasonRetired": "Ended: the agent version was retired",
-    "stepAgentVersion": "Answered by agent version {{version}}"
+    "stepAgentVersion": "Answered by agent version {{version}}",
+    "searchTranscriptLabel": "Search the transcript",
+    "matchCount": "Matching steps: {{matches}}"
   },
   "chat": {
     "hide": "Hide",
@@ -799,7 +807,10 @@
     "reviewNoticeLabel": "Conversation review",
     "sendRejected": "Your message was not sent: {{reason}}",
     "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
-    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
+    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason.",
+    "searchAgents": "Search agents",
+    "noAgentMatches": "No agents match your search",
+    "transcript": "Conversation"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -3258,7 +3269,12 @@
     "created": "Created",
     "updated": "Updated",
     "sourceConversation": "Source Conversation",
-    "conflicted": "Conflicted"
+    "conflicted": "Conflicted",
+    "deleteEntryTitle": "Delete memory entry?",
+    "deleteEntryDesc": "This permanently deletes the memory entry \"{{key}}\". This cannot be undone.",
+    "deleteAllDescUser": "This permanently deletes all {{total}} memory entries for user \"{{userId}}\". This cannot be undone.",
+    "toggleDetails": "Show or hide details for {{key}}",
+    "deleteEntryLabel": "Delete memory entry {{key}}"
   },
   "properties": {
     "title": "User Properties",
@@ -3689,7 +3705,11 @@
     "conversationsTruncated_other": "Conversations were capped — the user has {{count}} in total.",
     "failedConversations_one": "{{count}} conversation could not be read and is absent from the bundle.",
     "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
-    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled."
+    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled.",
+    "noDataFoundToast": "No data found for this user id — nothing was deleted.",
+    "noDataFoundTitle": "No data found for this user id",
+    "noDataFoundBody": "Nothing was deleted for \"{{userId}}\". Check the id for typos, then try again.",
+    "confirmTypeLabel": "Type the user id \"{{userId}}\" to confirm"
   },
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."

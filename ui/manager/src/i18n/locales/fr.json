@@ -683,7 +683,13 @@
     "purgeSuccess_one": "{{count}} conversation terminée purgée",
     "purgeSuccess_other": "{{count}} conversations terminées purgées",
     "endStateUnavailable": "Impossible de revérifier l'état actuel des conversations ; aucune n'a donc été terminée. Réessayez.",
-    "endStateChanged": "Une conversation sélectionnée attend maintenant une approbation. Vérifiez la sélection et confirmez à nouveau."
+    "endStateChanged": "Une conversation sélectionnée attend maintenant une approbation. Vérifiez la sélection et confirmez à nouveau.",
+    "noMoreResults": "Plus aucun résultat",
+    "backToPreviousPage": "Retour à la page précédente",
+    "purgeTitleAll": "Purger les conversations terminées – tous les agents",
+    "purgeScopeNote": "Cela ne se limite pas à l'agent sélectionné ci-dessus : les conversations terminées de tous les agents sont supprimées.",
+    "confirmPurgeScope": "S'applique à TOUS les agents, pas seulement à celui sélectionné ci-dessus.",
+    "purgeDaysInvalid": "Saisissez un nombre entier de jours, 1 ou plus."
   },
   "conversationDetail": {
     "backToConversations": "Retour aux conversations",
@@ -701,7 +707,9 @@
     "totalCost": "Coût total",
     "cacheHitRate": "Taux de cache",
     "endReasonRetired": "Terminée : la version de l’agent a été retirée",
-    "stepAgentVersion": "Réponse de la version {{version}} de l’agent"
+    "stepAgentVersion": "Réponse de la version {{version}} de l’agent",
+    "searchTranscriptLabel": "Rechercher dans la transcription",
+    "matchCount": "Étapes correspondantes : {{matches}}"
   },
   "chat": {
     "hide": "Masquer",
@@ -782,7 +790,10 @@
     "reviewNoticeLabel": "Consultation des conversations",
     "sendRejected": "Votre message n'a pas été envoyé : {{reason}}",
     "sendWhileLoading": "Votre message n'a pas été envoyé : la conversation est encore en cours de chargement. Réessayez dans un instant.",
-    "turnFailed": "L'agent n'a pas pu répondre à ce message. Consultez le journal du serveur ou la piste d'audit de la conversation pour en connaître la raison."
+    "turnFailed": "L'agent n'a pas pu répondre à ce message. Consultez le journal du serveur ou la piste d'audit de la conversation pour en connaître la raison.",
+    "searchAgents": "Rechercher des agents",
+    "noAgentMatches": "Aucun agent ne correspond à votre recherche",
+    "transcript": "Conversation"
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -3074,7 +3085,12 @@
     "created": "Créé",
     "updated": "Mis à jour",
     "sourceConversation": "Conversation source",
-    "conflicted": "En conflit"
+    "conflicted": "En conflit",
+    "deleteEntryTitle": "Supprimer l'entrée de mémoire ?",
+    "deleteEntryDesc": "Cela supprime définitivement l'entrée de mémoire « {{key}} ». Cette action est irréversible.",
+    "deleteAllDescUser": "Cela supprime définitivement les {{total}} entrées de mémoire de l'utilisateur « {{userId}} ». Cette action est irréversible.",
+    "toggleDetails": "Afficher ou masquer les détails de {{key}}",
+    "deleteEntryLabel": "Supprimer l'entrée de mémoire {{key}}"
   },
   "properties": {
     "title": "Propriétés utilisateur",
@@ -3688,7 +3704,11 @@
     "failedConversations_other": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
     "conversationsTruncated_many": "Les conversations ont été plafonnées — l’utilisateur en a {{count}} au total.",
     "failedConversations_many": "{{count}} conversations n’ont pas pu être lues et sont absentes du paquet.",
-    "deleteIncomplete": "Effacement incomplet — certaines données de cet utilisateur peuvent encore exister. Ne le déclarez pas comme accompli."
+    "deleteIncomplete": "Effacement incomplet — certaines données de cet utilisateur peuvent encore exister. Ne le déclarez pas comme accompli.",
+    "noDataFoundToast": "Aucune donnée trouvée pour cet identifiant utilisateur – rien n'a été supprimé.",
+    "noDataFoundTitle": "Aucune donnée trouvée pour cet identifiant utilisateur",
+    "noDataFoundBody": "Rien n'a été supprimé pour « {{userId}} ». Vérifiez l'identifiant (faute de frappe ?) puis réessayez.",
+    "confirmTypeLabel": "Saisissez l'identifiant utilisateur « {{userId}} » pour confirmer"
   },
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend EDDI pour des données réelles."

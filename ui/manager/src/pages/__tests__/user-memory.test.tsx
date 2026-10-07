@@ -431,7 +431,7 @@ describe("UserMemoryPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Delete All Memories")).toBeInTheDocument();
       expect(
-        screen.getByText(/permanently delete ALL memory entries/)
+        screen.getByText(/permanently deletes all 3 memory entries for user "user-123"/)
       ).toBeInTheDocument();
     });
   });
@@ -497,9 +497,45 @@ describe("UserMemoryPage", () => {
 
     await user.click(screen.getByTestId("delete-memory-mem-1"));
 
+    // Deleting is permanent: a confirmation names the entry first.
+    expect(deleteCalled).toBe(false);
+    expect(screen.getByText("Delete memory entry?")).toBeInTheDocument();
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
+
     await waitFor(() => {
       expect(deleteCalled).toBe(true);
     });
+  });
+
+  it("cancelling the entry confirmation deletes nothing", async () => {
+    let deleteCalled = false;
+    server.use(
+      http.delete("*/usermemorystore/memories/entry/:entryId", () => {
+        deleteCalled = true;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    const user = await enterUserIdAndLoad();
+    await user.click(screen.getByTestId("delete-memory-mem-1"));
+    await user.click(screen.getByTestId("alert-dialog-cancel"));
+    expect(deleteCalled).toBe(false);
+    expect(screen.queryByText("Delete memory entry?")).not.toBeInTheDocument();
+  });
+
+  it("only the row being deleted is disabled while its delete is pending", async () => {
+    server.use(
+      http.delete("*/usermemorystore/memories/entry/:entryId", async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    const user = await enterUserIdAndLoad();
+    await user.click(screen.getByTestId("delete-memory-mem-1"));
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
+    await waitFor(() => {
+      expect(screen.getByTestId("delete-memory-mem-1")).toBeDisabled();
+    });
+    expect(screen.getByTestId("delete-memory-mem-2")).not.toBeDisabled();
   });
 
   // ─── Confirm delete all flow ───────────────────────────────────────────

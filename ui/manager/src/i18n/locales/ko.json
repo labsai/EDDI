@@ -675,7 +675,13 @@
     "purgeSuccess_other": "종료된 대화 {{count}}개를 정리했습니다",
     "purgeSuccess_one": "종료된 대화 {{count}}개를 정리했습니다",
     "endStateUnavailable": "대화의 현재 상태를 다시 확인할 수 없어 아무것도 종료하지 않았습니다. 다시 시도하세요.",
-    "endStateChanged": "선택한 대화 중 하나가 이제 승인을 기다리고 있습니다. 선택을 검토하고 다시 확인하세요."
+    "endStateChanged": "선택한 대화 중 하나가 이제 승인을 기다리고 있습니다. 선택을 검토하고 다시 확인하세요.",
+    "noMoreResults": "더 이상 결과가 없습니다",
+    "backToPreviousPage": "이전 페이지로 돌아가기",
+    "purgeTitleAll": "종료된 대화 삭제 – 모든 에이전트",
+    "purgeScopeNote": "위에서 선택한 에이전트로 제한되지 않습니다. 모든 에이전트의 종료된 대화가 삭제됩니다.",
+    "confirmPurgeScope": "위에서 선택한 에이전트만이 아니라 모든 에이전트에 적용됩니다.",
+    "purgeDaysInvalid": "1 이상의 정수로 일수를 입력하세요."
   },
   "conversationDetail": {
     "backToConversations": "대화로 돌아가기",
@@ -693,7 +699,9 @@
     "totalCost": "총 비용",
     "cacheHitRate": "캐시 적중률",
     "endReasonRetired": "종료됨: 에이전트 버전이 폐기되었습니다",
-    "stepAgentVersion": "에이전트 버전 {{version}}이(가) 응답함"
+    "stepAgentVersion": "에이전트 버전 {{version}}이(가) 응답함",
+    "searchTranscriptLabel": "대화 기록 검색",
+    "matchCount": "일치하는 단계: {{matches}}"
   },
   "chat": {
     "hide": "숨기기",
@@ -772,7 +780,10 @@
     "reviewNoticeLabel": "대화 검토",
     "sendRejected": "메시지가 전송되지 않았습니다: {{reason}}",
     "sendWhileLoading": "메시지가 전송되지 않았습니다: 대화를 아직 불러오는 중입니다. 잠시 후 다시 시도하세요.",
-    "turnFailed": "에이전트가 이 메시지에 응답하지 못했습니다. 이유는 서버 로그나 대화 감사 기록에서 확인하세요."
+    "turnFailed": "에이전트가 이 메시지에 응답하지 못했습니다. 이유는 서버 로그나 대화 감사 기록에서 확인하세요.",
+    "searchAgents": "에이전트 검색",
+    "noAgentMatches": "검색과 일치하는 에이전트가 없습니다",
+    "transcript": "대화"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -3038,7 +3049,12 @@
     "created": "생성일",
     "updated": "수정일",
     "sourceConversation": "소스 대화",
-    "conflicted": "충돌 있음"
+    "conflicted": "충돌 있음",
+    "deleteEntryTitle": "메모리 항목을 삭제할까요?",
+    "deleteEntryDesc": "메모리 항목 \"{{key}}\"을(를) 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
+    "deleteAllDescUser": "사용자 \"{{userId}}\"의 메모리 항목 {{total}}개를 모두 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
+    "toggleDetails": "{{key}} 상세 정보 표시/숨기기",
+    "deleteEntryLabel": "메모리 항목 {{key}} 삭제"
   },
   "properties": {
     "title": "사용자 속성",
@@ -3648,7 +3664,11 @@
     "failedConversations_other": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
     "conversationsTruncated_one": "대화가 상한에 걸렸습니다 — 이 사용자는 총 {{count}}개를 가지고 있습니다.",
     "failedConversations_one": "{{count}}개의 대화를 읽을 수 없어 번들에 포함되지 않았습니다.",
-    "deleteIncomplete": "삭제가 완료되지 않았습니다. 이 사용자의 일부 데이터가 아직 남아 있을 수 있습니다. 완료된 것으로 보고하지 마세요."
+    "deleteIncomplete": "삭제가 완료되지 않았습니다. 이 사용자의 일부 데이터가 아직 남아 있을 수 있습니다. 완료된 것으로 보고하지 마세요.",
+    "noDataFoundToast": "이 사용자 ID에 대한 데이터를 찾을 수 없습니다. 삭제된 항목이 없습니다.",
+    "noDataFoundTitle": "이 사용자 ID에 대한 데이터를 찾을 수 없습니다",
+    "noDataFoundBody": "\"{{userId}}\"에 대해 삭제된 항목이 없습니다. ID에 오타가 없는지 확인한 후 다시 시도하세요.",
+    "confirmTypeLabel": "확인하려면 사용자 ID \"{{userId}}\"를 입력하세요"
   },
   "mockBanner": {
     "message": "데모 모드 — 샘플 데이터를 표시합니다. 실제 데이터를 보려면 EDDI 백엔드에 연결하세요."

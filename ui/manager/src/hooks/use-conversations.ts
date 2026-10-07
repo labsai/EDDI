@@ -19,6 +19,8 @@ import {
 
 const CONVERSATIONS_KEY = ["conversations"] as const;
 
+const IN_PROGRESS_POLL_MS = 3000;
+
 export function useConversationDescriptors(
   limit = 20,
   index = 0,
@@ -53,12 +55,21 @@ export function useConversationDescriptors(
 export function useSimpleConversation(
   id: string,
   returnDetailed = true,
-  returnCurrentStepOnly = false
+  returnCurrentStepOnly = false,
+  /** Re-fetch every few seconds while the conversation is IN_PROGRESS, so a
+   *  page left open follows a running turn instead of showing a stale snapshot. */
+  pollWhileInProgress = false
 ) {
   return useQuery({
     queryKey: [...CONVERSATIONS_KEY, "simple", id, { returnDetailed, returnCurrentStepOnly }],
     queryFn: () => getSimpleConversationLog(id, returnDetailed, returnCurrentStepOnly),
     enabled: !!id,
+    refetchInterval: pollWhileInProgress
+      ? (query) =>
+          query.state.data?.conversationState === "IN_PROGRESS"
+            ? IN_PROGRESS_POLL_MS
+            : false
+      : false,
   });
 }
 

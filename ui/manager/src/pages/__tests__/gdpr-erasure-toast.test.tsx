@@ -24,6 +24,7 @@ async function erase() {
   const user = userEvent.setup();
   await user.type(screen.getByTestId("gdpr-user-id"), "user-123");
   await user.click(screen.getByTestId("gdpr-delete-btn"));
+  await user.type(await screen.findByTestId("gdpr-confirm-input"), "user-123");
   await user.click(await screen.findByRole("button", { name: /yes, delete all data/i }));
   await screen.findByTestId("gdpr-results");
 }

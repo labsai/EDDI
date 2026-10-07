@@ -40,9 +40,20 @@ const typeColors: Record<string, string> = {
   null: "text-muted-foreground bg-muted",
 };
 
-export function PropertiesPage({ embedded }: { embedded?: boolean } = {}) {
+export function PropertiesPage({
+  embedded,
+  userId: controlledUserId,
+  onUserIdChange,
+}: {
+  embedded?: boolean;
+  /** Set by UserDataPage so the id is shared by its tabs; standalone keeps its own. */
+  userId?: string;
+  onUserIdChange?: (userId: string) => void;
+} = {}) {
   const { t } = useTranslation();
-  const [userId, setUserId] = useState("");
+  const [localUserId, setLocalUserId] = useState("");
+  const userId = controlledUserId ?? localUserId;
+  const setUserId = onUserIdChange ?? setLocalUserId;
   const [search, setSearch] = useState("");
   const [showDeleteAll, setShowDeleteAll] = useState(false);
 

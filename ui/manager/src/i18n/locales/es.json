@@ -683,7 +683,13 @@
     "purgeSuccess_one": "{{count}} conversación finalizada purgada",
     "purgeSuccess_other": "{{count}} conversaciónes finalizadas purgadas",
     "endStateUnavailable": "No se pudo volver a comprobar el estado actual de las conversaciones, así que no se finalizó ninguna. Inténtelo de nuevo.",
-    "endStateChanged": "Una conversación seleccionada está ahora esperando aprobación. Revise la selección y vuelva a confirmar."
+    "endStateChanged": "Una conversación seleccionada está ahora esperando aprobación. Revise la selección y vuelva a confirmar.",
+    "noMoreResults": "No hay más resultados",
+    "backToPreviousPage": "Volver a la página anterior",
+    "purgeTitleAll": "Purgar conversaciones finalizadas: todos los agentes",
+    "purgeScopeNote": "No se limita al agente seleccionado arriba: elimina las conversaciones finalizadas de todos los agentes.",
+    "confirmPurgeScope": "Se aplica a TODOS los agentes, no solo al seleccionado arriba.",
+    "purgeDaysInvalid": "Introduce un número entero de días, 1 o más."
   },
   "conversationDetail": {
     "backToConversations": "Volver a conversaciones",
@@ -701,7 +707,9 @@
     "totalCost": "Coste total",
     "cacheHitRate": "Tasa de acierto de caché",
     "endReasonRetired": "Finalizada: la versión del agente fue retirada",
-    "stepAgentVersion": "Respondido por la versión {{version}} del agente"
+    "stepAgentVersion": "Respondido por la versión {{version}} del agente",
+    "searchTranscriptLabel": "Buscar en la transcripción",
+    "matchCount": "Pasos coincidentes: {{matches}}"
   },
   "chat": {
     "hide": "Ocultar",
@@ -782,7 +790,10 @@
     "reviewNoticeLabel": "Revisión de conversaciones",
     "sendRejected": "Tu mensaje no se envió: {{reason}}",
     "sendWhileLoading": "Tu mensaje no se envió: la conversación aún se está cargando. Inténtalo de nuevo en un momento.",
-    "turnFailed": "El agente no pudo responder a este mensaje. Consulta el registro del servidor o el registro de auditoría de la conversación para ver el motivo."
+    "turnFailed": "El agente no pudo responder a este mensaje. Consulta el registro del servidor o el registro de auditoría de la conversación para ver el motivo.",
+    "searchAgents": "Buscar agentes",
+    "noAgentMatches": "Ningún agente coincide con tu búsqueda",
+    "transcript": "Conversación"
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",
@@ -3074,7 +3085,12 @@
     "created": "Creado",
     "updated": "Actualizado",
     "sourceConversation": "Conversación de origen",
-    "conflicted": "En conflicto"
+    "conflicted": "En conflicto",
+    "deleteEntryTitle": "¿Eliminar la entrada de memoria?",
+    "deleteEntryDesc": "Esto elimina de forma permanente la entrada de memoria «{{key}}». No se puede deshacer.",
+    "deleteAllDescUser": "Esto elimina de forma permanente las {{total}} entradas de memoria del usuario «{{userId}}». No se puede deshacer.",
+    "toggleDetails": "Mostrar u ocultar los detalles de {{key}}",
+    "deleteEntryLabel": "Eliminar la entrada de memoria {{key}}"
   },
   "properties": {
     "title": "Propiedades del usuario",
@@ -3688,7 +3704,11 @@
     "failedConversations_other": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
     "conversationsTruncated_many": "Las conversaciones se limitaron — el usuario tiene {{count}} en total.",
     "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
-    "deleteIncomplete": "Borrado incompleto: algunos datos de este usuario pueden seguir existiendo. No lo notifiques como cumplido."
+    "deleteIncomplete": "Borrado incompleto: algunos datos de este usuario pueden seguir existiendo. No lo notifiques como cumplido.",
+    "noDataFoundToast": "No se encontraron datos para este ID de usuario; no se eliminó nada.",
+    "noDataFoundTitle": "No se encontraron datos para este ID de usuario",
+    "noDataFoundBody": "No se eliminó nada para «{{userId}}». Revisa el ID por si hay errores tipográficos e inténtalo de nuevo.",
+    "confirmTypeLabel": "Escribe el ID de usuario «{{userId}}» para confirmar"
   },
   "mockBanner": {
     "message": "Modo demo — Se muestran datos de ejemplo. Conecte un backend de EDDI para ver datos reales."

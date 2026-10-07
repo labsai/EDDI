@@ -41,12 +41,27 @@ const visibilityColors: Record<string, string> = {
   group: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
 };
 
-export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
+export function UserMemoryPage({
+  embedded,
+  userId: controlledUserId,
+  onUserIdChange,
+}: {
+  embedded?: boolean;
+  /** Set by UserDataPage so the id is shared by its tabs; standalone keeps its own. */
+  userId?: string;
+  onUserIdChange?: (userId: string) => void;
+} = {}) {
   const { t } = useTranslation();
-  const [userId, setUserId] = useState("");
+  const [localUserId, setLocalUserId] = useState("");
+  const userId = controlledUserId ?? localUserId;
+  const setUserId = onUserIdChange ?? setLocalUserId;
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [showDeleteAll, setShowDeleteAll] = useState(false);
+  // The id the Delete All dialog was opened for. The input is debounced, so
+  // the live value can differ from what the user confirmed against.
+  const [deleteAllUserId, setDeleteAllUserId] = useState("");
+  const [pendingEntry, setPendingEntry] = useState<UserMemoryEntry | null>(null);
 
   const debouncedUserId = useDebounce(userId.trim(), 500);
   const { data: memories, isLoading, isError, refetch } = useUserMemories(debouncedUserId);
@@ -91,25 +106,25 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
     [memories],
   );
 
-  const handleDeleteEntry = useCallback(
-    (entryId: string) => {
-      deleteMemory.mutate(entryId, {
-        onSuccess: () => toast.success(t("memories.entryDeleted", "Memory entry deleted")),
-        onError: (err) => toast.error(err.message),
-      });
-    },
-    [deleteMemory, t],
-  );
+  const handleConfirmDeleteEntry = useCallback(() => {
+    const entry = pendingEntry;
+    if (!entry?.id) return;
+    deleteMemory.mutate(entry.id, {
+      onSuccess: () => toast.success(t("memories.entryDeleted", "Memory entry deleted")),
+      onError: (err) => toast.error(err.message),
+      onSettled: () => setPendingEntry(null),
+    });
+  }, [deleteMemory, pendingEntry, t]);
 
   const handleDeleteAll = useCallback(() => {
-    deleteAll.mutate(debouncedUserId, {
+    deleteAll.mutate(deleteAllUserId, {
       onSuccess: () => {
         toast.success(t("memories.allDeleted", "All memories deleted for user"));
         setShowDeleteAll(false);
       },
       onError: (err) => toast.error(err.message),
     });
-  }, [deleteAll, debouncedUserId, t]);
+  }, [deleteAll, deleteAllUserId, t]);
 
   return (
     <div className="space-y-6" data-testid="user-memory-page">
@@ -191,7 +206,10 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
           <Button
             variant="destructive"
             size="sm"
-            onClick={() => setShowDeleteAll(true)}
+            onClick={() => {
+              setDeleteAllUserId(debouncedUserId);
+              setShowDeleteAll(true);
+            }}
             disabled={!memories.length || deleteAll.isPending}
             className="gap-1.5 text-xs"
             data-testid="delete-all-memories"
@@ -240,8 +258,10 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
               <MemoryRow
                 key={entry.id ?? entry.key}
                 entry={entry}
-                onDelete={handleDeleteEntry}
-                isDeleting={deleteMemory.isPending}
+                onDelete={setPendingEntry}
+                isDeleting={
+                  deleteMemory.isPending && deleteMemory.variables === entry.id
+                }
               />
             ))
           )}
@@ -253,11 +273,32 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
         open={showDeleteAll}
         onOpenChange={setShowDeleteAll}
         title={t("memories.deleteAllTitle", "Delete All Memories")}
-        description={t("memories.deleteAllDesc", "This will permanently delete ALL memory entries for this user. This action cannot be undone.")}
+        description={t("memories.deleteAllDescUser", {
+          total: memories?.length ?? 0,
+          userId: deleteAllUserId,
+          defaultValue: `This permanently deletes all ${memories?.length ?? 0} memory entries for user "${deleteAllUserId}". This cannot be undone.`,
+        })}
         confirmLabel={t("memories.deleteAllConfirm", "Delete All")}
         variant="destructive"
         onConfirm={handleDeleteAll}
         isPending={deleteAll.isPending}
+      />
+
+      {/* Single-entry delete confirm */}
+      <AlertDialog
+        open={pendingEntry !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingEntry(null);
+        }}
+        title={t("memories.deleteEntryTitle", "Delete memory entry?")}
+        description={t("memories.deleteEntryDesc", {
+          key: pendingEntry?.key ?? "",
+          defaultValue: `This permanently deletes the memory entry "${pendingEntry?.key ?? ""}". This cannot be undone.`,
+        })}
+        confirmLabel={t("common.delete")}
+        variant="destructive"
+        onConfirm={handleConfirmDeleteEntry}
+        isPending={deleteMemory.isPending}
       />
     </div>
   );
@@ -293,7 +334,7 @@ function MemoryRow({
   isDeleting,
 }: {
   entry: UserMemoryEntry;
-  onDelete: (id: string) => void;
+  onDelete: (entry: UserMemoryEntry) => void;
   isDeleting: boolean;
 }) {
   const { t } = useTranslation();
@@ -318,7 +359,15 @@ function MemoryRow({
         data-testid={`memory-expand-toggle-${entry.id ?? entry.key}`}
         onClick={() => setExpanded(!expanded)}
       >
-        <button type="button" className="shrink-0 text-muted-foreground">
+        <button
+          type="button"
+          className="shrink-0 text-muted-foreground"
+          aria-expanded={expanded}
+          aria-label={t("memories.toggleDetails", {
+            key: entry.key,
+            defaultValue: `Show or hide details for ${entry.key}`,
+          })}
+        >
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
 
@@ -346,11 +395,15 @@ function MemoryRow({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            if (entry.id) onDelete(entry.id);
+            if (entry.id) onDelete(entry);
           }}
           disabled={isDeleting || !entry.id}
           className="shrink-0 rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
           title={t("common.delete")}
+          aria-label={t("memories.deleteEntryLabel", {
+            key: entry.key,
+            defaultValue: `Delete memory entry ${entry.key}`,
+          })}
           data-testid={`delete-memory-${entry.id}`}
         >
           <Trash2 className="h-3.5 w-3.5" />

@@ -675,7 +675,13 @@
     "purgeSuccess_other": "已清除 {{count}} 个已结束对话",
     "purgeSuccess_one": "已清除 {{count}} 个已结束对话",
     "endStateUnavailable": "无法重新检查对话的当前状态，因此未结束任何对话。请重试。",
-    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。"
+    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。",
+    "noMoreResults": "没有更多结果",
+    "backToPreviousPage": "返回上一页",
+    "purgeTitleAll": "清理已结束的对话 – 所有智能体",
+    "purgeScopeNote": "不仅限于上方选中的智能体：将删除所有智能体已结束的对话。",
+    "confirmPurgeScope": "适用于所有智能体，而不仅是上方选中的智能体。",
+    "purgeDaysInvalid": "请输入不小于 1 的整数天数。"
   },
   "conversationDetail": {
     "backToConversations": "返回对话列表",
@@ -693,7 +699,9 @@
     "totalCost": "总成本",
     "cacheHitRate": "缓存命中率",
     "endReasonRetired": "已结束：该智能体版本已被停用",
-    "stepAgentVersion": "由智能体版本 {{version}} 回答"
+    "stepAgentVersion": "由智能体版本 {{version}} 回答",
+    "searchTranscriptLabel": "搜索对话记录",
+    "matchCount": "匹配的步骤：{{matches}}"
   },
   "chat": {
     "hide": "隐藏",
@@ -772,7 +780,10 @@
     "reviewNoticeLabel": "对话审阅",
     "sendRejected": "您的消息未发送：{{reason}}",
     "sendWhileLoading": "您的消息未发送：对话仍在加载中。请稍后再试。",
-    "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。"
+    "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。",
+    "searchAgents": "搜索智能体",
+    "noAgentMatches": "没有与搜索匹配的智能体",
+    "transcript": "对话"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -3038,7 +3049,12 @@
     "created": "创建时间",
     "updated": "更新时间",
     "sourceConversation": "来源对话",
-    "conflicted": "有冲突"
+    "conflicted": "有冲突",
+    "deleteEntryTitle": "删除记忆条目？",
+    "deleteEntryDesc": "这将永久删除记忆条目“{{key}}”，此操作无法撤销。",
+    "deleteAllDescUser": "这将永久删除用户“{{userId}}”的全部 {{total}} 条记忆条目，此操作无法撤销。",
+    "toggleDetails": "显示或隐藏 {{key}} 的详情",
+    "deleteEntryLabel": "删除记忆条目 {{key}}"
   },
   "properties": {
     "title": "用户属性",
@@ -3648,7 +3664,11 @@
     "failedConversations_other": "有 {{count}} 个会话无法读取，未包含在数据包中。",
     "conversationsTruncated_one": "会话已被截断 — 该用户共有 {{count}} 个。",
     "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。",
-    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。"
+    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。",
+    "noDataFoundToast": "未找到该用户 ID 的数据，未删除任何内容。",
+    "noDataFoundTitle": "未找到该用户 ID 的数据",
+    "noDataFoundBody": "未删除“{{userId}}”的任何内容。请检查 ID 是否有拼写错误，然后重试。",
+    "confirmTypeLabel": "请输入用户 ID“{{userId}}”以确认"
   },
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
