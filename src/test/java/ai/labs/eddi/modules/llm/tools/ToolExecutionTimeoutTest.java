@@ -245,10 +245,10 @@ class ToolExecutionTimeoutTest {
     @DisplayName("a tool that throws under a bound still reports its OWN message, not the executor's wrapper")
     void toolFailureKeepsItsMessage() {
         String result = runBounded("failingTool", () -> {
-            throw new IllegalStateException("upstream said no");
+            throw new ToolFailureException("Error: upstream said no");
         }, SHORT_TIMEOUT_MS);
 
-        assertEquals("Error executing tool: upstream said no", result);
+        assertEquals("Error: upstream said no", result);
         assertNull(meterRegistry.find("eddi.tool.execution.timeout").tag("tool", "failingTool").counter(),
                 "a plain failure is not a timeout");
     }

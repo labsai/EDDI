@@ -35,6 +35,21 @@ final class ModelParameterValues {
     private static final Logger LOGGER = Logger.getLogger(ModelParameterValues.class);
 
     /**
+     * Retries the provider SDK itself performs on a failed non-streaming request:
+     * none.
+     * <p>
+     * langchain4j's chat models retry on their own (two retries by default, three
+     * for Azure's SDK), and every model request EDDI makes in the tool loop and the
+     * legacy chat path already runs inside
+     * {@code RetryConfiguration.executeWithRetry} — three attempts by default, with
+     * backoff, a total-backoff budget, and no retry on a non-retryable 4xx.
+     * Stacked, one provider 500 became 3 × 3 = 9 upstream requests and about nine
+     * seconds before the turn failed. The task's {@code retry} block is now the
+     * single, configurable retry layer.
+     */
+    public static final int PROVIDER_MAX_RETRIES = 0;
+
+    /**
      * Keys that live in an LLM task's {@code parameters} map but are consumed
      * <em>outside</em> the provider builders, so they must never be reported as
      * unrecognised.

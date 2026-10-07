@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.PdfInfo;
 import dev.langchain4j.agent.tool.P;
@@ -19,6 +20,8 @@ import java.net.http.HttpRequest;
 import java.time.Duration;
 
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * PDF reader tool for extracting text from PDF documents fetched by URL.
@@ -56,42 +59,44 @@ public class PdfReaderTool {
     }
 
     @Tool("Extracts all text content from a PDF file. Provide the URL to the PDF document.")
-    public String extractTextFromPdf(@P("pdfLocation") String pdfLocation) {
+    public String extractTextFromPdf(@P("Absolute http(s) URL of the PDF document") String pdfLocation) {
 
         try {
-            LOGGER.info("Extracting text from PDF: " + pdfLocation);
+            LOGGER.debugf("Extracting text from PDF: %s", sanitize(pdfLocation));
             validateUrl(pdfLocation);
 
             byte[] pdfBytes = downloadPdfBytes(pdfLocation);
             return textExtractor.extractPdfText(pdfBytes);
 
         } catch (Exception e) {
-            LOGGER.error("PDF extraction error for " + pdfLocation + ": " + e.getMessage());
-            return "Error: Could not extract text from PDF - " + e.getMessage();
+            LOGGER.warnf("PDF extraction failed for %s: %s", sanitize(pdfLocation), sanitize(e.getMessage()));
+            throw new ToolFailureException("Error: Could not extract text from PDF - " + e.getMessage());
         }
     }
 
     @Tool("Extracts text from specific pages of a PDF file")
-    public String extractTextFromPdfPages(@P("pdfLocation") String pdfLocation, @P("startPage") int startPage, @P("endPage") int endPage) {
+    public String extractTextFromPdfPages(@P("Absolute http(s) URL of the PDF document") String pdfLocation,
+                                          @P("First page to read, 1-based") int startPage,
+                                          @P("Last page to read, 1-based and inclusive") int endPage) {
 
         try {
-            LOGGER.info("Extracting text from PDF pages " + startPage + "-" + endPage + ": " + pdfLocation);
+            LOGGER.debugf("Extracting text from PDF pages %d-%d: %s", startPage, endPage, sanitize(pdfLocation));
             validateUrl(pdfLocation);
 
             byte[] pdfBytes = downloadPdfBytes(pdfLocation);
             return textExtractor.extractPdfText(pdfBytes, startPage, endPage, textExtractor.getDefaultMaxChars());
 
         } catch (Exception e) {
-            LOGGER.error("PDF page extraction error: " + e.getMessage());
-            return "Error: Could not extract text from PDF pages - " + e.getMessage();
+            LOGGER.warnf("PDF page extraction failed: %s", sanitize(e.getMessage()));
+            throw new ToolFailureException("Error: Could not extract text from PDF pages - " + e.getMessage());
         }
     }
 
     @Tool("Gets metadata and information about a PDF file (number of pages, title, author, etc.)")
-    public String getPdfInfo(@P("pdfLocation") String pdfLocation) {
+    public String getPdfInfo(@P("Absolute http(s) URL of the PDF document") String pdfLocation) {
 
         try {
-            LOGGER.info("Getting PDF info for: " + pdfLocation);
+            LOGGER.debugf("Getting PDF info for: %s", sanitize(pdfLocation));
             validateUrl(pdfLocation);
 
             byte[] pdfBytes = downloadPdfBytes(pdfLocation);
@@ -116,17 +121,17 @@ public class PdfReaderTool {
                 sb.append("Creation date: ").append(info.creationDate().getTime()).append("\n");
             }
 
-            LOGGER.debug("PDF info extracted for " + pdfLocation);
+            LOGGER.debugf("PDF info extracted for %s", sanitize(pdfLocation));
             return sb.toString();
 
         } catch (Exception e) {
-            LOGGER.error("PDF info extraction error: " + e.getMessage());
-            return "Error: Could not get PDF information - " + e.getMessage();
+            LOGGER.warnf("PDF info extraction failed: %s", sanitize(e.getMessage()));
+            throw new ToolFailureException("Error: Could not get PDF information - " + e.getMessage());
         }
     }
 
     private byte[] downloadPdfBytes(String url) throws IOException, InterruptedException {
-        LOGGER.debug("Downloading PDF from URL: " + url);
+        LOGGER.debugf("Downloading PDF from URL: %s", sanitize(url));
 
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(30))
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();

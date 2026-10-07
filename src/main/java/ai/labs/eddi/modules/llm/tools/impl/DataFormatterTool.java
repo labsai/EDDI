@@ -17,6 +17,8 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Data formatting tool for parsing and converting between different data
  * formats.
@@ -29,7 +31,7 @@ public class DataFormatterTool {
     private final CsvMapper csvMapper = new CsvMapper();
 
     @Tool("Validates and formats JSON data. Returns formatted JSON or error message.")
-    public String formatJson(@P("jsonString") String jsonString) {
+    public String formatJson(@P("The JSON document, as text") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);
@@ -38,13 +40,13 @@ public class DataFormatterTool {
             return "Valid JSON:\n" + formatted;
 
         } catch (Exception e) {
-            LOGGER.error("JSON validation error: " + e.getMessage());
+            LOGGER.debugf("JSON validation error: %s", sanitize(e.getMessage()));
             return "Error: Invalid JSON - " + e.getMessage();
         }
     }
 
     @Tool("Converts JSON to XML format")
-    public String jsonToXml(@P("jsonString") String jsonString) {
+    public String jsonToXml(@P("The JSON document, as text") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);
@@ -53,13 +55,13 @@ public class DataFormatterTool {
             return xml;
 
         } catch (Exception e) {
-            LOGGER.error("JSON to XML conversion error: " + e.getMessage());
+            LOGGER.debugf("JSON to XML conversion error: %s", sanitize(e.getMessage()));
             return "Error: Could not convert JSON to XML - " + e.getMessage();
         }
     }
 
     @Tool("Converts XML to JSON format")
-    public String xmlToJson(@P("xmlString") String xmlString) {
+    public String xmlToJson(@P("The XML document, as text") String xmlString) {
 
         try {
             JsonNode jsonNode = xmlMapper.readTree(xmlString);
@@ -68,13 +70,13 @@ public class DataFormatterTool {
             return json;
 
         } catch (Exception e) {
-            LOGGER.error("XML to JSON conversion error: " + e.getMessage());
+            LOGGER.debugf("XML to JSON conversion error: %s", sanitize(e.getMessage()));
             return "Error: Could not convert XML to JSON - " + e.getMessage();
         }
     }
 
     @Tool("Parses CSV data and converts it to JSON format")
-    public String csvToJson(@P("csvString") String csvString) {
+    public String csvToJson(@P("CSV text; the first line holds the column names") String csvString) {
 
         try {
             CsvSchema schema = CsvSchema.emptySchema().withHeader();
@@ -88,13 +90,14 @@ public class DataFormatterTool {
             return json;
 
         } catch (Exception e) {
-            LOGGER.error("CSV to JSON conversion error: " + e.getMessage());
+            LOGGER.debugf("CSV to JSON conversion error: %s", sanitize(e.getMessage()));
             return "Error: Could not convert CSV to JSON - " + e.getMessage();
         }
     }
 
     @Tool("Extracts a value from JSON using a JSONPath-like expression")
-    public String extractJsonValue(@P("jsonString") String jsonString, @P("path") String path) {
+    public String extractJsonValue(@P("The JSON document, as text") String jsonString,
+                                   @P("Dot-separated path to the value, e.g. 'user.address.city' or 'items[0].name'") String path) {
 
         try {
             JsonNode valueNode = jsonMapper.readTree(jsonString);
@@ -117,17 +120,17 @@ public class DataFormatterTool {
             }
 
             String result = valueNode.isTextual() ? valueNode.asText() : valueNode.toString();
-            LOGGER.debug("Extracted value from JSON path: " + path);
+            LOGGER.debugf("Extracted value from JSON path: %s", sanitize(path));
             return result;
 
         } catch (Exception e) {
-            LOGGER.error("JSON value extraction error: " + e.getMessage());
+            LOGGER.debugf("JSON value extraction error: %s", sanitize(e.getMessage()));
             return "Error: Could not extract value - " + e.getMessage();
         }
     }
 
     @Tool("Validates XML against basic well-formedness rules")
-    public String validateXml(@P("xmlString") String xmlString) {
+    public String validateXml(@P("The XML document, as text") String xmlString) {
 
         try {
             xmlMapper.readTree(xmlString);
@@ -135,13 +138,13 @@ public class DataFormatterTool {
             return "Valid XML: The XML is well-formed.";
 
         } catch (Exception e) {
-            LOGGER.error("XML validation error: " + e.getMessage());
+            LOGGER.debugf("XML validation error: %s", sanitize(e.getMessage()));
             return "Error: Invalid XML - " + e.getMessage();
         }
     }
 
     @Tool("Minifies JSON by removing whitespace and formatting")
-    public String minifyJson(@P("jsonString") String jsonString) {
+    public String minifyJson(@P("The JSON document, as text") String jsonString) {
 
         try {
             JsonNode jsonNode = jsonMapper.readTree(jsonString);
@@ -150,7 +153,7 @@ public class DataFormatterTool {
             return minified;
 
         } catch (Exception e) {
-            LOGGER.error("JSON minification error: " + e.getMessage());
+            LOGGER.debugf("JSON minification error: %s", sanitize(e.getMessage()));
             return "Error: Could not minify JSON - " + e.getMessage();
         }
     }

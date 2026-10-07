@@ -692,7 +692,7 @@ class AgentOrchestratorBranchTest {
         @Test
         @DisplayName("reserved keys are blocked")
         void reservedKeysBlocked() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = HttpCallToolsProvider.class.getDeclaredMethod(
                     "safeTemplateMerge", Map.class, Map.class);
             method.setAccessible(true);
 
@@ -715,7 +715,7 @@ class AgentOrchestratorBranchTest {
         @Test
         @DisplayName("all reserved keys are protected")
         void allReservedKeysProtected() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = HttpCallToolsProvider.class.getDeclaredMethod(
                     "safeTemplateMerge", Map.class, Map.class);
             method.setAccessible(true);
 
@@ -742,7 +742,7 @@ class AgentOrchestratorBranchTest {
         @Test
         @DisplayName("non-reserved keys are merged")
         void nonReservedKeysMerged() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = HttpCallToolsProvider.class.getDeclaredMethod(
                     "safeTemplateMerge", Map.class, Map.class);
             method.setAccessible(true);
 
@@ -769,7 +769,7 @@ class AgentOrchestratorBranchTest {
         @Test
         @DisplayName("malformed JSON does not throw (caught internally)")
         void malformedJson() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = ToolLoopRunner.class.getDeclaredMethod(
                     "activateDiscoveredTools", String.class, List.class, List.class);
             method.setAccessible(true);
 
@@ -781,7 +781,7 @@ class AgentOrchestratorBranchTest {
         @Test
         @DisplayName("null tools node does not activate anything")
         void nullToolsNode() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = ToolLoopRunner.class.getDeclaredMethod(
                     "activateDiscoveredTools", String.class, List.class, List.class);
             method.setAccessible(true);
 
@@ -792,7 +792,7 @@ class AgentOrchestratorBranchTest {
         @Test
         @DisplayName("non-array tools node does not activate anything")
         void nonArrayToolsNode() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = ToolLoopRunner.class.getDeclaredMethod(
                     "activateDiscoveredTools", String.class, List.class, List.class);
             method.setAccessible(true);
 
@@ -803,7 +803,7 @@ class AgentOrchestratorBranchTest {
         @Test
         @DisplayName("valid tools array without name field is skipped")
         void toolsWithoutName() throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = ToolLoopRunner.class.getDeclaredMethod(
                     "activateDiscoveredTools", String.class, List.class, List.class);
             method.setAccessible(true);
 

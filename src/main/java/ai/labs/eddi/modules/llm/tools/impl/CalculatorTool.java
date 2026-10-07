@@ -14,6 +14,8 @@ import java.math.RoundingMode;
 import java.util.function.DoubleBinaryOperator;
 import java.util.function.DoubleUnaryOperator;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Calculator tool for performing mathematical operations. Uses a safe recursive
  * descent parser for expression evaluation. No external scripting engine
@@ -32,7 +34,7 @@ public class CalculatorTool {
     @Tool("Performs mathematical calculations. Supports basic operations (+, -, *, /, ^, %), "
             + "functions (sqrt, pow, abs, ceil, floor, round, min, max, sin, cos, tan, atan, log, exp), "
             + "and constants (PI, E). Returns the numeric result.")
-    public String calculate(@P("expression") String expression) {
+    public String calculate(@P("Arithmetic expression to evaluate, e.g. 'sqrt(16) + 2^3 * PI'") String expression) {
 
         try {
             if (expression == null || expression.isBlank()) {
@@ -47,7 +49,7 @@ public class CalculatorTool {
                 return "Error: Expression too long (max " + MAX_EXPRESSION_LENGTH + " characters).";
             }
 
-            LOGGER.debug("Calculating expression: " + expression);
+            LOGGER.debugf("Calculating expression: %s", sanitize(expression));
 
             double result = new SafeMathParser(expression).parse();
 
@@ -65,11 +67,11 @@ public class CalculatorTool {
             decimal = decimal.stripTrailingZeros();
 
             String resultStr = decimal.toPlainString();
-            LOGGER.info("Calculation result: " + expression + " = " + resultStr);
+            LOGGER.debugf("Calculation result: %s = %s", sanitize(expression), resultStr);
             return resultStr;
 
         } catch (IllegalArgumentException e) {
-            LOGGER.error("Calculation error: " + e.getMessage());
+            LOGGER.debugf("Calculation rejected: %s", sanitize(e.getMessage()));
             return "Error: " + e.getMessage();
         } catch (StackOverflowError e) {
             // Defense-in-depth alongside the length cap: deeply nested input.
@@ -82,7 +84,9 @@ public class CalculatorTool {
     }
 
     @Tool("Converts between different units of measurement")
-    public String convertUnits(@P("value") double value, @P("fromUnit") String fromUnit, @P("toUnit") String toUnit) {
+    public String convertUnits(@P("Numeric value to convert") double value,
+                               @P("Unit to convert from: celsius, fahrenheit, kelvin, m, km, feet, miles, kg, lb, liters or gallons") String fromUnit,
+                               @P("Unit to convert to, from the same list and of the same kind") String toUnit) {
 
         try {
             double result = performConversion(value, fromUnit.toLowerCase(), toUnit.toLowerCase());

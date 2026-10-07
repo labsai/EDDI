@@ -65,7 +65,7 @@ class ToolExecutionServiceBranchTest {
                     },
                     false, false, false, 0);
 
-            assertTrue(result.contains("NullPointerException"));
+            assertTrue(ToolExecutionService.isInternalFailure(result, "myTool"), result);
         }
 
         @Test

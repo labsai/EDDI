@@ -232,7 +232,8 @@ public class ToolResponseTruncator {
                     SystemMessage.from(systemPrompt),
                     UserMessage.from(result));
 
-            var response = model.chat(ChatRequest.builder().messages(messages).build());
+            var response = TransientFailureRetry.call(() -> model.chat(ChatRequest.builder().messages(messages).build()),
+                    "Tool response summarization");
             String summary = response.aiMessage().text();
 
             // Guard 4: empty summary
