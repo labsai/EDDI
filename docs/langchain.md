@@ -1382,6 +1382,10 @@ The Langchain task configurations can be managed via REST API endpoints.
    - **Endpoint:** `DELETE /llmstore/llms/{id}`
    - **Description:** Deletes a specific Langchain configuration
 
+8. **Patch Langchain Configuration**
+   - **Endpoint:** `PATCH /llmstore/llms/{id}?version=N` (`Content-Type: application/json-patch+json`)
+   - **Description:** Applies an RFC 6902 JSON Patch to version `N` and stores a new version, validated exactly like `PUT`. `409` if `N` is not the current version; `400` for a failed `test` operation, a path that does not resolve, or a patched document the model rejects. Send only what changes — a document that holds `${vault:…}` references never has to be echoed back. See [Editing a configuration that holds a reference](secrets-vault.md#editing-a-configuration-that-holds-a-reference-patch-not-echo)
+
 ---
 
 ## Tool Execution Pipeline
