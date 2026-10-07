@@ -149,4 +149,29 @@ class ConversationServiceReadLogTest {
         assertNotNull(result);
         assertEquals("application/json", result.mediaType());
     }
+
+    /**
+     * {@code GET /agents/{id}/log?outputType=} — Quarkus REST hands an empty query
+     * parameter through as {@code null} without applying its {@code @DefaultValue},
+     * and the service lowercased it before its own null check: a 500.
+     */
+    @Test
+    void readConversationLog_nullOutputType_returnsText() throws Exception {
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
+                .thenReturn(createEmptySnapshot());
+
+        ConversationLogResult result = conversationService.readConversationLog(CONVERSATION_ID, null, null);
+
+        assertEquals("text/plain", result.mediaType());
+    }
+
+    @Test
+    void readConversationLog_blankOutputType_returnsText() throws Exception {
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
+                .thenReturn(createEmptySnapshot());
+
+        ConversationLogResult result = conversationService.readConversationLog(CONVERSATION_ID, "  ", null);
+
+        assertEquals("text/plain", result.mediaType());
+    }
 }

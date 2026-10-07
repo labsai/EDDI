@@ -31,6 +31,7 @@ public record OpenAiErrorResponse(OpenAiError error) {
     public static final String CODE_AGENT_NOT_READY = "agent_not_ready";
     public static final String CODE_UNKNOWN_ENDPOINT = "unknown_endpoint";
     public static final String CODE_INVALID_REQUEST_FIELD = "invalid_request_field";
+    public static final String CODE_INVALID_REQUEST_BODY = "invalid_request_body";
     public static final String CODE_TIMEOUT = "timeout";
 
     public static OpenAiErrorResponse of(String message, String type, String code) {
