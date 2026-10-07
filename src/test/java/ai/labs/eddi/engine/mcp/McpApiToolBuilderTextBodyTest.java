@@ -166,6 +166,108 @@ class McpApiToolBuilderTextBodyTest {
         assertEquals(1, result.endpointCount());
     }
 
+    private static final String AUTH_HEADER_SPEC = spec("""
+            "/a":{"get":{"operationId":"secured",
+              "parameters":[{"name":"authorization","in":"header","required":true,"schema":{"type":"string"}}],
+              "responses":{"200":{"description":"ok"}}}},
+            "/b":{"get":{"operationId":"plain","responses":{"200":{"description":"ok"}}}}
+            """);
+
+    @Test
+    @DisplayName("a required header the configured auth sends on every call is not reported")
+    void requiredAuthHeaderIsExemptWhenAuthConfigured() {
+        var result = McpApiToolBuilder.parseAndBuild(AUTH_HEADER_SPEC, null, null, "Bearer abc");
+
+        assertEquals(2, result.endpointCount());
+        assertTrue(result.unusableEndpoints().isEmpty(), result.unusableEndpoints().toString());
+    }
+
+    @Test
+    @DisplayName("the same header is still reported when no auth is configured")
+    void requiredAuthHeaderIsReportedWithoutAuth() {
+        var result = McpApiToolBuilder.parseAndBuild(AUTH_HEADER_SPEC, null, null, null);
+
+        assertEquals(1, result.endpointCount());
+        assertEquals(1, result.unusableEndpoints().size());
+        assertTrue(result.unusableEndpoints().getFirst().contains("'authorization'"), result.unusableEndpoints().toString());
+    }
+
+    @Test
+    @DisplayName("a different required header is reported even with auth configured")
+    void otherRequiredHeaderIsReportedWithAuth() {
+        String spec = spec("""
+                "/a":{"get":{"operationId":"x","parameters":[{"name":"X-Tenant","in":"header","required":true,"schema":{"type":"string"}}],
+                  "responses":{"200":{"description":"ok"}}}},
+                "/b":{"get":{"operationId":"plain","responses":{"200":{"description":"ok"}}}}
+                """);
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, "Bearer abc");
+
+        assertEquals(1, result.unusableEndpoints().size());
+    }
+
+    @Test
+    @DisplayName("a custom auth header name is the one exempted")
+    void customAuthHeaderIsExempt() {
+        String spec = spec("""
+                "/a":{"get":{"operationId":"x","parameters":[{"name":"X-Api-Key","in":"header","required":true,"schema":{"type":"string"}}],
+                  "responses":{"200":{"description":"ok"}}}}
+                """);
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, "secret", "x-api-key");
+
+        assertEquals(1, result.endpointCount());
+        assertTrue(result.unusableEndpoints().isEmpty());
+    }
+
+    @Test
+    @DisplayName("a $ref'd required body of an unsupported type is reported, not read as 'no body'")
+    void refRequestBodyUnsupportedIsReported() {
+        String spec = """
+                {"openapi":"3.0.3","info":{"title":"t","version":"1"},"servers":[{"url":"https://t.example.com"}],
+                 "paths":{"/z":{"post":{"operationId":"z","requestBody":{"$ref":"#/components/requestBodies/Zip"},
+                   "responses":{"200":{"description":"ok"}}}},
+                  "/ok":{"get":{"operationId":"ok","responses":{"200":{"description":"ok"}}}}},
+                 "components":{"requestBodies":{"Zip":{"required":true,"content":{"application/zip":{"schema":{"type":"string"}}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+
+        assertEquals(1, result.endpointCount());
+        assertEquals(1, result.unusableEndpoints().size());
+        assertTrue(result.unusableEndpoints().getFirst().contains("application/zip"), result.unusableEndpoints().toString());
+    }
+
+    @Test
+    @DisplayName("a $ref'd text/plain body is mapped, not dropped")
+    void refRequestBodyTextIsMapped() {
+        String spec = """
+                {"openapi":"3.0.3","info":{"title":"t","version":"1"},"servers":[{"url":"https://t.example.com"}],
+                 "paths":{"/z":{"put":{"operationId":"z","requestBody":{"$ref":"#/components/requestBodies/Uri"},
+                   "responses":{"200":{"description":"ok"}}}}},
+                 "components":{"requestBodies":{"Uri":{"required":true,"description":"A URI.","content":{"text/plain":{"schema":{"type":"string"}}}}}}}
+                """;
+        ApiCall call = onlyCall(McpApiToolBuilder.parseAndBuild(spec, null, null, null));
+
+        assertEquals("text/plain", call.getRequest().getContentType());
+        assertEquals("{requestBody}", call.getRequest().getBody());
+    }
+
+    @Test
+    @DisplayName("a $ref'd required header parameter and a path-level one are both seen")
+    void refAndPathLevelParametersAreSeen() {
+        String spec = """
+                {"openapi":"3.0.3","info":{"title":"t","version":"1"},"servers":[{"url":"https://t.example.com"}],
+                 "paths":{
+                  "/r":{"get":{"operationId":"r","parameters":[{"$ref":"#/components/parameters/Tenant"}],"responses":{"200":{"description":"ok"}}}},
+                  "/p":{"parameters":[{"name":"X-Path","in":"header","required":true,"schema":{"type":"string"}}],
+                        "get":{"operationId":"p","responses":{"200":{"description":"ok"}}}},
+                  "/ok":{"get":{"operationId":"ok","responses":{"200":{"description":"ok"}}}}},
+                 "components":{"parameters":{"Tenant":{"name":"X-Tenant","in":"header","required":true,"schema":{"type":"string"}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+
+        assertEquals(1, result.endpointCount());
+        assertEquals(2, result.unusableEndpoints().size(), result.unusableEndpoints().toString());
+    }
+
     @Test
     @DisplayName("when nothing usable remains the failure names the skipped operations")
     void allUnusableFailsLoudly() {

@@ -15,6 +15,7 @@ import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.Parameter;
+import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.servers.Server;
 import io.swagger.v3.parser.ObjectMapperFactory;
 import io.swagger.v3.parser.OpenAPIV3Parser;
@@ -195,7 +196,7 @@ public final class McpApiToolBuilder {
 
                     // Refuse, and say so, rather than generate a tool that cannot send an
                     // input the operation requires. See findUnmappableInput.
-                    String unmappable = findUnmappableInput(operation);
+                    String unmappable = findUnmappableInput(operation, pathItem, openAPI, apiAuth, authHeader);
                     if (unmappable != null) {
                         unusableEndpoints.add(method.toUpperCase() + " " + path + ": " + unmappable);
                         continue;
@@ -617,7 +618,7 @@ public final class McpApiToolBuilder {
      * send.
      */
     private static BodyMapping mapRequestBody(Operation operation, OpenAPI openAPI) {
-        var requestBody = operation.getRequestBody();
+        var requestBody = resolveRequestBody(operation, openAPI);
         if (requestBody == null || requestBody.getContent() == null) {
             return null;
         }
@@ -673,6 +674,54 @@ public final class McpApiToolBuilder {
     }
 
     /**
+     * The operation's request body with a component {@code $ref} followed one level
+     * ({@code #/components/requestBodies/X}). The parser can leave such a body as a
+     * shell with no content, which reads as "no body" and is dropped — the
+     * silent-drop bug again.
+     */
+    private static RequestBody resolveRequestBody(Operation operation, OpenAPI openAPI) {
+        RequestBody body = operation.getRequestBody();
+        if (body == null || body.get$ref() == null || openAPI == null || openAPI.getComponents() == null
+                || openAPI.getComponents().getRequestBodies() == null) {
+            return body;
+        }
+        String prefix = "#/components/requestBodies/";
+        String ref = body.get$ref();
+        if (!ref.startsWith(prefix)) {
+            return body;
+        }
+        RequestBody resolved = openAPI.getComponents().getRequestBodies().get(ref.substring(prefix.length()));
+        return resolved != null ? resolved : body;
+    }
+
+    /**
+     * Path-item parameters plus the operation's own, each with a component
+     * {@code $ref} followed one level. A {@code $ref}'d parameter has no name or
+     * location on the model until resolved, so it used to be invisible here.
+     */
+    private static List<Parameter> effectiveParameters(Operation operation, PathItem pathItem, OpenAPI openAPI) {
+        var all = new ArrayList<Parameter>();
+        if (pathItem != null && pathItem.getParameters() != null) {
+            all.addAll(pathItem.getParameters());
+        }
+        if (operation.getParameters() != null) {
+            all.addAll(operation.getParameters());
+        }
+        var resolved = new ArrayList<Parameter>();
+        String prefix = "#/components/parameters/";
+        for (Parameter param : all) {
+            if (param != null && param.get$ref() != null && param.get$ref().startsWith(prefix) && openAPI != null
+                    && openAPI.getComponents() != null && openAPI.getComponents().getParameters() != null) {
+                Parameter target = openAPI.getComponents().getParameters().get(param.get$ref().substring(prefix.length()));
+                resolved.add(target != null ? target : param);
+            } else {
+                resolved.add(param);
+            }
+        }
+        return resolved;
+    }
+
+    /**
      * Why this operation cannot be turned into a working tool, or null when it can.
      * <p>
      * A generated tool sends path, query and body inputs. Anything the operation
@@ -685,9 +734,15 @@ public final class McpApiToolBuilder {
      * Covers: a body whose every media type is unsupported (unless the spec marks
      * the body explicitly optional, in which case the tool is generated without
      * it), and a required header or cookie parameter (never mapped).
+     * <p>
+     * The one exemption: when {@code apiAuth} is set, a required header named
+     * {@code authHeader} (case-insensitive) is not reported, because
+     * {@link #buildApiCall} sends that header on every call. Third-party specs
+     * routinely declare their auth header this way. (The Manager's twin check has
+     * no such exemption: EDDI's own spec declares no auth header parameter.)
      */
-    static String findUnmappableInput(Operation operation) {
-        var requestBody = operation.getRequestBody();
+    static String findUnmappableInput(Operation operation, PathItem pathItem, OpenAPI openAPI, String apiAuth, String authHeader) {
+        var requestBody = resolveRequestBody(operation, openAPI);
         if (requestBody != null && !Boolean.FALSE.equals(requestBody.getRequired())) {
             var content = requestBody.getContent();
             // No content map at all is a body-less declaration the JSON path tolerated
@@ -697,12 +752,14 @@ public final class McpApiToolBuilder {
                         + ", which generated tools cannot send (supported: " + JSON_MEDIA_TYPE + ", " + TEXT_MEDIA_TYPE + ")";
             }
         }
-        if (operation.getParameters() != null) {
-            for (Parameter param : operation.getParameters()) {
-                if (param != null && param.getName() != null && Boolean.TRUE.equals(param.getRequired())
-                        && ("header".equals(param.getIn()) || "cookie".equals(param.getIn()))) {
-                    return "requires the " + param.getIn() + " parameter '" + param.getName() + "', which generated tools cannot send";
+        boolean authConfigured = apiAuth != null && !apiAuth.isBlank();
+        for (Parameter param : effectiveParameters(operation, pathItem, openAPI)) {
+            if (param != null && param.getName() != null && Boolean.TRUE.equals(param.getRequired())
+                    && ("header".equals(param.getIn()) || "cookie".equals(param.getIn()))) {
+                if (authConfigured && "header".equals(param.getIn()) && authHeader != null && authHeader.equalsIgnoreCase(param.getName())) {
+                    continue;
                 }
+                return "requires the " + param.getIn() + " parameter '" + param.getName() + "', which generated tools cannot send";
             }
         }
         return null;

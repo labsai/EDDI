@@ -272,6 +272,12 @@ export function findMissingEndpoints(
  * (`McpApiToolBuilder`). Keep in step with it: a body type absent here is one
  * the generated tool cannot fill, which is the whole point of
  * {@link findUnusableEndpoints}.
+ *
+ * The backend twin (`McpApiToolBuilder.findUnmappableInput`) follows the same
+ * rules with ONE intentional difference: it exempts a required header parameter
+ * named like the configured auth header, because it sends that header on every
+ * call (third-party specs often declare it). This check has no such exemption —
+ * EDDI's own spec declares no auth header parameter, so none is needed here.
  */
 const SUPPORTED_BODY_MEDIA_TYPES: readonly string[] = [
   "application/json",
@@ -303,7 +309,8 @@ function baseMediaType(mediaType: string): string {
 /**
  * Why one operation would produce a tool that cannot send an input it requires,
  * or `null` when it is fine. The client-side twin of the backend's
- * `McpApiToolBuilder.findUnmappableInput`; both must agree.
+ * `McpApiToolBuilder.findUnmappableInput`; both must agree, except for the
+ * backend-only auth-header exemption described at {@link SUPPORTED_BODY_MEDIA_TYPES}.
  */
 function unusableReason(
   spec: FetchedSpec,
