@@ -10,8 +10,8 @@
 |---|---|---|---|
 | **Conversation Memory** | MongoDB / PostgreSQL | Yes (userId, chat content) | 365 days default (configurable) |
 | **User Memory** | MongoDB / PostgreSQL | Yes (userId, structured facts) | Until explicitly deleted |
-| **Audit Ledger** | MongoDB / PostgreSQL | Yes (userId) | Indefinite (EU AI Act) |
-| **Database Logs** | MongoDB / PostgreSQL | Yes (userId) | Configurable |
+| **Audit Ledger** | MongoDB / PostgreSQL | Yes (userId, prompts, responses, tool calls) | Indefinite (EU AI Act record-keeping); content redacted on erasure |
+| **Database Logs** | MongoDB / PostgreSQL | Yes (userId, log messages) | `eddi.logs.db-retention-days` (default: kept until deleted) |
 | **Managed Conversations** | MongoDB / PostgreSQL | Yes (userId, intent) | Until explicitly deleted |
 
 ## Data Subject Rights
@@ -29,13 +29,18 @@ This cascades across all stores:
 2. **Conversation snapshots** — permanently deleted
 3. **Managed conversation mappings** — permanently deleted
 4. **Database logs** — userId pseudonymized (SHA-256 hash)
-5. **Audit ledger** — userId pseudonymized (SHA-256 hash)
+5. **Audit ledger** — rows kept; recorded content (prompt, response, LLM detail,
+   tool calls) redacted and userId pseudonymized
 
-**Why pseudonymize instead of delete?** The audit ledger and logs are retained
-under GDPR Art. 17(3)(e) — compliance with EU AI Act Articles 17/19 which
-require immutable decision traceability for AI systems. User identifiers are
-replaced with irreversible hashes, making re-identification impossible without
-the original identifier.
+This is the short list; the full cascade is in
+[gdpr-compliance.md](docs/gdpr-compliance.md#1-right-to-erasure-gdpr-art-17--ccpa-1798105).
+
+**Why keep the audit rows?** Record-keeping obligations for AI systems (EU AI
+Act Arts. 12/19) cover the record that processing happened, so the rows and
+their chain stay — but not with the erased person's data in them. The
+pseudonym is **not** anonymisation: the database-log hash is unsalted, so
+anyone holding a candidate identifier can recompute it, and pseudonymised data
+remains personal data (GDPR Art. 4(5)).
 
 ### Right of Access / Portability (Art. 15/20)
 
@@ -43,19 +48,24 @@ the original identifier.
 GET /admin/gdpr/{userId}/export
 ```
 
-Returns all user data as JSON: memories, conversations (with chat history),
-and managed conversation mappings.
+Returns user data as JSON: memories, conversations (with chat history),
+managed conversation mappings, audit processing records, attachment metadata
+and linked accounts. Some categories are not exported yet and are named in
+`omittedCategories` — see
+[gdpr-compliance.md](docs/gdpr-compliance.md#2-right-of-access-gdpr-art-15--data-portability-art-20--right-to-know-ccpa-1798100).
 
 ### MCP Tools
 
 For AI-orchestrated compliance workflows:
 - `delete_user_data` — full cascade erasure (requires `confirmation="CONFIRM"`)
-- `export_user_data` — complete user data bundle
+- `export_user_data` — the same bundle as the export endpoint; check `complete` and
+  `omittedCategories` before treating it as a full Art. 15 response
 
 ## Security Measures
 
 - **Encryption at rest**: AES-256-GCM via Secrets Vault for API keys and credentials
-- **Immutable audit trail**: HMAC-signed ledger entries for tamper detection
+- **Audit trail**: HMAC-signed ledger entries for tamper detection — signed only when
+  `EDDI_VAULT_MASTER_KEY` or `EDDI_AUDIT_HMAC_KEY` is set
 - **Secret redaction**: `SecretRedactionFilter` scrubs API keys, tokens, and vault
   references from audit entries before persistence
 - **RBAC**: All GDPR endpoints require `eddi-admin` role
@@ -105,17 +115,14 @@ As the data controller, you **must**:
 
 ### What Data is Sent to LLM Providers
 
-| Data Type | Sent? | Notes |
-|---|---|---|
-| User messages | ✅ Yes | The current turn's input |
-| Conversation history | ✅ Yes | Recent conversation context (windowed) |
-| System prompt | ✅ Yes | Agent instructions (configured by deployer) |
-| User ID | ❌ No | Not included in LLM requests |
-| API keys | ❌ No | Only the provider's own key for authentication |
-
-EDDI does **not** send user IDs, metadata, or data from other conversations
-to LLM providers. Only the conversation context relevant to the current agent
-interaction is transmitted.
+The current message, the conversation history window and the agent's templated
+system prompt — and, depending on the agent's configuration, the user's
+persistent memories (including `global` memories other agents wrote about the
+same user), retrieved documents, tool results and group discussion content.
+EDDI adds no user identifier to a provider request by itself; one reaches the
+provider only if a prompt template or a tool result contains it. The full
+inventory is in
+[What reaches the LLM provider](docs/compliance-data-flow.md#what-reaches-the-llm-provider).
 
 ## Consent (GDPR Art. 6/7)
 
@@ -130,7 +137,7 @@ EDDI's data processing activities and their typical legal bases:
 |---|---|---|
 | Conversation processing | Art. 6(1)(a) Consent or Art. 6(1)(b) Contract | Controller determines |
 | Persistent user memory | Art. 6(1)(a) Consent | Users should be informed |
-| Audit ledger retention | Art. 6(1)(c) Legal obligation | EU AI Act Art. 17/19 |
+| Audit ledger retention | Art. 6(1)(c) Legal obligation | EU AI Act Arts. 12/19 |
 | System logging | Art. 6(1)(f) Legitimate interest | Operational necessity |
 
 ### Controller Obligations
@@ -158,16 +165,12 @@ If your deployment scenario involves sharing user data with third parties
 (e.g., analytics providers), this is the controller's responsibility to
 manage and disclose.
 
-### Right to Know (§1798.100)
+### Right to Know (§1798.100) and Right to Delete (§1798.105)
 
-The GDPR export endpoint (`GET /admin/gdpr/{userId}/export`) satisfies the
-CCPA "right to know" requirement by providing all personal information
-collected about a consumer in a structured, machine-readable format.
-
-### Right to Delete (§1798.105)
-
-The GDPR erasure endpoint (`DELETE /admin/gdpr/{userId}`) satisfies the
-CCPA "right to delete" requirement.
+The GDPR export and erasure endpoints serve both, with the same results and
+the same limits: the export does not yet cover every category, and the erasure
+keeps the audit ledger (redacted) and database logs (pseudonymized). See
+[gdpr-compliance.md](docs/gdpr-compliance.md#ccpa-specific-requirements).
 
 ## Data Retention
 
@@ -176,7 +179,8 @@ CCPA "right to delete" requirement.
 | Ended conversations | 365 days | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` |
 | Idle conversations | 90 days | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` |
 | User memories | No auto-delete | Use GDPR API or MCP tools |
-| Audit ledger | No auto-delete | Retained for EU AI Act compliance |
+| Audit ledger | No auto-delete | Retained for EU AI Act record-keeping; content redacted on erasure |
+| Database logs | No auto-delete | `eddi.logs.db-retention-days` |
 
 Set retention to `-1` to disable automatic cleanup.
 
@@ -209,7 +213,7 @@ Information Principles.
 
 | PIPEDA Principle | EDDI Technical Capability | Status |
 |---|---|---|
-| **Accountability** | Immutable HMAC-signed audit ledger traces all operations | ✅ + 🏢 |
+| **Accountability** | HMAC-signed audit ledger records conversation processing and administrative actions (reads are not recorded) | ✅ + 🏢 |
 | **Identifying Purposes** | Agent configuration documents AI processing purpose | ✅ + 🏢 |
 | **Consent** | Deployer integrates consent capture in their application layer | 🏢 Your org |
 | **Limiting Collection** | Token-aware windowing limits data sent to LLMs; configurable retention auto-deletes old conversations | ✅ Built-in |
@@ -218,7 +222,7 @@ Information Principles.
 | **Safeguards** | AES-256-GCM envelope encryption (Secrets Vault), HMAC-SHA256 audit integrity, Keycloak OIDC, role-based access control | ✅ Built-in |
 | **Openness** | Full source code is open (Apache 2.0); PRIVACY.md and documentation are public | ✅ Built-in |
 | **Individual Access** | `GET /admin/gdpr/{userId}/export` — returns all memories, conversations, and managed conversation mappings as JSON | ✅ Built-in |
-| **Challenging Compliance** | `DELETE /admin/gdpr/{userId}` — cascade deletion across all 5 data stores; audit trail pseudonymized (not deleted) | ✅ Built-in |
+| **Challenging Compliance** | `DELETE /admin/gdpr/{userId}` — cascade deletion; audit trail kept with its content redacted and the user id pseudonymized | ✅ Built-in |
 
 **Deployer checklist**:
 
@@ -238,10 +242,10 @@ their personal data.
 
 | LGPD Right | EDDI Technical Capability | Status |
 |---|---|---|
-| Confirmation of processing (Art. 18, I) | Documented in PRIVACY.md; audit trail records all operations | ✅ Built-in |
+| Confirmation of processing (Art. 18, I) | Documented in PRIVACY.md; audit trail records conversation processing and administrative actions | ✅ Built-in |
 | Access to data (Art. 18, II) | `GET /admin/gdpr/{userId}/export` — full JSON bundle | ✅ Built-in |
 | Correction of inaccurate data (Art. 18, III) | `PUT /usermemorystore/memories` — upserts individual memory entries | ✅ Built-in |
-| Anonymization/blocking/deletion (Art. 18, IV) | `DELETE /admin/gdpr/{userId}` — cascade deletion + SHA-256 pseudonymization of audit trail | ✅ Built-in |
+| Anonymization/blocking/deletion (Art. 18, IV) | `DELETE /admin/gdpr/{userId}` — cascade deletion; audit trail redacted and pseudonymized | ✅ Built-in |
 | Data portability (Art. 18, V) | JSON export includes all data; machine-readable format | ✅ Built-in |
 | Deletion of unnecessary data (Art. 18, VI) | Configurable retention (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`) + idle conversation auto-end | ✅ Built-in |
 | Information about sharing (Art. 18, VII) | LLM provider data flows documented; audit trail records model name per invocation | ✅ Built-in |
@@ -278,7 +282,7 @@ two regions.
 | Correction and deletion (Art. 34-35) | `PUT /usermemorystore/memories` for correction; `DELETE /admin/gdpr/{userId}` for deletion | ✅ Built-in |
 | Breach notification (Art. 26) | Incident response runbook (`docs/incident-response.md`) | ✅ Built-in |
 | Cross-border transfer (Art. 28) | EDDI documents provider data flows; deployer verifies recipient country protections and obtains consent where required | ✅ + 🏢 |
-| Pseudonymized information (2022 amendment) | GDPR erasure uses SHA-256 pseudonymization — satisfies APPI's pseudonymized information category | ✅ Built-in |
+| Pseudonymized information (2022 amendment) | GDPR erasure pseudonymizes the identifiers it keeps (a keyed HMAC in the audit ledger, SHA-256 in the database logs) — satisfies APPI's pseudonymized information category | ✅ Built-in |
 
 **Deployer checklist**:
 

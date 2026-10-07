@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -460,5 +461,82 @@ class UserMemoryToolTest {
         // cross-agent overwrites, so there is no ownership to enforce.
         verify(store).upsert(any());
         verify(store, never()).upsertIfOwnedBy(any(), any());
+    }
+
+    // === Concurrent inserts at the cap (enforceCapacity race) ===
+
+    private static UserMemoryEntry storedAt(String key, String owner, Instant createdAt) {
+        return new UserMemoryEntry("id-" + key, "user-1", key, "v", "fact", Visibility.self, owner, List.of(), "conv-0", false, 0, createdAt,
+                createdAt);
+    }
+
+    private List<UserMemoryEntry> fourExisting(Instant base) {
+        return List.of(storedAt("a", "agent-1", base.minusSeconds(40)), storedAt("b", "agent-1", base.minusSeconds(30)),
+                storedAt("c", "agent-1", base.minusSeconds(20)), storedAt("d", "agent-1", base.minusSeconds(10)));
+    }
+
+    /**
+     * Two conversations of one user at cap - 1 both passed the count check and both
+     * inserted, leaving the user above the cap for good. The write that is over the
+     * cap — the newest — is now undone in reject mode.
+     */
+    @Test
+    void rememberFact_concurrentInsertOvershootsTheCap_rejectModeUndoesTheNewestInsert() throws Exception {
+        config.setMaxEntriesPerUser(5);
+        config.setOnCapReached("reject");
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        Instant base = Instant.now();
+        var after = new ArrayList<>(fourExisting(base));
+        after.add(storedAt("drink", "agent-2", base.minusSeconds(1))); // the other conversation's insert
+        after.add(storedAt("food", "agent-1", base)); // ours, the newest
+        when(store.getAllEntries("user-1")).thenReturn(fourExisting(base), after);
+        when(store.countEntries("user-1")).thenReturn(4L, 6L);
+        when(store.upsert(any())).thenReturn("id-food");
+
+        String result = tool.rememberFact("food", "pasta", "fact", "self");
+
+        assertTrue(result.contains("NOT saved"), result);
+        assertTrue(result.contains("(6/5)"), "reports the observed count over the cap, like the other capacity messages: " + result);
+        verify(store).deleteEntry("id-food");
+        verify(store, never()).deleteEntry("id-drink");
+    }
+
+    @Test
+    void rememberFact_concurrentInsertOvershootsTheCap_theOlderInsertIsKept() throws Exception {
+        config.setMaxEntriesPerUser(5);
+        config.setOnCapReached("reject");
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        Instant base = Instant.now();
+        var after = new ArrayList<>(fourExisting(base));
+        after.add(storedAt("food", "agent-1", base.minusSeconds(1))); // ours landed first
+        after.add(storedAt("drink", "agent-2", base)); // the other one is over the cap and settles it
+        when(store.getAllEntries("user-1")).thenReturn(fourExisting(base), after);
+        when(store.countEntries("user-1")).thenReturn(4L, 6L);
+        when(store.upsert(any())).thenReturn("id-food");
+
+        String result = tool.rememberFact("food", "pasta", "fact", "self");
+
+        assertTrue(result.contains("✅ Remembered"), result);
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void rememberFact_concurrentInsertOvershootsTheCap_evictModeEvictsTheOldestOwnEntry() throws Exception {
+        config.setMaxEntriesPerUser(5);
+        config.setOnCapReached("evict_oldest");
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        Instant base = Instant.now();
+        var after = new ArrayList<>(fourExisting(base));
+        after.add(storedAt("drink", "agent-2", base.minusSeconds(1)));
+        after.add(storedAt("food", "agent-1", base));
+        when(store.getAllEntries("user-1")).thenReturn(fourExisting(base), after);
+        when(store.countEntries("user-1")).thenReturn(4L, 6L);
+        when(store.upsert(any())).thenReturn("id-food");
+
+        String result = tool.rememberFact("food", "pasta", "fact", "self");
+
+        assertTrue(result.contains("✅ Remembered"), result);
+        verify(store).deleteEntry("id-a");
+        verify(store, never()).deleteEntry("id-food");
     }
 }

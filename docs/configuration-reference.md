@@ -200,7 +200,8 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 
 Full guide: [audit-ledger.md](audit-ledger.md). Note there is **no retention
 property** — the ledger is append-only by design; see
-[gdpr-compliance.md](gdpr-compliance.md).
+[gdpr-compliance.md](gdpr-compliance.md). A GDPR erasure keeps the user's rows
+but redacts their content (`eddi.audit.erasure-mode`).
 
 | Property | Default | Description |
 |---|---|---|
@@ -212,6 +213,8 @@ property** — the ledger is append-only by design; see
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |
+| `eddi.audit.erasure-mode` | `redact` | What `DELETE /admin/gdpr/{userId}` does to the user's ledger rows. `redact`: the user id is pseudonymized **and** the recorded content (`input`, `output`, `llmDetail`, `toolCalls`) is replaced by a redaction marker; rows that verified are re-signed, so they still verify, and the chain stays intact. `pseudonymize`: the user id only — prompts, responses and tool calls are **kept**; for a legal hold that requires the content, and logged as a WARN at startup. Any other value means `redact`. See [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion) |
+| `eddi.audit.admin-actions.enabled` | `true` | Record every mutating REST request outside the chat APIs — caller, method, path, endpoint, status; never the body — in the ledger. See [audit-ledger.md](audit-ledger.md#administrative-actions) |
 | `eddi.audit.hmac-previous-keys` | *(empty)* | Comma-separated retired `eddi.audit.hmac-key` values (or retired vault master keys) that old entries were signed with. Verification only. An entry naming a key the deployment recorded as having signed, but that nobody lists, reports `UNKNOWN_KEY`; an id that was never recorded reports `INVALID` |
 
 ---
@@ -427,6 +430,9 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.logs.db-enabled` | `true` | Also persist logs to the database |
 | `eddi.logs.db-flush-interval-seconds` | `5` | Persistence batch cadence |
 | `eddi.logs.db-persist-min-level` | `WARN` | Minimum level persisted. Lowering this to `DEBUG` in production will fill the database quickly |
+| `eddi.logs.db-retention-days` | `-1` | Delete persisted log entries older than this many days. `-1` (or `0`) keeps them until deleted by hand. Persisted entries carry the user id (pseudonymized on GDPR erasure) and the message text, so set this wherever a data-retention policy applies. Applies to entries already stored even after `eddi.logs.db-enabled=false` |
+| `eddi.logs.db-retention-interval` | `24h` | How often the retention sweep runs |
+| `eddi.logs.db-retention-initial-delay` | `4m` | Delay before the first sweep after startup |
 | `eddi.docs.enabled` | `true` | Serve EDDI's own docs at `/administration/docs`, as MCP resources (`eddi://docs/*`) and as the `list_docs`/`read_docs` MCP tools. One switch covers all three. The content is the public repository documentation, so this is an exposure policy, not a secrecy control |
 | `eddi.docs.path` | `docs` | Directory the above is served from |
 

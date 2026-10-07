@@ -15,6 +15,8 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -45,6 +47,9 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             )
             """;
 
+    /** Backs both the newest-first read and the retention sweep's range delete. */
+    private static final String CREATE_INDEX_TIMESTAMP = "CREATE INDEX IF NOT EXISTS idx_database_logs_ts ON database_logs (timestamp DESC)";
+
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
@@ -58,6 +63,7 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
+            stmt.execute(CREATE_INDEX_TIMESTAMP);
             schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.error("Failed to initialize database_logs table", e);
@@ -173,8 +179,41 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
             ps.setString(2, userId);
             return ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to pseudonymize database logs", e);
-            return 0;
+            // Thrown, not swallowed: returning 0 made a failed pseudonymisation look
+            // like a user with no log entries, and the GDPR cascade then reported the
+            // erasure complete while the raw id was still in the table.
+            throw new IllegalStateException("Failed to pseudonymize database logs", e);
         }
     }
+
+    @Override
+    public long deleteOlderThan(int olderThanDays) {
+        if (olderThanDays <= 0) {
+            throw new IllegalArgumentException("olderThanDays must be positive, got " + olderThanDays);
+        }
+        ensureSchema();
+        // In batches: the first sweep after retention is switched on may face the
+        // whole history, and one DELETE of millions of rows is a single transaction
+        // that holds every row lock, bloats WAL and delays vacuum until it ends.
+        String sql = "DELETE FROM database_logs WHERE ctid IN (SELECT ctid FROM database_logs WHERE timestamp < ? LIMIT ?)";
+        Timestamp cutoff = Timestamp.from(Instant.now().minus(Duration.ofDays(olderThanDays)));
+        long total = 0;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            int deleted;
+            do {
+                ps.setTimestamp(1, cutoff);
+                ps.setInt(2, RETENTION_BATCH_SIZE);
+                deleted = ps.executeUpdate();
+                total += deleted;
+            } while (deleted >= RETENTION_BATCH_SIZE);
+            return total;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete expired database logs", e);
+        }
+    }
+
+    /**
+     * Rows one retention DELETE removes; the sweep repeats until a batch is short.
+     */
+    static final int RETENTION_BATCH_SIZE = 10_000;
 }

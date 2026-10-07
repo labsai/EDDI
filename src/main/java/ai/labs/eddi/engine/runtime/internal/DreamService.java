@@ -30,6 +30,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.Collection;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -124,6 +125,7 @@ public class DreamService {
     private Counter entriesSummarizedCounter;
     private Counter cyclesFailedCounter;
     private Counter summarizationFailedCounter;
+    private Counter conflictsSkippedCounter;
     private Timer dreamDurationTimer;
 
     @Inject
@@ -147,6 +149,7 @@ public class DreamService {
         entriesSummarizedCounter = meterRegistry.counter("eddi.dream.entries.summarized");
         cyclesFailedCounter = meterRegistry.counter("eddi.dream.cycles.failed");
         summarizationFailedCounter = meterRegistry.counter("eddi.dream.summarization.failed");
+        conflictsSkippedCounter = meterRegistry.counter("eddi.dream.conflicts.skipped");
         dreamDurationTimer = meterRegistry.timer("eddi.dream.duration");
     }
 
@@ -294,6 +297,7 @@ public class DreamService {
         int summarized = 0;
         double estimatedCost = 0.0;
         String summarizationError = null;
+        var conflicts = new AtomicInteger();
 
         try {
             LOGGER.infof("[DREAM] Starting dream cycle for user='%s', agent='%s'", LogSanitizer.sanitize(userId), LogSanitizer.sanitize(agentId));
@@ -306,7 +310,7 @@ public class DreamService {
 
             // 1. Prune stale entries (deterministic, zero LLM cost)
             if (dreamConfig.getPruneStaleAfterDays() > 0) {
-                pruned = pruneStaleEntries(userId, allEntries, dreamConfig.getPruneStaleAfterDays());
+                pruned = pruneStaleEntries(userId, allEntries, dreamConfig.getPruneStaleAfterDays(), conflicts);
             }
 
             // After pruning, reload once — shared by contradiction detection and
@@ -329,7 +333,7 @@ public class DreamService {
 
             // 3. Summarize interactions (LLM-driven consolidation)
             if (dreamConfig.isSummarizeInteractions()) {
-                var outcome = summarizeInteractions(userId, currentEntries, dreamConfig);
+                var outcome = summarizeInteractions(userId, currentEntries, dreamConfig, conflicts);
                 summarized = outcome.entriesReduced();
                 estimatedCost = outcome.estimatedCostUsd();
                 summarizationError = outcome.error();
@@ -342,37 +346,46 @@ public class DreamService {
             if (summarizationError != null) {
                 cyclesFailedCounter.increment();
                 LOGGER.errorf("[DREAM] Completed WITH ERRORS for user='%s': pruned=%d, contradictions=%d, summarized=%d, "
-                        + "estimatedCost=$%.4f, duration=%dms, error=%s", LogSanitizer.sanitize(userId), pruned, contradictions, summarized,
-                        estimatedCost,
-                        duration.toMillis(), summarizationError);
+                        + "conflictsSkipped=%d, estimatedCost=$%.4f, duration=%dms, error=%s", LogSanitizer.sanitize(userId), pruned,
+                        contradictions, summarized, conflicts.get(), estimatedCost, duration.toMillis(), summarizationError);
             } else {
-                LOGGER.infof("[DREAM] Completed for user='%s': pruned=%d, contradictions=%d, summarized=%d, "
-                        + "estimatedCost=$%.4f, duration=%dms", LogSanitizer.sanitize(userId), pruned, contradictions, summarized, estimatedCost,
-                        duration.toMillis());
+                LOGGER.infof("[DREAM] Completed for user='%s': pruned=%d, contradictions=%d, summarized=%d, conflictsSkipped=%d, "
+                        + "estimatedCost=$%.4f, duration=%dms", LogSanitizer.sanitize(userId), pruned, contradictions, summarized, conflicts.get(),
+                        estimatedCost, duration.toMillis());
             }
 
-            return new DreamResult(userId, pruned, contradictions, summarized, duration.toMillis(), estimatedCost, summarizationError);
+            return new DreamResult(userId, pruned, contradictions, summarized, duration.toMillis(), estimatedCost, summarizationError,
+                    conflicts.get());
 
         } catch (Exception e) {
             cyclesFailedCounter.increment();
             LOGGER.errorf(e, "[DREAM] Failed for user='%s'", LogSanitizer.sanitize(userId));
             return new DreamResult(userId, pruned, contradictions, summarized, Duration.between(start, Instant.now()).toMillis(), estimatedCost,
-                    describe(e));
+                    describe(e), conflicts.get());
         }
     }
 
     /**
-     * Remove entries that haven't been accessed in the specified number of days.
+     * Remove entries that haven't been written in the specified number of days.
      * This is a deterministic operation with zero LLM cost.
+     * <p>
+     * The delete is conditional on the entry's {@code updatedAt}: an entry the
+     * user's conversation rewrote after the cycle read it is no longer stale, and
+     * deleting it by id removed the fresh fact. Such an entry is skipped and
+     * counted in {@code conflicts}.
      */
-    private int pruneStaleEntries(String userId, List<UserMemoryEntry> allEntries, int staleAfterDays) {
+    private int pruneStaleEntries(String userId, List<UserMemoryEntry> allEntries, int staleAfterDays, AtomicInteger conflicts) {
         Instant cutoff = Instant.now().minus(Duration.ofDays(staleAfterDays));
 
         int pruned = 0;
         for (UserMemoryEntry entry : allEntries) {
             if (entry.updatedAt() != null && entry.updatedAt().isBefore(cutoff)) {
                 try {
-                    userMemoryStore.deleteEntry(entry.id());
+                    if (!userMemoryStore.deleteEntryIfUnchanged(entry.id(), entry.updatedAt())) {
+                        recordConflict(conflicts, userId, "entry '" + LogSanitizer.sanitize(entry.key())
+                                + "' was written after this cycle read it; not pruned");
+                        continue;
+                    }
                     pruned++;
                     entriesPrunedCounter.increment();
                 } catch (Exception e) {
@@ -474,7 +487,7 @@ public class DreamService {
      */
     private SummarizationOutcome summarizeInteractions(String userId,
                                                        List<UserMemoryEntry> entries,
-                                                       AgentConfiguration.DreamConfig config) {
+                                                       AgentConfiguration.DreamConfig config, AtomicInteger conflicts) {
         int totalConsolidated = 0;
         int llmCallsMade = 0;
         int transientFailures = 0;
@@ -556,7 +569,7 @@ public class DreamService {
                                 + e.getMessage());
             }
             llmCallsMade++;
-            estimatedCostAccumulated += estimateCost(llmResult, content.length());
+            estimatedCostAccumulated += estimateCost(llmResult, content.length(), config.getInputPricePer1M(), config.getOutputPricePer1M());
 
             // 4. Parse response (handles markdown fences, validates output). Two
             // consolidated entries with the same key would upsert onto the same
@@ -637,8 +650,14 @@ public class DreamService {
                     .collect(Collectors.toMap(UserMemoryEntry::id, e -> e, (a, b) -> a, LinkedHashMap::new));
             Map<String, UserMemoryEntry> reusedOriginals = new LinkedHashMap<>();
             String collidingKey;
+            String changedOriginal;
             try {
                 List<UserMemoryEntry> userEntries = userMemoryStore.getAllEntries(userId);
+                // The model consolidated the values this cycle read before the LLM call,
+                // which takes seconds. An original the conversation rewrote (or deleted)
+                // since then carries a fact the consolidation never saw: writing the
+                // consolidation over it, or deleting it afterwards, would lose that fact.
+                changedOriginal = firstChangedSince(groupEntries, userEntries);
                 collidingKey = null;
                 for (var entry : consolidated) {
                     UserMemoryEntry existing = findUpsertTarget(userEntries, entry.key(), mergedVisibility, sourceAgent);
@@ -655,6 +674,11 @@ public class DreamService {
             } catch (Exception e) {
                 LOGGER.warnf("[DREAM] Could not resolve consolidation targets for user='%s', group='%s': %s. Originals preserved.",
                         LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getMessage());
+                continue;
+            }
+            if (changedOriginal != null) {
+                recordConflict(conflicts, userId, "group '" + LogSanitizer.sanitize(group.getKey()) + "': entry '"
+                        + LogSanitizer.sanitize(changedOriginal) + "' changed during the LLM call; the group is skipped untouched");
                 continue;
             }
             if (collidingKey != null) {
@@ -705,19 +729,22 @@ public class DreamService {
                         createdIds.add(id);
                         continue;
                     }
-                    String id = userMemoryStore.upsert(toWrite);
-                    if (id == null) {
-                        // The write cannot be confirmed, so it may have landed on an original
-                        // with this key: restore that one too, then roll everything back.
-                        reusedOriginals.values().stream().filter(o -> entry.key().equals(o.key()))
-                                .forEach(o -> overwrittenOriginalIds.add(o.id()));
-                        throw new IllegalStateException("user memory upsert returned no id for key '" + entry.key() + "'");
-                    } else if (reusedOriginals.containsKey(id)) {
-                        overwrittenOriginalIds.add(id);
-                    } else {
-                        createdIds.add(id);
+                    // Overwrite the original in place only if it is still the version the
+                    // model consolidated — a compare-and-set on updatedAt, never a blind
+                    // upsert onto whatever is stored under that id by now.
+                    UserMemoryEntry reused = reusedOriginals.values().stream().filter(o -> entry.key().equals(o.key())).findFirst()
+                            .orElseThrow();
+                    UserMemoryEntry snapshot = originalsById.getOrDefault(reused.id(), reused);
+                    if (!userMemoryStore.replaceIfUnchanged(reused.id(), toWrite, snapshot.updatedAt())) {
+                        throw new ConsolidationConflictException(entry.key());
                     }
+                    overwrittenOriginalIds.add(reused.id());
                 }
+            } catch (ConsolidationConflictException e) {
+                recordConflict(conflicts, userId, "group '" + LogSanitizer.sanitize(group.getKey()) + "': entry '"
+                        + LogSanitizer.sanitize(e.key) + "' changed before the consolidation could replace it; rolled back");
+                rollback(createdIds, overwrittenOriginalIds, reusedOriginals);
+                continue;
             } catch (Exception e) {
                 LOGGER.warnf("[DREAM] Failed to insert consolidated entries for " +
                         "user='%s', group='%s': %s. Rolling back %d insert(s) and restoring %d overwritten original(s).",
@@ -736,7 +763,14 @@ public class DreamService {
                     continue;
                 }
                 try {
-                    userMemoryStore.deleteEntry(original.id());
+                    // Conditional: an original rewritten since the cycle read it holds a fact
+                    // the consolidation does not contain. Keeping it leaves a duplicate the
+                    // next cycle reconciles; deleting it would lose the fact for good.
+                    if (!userMemoryStore.deleteEntryIfUnchanged(original.id(), original.updatedAt())) {
+                        recordConflict(conflicts, userId, "entry '" + LogSanitizer.sanitize(original.key())
+                                + "' was written during consolidation; kept");
+                        continue;
+                    }
                     actualDeleted++;
                 } catch (Exception e) {
                     LOGGER.warnf("[DREAM] Failed to delete original entry '%s': %s. " +
@@ -818,29 +852,72 @@ public class DreamService {
     }
 
     /**
-     * Estimate cost from an LLM summarization result using token usage. Uses a
-     * conservative upper-bound rate of $0.01 per 1,000 tokens when the provider
-     * doesn't expose real pricing. Falls back to character-based heuristic (~4
-     * chars per token) when token counts are unavailable.
+     * Upper-bound input price, USD per 1M tokens, used when the dream config does
+     * not name its model's price: the list price of the most expensive input tier
+     * among the mainstream hosted models Dream is configured with (Claude Opus).
+     */
+    static final double UPPER_BOUND_INPUT_PRICE_PER_1M = 15.0;
+
+    /** Upper-bound output price, USD per 1M tokens — see above (Claude Opus). */
+    static final double UPPER_BOUND_OUTPUT_PRICE_PER_1M = 75.0;
+
+    /**
+     * Characters per token assumed when the provider reports no usage. Three, not
+     * the usual four: four is an English-prose average, and JSON, code and most
+     * other languages pack fewer characters into a token — an estimate that is
+     * meant to bound spend must not be the one that undercounts.
+     */
+    static final int CHARS_PER_TOKEN_LOWER_BOUND = 3;
+
+    /**
+     * The same estimate with the upper-bound prices — for callers and tests that
+     * hold no dream config.
+     */
+    static double estimateCost(SummarizationService.SummarizationResult result, int inputContentLength) {
+        return estimateCost(result, inputContentLength, null, null);
+    }
+
+    /**
+     * Estimate the dollar cost of one consolidation call, for the
+     * {@code maxCostPerRun} budget.
+     * <p>
+     * Input and output tokens are priced separately, at the model's own prices when
+     * the dream config names them
+     * ({@code inputPricePer1M}/{@code outputPricePer1M}) and otherwise at
+     * {@link #UPPER_BOUND_INPUT_PRICE_PER_1M} /
+     * {@link #UPPER_BOUND_OUTPUT_PRICE_PER_1M}. The previous flat "$0.01 per 1K
+     * tokens, conservative" was not conservative: output tokens of the default
+     * model already cost more than that, and a run on a premium model spent two to
+     * seven times what the budget believed — so the ceiling meant to stop a run
+     * stopped it late. An unpriced estimate now errs high, which only ends a run
+     * early.
+     * <p>
+     * Without reported usage, tokens are estimated from the characters sent and
+     * received at {@link #CHARS_PER_TOKEN_LOWER_BOUND} characters per token, priced
+     * at the input rate for the prompt and the output rate for the answer.
      *
      * @param result
      *            the LLM result with token usage
      * @param inputContentLength
      *            length of the input text sent to the LLM
+     * @param inputPricePer1M
+     *            the model's input price, or null/negative for the upper bound
+     * @param outputPricePer1M
+     *            the model's output price, or null/negative for the upper bound
      */
-    static double estimateCost(SummarizationService.SummarizationResult result,
-                               int inputContentLength) {
-        // Conservative upper-bound: $0.01 per 1K tokens
-        double ratePerToken = 0.01 / 1000.0;
+    static double estimateCost(SummarizationService.SummarizationResult result, int inputContentLength, Double inputPricePer1M,
+                               Double outputPricePer1M) {
+        double inputRate = (inputPricePer1M != null && inputPricePer1M >= 0 ? inputPricePer1M : UPPER_BOUND_INPUT_PRICE_PER_1M) / 1_000_000.0;
+        double outputRate = (outputPricePer1M != null && outputPricePer1M >= 0 ? outputPricePer1M : UPPER_BOUND_OUTPUT_PRICE_PER_1M) / 1_000_000.0;
 
         if (result.totalTokens() > 0) {
-            return result.totalTokens() * ratePerToken;
+            return result.inputTokens() * inputRate + result.outputTokens() * outputRate;
         }
 
-        // Fallback: estimate from input + output character length (~4 chars per token)
         int outputLength = result.summary() != null ? result.summary().length() : 0;
-        int estimatedTokens = (inputContentLength + outputLength) / 4;
-        return estimatedTokens * ratePerToken;
+        double inputTokens = Math.ceil((double) inputContentLength / CHARS_PER_TOKEN_LOWER_BOUND);
+        double outputTokens = Math.ceil((double) outputLength / CHARS_PER_TOKEN_LOWER_BOUND);
+        return inputTokens * inputRate + outputTokens * outputRate;
     }
 
     /**
@@ -1052,6 +1129,52 @@ public class DreamService {
     }
 
     /**
+     * The key of the first entry of {@code snapshot} that is gone from, or carries
+     * a different {@code updatedAt} in, {@code current}; null when none changed.
+     */
+    static String firstChangedSince(List<UserMemoryEntry> snapshot, List<UserMemoryEntry> current) {
+        Map<String, UserMemoryEntry> currentById = new HashMap<>();
+        for (UserMemoryEntry entry : current) {
+            if (entry.id() != null) {
+                currentById.put(entry.id(), entry);
+            }
+        }
+        for (UserMemoryEntry original : snapshot) {
+            if (original.id() == null) {
+                continue;
+            }
+            UserMemoryEntry now = currentById.get(original.id());
+            if (now == null || !Objects.equals(now.updatedAt(), original.updatedAt())) {
+                return original.key();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Counts a write Dream skipped because the memory changed under it — the user's
+     * newer fact wins over the consolidation of an older one.
+     */
+    private void recordConflict(AtomicInteger conflicts, String userId, String what) {
+        conflicts.incrementAndGet();
+        conflictsSkippedCounter.increment();
+        LOGGER.infof("[DREAM] Skipped for user='%s' to keep a concurrent write: %s", LogSanitizer.sanitize(userId), what);
+    }
+
+    /**
+     * A reused original changed between the precheck and the compare-and-set that
+     * was to replace it.
+     */
+    private static final class ConsolidationConflictException extends Exception {
+        private final String key;
+
+        ConsolidationConflictException(String key) {
+            super("memory '" + key + "' changed during consolidation", null, false, false);
+            this.key = key;
+        }
+    }
+
+    /**
      * Undoes a partially written consolidation: deletes the documents it created
      * and writes back the originals it had overwritten in place.
      */
@@ -1170,9 +1293,20 @@ public class DreamService {
      * @param error
      *            {@code null} on success; otherwise the cause, which the schedule
      *            dispatcher turns into a FAILED fire
+     * @param conflictsSkipped
+     *            prunes, overwrites and deletes skipped because the memory was
+     *            written after the cycle read it — the newer fact is kept
      */
     public record DreamResult(String userId, int entriesPruned, int contradictionsFound, int entriesSummarized, long durationMs,
-            double estimatedCostUsd, String error) {
+            double estimatedCostUsd, String error, int conflictsSkipped) {
+
+        /**
+         * The shape before {@code conflictsSkipped}, reported as 0.
+         */
+        public DreamResult(String userId, int entriesPruned, int contradictionsFound, int entriesSummarized, long durationMs,
+                double estimatedCostUsd, String error) {
+            this(userId, entriesPruned, contradictionsFound, entriesSummarized, durationMs, estimatedCostUsd, error, 0);
+        }
 
         public boolean isSuccess() {
             return error == null;

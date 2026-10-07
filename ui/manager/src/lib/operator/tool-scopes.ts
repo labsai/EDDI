@@ -183,6 +183,13 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /ragstore/rags/{id}/sources/{sourceId}/files",
   // Audit
   "GET /auditstore/agent/{agentId}",
+  // Administrative actions — who changed, deployed, imported, erased or was
+  // refused what (backend `AdminActionAuditFilter`). The records hold caller,
+  // method, path, endpoint and status only — never a request body — and the id of
+  // a person an action was about is already pseudonymised, so the read exposes
+  // nothing the agent read above does not. "Who changed this agent's prompt?" is
+  // the question an admin asks first after a misbehaving deploy.
+  "GET /auditstore/admin-actions",
 ] as const;
 
 /**

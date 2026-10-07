@@ -84,7 +84,7 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `maxEntriesPerUser` | `int` | `500` | Maximum memory entries per user |
+| `maxEntriesPerUser` | `int` | `500` | Maximum memory entries per user. Enforced across concurrent writers: the count is checked before a new fact is written and again after it, so two conversations of the same user saving at the same moment cannot leave the user above the cap — the insert that lands over it is undone (`reject`) or makes room by evicting one more of its agent's oldest entries (`evict_oldest`) |
 | `maxRecallEntries` | `int` | `50` | Maximum entries returned by recall |
 | `recallOrder` | `String` | `"most_recent"` | `"most_recent"` (by updatedAt) or `"most_accessed"` (by accessCount) |
 | `onCapReached` | `String` | `"evict_oldest"` | `"reject"` (refuse a **new** entry once `maxEntriesPerUser` is reached — updating an existing one is always allowed, it adds no row) or `"evict_oldest"` (permanently delete this agent's oldest entries to make room — entries owned by other agents are never evicted) |
@@ -116,7 +116,9 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `preserveAgentProvenance` | `boolean` | `false` | Sub-group by `sourceAgentId` (preserves per-agent provenance) |
 | `maxSummarizationCalls` | `int` | `10` | **Deprecated** — prefer `maxCostPerRun`. Still honoured as a secondary backstop *if you set it explicitly*, because silently dropping a bound an operator wrote is worse than enforcing a redundant one. A call count is a poor budget: consolidations differ wildly in cost. |
 | `summarizationPrompt` | `String` | *(built-in)* | Custom LLM instructions for consolidation |
-| `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle — the primary ceiling |
+| `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle — the primary ceiling. A soft cap: it is checked before each consolidation call against the **estimated** spend so far (see `inputPricePer1M`) |
+| `inputPricePer1M` | `Double` | *(unset)* | USD price per 1M input tokens of `llmModel`, used to estimate spend against `maxCostPerRun`. Unset: an upper bound of **$15** is assumed — the input list price of the most expensive mainstream tier (Claude Opus) — so the estimate errs high and a run stops early rather than late. Set both prices to make the budget accurate |
+| `outputPricePer1M` | `Double` | *(unset)* | USD price per 1M output tokens of `llmModel`. Unset: an upper bound of **$75** (Claude Opus output). When the provider reports no token usage, tokens are estimated at 3 characters each |
 | `crossAgentMaintenance` | `boolean` | `false` | By default a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `true` to let it maintain the user's whole memory set across agents — otherwise agent A's retention setting would delete agent B's memories, and A's model endpoint would see B's private text. |
 | `llmProvider` | `String` | `"anthropic"` | LLM provider for dream operations |
 | `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations. Passed under the key the provider reads (`model` for Ollama, `modelId` for Bedrock/HuggingFace/Vertex, `deploymentName` for Azure, `modelName` otherwise) |
@@ -285,6 +287,8 @@ The Dream service performs background maintenance on user memories:
 
 3. **Interaction Summarization** — When `summarizeInteractions=true`, compresses multiple related facts into consolidated summaries using the configured LLM. Entries are grouped by the `summarizeGroupBy` strategy (per-category or all together), and each group above `summarizeMinEntries` is distilled toward `summarizeTargetEntries` entries. Safety guarantees: every write target is resolved before anything is written; new entries are inserted before originals are deleted; an original that receives a consolidated entry (the model reused its key) is updated in place and **not** deleted; a key that would overwrite a memory outside the group skips the group untouched; duplicate keys in the answer are merged; a failed insert restores any original it overwrote; an answer that only repeats originals verbatim may drop an original only when it duplicated a kept value (otherwise it merged nothing and the group is skipped); LLM failures or invalid responses preserve the original entries.
 
+4. **Concurrent writes win.** A cycle reads the user's memories, then spends seconds in the LLM call before it writes. Every write it makes is therefore conditional on the memory being exactly as it was read — a compare-and-set on `updatedAt`, one atomic statement on MongoDB and PostgreSQL: a stale entry the conversation rewrote in the meantime is not pruned; a group any of whose originals changed during the LLM call is skipped untouched; an original rewritten after the consolidation was written is kept rather than deleted (the duplicate is reconciled by the next cycle). Each skip is counted as `conflictsSkipped` in the cycle's completion log line and on `eddi.dream.conflicts.skipped`. Earlier releases deleted and overwrote by id, so a fact the user stated during the cycle could be lost.
+
 ### Scheduling a Dream Cycle
 
 Setting `dream.enabled: true` does not start anything on its own — it is the per-agent veto that is checked when a dream schedule fires. Dream runs through the regular cluster-aware schedule machinery, so a cycle only happens if you also create a `ScheduleConfiguration` that targets it:
@@ -317,6 +321,7 @@ The Dream service exposes Micrometer metrics (Prometheus names at `/q/metrics` r
 | `eddi.dream.entries.summarized` | Counter | Entries reduced by LLM consolidation |
 | `eddi.dream.cycles.failed` | Counter | Cycles that were rejected or ended with an error |
 | `eddi.dream.summarization.failed` | Counter | Consolidation LLM calls that failed |
+| `eddi.dream.conflicts.skipped` | Counter | Prunes, overwrites and deletes skipped because the memory was written after the cycle read it — the newer fact is kept |
 | `eddi.dream.duration` | Timer | Duration of dream cycles |
 
 ## Migration from Legacy Properties
