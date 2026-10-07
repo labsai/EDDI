@@ -3682,6 +3682,8 @@
     "toolDetailsMissing": "لا تحتوي هذه المقاطعة الخاصة باستدعاء الأداة على أي استدعاءات للمراجعة، لذا لا يمكن الموافقة عليها من هنا. الرفض لا يزال آمنًا.",
     "argsShowFormatted": "عرض بتنسيق مقروء",
     "argsShowRaw": "عرض النص الخام",
+    "noticeWaitingFor": "في انتظار الموافقة: {{tools}}",
+    "noticeSaving": "جارٍ حفظ الإيقاف المؤقت…",
       "decisionSummaryApproved": "لقد وافقت على هذا الطلب",
       "decisionSummaryRejected": "لقد رفضت هذا الطلب",
       "decisionSummaryCallApproved": "تمت الموافقة",

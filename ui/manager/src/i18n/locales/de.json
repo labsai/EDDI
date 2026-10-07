@@ -3530,6 +3530,8 @@
     "toolDetailsMissing": "Diese Tool-Aufruf-Pause enthält keine Aufrufe zur Prüfung und kann daher hier nicht genehmigt werden. Ablehnen ist weiterhin sicher.",
     "argsShowFormatted": "Formatiert anzeigen",
     "argsShowRaw": "Rohdaten anzeigen",
+    "noticeWaitingFor": "Wartet auf Genehmigung: {{tools}}",
+    "noticeSaving": "Pause wird gespeichert…",
       "decisionSummaryApproved": "Sie haben diese Anfrage genehmigt",
       "decisionSummaryRejected": "Sie haben diese Anfrage abgelehnt",
       "decisionSummaryCallApproved": "genehmigt",

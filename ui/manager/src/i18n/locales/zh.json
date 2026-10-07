@@ -3530,6 +3530,8 @@
     "toolDetailsMissing": "此工具调用暂停没有可供审核的调用，因此无法在此处批准。拒绝仍然是安全的。",
     "argsShowFormatted": "显示格式化内容",
     "argsShowRaw": "显示原始内容",
+    "noticeWaitingFor": "等待批准：{{tools}}",
+    "noticeSaving": "正在保存暂停状态…",
       "decisionSummaryApproved": "您已批准此请求",
       "decisionSummaryRejected": "您已拒绝此请求",
       "decisionSummaryCallApproved": "已批准",

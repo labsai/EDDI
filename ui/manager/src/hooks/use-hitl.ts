@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   type ApprovalStatusSummary,
@@ -82,7 +82,19 @@ export interface ApprovalStatusOptions {
    * `describesPause`.
    */
   verifyPause?: boolean;
+  /**
+   * For a READ-ONLY surface that only shows the pause (a chat notice): called
+   * once, when the pause that was seen stored is no longer AWAITING_HUMAN —
+   * decided elsewhere, or auto-decided by its timeout policy. Also keeps polling
+   * (every 5 s) after the pause is described, which a deciding card has no use
+   * for. A not-yet-stored read can never trigger it: only a pause that was
+   * actually seen counts. Requires `verifyPause`.
+   */
+  onResolved?: () => void;
 }
+
+/** How often a watching surface re-reads a pause it has already seen stored. */
+const APPROVAL_WATCH_MS = 5000;
 
 /**
  * Structured approval status of a paused 1:1 conversation — the only source of
@@ -120,6 +132,16 @@ export function useApprovalStatus(
   // One window per (conversation, pause, retry). It restarts when any of them
   // changes, so a Retry gets a full window rather than the remainder of the last.
   const [attempt, setAttempt] = useState(0);
+  const watching = verifyPause && !!options?.onResolved;
+  // The pause was seen stored (so any later non-AWAITING read is a genuine
+  // resolution), and whether that resolution was already reported. Written only
+  // from the async query function and the interval callback, read there too.
+  const seenRef = useRef(false);
+  const resolvedRef = useRef(false);
+  const onResolvedRef = useRef(options?.onResolved);
+  useEffect(() => {
+    onResolvedRef.current = options?.onResolved;
+  });
   const windowId = `${conversationId ?? ""}|${expectedPausedAt ?? ""}|${attempt}`;
   const [timedOutWindow, setTimedOutWindow] = useState<string | null>(null);
   const timedOut = verifyPause && timedOutWindow === windowId;
@@ -132,7 +154,21 @@ export function useApprovalStatus(
 
   const query = useQuery({
     queryKey: ["approval-status", conversationId, pauseKey ?? null],
-    queryFn: () => getApprovalStatus(conversationId!),
+    queryFn: async () => {
+      const status = await getApprovalStatus(conversationId!);
+      if (watching) {
+        if (describesPause(status, expectedPausedAt)) {
+          seenRef.current = true;
+        } else if (seenRef.current && !resolvedRef.current && status.state !== "AWAITING_HUMAN") {
+          resolvedRef.current = true;
+          onResolvedRef.current?.();
+        }
+      }
+      return status;
+    },
+    // Verifying callers want a fresh read on mount: a cached response from an
+    // earlier pause of this conversation must not stand in for this one.
+    staleTime: verifyPause ? 0 : undefined,
     enabled: active,
     // Poll fast until the response describes the pause, then stop. A function,
     // so the answer is re-derived from each response rather than frozen at the
@@ -140,7 +176,9 @@ export function useApprovalStatus(
     // state, so flipping it re-renders and the observer picks up the new options.
     refetchInterval: verifyPause
       ? (q) => {
-          if (timedOut || describesPause(q.state.data, expectedPausedAt)) return false;
+          if (resolvedRef.current) return false;
+          if (describesPause(q.state.data, expectedPausedAt)) return watching ? APPROVAL_WATCH_MS : false;
+          if (timedOut) return false;
           const polls = q.state.dataUpdateCount + q.state.errorUpdateCount;
           // The interval is re-derived AFTER each response, so the first
           // response (polls = 1) must already map to the first delay.
@@ -157,7 +195,7 @@ export function useApprovalStatus(
   }, [refetch]);
 
   if (!verifyPause) {
-    return { ...query, detailsPending: active && query.isLoading, detailsError: active && query.isError, retry };
+    return { ...query, latest: query.data, detailsPending: active && query.isLoading, detailsError: active && query.isError, retry };
   }
 
   const describes = describesPause(query.data, expectedPausedAt);
@@ -170,6 +208,8 @@ export function useApprovalStatus(
     // `pauseDetails` is null or belongs to an earlier pause, and passing it on
     // would render a card with nothing on it to object to.
     data: describes ? query.data : (undefined as ApprovalStatusSummary | undefined),
+    /** The last response as received, described or not — for a surface that must tell "not stored yet" from "decided". */
+    latest: query.data,
     detailsPending: active && !describes && !timedOut && !failed,
     detailsError: active && !describes && (timedOut || failed),
     retry,

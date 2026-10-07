@@ -1,7 +1,7 @@
 import { ReviewNotice } from "@/components/chat/review-notice";
 import { useAgentReviewProfile } from "@/hooks/use-agent-review-profile";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { useSearchParams, Link, useLocation } from "react-router-dom";
+import { useSearchParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { Environment } from "@/lib/constants";
 import { preferredChatEnvironment } from "@/lib/deployment-environments";
@@ -37,6 +37,7 @@ import { useDebugStore, isInternalTask, type PipelineEvent } from "@/hooks/use-d
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import { InputHint } from "@/components/chat/input-hint";
+import { PauseNotice } from "@/components/hitl/pause-notice";
 import { SecretInputField } from "./secret-input-field";
 import {
   Bot,
@@ -61,7 +62,6 @@ import {
   Hash,
   Clock,
   Wrench,
-  Hand,
   ListOrdered,
 } from "lucide-react";
 
@@ -85,6 +85,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const isThinking = useChatStore((s) => s.isThinking);
   const isPaused = useChatStore((s) => s.isPaused);
   const pauseReason = useChatStore((s) => s.pauseReason);
+  const pausedAt = useChatStore((s) => s.pausedAt);
   const undoAvailable = useChatStore((s) => s.undoAvailable);
   const redoAvailable = useChatStore((s) => s.redoAvailable);
   const quickReplies = useChatStore((s) => s.quickReplies);
@@ -683,24 +684,16 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             for human approval; the decision is made on the conversation's
             review page (which renders the full approval banner). */}
         {isPaused && conversationId && (
-          <div
-            className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs"
-            data-testid="chat-pause-banner"
-          >
-            <Hand className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
-            <span className="text-amber-600 dark:text-amber-400">
-              {pauseReason || t("hitl.chatPaused", "This conversation is awaiting human approval.")}
-            </span>
-            {!location.pathname.startsWith("/workforce") && (
-              <Link
-                to={`/manage/conversationview/${conversationId}`}
-                className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
-                data-testid="chat-pause-review"
-              >
-                {t("hitl.review", "Review")}
-              </Link>
-            )}
-          </div>
+          <PauseNotice
+            conversationId={conversationId}
+            pausedAt={pausedAt}
+            fallbackReason={pauseReason}
+            testIdBase="chat-pause"
+            hideReview={location.pathname.startsWith("/workforce")}
+            // Decided elsewhere (another reviewer, or the timeout policy): unlock
+            // the composer instead of leaving it stuck on "awaiting approval".
+            onResolved={() => useChatStore.getState().setPaused(false, null)}
+          />
         )}
 
         {/* Input — show SecretInput when backend requests it or user toggles 🔒 */}

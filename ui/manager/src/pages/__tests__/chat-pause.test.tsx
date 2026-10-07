@@ -23,7 +23,7 @@ describe("ChatPage — HITL pause UX", () => {
     expect(screen.getByText("Deletion needs sign-off")).toBeInTheDocument();
     const review = screen.getByTestId("chat-pause-review");
     expect(review).toBeInTheDocument();
-    expect(review).toHaveAttribute("href", "/manage/conversationview/conv-1");
+    expect(review).toHaveAttribute("href", "/manage/conversationview/conv-1?awaiting=1");
     expect(screen.getByTestId("chat-input")).toBeDisabled();
   });
 

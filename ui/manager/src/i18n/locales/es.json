@@ -3568,6 +3568,8 @@
     "toolDetailsMissing": "Esta pausa de llamada a herramienta no tiene llamadas que revisar, por lo que no se puede aprobar desde aquí. Rechazar sigue siendo seguro.",
     "argsShowFormatted": "Mostrar formateado",
     "argsShowRaw": "Mostrar sin formato",
+    "noticeWaitingFor": "Esperando aprobación: {{tools}}",
+    "noticeSaving": "Guardando la pausa…",
       "decisionSummaryApproved": "Aprobaste esta solicitud",
       "decisionSummaryRejected": "Rechazaste esta solicitud",
       "decisionSummaryCallApproved": "aprobada",

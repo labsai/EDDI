@@ -3530,6 +3530,8 @@
     "toolDetailsMissing": "이 도구 호출 일시 중지에는 검토할 호출이 없으므로 여기서 승인할 수 없습니다. 거부는 여전히 안전합니다.",
     "argsShowFormatted": "서식 적용하여 보기",
     "argsShowRaw": "원본 보기",
+    "noticeWaitingFor": "승인 대기 중: {{tools}}",
+    "noticeSaving": "일시 중지를 저장하는 중…",
       "decisionSummaryApproved": "이 요청을 승인했습니다",
       "decisionSummaryRejected": "이 요청을 거부했습니다",
       "decisionSummaryCallApproved": "승인됨",

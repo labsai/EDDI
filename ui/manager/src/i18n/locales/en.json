@@ -3571,6 +3571,8 @@
     "toolDetailsMissing": "This tool-call pause has no calls to review, so it can't be approved from here. Rejecting is still safe.",
     "argsShowFormatted": "Show formatted",
     "argsShowRaw": "Show raw",
+    "noticeWaitingFor": "Waiting for approval: {{tools}}",
+    "noticeSaving": "Saving the pause…",
       "decisionSummaryApproved": "You approved this request",
       "decisionSummaryRejected": "You rejected this request",
       "decisionSummaryCallApproved": "approved",

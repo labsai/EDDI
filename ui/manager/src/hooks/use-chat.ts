@@ -142,6 +142,8 @@ interface ChatState {
   isPaused: boolean;
   /** Approver-facing reason for the pause, when the backend reported one. */
   pauseReason: string | null;
+  /** When the pause on screen started (`hitlPausedAt`), so a notice can tell THIS pause from another. */
+  pausedAt: string | null;
   /**
    * Bumped whenever the transcript on screen stops being the one a send in
    * flight belongs to: another agent picked, another conversation loaded, a
@@ -184,7 +186,7 @@ interface ChatState {
   setInputField: (field: InputField) => void;
   clearInputField: () => void;
   toggleSecretMode: () => void;
-  setPaused: (isPaused: boolean, reason?: string | null) => void;
+  setPaused: (isPaused: boolean, reason?: string | null, pausedAt?: string | null) => void;
   reset: () => void;
 }
 
@@ -211,6 +213,7 @@ export const useChatStore = create<ChatState>((set) => ({
   isSecretMode: false,
   isPaused: false,
   pauseReason: null,
+  pausedAt: null,
   conversationEpoch: 0,
   loadingConversationId: null,
 
@@ -338,7 +341,8 @@ export const useChatStore = create<ChatState>((set) => ({
 
   toggleSecretMode: () => set((s) => ({ isSecretMode: !s.isSecretMode })),
 
-  setPaused: (isPaused, reason = null) => set({ isPaused, pauseReason: reason ?? null }),
+  setPaused: (isPaused, reason = null, pausedAt = null) =>
+    set({ isPaused, pauseReason: reason ?? null, pausedAt: isPaused ? (pausedAt ?? null) : null }),
 
   reset: () =>
     set((s) => {
@@ -1082,7 +1086,7 @@ function handleSSEEvent(
           // because JSON.parse is untyped, caught by review. approval-status
           // supplies the rendered reason.
           if (snapshot.conversationState === "AWAITING_HUMAN") {
-            store.getState().setPaused(true, null);
+            store.getState().setPaused(true, null, snapshot.hitlPausedAt ?? null);
           }
           // Same as the non-streaming path: the finished turn is undoable.
           if (snapshot && typeof snapshot === "object") {
@@ -1574,6 +1578,7 @@ function installSnapshot(snapshot: SimpleConversationMemorySnapshot) {
   store.getState().setPaused(
     snapshot.conversationState === "AWAITING_HUMAN",
     null,
+    snapshot.hitlPausedAt ?? null,
   );
   // A conversation reopened while its last reply asks for a secret must offer
   // the masked field again, or the answer goes into the plain textarea. Set

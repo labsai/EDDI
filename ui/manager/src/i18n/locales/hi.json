@@ -3530,6 +3530,8 @@
     "toolDetailsMissing": "इस टूल-कॉल विराम में समीक्षा के लिए कोई कॉल नहीं है, इसलिए इसे यहाँ से स्वीकृत नहीं किया जा सकता। अस्वीकार करना अब भी सुरक्षित है।",
     "argsShowFormatted": "स्वरूपित दिखाएँ",
     "argsShowRaw": "मूल पाठ दिखाएँ",
+    "noticeWaitingFor": "स्वीकृति की प्रतीक्षा: {{tools}}",
+    "noticeSaving": "विराम सहेजा जा रहा है…",
       "decisionSummaryApproved": "आपने इस अनुरोध को स्वीकृत किया",
       "decisionSummaryRejected": "आपने इस अनुरोध को अस्वीकार किया",
       "decisionSummaryCallApproved": "स्वीकृत",

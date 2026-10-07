@@ -3568,6 +3568,8 @@
     "toolDetailsMissing": "Cette pause d'appel d'outil ne contient aucun appel à examiner et ne peut donc pas être approuvée ici. Le rejet reste sans risque.",
     "argsShowFormatted": "Afficher le format lisible",
     "argsShowRaw": "Afficher le brut",
+    "noticeWaitingFor": "En attente d'approbation : {{tools}}",
+    "noticeSaving": "Enregistrement de la pause…",
       "decisionSummaryApproved": "Vous avez approuvé cette demande",
       "decisionSummaryRejected": "Vous avez rejeté cette demande",
       "decisionSummaryCallApproved": "approuvé",

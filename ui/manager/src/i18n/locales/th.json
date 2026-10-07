@@ -3530,6 +3530,8 @@
     "toolDetailsMissing": "การหยุดชั่วคราวของการเรียกเครื่องมือนี้ไม่มีการเรียกให้ตรวจสอบ จึงไม่สามารถอนุมัติจากที่นี่ได้ การปฏิเสธยังคงปลอดภัย",
     "argsShowFormatted": "แสดงแบบจัดรูปแบบ",
     "argsShowRaw": "แสดงแบบดิบ",
+    "noticeWaitingFor": "รอการอนุมัติ: {{tools}}",
+    "noticeSaving": "กำลังบันทึกการหยุดชั่วคราว…",
       "decisionSummaryApproved": "คุณอนุมัติคำขอนี้แล้ว",
       "decisionSummaryRejected": "คุณปฏิเสธคำขอนี้แล้ว",
       "decisionSummaryCallApproved": "อนุมัติแล้ว",

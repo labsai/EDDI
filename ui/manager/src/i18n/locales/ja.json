@@ -3530,6 +3530,8 @@
     "toolDetailsMissing": "このツール呼び出しの一時停止には確認できる呼び出しがないため、ここから承認することはできません。却下は引き続き安全です。",
     "argsShowFormatted": "整形して表示",
     "argsShowRaw": "元の形式で表示",
+    "noticeWaitingFor": "承認待ち: {{tools}}",
+    "noticeSaving": "一時停止を保存しています…",
       "decisionSummaryApproved": "このリクエストを承認しました",
       "decisionSummaryRejected": "このリクエストを却下しました",
       "decisionSummaryCallApproved": "承認",
