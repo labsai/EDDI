@@ -16,7 +16,13 @@ import {
 } from "@/api/hitl-api";
 
 interface PausedCardProps {
-  status: ApprovalStatus;
+  /**
+   * What approval-status says about the pause, or null while it is not known yet.
+   * The stream announces a pause before it is stored, so the card is shown at
+   * once from the stream's own news ("Waiting for approval…", Cancel available)
+   * and enriched when the status arrives.
+   */
+  status: ApprovalStatus | null;
   onCancel: () => void;
   cancelDisabled?: boolean;
 }
@@ -47,7 +53,7 @@ function describePolicy(policy: string): string {
 }
 
 export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps) {
-  const deadline = approvalDeadline(status);
+  const deadline = status ? approvalDeadline(status) : null;
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -56,7 +62,7 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
     return () => clearInterval(id);
   }, [deadline]);
 
-  const tools = gatedToolNames(status);
+  const tools = status ? gatedToolNames(status) : [];
 
   return (
     <div className="paused-card" role="status" aria-live="polite" data-testid="paused-card">
@@ -67,7 +73,9 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
         <span className="paused-card__title">Waiting for approval</span>
       </div>
 
-      <p className="paused-card__text">{pauseHeadline(status)}</p>
+      <p className="paused-card__text" data-testid="paused-headline">
+        {status ? pauseHeadline(status) : "A reviewer must approve this step before I can continue."}
+      </p>
 
       {tools.length > 0 && (
         <ul className="paused-card__tools">
@@ -81,7 +89,7 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
 
       {deadline !== null && (
         <p className="paused-card__deadline" data-testid="paused-deadline">
-          {`Otherwise ${describePolicy(status.timeoutPolicy)} in ${formatRemaining(deadline - now)}.`}
+          {`Otherwise ${describePolicy(status?.timeoutPolicy ?? "")} in ${formatRemaining(deadline - now)}.`}
         </p>
       )}
 

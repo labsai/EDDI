@@ -1513,7 +1513,9 @@ export function ChatWidget() {
               />
             ))}
 
-            {isPaused && state.approvalStatus ? (
+            {isPaused ? (
+              // From the stream's own news, at once: approval-status may not have
+              // the pause stored yet, and the composer is locked meanwhile.
               <PausedCard
                 status={state.approvalStatus}
                 onCancel={handleCancel}

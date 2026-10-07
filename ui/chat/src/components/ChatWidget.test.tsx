@@ -111,6 +111,35 @@ describe("ChatWidget", () => {
     });
   });
 
+  it("shows the paused card at once, before approval-status can describe the pause", async () => {
+    // The stream announces the pause before it is stored: approval-status
+    // answers READY for a while. The composer is locked meanwhile, so the card
+    // (Cancel available, read-only) must already be there.
+    mockBackend({
+      conversationState: "AWAITING_HUMAN",
+      conversationOutputs: [{ output: [], quickReplies: [] }],
+    });
+    const inner = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).includes("/approval-status")) {
+        return new Response(
+          JSON.stringify({ conversationId: "conv-1", state: "READY", pausedAt: "", pauseReason: "", timeoutPolicy: "", approvalTimeout: "", pauseDetails: null }),
+          { status: 200 },
+        );
+      }
+      return inner(url, init);
+    }) as typeof fetch;
+
+    renderWidget();
+
+    const card = await screen.findByTestId("paused-card");
+    expect(card).toHaveTextContent(/waiting for approval/i);
+    expect(screen.getByTestId("paused-headline")).toHaveTextContent(/reviewer must approve this step/i);
+    expect(screen.getByTestId("paused-cancel")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /approve/i })).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("chat-input")).toBeDisabled());
+  });
+
   it("does not offer approve or reject to the end user", async () => {
     mockBackend({
       conversationState: "AWAITING_HUMAN",
