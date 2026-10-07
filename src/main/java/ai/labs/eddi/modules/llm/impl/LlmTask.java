@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -1789,7 +1790,7 @@ public class LlmTask implements ILifecycleTask {
 
         Object uriObj = configuration.get(KEY_URI);
         if (!isNullOrEmpty(uriObj)) {
-            URI uri = URI.create(uriObj.toString());
+            URI uri = ResourceUris.require(uriObj, ID);
 
             try {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);

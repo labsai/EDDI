@@ -20,6 +20,7 @@ import io.quarkus.qute.ValueResolver;
 import io.quarkus.qute.WhenSectionHelper;
 import io.quarkus.qute.WithSectionHelper;
 
+import java.math.BigDecimal;
 import java.util.Set;
 import java.util.concurrent.CompletionStage;
 
@@ -187,6 +188,7 @@ public final class RuntimeTemplateEngineFactory {
             builder.addResultMapper(mapper);
         }
         builder.addResultMapper(new NotFoundRendersNothing());
+        builder.addResultMapper(new PlainDecimalRendering());
 
         return builder.build();
     }
@@ -226,6 +228,43 @@ public final class RuntimeTemplateEngineFactory {
         @Override
         public String map(Object result, Expression expression) {
             return "";
+        }
+    }
+
+    /**
+     * Renders a {@code Double} or {@code Float} in plain notation where
+     * {@code toString()} would switch to scientific notation — {@code 12500000.5}
+     * instead of {@code 1.25000005E7}, {@code 0.0001} instead of {@code 1.0E-4}. A
+     * decimal read from an API response or a client context is stored as a
+     * {@code Double} property, and {@code {properties.price}} in a reply, a URL or
+     * a request body has to read like the number it is. Within the range where
+     * JavaScript also prints plain digits ({@code 1e-7 <= |x| < 1e21}); beyond it,
+     * and for NaN and the infinities, {@code toString()} is kept.
+     */
+    static final class PlainDecimalRendering implements ResultMapper {
+        @Override
+        public int getPriority() {
+            return 10;
+        }
+
+        @Override
+        public boolean appliesTo(Origin origin, Object result) {
+            if (result instanceof Double || result instanceof Float) {
+                double value = ((Number) result).doubleValue();
+                if (Double.isNaN(value) || Double.isInfinite(value)) {
+                    return false;
+                }
+                double magnitude = Math.abs(value);
+                return result.toString().indexOf('E') >= 0 && magnitude >= 1e-7 && magnitude < 1e21;
+            }
+            return false;
+        }
+
+        @Override
+        public String map(Object result, Expression expression) {
+            // From toString(), not from the binary value: 0.1 stays 0.1, and a Float keeps
+            // its own shortest representation instead of a widened double's digits.
+            return new BigDecimal(result.toString()).stripTrailingZeros().toPlainString();
         }
     }
 

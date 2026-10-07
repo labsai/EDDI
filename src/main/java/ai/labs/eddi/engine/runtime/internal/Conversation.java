@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.PropertyValues;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import org.jboss.logging.Logger;
@@ -239,12 +240,7 @@ public class Conversation implements IConversation {
      * value was never written and the user-memory store kept the secret.
      */
     private static Property valueCopy(Property property) {
-        var copy = new Property(property.getName(), property.getValueString(),
-                property.getValueObject() != null ? new LinkedHashMap<>(property.getValueObject()) : null,
-                property.getValueList() != null ? new ArrayList<>(property.getValueList()) : null, property.getValueInt(),
-                property.getValueFloat(), property.getValueBoolean(), property.getScope(), property.getVisibility());
-        copy.setAutoVaulted(property.getAutoVaulted());
-        return copy;
+        return PropertyValues.copyOf(property);
     }
 
     @Override
@@ -959,24 +955,11 @@ public class Conversation implements IConversation {
 
     private static Property entryToProperty(UserMemoryEntry entry) {
         Object value = entry.value();
-        Property prop;
-        if (value instanceof String s) {
-            prop = new Property(entry.key(), s, Scope.longTerm);
-        } else if (value instanceof Map<?, ?>) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> map = (Map<String, Object>) value;
-            prop = new Property(entry.key(), map, Scope.longTerm);
-        } else if (value instanceof List<?> list) {
-            @SuppressWarnings("unchecked")
-            List<Object> objectList = (List<Object>) list;
-            prop = new Property(entry.key(), objectList, Scope.longTerm);
-        } else if (value instanceof Integer i) {
-            prop = new Property(entry.key(), i, Scope.longTerm);
-        } else if (value instanceof Float f) {
-            prop = new Property(entry.key(), f, Scope.longTerm);
-        } else if (value instanceof Boolean b) {
-            prop = new Property(entry.key(), b, Scope.longTerm);
-        } else {
+        // A stored number comes back as whatever the backend decodes it to — a Double
+        // or a Long from MongoDB, any Number from PostgreSQL's JSON — and used to
+        // fall through to toString() here, so a longTerm price became a string.
+        Property prop = PropertyValues.toProperty(entry.key(), value, Scope.longTerm);
+        if (prop == null) {
             prop = new Property(entry.key(), value != null ? value.toString() : null, Scope.longTerm);
         }
         prop.setVisibility(entry.visibility());

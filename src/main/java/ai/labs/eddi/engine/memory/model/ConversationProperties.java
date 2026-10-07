@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.PropertyValues;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -117,21 +118,6 @@ public class ConversationProperties extends LinkedHashMap<String, Property> impl
      * carries none.
      */
     private static Object extractValue(Property property) {
-        if (property.getValueString() != null) {
-            return property.getValueString();
-        }
-        if (property.getValueObject() != null) {
-            return property.getValueObject();
-        }
-        if (property.getValueList() != null) {
-            return property.getValueList();
-        }
-        if (property.getValueInt() != null) {
-            return property.getValueInt();
-        }
-        if (property.getValueFloat() != null) {
-            return property.getValueFloat();
-        }
-        return property.getValueBoolean();
+        return PropertyValues.valueOf(property);
     }
 }

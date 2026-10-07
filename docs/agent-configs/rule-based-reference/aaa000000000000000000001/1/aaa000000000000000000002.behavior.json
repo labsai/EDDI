@@ -2,6 +2,22 @@
   "expressionsAsActions" : true,
   "behaviorGroups" : [ {
     "behaviorRules" : [ {
+      "name" : "Not now - end the conversation",
+      "actions" : [ "CONVERSATION_END" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "CONVERSATION_START",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "exit_conversation",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
       "name" : "Ask for Agent Name",
       "actions" : [ "ask_for_agent_name" ],
       "conditions" : [ {

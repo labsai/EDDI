@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
+import ai.labs.eddi.configs.properties.model.PropertyValues;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 
 import java.util.List;
@@ -21,8 +22,9 @@ import java.util.List;
  * something else is rejected here rather than when a conversation runs it:
  * <ul>
  * <li>{@code valueObject}, {@code valueList}, {@code valueInt},
- * {@code valueFloat} or {@code valueBoolean} under {@code scope: "secret"} —
- * those used to be stored as plaintext properties, scope notwithstanding;</li>
+ * {@code valueLong}, {@code valueFloat}, {@code valueDouble} or
+ * {@code valueBoolean} under {@code scope: "secret"} — those used to be stored
+ * as plaintext properties, scope notwithstanding;</li>
  * <li>a literal property name the vault reference cannot carry ({@code /},
  * braces, {@code $}).</li>
  * </ul>
@@ -53,10 +55,9 @@ public final class SecretScopeValidation {
                 continue;
             }
             String location = where + "[" + i + "]" + (instruction.getName() != null ? " ('" + instruction.getName() + "')" : "");
-            if (instruction.getValueObject() != null || instruction.getValueList() != null || instruction.getValueInt() != null
-                    || instruction.getValueFloat() != null || instruction.getValueBoolean() != null) {
-                throw new IllegalArgumentException(location + " has scope 'secret' but sets valueObject, valueList, valueInt, valueFloat or "
-                        + "valueBoolean. Only a string value can be vaulted — use valueString or fromObjectPath.");
+            if (PropertyValues.hasTypedValue(instruction)) {
+                throw new IllegalArgumentException(location + " has scope 'secret' but sets valueObject, valueList, valueInt, valueLong, "
+                        + "valueFloat, valueDouble or valueBoolean. Only a string value can be vaulted — use valueString or fromObjectPath.");
             }
             String name = instruction.getName();
             if (name != null && !name.contains("{") && !AutoVaultedSecrets.isEmbeddable(name)) {

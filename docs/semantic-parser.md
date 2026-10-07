@@ -473,6 +473,20 @@ To use the pattern matcher in your agent orchestration, add it as the first step
 
 The three `max*` limits guard against pathological inputs. Values below `1` are ignored and fall back to the default.
 
+### Referencing a stored parser instead
+
+Instead of carrying the parser inline, the step can reference a parser document created through `/parserstore/parsers` (this is the shape the setup wizard, the MCP setup tools and the Manager's pipeline builder write):
+
+```json
+{ "type": "eddi://ai.labs.parser", "config": { "uri": "eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1" } }
+```
+
+The document's `config` and `extensions` are used as if they were written in the step. Both may be combined: a `config` key the step sets **overrides** the document's, and the step's own `extensions` entries are **appended after** the document's for each extension point (normalizers, dictionaries, corrections — so the document's normalizers run first). A `uri` that cannot be read fails the deployment. Before this was supported, such a step ran with no dictionaries at all, silently.
+
+### Quick replies as a temporary dictionary
+
+The quick replies the agent offered on the previous turn — from its output set, or built by an httpcall / LLM / MCP `postResponse` — become a temporary dictionary for the next input, so a click on one produces its `expressions` (or, without any, an expression generated from its value). Quick replies a **client** sends as `context` are only displayed: they are never matched and never produce an expression, so a client cannot hand itself an expression (and, with `expressionsAsActions`, an action) by offering itself a quick reply.
+
 ## Complete Example: Multi-Agent Customer Service Orchestration
 
 Let's build an agent routing system for customer service:
