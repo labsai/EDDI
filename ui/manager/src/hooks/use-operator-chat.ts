@@ -784,7 +784,23 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
 
   stop: () => {
     get().abortController?.abort();
-    set({ abortController: null, isStreaming: false });
+    // The send's own `finally` files a turn's trace under its answer — but only
+    // while it is still the current turn, and nulling the controller here is
+    // what makes it no longer current. So a stopped turn used to lose the trace
+    // of everything it had already done, the reads behind a partial answer
+    // included. File it here instead, under the bubble that was streaming.
+    set((s) => {
+      const live = [...s.messages].reverse().find((m) => m.role === "agent" && m.isStreaming);
+      return {
+        abortController: null,
+        isStreaming: false,
+        events: [],
+        tracesByMessageId:
+          live && s.events.length > 0
+            ? { ...s.tracesByMessageId, [live.id]: s.events }
+            : s.tracesByMessageId,
+      };
+    });
   },
 
   /**
@@ -1069,6 +1085,9 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       );
 
       for await (const event of stream) {
+        // A frame already buffered when Stop was pressed (or when a newer turn
+        // took over) must not write into the answer stop() just settled.
+        if (controller.signal.aborted || get().abortController !== controller) break;
         if (event.type === "token") {
           set((s) => ({
             ...s,

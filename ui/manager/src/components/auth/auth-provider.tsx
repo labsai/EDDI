@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import Keycloak from "keycloak-js";
+import { useTranslation } from "react-i18next";
 import { getAuthConfig, type AuthConfig } from "@/lib/auth-config";
 import { api } from "@/lib/api-client";
 import {
@@ -50,6 +51,7 @@ function KeycloakAuthProvider({
   config: AuthConfig;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const [keycloak] = useState(
     () =>
       new Keycloak({
@@ -70,6 +72,18 @@ function KeycloakAuthProvider({
   // Without id_token_hint, Keycloak 26 redirects back after logout WITHOUT
   // actually invalidating the SSO session — the user silently re-authenticates.
   const idTokenRef = useRef<string | undefined>(undefined);
+
+  /**
+   * The one `keycloak.init()` call, shared by every run of the effect below.
+   *
+   * keycloak-js refuses a second `init()` on the same instance. React's
+   * StrictMode mounts effects twice in development, so the second run threw
+   * "A 'Keycloak' instance can only be initialized once", reported auth as
+   * failed, and the first run — the one that succeeded — was ignored because
+   * its cleanup had already marked it unmounted: every authenticated `npm run
+   * dev` session stayed signed out. Both runs now await the same promise.
+   */
+  const initRef = useRef<Promise<boolean> | null>(null);
 
   // Initialize Keycloak
   useEffect(() => {
@@ -99,7 +113,7 @@ function KeycloakAuthProvider({
             });
         };
 
-        const auth = await keycloak.init({
+        initRef.current ??= keycloak.init({
           onLoad: "login-required",
           checkLoginIframe: false,
           pkceMethod: "S256",
@@ -110,6 +124,7 @@ function KeycloakAuthProvider({
           // seeing a generic "TypeError: Failed to fetch").
           responseMode: "query",
         });
+        const auth = await initRef.current;
 
         if (!mounted) return;
 
@@ -210,7 +225,7 @@ function KeycloakAuthProvider({
       >
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary" />
-          <p className="text-sm text-muted-foreground">Authenticating…</p>
+          <p className="text-sm text-muted-foreground">{t("auth.loading", "Authenticating…")}</p>
         </div>
       </div>
     );

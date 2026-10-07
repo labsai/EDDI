@@ -2987,7 +2987,8 @@
       "humanNeedsName_other": "{{count}}명의 사람 멤버에게 표시 이름이 필요합니다.",
       "humanNeedsId_one": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다.",
       "humanNeedsId_other": "{{count}}명의 사람 멤버에게 해당 사용자의 ID가 필요합니다."
-    }
+    },
+    "versionLookupFailed": "이 그룹의 현재 버전을 확인할 수 없습니다."
   },
   "taskBoard": {
     "title": "작업 보드",

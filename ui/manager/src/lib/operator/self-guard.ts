@@ -4,7 +4,11 @@ import type { PendingToolCallView } from "@/lib/api/hitl";
  * Refuses a gated write that the operator aimed at **itself**.
  *
  * Unlike `escalation-flags.ts`, which is explicitly an attention aid, this is a
- * control: the approval surfaces disable Approve outright when it fires. That
+ * control: the Manager's approval surfaces disable Approve outright when it
+ * fires. It is a CLIENT-side control — defence in depth, not the boundary. A
+ * pause decided over the REST approval endpoint, an MCP tool or a Slack approval
+ * channel never runs this code; there, the backend's validation of the approved
+ * call is what enforces the rule (see `gate-guard.ts` → "Where it holds"). That
  * difference is deliberate — what it blocks is not "a setting worth reading
  * twice" but the one write that would remove the operator's own oversight, and
  * a warning label an approver can skim past is not a defence against that.

@@ -1,101 +1,102 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { isValidElement, type ReactElement } from "react";
 import { EDITOR_MAP, EXTENSION_TO_SLUG } from "@/components/editors/editor-registry";
+import { RESOURCE_TYPES } from "@/lib/api/resources";
+import { RulesEditor } from "@/components/editors/rules-editor";
+import { ApiCallsEditor } from "@/components/editors/apicalls-editor";
+import { LlmEditor } from "@/components/editors/llm-editor";
+import { OutputEditor } from "@/components/editors/output-editor";
+import { PropertySetterEditor } from "@/components/editors/propertysetter-editor";
+import { DictionaryEditor } from "@/components/editors/dictionary-editor";
+import { McpCallsEditor } from "@/components/editors/mcpcalls-editor";
+import { RagEditor } from "@/components/editors/rag-editor";
+import { SnippetEditor } from "@/components/editors/snippet-editor";
+import { ParserEditor } from "@/components/editors/parser-editor";
+
+/** The editor component each resource slug must open — the registry's whole contract. */
+const EXPECTED_EDITOR: Record<string, unknown> = {
+  rules: RulesEditor,
+  apicalls: ApiCallsEditor,
+  llm: LlmEditor,
+  output: OutputEditor,
+  propertysetter: PropertySetterEditor,
+  dictionary: DictionaryEditor,
+  mcpcalls: McpCallsEditor,
+  rag: RagEditor,
+  snippets: SnippetEditor,
+  parser: ParserEditor,
+};
+
+const META = { resourceId: "res-1", version: 3, isDirty: true };
+
+type EditorProps = {
+  data: unknown;
+  onChange: (v: unknown) => void;
+  readOnly: boolean;
+  resourceId?: string;
+  version?: number;
+  isDirty?: boolean;
+};
+
+function renderEntry(slug: string, readOnly: boolean) {
+  const data = { marker: slug };
+  const onChange = vi.fn();
+  const node = EDITOR_MAP[slug]!(data, onChange, readOnly, META);
+  expect(isValidElement(node)).toBe(true);
+  return { element: node as ReactElement<EditorProps>, data, onChange };
+}
 
 describe("editor-registry", () => {
   describe("EDITOR_MAP", () => {
-    it("has editor for rules", () => {
-      expect(EDITOR_MAP.rules).toBeDefined();
-      expect(typeof EDITOR_MAP.rules).toBe("function");
+    it("registers an editor for exactly the resource types the app knows", () => {
+      expect(Object.keys(EDITOR_MAP).sort()).toEqual(
+        RESOURCE_TYPES.map((rt) => rt.slug).sort(),
+      );
     });
 
-    it("has editor for apicalls", () => {
-      expect(EDITOR_MAP.apicalls).toBeDefined();
-    });
+    it.each(Object.keys(EXPECTED_EDITOR))(
+      "%s opens its own editor with the data, onChange and readOnly it is given",
+      (slug) => {
+        const { element, data, onChange } = renderEntry(slug, true);
+        expect(element.type).toBe(EXPECTED_EDITOR[slug]);
+        expect(element.props.data).toBe(data);
+        expect(element.props.onChange).toBe(onChange);
+        expect(element.props.readOnly).toBe(true);
 
-    it("has editor for llm", () => {
-      expect(EDITOR_MAP.llm).toBeDefined();
-    });
+        expect(renderEntry(slug, false).element.props.readOnly).toBe(false);
+      },
+    );
 
-    it("has editor for output", () => {
-      expect(EDITOR_MAP.output).toBeDefined();
-    });
-
-    it("has editor for propertysetter", () => {
-      expect(EDITOR_MAP.propertysetter).toBeDefined();
-    });
-
-    it("has editor for dictionary", () => {
-      expect(EDITOR_MAP.dictionary).toBeDefined();
-    });
-
-    it("has editor for mcpcalls", () => {
-      expect(EDITOR_MAP.mcpcalls).toBeDefined();
-    });
-
-    it("has editor for rag", () => {
-      expect(EDITOR_MAP.rag).toBeDefined();
-    });
-
-    it("has editor for snippets", () => {
-      expect(EDITOR_MAP.snippets).toBeDefined();
-    });
-
-    it("has editor for parser", () => {
-      expect(EDITOR_MAP.parser).toBeDefined();
-    });
-
-    it("has exactly 10 editors registered", () => {
-      expect(Object.keys(EDITOR_MAP).length).toBe(10);
+    it("passes the resource id, version and dirty flag through to the RAG editor", () => {
+      const { element } = renderEntry("rag", false);
+      expect(element.props.resourceId).toBe("res-1");
+      expect(element.props.version).toBe(3);
+      expect(element.props.isDirty).toBe(true);
     });
   });
 
   describe("EXTENSION_TO_SLUG", () => {
-    it("maps rules extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.rules"]).toBe("rules");
+    it("maps every workflow-step resource type's own extension back to its slug", () => {
+      for (const rt of RESOURCE_TYPES) {
+        expect(EXTENSION_TO_SLUG[`eddi://${rt.extension}`]).toBe(rt.slug);
+      }
     });
 
-    it("maps apicalls extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.apicalls"]).toBe("apicalls");
+    it("only ever resolves to a slug that has an editor", () => {
+      for (const slug of Object.values(EXTENSION_TO_SLUG)) {
+        expect(EDITOR_MAP).toHaveProperty(slug);
+      }
     });
 
-    it("maps llm extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.llm"]).toBe("llm");
-    });
-
-    it("maps output extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.output"]).toBe("output");
-    });
-
-    it("maps output.template extension type to output", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.output.template"]).toBe("output");
-    });
-
-    it("maps property extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.property"]).toBe("propertysetter");
-    });
-
-    it("maps mcpcalls extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.mcpcalls"]).toBe("mcpcalls");
-    });
-
-    it("maps dictionary extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.dictionary"]).toBe("dictionary");
-    });
-
-    it("maps rag extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.rag"]).toBe("rag");
-    });
-
-    it("maps snippets extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.snippets"]).toBe("snippets");
+    it.each([
+      ["eddi://ai.labs.behavior", "rules"],
+      ["eddi://ai.labs.output.template", "output"],
+    ])("maps the alias %s to %s", (extension, slug) => {
+      expect(EXTENSION_TO_SLUG[extension]).toBe(slug);
     });
 
     it("returns undefined for unknown types", () => {
       expect(EXTENSION_TO_SLUG["eddi://ai.labs.unknown"]).toBeUndefined();
-    });
-
-    it("maps parser extension type", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.parser"]).toBe("parser");
     });
   });
 });

@@ -3023,7 +3023,8 @@
       "humanNeedsId_many": "{{count}} membros humanos precisam do id de utilizador da pessoa.",
       "humanNeedsId_one": "{{count}} membro humano precisa do id de utilizador da pessoa.",
       "humanNeedsId_other": "{{count}} membros humanos precisam do id de utilizador da pessoa."
-    }
+    },
+    "versionLookupFailed": "Não foi possível determinar a versão atual deste grupo."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
