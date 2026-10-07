@@ -67,6 +67,36 @@ describe("ApprovalCard", () => {
     expect(screen.getByTestId("tool-approve-c1")).toHaveAttribute("aria-pressed", "false");
   });
 
+  it("never shows a spent receipt for a later resolution (a cancel after a failed approve)", () => {
+    const onCancel = vi.fn();
+    const { rerender } = renderWithProviders(card({ onCancel }));
+    fireEvent.click(screen.getByTestId("tool-approve-c1"));
+    fireEvent.click(screen.getByTestId("tool-approve-c2"));
+    fireEvent.click(screen.getByTestId("approve-button"));
+    rerender(card({ onCancel, isResolving: true }));
+    expect(screen.getByTestId("approval-decision-summary")).toBeInTheDocument();
+    // The resume failed: card is back.
+    rerender(card({ onCancel, isResolving: false }));
+    expect(screen.queryByTestId("approval-decision-summary")).not.toBeInTheDocument();
+    // Cancel, which makes the surface "resolving" again.
+    fireEvent.click(screen.getByTestId("cancel-button"));
+    confirm("Cancel conversation");
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    rerender(card({ onCancel, isResolving: true }));
+    expect(screen.queryByTestId("approval-decision-summary")).not.toBeInTheDocument();
+  });
+
+  it("does not resurrect an old receipt when the surface goes resolving again without a new submit", () => {
+    const { rerender } = renderWithProviders(card());
+    fireEvent.click(screen.getByTestId("tool-approve-c1"));
+    fireEvent.click(screen.getByTestId("tool-approve-c2"));
+    fireEvent.click(screen.getByTestId("approve-button"));
+    rerender(card({ isResolving: true }));
+    rerender(card({ isResolving: false }));
+    rerender(card({ isResolving: true }));
+    expect(screen.queryByTestId("approval-decision-summary")).not.toBeInTheDocument();
+  });
+
   it("group PHASE: Approve + confirm, receipt names the phase", () => {
     const onDecide = vi.fn();
     const props = (r: boolean): ApprovalCardProps => ({
