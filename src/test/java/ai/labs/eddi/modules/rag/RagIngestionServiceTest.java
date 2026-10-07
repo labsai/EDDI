@@ -57,7 +57,7 @@ class RagIngestionServiceTest {
     @Test
     void ingest_shouldReturnIngestionId() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -83,7 +83,7 @@ class RagIngestionServiceTest {
     @Test
     void ingest_asksForADocumentModel() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -101,7 +101,7 @@ class RagIngestionServiceTest {
     @Test
     void getStatus_shouldReturnPendingInitially() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
 
         var config = createConfig();
         String ingestionId = service.ingest("test-kb", "Content", "doc.txt", config);
@@ -237,6 +237,49 @@ class RagIngestionServiceTest {
         assertEquals(1, stored.size(), "exactly one version must survive two concurrent replacements: " + stored);
     }
 
+    /**
+     * Two knowledge bases in one physical store — two with an explicit shared
+     * table, or two 6.5.0-layout ones that were (until now) always merged. A
+     * replacement by one of them must not delete a document of the same name that
+     * belongs to the other, and every chunk carries the id of the knowledge base
+     * that wrote it, which is what retrieval filters on.
+     */
+    @Test
+    void replaceInASharedStoreOnlyTouchesItsOwnKnowledgeBase() {
+        var shared = new InMemoryEmbeddingStore<TextSegment>();
+        wireRealStore(shared);
+        var alpha = createConfig();
+        alpha.setName("same-name");
+        alpha.setStoreNamespace("id");
+        var beta = createConfig();
+        beta.setName("same-name");
+        beta.setStoreNamespace("id");
+
+        awaitCompleted(service.ingest(ALPHA_ID, "ALPHA policy text.", "policy.txt", alpha, false));
+        awaitCompleted(service.ingest(BETA_ID, "BETA policy text.", "policy.txt", beta, true));
+
+        assertEquals(List.of("ALPHA policy text.", "BETA policy text."), storedTexts(shared),
+                "beta's replace=true must not delete alpha's document of the same name");
+        var alphaOnly = shared.search(EmbeddingSearchRequest.builder().queryEmbedding(Embedding.from(new float[]{1f, 0f}))
+                .maxResults(10).minScore(0.0).filter(EmbeddingStoreFactory.retrievalFilter(ALPHA_ID, alpha)).build())
+                .matches().stream().map(match -> match.embedded().text()).toList();
+        assertEquals(List.of("ALPHA policy text."), alphaOnly, "alpha's retrieval filter must see only alpha's chunks");
+    }
+
+    @Test
+    void ingestionAddressesTheStoreByTheConfigurationId() {
+        wireRealStore(new InMemoryEmbeddingStore<>());
+        var config = createConfig();
+        config.setStoreNamespace("id");
+
+        awaitCompleted(service.ingest(ALPHA_ID, "text", "doc", config, false));
+
+        verify(embeddingStoreFactory).getOrCreate(eq(ALPHA_ID), same(config));
+    }
+
+    private static final String ALPHA_ID = "65f0aa11bb22cc33dd44ee55";
+    private static final String BETA_ID = "65f0aa11bb22cc33dd44ee66";
+
     private void wireRealStore(EmbeddingStore<TextSegment> store) {
         EmbeddingModel fixed = new EmbeddingModel() {
             @Override
@@ -245,7 +288,7 @@ class RagIngestionServiceTest {
             }
         };
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(fixed);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
     }
 
     private void awaitCompleted(String ingestionId) {

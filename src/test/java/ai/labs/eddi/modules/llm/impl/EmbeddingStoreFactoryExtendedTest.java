@@ -170,6 +170,7 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("blank port value should use default")
         void blankPort() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of("password", "secret", "port", "  "));
 
@@ -183,6 +184,7 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("valid port number should be accepted")
         void validPort() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of("password", "secret", "port", "5433", "dimension", "768"));
 
@@ -196,11 +198,12 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("invalid dimension value should throw with clear message")
         void invalidDimension() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of("password", "secret", "dimension", "abc"));
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate(config, "kb"));
+                    () -> factory.getOrCreate("kb", config));
             assertTrue(ex.getMessage().contains("dimension"),
                     "Error should mention the invalid param, got: " + ex.getMessage());
         }
@@ -216,11 +219,12 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("invalid Chroma API version should throw")
         void invalidApiVersion() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("chroma");
             config.setStoreParameters(Map.of("apiVersion", "INVALID"));
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate(config, "kb"));
+                    () -> factory.getOrCreate("kb", config));
             assertTrue(ex.getMessage().contains("ChromaApiVersion"),
                     "Error should mention ChromaApiVersion, got: " + ex.getMessage());
         }
@@ -236,10 +240,11 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("null storeParameters should produce valid cache key")
         void nullStoreParams() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
             config.setStoreParameters(null);
 
-            var store = factory.getOrCreate(config, "kb-null-params");
+            var store = factory.getOrCreate("kb-null-params", config);
             assertNotNull(store);
         }
 
@@ -247,15 +252,17 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("Same type and kbId with null vs empty params should produce different stores")
         void nullVsEmptyParams() {
             var config1 = new RagConfiguration();
+            config1.setStoreNamespace("id");
             config1.setStoreType("in-memory");
             config1.setStoreParameters(null);
 
             var config2 = new RagConfiguration();
+            config2.setStoreNamespace("id");
             config2.setStoreType("in-memory");
             config2.setStoreParameters(Map.of());
 
-            var store1 = factory.getOrCreate(config1, "kb1");
-            var store2 = factory.getOrCreate(config2, "kb1");
+            var store1 = factory.getOrCreate("kb1", config1);
+            var store2 = factory.getOrCreate("kb1", config2);
 
             // null and empty map produce different cache keys, so different store instances
             assertNotSame(store1, store2,
@@ -273,8 +280,9 @@ class EmbeddingStoreFactoryExtendedTest {
 
         // After clearing, new stores should be created
         var config = new RagConfiguration();
+        config.setStoreNamespace("id");
         config.setStoreType("in-memory");
-        assertNotNull(factory.getOrCreate(config, "kb"));
+        assertNotNull(factory.getOrCreate("kb", config));
     }
 
     // ==================== Unsupported store type message ====================
@@ -283,10 +291,11 @@ class EmbeddingStoreFactoryExtendedTest {
     @DisplayName("unsupported type error message lists all supported types")
     void unsupportedTypeListsSupported() {
         var config = new RagConfiguration();
+        config.setStoreNamespace("id");
         config.setStoreType("redis");
 
         var ex = assertThrows(IllegalArgumentException.class,
-                () -> factory.getOrCreate(config, "kb"));
+                () -> factory.getOrCreate("kb", config));
         assertTrue(ex.getMessage().contains("in-memory"));
         assertTrue(ex.getMessage().contains("pgvector"));
         assertTrue(ex.getMessage().contains("mongodb-atlas"));
@@ -305,11 +314,12 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("pgvector without password (null) should throw")
         void pgvectorNullPassword() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of());
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate(config, "kb1"));
+                    () -> factory.getOrCreate("kb1", config));
             assertTrue(ex.getMessage().contains("password"),
                     "Error should mention password, got: " + ex.getMessage());
             assertTrue(ex.getMessage().contains("pgvector"),
@@ -320,11 +330,12 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("pgvector with blank password should throw")
         void pgvectorBlankPassword() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of("password", "   "));
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate(config, "kb1"));
+                    () -> factory.getOrCreate("kb1", config));
             assertTrue(ex.getMessage().contains("password"),
                     "Error should mention password, got: " + ex.getMessage());
         }
@@ -341,11 +352,12 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("mongodb-atlas without connectionString should throw")
         void missingConnectionString() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("mongodb-atlas");
             config.setStoreParameters(Map.of());
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate(config, "kb1"));
+                    () -> factory.getOrCreate("kb1", config));
             assertTrue(ex.getMessage().contains("connectionString"),
                     "Error should mention connectionString, got: " + ex.getMessage());
             assertTrue(ex.getMessage().contains("mongodb-atlas"),
@@ -368,6 +380,7 @@ class EmbeddingStoreFactoryExtendedTest {
             // when the resolved value is null or blank after getOrDefault.
             // However, the parseChromaApiVersion method itself handles null
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("chroma");
             config.setStoreParameters(Map.of()); // no apiVersion key → default "V2"
 
@@ -375,7 +388,7 @@ class EmbeddingStoreFactoryExtendedTest {
             // with a connection exception, NOT an IllegalArgumentException
             // This proves the API version defaulting worked
             try {
-                factory.getOrCreate(config, "kb-chroma-default");
+                factory.getOrCreate("kb-chroma-default", config);
             } catch (IllegalArgumentException e) {
                 fail("Should not throw IllegalArgumentException for default API version, got: " + e.getMessage());
             } catch (Exception e) {
@@ -424,11 +437,12 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("calling getOrCreate twice with same params should return same instance")
         void cacheHitReturnsSameInstance() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
             config.setStoreParameters(Map.of());
 
-            var store1 = factory.getOrCreate(config, "kb-cache-test");
-            var store2 = factory.getOrCreate(config, "kb-cache-test");
+            var store1 = factory.getOrCreate("kb-cache-test", config);
+            var store2 = factory.getOrCreate("kb-cache-test", config);
 
             assertSame(store1, store2, "Same params/kbId should return cached instance");
         }
@@ -437,10 +451,11 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("different kbIds should produce different instances")
         void differentKbIdsDifferentInstances() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store1 = factory.getOrCreate(config, "kb-a");
-            var store2 = factory.getOrCreate(config, "kb-b");
+            var store1 = factory.getOrCreate("kb-a", config);
+            var store2 = factory.getOrCreate("kb-b", config);
 
             assertNotSame(store1, store2, "Different kbIds should produce different instances");
         }
@@ -449,11 +464,12 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("clearCache should invalidate cached instances")
         void clearCacheInvalidates() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store1 = factory.getOrCreate(config, "kb-clear");
+            var store1 = factory.getOrCreate("kb-clear", config);
             factory.clearCache();
-            var store2 = factory.getOrCreate(config, "kb-clear");
+            var store2 = factory.getOrCreate("kb-clear", config);
 
             assertNotSame(store1, store2, "After clearCache, new instance should be created");
         }
@@ -470,11 +486,12 @@ class EmbeddingStoreFactoryExtendedTest {
         @DisplayName("pgvector with null storeParameters should use empty map and throw for missing password")
         void pgvectorNullStoreParams() {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             config.setStoreParameters(null);
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate(config, "kb-null-params"));
+                    () -> factory.getOrCreate("kb-null-params", config));
             assertTrue(ex.getMessage().contains("password"),
                     "Should throw for missing password with null storeParameters, got: " + ex.getMessage());
         }

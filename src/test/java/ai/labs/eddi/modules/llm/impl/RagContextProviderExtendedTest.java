@@ -423,7 +423,7 @@ class RagContextProviderExtendedTest {
 
         var step = new WorkflowConfiguration.WorkflowStep();
         step.setType(URI.create("eddi://ai.labs.rag"));
-        step.setConfig(Map.of("uri", "eddi://ai.labs.rag/ragstore/rag/rag-1?version=1"));
+        step.setConfig(Map.of("uri", "eddi://ai.labs.rag/ragstore/rags/aabbccddeeff00112233aabb?version=1"));
 
         var workflowConfig = new WorkflowConfiguration();
         workflowConfig.setWorkflowSteps(List.of(step));
@@ -457,7 +457,7 @@ class RagContextProviderExtendedTest {
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(embedding));
 
         EmbeddingStore<TextSegment> store = mock(EmbeddingStore.class);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
 
         var match = new EmbeddingMatch<>(0.9, "id-1", embedding, TextSegment.from(contentText));
         when(store.search(any(EmbeddingSearchRequest.class)))
@@ -475,7 +475,7 @@ class RagContextProviderExtendedTest {
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(embedding));
 
         EmbeddingStore<TextSegment> store = mock(EmbeddingStore.class);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
 
         when(store.search(any(EmbeddingSearchRequest.class)))
                 .thenReturn(new EmbeddingSearchResult<>(List.of()));

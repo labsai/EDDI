@@ -22,10 +22,14 @@ import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.rag.query.Query;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.filter.Filter;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -158,11 +162,23 @@ public class RagContextProvider {
                 // QUERY: this vector is the search key, not a stored document. Passing
                 // DOCUMENT here (which is what a shared instance did) measurably
                 // costs recall on an asymmetric model.
+                // The store is the one bound in the workflow, addressed by the bound
+                // configuration's id — never by its name, which another knowledge base
+                // may share.
+                String ragConfigId = ragConfigIdOf(step.stepConfig());
                 EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.QUERY);
-                EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfig, kbName);
+                EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
 
-                ContentRetriever retriever = EmbeddingStoreContentRetriever.builder().embeddingStore(store).embeddingModel(embeddingModel)
-                        .maxResults(maxResults).minScore(minScore).build();
+                var retrieverBuilder = EmbeddingStoreContentRetriever.builder().embeddingStore(store).embeddingModel(embeddingModel)
+                        .maxResults(maxResults).minScore(minScore);
+                // Isolation at read time as well as at write time: a knowledge base in
+                // the per-id layout only ever sees chunks tagged with its own id, even
+                // in a physical table it shares.
+                Filter isolation = EmbeddingStoreFactory.retrievalFilter(ragConfigId, ragConfig);
+                if (isolation != null) {
+                    retrieverBuilder.filter(isolation);
+                }
+                ContentRetriever retriever = retrieverBuilder.build();
 
                 // Step 5: Retrieve
                 List<Content> relevant = retriever.retrieve(Query.from(userQuery));
@@ -213,6 +229,29 @@ public class RagContextProvider {
         currentStep.storeData(ragContextData);
 
         return formattedContext;
+    }
+
+    /**
+     * The id of the RAG configuration a workflow step binds, from its {@code uri}.
+     *
+     * @throws IllegalArgumentException
+     *             when the step's URI names no id — retrieval then reports this
+     *             knowledge base as failed rather than guessing a store
+     */
+    static String ragConfigIdOf(Map<String, Object> stepConfig) {
+        Object uri = stepConfig == null ? null : stepConfig.get("uri");
+        IResourceStore.IResourceId resourceId = null;
+        if (uri != null) {
+            try {
+                resourceId = RestUtilities.extractResourceId(URI.create(uri.toString()));
+            } catch (IllegalArgumentException e) {
+                resourceId = null;
+            }
+        }
+        if (resourceId == null || resourceId.getId() == null || resourceId.getId().isBlank()) {
+            throw new IllegalArgumentException("The workflow step's knowledge base URI names no id: " + uri);
+        }
+        return resourceId.getId();
     }
 
     /**
