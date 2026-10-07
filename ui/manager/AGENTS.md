@@ -240,6 +240,20 @@ what it finds. Off by default. Worth knowing before touching it:
   (`Task.toolApprovals` fully replaces the agent's), so the grant is valid only
   alongside `gate-guard.ts`, which hard-refuses any llmstore write carrying that
   field. Do not separate the two.
+  **Edits go through `PATCH`, not `PUT`.** LLM, apicall and mcpcall documents hold
+  `${vault:…}` references, and a full `PUT` of a document the model read back is
+  refused by the backend's `ConfigReferenceGuard` — correctly, and an echo that
+  got past it would be resolved to the plaintext key before it was stored. So
+  `PATCH /{store}/{id}` (RFC 6902, `application/json-patch+json`) is granted for
+  those three stores (`PATCHABLE_EXTENSION_STORES`), the prompt tells the operator
+  to send only what changes, and `gate-guard.ts` reads patch operations: a path
+  or value naming `toolApprovals` is refused, and so are `copy` and `move` (they
+  can carry a stored override or reference somewhere new). The approval card
+  lists a patch operation by operation (`request-preview.tsx`). `PUT` stays
+  granted for documents without references. Never loosen the guard's `PATCH`
+  rules without reading its "Patches" section; a new patchable store needs the
+  same three things: the endpoint in `tool-scopes.ts`, a backend `PATCH`, and a
+  line in `openapi-operations.json`.
   `read_write` is the DEFAULT scope and freely selectable on first activation
   (read-only is the explicit opt-down); the safety lives in activation itself:
   the gate is read back from the just-provisioned document
