@@ -42,6 +42,25 @@ function applyTheme(mode: ThemeMode): void {
   document.documentElement.setAttribute("data-theme", resolved);
 }
 
+/**
+ * `?theme=` from the address. An explicit instruction from whoever embedded the
+ * widget has to beat a preference remembered from an earlier visit — otherwise
+ * `?theme=light` stops working the first time somebody toggles the theme.
+ */
+function readUrlTheme(): ThemeMode | null {
+  try {
+    const value = new URLSearchParams(window.location.search).get("theme");
+    return value === "dark" || value === "light" || value === "system" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** dark -> light -> system -> dark. */
+export function nextTheme(mode: ThemeMode): ThemeMode {
+  return mode === "dark" ? "light" : mode === "light" ? "system" : "dark";
+}
+
 export function useTheme(initial: ThemeMode = "dark") {
   // The mode in force on this page. Storage cannot be the record of it: when
   // storage is blocked, setTheme("system") is never persisted, and a listener
@@ -51,7 +70,7 @@ export function useTheme(initial: ThemeMode = "dark") {
 
   // Apply on mount
   useEffect(() => {
-    const mode = readStoredTheme() ?? initial;
+    const mode = readUrlTheme() ?? readStoredTheme() ?? initial;
     currentMode.current = mode;
     applyTheme(mode);
 
@@ -72,5 +91,8 @@ export function useTheme(initial: ThemeMode = "dark") {
     applyTheme(mode);
   }, []);
 
-  return { setTheme };
+  /** The mode in force (may be "system", which `data-theme` never says). */
+  const getMode = useCallback(() => currentMode.current, []);
+
+  return { setTheme, getMode };
 }

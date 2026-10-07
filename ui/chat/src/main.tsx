@@ -8,7 +8,11 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import { ChatProvider } from "@/store/chat-store";
 import { ChatWidget } from "@/components/ChatWidget";
+import { initLocale } from "@/i18n";
 import "@/styles/chat.css";
+
+// Before the first render: the copy helpers outside React read the locale too.
+initLocale(new URLSearchParams(window.location.search).get("lang"));
 
 function App() {
   return (

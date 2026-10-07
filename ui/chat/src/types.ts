@@ -10,6 +10,12 @@ export interface ChatMessage {
   timestamp: number;
   /** True while the agent is still streaming tokens. */
   isStreaming?: boolean;
+  /**
+   * `"notice"` marks text the WIDGET wrote (a failed send, an undo that did
+   * not work, a cancelled request) as opposed to something the agent said. It
+   * renders as a system notice, not as an agent bubble.
+   */
+  kind?: "notice";
   /** `image` output items, rendered by the widget rather than as markdown. */
   images?: { uri: string; alt?: string }[];
 }

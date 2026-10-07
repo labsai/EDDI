@@ -8,6 +8,8 @@
 import { useState, useCallback, useId, type KeyboardEvent } from "react";
 import { Eye, EyeOff, Lock, SendHorizontal } from "lucide-react";
 import { useChatDispatch } from "@/store/chat-store";
+import { isImeComposing } from "@/ime";
+import { t } from "@/i18n";
 
 interface SecretInputProps {
   label?: string;
@@ -15,6 +17,12 @@ interface SecretInputProps {
   defaultValue?: string;
   subType?: string;
   onSend: (message: string, isSecret: boolean) => void;
+  /**
+   * Leave the requested field for the ordinary composer. Without it an agent
+   * that asks for an input field traps the user: the composer is replaced for
+   * as long as the request stands, and only sending a value ends it.
+   */
+  onCancel?: () => void;
   disabled?: boolean;
 }
 
@@ -24,6 +32,7 @@ export function SecretInput({
   defaultValue = "",
   subType = "password",
   onSend,
+  onCancel,
   disabled = false,
 }: SecretInputProps) {
   const dispatch = useChatDispatch();
@@ -46,13 +55,19 @@ export function SecretInput({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      // Enter that confirms an IME candidate must not submit the password.
+      if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
         e.preventDefault();
         handleSubmit();
       }
     },
     [handleSubmit],
   );
+
+  const handleCancel = useCallback(() => {
+    if (onCancel) onCancel();
+    else dispatch({ type: "CLEAR_INPUT_FIELD" });
+  }, [onCancel, dispatch]);
 
   const inputType = isSecret
     ? visible
@@ -87,7 +102,7 @@ export function SecretInput({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder || (isSecret ? "Enter secret value..." : "")}
+            placeholder={placeholder || (isSecret ? t("input.secretPlaceholder") : "")}
             disabled={disabled}
             autoFocus
             autoComplete={isSecret ? "off" : undefined}
@@ -98,8 +113,8 @@ export function SecretInput({
               type="button"
               className="secret-input__eye-toggle"
               onClick={() => setVisible((v) => !v)}
-              aria-label={visible ? "Hide secret" : "Show secret"}
-              title={visible ? "Hide" : "Show"}
+              aria-label={visible ? t("input.secretHide") : t("input.secretShow")}
+              title={visible ? t("input.hide") : t("input.show")}
               data-testid="secret-input-eye"
             >
               {/* Shows the action, like the aria-label: an open eye reveals. */}
@@ -112,12 +127,20 @@ export function SecretInput({
           className={`chat-input__send ${value && !disabled ? "chat-input__send--active" : "chat-input__send--disabled"}`}
           onClick={handleSubmit}
           disabled={!value || disabled}
-          aria-label={isSecret ? "Send secret" : "Send"}
+          aria-label={isSecret ? t("input.sendSecret") : t("input.send")}
           data-testid="secret-input-send"
         >
           <SendHorizontal size="1em" />
         </button>
       </div>
+      <button
+        type="button"
+        className="secret-input__cancel"
+        onClick={handleCancel}
+        data-testid="secret-input-cancel"
+      >
+        {t("input.typeInstead")}
+      </button>
     </div>
   );
 }

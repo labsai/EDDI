@@ -58,6 +58,8 @@ src/
 │   └── chat.css        # All component styles (BEM naming)
 ├── test-utils/
 │   └── sse.ts          # SSE stream + status-aware fetch harnesses
+├── i18n.ts             # String tables (en/de/fr/es), t(), initLocale() — ALL widget-owned text goes through t()
+├── ime.ts              # isImeComposing(): Enter that confirms an IME candidate is not "send"
 ├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
 ```

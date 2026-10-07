@@ -27,11 +27,11 @@ describe("ChatHeader", () => {
     expect(screen.getByTestId("theme-toggle")).toBeInTheDocument();
   });
 
-  it("hides the logo when showLogo is false (no branding text either)", () => {
+  it("replaces the logo with the title text when showLogo is false", () => {
     renderHeader({ showLogo: false });
     expect(screen.queryByRole("img", { name: "EDDI" })).not.toBeInTheDocument();
-    // No fallback "EDDI" text either
-    expect(screen.queryByText("EDDI")).not.toBeInTheDocument();
+    // The header is not left empty: the title stands in for the logo.
+    expect(screen.getByTestId("chat-title")).toHaveTextContent("EDDI");
   });
 
   it("does not show agent name when no agent name is set in state", () => {
