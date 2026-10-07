@@ -79,17 +79,24 @@ public final class McpApiToolBuilder {
      *            endpoint-filter entries that matched no operation in the spec and
      *            were therefore ignored — a typo'd path or method used to vanish
      *            without a trace
+     * @param unusableEndpoints
+     *            operations the filter selected that could NOT be turned into a
+     *            working tool, each as {@code "METHOD /path: reason"}. They are
+     *            absent from {@code configsByGroup}: a tool that cannot send a
+     *            required input is worse than no tool, because the model reports
+     *            "the tool has no field for that" and the admin cannot tell why
      */
     public record ApiBuildResult(String title, Map<String, ApiCallsConfiguration> configsByGroup, String apiSummary, int endpointCount,
-            List<String> unmatchedEndpoints) {
+            List<String> unmatchedEndpoints, List<String> unusableEndpoints) {
 
         public ApiBuildResult {
             unmatchedEndpoints = unmatchedEndpoints == null ? List.of() : List.copyOf(unmatchedEndpoints);
+            unusableEndpoints = unusableEndpoints == null ? List.of() : List.copyOf(unusableEndpoints);
         }
 
-        /** A result whose filter (if any) matched in full. */
+        /** A result whose filter (if any) matched in full and nothing was unusable. */
         public ApiBuildResult(String title, Map<String, ApiCallsConfiguration> configsByGroup, String apiSummary, int endpointCount) {
-            this(title, configsByGroup, apiSummary, endpointCount, List.of());
+            this(title, configsByGroup, apiSummary, endpointCount, List.of(), List.of());
         }
     }
 
@@ -157,6 +164,7 @@ public final class McpApiToolBuilder {
         int endpointCount = 0;
         var summaryLines = new ArrayList<String>();
         var matchedFilters = new ArrayList<String>();
+        var unusableEndpoints = new ArrayList<String>();
 
         if (openAPI.getPaths() != null) {
             for (var pathEntry : openAPI.getPaths().entrySet()) {
@@ -185,6 +193,14 @@ public final class McpApiToolBuilder {
                     // Determine group (first tag, or "General")
                     String group = (operation.getTags() != null && !operation.getTags().isEmpty()) ? operation.getTags().get(0) : DEFAULT_GROUP;
 
+                    // Refuse, and say so, rather than generate a tool that cannot send an
+                    // input the operation requires. See findUnmappableInput.
+                    String unmappable = findUnmappableInput(operation);
+                    if (unmappable != null) {
+                        unusableEndpoints.add(method.toUpperCase() + " " + path + ": " + unmappable);
+                        continue;
+                    }
+
                     ApiCall httpCall = buildApiCall(method, path, operation, apiAuth, authHeader, openAPI);
                     callsByGroup.computeIfAbsent(group, k -> new ArrayList<>()).add(httpCall);
                     endpointCount++;
@@ -196,10 +212,14 @@ public final class McpApiToolBuilder {
         }
 
         List<String> unmatchedEndpoints = allowedEndpoints.stream().filter(filter -> !matchedFilters.contains(filter)).sorted().toList();
+        if (!unusableEndpoints.isEmpty()) {
+            LOGGER.warnf("Operations skipped because they require an input a generated tool cannot send: %s", unusableEndpoints);
+        }
         if (endpointCount == 0) {
             throw new IllegalArgumentException(
                     "No valid endpoints found in the OpenAPI spec"
-                            + (allowedEndpoints.isEmpty() ? "" : " matching the filter " + unmatchedEndpoints));
+                            + (allowedEndpoints.isEmpty() ? "" : " matching the filter " + unmatchedEndpoints)
+                            + (unusableEndpoints.isEmpty() ? "" : "; operations skipped as unusable: " + unusableEndpoints));
         }
         if (!unmatchedEndpoints.isEmpty()) {
             LOGGER.warnf("Endpoint filter entries matched no (non-deprecated) operation in the OpenAPI spec and were ignored: %s",
@@ -224,7 +244,7 @@ public final class McpApiToolBuilder {
 
         String title = (openAPI.getInfo() != null && openAPI.getInfo().getTitle() != null) ? openAPI.getInfo().getTitle() : "API";
 
-        return new ApiBuildResult(title, configsByGroup, apiSummary, endpointCount, unmatchedEndpoints);
+        return new ApiBuildResult(title, configsByGroup, apiSummary, endpointCount, unmatchedEndpoints, unusableEndpoints);
     }
 
     /**
@@ -501,50 +521,38 @@ public final class McpApiToolBuilder {
         }
         request.setQueryParams(queryParams);
 
-        // Request body for POST/PUT/PATCH
-        if (operation.getRequestBody() != null && operation.getRequestBody().getContent() != null) {
-            var content = operation.getRequestBody().getContent();
-            MediaType jsonMedia = content.get("application/json");
-            if (jsonMedia != null) {
-                request.setContentType("application/json");
-                // One level of $ref resolution, HERE and deliberately not resolveFully():
-                // the parser leaves component references unresolved, so a body
-                // declared as $ref: InputData reached describeBodySchema as a
-                // nameless shell and the parameter description degraded to "a
-                // single JSON object" with ZERO field names. The model then
-                // guesses keys — observed with the say tool, where a guessed
-                // {"message": ...} bound to InputData's DEFAULTS, returned 200,
-                // and the approved test message was silently never delivered.
-                // Nested property refs stay unresolved: the top-level field
-                // names and requiredness are what the model needs to write a
-                // correct body.
-                var body = buildBodyTemplate(resolveComponentRef(jsonMedia.getSchema(), openAPI));
-                // The body template's variables must be declared as tool parameters,
-                // or the model has no documented way to fill them: the tool schema is
-                // built from getParameters() alone (AgentOrchestrator), and with
-                // strict-rendering off an undeclared variable renders as empty. The
-                // request would go out structurally valid and semantically empty.
-                //
-                // A path or query parameter of the same name wins — those are
-                // structural — so the body variable is RENAMED rather than dropped.
-                // Dropping it is the empty-body bug all over again, for a spec that
-                // happens to name a parameter "requestBody".
-                String bodyTemplate = body.template();
-                for (var variable : body.variables().entrySet()) {
-                    String variableName = variable.getKey();
-                    if (paramDescriptions.containsKey(variableName)) {
-                        String renamed = variableName;
-                        while (paramDescriptions.containsKey(renamed) || body.variables().containsKey(renamed)) {
-                            renamed = renamed + "Body";
-                        }
-                        bodyTemplate = bodyTemplate.replace("{" + variableName + "}", "{" + renamed + "}");
-                        paramDescriptions.put(renamed, variable.getValue());
-                    } else {
-                        paramDescriptions.put(variableName, variable.getValue());
+        // Request body. Dispatch on the media type the operation consumes; a type
+        // with no case here is refused up front by findUnmappableInput (when the
+        // body is required), never silently dropped.
+        BodyMapping bodyMapping = mapRequestBody(operation, openAPI);
+        if (bodyMapping != null) {
+            request.setContentType(bodyMapping.contentType());
+            var body = bodyMapping.body();
+            // The body template's variables must be declared as tool parameters,
+            // or the model has no documented way to fill them: the tool schema is
+            // built from getParameters() alone (AgentOrchestrator), and with
+            // strict-rendering off an undeclared variable renders as empty. The
+            // request would go out structurally valid and semantically empty.
+            //
+            // A path or query parameter of the same name wins — those are
+            // structural — so the body variable is RENAMED rather than dropped.
+            // Dropping it is the empty-body bug all over again, for a spec that
+            // happens to name a parameter "requestBody".
+            String bodyTemplate = body.template();
+            for (var variable : body.variables().entrySet()) {
+                String variableName = variable.getKey();
+                if (paramDescriptions.containsKey(variableName)) {
+                    String renamed = variableName;
+                    while (paramDescriptions.containsKey(renamed) || body.variables().containsKey(renamed)) {
+                        renamed = renamed + "Body";
                     }
+                    bodyTemplate = bodyTemplate.replace("{" + variableName + "}", "{" + renamed + "}");
+                    paramDescriptions.put(renamed, variable.getValue());
+                } else {
+                    paramDescriptions.put(variableName, variable.getValue());
                 }
-                request.setBody(bodyTemplate);
             }
+            request.setBody(bodyTemplate);
         }
 
         httpCall.setRequest(request);
@@ -555,6 +563,149 @@ public final class McpApiToolBuilder {
         }
 
         return httpCall;
+    }
+
+    /** Media type of a JSON request body. */
+    static final String JSON_MEDIA_TYPE = "application/json";
+
+    /** Media type of a plain-text request body. */
+    static final String TEXT_MEDIA_TYPE = "text/plain";
+
+    /**
+     * A request body ready to be written into a call: the content type to send, and
+     * the template plus the tool parameters that fill it.
+     */
+    private record BodyMapping(String contentType, BodyTemplate body) {
+    }
+
+    /**
+     * The request-body media types a generated tool can send. A new case here, and
+     * in {@link #mapRequestBody}, is the whole change needed to support another
+     * type; anything absent is reported by {@link #findUnmappableInput}.
+     */
+    private static boolean isSupportedBodyType(String baseType) {
+        return JSON_MEDIA_TYPE.equals(baseType) || TEXT_MEDIA_TYPE.equals(baseType);
+    }
+
+    /** {@code "Text/Plain; charset=utf-8"} becomes {@code "text/plain"}. */
+    private static String baseMediaType(String mediaType) {
+        int semicolon = mediaType.indexOf(';');
+        return (semicolon < 0 ? mediaType : mediaType.substring(0, semicolon)).trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * The first declared media type this builder supports, preferring JSON — an
+     * operation that accepts both is sent the structured form it was written for.
+     * Returns the entry as declared (its key is the content type), or null.
+     */
+    private static Map.Entry<String, MediaType> selectSupportedBody(Map<String, MediaType> content) {
+        Map.Entry<String, MediaType> other = null;
+        for (var entry : content.entrySet()) {
+            String base = baseMediaType(entry.getKey());
+            if (JSON_MEDIA_TYPE.equals(base)) {
+                return entry;
+            }
+            if (other == null && isSupportedBodyType(base)) {
+                other = entry;
+            }
+        }
+        return other;
+    }
+
+    /**
+     * Maps the operation's request body, or null when it has none this builder can
+     * send.
+     */
+    private static BodyMapping mapRequestBody(Operation operation, OpenAPI openAPI) {
+        var requestBody = operation.getRequestBody();
+        if (requestBody == null || requestBody.getContent() == null) {
+            return null;
+        }
+        var selected = selectSupportedBody(requestBody.getContent());
+        if (selected == null) {
+            return null;
+        }
+        MediaType media = selected.getValue();
+        if (TEXT_MEDIA_TYPE.equals(baseMediaType(selected.getKey()))) {
+            return new BodyMapping(TEXT_MEDIA_TYPE, buildTextBodyTemplate(requestBody.getDescription(), media));
+        }
+        // One level of $ref resolution, HERE and deliberately not resolveFully():
+        // the parser leaves component references unresolved, so a body
+        // declared as $ref: InputData reached describeBodySchema as a
+        // nameless shell and the parameter description degraded to "a
+        // single JSON object" with ZERO field names. The model then
+        // guesses keys — observed with the say tool, where a guessed
+        // {"message": ...} bound to InputData's DEFAULTS, returned 200,
+        // and the approved test message was silently never delivered.
+        // Nested property refs stay unresolved: the top-level field
+        // names and requiredness are what the model needs to write a
+        // correct body.
+        return new BodyMapping(JSON_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI)));
+    }
+
+    /**
+     * The plain-text body: one variable carrying the entire body, sent verbatim.
+     * <p>
+     * Same single-variable shape as the JSON body, for the same reasons, and one
+     * more: a text body has no structure for EDDI to add, so nothing is wrapped,
+     * quoted or JSON-escaped on the way out. The value is substituted as DATA into
+     * the authored {@code {requestBody}} placeholder — the templating engine does
+     * not re-evaluate a substituted value, so a {@code {…}} or {@code ${…}} inside
+     * the text is sent as written, never rendered as a template.
+     */
+    private static BodyTemplate buildTextBodyTemplate(String bodyDescription, MediaType media) {
+        var description = new StringBuilder("The complete request body as plain text, sent exactly as given with Content-Type text/plain. "
+                + "Give the bare value: no JSON, no quotes, no key name.");
+        Schema<?> schema = media.getSchema();
+        if (bodyDescription != null && !bodyDescription.isBlank()) {
+            description.append(' ').append(bodyDescription.trim());
+        } else if (schema != null && schema.getDescription() != null && !schema.getDescription().isBlank()) {
+            description.append(' ').append(schema.getDescription().trim());
+        }
+        if (schema != null && schema.getFormat() != null && !schema.getFormat().isBlank()) {
+            description.append(" Format: ").append(schema.getFormat()).append('.');
+        }
+        Object example = media.getExample() != null ? media.getExample() : (schema != null ? schema.getExample() : null);
+        if (example != null && !String.valueOf(example).isBlank()) {
+            description.append(" Example: ").append(example).append('.');
+        }
+        return new BodyTemplate("{" + WHOLE_BODY_VARIABLE + "}", Map.of(WHOLE_BODY_VARIABLE, description.toString()));
+    }
+
+    /**
+     * Why this operation cannot be turned into a working tool, or null when it can.
+     * <p>
+     * A generated tool sends path, query and body inputs. Anything the operation
+     * REQUIRES beyond those has no parameter on the tool, and the failure is
+     * invisible until a call is made: the model reports "the tool has no field for
+     * that" and the approver has already approved. This used to happen silently for
+     * every non-JSON body — {@code PUT /agentstore/agents/{id}/updateResourceUri}
+     * takes a {@code text/plain} body and the generated tool had no way to send it.
+     * <p>
+     * Covers: a body whose every media type is unsupported (unless the spec marks
+     * the body explicitly optional, in which case the tool is generated without
+     * it), and a required header or cookie parameter (never mapped).
+     */
+    static String findUnmappableInput(Operation operation) {
+        var requestBody = operation.getRequestBody();
+        if (requestBody != null && !Boolean.FALSE.equals(requestBody.getRequired())) {
+            var content = requestBody.getContent();
+            // No content map at all is a body-less declaration the JSON path tolerated
+            // (it generated no body); keep that.
+            if (content != null && !content.isEmpty() && selectSupportedBody(content) == null) {
+                return "requires a request body of type " + String.join(", ", content.keySet())
+                        + ", which generated tools cannot send (supported: " + JSON_MEDIA_TYPE + ", " + TEXT_MEDIA_TYPE + ")";
+            }
+        }
+        if (operation.getParameters() != null) {
+            for (Parameter param : operation.getParameters()) {
+                if (param != null && param.getName() != null && Boolean.TRUE.equals(param.getRequired())
+                        && ("header".equals(param.getIn()) || "cookie".equals(param.getIn()))) {
+                    return "requires the " + param.getIn() + " parameter '" + param.getName() + "', which generated tools cannot send";
+                }
+            }
+        }
+        return null;
     }
 
     /**
