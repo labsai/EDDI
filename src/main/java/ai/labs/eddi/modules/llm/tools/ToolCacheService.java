@@ -6,23 +6,24 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
-import ai.labs.eddi.modules.llm.tools.impl.ArtifactTools;
-import ai.labs.eddi.modules.llm.tools.impl.GroupTaskTools;
-import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.service.tool.DefaultToolExecutor;
+import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.NormalScope;
+import jakarta.enterprise.inject.Vetoed;
 import jakarta.inject.Inject;
+import jakarta.inject.Scope;
 import org.jboss.logging.Logger;
 
+import java.lang.annotation.Annotation;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -100,40 +101,59 @@ public class ToolCacheService {
     private static final long DEFAULT_TTL_SECONDS = 300L; // 5 minutes default
 
     /**
-     * Tools whose result depends on state they or their peers change, so a cached
-     * answer is a wrong answer. Derived from the {@code @Tool} methods of the
-     * classes themselves, so a tool added to one of them is covered without anyone
-     * remembering this list.
+     * Whether a tool's results belong to one conversation and may therefore never
+     * be served from, or stored in, the cache.
      * <p>
-     * The defect this closes: every member of a group discussion runs as the same
-     * user, so under the default USER scope {@code listArtifacts()} — no arguments,
-     * identical cache key — served one member's earlier "No artifacts yet" to the
-     * next member for five minutes, right after a third member had created one.
-     * Creating, updating, recruiting, delegating and remembering are side effects;
-     * serving them from cache skips the side effect entirely.
+     * Derived from how the tool object is built, not from a hand-kept list. A
+     * shared CDI bean ({@code @ApplicationScoped} and friends) is one instance
+     * serving every conversation, so whatever it returns is a function of its
+     * arguments. A tool class that is <em>not</em> a bean ({@code @Vetoed}, or
+     * simply never annotated with a scope) is constructed per turn with that
+     * conversation's state baked in — the conversation id of
+     * {@code ReadAttachmentTool}, the roster of the dynamic-agent tools, the
+     * artifacts of a group discussion, the user-memory handle. Its result changes
+     * with that state, and under the default USER scope two conversations of the
+     * same user produced identical cache keys: {@code listAttachments()} in
+     * conversation B answered with conversation A's files for five minutes, and
+     * within one conversation a newly uploaded file stayed invisible for as long.
+     * <p>
+     * Not cached at all rather than narrowed to the conversation partition: the
+     * state such a tool reads changes <em>within</em> a conversation too (a new
+     * upload, a peer's artifact), and several of these tools have side effects a
+     * cache hit would silently skip. This replaces the earlier hand-listed
+     * {@code STATEFUL_TOOL_NAMES}, every member of which was such a per-turn
+     * object; {@code ReadAttachmentTool} was the one nobody had remembered to add.
+     *
+     * @param executor
+     *            the executor the call dispatches to; only a reflected
+     *            {@link DefaultToolExecutor} names a tool class, every other kind
+     *            (http, mcp, a2a) is governed by {@link #mayCache} instead
      */
-    private static final Set<String> STATEFUL_TOOL_NAMES = toolNamesOf(ArtifactTools.class, GroupTaskTools.class,
-            CreateSubAgentTool.class, ConverseWithAgentTool.class, RecruitAgentTool.class, TeardownAgentTool.class,
-            FindAgentsByCapabilityTool.class, UserMemoryTool.class, ConversationRecallTool.class);
-
-    private static Set<String> toolNamesOf(Class<?>... toolClasses) {
-        return Arrays.stream(toolClasses)
-                .flatMap(toolClass -> Arrays.stream(toolClass.getMethods()))
-                .filter(method -> method.isAnnotationPresent(Tool.class))
-                .map(method -> {
-                    String declared = method.getAnnotation(Tool.class).name();
-                    return declared == null || declared.isBlank() ? method.getName() : declared;
-                })
-                .collect(Collectors.toUnmodifiableSet());
+    public static boolean isConversationBound(ToolExecutor executor) {
+        if (!(executor instanceof DefaultToolExecutor reflected) || reflected.originalMethod() == null) {
+            return false;
+        }
+        return isConversationBound(reflected.originalMethod().getDeclaringClass());
     }
 
     /**
-     * Whether a call's result may be served from, or stored in, the cache. False
-     * for the stateful tools above, whatever the task's caching setting says.
+     * Class-level form of {@link #isConversationBound(ToolExecutor)}: true unless
+     * the class is a CDI bean shared by every conversation.
      */
-    public static boolean isCacheable(ToolInvocation invocation) {
-        return invocation != null && !STATEFUL_TOOL_NAMES.contains(invocation.dispatchName())
-                && !STATEFUL_TOOL_NAMES.contains(invocation.canonicalName());
+    public static boolean isConversationBound(Class<?> toolClass) {
+        if (toolClass == null) {
+            return false;
+        }
+        if (toolClass.isAnnotationPresent(Vetoed.class)) {
+            return true;
+        }
+        for (Annotation annotation : toolClass.getAnnotations()) {
+            Class<? extends Annotation> type = annotation.annotationType();
+            if (type.isAnnotationPresent(NormalScope.class) || type.isAnnotationPresent(Scope.class)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -150,9 +170,9 @@ public class ToolCacheService {
 
     /**
      * Whether a call from this source may use the cache at all. Built-in tools may
-     * (subject to {@link #isCacheable}); HTTP, MCP and A2A tools only when the task
-     * names the tool in {@code toolCacheScopes} — naming it is the explicit
-     * statement that repeating the call is safe to skip.
+     * (unless {@link #isConversationBound conversation-bound}); HTTP, MCP and A2A
+     * tools only when the task names the tool in {@code toolCacheScopes} — naming
+     * it is the explicit statement that repeating the call is safe to skip.
      *
      * @param source
      *            the tool's source tag ({@code builtin}, {@code http}, {@code mcp},

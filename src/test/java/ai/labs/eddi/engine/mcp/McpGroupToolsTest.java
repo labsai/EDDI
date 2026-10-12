@@ -35,6 +35,7 @@ import java.util.Map;
 import java.security.Principal;
 import io.smallrye.common.annotation.NonBlocking;
 import io.smallrye.common.annotation.Blocking;
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -143,6 +144,40 @@ class McpGroupToolsTest {
         String result = tools.list_groups(null, null, null);
 
         assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void internalFailure_isNotEchoedToTheClient_butGetsAReference() {
+        when(groupStore.readGroupDescriptors(any(), anyInt(), anyInt()))
+                .thenThrow(new RuntimeException("Timed out connecting to mongodb://eddi:hunter2@db-internal:27017 collection descriptors"));
+
+        String result = tools.list_groups(null, null, null);
+
+        assertFalse(result.contains("db-internal"), result);
+        assertFalse(result.contains("hunter2"), result);
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""), result);
+        assertTrue(result.matches(".*\"reference\":\"[0-9a-f]{8}\".*"), result);
+    }
+
+    @Test
+    void invalidTasksJson_getsACuratedMessage_notTheParserText() throws Exception {
+        when(jsonSerialization.deserialize(eq("{not json"), eq(AgentGroupConfiguration.TaskDefinition[].class)))
+                .thenThrow(new JsonParseException(null, "Unexpected character at [Source: ai.labs.eddi.configs.groups.model.TaskDefinition]"));
+
+        String result = tools.create_group("G", null, "a,b", null, null, null, null, null, null, null, "{not json");
+
+        assertTrue(result.contains("Invalid tasks JSON"), result);
+        assertFalse(result.contains("ai.labs.eddi"), result);
+        assertFalse(result.contains("Unexpected character"), result);
+    }
+
+    @Test
+    void callerError_isStillDescribed() {
+        when(groupStore.createGroup(any())).thenThrow(new IllegalArgumentException("members[1] repeats members[0] ('a')"));
+
+        String result = tools.create_group("G", null, "a,a", null, null, null, null, null, null, null, null);
+
+        assertTrue(result.contains("members[1] repeats members[0]"), result);
     }
 
     // --- read_group ---
@@ -547,12 +582,13 @@ class McpGroupToolsTest {
     @Test
     void deleteGroupConversation_handlesException() throws Exception {
         stubConversation("gc-bad");
-        doThrow(new RuntimeException("internal detail")).when(groupConversationService).deleteGroupConversation("gc-bad");
+        doThrow(new RuntimeException("E11000 at db-internal:27017")).when(groupConversationService).deleteGroupConversation("gc-bad");
 
         String result = tools.delete_group_conversation("gc-bad");
 
         assertTrue(result.contains("Failed to delete group conversation"), result);
-        assertFalse(result.contains("internal detail"), result);
+        assertFalse(result.contains("db-internal"), "an internal failure's text stays in the server log: " + result);
+        assertTrue(result.contains("reference"), result);
     }
 
     // --- execution model (must stay off the Vert.x event loop) ---

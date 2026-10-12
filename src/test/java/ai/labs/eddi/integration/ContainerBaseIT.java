@@ -52,7 +52,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
      */
     @SuppressWarnings("resource")
     @Container
-    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0.14")
+    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7.0.43")
             .withNetwork(NETWORK)
             .withNetworkAliases("mongodb");
 

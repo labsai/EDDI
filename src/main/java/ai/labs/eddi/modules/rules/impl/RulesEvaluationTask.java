@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.rules.impl;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -163,8 +164,8 @@ public class RulesEvaluationTask implements ILifecycleTask {
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
 
-        Object uriObj = configuration.get(BEHAVIOR_CONFIG_URI);
-        URI uri = URI.create(uriObj.toString());
+        // A missing or malformed uri used to be a NullPointerException here.
+        URI uri = ResourceUris.require(configuration == null ? null : configuration.get(BEHAVIOR_CONFIG_URI), ID);
 
         try {
             var appendActions = appendActionsDefault;

@@ -54,7 +54,21 @@ public final class ModelOutputParser {
 
     /** What happened to a reply. */
     public enum Kind {
-        VALID, INVALID, EMPTY
+        /**
+         * Parsed (possibly after repair) and, if a shape was configured, matches it.
+         */
+        VALID,
+        /** Not parseable JSON; the raw reply is the value. */
+        INVALID,
+        /** Null or blank reply. */
+        EMPTY,
+        /**
+         * Parsed, but violates the configured {@code responseSchema} /
+         * {@code nonBlankFields}. Unlike {@link #INVALID} the value <em>is</em> the
+         * parsed object — templates that worked on a partially valid object keep
+         * working — and {@link JsonOutcome#reason()} says what is wrong.
+         */
+        SCHEMA_MISMATCH
     }
 
     /**
@@ -63,12 +77,14 @@ public final class ModelOutputParser {
      * @param kind
      *            VALID, INVALID or EMPTY
      * @param value
-     *            the parsed Map/List when VALID; the raw reply otherwise (today's
-     *            observable behaviour: the raw string is what gets stored)
+     *            the parsed Map/List when VALID or SCHEMA_MISMATCH; the raw reply
+     *            otherwise (today's observable behaviour: the raw string is what
+     *            gets stored)
      * @param repaired
      *            true when VALID only after fence stripping or extraction
      * @param reason
-     *            EDDI-generated reason when INVALID, else null. Never model output
+     *            EDDI-generated reason when INVALID or SCHEMA_MISMATCH, else null.
+     *            Never model output
      * @param raw
      *            the reply exactly as received
      */
@@ -76,13 +92,14 @@ public final class ModelOutputParser {
 
         /**
          * The label recorded on the step and used as the metric tag:
-         * {@code valid|repaired|invalid|empty}.
+         * {@code valid|repaired|invalid|empty|schema_mismatch}.
          */
         public String label() {
             return switch (kind) {
                 case VALID -> repaired ? "repaired" : "valid";
                 case INVALID -> "invalid";
                 case EMPTY -> "empty";
+                case SCHEMA_MISMATCH -> "schema_mismatch";
             };
         }
     }
@@ -90,9 +107,30 @@ public final class ModelOutputParser {
     private static final Pattern FENCE = Pattern.compile("^```(?:json)?[ \\t]*\\r?\\n?(.*?)\\s*```$", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
 
     private final IJsonSerialization jsonSerialization;
+    private final ResponseShapeValidator shapeValidator = new ResponseShapeValidator();
 
     public ModelOutputParser(IJsonSerialization jsonSerialization) {
         this.jsonSerialization = jsonSerialization;
+    }
+
+    /**
+     * {@link #parse(String, boolean)} followed by shape validation: a reply that
+     * parsed but violates {@code responseSchema} / {@code nonBlankFields} becomes
+     * {@link Kind#SCHEMA_MISMATCH}, carrying the <em>parsed</em> value and the
+     * violation as the reason. Invalid and empty replies are returned as they are
+     * (they have no shape to check), and with neither a schema nor non-blank fields
+     * this is exactly {@code parse}.
+     *
+     * @param taskId
+     *            only labels the one-time warning for an unusable schema
+     */
+    public JsonOutcome parse(String raw, boolean convertToObject, String responseSchema, List<String> nonBlankFields, String taskId) {
+        JsonOutcome outcome = parse(raw, convertToObject);
+        if (!convertToObject || outcome.kind() != Kind.VALID) {
+            return outcome;
+        }
+        return shapeValidator.validate(outcome.value(), responseSchema, nonBlankFields, taskId)
+                .map(reason -> new JsonOutcome(Kind.SCHEMA_MISMATCH, outcome.value(), outcome.repaired(), reason, outcome.raw())).orElse(outcome);
     }
 
     /**
