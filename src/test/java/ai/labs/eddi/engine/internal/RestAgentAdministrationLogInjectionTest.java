@@ -19,7 +19,6 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
-import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -42,10 +41,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -91,6 +91,15 @@ class RestAgentAdministrationLogInjectionTest {
     void setUp() throws Exception {
         runtime = mock(IRuntime.class);
         agentFactory = mock(IAgentFactory.class);
+        // A deployment succeeds unless a test says otherwise: AgentFactory reports the
+        // outcome through the callback (it never throws for a failed deployment).
+        lenient().doAnswer(invocation -> {
+            var callback = invocation.getArgument(3, IAgentFactory.DeploymentProcess.class);
+            if (callback != null) {
+                callback.completed(Deployment.Status.READY);
+            }
+            return null;
+        }).when(agentFactory).deployAgent(any(), anyString(), anyInt(), any());
         scheduleStore = mock(IScheduleStore.class);
         var conversationMemoryStore = mock(IConversationMemoryStore.class);
         var deploymentStore = mock(IDeploymentStore.class);
@@ -140,6 +149,9 @@ class RestAgentAdministrationLogInjectionTest {
 
     private static ScheduleConfiguration poisonedSchedule(boolean enabled) {
         var schedule = new ScheduleConfiguration();
+        if (!enabled) {
+            schedule.setDisabledReason(ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+        }
         schedule.setId("sched-1" + FORGED_RECORD);
         schedule.setName("Nightly report" + FORGED_RECORD);
         schedule.setEnabled(enabled);
@@ -201,8 +213,9 @@ class RestAgentAdministrationLogInjectionTest {
     @DisplayName("a CR/LF Agent id cannot forge a record through the deployment-error ERROR")
     void deploymentFailsWithServiceException() throws Exception {
         runtimeAcceptsCallables();
-        doThrow(new ServiceException("store down")).when(agentFactory)
-                .deployAgent(any(), eq(POISONED_AGENT_ID), eq(1), any());
+        // The status lookup is what throws; deployAgent reports failures via its
+        // callback.
+        when(agentFactory.getAgent(any(), eq(POISONED_AGENT_ID), eq(1))).thenThrow(new ServiceException("store down"));
 
         admin.deployAgent(ENV, POISONED_AGENT_ID, 1, false, false);
         var deployBody = submittedCallable();
@@ -217,22 +230,24 @@ class RestAgentAdministrationLogInjectionTest {
     }
 
     @Test
-    @DisplayName("a CR/LF Agent id cannot forge a record through the deployment-in-progress ERROR")
-    void deploymentIsAlreadyInProgress() throws Exception {
+    @DisplayName("a CR/LF Agent id cannot forge a record through the failed-deployment WARN")
+    void deploymentEndsInError() throws Exception {
         runtimeAcceptsCallables();
-        doThrow(new IllegalAccessException("already deploying")).when(agentFactory)
-                .deployAgent(any(), eq(POISONED_AGENT_ID), eq(1), any());
+        doAnswer(invocation -> {
+            invocation.getArgument(3, IAgentFactory.DeploymentProcess.class).completed(Deployment.Status.ERROR);
+            return null;
+        }).when(agentFactory).deployAgent(any(), eq(POISONED_AGENT_ID), eq(1), any());
 
         admin.deployAgent(ENV, POISONED_AGENT_ID, 1, false, false);
         var deployBody = submittedCallable();
 
         List<String> captured = captureLogsOf(RestAgentAdministration.class,
-                () -> assertThrows(WebApplicationException.class, deployBody::call));
+                () -> assertDoesNotThrow(deployBody::call));
 
         assertFalse(captured.isEmpty(), "nothing was captured, so this proves nothing — the logger was not open");
-        assertTrue(captured.stream().anyMatch(value -> value.contains("Agent deployment is currently in progress!")),
+        assertTrue(captured.stream().anyMatch(value -> value.contains("not announcing READY")),
                 "the line under test did not fire; captured: " + captured);
-        assertNoForgedRecordBoundary(captured, "RestAgentAdministration.throwErrorForbidden's in-progress ERROR");
+        assertNoForgedRecordBoundary(captured, "RestAgentAdministration.deploy's failed-deployment WARN");
     }
 
     @Test

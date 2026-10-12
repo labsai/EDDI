@@ -6,6 +6,7 @@ import {
   CONNECTIONS_FORBIDDEN,
   ConnectionsError,
   authorizeConnection,
+  deleteConnection,
   disconnectConnection,
   emptyConnection,
   getEnrichedConnectionDescriptors,
@@ -472,5 +473,31 @@ describe("disconnectConnection", () => {
       ),
     );
     await expect(disconnectConnection("deleted-long-ago")).resolves.toBeUndefined();
+  });
+});
+
+describe("deleteConnection — soft by default (review 2026-10-02 #7)", () => {
+  function captureDelete() {
+    const urls: URL[] = [];
+    server.use(
+      http.delete("*/connectionstore/connections/:id", ({ request }) => {
+        urls.push(new URL(request.url));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    return urls;
+  }
+
+  it("sends permanent=false unless a hard delete is asked for", async () => {
+    const urls = captureDelete();
+    await deleteConnection("c1", 3);
+    expect(urls[0]!.searchParams.get("permanent")).toBe("false");
+    expect(urls[0]!.searchParams.get("version")).toBe("3");
+  });
+
+  it("sends permanent=true when asked", async () => {
+    const urls = captureDelete();
+    await deleteConnection("c1", 3, true);
+    expect(urls[0]!.searchParams.get("permanent")).toBe("true");
   });
 });

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 404,
+    "message": "models/gemini-9-retired is not found for API version v1beta, or is not supported for generateContent.",
+    "status": "NOT_FOUND"
+  }
+}
