@@ -5,6 +5,10 @@
 package ai.labs.eddi.configs.patch;
 
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,6 +26,7 @@ import jakarta.ws.rs.core.Response;
 
 import java.io.IOException;
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Applies an RFC 6902 JSON Patch to a stored configuration document and hands
@@ -57,8 +62,22 @@ public class ConfigJsonPatcher {
     /** The media type of an RFC 6902 patch document. */
     public static final String JSON_PATCH_MEDIA_TYPE = "application/json-patch+json";
 
-    /** Upper bound on the patch body: a patch is a diff, not a document. */
+    /**
+     * Upper bound on the patch body, in UTF-8 bytes: a patch is a diff, not a
+     * document.
+     */
     static final int MAX_PATCH_BYTES = 256 * 1024;
+
+    /**
+     * Reads a patch body once, only to refuse what two parsers could read
+     * differently. The Manager's approval guard reads the same body with
+     * {@code JSON.parse}, where the LAST of two equal keys wins; if this side ever
+     * resolved a duplicate the other way, the guard would judge one patch and the
+     * server would apply another. A body with a duplicate key at any depth, or with
+     * anything after its first value, is refused instead of interpreted.
+     */
+    private static final ObjectMapper UNAMBIGUOUS = new ObjectMapper(new JsonFactory().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION))
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     /** Upper bound on the number of operations in one patch. */
     static final int MAX_OPERATIONS = 200;
@@ -111,8 +130,16 @@ public class ConfigJsonPatcher {
         if (patchBody == null || patchBody.isBlank()) {
             throw badRequest("A JSON Patch body (an array of operations) is required.");
         }
-        if (patchBody.length() > MAX_PATCH_BYTES) {
+        if (patchBody.getBytes(StandardCharsets.UTF_8).length > MAX_PATCH_BYTES) {
             throw badRequest("The patch is larger than " + MAX_PATCH_BYTES + " bytes. A patch is a diff: send only what changes.");
+        }
+        try {
+            UNAMBIGUOUS.readTree(patchBody);
+        } catch (JsonProcessingException e) {
+            throw badRequest("The patch body is not unambiguous JSON (a duplicate key, text after the patch, or invalid syntax): "
+                    + e.getOriginalMessage());
+        } catch (IOException e) {
+            throw badRequest("The patch body could not be read: " + e.getMessage());
         }
         try (JsonReader reader = Json.createReader(new StringReader(patchBody))) {
             JsonStructure body = reader.read();

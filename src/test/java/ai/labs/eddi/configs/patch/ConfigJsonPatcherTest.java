@@ -148,6 +148,52 @@ class ConfigJsonPatcherTest {
     }
 
     @Test
+    @DisplayName("a duplicate key anywhere in the patch is a 400 — the approval guard and the server must read one patch")
+    void duplicateKeysAreRefused() {
+        // The Manager's guard reads with JSON.parse (last key wins). Whatever Parsson
+        // does with these, the server refuses them rather than choose.
+        for (String patch : new String[]{
+                // in an operation: the guard could judge /x while the server applies
+                // /tasks/0/toolApprovals
+                "[{\"op\":\"replace\",\"path\":\"/tasks/0/x\",\"path\":\"/tasks/0/parameters/modelName\",\"value\":\"m\"}]",
+                "[{\"op\":\"test\",\"op\":\"replace\",\"path\":\"/tasks/0/parameters/modelName\",\"value\":\"m\"}]",
+                // inside a value
+                "[{\"op\":\"add\",\"path\":\"/tasks/0/parameters/x\",\"value\":{\"a\":1,\"a\":2}}]",
+                "[{\"op\":\"add\",\"path\":\"/tasks/0/parameters/x\",\"value\":[{\"a\":{\"b\":1,\"b\":2}}]}]",
+                // a repeated value key
+                "[{\"op\":\"add\",\"path\":\"/tasks/0/parameters/x\",\"value\":1,\"value\":2}]"}) {
+            var e = refused(patch);
+            assertEquals(400, e.getResponse().getStatus(), patch);
+            assertTrue(e.getResponse().getEntity().toString().contains("unambiguous"), e.getResponse().getEntity().toString());
+        }
+    }
+
+    @Test
+    @DisplayName("documents why the check exists: Parsson itself accepts a duplicate key silently, the last one winning")
+    void parssonDefaultIsSilent() {
+        try (var reader = jakarta.json.Json.createReader(new java.io.StringReader("{\"a\":1,\"a\":2}"))) {
+            assertEquals(2, reader.readObject().getInt("a"));
+        }
+    }
+
+    @Test
+    @DisplayName("text after the patch is a 400 rather than ignored")
+    void trailingTextIsRefused() {
+        assertEquals(400, refused("[{\"op\":\"remove\",\"path\":\"/tasks/0/parameters/temperature\"}] [{\"op\":\"remove\",\"path\":\"/tasks\"}]")
+                .getResponse().getStatus());
+    }
+
+    @Test
+    @DisplayName("the size limit counts UTF-8 bytes, not characters")
+    void limitIsInBytes() {
+        // 'é' is two bytes: half the limit in characters is the whole limit in bytes.
+        String value = "é".repeat(ConfigJsonPatcher.MAX_PATCH_BYTES / 2 + 1);
+        String patch = "[{\"op\":\"add\",\"path\":\"/tasks/0/parameters/x\",\"value\":\"" + value + "\"}]";
+        assertTrue(patch.length() < ConfigJsonPatcher.MAX_PATCH_BYTES);
+        assertEquals(400, refused(patch).getResponse().getStatus());
+    }
+
+    @Test
     @DisplayName("the stored document is not mutated by a patch")
     void storedDocumentUntouched() {
         apply("[{\"op\":\"replace\",\"path\":\"/tasks/0/parameters/modelName\",\"value\":\"claude-b\"}]");
