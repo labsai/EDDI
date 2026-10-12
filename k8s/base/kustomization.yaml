@@ -37,12 +37,12 @@ commonAnnotations:
 #   cosign verify \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
 #     --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
-#     labsai/eddi:6.4.0
-#   crane digest labsai/eddi:6.4.0   # → sha256:...
+#     labsai/eddi:6.5.0
+#   crane digest labsai/eddi:6.5.0   # → sha256:...
 # then add it to the entry below as:  digest: sha256:<digest>
 images:
   - name: labsai/eddi
-    newTag: "6.4.0"
+    newTag: "6.5.0"
 
 # app.kubernetes.io/version on every base resource — the Namespace, ConfigMap
 # and Service as well as the Deployment and its pod template. That is on
@@ -54,6 +54,6 @@ images:
 # of the release being rolled out.
 labels:
   - pairs:
-      app.kubernetes.io/version: "6.4.0"
+      app.kubernetes.io/version: "6.5.0"
     includeSelectors: false
     includeTemplates: true

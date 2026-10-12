@@ -241,6 +241,10 @@ _Response Code_
 
 `200`
 
+_Agent not ready_
+
+If no version of the agent is deployed and ready yet (startup, rolling deploy), the managed endpoints that would start a conversation answer `503 Service Unavailable` with `Retry-After: 5`. Retry after that many seconds; no conversation was created.
+
 ### MCP Integration
 
 The same managed conversation functionality is available via the MCP `chat_managed` tool:
