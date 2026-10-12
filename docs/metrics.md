@@ -731,6 +731,8 @@ system_cpu_usage
 http_server_requests_seconds{method,uri,status}
 ```
 
+`uri` is the endpoint's template (`/agentstore/agents/{id}`), so it has one value per endpoint, not per resource. Static files would otherwise get one value each, which is ~800 for the Manager's hashed chunks alone. Instead they fold into one value per directory: `/assets/{file}`, `/fonts/{file}`, `/scripts/{file}` and `/img/{file}`. Unknown paths share `NOT_FOUND`. Micrometer registers at most `quarkus.micrometer.binder.http-server.max-uri-tags` (500) values. A URI first seen after that has no request metrics, and the log says "Reached the maximum number … of URI tags" once.
+
 ### Database Connection Pool (auto-exposed)
 
 **MongoDB** (when `eddi.datastore.type=mongodb`):
