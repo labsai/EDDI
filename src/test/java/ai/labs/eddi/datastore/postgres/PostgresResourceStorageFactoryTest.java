@@ -14,6 +14,8 @@ import org.mockito.ArgumentCaptor;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -81,6 +83,10 @@ class PostgresResourceStorageFactoryTest {
 
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
+        // The catalogue knows no earlier release's index: a fresh database.
+        PreparedStatement lookup = mock(PreparedStatement.class);
+        when(connection.prepareStatement(anyString())).thenReturn(lookup);
+        when(lookup.executeQuery()).thenReturn(mock(ResultSet.class));
 
         PostgresResourceStorageFactory factory = new PostgresResourceStorageFactory(dataSourceInstance, jsonSerialization);
         factory.create("descriptors", documentBuilder, String.class, "lastModifiedOn");

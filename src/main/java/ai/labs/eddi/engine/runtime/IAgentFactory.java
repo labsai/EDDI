@@ -46,8 +46,14 @@ public interface IAgentFactory {
 
     IAgent getAgent(Deployment.Environment environment, String agentId, Integer version) throws ServiceException;
 
-    void deployAgent(Deployment.Environment environment, String agentId, Integer version, DeploymentProcess deploymentProcess)
-            throws ServiceException, IllegalAccessException;
+    /**
+     * Deploys a version on this node. Never throws for a deployment that fails: a
+     * store or workflow error, or a refused vault grant, marks the version
+     * {@code ERROR} and reports it to {@code deploymentProcess} — which is
+     * therefore the only reliable way to learn the outcome. Callers must not treat
+     * a normal return as success.
+     */
+    void deployAgent(Deployment.Environment environment, String agentId, Integer version, DeploymentProcess deploymentProcess);
 
     /**
      * Removes a deployed agent from this node's runtime registry.
@@ -61,7 +67,7 @@ public interface IAgentFactory {
      *            {@code AgentId(id, null)} that equalled no deployed key, so the
      *            removal silently did nothing while the caller logged success.
      */
-    void undeployAgent(Deployment.Environment environment, String agentId, Integer version) throws ServiceException, IllegalAccessException;
+    void undeployAgent(Deployment.Environment environment, String agentId, Integer version);
 
     interface DeploymentProcess {
         void completed(Deployment.Status status);

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -46,13 +47,16 @@ class RestOrphanAdminBranchTest {
     @Mock
     private IDeploymentStore deploymentStore;
 
+    @Mock
+    private IParserStore parserStore;
+
     private RestOrphanAdmin restOrphanAdmin;
 
     @BeforeEach
     void setUp() {
         openMocks(this);
         restOrphanAdmin = new RestOrphanAdmin(agentStore, workflowStore, documentDescriptorStore, resourceClientLibrary, restWorkflowStore,
-                deploymentStore);
+                deploymentStore, parserStore);
     }
 
     // =========================================================

@@ -332,7 +332,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   // wiped by that read or be read half-done — so every entry point below waits.
   const conversationBusy = stepMovePending || rerunConversation.isPending;
   const lastMessage = messages[messages.length - 1];
-  const showRerun = lastMessage?.role === "agent" && (lastMessage.content ?? "").includes("⚠️ Error");
+  const showRerun = lastMessage?.role === "agent" && lastMessage.isError === true;
 
   const handleRerun = useCallback(() => {
     rerunConversation.mutate(undefined, {
@@ -482,7 +482,18 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 <MessageSquarePlus className="h-4 w-4" />
               </button>
               <button
-                onClick={() => endConversation.mutate()}
+                onClick={() =>
+                  // The id on screen at click time, not whatever is current
+                  // when the request returns.
+                  endConversation.mutate(conversationId, {
+                    onError: (err) =>
+                      toast.error(
+                        t("chat.endConversationFailed", "Could not end the conversation: {{reason}}", {
+                          reason: getErrorMessage(err),
+                        }),
+                      ),
+                  })
+                }
                 className="flex h-9 w-9 items-center justify-center rounded-lg text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                 title={t("chat.endConversation")}
                 data-testid="end-conversation"
@@ -496,7 +507,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
         {/* Conversation context header */}
         {conversationId && contextOpen && (
           <div className="flex items-center gap-4 border-b border-border/50 bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
-            <div className="flex items-center gap-1" title="Conversation ID">
+            <div className="flex items-center gap-1" title={t("chat.context.conversationId", "Conversation ID")}>
               <Hash className="h-3 w-3" />
               <button
                 onClick={() => {
@@ -509,11 +520,11 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 {conversationId.slice(0, 12)}…
               </button>
             </div>
-            <div className="flex items-center gap-1" title="Steps">
+            <div className="flex items-center gap-1" title={t("chat.context.stepCount", "turns")}>
               <ListOrdered className="h-3 w-3" />
               <span>{messages.filter((m) => m.role === "user").length} {t("chat.context.stepCount", "turns")}</span>
             </div>
-            <div className="flex items-center gap-1" title="Started">
+            <div className="flex items-center gap-1" title={t("chat.context.startTime", "Started")}>
               <Clock className="h-3 w-3" />
               <span>
                 {messages[0]

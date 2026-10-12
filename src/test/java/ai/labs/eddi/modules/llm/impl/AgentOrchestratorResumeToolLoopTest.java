@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -315,6 +316,31 @@ class AgentOrchestratorResumeToolLoopTest {
 
         assertEquals(approver, callerDuringApprovedCall.get(), "the call the approver saw runs with their credentials");
         assertNull(callerDuringContinuation.get(), "nothing after it inherits them");
+    }
+
+    @Test
+    @DisplayName("an approved call executes inside ApprovedCallScope, so the request it finally sends is held to the self-ungating rule")
+    void approvedCallRunsInsideApprovedCallScope() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), anyString())).thenReturn(true);
+        var scopedDuringApprovedCall = new AtomicReference<Boolean>();
+        var scopedDuringContinuation = new AtomicReference<Boolean>();
+        when(calculatorTool.calculate("6*7")).thenAnswer(inv -> {
+            scopedDuringApprovedCall.set(ApprovedCallScope.isActive());
+            return "42";
+        });
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenAnswer(inv -> {
+            scopedDuringContinuation.set(ApprovedCallScope.isActive());
+            return text("42");
+        });
+
+        orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        assertEquals(Boolean.TRUE, scopedDuringApprovedCall.get(), "the approved execution is scoped");
+        assertEquals(Boolean.FALSE, scopedDuringContinuation.get(), "the continuation is not");
     }
 
     @Test

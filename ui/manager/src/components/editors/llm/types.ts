@@ -126,6 +126,8 @@ export interface LlmTask {
     backoffDelayMs?: number;
     backoffMultiplier?: number;
     maxBackoffDelayMs?: number;
+    honorRetryAfter?: boolean;
+    maxRetryAfterMs?: number;
   };
   maxBudgetPerConversation?: number;
   enableCostTracking?: boolean;
