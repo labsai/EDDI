@@ -12,6 +12,7 @@ import {
   readOperatorStatus,
   deactivateOperator,
   resetOperator,
+  retireOperatorAgent,
   provisionOperator,
   resolveAgentVersion,
   fetchOpenApiSpec,
@@ -27,7 +28,8 @@ import {
   type OperatorConfig,
   type FetchedSpec,
 } from "@/lib/api/operator";
-import { undeployAgent, deleteAgent, getAgentCurrentVersion } from "@/lib/api/agents";
+import { getAgentCurrentVersion } from "@/lib/api/agents";
+import { ApiClientError, getErrorMessage } from "@/lib/api-client";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
 import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
 import {
@@ -365,8 +367,12 @@ export function useActivateOperator() {
         try {
           await removeSupersededAgent(config);
         } catch (removalError) {
+          // A 409's body is just the agent's current URI, which read as the reason
+          // itself ("could not be removed (eddi://…?version=2)"). Say what it means.
           const detail =
-            removalError instanceof Error ? removalError.message : String(removalError);
+            removalError instanceof ApiClientError && removalError.status === 409
+              ? "it kept changing to a newer version while being removed — HTTP 409"
+              : getErrorMessage(removalError);
           supersededWarning =
             `The new operator agent (${result.agentId}) is live, but the one it replaced (${config.agentId}) ` +
             `could not be removed (${detail}). It may still be deployed and answering. ` +
@@ -559,24 +565,11 @@ async function agentPresence(agentId: string): Promise<"present" | "absent" | "u
  */
 async function removeSupersededAgent(config: OperatorConfig): Promise<void> {
   if (!config.agentId || config.version == null) return;
-  try {
-    // `endAllActiveConversations`, for the same reason deactivateOperator and
-    // resetOperator pass it: the backend refuses (409) to undeploy an agent that
-    // still has active conversations, and the superseded operator's active
-    // conversation is almost always the admin's own operator chat — on the very
-    // screen the Reconfigure button lives on. Without the flag, having USED the
-    // operator was enough to make its replacement leave it deployed.
-    await undeployAgent(config.environment, config.agentId, config.version, {
-      endAllActiveConversations: true,
-    });
-  } catch {
-    // Already undeployed, or the environment is gone — the delete below is what
-    // actually retires it, and its failure is NOT swallowed.
-  }
-  await deleteAgent(config.agentId, config.version, {
-    cascade: true,
-    permanent: true,
-  });
+  // At the version the agent lives at NOW, not the recorded one — an in-place
+  // edit after activation moves it on, and the delete then 409s. Ends active
+  // conversations too: the superseded operator's is almost always the admin's
+  // own chat, on the very screen the Reconfigure button lives on.
+  await retireOperatorAgent(config.environment, config.agentId, config.version);
 }
 
 /** Re-enable a configured-but-disabled operator by redeploying its agent. */
