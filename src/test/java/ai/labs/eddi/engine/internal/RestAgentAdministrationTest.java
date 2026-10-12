@@ -13,6 +13,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
@@ -26,6 +28,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -40,6 +43,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.anyInt;
 
 /**
  * Unit tests for {@link RestAgentAdministration}.
@@ -221,8 +225,8 @@ class RestAgentAdministrationTest {
             when(conversationMemoryStore.getActiveConversationCount("agent-1", 1))
                     .thenReturn(3L)
                     .thenReturn(0L); // After ending
-            when(restConversationStore.getActiveConversations("agent-1", 1))
-                    .thenReturn(List.of());
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), isNull(), anyInt()))
+                    .thenReturn(List.of(new ConversationActivitySummary("c1c1c1c1c1c1c1c1c1c1c1c1", ConversationState.READY, "agent-1", 1, null)));
             when(runtime.submitCallable(any(Callable.class), any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
 
@@ -230,7 +234,12 @@ class RestAgentAdministrationTest {
                     Deployment.Environment.test, "agent-1", 1, true, false);
 
             assertEquals(202, response.getStatus());
-            verify(restConversationStore).endActiveConversations(any(), eq(IConversationService.END_REASON_AGENT_VERSION_RETIRED));
+            var ended = ArgumentCaptor.forClass(List.class);
+            verify(restConversationStore).endActiveConversations(ended.capture(), eq(IConversationService.END_REASON_AGENT_VERSION_RETIRED));
+            assertEquals(1, ended.getValue().size());
+            // The /active listing reads a descriptor per conversation for a field undeploy
+            // never uses; undeploy must list from the store projection instead.
+            verify(restConversationStore, never()).getActiveConversations(any(), any());
         }
 
         @Test

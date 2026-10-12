@@ -22,9 +22,10 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -52,7 +53,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
-import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -93,6 +93,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     private final int maximumLifeTimeOfIdleConversationsInDays;
     private Instant lastDeploymentCheck = null;
     private static final Logger LOGGER = Logger.getLogger(AgentDeploymentManagement.class);
+
+    /**
+     * How many open conversations the idle sweep reads per batch. Each is a handful
+     * of scalar fields, so a batch is small whatever the conversations weigh.
+     */
+    static final int IDLE_SWEEP_BATCH_SIZE = 200;
     private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
     /** Whether the "sweep parked" warning has been logged; see checkDeployments. */
     private final AtomicBoolean sweepParkedLogged = new AtomicBoolean();
@@ -806,10 +812,37 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             return;
         }
 
-        var conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
-
         int sparedPausedConversations = 0;
-        for (var conversationMemory : conversationMemorySnapshots) {
+        String afterConversationId = null;
+        while (true) {
+            // A projected batch — id, state, agent, version, last-interaction — never the
+            // conversation itself. This used to load every open conversation in full
+            // (loadActiveConversationMemorySnapshot): a production 5.x deployment with
+            // tens of thousands of open conversations of several hundred KB each ran out
+            // of heap shortly after boot, before it had ended anything.
+            var batch = conversationMemoryStore.loadOpenConversationActivity(agentId, agentVersion, afterConversationId, IDLE_SWEEP_BATCH_SIZE);
+            if (batch.isEmpty()) {
+                break;
+            }
+            afterConversationId = batch.getLast().conversationId();
+            sparedPausedConversations += endIdleConversationsOf(batch, agentId, agentVersion);
+        }
+
+        if (sparedPausedConversations > 0) {
+            LOGGER.info(format(
+                    "Spared %d paused (AWAITING_HUMAN) conversation(s) of Agent (id: %s, version: %d) from the idle sweep — "
+                            + "their pending approvals are preserved",
+                    sparedPausedConversations, agentId, agentVersion));
+        }
+    }
+
+    /**
+     * Ends the idle conversations of one batch; returns how many paused ones it
+     * spared.
+     */
+    private int endIdleConversationsOf(List<ConversationActivitySummary> batch, String agentId, Integer agentVersion) {
+        int sparedPausedConversations = 0;
+        for (var conversation : batch) {
             // A paused (AWAITING_HUMAN) conversation is a live pending approval:
             // ending it here with a raw setConversationState(ENDED) would leave its
             // armed timeout schedule and HITL bookmark behind, skip the EU AI Act
@@ -817,7 +850,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             // deliberately excludes so it survives undeploy. Skip it — reaping
             // paused conversations needs an explicit, audited HITL-aware policy
             // (see the HITL pending-approval retention sweep).
-            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+            if (conversation.conversationState() == ConversationState.AWAITING_HUMAN) {
                 sparedPausedConversations++;
                 continue;
             }
@@ -831,7 +864,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             // mis-signal was masked by the arithmetic bug in isOlderThanDays below —
             // fixing the arithmetic alone would have started ENDing live conversations,
             // which is why both are corrected together.
-            var lastInteraction = lastInteractionOf(conversationMemory);
+            var lastInteraction = conversation.lastInteraction();
             if (lastInteraction == null) {
                 // No step ever carried a timestamp. Fall back to the agent descriptor,
                 // and skip entirely when even that is unavailable: "cannot prove it is
@@ -844,7 +877,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 // how it decides the agent is gone). One deleted agent therefore
                 // aborted the whole sweep, including conversations that carry a
                 // perfectly good timestamp of their own and never needed the descriptor.
-                Instant descriptorLastModified = descriptorLastModifiedOf(conversationMemory);
+                Instant descriptorLastModified = descriptorLastModifiedOf(agentId, agentVersion);
                 if (descriptorLastModified == null) {
                     continue;
                 }
@@ -861,17 +894,10 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             var isOlderThanMaximumAmountOfDays = isOlderThanDays(lastInteractionDate, maximumLifeTimeOfIdleConversationsInDays, today);
 
             if (isOlderThanMaximumAmountOfDays) {
-                String conversationId = conversationMemory.getId();
-                // Conditional on the state this snapshot was loaded with, NOT an
-                // unconditional write. The snapshots were read at the top of the sweep,
-                // so between that read and this write a user can send a turn, or the
-                // conversation can pause at an HITL gate — and an unconditional ENDED
-                // would destroy a live turn or a pending approval. This was a latent
-                // check-then-act race while the arithmetic bug kept the sweep mostly
-                // inert; correcting the arithmetic is exactly what makes it fire.
-                // Re-read immediately before the write. The snapshots were loaded at
-                // the top of the sweep, so without this the window in which a user can
-                // send a turn spans the entire scan.
+                String conversationId = conversation.conversationId();
+                // Re-read immediately before the write. The batch was read at the top of
+                // the pass, so without this the window in which a user can send a turn
+                // spans the whole scan.
                 //
                 // The state CAS alone is not enough: a turn that starts AND completes
                 // inside the window returns the state to the value we observed, so the
@@ -889,44 +915,66 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                             conversationId));
                     continue;
                 }
-                ConversationState observedState = conversationMemory.getConversationState();
-                if (!conversationMemoryStore.compareAndSetState(conversationId, observedState, ConversationState.ENDED)) {
+                // Conditional on the state the batch was read with, NOT an unconditional
+                // write: between that read and this write the conversation can pause at
+                // an HITL gate, and an unconditional ENDED would destroy the approval.
+                ConversationState observedState = conversation.conversationState();
+                if (observedState == null || !compareAndSetStateToEnded(conversationId, observedState)) {
                     LOGGER.info(format("Skipped ending conversation (id: %s): its state changed from %s since the sweep read it",
                             conversationId, observedState));
                     continue;
                 }
+                recordIdleEndReason(conversationId);
                 var message = format(
                         "Ended conversation (id: %s) with Agent (name: %s, id: %s, version: %d) "
                                 + "because it has been idle for %d days, longer than the maximum idle time of %d days",
-                        conversationId, descriptorNameOf(conversationMemory), agentId, agentVersion,
+                        conversationId, descriptorNameOf(agentId, agentVersion), agentId, agentVersion,
                         DAYS.between(lastInteractionDate, today), maximumLifeTimeOfIdleConversationsInDays);
 
                 LOGGER.info(message);
             }
         }
+        return sparedPausedConversations;
+    }
 
-        if (sparedPausedConversations > 0) {
-            LOGGER.info(format(
-                    "Spared %d paused (AWAITING_HUMAN) conversation(s) of Agent (id: %s, version: %d) from the idle sweep — "
-                            + "their pending approvals are preserved",
-                    sparedPausedConversations, agentId, agentVersion));
+    private boolean compareAndSetStateToEnded(String conversationId, ConversationState observedState) {
+        try {
+            return conversationMemoryStore.compareAndSetState(conversationId, observedState, ConversationState.ENDED);
+        } catch (ResourceStoreException e) {
+            LOGGER.warn(format("Could not end conversation (id: %s): %s", conversationId, e.getMessage()));
+            return false;
         }
     }
 
     /**
-     * Re-reads the conversation and re-checks its age against the same limit and
-     * reference date the sweep used.
+     * Records why the sweep ended a conversation, so a client can tell the user.
+     * Best-effort, as in {@code ConversationService.endConversation}: failing to
+     * record the reason never un-ends the conversation.
+     */
+    private void recordIdleEndReason(String conversationId) {
+        try {
+            conversationMemoryStore.setConversationEndReason(conversationId, IConversationService.END_REASON_IDLE);
+        } catch (RuntimeException e) {
+            LOGGER.warn(format("Conversation (id: %s) was ended, but its end reason could not be recorded: %s", conversationId,
+                    e.getMessage()));
+        }
+    }
+
+    /**
+     * Re-reads the conversation's activity — a projection, never the conversation
+     * in full — and re-checks its age against the same limit and reference date the
+     * sweep used.
      * <p>
      * A store failure answers {@code false}: unable to confirm it is still idle is
      * not permission to end it.
      */
     private boolean stillIdle(String conversationId, int maxIdleDays, LocalDate today) {
         try {
-            var fresh = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            var fresh = conversationMemoryStore.loadConversationActivity(conversationId);
             if (fresh == null) {
                 return false;
             }
-            Instant freshLastInteraction = lastInteractionOf(fresh);
+            Instant freshLastInteraction = fresh.lastInteraction();
             if (freshLastInteraction == null) {
                 // No conversation-side signal on the re-read; the original decision
                 // already used the descriptor fallback, so nothing new to check.
@@ -946,9 +994,9 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * best-effort display name, and a deleted agent — which this sweep is
      * specifically reached for — makes {@code readDescriptor} throw.
      */
-    private Instant descriptorLastModifiedOf(ConversationMemorySnapshot conversationMemory) {
+    private Instant descriptorLastModifiedOf(String agentId, Integer agentVersion) {
         try {
-            var descriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
+            var descriptor = documentDescriptorStore.readDescriptor(agentId, agentVersion);
             return descriptor != null && descriptor.getLastModifiedOn() != null ? descriptor.getLastModifiedOn().toInstant() : null;
         } catch (Exception e) {
             return null;
@@ -956,45 +1004,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     }
 
     /** The agent's display name for the log line, or its id when unavailable. */
-    private String descriptorNameOf(ConversationMemorySnapshot conversationMemory) {
+    private String descriptorNameOf(String agentId, Integer agentVersion) {
         try {
-            var descriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
-            return descriptor != null && descriptor.getName() != null ? descriptor.getName() : conversationMemory.getAgentId();
+            var descriptor = documentDescriptorStore.readDescriptor(agentId, agentVersion);
+            return descriptor != null && descriptor.getName() != null ? descriptor.getName() : agentId;
         } catch (Exception e) {
-            return conversationMemory.getAgentId();
+            return agentId;
         }
-    }
-
-    /**
-     * The newest timestamp any data item in the conversation carries, or
-     * {@code null} when nothing is timestamped. This is the conversation's own
-     * last-interaction time: every turn writes step data through
-     * {@code ConversationStep}, and {@code Data} stamps each entry at construction.
-     */
-    static Instant lastInteractionOf(ConversationMemorySnapshot snapshot) {
-        if (snapshot == null || snapshot.getConversationSteps() == null) {
-            return null;
-        }
-
-        Date newest = null;
-        for (var step : snapshot.getConversationSteps()) {
-            if (step == null || step.getWorkflows() == null) {
-                continue;
-            }
-            for (var workflow : step.getWorkflows()) {
-                if (workflow == null || workflow.getLifecycleTasks() == null) {
-                    continue;
-                }
-                for (var task : workflow.getLifecycleTasks()) {
-                    Date timestamp = task != null ? task.getTimestamp() : null;
-                    if (timestamp != null && (newest == null || timestamp.after(newest))) {
-                        newest = timestamp;
-                    }
-                }
-            }
-        }
-
-        return newest != null ? newest.toInstant() : null;
     }
 
     /**
