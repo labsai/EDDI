@@ -222,6 +222,37 @@ export class OperatorGrantPendingError extends Error {
 }
 
 /**
+ * Activation failed before it touched any agent — the endpoint check, the
+ * address resolution, or anything else ahead of the reuse decision. Carries the
+ * original message (and the original error as `cause`), so it reads the same.
+ *
+ * It exists so the page can tell this apart from a failure AFTER the reuse
+ * decision: there, a kept agent was either reused (and is cleaned up by the
+ * failure path that follows) or removed. Here, a kept agent is still exactly
+ * where it was, and forgetting it would make the next attempt create a second
+ * one — the leak the kept agent exists to prevent.
+ */
+export class OperatorActivationNotStartedError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "OperatorActivationNotStartedError";
+  }
+}
+
+/**
+ * Which kept agent the page should remember after a failed activation.
+ *
+ * A refused grant names the agent it kept; a failure before the reuse decision
+ * leaves the previous one untouched; any other failure removed what it had, so
+ * there is nothing left to reuse.
+ */
+export function keptAgentAfterFailure(err: unknown, previous: KeptOperatorAgent | null): KeptOperatorAgent | null {
+  if (err instanceof OperatorGrantPendingError) return err.kept;
+  if (err instanceof OperatorActivationNotStartedError) return previous;
+  return null;
+}
+
+/**
  * Everything that went into provisioning, as one string — the operator's own
  * agent name, the prompt, the model, the key, the addresses and the scope. Two
  * activations with the same fingerprint would build the same agent.
@@ -273,48 +304,59 @@ export function useActivateOperator() {
     mutationFn: async (params: ActivateParams) => {
       const { agentName, config, apiKey, baseUrl, onStage } = params;
 
-      // Fail before creating anything if the deployment's spec doesn't actually
-      // expose the endpoints we intend to bind — otherwise the operator would
-      // come up "READY" with silently missing tools.
-      onStage?.("validating");
-      const spec = await fetchOpenApiSpec();
-      const missing = findMissingEndpoints(spec, endpointsForScope(config.scope));
-      if (missing.length > 0) {
-        throw new Error(
-          `This EDDI deployment does not expose ${missing.length} endpoint(s) the operator needs: ${missing.join(", ")}`,
-        );
+      // Everything up to the reuse decision touches no agent. A failure here is
+      // wrapped so the page keeps any agent a previous attempt kept — see
+      // OperatorActivationNotStartedError.
+      let spec: Awaited<ReturnType<typeof fetchOpenApiSpec>>;
+      let effectiveConfig: OperatorConfig;
+      let previous: Awaited<ReturnType<typeof readOperatorConfig>> | null;
+      let fingerprint: string;
+      try {
+        // Fail before creating anything if the deployment's spec doesn't actually
+        // expose the endpoints we intend to bind — otherwise the operator would
+        // come up "READY" with silently missing tools.
+        onStage?.("validating");
+        spec = await fetchOpenApiSpec();
+        const missing = findMissingEndpoints(spec, endpointsForScope(config.scope));
+        if (missing.length > 0) {
+          throw new Error(
+            `This EDDI deployment does not expose ${missing.length} endpoint(s) the operator needs: ${missing.join(", ")}`,
+          );
+        }
+
+        // The address the generated tools will target. Resolved HERE, before
+        // anything is created, because it is the single field that decides whether
+        // the operator can function at all — and because the resolved value is then
+        // persisted on the config, so the operator screen can show it and a later
+        // reconfigure reuses the admin's choice instead of re-deriving it.
+        const apiBaseUrl = await resolveOperatorApiBaseUrl(config);
+        effectiveConfig = {
+          ...config,
+          apiBaseUrl,
+          // Stamped on EVERY activation path — the form, Reconfigure, and the
+          // one-click upgrade — so what is recorded is always what was actually
+          // provisioned. These four fields are what a later upgrade reads.
+          provisionedRevision: OPERATOR_REVISION,
+          provisionedEndpoints: [...endpointsForScope(config.scope)],
+          promptBodyIsDefault: config.promptBody === defaultOperatorPromptBody(config.scope),
+          llmBaseUrl: baseUrl?.trim() || null,
+        };
+
+        // The stored config this activation replaces, captured BEFORE anything is
+        // written, so a replacement that fails verification can hand the deployment
+        // back to it. Best-effort: without it, a failed reconfigure still rolls the
+        // new agent back, it just cannot re-point the config at the old one.
+        previous = config.agentId ? await readOperatorConfig().catch(() => null) : null;
+
+        // A retry after a refused grant reuses the agent the failed attempt
+        // kept, instead of creating another one that is just as ungranted — but
+        // only when nothing that went into provisioning it has changed since, and
+        // only while it still exists. A kept agent built from different settings
+        // is removed first, so a retry never leaves two behind.
+        fingerprint = provisioningFingerprint(params, effectiveConfig);
+      } catch (notStarted) {
+        throw new OperatorActivationNotStartedError(notStarted);
       }
-
-      // The address the generated tools will target. Resolved HERE, before
-      // anything is created, because it is the single field that decides whether
-      // the operator can function at all — and because the resolved value is then
-      // persisted on the config, so the operator screen can show it and a later
-      // reconfigure reuses the admin's choice instead of re-deriving it.
-      const apiBaseUrl = await resolveOperatorApiBaseUrl(config);
-      const effectiveConfig: OperatorConfig = {
-        ...config,
-        apiBaseUrl,
-        // Stamped on EVERY activation path — the form, Reconfigure, and the
-        // one-click upgrade — so what is recorded is always what was actually
-        // provisioned. These four fields are what a later upgrade reads.
-        provisionedRevision: OPERATOR_REVISION,
-        provisionedEndpoints: [...endpointsForScope(config.scope)],
-        promptBodyIsDefault: config.promptBody === defaultOperatorPromptBody(config.scope),
-        llmBaseUrl: baseUrl?.trim() || null,
-      };
-
-      // The stored config this activation replaces, captured BEFORE anything is
-      // written, so a replacement that fails verification can hand the deployment
-      // back to it. Best-effort: without it, a failed reconfigure still rolls the
-      // new agent back, it just cannot re-point the config at the old one.
-      const previous = config.agentId ? await readOperatorConfig().catch(() => null) : null;
-
-      // A retry after a refused grant reuses the agent the failed attempt
-      // kept, instead of creating another one that is just as ungranted — but
-      // only when nothing that went into provisioning it has changed since, and
-      // only while it still exists. A kept agent built from different settings
-      // is removed first, so a retry never leaves two behind.
-      const fingerprint = provisioningFingerprint(params, effectiveConfig);
       const kept = params.reuseAgent ?? null;
       let agentId: string;
       let version: number;

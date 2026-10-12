@@ -40,7 +40,7 @@ A vault secret's grant (`allowedAgents`) lists agent ids, and an id exists only 
   - a restricted model key is granted inside activation, on the same agent, and a retry reuses it.
   - operator agents the Manager did not register are listed with Adopt, Fix and Remove. The marker is `[eddi-platform-operator]` on the descriptor.
   - the preflight endpoint is on the operator's read allow-list. The append-grant endpoint is deliberately not, because no LLM may widen a grant. The prompt explains `failure`. The operator revision moved from 2 to 3.
-- The 6.4.0 OpenAPI snapshot predates the two new endpoints, so they are exempted in `openapi-contract.test.ts` until the next `npm run openapi:refresh`.
+- `ui/manager/src/test/mocks/openapi-operations.json` is refreshed from this branch's backend (6.6.0, the two new operations).
 
 ### Still open
 

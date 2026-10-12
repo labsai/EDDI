@@ -1,6 +1,6 @@
 {
   "//": "Generated. Do not edit by hand — run: node scripts/refresh-openapi-operations.mjs",
-  "eddiVersion": "6.4.0",
+  "eddiVersion": "6.6.0",
   "operations": [
     "DELETE /AgentTriggerStore/agenttriggers/{intent}",
     "DELETE /admin/gdpr/{userId}",
@@ -67,6 +67,7 @@
     "GET /administration/quotas",
     "GET /administration/quotas/{tenantId}",
     "GET /administration/quotas/{tenantId}/usage",
+    "GET /administration/{environment}/deploy/{agentId}/preflight",
     "GET /administration/{environment}/deploymentimpact/{agentId}",
     "GET /administration/{environment}/deploymentstatus",
     "GET /administration/{environment}/deploymentstatus/{agentId}",
@@ -334,6 +335,7 @@
     "POST /secretstore/secrets/admin/rotate-kek",
     "POST /secretstore/secrets/{tenantId}/reset",
     "POST /secretstore/secrets/{tenantId}/rotate-dek",
+    "POST /secretstore/secrets/{tenantId}/{keyName}/grant/agents/{agentId}",
     "POST /snippetstore/snippets",
     "POST /snippetstore/snippets/{id}/currentversion",
     "POST /userconversationstore/userconversations/{intent}/{userId}",
