@@ -308,6 +308,12 @@ export interface ProvisionOperatorParams {
  * The descriptor is stamped with `OPERATOR_DESCRIPTOR_MARKER`, so an operator
  * the config does not point at (a kept agent, a deleted variable) can still be
  * found and managed from the operator screen.
+ *
+ * `apiBaseUrl` is `config.apiBaseUrl`, which the caller must already have
+ * resolved with {@link resolveOperatorApiBaseUrl}: the address EDDI can reach
+ * ITSELF at, so the generated tools call the same instance. It is not the
+ * Manager's browser origin (wrong behind any proxy), and provisioning throws
+ * rather than guess when it is missing.
  */
 export async function provisionOperator(
   params: ProvisionOperatorParams,

@@ -115,6 +115,9 @@ export const EXTENSION_TO_SLUG: Record<string, string> = {
   "eddi://ai.labs.mcpcalls": "mcpcalls",
   "eddi://ai.labs.dictionary": "dictionary",
   "eddi://ai.labs.rag": "rag",
+  // The store's real extension is the singular `ai.labs.snippet`
+  // (IRestPromptSnippetStore); the plural is kept for documents written with it.
+  "eddi://ai.labs.snippet": "snippets",
   "eddi://ai.labs.snippets": "snippets",
   "eddi://ai.labs.parser": "parser",
 };

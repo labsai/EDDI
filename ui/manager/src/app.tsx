@@ -4,8 +4,10 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { PageLoader } from "@/components/layout/page-loader";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { CommandPalette } from "@/components/shared/command-palette";
+import { NavigationGuardDialog } from "@/components/shared/navigation-guard-dialog";
 import { WorkforceLayout } from "@/components/workforce/workforce-layout";
 import { LandingPage } from "@/pages/landing-page";
+import { NotFoundPage } from "@/pages/not-found";
 import { lazyPage } from "@/lib/lazy-page";
 
 /**
@@ -148,6 +150,7 @@ export function App() {
             <Route path=":boardId/thread/:memberId" element={<WorkforceThread />} />
             <Route path=":boardId/settings" element={<WorkforceSettings />} />
             <Route path=":boardId/history" element={<WorkforceHistory />} />
+            <Route path="*" element={<NotFoundPage scope="workforce" />} />
           </Route>
 
           {/* Legacy /Workforce (capital W) redirect → /workforce */}
@@ -214,13 +217,14 @@ export function App() {
             <Route path="/manage/resources" element={<ResourcesPage />} />
             <Route path="/manage/resources/:type" element={<ResourceListPage />} />
             <Route path="/manage/resources/:type/:id" element={<ResourceDetailPage />} />
+            {/* Unknown paths say so inside the shell instead of redirecting to
+                /welcome without a word. */}
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
-
-          {/* Catch-all → welcome */}
-          <Route path="*" element={<Navigate to="/welcome" replace />} />
         </Routes>
       </Suspense>
       <CommandPalette />
+      <NavigationGuardDialog />
     </ErrorBoundary>
   );
 }

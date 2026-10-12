@@ -47,7 +47,7 @@ npm install
 npm run dev          # Vite dev server on http://localhost:3000
 ```
 
-The Vite dev proxy forwards API calls to the EDDI backend. If no backend is available, the Manager auto-starts in **standalone mode** with mock data (via [MSW](https://mswjs.io/)).
+The Vite dev proxy forwards API calls to the EDDI backend — `http://localhost:7070` unless `EDDI_BACKEND_URL` names another (e.g. `EDDI_BACKEND_URL=http://127.0.0.1:7250 npm run dev -- --port 3250`). If no backend is available, the Manager auto-starts in **standalone mode** with mock data (via [MSW](https://mswjs.io/)).
 
 ```bash
 npm run test         # Vitest unit/component suite (run it for the current count)

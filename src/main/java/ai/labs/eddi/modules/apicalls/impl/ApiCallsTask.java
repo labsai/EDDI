@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
@@ -152,7 +153,7 @@ public class ApiCallsTask implements ILifecycleTask {
 
         Object uriObj = configuration.get("uri");
         if (!isNullOrEmpty(uriObj)) {
-            URI uri = URI.create(uriObj.toString());
+            URI uri = ResourceUris.require(uriObj, ID);
 
             try {
                 ApiCallsConfiguration httpCallsConfig = resourceClientLibrary.getResource(uri, ApiCallsConfiguration.class);

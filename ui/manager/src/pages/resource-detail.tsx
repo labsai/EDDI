@@ -51,6 +51,7 @@ import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import { reportDeployOutcome } from "@/lib/deploy-outcome";
 import { OwningAgentContext } from "@/hooks/use-owning-agent";
+import { allowNextNavigation } from "@/hooks/use-unsaved-changes-guard";
 
 /**
  * One id for the "saved — not yet live" toast, so only the most recent save's
@@ -60,7 +61,7 @@ const SAVE_NOT_LIVE_TOAST_ID = "resource-save-not-live";
 
 export function ResourceDetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -75,18 +76,53 @@ export function ResourceDetailPage() {
     const wfVer = searchParams.get("wfVer");
     const agentId = searchParams.get("agentId");
     const agentVer = searchParams.get("agentVer");
+    const agentWfVer = searchParams.get("agentWfVer");
     if (wfId && wfVer && agentId && agentVer) {
-      return {
+      const ctx: CascadeContext = {
         workflowId: wfId,
         workflowVersion: parseInt(wfVer, 10),
         agentId: agentId,
         agentVersion: parseInt(agentVer, 10),
       };
+      if (agentWfVer) ctx.agentWorkflowVersion = parseInt(agentWfVer, 10);
+      return ctx;
     }
     return undefined;
   }, [searchParams]);
 
   const [cascadeContext, setCascadeContext] = useState<CascadeContext | undefined>(initialCascade);
+
+  /**
+   * Adopt the versions a cascade save created — in state AND in the URL.
+   *
+   * State alone was not enough: the URL kept the versions the page was opened
+   * with, so a reload, a shared link or the "Back to workflow" link (which reads
+   * `agentVer` from the URL) addressed versions that were no longer current and
+   * the next cascade 409'd. `replace`, so Back does not walk through every save.
+   */
+  const adoptCascadeContext = useCallback(
+    (next: CascadeContext | undefined) => {
+      setCascadeContext(next);
+      if (!next) return;
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          params.set("wfId", next.workflowId);
+          params.set("wfVer", String(next.workflowVersion));
+          params.set("agentId", next.agentId);
+          params.set("agentVer", String(next.agentVersion));
+          if (next.agentWorkflowVersion !== undefined) {
+            params.set("agentWfVer", String(next.agentWorkflowVersion));
+          } else {
+            params.delete("agentWfVer");
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   // Sync when URL params change (user navigates to a different resource).
   // The compatibility tick (below) belongs to the cascade it was given for.
@@ -200,9 +236,9 @@ export function ResourceDetailPage() {
       setCurrentVersion(partial.newResourceVersion);
     }
     if (partial.retryContext) {
-      setCascadeContext(partial.retryContext);
+      adoptCascadeContext(partial.retryContext);
     }
-  }, []);
+  }, [adoptCascadeContext]);
 
   // All hooks are above — safe to do early returns below
 
@@ -289,7 +325,7 @@ export function ResourceDetailPage() {
                 setSaveSuccess(true);
                 setCurrentVersion(result.newResourceVersion);
                 // Update cascade context so next save uses new versions
-                setCascadeContext(nextCascadeContext(cascadeContext, result));
+                adoptCascadeContext(nextCascadeContext(cascadeContext, result));
               },
               onError: (err) => {
                 adoptPartialCascade(err);
@@ -338,7 +374,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, adoptPartialCascade, deployWithGrants]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, adoptPartialCascade, adoptCascadeContext, deployWithGrants]
   );
 
   const handleSaveAndDeploy = useCallback(
@@ -366,7 +402,7 @@ export function ResourceDetailPage() {
             setCurrentVersion(result.newResourceVersion);
             setCascadeCompatible(false);
             // Update cascade context so next Save & Test uses correct versions
-            setCascadeContext(prev => prev ? nextCascadeContext(prev, result) : prev);
+            if (cascadeContext) adoptCascadeContext(nextCascadeContext(cascadeContext, result));
             return { newAgentVersion: result.newAgentVersion ?? agentCtx.agentVer };
           },
         });
@@ -374,7 +410,7 @@ export function ResourceDetailPage() {
         // Error handled inside saveAndDeploy
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, agentCtx, saveAndDeploy, adoptPartialCascade, t]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, agentCtx, saveAndDeploy, adoptPartialCascade, adoptCascadeContext, t]
   );
 
   const handleCascadeConfirm = useCallback(
@@ -483,6 +519,8 @@ export function ResourceDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
           setShowDeleteDialog(false);
+          // The document is gone — nothing left for the unsaved-changes guard to protect.
+          allowNextNavigation();
           navigate(`/manage/resources/${type}`);
         },
         onError: (err) => toast.error(getErrorMessage(err)),

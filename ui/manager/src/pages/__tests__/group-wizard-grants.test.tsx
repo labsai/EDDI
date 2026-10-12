@@ -106,6 +106,9 @@ async function reachReview(user: User) {
   await user.click(screen.getByTestId("gw-add-member"));
   await user.type(await screen.findByTestId("member-name-0"), "Alice");
   await user.type(screen.getByTestId("member-name-1"), "Bob");
+  // New members on a keyed provider need an API key before the step is complete.
+  await user.type(await screen.findByTestId("gw-bulk-apikey-input"), "sk-test-key");
+  await user.click(screen.getByTestId("gw-bulk-apply"));
   await user.click(screen.getByTestId("group-wizard-next"));
   return await screen.findByTestId("group-wizard-create");
 }

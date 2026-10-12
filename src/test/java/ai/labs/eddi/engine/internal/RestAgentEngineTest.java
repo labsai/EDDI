@@ -673,6 +673,36 @@ class RestAgentEngineTest {
         }
 
         @Test
+        @DisplayName("should resume with 400 + JSON body, not 500, for a malformed conversation id")
+        void malformedConversationIdIsBadRequest() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            // What the MongoDB driver throws for an id that is not a 24-char hex string —
+            // raised inside the driver, so its text is not passed to the client.
+            var driverRejection = new IllegalArgumentException("state should be: hexString has 24 characters");
+            driverRejection.setStackTrace(new StackTraceElement[]{
+                    new StackTraceElement("org.bson.types.ObjectId", "<init>", "ObjectId.java", 210)});
+            // doAnswer, not doThrow: Mockito rewrites the stack trace of an exception it
+            // throws.
+            doAnswer(invocation -> {
+                throw driverRejection;
+            }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("not-an-id", false, false, List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            Response resumed = captor.getValue();
+            assertEquals(400, resumed.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, String>) resumed.getEntity();
+            assertEquals("bad_request", body.get("error"));
+            assertTrue(body.get("message").startsWith("The request contains an invalid value (reference "), body.get("message"));
+            assertFalse(body.get("message").contains("hexString"), "the driver's own text must not reach the client");
+        }
+
+        @Test
         @DisplayName("should throw ISE for generic exception")
         void genericException() throws Exception {
             var asyncResponse = mock(AsyncResponse.class);

@@ -3,6 +3,7 @@
 ## Status
 
 - **R3 + R14 implemented** (PR for branch `feat/llm-output-parsing-never-throws`): fence stripping and prose recovery of **objects** (a non-empty object extracted from surrounding text), arrays accepted **only as the whole reply**; parsing never throws; outcome recorded under `llm:output:outcome:<taskId>` and `eddi.llm.output{outcome}`. `FaultInjectingChatModel` is test scope only.
+- **R4 implemented** (PR for branch `feat/llm-response-schema-validation`): shape validation and native schema. Where it differs from the R4 text below: a shape violation is outcome `schema_mismatch` (not `INVALID`) and keeps the parsed object; reason under `llm:output:reason:<taskId>`; the native schema is sent per request, **non-strict** (langchain4j's `strict` is a model-builder flag), for openai, azure-openai, mistral and gemini (not gemini-vertex); `nonBlankFields` is a task field next to `jsonResponseFormat`. See `docs/langchain.md` Structured Output.
 - Everything else below is still to do.
 
 
@@ -178,6 +179,8 @@ Plus, for the program-content HTTP call: `timeoutInMillis 10000` and
 
 ### R4 — Shape validation and native schema
 - `responseSchema` (already a parameter) gets two uses:
+  > **Shipped as:** violation = outcome `schema_mismatch` with the parsed object kept (not `INVALID`); native schema is per request and non-strict; `nonBlankFields` is a task field. The text below is the original plan.
+
   1. **Validation:** a JSON-Schema subset (`type`, `required`, `properties`, `items`, `enum`,
      `minLength`), in-house unless `pom.xml` already has a validator. A mismatch is
      `INVALID(schema: <path> <rule>)`.
@@ -383,9 +386,9 @@ real `LlmTask` pipeline.
   "correctiveMessage": "Your previous reply could not be used: {reason}. Reply again with only the JSON object.",
   "fallbackMessage": "{snippets.fallback_text ?: 'Sorry, I could not answer that just now. Please try again.'}",
   "fallbackField": "htmlResponseText",
-  "fallbackQuickReplies": [ { "value": "Try again", "expressions": "retry_last" } ],
-  "nonBlankFields": ["htmlResponseText"]
+  "fallbackQuickReplies": [ { "value": "Try again", "expressions": "retry_last" } ]
 },
+"nonBlankFields": ["htmlResponseText"],
 "onError": { "action": "fallback" },
 "circuitBreaker": { "enabled": true, "window": 10, "threshold": 8, "coolDownMs": 60000 }
 ```

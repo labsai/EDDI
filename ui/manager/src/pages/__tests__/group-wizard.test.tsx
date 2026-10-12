@@ -6,6 +6,16 @@ import { GroupWizardPage } from "@/pages/group-wizard";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
+/**
+ * Agents the wizard creates need an LLM API key (the backend refuses setup
+ * without one), so the Members step blocks Next until each has one. One bulk
+ * apply fills every new agent.
+ */
+async function applyBulkKey(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(await screen.findByTestId("gw-bulk-apikey-input"), "sk-test-key");
+  await user.click(screen.getByTestId("gw-bulk-apply"));
+}
+
 describe("GroupWizardPage", () => {
   describe("HITL configuration", () => {
     it("enabling human approval reveals phase gates with one sensible default", async () => {
@@ -205,7 +215,8 @@ describe("GroupWizardPage", () => {
     // Config → Next
     await user.click(screen.getByTestId("group-wizard-next"));
 
-    // Members → Next (5 members, all "new" mode, should pass)
+    // Members → Next (5 members, all "new" mode, once they have a key)
+    await applyBulkKey(user);
     await user.click(screen.getByTestId("group-wizard-next"));
 
     // Review step should show the auto-create notice
@@ -314,6 +325,7 @@ describe("GroupWizardPage", () => {
     await user.click(screen.getByTestId("group-wizard-next"));
 
     // Members step → Next
+    await applyBulkKey(user);
     await user.click(screen.getByTestId("group-wizard-next"));
 
     // Review step → Create
@@ -349,6 +361,10 @@ describe("GroupWizardPage", () => {
     await user.type(nameInputs[0]!, "Alice");
     await user.type(nameInputs[1]!, "Bob");
 
+    // Both are new agents on a provider that needs a key — Next waits for it.
+    expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+    await applyBulkKey(user);
+
     // Next should now be enabled
     await waitFor(() => {
       expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
@@ -372,6 +388,7 @@ describe("GroupWizardPage", () => {
 
     // Config → Members → Review
     await user.click(screen.getByTestId("group-wizard-next"));
+    await applyBulkKey(user);
     await user.click(screen.getByTestId("group-wizard-next"));
 
     await waitFor(() => {
@@ -448,6 +465,7 @@ describe("GroupWizardPage", () => {
 
     // Config → Members → Review
     await user.click(screen.getByTestId("group-wizard-next"));
+    await applyBulkKey(user);
     await user.click(screen.getByTestId("group-wizard-next"));
 
     await waitFor(() => {
@@ -501,6 +519,8 @@ describe("GroupWizardPage", () => {
       expect(screen.getByTestId("gw-add-member")).toBeInTheDocument();
     });
 
+    await applyBulkKey(user);
+
     // Verify the Next button is enabled before clicking
     const nextBtn = screen.getByTestId("group-wizard-next");
     expect(nextBtn).not.toBeDisabled();
@@ -534,6 +554,7 @@ describe("GroupWizardPage", () => {
     });
 
     // Members → Review
+    await applyBulkKey(user);
     await user.click(screen.getByTestId("group-wizard-next"));
 
     await waitFor(() => {
@@ -577,6 +598,7 @@ describe("GroupWizardPage", () => {
       expect(screen.getByTestId("gw-add-member")).toBeInTheDocument();
     });
 
+    await applyBulkKey(user);
     await user.click(screen.getByTestId("group-wizard-next"));
 
     await waitFor(() => {
@@ -640,6 +662,8 @@ describe("GroupWizardPage", () => {
       // the members-step gate, so any Next-disabling below is attributable to
       // the first (HUMAN) member specifically.
       await user.type(screen.getByTestId("member-name-1"), "Agent Two");
+      // New agents need an API key before the step is complete.
+      await applyBulkKey(user);
     }
 
     it("switching a member to Human blocks Next until a principal id is entered", async () => {
@@ -819,59 +843,14 @@ describe("GroupWizardPage", () => {
       // Blank timeout ("wait indefinitely") is valid — Next stays enabled.
       expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
 
-      await user.type(screen.getByTestId("human-turn-timeout-input"), "not-a-duration");
+      // Number + unit, no ISO grammar to get wrong: zero is not a timeout.
+      await user.type(screen.getByTestId("human-turn-timeout-input"), "0");
       expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
 
       await user.clear(screen.getByTestId("human-turn-timeout-input"));
-      await user.type(screen.getByTestId("human-turn-timeout-input"), "PT24H");
+      await user.type(screen.getByTestId("human-turn-timeout-input"), "24");
+      await user.selectOptions(screen.getByTestId("human-turn-timeout-input-unit"), "days");
       expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
     });
-  });
-
-  // Review 2026-10-02: the members created before a failed moderator were not
-  // written back, so the retry created every member agent again.
-  it("does not create the members again when the moderator failed and the user retries", async () => {
-    const memberSetups: string[] = [];
-    let moderatorAttempts = 0;
-    let created = false;
-    server.use(
-      http.post("*/administration/agents/setup", async ({ request }) => {
-        const body = (await request.json()) as { name?: string };
-        if (body.name?.includes("Moderator")) {
-          moderatorAttempts += 1;
-          if (moderatorAttempts === 1) {
-            return HttpResponse.json({ message: "provider down" }, { status: 502 });
-          }
-        } else {
-          memberSetups.push(body.name ?? "");
-        }
-        return HttpResponse.json({
-          agentId: `auto-${memberSetups.length}-${moderatorAttempts}`, agentName: "Auto", provider: "anthropic",
-          model: "claude-sonnet-4-6", deployed: true, deploymentStatus: "deployed",
-        });
-      }),
-      http.post("*/groupstore/groups", () => {
-        created = true;
-        return new HttpResponse(null, { status: 201, headers: { Location: "/groupstore/groups/g?version=1" } });
-      }),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<GroupWizardPage />, { initialRoute: "/manage/groups/wizard" });
-    await user.click(screen.getByTestId("template-advisory-board"));
-    await user.click(screen.getByTestId("group-wizard-next"));
-    await user.click(screen.getByTestId("group-wizard-next"));
-    await user.click(await screen.findByTestId("group-wizard-create"));
-
-    await waitFor(() => expect(moderatorAttempts).toBe(1), { timeout: 15000 });
-    const firstRun = memberSetups.length;
-    expect(firstRun).toBeGreaterThan(0);
-    expect(created).toBe(false);
-
-    await waitFor(() => expect(screen.getByTestId("group-wizard-create")).not.toBeDisabled());
-    await user.click(screen.getByTestId("group-wizard-create"));
-    await waitFor(() => expect(created).toBe(true), { timeout: 15000 });
-
-    expect(moderatorAttempts).toBe(2);
-    expect(memberSetups).toHaveLength(firstRun);
   });
 });

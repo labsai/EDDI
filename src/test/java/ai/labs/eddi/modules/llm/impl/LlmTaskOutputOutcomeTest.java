@@ -44,6 +44,8 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -269,6 +271,119 @@ class LlmTaskOutputOutcomeTest {
             String key = LlmTask.KEY_OUTPUT_OUTCOME;
             assertTrue(key.startsWith("llm:"));
             assertFalse(key.startsWith("output") || key.startsWith("actions") || key.startsWith("quickReplies") || key.startsWith("input"));
+        }
+    }
+
+    private static final String REASON_KEY = "llm:output:reason:taskA";
+    private static final String SHAPE_SCHEMA = "{\"type\":\"object\",\"required\":[\"htmlResponseText\"],"
+            + "\"properties\":{\"htmlResponseText\":{\"type\":\"string\",\"minLength\":1}}}";
+
+    private LlmConfiguration shaped(String schema, List<String> nonBlank, boolean tools) {
+        var t = task(true, tools);
+        if (schema != null) {
+            t.getParameters().put("responseSchema", schema);
+        }
+        t.setNonBlankFields(nonBlank);
+        return new LlmConfiguration(List.of(t));
+    }
+
+    @Nested
+    @DisplayName("shape validation (R4)")
+    class Shape {
+
+        @Test
+        @DisplayName("valid JSON missing a required field: parsed object kept, outcome schema_mismatch, reason recorded")
+        void requiredMissingKeepsParsedObject() throws Exception {
+            liveModelReplies(Step.text("{\"other\":\"x\"}"));
+
+            assertDoesNotThrow(() -> llmTask.execute(memory, shaped(SHAPE_SCHEMA, null, false)));
+
+            assertEquals(Map.of("other", "x"), templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "schema_mismatch");
+            verify(dataFactory).createData(REASON_KEY, "schema: $.htmlResponseText required");
+            assertEquals(1, counted("schema_mismatch"));
+            assertEquals(0, counted("valid"));
+        }
+
+        @Test
+        @DisplayName("an empty answer is caught by nonBlankFields with no schema at all")
+        void blankFieldWithoutSchema() throws Exception {
+            liveModelReplies(Step.text("{\"htmlResponseText\":\"\"}"));
+
+            llmTask.execute(memory, shaped(null, List.of("htmlResponseText"), false));
+
+            verify(dataFactory).createData(OUTCOME_KEY, "schema_mismatch");
+            verify(dataFactory).createData(REASON_KEY, "nonBlank: $.htmlResponseText");
+            assertEquals(Map.of("htmlResponseText", ""), templateData.get("taskA"));
+        }
+
+        @Test
+        @DisplayName("a conforming reply is valid and records no reason")
+        void conformingIsValid() throws Exception {
+            liveModelReplies(Step.text("{\"htmlResponseText\":\"hi\"}"));
+
+            llmTask.execute(memory, shaped(SHAPE_SCHEMA, List.of("htmlResponseText"), false));
+
+            verify(dataFactory).createData(OUTCOME_KEY, "valid");
+            verify(dataFactory, never()).createData(eq(REASON_KEY), any());
+        }
+
+        @Test
+        @DisplayName("an unusable responseSchema skips validation; the turn and the outcome are unaffected")
+        void unusableSchemaSkipped() throws Exception {
+            liveModelReplies(Step.text("{\"other\":\"x\"}"));
+
+            assertDoesNotThrow(() -> llmTask.execute(memory, shaped("{not a schema", null, false)));
+
+            verify(dataFactory).createData(OUTCOME_KEY, "valid");
+        }
+
+        @Test
+        @DisplayName("invalid JSON keeps outcome invalid and records the parser's reason")
+        void invalidKeepsParserReason() throws Exception {
+            liveModelReplies(Step.text("{\"htmlResponseText\": \"cut"));
+
+            llmTask.execute(memory, shaped(SHAPE_SCHEMA, null, false));
+
+            verify(dataFactory).createData(OUTCOME_KEY, "invalid");
+            verify(dataFactory).createData(REASON_KEY, "truncated JSON");
+        }
+
+        @Test
+        @DisplayName("the resume path validates the shape the same way")
+        void resumePathValidates() throws Exception {
+            resumeReplies("{\"other\":1}");
+
+            llmTask.execute(memory, shaped(SHAPE_SCHEMA, null, true));
+
+            verify(dataFactory).createData(OUTCOME_KEY, "schema_mismatch");
+            verify(dataFactory).createData(REASON_KEY, "schema: $.htmlResponseText required");
+            assertEquals(Map.of("other", 1), templateData.get("taskA"));
+        }
+
+        @Test
+        @DisplayName("the task's responseSchema reaches the outgoing request natively for openai, and not for anthropic")
+        void nativeSchemaWiredThroughTask() throws Exception {
+            var model = FaultInjectingChatModel.script(Step.text("{\"htmlResponseText\":\"hi\"}")).repeatLast();
+            when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+
+            llmTask.execute(memory, shaped(SHAPE_SCHEMA, null, false));
+
+            var openAiRequest = model.requests().getFirst();
+            assertNotNull(openAiRequest.responseFormat());
+            assertNotNull(openAiRequest.responseFormat().jsonSchema(), "responseSchema must be forwarded to the policy");
+
+            var anthropic = shaped(SHAPE_SCHEMA, null, false);
+            anthropic.tasks().getFirst().setType("anthropic");
+            llmTask.execute(memory, anthropic);
+
+            assertNull(model.requests().get(1).responseFormat(), "anthropic cannot take a JSON format, schema or not");
+        }
+
+        @Test
+        @DisplayName("the reason key is not a client-visible snapshot key")
+        void reasonKeyStaysOutOfSnapshots() {
+            assertTrue(LlmTask.KEY_OUTPUT_REASON.startsWith("llm:"));
         }
     }
 

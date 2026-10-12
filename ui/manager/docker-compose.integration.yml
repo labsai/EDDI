@@ -34,7 +34,7 @@ services:
       EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
 
   mongodb:
-    image: mongo:6.0
+    image: mongo:7.0.43
     restart: always
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]

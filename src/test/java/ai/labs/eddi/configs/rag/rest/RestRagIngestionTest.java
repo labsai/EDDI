@@ -51,24 +51,41 @@ class RestRagIngestionTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> body = (Map<String, Object>) response.getEntity();
         assertEquals("ingestion-abc", body.get("ingestionId"));
-        assertEquals("product-docs", body.get("kbId"));
+        // The knowledge base's identity is its id — the name can be shared.
+        assertEquals("rag-123", body.get("kbId"));
         assertEquals("pending", body.get("status"));
+        verify(ragIngestionService).ingest(eq("rag-123"), anyString(), anyString(), any(), anyBoolean());
+    }
+
+    /**
+     * The cross-knowledge-base poisoning: an editor of their own knowledge base
+     * named another's in ?kbId= and the documents went into the other's store (and
+     * replace=true deleted the other's). The path's knowledge base — the one EDIT
+     * was checked on — is the only one that can be written to.
+     */
+    @Test
+    void ingestDocument_withForeignKbId_isRefusedAndNothingIsIngested() {
+        var config = new RagConfiguration();
+        config.setName("beta");
+        when(restRagStore.readRag("rag-123", 1)).thenReturn(config);
+
+        Response response = restRagIngestion.ingestDocument("rag-123", 1, "alpha", "p1", true, "POISON");
+
+        assertEquals(400, response.getStatus());
+        verify(ragIngestionService, never()).ingest(any(), any(), any(), any(), anyBoolean());
     }
 
     @Test
-    void ingestDocument_withExplicitKbId_shouldUseProvidedKbId() {
+    void ingestDocument_withKbIdNamingThisKnowledgeBase_isAcceptedForOldClients() {
         var config = new RagConfiguration();
         config.setName("product-docs");
         when(restRagStore.readRag("rag-123", 1)).thenReturn(config);
-        when(ragIngestionService.ingest(eq("custom-kb"), anyString(), anyString(), any(), anyBoolean())).thenReturn("ingestion-xyz");
+        when(ragIngestionService.ingest(anyString(), anyString(), anyString(), any(), anyBoolean())).thenReturn("ingestion-xyz");
 
-        Response response = restRagIngestion.ingestDocument("rag-123", 1, "custom-kb", "test.txt", false, "Hello world");
-
-        assertEquals(202, response.getStatus());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> body = (Map<String, Object>) response.getEntity();
-        assertEquals("custom-kb", body.get("kbId"));
-        verify(ragIngestionService).ingest(eq("custom-kb"), anyString(), anyString(), any(), anyBoolean());
+        assertEquals(202, restRagIngestion.ingestDocument("rag-123", 1, "product-docs", "test.txt", false, "Hello").getStatus());
+        assertEquals(202, restRagIngestion.ingestDocument("rag-123", 1, "rag-123", "test.txt", false, "Hello").getStatus());
+        // Either way it is written to the path's knowledge base, by id.
+        verify(ragIngestionService, times(2)).ingest(eq("rag-123"), anyString(), anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -104,7 +121,7 @@ class RestRagIngestionTest {
         Response response = restRagIngestion.ingestDocument("rag-123", 1, null, "policy.txt", true, "Refunds within 47 days.");
 
         assertEquals(202, response.getStatus());
-        verify(ragIngestionService).ingest(eq("product-docs"), anyString(), eq("policy.txt"), any(), eq(true));
+        verify(ragIngestionService).ingest(eq("rag-123"), anyString(), eq("policy.txt"), any(), eq(true));
     }
 
     /**

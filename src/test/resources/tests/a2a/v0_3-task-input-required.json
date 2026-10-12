@@ -1,0 +1,20 @@
+{
+  "id": "task-03",
+  "contextId": "ctx-03",
+  "status": {
+    "state": "input-required",
+    "message": {
+      "messageId": "task-03-status",
+      "role": "agent",
+      "parts": [{"kind": "text", "text": "Waiting for approval"}],
+      "taskId": "task-03",
+      "contextId": "ctx-03",
+      "kind": "message"
+    },
+    "timestamp": "2026-10-03T10:00:00Z"
+  },
+  "history": [
+    {"messageId": "task-03-user", "role": "user", "parts": [{"kind": "text", "text": "Refund order #12345"}], "taskId": "task-03", "contextId": "ctx-03", "kind": "message"}
+  ],
+  "kind": "task"
+}
