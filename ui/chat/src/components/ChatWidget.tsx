@@ -82,13 +82,19 @@ interface TurnContext {
   stateBeforeSend: ConversationState | null;
   /** Id of this turn's optimistic user bubble, so a dropped turn can withdraw it. */
   userMessageId: string | null;
+  /**
+   * This turn's own `done` said AWAITING_HUMAN. A read right after it can still
+   * see the previous stored state (READY), because a backend may announce the
+   * pause before persisting it; such a read must not take the pause back.
+   */
+  announcedPause: boolean;
 }
 
 function newTurn(
   stateBeforeSend: ConversationState | null,
   userMessageId: string | null = null,
 ): TurnContext {
-  return { tokenCount: 0, stateBeforeSend, userMessageId };
+  return { tokenCount: 0, stateBeforeSend, userMessageId, announcedPause: false };
 }
 
 function makeAgentMessage(content: string, images?: OutputImage[]): ChatMessage {
@@ -511,6 +517,7 @@ export function ChatWidget() {
           }
 
           if (snapshot?.conversationState) {
+            if (snapshot.conversationState === "AWAITING_HUMAN") turn.announcedPause = true;
             dispatch({
               type: "SET_CONVERSATION_STATE",
               state: snapshot.conversationState,
@@ -1055,7 +1062,11 @@ export function ChatWidget() {
             // abortRef, so a controller that is no longer current means this
             // turn was stopped and its refresh must not speak for the state.
             const wasStopped = abortRef.current !== abort;
-            if (after.conversationState && !wasStopped) {
+            // A READY read straight after this turn announced a pause is the
+            // store not having caught up, not a decision: keep the pause, and let
+            // the approval-status watch (useHitlPolling) say when it resolves.
+            const staleOverPause = turn.announcedPause && after.conversationState === "READY";
+            if (after.conversationState && !wasStopped && !staleOverPause) {
               dispatch({
                 type: "SET_CONVERSATION_STATE",
                 state: after.conversationState,
