@@ -320,7 +320,7 @@ class AgentSetupServiceTest {
         void behaviorConfig() {
             RuleSetConfiguration config = service.createBehaviorConfig();
             assertNotNull(config);
-            assertTrue(config.getExpressionsAsActions());
+            assertNotEquals(Boolean.TRUE, config.getExpressionsAsActions(), "setup must not force expressionsAsActions");
             assertFalse(config.getBehaviorGroups().isEmpty());
             var firstRule = config.getBehaviorGroups().getFirst().getRules().getFirst();
             assertEquals("Send Message to LLM", firstRule.getName());

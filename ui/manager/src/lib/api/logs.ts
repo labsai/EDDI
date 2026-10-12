@@ -108,5 +108,7 @@ export function createLogEventSource(filters: LogFilters = {}): BearerEventSourc
 
   const qs = params.toString();
   const url = `${window.location.origin}${BASE}/stream${qs ? `?${qs}` : ""}`;
-  return new BearerEventSource(url, api.getAuthHeader());
+  // A provider, not a snapshot: asked again on every reconnect, so the stream
+  // picks up the refreshed token instead of retrying with the expired one.
+  return new BearerEventSource(url, () => api.getAuthHeader());
 }
