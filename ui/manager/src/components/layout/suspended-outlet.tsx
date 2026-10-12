@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { PageLoader } from "./page-loader";
 
 /**
@@ -13,9 +14,12 @@ import { PageLoader } from "./page-loader";
  * Placed at the outlet, only the page area swaps.
  */
 export function SuspendedOutlet() {
+  const location = useLocation();
   return (
-    <Suspense fallback={<PageLoader />}>
-      <Outlet />
-    </Suspense>
+    <ErrorBoundary resetKey={location.key}>
+      <Suspense fallback={<PageLoader />}>
+        <Outlet />
+      </Suspense>
+    </ErrorBoundary>
   );
 }

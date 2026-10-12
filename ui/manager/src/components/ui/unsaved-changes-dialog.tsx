@@ -17,6 +17,8 @@ interface UnsavedChangesDialogProps {
    * leaving is fine as long as the work is kept.
    */
   onSave?: () => void;
+  /** Label of the cancel button. Defaults to "Cancel". */
+  cancelLabel?: string;
   /** Label of the confirm (discard) button. Defaults to "Discard & Leave". */
   confirmLabel?: string;
 }
@@ -33,6 +35,7 @@ export function UnsavedChangesDialog({
   title,
   children,
   onSave,
+  cancelLabel,
   confirmLabel,
 }: UnsavedChangesDialogProps) {
   const { t } = useTranslation();
@@ -53,14 +56,24 @@ export function UnsavedChangesDialog({
     }
   }, [open]);
 
-  // Esc key cancels
+  // Esc key cancels.
+  //
+  // Registered in the CAPTURE phase and stopped there. This dialog is routinely
+  // opened on top of another one (an editor sheet, a create dialog), and those
+  // listen for Escape on `window` too: a bubble-phase listener here, even with
+  // stopPropagation, still left the other window listeners firing, so one Escape
+  // closed both dialogs and the user lost the very edit this one was protecting.
+  // Capture runs before any of them, and stopPropagation then ends the event.
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      e.preventDefault();
+      onCancel();
     }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [open, onCancel]);
 
   // Focus trap
@@ -130,7 +143,7 @@ export function UnsavedChangesDialog({
               className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
               data-testid="unsaved-cancel"
             >
-              {t("common.cancel", "Cancel")}
+              {cancelLabel ?? t("common.cancel", "Cancel")}
             </button>
             <button
               onClick={onConfirm}
@@ -153,16 +166,4 @@ export function UnsavedChangesDialog({
       </div>
     </>
   );
-}
-
-/**
- * The in-app navigation prompt for a page guarded by `useUnsavedChangesGuard`.
- * Renders nothing until a navigation away from the dirty page is held.
- */
-export function UnsavedChangesPrompt({
-  guard,
-}: {
-  guard: { blocked: boolean; proceed: () => void; stay: () => void };
-}) {
-  return <UnsavedChangesDialog open={guard.blocked} onConfirm={guard.proceed} onCancel={guard.stay} />;
 }
