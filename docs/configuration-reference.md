@@ -155,8 +155,8 @@ two.
 
 ### Graceful shutdown
 
-Tuned for Kubernetes rolling updates: EDDI reports itself not-ready first, waits
-for the load balancer to notice, then drains in-flight conversations.
+Tuned for Kubernetes pod replacement (an upgrade, an eviction, a reschedule): EDDI reports itself
+not-ready first, waits for the load balancer to notice, then drains in-flight conversations.
 
 | Property | Default | Description |
 |---|---|---|
@@ -323,6 +323,8 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call |
 | `eddi.tools.ratelimit.global.limit` | `1000` | Calls per minute when the above is on |
 | `eddi.tools.web-scraper.max-response-bytes` | `5242880` (5 MB) | Cap on the response body the web-scraper tool reads from an LLM-chosen URL, bounded as it streams |
+| `eddi.tools.web-scraper.parse-threads` | `2` | Platform threads that may parse pages / evaluate CSS selectors at the same time; a call that finds all busy is refused at once. Bounds the CPU a runaway selector can hold — see [Web Scraper Tool](langchain.md#web-scraper-tool) |
+| `eddi.tools.web-scraper.parse-timeout-ms` | `10000` | Deadline for parsing one page and evaluating one selector; past it the call is reported to the model as a failure |
 | `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
 | `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
 | `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
@@ -370,12 +372,13 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
 | `eddi.backup.import.max-entries` | `10000` | Most entries (files and directories) an imported or synced agent archive may hold. A larger archive is refused with `413` |
 | `eddi.backup.import.max-entry-bytes` | `33554432` (32 MiB) | Most bytes one archive entry may inflate to, counted from what is actually decompressed rather than from the entry header. The importer reads each entry whole into memory, so this also bounds the heap one import can take per file |
-| `eddi.backup.import.max-uncompressed-bytes` | `268435456` (256 MiB) | Most bytes a whole archive may inflate to. Together with the two above this stops a small upload that decompresses to gigabytes from filling the disk under `tmp/import` |
+| `eddi.backup.import.max-uncompressed-bytes` | `268435456` (256 MiB) | Most bytes a whole archive may inflate to. Together with the two above this stops a small upload that decompresses to gigabytes from filling the disk under `tmp/import`. It also bounds the archive's own (compressed) size: this value plus 1 KiB per allowed entry (`max-entries`) — anything larger is refused with `413` while it streams, whoever supplies the stream |
 | `eddi.backup.sync.require-https` | `true` | Whether live sync refuses a plain `http://` source. The caller's `X-Source-Authorization` bearer travels to that host, so HTTP hands it to anyone on the path — turn this off only between instances on a network you trust |
 | `eddi.backup.sync.allow-private-targets` | `false` | Whether live sync accepts a loopback, RFC 1918, ULA, CGNAT or link-local source. Off by default because a caller who can reach the sync endpoint could otherwise use this deployment to probe hosts behind it; on for a single-tenant deployment whose other instances are internal |
 | `eddi.backup.sync.allowed-sources` | *(empty)* | Comma-separated exact origins (`scheme://host[:port]`) that live sync accepts whatever the two settings above say. The narrow way to reach one internal staging instance without opening the endpoint to every internal address — **prefer this** |
+| `eddi.backup.sync.max-response-bytes` | `16777216` (16 MiB) | Most bytes live sync accepts in one JSON response from the source instance (descriptor listings, configs). A larger declared `Content-Length` is refused before reading, an undeclared body is cut off at the cap, and the sync fails with `502`. Bounds how much heap a compromised or misbehaving source can make one sync take. The archive a first-time sync downloads has its own fixed 256 MiB cap |
 
-> These three decide what `POST /backup/import/sync*` will read an agent **from**.
+> `require-https`, `allow-private-targets` and `allowed-sources` decide what `POST /backup/import/sync*` will read an agent **from**.
 > The strict default is why two instances on one private network — staging and
 > production as neighbouring services — could not sync at all before 6.4.1.
 > Dev and test mode accept `http://` whatever `require-https` says, so a
@@ -414,7 +417,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions |
 | `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
 | `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
-| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a peer's `tasks/send` may wait for the turn. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking A2A send (`SendMessage`, `message/send`, `tasks/send`) waits for the turn before answering with the task still `working` — the peer then polls `GetTask`. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+| `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once, across all peers and agents. The excess is refused with HTTP `503`, `Retry-After: 1` and a JSON-RPC error, before any conversation is started. A slot is held for the turn (a `returnImmediately` send and a stream keep it until the turn settles) and released at the latest task timeout + 30 s after it was taken |
 
 ### Slack
 

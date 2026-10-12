@@ -297,7 +297,7 @@ Always use v6 canonical URIs in new configs:
 
 | Step `type` | Config URI prefix | Required? |
 | --- | --- | --- |
-| `eddi://ai.labs.parser` | `eddi://ai.labs.parser/...` — optional; when set, names the parser document | Yes — always first |
+| `eddi://ai.labs.parser` | `eddi://ai.labs.parser/...` — optional; when set, names the parser document, whose config and extensions are merged with the step's own (the step's `config` keys win, its extensions are appended) | Yes — always first |
 | `eddi://ai.labs.behavior` | `eddi://ai.labs.rules/...` | Yes — the orchestrator |
 | `eddi://ai.labs.property` | `eddi://ai.labs.property/...` | Optional — slot-filling |
 | `eddi://ai.labs.httpcalls` | `eddi://ai.labs.apicalls/...` | Optional — API calls |

@@ -171,7 +171,7 @@ EDDI needs a database. This starts MongoDB on a private Docker network (no publi
 
 ```bash
 docker network create eddi
-docker run -d --name mongodb --network eddi mongo:7.0.14
+docker run -d --name mongodb --network eddi mongo:7.0.43
 docker run -i --rm --network eddi -p 127.0.0.1:7070:7070 \
   -e MONGODB_CONNECTIONSTRING='mongodb://mongodb:27017/eddi?retryWrites=true&w=majority' \
   -e EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true \

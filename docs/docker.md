@@ -39,11 +39,11 @@ ship as `eddi`/`eddi`, `viewer`/`viewer` and `user`/`user`.
 
 ### Manual Docker Setup
 
-Create a network and start MongoDB on it (the same `mongo:7.0.14` image `docker-compose.yml` pins). EDDI's default connection string points at a host named `mongodb`, so the container name matters:
+Create a network and start MongoDB on it (the same `mongo:7.0.43` image `docker-compose.yml` pins). EDDI's default connection string points at a host named `mongodb`, so the container name matters:
 
 ```bash
 docker network create eddi
-docker run --name mongodb --network eddi -d mongo:7.0.14
+docker run --name mongodb --network eddi -d mongo:7.0.43
 ```
 
 Start EDDI (without auth) — **local development only:**

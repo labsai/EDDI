@@ -107,7 +107,7 @@ same three opt-outs the bundled `docker-compose.yml` makes, and bind the port to
     image's default connection string is `mongodb://mongodb:27017/eddi`.
 
     ```bash
-    docker run --name mongodb --network=eddi-network -d mongo:7.0.14
+    docker run --name mongodb --network=eddi-network -d mongo:7.0.43
     ```
 
 3.  Start **EDDI**:

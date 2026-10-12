@@ -22,7 +22,7 @@ branch.
   from Secrets Manager. [`redhat-openshift.md`](../redhat-openshift.md): the quick
   start has a MongoDB and binds to loopback; the OIDC client is `eddi-backend`;
   the `redhat-certify` and OpenSSF-level claims say only what the repository shows.
-  [`docker.md`](../docker.md): `mongo:7.0.14`.
+  [`docker.md`](../docker.md): `mongo:7.0.43`.
 - [`security.md`](../security.md): EDDI does not "run open" — the two startup
   guards are described.
 

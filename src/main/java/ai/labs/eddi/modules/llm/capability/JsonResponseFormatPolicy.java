@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.capability;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import dev.langchain4j.model.chat.request.ResponseFormat;
+import dev.langchain4j.model.chat.request.ResponseFormatType;
 
 import java.util.Locale;
 import java.util.Set;
@@ -108,13 +109,72 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  *            default
  * @param override
  *            the per-task override; {@link Support#AUTO} defers to the matrix
+ * @param responseSchema
+ *            the task's {@code responseSchema} text, or null. When the provider
+ *            can enforce a schema <em>per request</em> (see
+ *            {@link #supportsNativeSchema}) and the text converts (see
+ *            {@link ResponseSchemaConverter}), the request carries it as a
+ *            {@code JSON_SCHEMA} response format instead of schemaless JSON
+ *
+ *            <h2>Native schema enforcement</h2>
+ *            <table border="1">
+ *            <caption>Request-level JSON-schema support (langchain4j
+ *            1.20.2)</caption>
+ *            <tr>
+ *            <th>provider</th>
+ *            <th>native schema</th>
+ *            <th>evidence</th>
+ *            </tr>
+ *            <tr>
+ *            <td>openai</td>
+ *            <td>yes</td>
+ *            <td>{@code toOpenAiResponseFormat} → {@code json_schema}.
+ *            {@code strict} is a <em>model</em>-level builder flag in the
+ *            binding, so it is not sent: EDDI never bakes a response format
+ *            into a cached model. The schema is a strong hint, and EDDI's own
+ *            validation is the gate</td>
+ *            </tr>
+ *            <tr>
+ *            <td>azure-openai</td>
+ *            <td>yes</td>
+ *            <td>{@code toAzureOpenAiResponseFormat} maps the request's
+ *            {@code jsonSchema}</td>
+ *            </tr>
+ *            <tr>
+ *            <td>mistral</td>
+ *            <td>yes</td>
+ *            <td>{@code toMistralAiResponseFormat} → {@code fromSchema}</td>
+ *            </tr>
+ *            <tr>
+ *            <td>gemini</td>
+ *            <td>yes</td>
+ *            <td>request {@code responseFormat} with a schema →
+ *            {@code responseSchema}. Still subject to the no-JSON-with-tools
+ *            rule above</td>
+ *            </tr>
+ *            <tr>
+ *            <td>gemini-vertex</td>
+ *            <td><strong>no</strong></td>
+ *            <td>the Vertex binding takes its schema from the model builder
+ *            only</td>
+ *            </tr>
+ *            <tr>
+ *            <td>everything else</td>
+ *            <td><strong>no</strong></td>
+ *            <td>schemaless JSON where the matrix allows it; the prompt block
+ *            carries the schema</td>
+ *            </tr>
+ *            </table>
  *
  * @since 6.1.0
  */
-public record JsonResponseFormatPolicy(boolean requested, String provider, Support override) {
+public record JsonResponseFormatPolicy(boolean requested, String provider, Support override, String responseSchema) {
 
     /** Never applies — the request is sent exactly as it is built. */
-    public static final JsonResponseFormatPolicy DISABLED = new JsonResponseFormatPolicy(false, null, Support.AUTO);
+    public static final JsonResponseFormatPolicy DISABLED = new JsonResponseFormatPolicy(false, null, Support.AUTO, null);
+
+    /** Providers whose binding honours a request-level JSON schema. */
+    private static final Set<String> REQUEST_LEVEL_SCHEMA = Set.of(LLM_TYPE_OPENAI, LLM_TYPE_AZURE_OPENAI, LLM_TYPE_MISTRAL, LLM_TYPE_GEMINI);
 
     /** Providers whose binding maps a schemaless request-level JSON format. */
     private static final Set<String> REQUEST_LEVEL_JSON = Set.of(
@@ -128,6 +188,11 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
         override = override == null ? Support.AUTO : override;
     }
 
+    /** Policy without a schema: schemaless JSON mode only. */
+    public JsonResponseFormatPolicy(boolean requested, String provider, Support override) {
+        this(requested, provider, override, null);
+    }
+
     /**
      * @param requested
      *            {@code convertToObject} for this task
@@ -139,6 +204,19 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
      */
     public static JsonResponseFormatPolicy of(boolean requested, String provider, String overrideToken) {
         return new JsonResponseFormatPolicy(requested, provider, Support.parse(overrideToken));
+    }
+
+    /**
+     * As {@link #of(boolean, String, String)}, also carrying the task's
+     * {@code responseSchema} for native enforcement.
+     */
+    public static JsonResponseFormatPolicy of(boolean requested, String provider, String overrideToken, String responseSchema) {
+        return new JsonResponseFormatPolicy(requested, provider, Support.parse(overrideToken), responseSchema);
+    }
+
+    /** Whether the provider enforces a JSON schema carried on the request. */
+    public static boolean supportsNativeSchema(String provider) {
+        return REQUEST_LEVEL_SCHEMA.contains(normalize(provider));
     }
 
     /**
@@ -176,13 +254,26 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
 
     /**
      * The response format to set on the request, or {@code null} to leave the
-     * request untouched.
+     * request untouched. Schemaless {@code JSON} unless the provider enforces a
+     * request-level schema and {@link #responseSchema} converts, in which case the
+     * format carries that schema too.
      *
      * @param toolsInRequest
      *            whether the request being built carries tool specifications
      */
     public ResponseFormat resolve(boolean toolsInRequest) {
-        return applies(toolsInRequest) ? ResponseFormat.JSON : null;
+        if (!applies(toolsInRequest)) {
+            return null;
+        }
+        if (supportsNativeSchema(provider)) {
+            // Gemini's typed schema mapper drops additionalProperties; send the author's
+            // schema text raw when it relies on a closed object.
+            boolean raw = LLM_TYPE_GEMINI.equals(normalize(provider)) && ResponseSchemaConverter.hasClosedObject(responseSchema);
+            return (raw ? ResponseSchemaConverter.convertRaw(responseSchema) : ResponseSchemaConverter.convert(responseSchema))
+                    .map(schema -> ResponseFormat.builder().type(ResponseFormatType.JSON).jsonSchema(schema).build())
+                    .orElse(ResponseFormat.JSON);
+        }
+        return ResponseFormat.JSON;
     }
 
     private static String normalize(String value) {
