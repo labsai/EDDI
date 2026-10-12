@@ -15,6 +15,8 @@ import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.WorkspaceAccessIndexMigration;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.properties.mongo.PropertiesMigrationService;
+import jakarta.enterprise.inject.Instance;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
@@ -24,9 +26,8 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
-import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -469,6 +470,48 @@ class AgentDeploymentManagementTest {
             verify(v6QuteMigration).runIfNeeded();
             verify(migrationManager).startMigrationIfFirstTimeRun(any());
         }
+
+        @Test
+        @DisplayName("runs the legacy properties migration after the rename and before readiness, on the sweep thread")
+        @SuppressWarnings("unchecked")
+        void runsPropertiesMigrationBeforeReadiness() throws Exception {
+            when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
+            PropertiesMigrationService propertiesMigration = mock(PropertiesMigrationService.class);
+            Instance<PropertiesMigrationService> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(propertiesMigration);
+            management.propertiesMigrationInstance = instance;
+            doAnswer(inv -> {
+                IMigrationManager.IMigrationFinished callback = inv.getArgument(0);
+                callback.onComplete();
+                return null;
+            }).when(migrationManager).startMigrationIfFirstTimeRun(any());
+
+            management.autoDeployAgents();
+
+            var order = inOrder(v6RenameMigration, propertiesMigration, migrationManager, agentsReadiness);
+            order.verify(v6RenameMigration).runIfNeeded();
+            order.verify(propertiesMigration).runIfNeeded();
+            order.verify(migrationManager).startMigrationIfFirstTimeRun(any());
+            order.verify(agentsReadiness).setAgentsReadiness(true);
+        }
+
+        @Test
+        @DisplayName("a failing properties migration does not stop the deployment")
+        @SuppressWarnings("unchecked")
+        void failingPropertiesMigrationDoesNotBlockDeployment() throws Exception {
+            when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
+            PropertiesMigrationService propertiesMigration = mock(PropertiesMigrationService.class);
+            doThrow(new IllegalStateException("boom")).when(propertiesMigration).runIfNeeded();
+            Instance<PropertiesMigrationService> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(propertiesMigration);
+            management.propertiesMigrationInstance = instance;
+
+            management.autoDeployAgents();
+
+            verify(migrationManager).startMigrationIfFirstTimeRun(any());
+        }
     }
 
     @Nested
@@ -480,7 +523,7 @@ class AgentDeploymentManagementTest {
         void skipsPausedConversations() throws Exception {
             var paused = snapshot("conv-paused", ConversationState.AWAITING_HUMAN);
 
-            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent1", 1))
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent1"), eq(1), isNull(), anyInt()))
                     .thenReturn(List.of(paused));
 
             invokeEndOldConversations("agent1", 1);
@@ -496,13 +539,11 @@ class AgentDeploymentManagementTest {
         @DisplayName("Task 14/3: skips a PENDING TOOL_CALL pause identically — the spare check only reads "
                 + "ConversationState, never hitlPauseType, so undeploy is allowed the same way for both pause flavors")
         void skipsPausedToolCallConversation() throws Exception {
+            // The sweep reads only the state: a tool-call pause looks exactly like a rule
+            // pause to it, whatever the pending batch holds.
             var toolPaused = snapshot("conv-tool-paused", ConversationState.AWAITING_HUMAN);
-            toolPaused.setHitlPauseType("TOOL_CALL");
-            var batch = new PendingToolCallBatch();
-            batch.setPauseEpoch("epoch-undeploy-sweep");
-            toolPaused.setHitlPendingToolCalls(batch);
 
-            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent1", 1))
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent1"), eq(1), isNull(), anyInt()))
                     .thenReturn(List.of(toolPaused));
 
             invokeEndOldConversations("agent1", 1);
@@ -516,15 +557,10 @@ class AgentDeploymentManagementTest {
         }
     }
 
-    private static ConversationMemorySnapshot snapshot(
-                                                       String id,
-                                                       ConversationState state) {
-        var s = new ConversationMemorySnapshot();
-        s.setId(id);
-        s.setAgentId("agent1");
-        s.setAgentVersion(1);
-        s.setConversationState(state);
-        return s;
+    private static ConversationActivitySummary snapshot(
+                                                        String id,
+                                                        ConversationState state) {
+        return new ConversationActivitySummary(id, state, "agent1", 1, null);
     }
 
     private void invokeEndOldConversations(String agentId, Integer agentVersion) throws Exception {

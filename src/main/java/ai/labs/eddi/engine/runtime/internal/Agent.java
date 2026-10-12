@@ -36,6 +36,7 @@ public class Agent implements IAgent {
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ToolApprovalsConfig toolApprovalsConfig;
     private Integer compatibilityGeneration;
+    private volatile List<String> deploymentWarnings = List.of();
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
@@ -149,5 +150,14 @@ public class Agent implements IAgent {
 
     public void setCompatibilityGeneration(Integer compatibilityGeneration) {
         this.compatibilityGeneration = compatibilityGeneration;
+    }
+
+    @Override
+    public List<String> getDeploymentWarnings() {
+        return deploymentWarnings;
+    }
+
+    public void setDeploymentWarnings(List<String> deploymentWarnings) {
+        this.deploymentWarnings = deploymentWarnings == null ? List.of() : List.copyOf(deploymentWarnings);
     }
 }

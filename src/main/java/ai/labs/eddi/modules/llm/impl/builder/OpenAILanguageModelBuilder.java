@@ -83,6 +83,9 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         if (customParameters != null && !customParameters.isEmpty()) {
             builder.customParameters(customParameters);
         }
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
+
         return builder.build();
     }
 

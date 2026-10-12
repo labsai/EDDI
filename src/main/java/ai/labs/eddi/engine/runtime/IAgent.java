@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.DeploymentFailure;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -81,5 +82,16 @@ public interface IAgent {
      */
     default DeploymentFailure getDeploymentFailure() {
         return null;
+    }
+
+    /**
+     * Advisory findings of the deploy-time compatibility lint, one line each; empty
+     * when the agent is clean or has not been checked. They never affect the
+     * deployment status.
+     *
+     * @since 6.6.0
+     */
+    default List<String> getDeploymentWarnings() {
+        return List.of();
     }
 }
