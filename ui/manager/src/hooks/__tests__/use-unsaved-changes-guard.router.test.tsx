@@ -144,4 +144,79 @@ describe("useUnsavedChangesGuard — in-app navigation", () => {
     expect(router.state.location.pathname).toBe("/other");
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
+
+  it("holds the browser's Back button too", async () => {
+    const router = createMemoryRouter(
+      [
+        {
+          path: "*",
+          element: (
+            <>
+              <NavigationGuardDialog />
+              <Routes>
+                <Route path="/editor" element={<Editor dirty />} />
+                <Route path="/other" element={<h1>other page</h1>} />
+              </Routes>
+            </>
+          ),
+        },
+      ],
+      { initialEntries: ["/other", "/editor"], initialIndex: 1 },
+    );
+    render(<RouterProvider router={router} />);
+    await router.navigate(-1);
+
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/editor");
+  });
+
+  it("a clean guard in a sibling component, mounted after the dirty one, does not unprotect it", async () => {
+    // Regression for the single-blocker contract: a router consults only the LAST
+    // blocker registered, so if each hook called `useBlocker` itself, mounting any
+    // clean guard later (here a separate sibling, not a child of the dirty page)
+    // would take over and let the navigation through with the edits unsaved.
+    function DirtyPage() {
+      useUnsavedChangesGuard(true);
+      return <Link to="/other">go other</Link>;
+    }
+    function LateCleanSibling() {
+      const [show, setShow] = useState(false);
+      useEffect(() => setShow(true), []);
+      return show ? <CleanGuard /> : null;
+    }
+    const router = createMemoryRouter(
+      [
+        {
+          path: "*",
+          element: (
+            <>
+              <NavigationGuardDialog />
+              <Routes>
+                <Route
+                  path="/editor"
+                  element={
+                    <>
+                      <DirtyPage />
+                      <LateCleanSibling />
+                    </>
+                  }
+                />
+                <Route path="/other" element={<h1>other page</h1>} />
+              </Routes>
+            </>
+          ),
+        },
+      ],
+      { initialEntries: ["/editor"] },
+    );
+    render(<RouterProvider router={router} />);
+    // Let the late sibling mount and register before navigating.
+    await screen.findByText("go other");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await userEvent.click(screen.getByText("go other"));
+
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/editor");
+  });
 });

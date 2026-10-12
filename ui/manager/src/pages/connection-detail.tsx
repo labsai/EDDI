@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
@@ -383,10 +384,13 @@ export function ConnectionDetailPage() {
     }
   };
 
+  /** Hard delete — explicit opt-in; the store (and this dialog) default to soft. */
+  const [deletePermanently, setDeletePermanently] = useState(false);
+
   const handleDelete = async () => {
     if (!id) return;
     try {
-      await deleteMutation.mutateAsync({ id, version });
+      await deleteMutation.mutateAsync({ id, version, permanent: deletePermanently });
       // Deliberately `navigate`, not `leaveFor`: the document is gone, so there
       // is nothing left for an "unsaved changes" prompt to protect.
       allowNextNavigation();
@@ -824,17 +828,26 @@ export function ConnectionDetailPage() {
 
       <AlertDialog
         open={deleteOpen}
-        onOpenChange={setDeleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) setDeletePermanently(false);
+        }}
         title={t("connections.confirmDelete", "Delete this connection?")}
         description={t(
           "connections.confirmDeleteDesc",
           "Every account linked through it is unlinked at the same time — tokens must not outlive the connection that produced them. Agents referring to it by name will stop being able to authenticate.",
         )}
         onConfirm={() => void handleDelete()}
-        confirmLabel={t("common.delete", "Delete")}
+        confirmLabel={
+          deletePermanently
+            ? t("common.deletePermanently", "Delete permanently")
+            : t("common.delete", "Delete")
+        }
         cancelLabel={t("common.cancel", "Cancel")}
         isPending={deleteMutation.isPending}
-      />
+      >
+        <PermanentDeleteOption checked={deletePermanently} onChange={setDeletePermanently} />
+      </AlertDialog>
 
       <UnsavedChangesDialog
         open={pendingExit !== null}

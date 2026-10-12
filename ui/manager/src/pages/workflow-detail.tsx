@@ -126,7 +126,7 @@ export function WorkflowDetailPage() {
     localExtensions !== null &&
     JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
 
-  // Warn on tab close/reload when dirty
+  // Warn on tab close/reload, and hold in-app navigation, when dirty
   useUnsavedChangesGuard(isDirty);
 
   // Save & Test support

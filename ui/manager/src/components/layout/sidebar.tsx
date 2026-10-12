@@ -16,9 +16,9 @@ import {
   Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth, useMayOpenScreen } from "@/hooks/use-auth";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
 import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
@@ -63,6 +63,17 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
   const { t } = useTranslation();
   const { language, languages, changeLanguage } = useLanguageSwitcher();
   const { method, user, logout } = useAuth();
+  // Screens the user's role cannot open are not offered — an eddi-editor saw
+  // Logs, Audit and Secrets here and got a 403 on each. The backend still
+  // decides; with no EDDI role in the token everything stays listed.
+  const mayOpen = useMayOpenScreen();
+  const visibleSections = useMemo(
+    () =>
+      NAV_SECTIONS
+        .map((section) => ({ ...section, items: section.items.filter((item) => mayOpen(item.path)) }))
+        .filter((section) => section.items.length > 0),
+    [mayOpen],
+  );
   const showUser = method === "keycloak" && user;
 
   const { data: serverVersion, isLoading } = useEddiVersion();
@@ -167,7 +178,7 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
 
       {/* Navigation with section groupings */}
       <nav className="flex-1 overflow-y-auto p-1.5" aria-label={t("nav.mainNavigation", "Main navigation")}>
-        {NAV_SECTIONS.map((section, idx) => (
+        {visibleSections.map((section, idx) => (
           <div key={section.id} className={cn(idx > 0 && "mt-2.5")}>
             {/* Section label — clickable toggle (hidden when sidebar is collapsed) */}
             {!collapsed && (

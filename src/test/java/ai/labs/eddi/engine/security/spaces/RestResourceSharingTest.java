@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.security.spaces.notifications.WorkspaceNotifications;
 import ai.labs.eddi.engine.security.spaces.rest.RestResourceSharing;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -365,6 +367,15 @@ class RestResourceSharingTest {
         @DisplayName("ownership cannot be requested")
         void ownRefused() {
             assertThrows(BadRequestException.class, () -> withNotifications.requestAccess(RESOURCE_ID, "OWN", null));
+            verify(notifications, never()).requestAccess(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("F1: access to a non-configuration resource (a conversation) cannot be requested")
+        void nonConfigurationRefused() {
+            doThrow(new NotFoundException("not configuration")).when(service).requireShareable(RESOURCE_ID);
+
+            assertThrows(NotFoundException.class, () -> withNotifications.requestAccess(RESOURCE_ID, "VIEW", null));
             verify(notifications, never()).requestAccess(anyString(), any(), any());
         }
     }

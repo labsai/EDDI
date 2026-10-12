@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Command } from "cmdk";
+import { useMayOpenScreen } from "@/hooks/use-auth";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { getAgentDescriptors, parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
 import { agentKeys } from "@/lib/query-keys";
@@ -70,10 +71,16 @@ export function CommandPalette() {
 
   // The page list comes from the same registry as the sidebar and the
   // breadcrumb, so a page added there is searchable here without a second edit.
+  // Not offered when the user's role cannot open it (the backend would 403).
+  const mayOpen = useMayOpenScreen();
   const pages = useMemo(
-    () => ALL_PAGES.map((entry) => ({ ...entry, label: pageLabel(t, entry) })),
-    [t],
+    () =>
+      ALL_PAGES.filter((entry) => mayOpen(entry.path)).map((entry) => ({ ...entry, label: pageLabel(t, entry) })),
+    [t, mayOpen],
   );
+  // Recents are stored per browser, not per role: one opened under an admin
+  // session must not be offered to the next user who signs in without it.
+  const recentOpenPages = recentPages.filter((page) => mayOpen(page.path));
 
   // Agents are searched on the server. Filtering the first page of the list in the
   // browser — and only the first ten of that — meant any agent beyond it could
@@ -181,7 +188,7 @@ export function CommandPalette() {
         </Command.Empty>
 
         {/* Recent */}
-        {recentPages.length > 0 && (
+        {recentOpenPages.length > 0 && (
           <Command.Group
             heading={
               <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
@@ -190,7 +197,7 @@ export function CommandPalette() {
               </span>
             }
           >
-            {recentPages.map((page) => {
+            {recentOpenPages.map((page) => {
               const nav = pages.find((p) => p.path === page.path);
               const Icon = nav?.icon ?? Clock;
               return (

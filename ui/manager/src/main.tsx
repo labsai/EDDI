@@ -68,7 +68,11 @@ async function startApp() {
       const res = await fetch("/agentstore/agents/descriptors?limit=1", {
         signal: AbortSignal.timeout(1500),
       });
-      if (!res.ok) throw new Error("Backend not OK");
+      // 401/403 is an answer from EDDI with authentication on (the probe runs
+      // before sign-in): the backend is there. Reading it as "unreachable" put
+      // every authenticated dev session onto the mock API, where an editor saw
+      // the mocks' admin data instead of the server's refusals.
+      if (!res.ok && res.status !== 401 && res.status !== 403) throw new Error("Backend not OK");
       console.log("[EDDI] Backend detected — using real API");
     } catch {
       // Say which of the two reasons it was. Logging "backend not reachable"
