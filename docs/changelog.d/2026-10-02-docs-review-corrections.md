@@ -106,5 +106,10 @@ and seven validation messages in `ConnectionConfiguration` and
 
 ```decision-log
 | 2026-10-02 | The two "first agent" tutorials are folded into one page (creating-your-first-agent/README.md) and the sub-pages are deleted | Both repeated the same steps with different mistakes; one tested page is cheaper to keep correct than two. The anchors other pages link to are directory links and still resolve | Correcting both pages in place (two copies of the same steps to keep in sync) |
-| 2026-10-02 | Doc examples keep `labsai/eddi:6.4.0` / `EDDI_VERSION=6.4.0` although 6.5.0 is tagged | ReleaseVersionSourceTest ties every pointer to helm/eddi/Chart.yaml's appVersion, still 6.4.0 until the post-release PR lands; bump-version.py moves them all together | Writing 6.5.0 now (fails the build until the chart moves) |
+| 2026-10-02 | Doc examples keep `labsai/eddi:6.4.0` / `EDDI_VERSION=6.4.0` although 6.5.0 is tagged | ReleaseVersionSourceTest ties every pointer to helm/eddi/Chart.yaml's appVersion, still 6.4.0 until the post-release PR lands; bump-version.py moves them all together. Superseded on 2026-10-12: the post-release PR moved the chart to 6.5.0, so the examples were bumped with it when main was merged | Writing 6.5.0 now (fails the build until the chart moves) |
 ```
+
+**Added while merging `main`:** [`upgrading-from-6.5.md`](../upgrading-from-6.5.md) gains an **Authorization defaults**
+section listing what #942 (authorization hardening) changes for a running 6.5 deployment — the metrics role, API docs,
+`/v1`, triggers, owner-less conversations and unannotated JAX-RS resources. #942's description deferred these notes to
+whichever of #937 and #942 merged second, and neither added them.
