@@ -31,6 +31,23 @@ Behavior Rules examine the conversation memory (including parsed input, context 
 
 `Behavior Rules` are very flexible in structure to cover most use cases that you will come across. `Behavior Rules` are clustered in `Groups`. `Behavior Rules` are executed sequentially within each `Group`. By default, as soon as one `Behavior Rule` succeeds, all remaining `Behavior Rules` in this `Group` will be skipped. A `Group` may override this with the optional `executionStrategy` field (default `executeUntilFirstSuccess`): with `"executionStrategy": "executeAll"`, every rule in the group whose conditions match fires and contributes its actions. Any other value fails ruleset deserialization.
 
+### Rule-set options
+
+Two optional top-level fields of the rule set (each can also be set per workflow step, in the step's `config`, which then wins):
+
+| Field | Default | Effect |
+|---|---|---|
+| `appendActions` | `true` | The actions of the rules that fired are **added** to the actions already on this step (from an earlier workflow of the same agent, say). `false` replaces them — unless no rule fired, in which case the existing actions are kept. |
+| `expressionsAsActions` | `false` | Additionally emits the **name** of every expression the parser produced this turn as an action — `greeting(hello)` becomes the action `greeting`. Convenient for a dictionary-driven agent where each expression maps 1:1 to an action, but it means *whatever the parser recognises* becomes an action, so keep it off when an action triggers something that matters (an API call, a payment). Agents created by the setup wizard / MCP `setup_agent` no longer turn it on. |
+
+```json
+{
+  "appendActions": true,
+  "expressionsAsActions": false,
+  "behaviorGroups": [ ... ]
+}
+```
+
 ## **Groups**
 
 ```javascript
@@ -123,6 +140,8 @@ If the **user** would type "hello", and the parser resolves this as expressions 
 ```
 
 This `inputmatcher` `condition` will match any `expression` of type greeting, may that be "`greeting(hello)`", "`greeting(hi)`" or anything else. Of course, if you would want to match `greeting(hello)` explicitly, you would put "`greeting(hello)`" as value for the "`expressions`" field.
+
+The special value **`empty`** (`"expressions": "empty"`) matches a step whose input produced **no** expressions at all — the parser recognised nothing. It is the way to write a fallback ("I didn't understand that") rule.
 
 ### Context Matcher
 
@@ -294,6 +313,8 @@ Check if another `Behavior Rule` has met it's condition or not in the same `conv
 ### Action Matcher
 
 As `inputMatcher` doesn't look at expressions but it looks for actions instead, imagine a `Behavior Rule` has been triggered and you want to check if that action has been triggered before.
+
+Like the input matcher, the action matcher accepts the special value **`empty`** (`"actions": "empty"`), which matches a step on which no action was emitted.
 
 ```javascript
 (...)

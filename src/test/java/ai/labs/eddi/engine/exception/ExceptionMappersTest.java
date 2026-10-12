@@ -75,7 +75,8 @@ class ExceptionMappersTest {
             Response response = mapper.toResponse(ex);
 
             assertEquals(400, response.getStatus());
-            assertEquals("Invalid parameter", response.getEntity());
+            assertEquals(Map.of("error", "bad_request", "message", "Invalid parameter"), response.getEntity());
+            assertEquals("application/json", response.getMediaType().toString());
         }
     }
 

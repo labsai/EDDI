@@ -16,6 +16,8 @@ import java.nio.file.Path;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipException;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
@@ -162,7 +164,48 @@ public class ZipArchive implements IZipArchive {
         }
 
         String targetDirPath = targetDir.getCanonicalPath();
-        try (ZipInputStream zipIn = new ZipInputStream(new BufferedInputStream(zipFile))) {
+        // The raw archive is copied aside as it streams past, so its central directory
+        // can be checked once the entries are out (see requireCompleteArchive).
+        Path rawCopy = Files.createTempFile(targetDir.getCanonicalFile().getParentFile().toPath(), "upload-", ".zip");
+        try (OutputStream rawOut = new BufferedOutputStream(Files.newOutputStream(rawCopy));
+                InputStream teed = new TeeInputStream(zipFile, rawOut, maxRawArchiveBytes())) {
+            extractEntries(teed, targetDir, targetDirPath);
+            // Whatever ZipInputStream did not consume — the central directory and the
+            // end record — still has to reach the copy.
+            teed.transferTo(OutputStream.nullOutputStream());
+            rawOut.flush();
+            requireCompleteArchive(rawCopy);
+        } finally {
+            Files.deleteIfExists(rawCopy);
+        }
+    }
+
+    /**
+     * {@link ZipInputStream} reads local entry headers only, and treats end of
+     * input where the next header should be as a normal end. An upload cut off
+     * after its last complete entry — before the central directory — therefore
+     * unpacked "successfully" with entries missing, and the importer worked from an
+     * incomplete agent. {@link ZipFile} reads the central directory and the end
+     * record, so opening the copy is the completeness check.
+     */
+    private static void requireCompleteArchive(Path rawCopy) throws IOException {
+        try {
+            // Opening it is the check: ZipFile refuses an archive without a readable
+            // central directory and end record.
+            new ZipFile(rawCopy.toFile()).close();
+        } catch (ZipException e) {
+            throw new MalformedArchiveException("Zip archive is corrupt or truncated: " + e.getMessage());
+        }
+    }
+
+    private void extractEntries(InputStream archive, File targetDir, String targetDirPath) throws IOException {
+        try (ZipInputStream zipIn = new ZipInputStream(new BufferedInputStream(archive) {
+            @Override
+            public void close() {
+                // The tee owns the underlying stream: it still has to read what
+                // ZipInputStream leaves behind.
+            }
+        })) {
             ZipEntry entry;
             int entryCount = 0;
             // A running total across all entries, so many small entries cannot add up
@@ -174,11 +217,18 @@ public class ZipArchive implements IZipArchive {
                             + MAX_ENTRIES_PROPERTY + ")");
                 }
                 File destFile = new File(targetDir, entry.getName());
-                String destFilePath = destFile.getCanonicalPath();
+                String destFilePath;
+                try {
+                    destFilePath = destFile.getCanonicalPath();
+                } catch (IOException e) {
+                    // A name the file system cannot even resolve (a NUL byte, a reserved
+                    // device name on Windows) is the archive's fault, not this server's.
+                    throw new MalformedArchiveException("Zip entry has a name that is not a valid file path");
+                }
 
                 // Ensure the resolved destination path starts with the target directory path
                 if (!destFilePath.startsWith(targetDirPath + File.separator)) {
-                    throw new IOException("Zip entry escapes target directory");
+                    throw new MalformedArchiveException("Zip entry escapes target directory");
                 }
 
                 if (entry.isDirectory()) {
@@ -194,6 +244,10 @@ public class ZipArchive implements IZipArchive {
                 }
                 zipIn.closeEntry();
             }
+        } catch (ZipException | EOFException e) {
+            // Corrupt or truncated archive data (bad compression stream, CRC
+            // mismatch, cut-off upload). Never quotes the entry contents.
+            throw new MalformedArchiveException("Zip archive is corrupt or truncated: " + e.getMessage());
         }
     }
 
@@ -226,6 +280,97 @@ public class ZipArchive implements IZipArchive {
      */
     public static class ZipLimitExceededException extends IOException {
         public ZipLimitExceededException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Allowance per entry, on top of the inflated-bytes limit, for what an archive
+     * holds besides content: local headers, data descriptors, the central directory
+     * record and the entry name, twice. Generous — a real header set is well under
+     * 1 KiB.
+     */
+    static final long RAW_OVERHEAD_PER_ENTRY = 1024;
+
+    /**
+     * The most raw (compressed) bytes one archive may carry. Stored entries make an
+     * archive about as large as its content, so the content limit plus the
+     * per-entry overhead bounds every legitimate one. It is what bounds the raw
+     * copy, and the drain that follows the entries: without it, a stream that does
+     * not end — a caller that is not behind the HTTP body limit, a sync source —
+     * would be copied to disk for as long as it kept sending after its last entry.
+     */
+    long maxRawArchiveBytes() {
+        return maxTotalInflatedBytes + (long) maxEntries * RAW_OVERHEAD_PER_ENTRY;
+    }
+
+    /**
+     * Copies every byte read through it to a side stream, refusing to read past a
+     * ceiling.
+     */
+    private static final class TeeInputStream extends FilterInputStream {
+        private final OutputStream copy;
+        private final long maxBytes;
+        private long copied;
+
+        TeeInputStream(InputStream in, OutputStream copy, long maxBytes) {
+            super(in);
+            this.copy = copy;
+            this.maxBytes = maxBytes;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int b = super.read();
+            if (b != -1) {
+                count(1);
+                copy.write(b);
+            }
+            return b;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int n = super.read(buffer, offset, length);
+            if (n > 0) {
+                count(n);
+                copy.write(buffer, offset, n);
+            }
+            return n;
+        }
+
+        private void count(int n) throws ZipLimitExceededException {
+            copied += n;
+            if (copied > maxBytes) {
+                throw new ZipLimitExceededException("Zip archive is larger than " + maxBytes + " bytes (" + MAX_TOTAL_BYTES_PROPERTY
+                        + " plus " + RAW_OVERHEAD_PER_ENTRY + " bytes per allowed entry, " + MAX_ENTRIES_PROPERTY + ")");
+            }
+        }
+
+        @Override
+        public long skip(long n) throws IOException {
+            // Skipped bytes must reach the copy too.
+            byte[] discard = new byte[(int) Math.min(n, BUFFER_SIZE)];
+            long skipped = 0;
+            while (skipped < n) {
+                int r = read(discard, 0, (int) Math.min(discard.length, n - skipped));
+                if (r < 0) {
+                    break;
+                }
+                skipped += r;
+            }
+            return skipped;
+        }
+    }
+
+    /**
+     * An archive this deployment refuses because of its shape — an entry that would
+     * land outside the extraction directory (zip-slip), a name that is not a path,
+     * corrupt or truncated data — so a caller can answer 400 with the reason rather
+     * than 500. The refusal itself always worked; only the status was wrong.
+     */
+    public static class MalformedArchiveException extends IOException {
+        public MalformedArchiveException(String message) {
             super(message);
         }
     }

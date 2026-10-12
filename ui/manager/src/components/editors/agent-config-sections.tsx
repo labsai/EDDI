@@ -484,12 +484,14 @@ function AttrRow({
         value={attrValue}
         onChange={(e) => onCommit(e.target.value)}
         disabled={disabled}
+        data-testid={`attribute-value-${attrKey}`}
         className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
       <button
         type="button"
         onClick={onRemove}
         disabled={disabled}
+        data-testid={`attribute-remove-${attrKey}`}
         className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
       >
         <X className="h-3 w-3" />
@@ -587,6 +589,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                     <button
                       type="button"
                       onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+                      data-testid={`capability-attributes-toggle-${i}`}
                       className="rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-medium text-violet-600 dark:text-violet-400 hover:bg-violet-500/20 transition-colors"
                     >
                       {Object.keys(cap.attributes).length} {t("agentDetail.attrs", "attrs")}

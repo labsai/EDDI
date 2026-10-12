@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
@@ -311,6 +312,53 @@ describe("CapabilitiesSection", () => {
     // Capability entry is shown with attribute
     expect(screen.getByTestId("capability-entry-0")).toBeInTheDocument();
     expect(screen.getByText("translation")).toBeInTheDocument();
+  });
+
+  describe("attribute edits (review: never lose an edit, never resurrect a removed key)", () => {
+    const withAttrs = (attributes: Record<string, string>): Agent => ({
+      ...baseAgent,
+      capabilities: [{ skill: "translation", confidence: "high", attributes }],
+    });
+    const sentAttributes = () =>
+      mockOnChange.mock.calls.map(([arg]) => (arg as Agent).capabilities?.[0]?.attributes);
+
+    /** Holds the draft the way the page does, so each edit renders back in. */
+    function Harness({ initial }: { initial: Agent }) {
+      const [agent, setAgent] = useState(initial);
+      return (
+        <CapabilitiesSection
+          agent={agent}
+          onChange={(next) => {
+            mockOnChange(next);
+            setAgent(next);
+          }}
+        />
+      );
+    }
+
+    beforeEach(() => vi.clearAllMocks());
+
+    it("keeps an edit when the editor is collapsed right after typing", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<Harness initial={withAttrs({ lang: "en" })} />);
+      await user.click(screen.getByTestId("capability-attributes-toggle-0"));
+      const input = screen.getByTestId("attribute-value-lang");
+      await user.clear(input);
+      await user.type(input, "de");
+      await user.click(screen.getByTestId("capability-attributes-toggle-0"));
+      const sent = sentAttributes();
+      expect(sent[sent.length - 1]).toEqual({ lang: "de" });
+    });
+
+    it("does not write back an attribute removed right after it was edited", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<Harness initial={withAttrs({ lang: "en", tone: "dry" })} />);
+      await user.click(screen.getByTestId("capability-attributes-toggle-0"));
+      await user.type(screen.getByTestId("attribute-value-lang"), "x");
+      await user.click(screen.getByTestId("attribute-remove-lang"));
+      const sent = sentAttributes();
+      expect(sent[sent.length - 1]).toEqual({ tone: "dry" });
+    });
   });
 });
 

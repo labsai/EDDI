@@ -251,7 +251,7 @@ class AgentOrchestratorTest {
 
     @Test
     void activateDiscoveredTools_validJson_activatesMatchingSpecs() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = ToolLoopRunner.class.getDeclaredMethod(
                 "activateDiscoveredTools", String.class, List.class, List.class);
         method.setAccessible(true);
 
@@ -278,7 +278,7 @@ class AgentOrchestratorTest {
 
     @Test
     void activateDiscoveredTools_invalidJson_handledGracefully() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = ToolLoopRunner.class.getDeclaredMethod(
                 "activateDiscoveredTools", String.class, List.class, List.class);
         method.setAccessible(true);
 
@@ -292,7 +292,7 @@ class AgentOrchestratorTest {
 
     @Test
     void activateDiscoveredTools_toolsArrayMissing_noActivation() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = ToolLoopRunner.class.getDeclaredMethod(
                 "activateDiscoveredTools", String.class, List.class, List.class);
         method.setAccessible(true);
 
@@ -311,7 +311,7 @@ class AgentOrchestratorTest {
 
     @Test
     void activateDiscoveredTools_alreadyActive_noDuplicates() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = ToolLoopRunner.class.getDeclaredMethod(
                 "activateDiscoveredTools", String.class, List.class, List.class);
         method.setAccessible(true);
 
@@ -666,7 +666,7 @@ class AgentOrchestratorTest {
 
     @Test
     void safeTemplateMerge_reservedKeysBlocked() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = HttpCallToolsProvider.class.getDeclaredMethod(
                 "safeTemplateMerge", Map.class, Map.class);
         method.setAccessible(true);
 
@@ -699,7 +699,7 @@ class AgentOrchestratorTest {
 
     @Test
     void safeTemplateMerge_normalKeysMerged() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = HttpCallToolsProvider.class.getDeclaredMethod(
                 "safeTemplateMerge", Map.class, Map.class);
         method.setAccessible(true);
 
@@ -719,7 +719,7 @@ class AgentOrchestratorTest {
 
     @Test
     void safeTemplateMerge_mixedReservedAndNormal_onlyNormalMerged() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = HttpCallToolsProvider.class.getDeclaredMethod(
                 "safeTemplateMerge", Map.class, Map.class);
         method.setAccessible(true);
 
@@ -837,7 +837,7 @@ class AgentOrchestratorTest {
 
     @Test
     void activateDiscoveredTools_toolsArrayNotArray_noActivation() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = ToolLoopRunner.class.getDeclaredMethod(
                 "activateDiscoveredTools", String.class, List.class, List.class);
         method.setAccessible(true);
 
@@ -856,7 +856,7 @@ class AgentOrchestratorTest {
 
     @Test
     void activateDiscoveredTools_toolEntryWithoutName_skipped() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = ToolLoopRunner.class.getDeclaredMethod(
                 "activateDiscoveredTools", String.class, List.class, List.class);
         method.setAccessible(true);
 
@@ -875,7 +875,7 @@ class AgentOrchestratorTest {
 
     @Test
     void activateDiscoveredTools_noMatchingBuiltIn_noActivation() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = ToolLoopRunner.class.getDeclaredMethod(
                 "activateDiscoveredTools", String.class, List.class, List.class);
         method.setAccessible(true);
 
@@ -894,7 +894,7 @@ class AgentOrchestratorTest {
 
     @Test
     void safeTemplateMerge_emptyArgs_noChange() throws Exception {
-        Method method = AgentOrchestrator.class.getDeclaredMethod(
+        Method method = HttpCallToolsProvider.class.getDeclaredMethod(
                 "safeTemplateMerge", Map.class, Map.class);
         method.setAccessible(true);
 

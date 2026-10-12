@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
+import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
@@ -434,9 +435,33 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Maximum number of tool-calling loop iterations before forcing a final answer
-         * (default 10).
+         * (default 10, engine ceiling 100 — a larger value is clamped and logged).
+         * <p>
+         * Bounds <em>rounds</em> only: one model response can request any number of
+         * calls. {@link #maxToolCallsPerIteration} and {@link #maxToolCallsPerTurn}
+         * bound the calls themselves.
          */
         private Integer maxToolIterations;
+
+        /**
+         * Most tool calls executed from a single model response (default 20). Calls
+         * beyond the cap are not executed: each is answered with a {@code NOT_EXECUTED}
+         * result telling the model the limit was reached, so the provider's
+         * one-result-per-call rule still holds and the model can answer with what it
+         * has. {@code -1} (or {@code 0}) removes the cap.
+         * <p>
+         * Without it, {@code maxToolIterations} was the only bound and a model that
+         * answered with fifty parallel calls in one response had all fifty executed.
+         */
+        private Integer maxToolCallsPerIteration;
+
+        /**
+         * Most tool calls executed across a whole turn — every iteration of the tool
+         * loop, including the iterations a HITL resume continues (default 100). Refused
+         * calls are answered as for {@link #maxToolCallsPerIteration}. {@code -1} (or
+         * {@code 0}) removes the cap.
+         */
+        private Integer maxToolCallsPerTurn;
 
         /**
          * Aggregate token ceiling for the <em>in-turn tool-call context</em>: every
@@ -487,6 +512,19 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.1.0
          */
         private String jsonResponseFormat;
+
+        /**
+         * Fields of the parsed {@code convertToObject} reply that must hold a non-blank
+         * string — top-level ({@code htmlResponseText}) or dotted
+         * ({@code answer.text}). A missing, non-string or blank ({@code ""}) value is a
+         * shape violation (outcome {@code schema_mismatch}), the shortcut for "an empty
+         * bubble is not an answer" without writing a {@code responseSchema}. Null or
+         * empty (default) checks nothing; it is independent of
+         * {@code responseValidation.enabled}.
+         *
+         * @since 6.6.0
+         */
+        private List<String> nonBlankFields;
 
         // === Multi-Model Cascade ===
 
@@ -543,6 +581,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.0.0
          */
         private ResponseValidation responseValidation;
+
+        /**
+         * What the task does when the model phase fails outright (provider error after
+         * its retries and cascade, an unusable model configuration, a validation policy
+         * of {@code "error"}). Absent means {@code {"action": "error"}}: the failure
+         * ends the turn, as it always did.
+         */
+        private OnError onError;
 
         /**
          * Overall wall-clock backstop, in seconds, for a streaming chat completion.
@@ -967,6 +1013,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.maxToolIterations = maxToolIterations;
         }
 
+        public Integer getMaxToolCallsPerIteration() {
+            return maxToolCallsPerIteration;
+        }
+
+        public void setMaxToolCallsPerIteration(Integer maxToolCallsPerIteration) {
+            this.maxToolCallsPerIteration = maxToolCallsPerIteration;
+        }
+
+        public Integer getMaxToolCallsPerTurn() {
+            return maxToolCallsPerTurn;
+        }
+
+        public void setMaxToolCallsPerTurn(Integer maxToolCallsPerTurn) {
+            this.maxToolCallsPerTurn = maxToolCallsPerTurn;
+        }
+
         public Integer getMaxToolContextTokens() {
             return maxToolContextTokens;
         }
@@ -981,6 +1043,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setJsonResponseFormat(String jsonResponseFormat) {
             this.jsonResponseFormat = jsonResponseFormat;
+        }
+
+        public List<String> getNonBlankFields() {
+            return nonBlankFields;
+        }
+
+        public void setNonBlankFields(List<String> nonBlankFields) {
+            this.nonBlankFields = nonBlankFields != null ? new ArrayList<>(nonBlankFields) : null;
         }
 
         public ModelCascadeConfig getModelCascade() {
@@ -1037,6 +1107,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setResponseValidation(ResponseValidation responseValidation) {
             this.responseValidation = responseValidation;
+        }
+
+        public OnError getOnError() {
+            return onError;
+        }
+
+        public void setOnError(OnError onError) {
+            this.onError = onError;
         }
 
         public Integer getStreamingTimeoutSeconds() {
@@ -1124,6 +1202,65 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private List<String> refusalPatterns = new ArrayList<>(DEFAULT_REFUSAL_PATTERNS);
 
+        /**
+         * The fixed sentence served when no {@link #fallbackMessage} is configured —
+         * what the {@code "fallback"} action always substituted.
+         */
+        public static final String DEFAULT_FALLBACK_MESSAGE = "I'm sorry, I wasn't able to generate a complete response. Please try again.";
+
+        /**
+         * The text served when a {@code "fallback"} action fires or the task's
+         * {@link OnError} is {@code fallback}. A Qute template rendered with the task's
+         * template data — it is author-written config, so {@code {#if
+         * properties.language == 'de'}}, {@code {snippets.fallback_text}} and
+         * {@code {properties.name}} all work. Null or blank means
+         * {@link #DEFAULT_FALLBACK_MESSAGE}; so does a template that fails to render.
+         * The rendered text is shown and stored, but never fed back to the model (see
+         * the {@code llm:fallback:<taskId>} step flag).
+         */
+        private String fallbackMessage;
+
+        /**
+         * Under {@code convertToObject}, the field the fallback is wrapped in:
+         * {@code {"<fallbackField>": "<message>"}} is stored under the task's response
+         * object name, so a {@code postResponse} output template that reads
+         * {@code {properties.aiOutputObject.htmlResponseText}} renders the fallback
+         * unchanged. Null leaves the fallback a plain string, as before.
+         */
+        private String fallbackField;
+
+        /**
+         * Quick replies added to the step next to the fallback text, e.g.
+         * {@code [{"value":"Try again","expressions":"retry_last"}]}. Their
+         * {@code value} and {@code expressions} are templates like
+         * {@link #fallbackMessage}.
+         */
+        private List<QuickReply> fallbackQuickReplies;
+
+        public String getFallbackMessage() {
+            return fallbackMessage;
+        }
+
+        public void setFallbackMessage(String fallbackMessage) {
+            this.fallbackMessage = fallbackMessage;
+        }
+
+        public String getFallbackField() {
+            return fallbackField;
+        }
+
+        public void setFallbackField(String fallbackField) {
+            this.fallbackField = fallbackField;
+        }
+
+        public List<QuickReply> getFallbackQuickReplies() {
+            return fallbackQuickReplies;
+        }
+
+        public void setFallbackQuickReplies(List<QuickReply> fallbackQuickReplies) {
+            this.fallbackQuickReplies = fallbackQuickReplies;
+        }
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -1180,6 +1317,34 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             // An explicit empty list means "do not detect refusals" and must survive;
             // only null falls back to the defaults.
             this.refusalPatterns = refusalPatterns != null ? new ArrayList<>(refusalPatterns) : new ArrayList<>(DEFAULT_REFUSAL_PATTERNS);
+        }
+    }
+
+    /**
+     * Task-level failure policy. {@code "error"} (the default) lets a failed model
+     * phase fail the turn; {@code "fallback"} serves the configured fallback
+     * ({@link ResponseValidation#getFallbackMessage()} and friends, or their
+     * defaults) instead, so the turn completes and the conversation stays
+     * {@code READY}. The failure is recorded under {@code llm:error:<taskId>}.
+     */
+    public static class OnError {
+        public static final String ACTION_ERROR = "error";
+        public static final String ACTION_FALLBACK = "fallback";
+
+        private String action = ACTION_ERROR;
+
+        public String getAction() {
+            return action;
+        }
+
+        public void setAction(String action) {
+            this.action = action;
+        }
+
+        /** True only for an explicit {@code "fallback"}; anything else is today's. */
+        @JsonIgnore
+        public boolean isFallback() {
+            return ACTION_FALLBACK.equalsIgnoreCase(action);
         }
     }
 
