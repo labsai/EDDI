@@ -496,6 +496,8 @@ describe("UserMemoryPage", () => {
     const user = await enterUserIdAndLoad();
 
     await user.click(screen.getByTestId("delete-memory-mem-1"));
+    // A single entry is confirmed first, like "Delete All".
+    await user.click(await screen.findByTestId("alert-dialog-confirm"));
 
     await waitFor(() => {
       expect(deleteCalled).toBe(true);
@@ -624,6 +626,41 @@ describe("UserMemoryPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("No memory entries found")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Single-entry delete is confirmed; the row toggle is a real button ──
+
+  describe("single-entry delete and the row toggle", () => {
+    // Regression: the trash icon deleted the entry on the spot.
+    it("asks before deleting one entry, and deletes only on confirm", async () => {
+      const deleted: string[] = [];
+      server.use(
+        http.delete("*/usermemorystore/memories/entry/:entryId", ({ params }) => {
+          deleted.push(String(params.entryId));
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+      const user = await enterUserIdAndLoad();
+
+      await user.click(screen.getByTestId("delete-memory-mem-1"));
+      expect(await screen.findByTestId("alert-dialog-confirm")).toBeInTheDocument();
+      expect(deleted).toEqual([]);
+
+      await user.click(screen.getByTestId("alert-dialog-confirm"));
+      await waitFor(() => expect(deleted).toEqual(["mem-1"]));
+    });
+
+    // Regression: the expandable row was a clickable div — no keyboard, no state.
+    it("expands from the keyboard and reports its state", async () => {
+      const user = await enterUserIdAndLoad();
+      const toggle = screen.getByTestId("memory-expand-toggle-mem-1");
+
+      expect(toggle.tagName).toBe("BUTTON");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      toggle.focus();
+      await user.keyboard("{Enter}");
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
     });
   });
 });

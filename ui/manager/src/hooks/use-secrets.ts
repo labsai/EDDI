@@ -162,11 +162,14 @@ export function useDeleteSecret() {
 }
 
 /** Vault health check. */
-export function useVaultHealth() {
+export function useVaultHealth(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: secretKeys.health,
     queryFn: getVaultHealth,
     refetchInterval: 30_000, // poll every 30s
+    // Callers pass false for a user whose role cannot read it (eddi-admin only)
+    // rather than polling a 403 every 30 seconds.
+    enabled: options.enabled ?? true,
   });
 }
 

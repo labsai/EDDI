@@ -49,7 +49,7 @@ import {
   parseResourceUri,
 } from "@/lib/api/agents";
 import { useDebugStore } from "@/hooks/use-debug-events";
-import { isApiError } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { toast } from "sonner";
 
 /**
@@ -452,11 +452,24 @@ export function useDeployedAgents() {
 export function useStartConversation() {
   const store = useChatStore;
   return useMutation({
-    mutationFn: async ({ agentId, environment }: { agentId: string; environment: Environment }) => {
+    mutationFn: async ({
+      agentId,
+      environment,
+      epoch: requestedEpoch,
+    }: {
+      agentId: string;
+      environment: Environment;
+      /**
+       * The transcript generation this start was requested in, when a caller
+       * did async work before calling it (the resume fallback). Defaults to
+       * the current one.
+       */
+      epoch?: number;
+    }) => {
       // The store may move on while this runs (another agent picked, another
       // conversation opened). The conversation is still created, but it must
       // not be installed over whatever the user is looking at by then.
-      const epoch = store.getState().conversationEpoch;
+      const epoch = requestedEpoch ?? store.getState().conversationEpoch;
       const isCurrent = () => store.getState().conversationEpoch === epoch;
 
       const conversationId = await startConversation(environment, agentId);
@@ -966,20 +979,33 @@ export function useSendMessage() {
         }
         return;
       }
+      // The send was consumed (or its fate is unknown), so the user's message
+      // stays. The placeholder bubble this send opened does not: an empty one
+      // is dropped and a partly streamed one is closed, or the typing indicator
+      // would keep running under the error.
+      pendingUserMessageIdRef.current = null;
+      pendingInputFieldRef.current = null;
       // Surface the error as a visible agent message so it's not silently
       // swallowed (the user would otherwise see processing start then stop
       // with no feedback).
-      const errorMsg =
-        error && typeof error === "object" && "message" in error
-          ? String((error as { message: string }).message)
-          : String(error);
-      state.addMessage({
-        id: `agent-error-${Date.now()}`,
-        role: "agent",
-        content: `\n\n⚠️ Error: ${errorMsg}`,
-        timestamp: Date.now(),
+      store.setState((s) => {
+        const msgs = [...s.messages];
+        const last = msgs[msgs.length - 1];
+        if (last?.role === "agent" && last.isStreaming) {
+          if (!last.content.trim()) msgs.pop();
+          else msgs[msgs.length - 1] = { ...last, isStreaming: false };
+        }
+        msgs.push({
+          id: `agent-error-${Date.now()}`,
+          role: "agent",
+          content: `⚠️ ${t("chat.errorWithReason", "Error: {{reason}}", { reason: getErrorMessage(error) })}`,
+          timestamp: Date.now(),
+          isError: true,
+        });
+        return { messages: msgs };
       });
       state.setProcessing(false);
+      state.setThinking(false);
       state.setQuickReplies([]);
     },
   });
@@ -1172,7 +1198,15 @@ function handleSSEEvent(
       // discarded: an unrecognised code is still worth showing, and its text is
       // the only thing that explains it.
       message = translateStreamError(code, t) ?? message;
-      store.getState().appendToLastAgentMessage(`\n\n⚠️ Error: ${message}`);
+      store.getState().appendToLastAgentMessage(
+        `\n\n⚠️ ${t("chat.errorWithReason", "Error: {{reason}}", { reason: message })}`,
+      );
+      store.setState((s) => {
+        const msgs = [...s.messages];
+        const last = msgs[msgs.length - 1];
+        if (last?.role === "agent") msgs[msgs.length - 1] = { ...last, isError: true };
+        return { messages: msgs };
+      });
       store.getState().finishStreaming();
       debug.finalizeTurn();
       return true;
@@ -1681,12 +1715,18 @@ export function useResumeOrStartConversation() {
           // The descriptor pointed at something we cannot read (deleted,
           // migrated, permissions) — start clean instead of failing.
         }
+        // The failed read was a second round trip. If the user picked another
+        // agent (or opened another conversation) while it ran, a fallback start
+        // now would create a conversation with THIS agent — the one they left —
+        // and install it under the one they moved to.
+        if (useChatStore.getState().conversationEpoch !== epoch) return null;
       }
 
       // Environment-explicit: this used to inherit a hardcoded "production"
       // that was then discarded on the wire, so an agent live only in `test` had
-      // no reachable conversation at all.
-      return startConversationMutation.mutateAsync({ agentId, environment });
+      // no reachable conversation at all. Bound to the epoch this open was
+      // requested in, not whatever is current when the start begins.
+      return startConversationMutation.mutateAsync({ agentId, environment, epoch });
     },
   });
 }
@@ -1755,16 +1795,27 @@ export function useRedoConversation() {
   return useMutation({ mutationFn: () => moveStepAndReload("redo") });
 }
 
-/** End the current conversation. */
+/**
+ * End a conversation — the one passed, which callers capture when the user
+ * clicks, or else the current one.
+ *
+ * The local transcript is cleared only when the end succeeded AND that
+ * conversation is still the one on screen: the request is a round trip, and
+ * the user may have opened another conversation meanwhile, which must not be
+ * wiped for the one they left. A failure rejects, so the caller can say so.
+ */
 export function useEndConversation() {
   const store = useChatStore;
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      const conversationId = store.getState().conversationId;
+    mutationFn: async (requestedId?: string | null) => {
+      const conversationId = requestedId ?? store.getState().conversationId;
       if (!conversationId) throw new Error("No active conversation");
       await endConversationApi(conversationId);
-      store.getState().clearMessages();
+      if (store.getState().conversationId === conversationId) {
+        store.getState().clearMessages();
+      }
+      return conversationId;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [...CHAT_KEY, "history"] });

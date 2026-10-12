@@ -9,8 +9,8 @@ import ai.labs.eddi.configs.properties.UserMemoryWriteRules;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.ForbiddenException;
@@ -48,14 +48,14 @@ public class McpMemoryTools {
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
-    private final ResourceAccessGuard resourceAccessGuard;
+    private final GroupMemoryAccessGuard groupMemoryAccessGuard;
     private final boolean authEnabled;
 
     @Inject
     public McpMemoryTools(IUserMemoryStore userMemoryStore, IJsonSerialization jsonSerialization, SecurityIdentity identity,
-            OwnershipValidator ownershipValidator, ResourceAccessGuard resourceAccessGuard,
+            OwnershipValidator ownershipValidator, GroupMemoryAccessGuard groupMemoryAccessGuard,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
-        this.resourceAccessGuard = resourceAccessGuard;
+        this.groupMemoryAccessGuard = groupMemoryAccessGuard;
         this.userMemoryStore = userMemoryStore;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
@@ -110,7 +110,7 @@ public class McpMemoryTools {
                     : List.of();
             try {
                 // Same rule as REST: naming a group must not unlock its team memories.
-                resourceAccessGuard.requireUseAccessToEach(groups, "group");
+                groupMemoryAccessGuard.requireEntitledToEach(groups);
             } catch (ForbiddenException e) {
                 return errorJson("Access denied: you do not have access to one of the named groups");
             }
@@ -232,7 +232,13 @@ public class McpMemoryTools {
             return errorJson("entryId is required");
         try {
             var existing = userMemoryStore.findEntryById(entryId);
-            if (existing.isPresent() && IUserMemoryStore.isReservedKey(existing.get().key())) {
+            if (existing.isEmpty()) {
+                // As the REST endpoint answers 404: reporting "deleted" for an id that
+                // names nothing (a typo, an id from the other datastore) told the caller
+                // a deletion had happened.
+                return errorJson("Memory entry not found: " + entryId);
+            }
+            if (IUserMemoryStore.isReservedKey(existing.get().key())) {
                 // The Art. 18 flag is lifted through the GDPR admin unrestrict endpoint, which
                 // audits it.
                 return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(existing.get().key()).getMessage());
