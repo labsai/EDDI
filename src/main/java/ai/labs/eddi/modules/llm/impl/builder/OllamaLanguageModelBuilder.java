@@ -108,6 +108,9 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
             builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
         }
 
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
+
         return builder.build();
     }
 

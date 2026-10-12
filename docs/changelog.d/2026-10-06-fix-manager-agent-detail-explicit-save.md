@@ -1,4 +1,4 @@
-## 🐛 fix(manager): agent detail saves on Save, not on every edit — and unsaved edits are guarded app-wide (2026-10-06)
+## 🐛 fix(manager): agent detail saves on Save, not on every edit — with review, discard and Save & leave (2026-10-06)
 
 **Repo:** EDDI (`fix/manager-agent-detail-explicit-save`)
 
@@ -29,16 +29,16 @@ resource editors:
 - The debounce timers and the per-agent save queue that existed only to make
   auto-save survivable are gone (`use-agent-section-save.ts` removed).
 
-**Leaving with unsaved edits is now asked about everywhere.** The app uses
-`<BrowserRouter>`, so React Router's `useBlocker` is unavailable and
-`useUnsavedChangesGuard` only covered tab close/reload. A new
-`UnsavedChangesNavigationGuard` (mounted once in `app.tsx`) holds in-app link
-clicks (sidebar, breadcrumbs, back links, cards), the browser back/forward
-buttons and command-palette jumps (`requestNavigation`) while any registered
-page is dirty, and asks **Keep editing / Discard changes / Save & leave**. Every
-existing caller — resource editors, workflow editor, connections, the Workforce
-agent sheet — gets it without change; agent detail and the workflow editor pass
-`onSave` to offer Save & leave.
+**Leaving with unsaved edits.** Agent detail uses the data-router blocker that
+#939 introduced (`useUnsavedChangesGuard` + `UnsavedChangesPrompt`), and the
+prompt gains an optional `onSave`: pages that can save from it — agent detail
+and the workflow editor — offer **Keep editing / Discard changes / Save &
+leave**, and the held navigation continues only once the save landed. Pages
+without `onSave` keep the two-button prompt. (This branch first carried its own
+app-wide guard, written while the app was still on `<BrowserRouter>`; it was
+dropped in favour of #939's when that merged.) While a placeholder document from
+the previous version is on screen (#939's `configPending`), the draft takes no
+edits.
 
 **Also:** the "compat. gen 1" badge left the monospace id line, where it
 inherited the code font and duplicated the version chip; it now sits beside the
@@ -54,19 +54,16 @@ against the dialog border; it now has the `p-5` every other dialog body has.
 
 - One draft of the whole document rather than per-section drafts: one Save, one
   version, one diff, and the same shape as the workflow editor.
-- Back/forward are held by a `popstate` listener installed at module load
-  (before the router's own) that undoes the step and replays it on Discard,
-  using the `idx` React Router keeps in `history.state`.
+- Save & leave lives on the shared `UnsavedChangesPrompt`, not on the agent
+  page, so any editor with a save that resolves to success can opt in.
 
 **Files:** [`agent-detail.tsx`](../../ui/manager/src/pages/agent-detail.tsx),
 [`agent-config-sections.tsx`](../../ui/manager/src/components/editors/agent-config-sections.tsx),
 [`agent-draft.ts`](../../ui/manager/src/lib/agent-draft.ts),
-[`unsaved-changes-registry.ts`](../../ui/manager/src/lib/unsaved-changes-registry.ts),
-[`unsaved-changes-navigation-guard.tsx`](../../ui/manager/src/components/layout/unsaved-changes-navigation-guard.tsx),
-[`use-unsaved-changes-guard.ts`](../../ui/manager/src/hooks/use-unsaved-changes-guard.ts),
+[`unsaved-changes-dialog.tsx`](../../ui/manager/src/components/ui/unsaved-changes-dialog.tsx),
 [`edit-grant-dialog.tsx`](../../ui/manager/src/components/secrets/edit-grant-dialog.tsx),
 [`compatibility-generation-badge.tsx`](../../ui/manager/src/components/agents/compatibility-generation-badge.tsx)
 
 ```decision-log
-| 2026-10-06 | Agent detail edits a draft saved by an explicit Save; in-app navigation away from unsaved edits is held app-wide | Every inline edit created an agent version and could not be undone; leaving a page silently dropped edits | Keeping auto-save with an undo stack; migrating to the data router for `useBlocker` (larger change than the guard) |
+| 2026-10-06 | Agent detail edits a draft saved by an explicit Save, with Save & leave on the shared unsaved-changes prompt | Every inline edit created an agent version and could not be undone | Keeping auto-save with an undo stack; a second, app-wide navigation guard beside #939's data-router blocker |
 ```

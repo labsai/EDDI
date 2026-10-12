@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 
@@ -159,5 +159,57 @@ export function UnsavedChangesDialog({
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * The in-app navigation prompt for a page guarded by `useUnsavedChangesGuard`.
+ * Renders nothing until a navigation away from the dirty page is held.
+ */
+export function UnsavedChangesPrompt({
+  guard,
+  onSave,
+}: {
+  guard: { blocked: boolean; proceed: () => void; stay: () => void };
+  /**
+   * Offers "Save & leave". Resolve `true` once saved: the held navigation then
+   * continues (the blocker also lets it through by itself once the page is
+   * clean). `false` keeps the user on the page — the save reports its own error.
+   */
+  onSave?: () => Promise<boolean>;
+}) {
+  const { t } = useTranslation();
+  const [saving, setSaving] = useState(false);
+
+  async function saveAndLeave() {
+    if (!onSave) return;
+    setSaving(true);
+    try {
+      if (await onSave()) guard.proceed();
+    } catch {
+      // The save reports its own failure; stay so nothing is lost.
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!onSave) {
+    return <UnsavedChangesDialog open={guard.blocked} onConfirm={guard.proceed} onCancel={guard.stay} />;
+  }
+  return (
+    <UnsavedChangesDialog
+      open={guard.blocked}
+      title={t("editor.leaveTitle", "Leave with unsaved changes?")}
+      message={t(
+        "editor.leaveMessage",
+        "You have changes on this page that are not saved yet. Save them, discard them, or keep editing.",
+      )}
+      cancelLabel={t("editor.keepEditing", "Keep editing")}
+      confirmLabel={t("editor.discardChanges", "Discard changes")}
+      onConfirm={guard.proceed}
+      onCancel={guard.stay}
+      onSave={() => void saveAndLeave()}
+      isSaving={saving}
+    />
   );
 }

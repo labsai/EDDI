@@ -1,8 +1,8 @@
 import { useEffect, useCallback } from "react";
-import { requestNavigation } from "@/lib/unsaved-changes-registry";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Command } from "cmdk";
+import { useMayOpenScreen } from "@/hooks/use-auth";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 import { useAgentDescriptors } from "@/hooks/use-agents";
 import { parseResourceUri } from "@/lib/api/agents";
@@ -43,7 +43,8 @@ export function CommandPalette() {
   const { isOpen, close, toggle, recentPages, addRecentPage } = useCommandPalette();
   const { data: agents } = useAgentDescriptors();
 
-  const PAGES: NavItem[] = [
+  const mayOpen = useMayOpenScreen();
+  const ALL_PAGES: NavItem[] = [
     { path: "/manage", label: t("nav.dashboard", "Dashboard"), icon: LayoutDashboard, section: "pages" },
     { path: "/manage/agents", label: t("nav.agents", "Agents"), icon: Bot, section: "pages" },
     { path: "/manage/workflows", label: t("nav.packages", "Workflows"), icon: Workflow, section: "pages" },
@@ -58,6 +59,11 @@ export function CommandPalette() {
     { path: "/manage/connections", label: t("nav.connections", "Connections"), icon: Plug, section: "pages" },
     { path: "/manage/linked-accounts", label: t("pages.linkedAccounts.title", "Linked accounts"), icon: Link2, section: "pages" },
   ];
+  // Not offered when the user's role cannot open it (the backend would 403).
+  const PAGES = ALL_PAGES.filter((page) => mayOpen(page.path));
+  // Recents are stored per browser, not per role: one opened under an admin
+  // session must not be offered to the next user who signs in without it.
+  const recentOpenPages = recentPages.filter((page) => mayOpen(page.path));
 
   // Global Ctrl+K / ⌘+K handler
   useEffect(() => {
@@ -78,9 +84,7 @@ export function CommandPalette() {
     (path: string, label: string) => {
       close();
       addRecentPage(path, label);
-      // Through the unsaved-changes guard — a palette jump leaves the page
-      // just as a link does, but no link click is there to intercept.
-      requestNavigation(() => navigate(path));
+      navigate(path);
     },
     [close, addRecentPage, navigate],
   );
@@ -126,7 +130,7 @@ export function CommandPalette() {
             </Command.Empty>
 
             {/* Recent */}
-            {recentPages.length > 0 && (
+            {recentOpenPages.length > 0 && (
               <Command.Group
                 heading={
                   <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
@@ -135,7 +139,7 @@ export function CommandPalette() {
                   </span>
                 }
               >
-                {recentPages.map((page) => {
+                {recentOpenPages.map((page) => {
                   const nav = PAGES.find((p) => p.path === page.path);
                   const Icon = nav?.icon ?? Clock;
                   return (

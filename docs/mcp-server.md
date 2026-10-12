@@ -24,6 +24,17 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 ## Available Tools (84)
 
+### Argument contract
+
+Every tool publishes its arguments in `tools/list`, and the server enforces that schema **before** the tool runs: an argument listed under `required` that is omitted — or sent as `null` — is refused with `Missing required argument: <name>` and the call never reaches EDDI.
+
+- **Only what a tool cannot work without is required** — identifiers, the message, a configuration body, a verdict. Everything a description calls *optional*, *default: …* or *deprecated* may be left out; 122 of the 244 arguments are required, and `list_agents {}` is a complete call. (Up to 6.5.0 every argument was required in 75 of the 84 tools: quarkus-mcp-server makes a `@ToolArg` required unless it says otherwise.)
+- **Defaults are real.** Where a default is a literal it is published as the JSON-schema `default` (e.g. `environment` → `production`, `limit` → `20`) and applied when the argument is absent. A `version` that defaults to **latest** resolves the current version (`get_agent`, `read_workflow`, `read_resource`, `list_agent_resources`, `read_channel_integration`, `read_group`); `list_conversations` without `agentVersion` lists every version.
+- **Environment** is optional everywhere and means `production` when omitted; `talk_to_agent` and `read_conversation` ignore it (the conversation keeps its own).
+- **Failures are tool errors.** A refused or failed call returns `isError: true` with a JSON body `{"error": "...", "errorCode": "..."}` — "Access denied", "not found", validation failures, and a missing role (`errorCode: FORBIDDEN`) alike. A successful call never carries `isError`. Results that report an outcome rather than a refusal stay ordinary results with an `error` *field* among others: `deploy_agent` when the deployment ends in `ERROR` (`"action": "deploy_failed"`), and `fire_schedule_now` when the fire itself failed. An unknown value is refused, not substituted: `create_group` with an unknown `style` answers `BAD_REQUEST` and lists the valid styles. Server-side failures name what failed (`errorCode: INTERNAL`) and keep the exception text in the server log.
+
+`McpToolContractTest` holds every tool to this contract (the tool count, no optional-described argument required, every published default matching its description) and `McpRoleTierParityTest` measures the [role tiers](#role-mapping) tool by tool.
+
 ### Conversation Tools (11)
 
 | Tool                    | Description                                                                                                                 |
@@ -72,7 +83,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 | Tool               | Description                                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------ |
-| `read_agent_logs`  | Read server-side pipeline logs (errors, LLM timeouts) filtered by agent/conversation/level. An unscoped or agent-only read additionally requires `eddi-admin` — it pulls from a shared buffer mixing every user's logs; only a `conversationId`-scoped read is open to a viewer (owner or admin) |
+| `read_agent_logs`  | Read server-side pipeline logs (errors, LLM timeouts) filtered by agent/conversation/level. An unscoped or agent-only read additionally requires `eddi-admin` — it pulls from a shared buffer mixing every user's logs; only a `conversationId`-scoped read is open to `eddi-viewer` (and only for a conversation the caller owns) |
 | `read_audit_trail` | Read per-task audit entries with LLM details, timing, cost, and tool calls                 |
 
 ### Setup Tools (2)
@@ -195,6 +206,8 @@ EDDI also exposes its documentation as MCP **resources**, allowing AI agents to 
 
 Configure the docs path with: `eddi.docs.path` (default: `docs/`, in Docker: `/deployments/docs`).
 
+The resources are guarded by the same roles as the docs tools and REST (any of the five EDDI roles); a refusal is a JSON-RPC error with code `-32005` (security error), since a resource read has no `isError` result. Neither the resources nor the tools name the server's docs directory when it is missing or disabled.
+
 ### The same docs over REST
 
 > **MCP resources do not reach an EDDI agent.** A resource is only usable by a client that asks for it, and EDDI's own MCP client never calls `resources/read` — it consumes *tools*. So `eddi://docs/*` made EDDI's documentation readable by a desktop MCP client and not by an agent running on EDDI, which is precisely backwards for an agent whose job is to explain the platform.
@@ -206,7 +219,7 @@ The same doc set is therefore served read-only over REST, where an agent generat
 | `GET /administration/docs` | any of `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | JSON array of page names, without the `.md` suffix |
 | `GET /administration/docs/{name}` | same | The page's markdown source as `text/plain`; `404` if absent |
 
-> **Roles are enumerated, not inherited.** EDDI has no role hierarchy — JAX-RS `@RolesAllowed` and the MCP layer's `requireRole` are both literal `hasRole` checks — so `eddi-viewer` alone would refuse an `eddi-admin`. The widest read tier is spelled out because these are published documentation pages.
+> **Roles are enumerated, not inherited.** A role check is a literal `hasRole`, in JAX-RS `@RolesAllowed` and in the MCP tools alike, so every tier lists each role it admits. The widest read tier is spelled out because these are published documentation pages.
 
 Both surfaces delegate to `DocsService`, which owns the filesystem access and the path-traversal guard.
 
@@ -384,7 +397,7 @@ Discover deployed agents with their capabilities. Returns an enriched list of de
 | Parameter     | Type   | Required | Default        | Description                                              |
 | ------------- | ------ | -------- | -------------- | -------------------------------------------------------- |
 | `filter`      | string | No       | `""`           | Filter agents by name (case-insensitive substring match) |
-| `environment` | string | No       | `"production"` | Environment: `production`, `production`, or `test`       |
+| `environment` | string | No       | `"production"` | Environment: `production` (default) or `test`            |
 
 **Response:**
 
@@ -430,7 +443,7 @@ The conversation is auto-created on first message and reused on subsequent calls
 | `intent`      | string | **Yes**  | Intent that maps to an agent trigger. E.g. `"customer_support"`           |
 | `userId`      | string | **Yes**  | User ID for conversation management (one conversation per intent+userId) |
 | `message`     | string | **Yes**  | The user message to send                                                 |
-| `environment` | string | No       | Environment: `production` (default), `production`, or `test`             |
+| `environment` | string | No       | Environment: `production` (default) or `test`                            |
 
 **Response:**
 
@@ -627,7 +640,7 @@ To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.jav
 
 - The MCP endpoint inherits EDDI's existing OIDC/Keycloak authentication
 - When auth is enabled (`quarkus.oidc.tenant-enabled=true`), MCP clients must provide valid tokens
-- Authorization is enforced **in-code**, not via `@RolesAllowed`: most tools call `requireRole(identity, authEnabled, "<role>")` (`McpToolUtils`), and the HITL tools use the shared `HitlAccessGuard` (per-conversation owner / `eddi-admin` / `eddi-approver`). When `authorization.enabled=false` (the default dev posture) `requireRole` is a no-op — production is guarded by `AuthStartupGuard`, which fails startup if OIDC is disabled.
+- Authorization is enforced **in-code**, not via `@RolesAllowed`: each tool checks its [role tier](#role-mapping) (`requireAnyRole(identity, authEnabled, McpRoles.<TIER>)`; the tiers live in `McpRoles`), and the HITL tools use the shared `HitlAccessGuard` (per-conversation owner / `eddi-admin` / `eddi-approver`). A refusal is a tool error (`isError: true`, `errorCode: FORBIDDEN`). When `authorization.enabled=false` (the default dev posture) the role check is a no-op — production is guarded by `AuthStartupGuard`, which fails startup if OIDC is disabled.
 - **Future**: Per-agent MCP access control via agent configuration for multi-tenant SaaS
 
 ### Connecting to an authenticated instance
@@ -727,21 +740,25 @@ printf '%s' "$KC_PASSWORD" | curl -s \
 
 - **The token expires.** The shipped realm does not override Keycloak's default access-token lifespan of five minutes, and a static header never refreshes. This recipe is for trying things out, not for running an assistant against EDDI all day.
 - **There is no long-lived API key for `/mcp`.** The only api-key surface in EDDI is the `/v1` OpenAI-compatible adapter (`eddi.openai-compat.api-key`), which is a different protocol — see [Open WebUI integration](open-webui-integration.md).
-- **Roles decide which tools work, and there is no hierarchy.** A token whose realm roles are missing authenticates fine and then fails every tool with "requires role" — see [Role Mapping](#role-mapping) below.
+- **Roles decide which tools work.** A token whose realm roles are missing authenticates fine and then fails every tool with "requires one of roles" — see [Role Mapping](#role-mapping) below.
 - **`/mcp` cannot be opened selectively.** `eddi.mcp.allow-unauthenticated` only lets a *fully* unauthenticated deployment boot past `HighValueSurfaceGuard`; it does not exempt `/mcp` on an instance where authentication is on.
 
 ### Role Mapping
 
-These are the **actual Keycloak role strings** the tools check (not aliases). Roles are additive in intent — grant an editor/admin the read scope too.
+These are the **actual Keycloak role strings** the tools check (not aliases). Every tool belongs to one tier, and each tier admits the roles of the REST endpoints it mirrors — the same agent, the same rights, whichever door the caller uses. The exceptions are spelled out in the table: `eddi-viewer` is an MCP-only role with no REST counterpart, and a few admin-only tools are narrower than the REST store they touch.
 
-> **There is no role hierarchy, and this bites exactly once.** `requireRole` is a literal `hasRole`, so an account holding `eddi-admin` but not `eddi-viewer` completes the OAuth flow and is then refused *every read tool* — 27 of the 84, including `list_agents`. It looks like a broken feature and is a missing role assignment. The shipped realm's `eddi` account holds `eddi-viewer` alongside `eddi-admin` and `eddi-editor` for this reason; grant the same to your own operators. For exact per-tool roles see the code (`requireRole` calls) and the per-category sections above (HITL / Memory / GDPR).
+| Tier | Roles admitted | Tools | REST counterpart (same `@RolesAllowed`) |
+| ---- | -------------- | ----- | --------------------------------------- |
+| **Docs** | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | `list_docs`, `read_docs`, and the `eddi://docs/*` resources | `/administration/docs` |
+| **Converse** — every tool ownership-guarded | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` | `create_conversation`, `talk_to_agent`, `chat_with_agent`, `chat_managed`, `read_conversation`, `read_conversation_log`, `list_conversations`, `discover_agents`; the group discussions (`describe_discussion_styles`, `discuss_with_group`, `start_group_discussion`, `read_group_conversation`, `list_group_conversations`, `followup_with_member`, `continue_group_discussion`, `close_group_conversation`, `delete_group_conversation`); the memory reads (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`) | `/agents/*` and `/groups/*/conversations` — admin, editor, user. `eddi-viewer` is the addition: the MCP read-and-converse role, which only ever reaches the caller's own conversations and memories. The memory reads also admit `eddi-editor`, which the REST memory store (`eddi-admin`, `eddi-user`) does not — for the caller's own `userId` only |
+| **Observe** — ownership-guarded | `eddi-admin`, `eddi-viewer` | `read_audit_trail`, and `read_agent_logs` *with* a `conversationId` | `/auditstore`, `/administration/logs` — admin only. An audit entry carries the LLM request (system prompt, tool calls and their arguments), which `eddi-user` cannot read over REST, so this tier is not the conversation tier: next to the admin it admits only `eddi-viewer`, the MCP observer role that has always held these two tools. An editor who needs them is granted `eddi-viewer` |
+| **Author** | `eddi-admin`, `eddi-editor` | `list_agents`, `list_agent_configs`, `get_agent`; deployment (`deploy_agent`, `undeploy_agent`, `get_deployment_status`); agent, workflow and resource CRUD (`create_agent`, `update_agent`, `delete_agent`, `list_workflows`, `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `list_agent_resources`, `apply_agent_changes`); triggers (`*_agent_trigger`); channels (`*_channel_integration`); group configuration (`list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `create_group_from_template`, `list_group_templates`, `add_team_task`, `list_team_backlog`) | the configuration stores, `/administration/{env}/deploy…`, `/agenttriggerstore`, `/channelstore`, `/groupstore` |
+| **Admin** | `eddi-admin` | `setup_agent`, `create_api_agent`; the schedule tools (`create_schedule`, `list_schedules`, `read_schedule`, `delete_schedule`, `fire_schedule_now`, `retry_failed_schedule`); memory writes (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`); GDPR (`delete_user_data`, `export_user_data`); `read_agent_logs` *without* a `conversationId` (the shared server log) | `/administration/agents/setup(-api)`, `/administration/gdpr`, `/administration/logs`. **Deliberately narrower than REST** for schedules and memory writes: these tools act on any user's schedule or memory directly, without the per-owner scoping the REST endpoints apply to editors and users |
+| **HITL** | decided per conversation by `HitlAccessGuard`: the owner, `eddi-admin`, `eddi-approver` | `resume_conversation`, `cancel_conversation`, `get_approval_status`, `list_pending_approvals`, and the group counterparts | the REST HITL endpoints — see [HITL](hitl.md#who-may-decide) |
 
-| Role           | Scope |
-| -------------- | ----- |
-| `eddi-viewer`  | The conversation tools (`list_agents`, `list_agent_configs`, `get_agent`, `discover_agents`, `create_conversation`, `talk_to_agent`/`chat_with_agent`/`chat_managed`, `read_conversation`, `read_conversation_log`, `list_conversations`, `read_agent_logs`, `read_audit_trail`), running a discussion and reading its transcript (`describe_discussion_styles`, `discuss_with_group`, `start_group_discussion`, `read_group_conversation`, `list_group_conversations`, `followup_with_member`, `continue_group_discussion`, `list_team_backlog`, `list_group_templates`), and the memory **read** tools (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`). `read_agent_logs` additionally requires `eddi-admin` unless a `conversationId` is supplied |
-| `eddi-editor`  | `setup_agent`, `create_api_agent`, and the group configuration/lifecycle tools: `list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `create_group_from_template`, `add_team_task`, `close_group_conversation`, `delete_group_conversation` |
-| `eddi-admin`   | **Every** tool in `McpAdminTools`, read as well as write — `deploy_agent`/`undeploy_agent`, `get_deployment_status`, agent and resource CRUD (`list_workflows`, `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `list_agent_resources`, `apply_agent_changes`), and trigger/schedule/channel authoring *and* listing — plus the **memory writes** (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`) and **GDPR** tools (`delete_user_data`, `export_user_data`) |
-| `eddi-approver`| Decide HITL approvals (with the conversation owner and `eddi-admin`): `resume_conversation`, `approve_group_phase`, `cancel_*`, `*_pending_approvals`, `*_approval_status` — see [HITL](hitl.md#who-may-decide) |
+> **Higher roles include the read tiers.** A role check is a literal `hasRole`, so each tier enumerates its roles rather than relying on a hierarchy — which gives `eddi-admin ⊇ eddi-editor ⊇ eddi-viewer` for the conversation tools and `eddi-admin ⊇ eddi-viewer` for the Observe tier. An admin no longer needs `eddi-viewer` as well, and an editor needs it only for `read_audit_trail` and conversation-scoped `read_agent_logs` (up to 6.5.0 an account without `eddi-viewer` was refused all 27 read tools, `list_agents` included). The tiers are defined once, in `McpRoles`.
+
+> **Changed after 6.5.0** to remove the places MCP and REST disagreed — see [Upgrading from 6.5](upgrading-from-6.5.md#mcp-role-tiers) for what an existing MCP client loses and gains: `setup_agent` and `create_api_agent` are admin-only (REST setup always was — provisioning writes API keys into the vault); deployment, agent/resource CRUD, triggers, channels and group configuration admit both `eddi-admin` and `eddi-editor` (as REST does); `get_agent`, `list_agents`, `list_agent_configs`, `list_team_backlog` and `list_group_templates` are no longer open to `eddi-viewer`, who cannot make those reads over REST either (`discover_agents` remains the viewer's way to find an agent); and `eddi-user` can now use the conversation and memory-read tools it can already use over REST.
 
 ## Sentiment Monitoring
 

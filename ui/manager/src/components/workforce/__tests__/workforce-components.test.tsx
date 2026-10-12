@@ -5,7 +5,7 @@ import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 import { WorkforceTopbar } from "../workforce-topbar";
-import { AgentWorkforceCard, AddAgentCard } from "../agent-workforce-card";
+import { AgentWorkforceCard } from "../agent-workforce-card";
 import { WorkforceCard } from "../workforce-card";
 import { ContextCard } from "../context-card";
 import { QuickActions } from "../quick-actions";
@@ -88,16 +88,6 @@ describe("Workforce Components", () => {
       const card = screen.getByRole("button");
       const user = userEvent.setup();
       await user.click(card);
-      expect(onClick).toHaveBeenCalled();
-    });
-
-    it("AddAgentCard renders and calls onClick", async () => {
-      const onClick = vi.fn();
-      renderWithProviders(<AddAgentCard onClick={onClick} />);
-      const btn = screen.getByRole("button");
-      expect(btn).toBeInTheDocument();
-      const user = userEvent.setup();
-      await user.click(btn);
       expect(onClick).toHaveBeenCalled();
     });
   });

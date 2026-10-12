@@ -4,7 +4,6 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { PageLoader } from "@/components/layout/page-loader";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { CommandPalette } from "@/components/shared/command-palette";
-import { UnsavedChangesNavigationGuard } from "@/components/layout/unsaved-changes-navigation-guard";
 import { WorkforceLayout } from "@/components/workforce/workforce-layout";
 import { LandingPage } from "@/pages/landing-page";
 import { lazyPage } from "@/lib/lazy-page";
@@ -222,7 +221,6 @@ export function App() {
         </Routes>
       </Suspense>
       <CommandPalette />
-      <UnsavedChangesNavigationGuard />
     </ErrorBoundary>
   );
 }

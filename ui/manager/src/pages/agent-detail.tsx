@@ -66,7 +66,7 @@ import {
 import { parseVersionFromLocation } from "@/lib/api/location-version";
 import { agentKeys } from "@/lib/query-keys";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { UnsavedChangesDialog, UnsavedChangesPrompt } from "@/components/ui/unsaved-changes-dialog";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
@@ -151,7 +151,21 @@ export function AgentDetailPage() {
   // Default to latest version once loaded
   const resolvedVersion = version ?? versions?.[0]?.version ?? 1;
 
-  const { data: agent, isLoading, isError, error: loadError, refetch } = useAgent(id!, resolvedVersion);
+  const {
+    data: agent,
+    isLoading,
+    isError,
+    error: loadError,
+    refetch,
+    isPlaceholderData,
+  } = useAgent(id!, resolvedVersion);
+  /**
+   * The document on screen is the PREVIOUS version's, kept while the selected
+   * one loads. Every write addresses `resolvedVersion`, so nothing may be edited
+   * or saved from it — a section save would otherwise write that document into
+   * the version being loaded.
+   */
+  const configPending = isPlaceholderData;
   const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
   const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
@@ -209,12 +223,12 @@ export function AgentDetailPage() {
 
   const editAgent = useCallback<AgentEdit>(
     (next) => {
-      if (!agent || !editable) return;
+      if (!agent || !editable || configPending) return;
       // Applied onto the latest draft, not taken wholesale: an edit built from
       // a slightly older render must not undo the one before it.
       setDraft((prev) => applyChangedFields(prev ?? agent, editable, next));
     },
-    [agent, editable],
+    [agent, editable, configPending],
   );
 
   /** Writes the draft as one new version. Resolves whether it landed. */
@@ -270,9 +284,9 @@ export function AgentDetailPage() {
     setShowReviewDialog(false);
   }
 
-  // Tab close / reload, and (through the app-wide navigation guard) leaving by
-  // any link, the back button or the command palette, with Save & leave.
-  useUnsavedChangesGuard(isDirty, { onSave: saveDraft });
+  // Tab close / reload, and leaving by any in-app navigation (the data router's
+  // blocker) — answered by the prompt below, which also offers Save & leave.
+  const unsavedGuard = useUnsavedChangesGuard(isDirty);
 
   // Ctrl/Cmd+S saves while there is something to save.
   useEffect(() => {
@@ -357,12 +371,12 @@ export function AgentDetailPage() {
   }
 
   function handleRemoveWorkflow(packageUri: string) {
-    if (!editable?.workflows) return;
+    if (!editable?.workflows || configPending) return;
     editAgent({ ...editable, workflows: editable.workflows.filter((p) => p !== packageUri) });
   }
 
   function handleAddWorkflow(packageUri: string) {
-    if (!editable) return;
+    if (!editable || configPending) return;
     const current = editable.workflows ?? [];
     if (current.includes(packageUri)) return;
     editAgent({ ...editable, workflows: [...current, packageUri] });
@@ -370,7 +384,7 @@ export function AgentDetailPage() {
   }
 
   function handleUpdateWorkflowVersion(oldUri: string, newVersion: number) {
-    if (!editable?.workflows) return;
+    if (!editable?.workflows || configPending) return;
     const updated = editable.workflows.map((u) =>
       u === oldUri ? u.replace(/([?&]version=)\d+/, `$1${newVersion}`) : u,
     );
@@ -832,6 +846,14 @@ export function AgentDetailPage() {
         />
       )}
 
+      {/* The editable sections. Disabled while the previous version's document
+          is standing in for the one being loaded (see `configPending`). */}
+      <fieldset
+        disabled={configPending || isSaving}
+        aria-busy={configPending || isSaving}
+        className="contents"
+        data-testid="agent-config-sections"
+      >
       {/* A2A Protocol (collapsible, hidden by default) */}
       <A2ASection
         agent={doc}
@@ -873,6 +895,7 @@ export function AgentDetailPage() {
 
       {/* Raw config (collapsible) */}
       <RawConfigSection agent={doc} />
+      </fieldset>
 
       {/* Floating save bar — the header's controls scroll away on a page this
           long, and the edit is usually made far below them. */}
@@ -971,6 +994,9 @@ export function AgentDetailPage() {
           </div>
         </div>
       </AccessibleDialog>
+
+      {/* Leaving with unsaved edits */}
+      <UnsavedChangesPrompt guard={unsavedGuard} onSave={saveDraft} />
 
       {/* Discard confirmation */}
       <UnsavedChangesDialog
@@ -1588,7 +1614,7 @@ function A2ASection({
                       type="button"
                       onClick={() => handleRemoveSkill(i)}
                       className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                      aria-label={`Remove ${skill}`}
+                      aria-label={t("common.removeItem", { item: skill, defaultValue: "Remove {{item}}" })}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -1649,7 +1675,7 @@ function A2ASection({
                       type="button"
                       onClick={() => copyToClipboard(url, label)}
                       className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
-                      aria-label="Copy URL"
+                      aria-label={t("agentDetail.copyUrl", "Copy URL")}
                       data-testid={`copy-url-${label}`}
                     >
                       {copied === label ? (
