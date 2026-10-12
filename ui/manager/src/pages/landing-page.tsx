@@ -1,4 +1,4 @@
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Settings2,
@@ -122,9 +122,15 @@ export function LandingPage() {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
 
+  // `?choose` shows the chooser even when a choice is remembered — otherwise a
+  // saved preference makes this page unreachable and the choice can never be
+  // changed from here.
+  const [searchParams] = useSearchParams();
+  const forceChooser = searchParams.has("choose");
+
   // Synchronous redirect — no flash
   const pref = getStoredPreference();
-  if (pref === "manage" || pref === "workforce") {
+  if (!forceChooser && (pref === "manage" || pref === "workforce")) {
     return <Navigate to={`/${pref}`} replace />;
   }
 

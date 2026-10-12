@@ -123,3 +123,51 @@ test.describe("Navigation", () => {
     });
   }
 });
+
+test.describe("Unsaved-changes guard on in-app navigation", () => {
+  test("a sidebar click on a dirty editor asks first; Stay keeps the edit, Discard leaves", async ({
+    page,
+  }) => {
+    await page.goto("/manage/resources/rules/beh1");
+    await waitForApp(page);
+
+    // MSW returns a behavior group named "Greeting Rules" in an input.
+    const nameInput = page.locator('input[value="Greeting Rules"]');
+    await expect(nameInput).toBeVisible({ timeout: 10_000 });
+    await nameInput.fill("Renamed rules");
+
+    const agentsLink = page.getByTestId("sidebar").getByRole("link", { name: /agents/i });
+    await agentsLink.click();
+
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await expect(page).toHaveURL(/\/manage\/resources\/rules\/beh1/);
+
+    // Stay: the dialog closes and the edit is still there.
+    await dialog.getByRole("button", { name: "Stay" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page).toHaveURL(/\/manage\/resources\/rules\/beh1/);
+    await expect(page.locator('input[value="Renamed rules"]')).toBeVisible();
+
+    // Discard & Leave: navigation goes through.
+    await agentsLink.click();
+    await page.getByRole("alertdialog").getByTestId("unsaved-confirm").click();
+    await expect(page).toHaveURL(/\/manage\/agents/);
+  });
+});
+
+test.describe("Unknown routes", () => {
+  test("a mistyped /manage path shows Page not found inside the shell, not a silent redirect", async ({
+    page,
+  }) => {
+    await page.goto("/manage/definitely-not-a-page");
+    await waitForApp(page);
+
+    await expect(page.getByRole("heading", { level: 1, name: "Page not found" })).toBeVisible();
+    await expect(page).toHaveURL(/\/manage\/definitely-not-a-page/);
+    await expect(page.getByTestId("sidebar")).toBeVisible();
+
+    await page.getByTestId("not-found-home").click();
+    await expect(page).toHaveURL(/\/manage$/);
+  });
+});

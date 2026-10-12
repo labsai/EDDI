@@ -76,7 +76,11 @@
     "monitoring": "Conversation Monitoring",
     "analytics": "Analytics",
     "connections": "Connections",
-    "workspaces": "Workspaces"
+    "workspaces": "Workspaces",
+    "breadcrumb": "Breadcrumb",
+    "checkingVersion": "Checking version...",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar"
   },
   "theme": {
     "light": "Light",
@@ -948,6 +952,7 @@
     "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
     "deployNow": "Deploy",
     "deployStarted": "Deployment started",
+    "stay": "Stay",
     "invalidJsonNotSaved": "Not saved — the JSON is invalid: {{reason}}"
   },
   "rulesEditor": {
@@ -2525,7 +2530,8 @@
       "title": "Help & Tour",
       "platformTour": "Platform Tour",
       "resetAll": "Reset All Tours",
-      "resetConfirm": "Reset all tour progress?"
+      "resetConfirm": "Reset all tour progress?",
+      "completed": "Completed"
     },
     "offer": {
       "message": "New here? Take the {{page}}",
@@ -5389,6 +5395,13 @@
     "impactReasonLegacy": "predates version following",
     "impactReasonBreaking": "breaking change",
     "switchNotice": "Agent moved from v{{from}} to v{{to}}"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "There is nothing at this address. It may have moved, or the link may be mistyped.",
+    "backToDashboard": "Back to Dashboard",
+    "backToWorkforce": "Back to Workforce",
+    "chooseWorkspace": "Choose a workspace"
   },
   "actionTags": {
     "remove": "Remove {{action}}",
