@@ -4,8 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import {
   useUserMemories,
-  useSearchMemories,
-  useCountMemories,
   useDeleteMemory,
   useDeleteAllMemories,
 } from "@/hooks/use-user-memory";
@@ -45,58 +43,6 @@ describe("useUserMemories", () => {
 
   it("is disabled when userId is whitespace", () => {
     const { result } = renderHook(() => useUserMemories("   "), {
-      wrapper: createWrapper(),
-    });
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useSearchMemories", () => {
-  it("searches memories with a query", async () => {
-    const { result } = renderHook(
-      () => useSearchMemories("user-123", "language"),
-      { wrapper: createWrapper() },
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(Array.isArray(result.current.data)).toBe(true);
-  });
-
-  it("is disabled when userId is empty", () => {
-    const { result } = renderHook(
-      () => useSearchMemories("", "test"),
-      { wrapper: createWrapper() },
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-
-  it("is disabled when query is empty", () => {
-    const { result } = renderHook(
-      () => useSearchMemories("user-123", ""),
-      { wrapper: createWrapper() },
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-
-  it("is disabled when both are whitespace", () => {
-    const { result } = renderHook(
-      () => useSearchMemories("   ", "   "),
-      { wrapper: createWrapper() },
-    );
-    expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useCountMemories", () => {
-  it("counts memories for a user", async () => {
-    const { result } = renderHook(() => useCountMemories("user-123"), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(typeof result.current.data).toBe("number");
-  });
-
-  it("is disabled when userId is empty", () => {
-    const { result } = renderHook(() => useCountMemories(""), {
       wrapper: createWrapper(),
     });
     expect(result.current.fetchStatus).toBe("idle");

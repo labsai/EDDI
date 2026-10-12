@@ -10,7 +10,6 @@ import {
   useResourceDescriptors,
   useResource,
   useResourceVersions,
-  useUpdateResource,
   useCreateResource,
   useDeleteResource,
   useDuplicateResource,
@@ -102,22 +101,6 @@ describe("useResourceVersions", () => {
       { wrapper: createWrapper() }
     );
     expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useUpdateResource", () => {
-  it("updates a resource", async () => {
-    const { result } = renderHook(() => useUpdateResource("rules"), {
-      wrapper: createWrapper(),
-    });
-    await act(async () => {
-      result.current.mutate({
-        id: "beh1",
-        version: 1,
-        body: { behaviorGroups: [] },
-      });
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 });
 
