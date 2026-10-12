@@ -1,30 +1,34 @@
-## 🐛 fix(test): repair two tests that main's concurrent merges broke (2026-10-12)
+## 🐛 fix(a2a): restore the agent-qualified `sayStreaming` so main compiles again (2026-10-12)
 
 **Repo:** EDDI (`fix/main-build-after-concurrent-merges`)
 
 ### What changed and why
 
-`Build & Test` on `main` failed with four errors after a batch of PRs merged in
-parallel — each was green against the `main` it was opened on, but two of them
-broke each other, and with `strict` branch protection off nothing re-ran CI on
-the combination. Every open PR's `Build & Test` inherited the failure.
+`main` stopped compiling after a batch of PRs merged in parallel — each was green
+against the `main` it was opened on, and with `strict` branch protection off
+nothing built the combination.
 
-- **`RestImportServiceTemplateConversionTest`** (#992) looks `readResource` up
-  reflectively with the five-parameter signature; #997 added a sixth,
-  `Set<String> v5LlmUris`, so the lookup threw `NoSuchMethodException`. The test
-  now passes an empty set — no document is migrated as 5.x, so only the template
-  conversion it is about runs.
-- **`RestAgentAdministrationUndeployResilienceTest`** (#990) stubbed
-  `IAgentFactory.undeployAgent` to throw the checked `ServiceException`, which
-  that method no longer declares; Mockito refuses the stub. It now throws an
-  unchecked exception — `RestAgentAdministration` catches any `Exception` there,
-  so "a version fails to undeploy" is exercised exactly as before.
+- #949 removed the environment-qualified `sayStreaming(Environment, agentId,
+  conversationId, …)` from `IConversationService`, on the grounds that nothing
+  outside `ConversationService` called it, and left the implementation
+  package-private.
+- #953 (A2A 1.0 / 0.3) added exactly such a caller: `A2ATaskHandler` streams a
+  `message/stream` turn through it. `A2ATaskHandler.java:542` no longer compiled.
 
-Test-only; no production code changes.
+The qualified overload is back on the interface (and public on the
+implementation). A2A addresses an agent, not a stored conversation record — its
+non-streaming path already uses the qualified `say()` for the same reason — so
+rewriting the call onto the conversation-id overload would have routed A2A
+streaming through the caller-facing access check instead; restoring the overload
+keeps the behaviour #953 was written and reviewed against.
 
-**Files:** [`RestImportServiceTemplateConversionTest.java`](../../src/test/java/ai/labs/eddi/backup/impl/RestImportServiceTemplateConversionTest.java),
-[`RestAgentAdministrationUndeployResilienceTest.java`](../../src/test/java/ai/labs/eddi/engine/internal/RestAgentAdministrationUndeployResilienceTest.java)
+This branch first also repaired two tests the same merges broke
+(`RestImportServiceTemplateConversionTest`, `RestAgentAdministrationUndeployResilienceTest`);
+#993 fixed both on `main` meanwhile, so `main`'s versions were kept.
+
+**Files:** [`IConversationService.java`](../../src/main/java/ai/labs/eddi/engine/api/IConversationService.java),
+[`ConversationService.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationService.java)
 
 ```regression-note
-| 2026-10-12 | `Build & Test` red on `main` (4 errors) | #992 and #990 tests written against signatures #997 and another PR changed; PRs merged in parallel with `strict` off, so the combination was never built | Tests updated to the current signatures | fix/main-build-after-concurrent-merges |
+| 2026-10-12 | `main` does not compile (`A2ATaskHandler.java:542`) | #949 removed the qualified `IConversationService.sayStreaming` while #953 added a caller; merged in parallel with `strict` off | Overload restored on the interface | fix/main-build-after-concurrent-merges |
 ```

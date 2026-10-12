@@ -711,11 +711,12 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     /**
      * Environment-qualified twin of
-     * {@link #sayStreaming(String, Boolean, Boolean, List, InputData, StreamingResponseHandler)};
-     * internal and tests only.
+     * {@link #sayStreaming(String, Boolean, Boolean, List, InputData, StreamingResponseHandler)}
+     * — for callers that address an agent (A2A streaming), and tests.
      */
-    void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
-                      List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
+    @Override
+    public void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                             List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
             throws Exception {
         ConversationEventSink eventSink = eventSinkFor(streamingHandler);
         admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false,
