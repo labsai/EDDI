@@ -50,7 +50,7 @@ This starts Keycloak alongside EDDI with a pre-configured realm, clients and acc
 
 | User | Password | Role | Notes |
 |------|----------|------|-------|
-| `eddi` | one-time, printed by the installer | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access (`eddi-viewer` included deliberately — there is no role hierarchy, so an admin without it is refused every MCP read tool). Keycloak asks for a new password at the first login |
+| `eddi` | one-time, printed by the installer | `eddi-admin`, `eddi-editor`, `eddi-viewer` | Full access. Keycloak asks for a new password at the first login |
 | `viewer` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-viewer` | Read-only access |
 | `user` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-user` | Standard user access |
 
@@ -137,6 +137,21 @@ value, so a changed name orphans everything filed under the old one.
 > *every* configuration in the deployment. To scope agents, workflows and the
 > rest to the user or team that created them — and to share them deliberately —
 > see [Workspaces](workspaces.md).
+
+### Role Tiers
+
+Roles are checked literally (`hasRole`), never inherited, so every endpoint and every MCP tool enumerates the roles it admits. The REST API and the MCP server share one matrix — a tier admits the same roles on both doors, except where the table says otherwise:
+
+| Tier | Roles | Covers |
+| ---- | ----- | ------ |
+| Docs | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | Published documentation |
+| Converse | `eddi-admin`, `eddi-editor`, `eddi-user` (+ `eddi-viewer` over MCP) | Starting, continuing and reading one's **own** conversations, group discussions and memories (the REST memory store admits only `eddi-admin` and `eddi-user`; over MCP an editor may read its own memories too) |
+| Author | `eddi-admin`, `eddi-editor` | Configuration stores, deployment, triggers, channels, groups, schedules (REST) |
+| Admin | `eddi-admin` | Agent setup (writes API keys to the vault), GDPR, logs, audit, secrets, tenant quotas; over MCP also schedules and memory writes for arbitrary users |
+| Observe (MCP only) | `eddi-admin`, `eddi-viewer` | The audit trail and pipeline logs of a conversation the caller owns (`read_audit_trail`, conversation-scoped `read_agent_logs`). Over REST these are Admin |
+| HITL | owner, `eddi-admin`, `eddi-approver` | Approval decisions, per conversation |
+
+`eddi-viewer` is the MCP read-and-converse role: over REST it reaches only the docs, usage and workspace listings. The per-tool assignment is in [MCP Server → Role Mapping](mcp-server.md#role-mapping), and `McpRoleTierParityTest` fails the build if an MCP tier and the REST endpoints it mirrors disagree beyond these documented differences.
 
 ### Auth Permissions
 
@@ -685,6 +700,19 @@ In CI, fuzz tests run as standard JUnit regression tests. For deep coverage-guid
 ./mvnw test -Dtest=PathNavigatorFuzzTest \
   -Djazzer.instrument=ai.labs.eddi.utils.PathNavigator
 ```
+
+### Secrets in the Container Environment
+
+The image's start script (`run-java.sh`) logs the complete Java command line at startup, built from
+`JAVA_OPTS` and `JAVA_OPTS_APPEND`. It masks only keys whose name contains `password`, and no
+setting disables the line. Never put a credential in a `-D...` system property there. In particular,
+`-Dmongodb.connectionString=...` writes the database user and password into the container log, and
+from there into any log aggregator.
+
+Provide the connection string through the `MONGODB_CONNECTIONSTRING` environment variable, injected
+from a secret store (ECS `secrets`, a Kubernetes `Secret`, Docker secrets). Environment variables
+are not printed by the script. See [Kubernetes](kubernetes.md) for the secret-based layout and
+[Upgrading from 5.x](upgrading-from-5x.md#keep-the-connection-string-out-of-the-java-command-line).
 
 ### Docker Image Security
 

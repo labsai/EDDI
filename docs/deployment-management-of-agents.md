@@ -113,7 +113,12 @@ The undeployment of a specific agent is done through a **`POST`** to **`/adminis
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.               |
 | version       | (`Query parameter`, **required**):`Integer` version of the agent that you wish to **undeploy**. |
 | endAllActiveConversations | (`Query parameter`, optional, default `false`):`Boolean` end the agent's active conversations instead of refusing. Without it, undeploying an agent that has active conversations returns `409`. Conversations that can move to another deployed, compatible version are neither counted nor ended — see [Running conversations and new agent versions](#running-conversations-and-new-agent-versions). |
-| undeployThisAndAllPreviousAgentVersions | (`Query parameter`, optional, default `false`):`Boolean` also undeploy every earlier version, counting down to version 1. |
+| undeployThisAndAllPreviousAgentVersions | (`Query parameter`, optional, default `false`):`Boolean` also undeploy every earlier version, counting down to version 1. Every version is attempted: one that fails (`500`, naming the version) or that is refused for its open conversations (`409`) no longer stops the lower versions, and the response reports what was not undeployed. |
+
+Ending the open conversations reads only a small projection of each (never the conversations
+themselves), so it is safe on a version with tens of thousands of open conversations. To end idle
+conversations across the whole deployment instead, see
+[Ending a backlog of idle conversations](upgrading-from-5x.md#ending-a-backlog-of-idle-conversations-in-one-call).
 
 ### Example :
 

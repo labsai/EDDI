@@ -1051,7 +1051,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
-        var targetUriStr = prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
+        var targetUriStr = templateTargetUri(targetDestination, templateDataObjects);
         // Resolve global variable references, then vault references in URL
         targetUriStr = resolveGuardedVariables(targetDestination, targetUriStr, "the request path", templateDataObjects, conversationProperties);
         targetUriStr = resolveSecrets(targetUriStr, resolvedSecrets, "the request path");
@@ -1437,6 +1437,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * server then decodes it back to the literal value. Identifiers like
      * {@code 6.2.0} round-trip unchanged.
      */
+    /** What a substituted value may keep when it lands in a URL's host:port. */
+    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
+
     private static final String PATH_SEGMENT_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~";
 
     /**
@@ -1484,8 +1487,65 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * identical encoding, so request pinning is unaffected.
      */
     private static Map<String, Object> pathSafeView(Map<String, Object> templateDataObjects) {
+        return encodedView(templateDataObjects, PATH_SEGMENT_UNRESERVED);
+    }
+
+    /**
+     * Renders the target URL template. The authority ({@code scheme://host:port})
+     * is rendered against a host-safe view and everything after it against the
+     * path-safe view.
+     * <p>
+     * A 5.x configuration such as {@code https://{properties.apiHost}} templates
+     * the host. The path-safe view percent-encodes every dot, which is right for a
+     * path segment (it keeps {@code ..} from traversing) and wrong for a host:
+     * {@code api.example.com} became {@code api%2Eexample%2Ecom} and the call
+     * failed with an unknown host. A host-safe value keeps letters, digits,
+     * {@code . - _} and {@code :}; anything else in a substituted value
+     * ({@code / @ ? #}, spaces, {@code %}) is still percent-encoded, so a value
+     * cannot add a path, a userinfo part or a query to the authority. The result is
+     * validated as before ({@link UrlValidationUtils}), so a host that resolves to
+     * a private or metadata address is refused all the same.
+     */
+    String templateTargetUri(String targetDestination, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException {
+        int authorityEnd = authorityEnd(targetDestination);
+        if (authorityEnd < 0) {
+            return prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
+        }
+        String authority = prePostUtils.templateValues(targetDestination.substring(0, authorityEnd),
+                encodedView(templateDataObjects, HOST_UNRESERVED));
+        String rest = prePostUtils.templateValues(targetDestination.substring(authorityEnd), pathSafeView(templateDataObjects));
+        return authority + rest;
+    }
+
+    /**
+     * Index just past the authority of {@code scheme://authority/...}, or -1 when
+     * the value carries no http(s) scheme. Braces are tracked so a {@code /} inside
+     * a template expression does not end the authority early.
+     */
+    static int authorityEnd(String url) {
+        String lower = url.toLowerCase(Locale.ROOT);
+        int start = lower.startsWith("https://") ? 8 : lower.startsWith("http://") ? 7 : -1;
+        if (start < 0) {
+            return -1;
+        }
+        int depth = 0;
+        for (int i = start; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (c == '{') {
+                depth++;
+            } else if (c == '}' && depth > 0) {
+                depth--;
+            } else if (depth == 0 && (c == '/' || c == '?' || c == '#')) {
+                return i;
+            }
+        }
+        return url.length();
+    }
+
+    private static Map<String, Object> encodedView(Map<String, Object> templateDataObjects, String unreserved) {
         var view = new HashMap<String, Object>(templateDataObjects.size());
-        templateDataObjects.forEach((key, value) -> view.put(key, encodePathValue(value, 0)));
+        templateDataObjects.forEach((key, value) -> view.put(key, encodePathValue(value, 0, unreserved)));
         return view;
     }
 
@@ -1496,21 +1556,25 @@ public class ApiCallExecutor implements IApiCallExecutor {
     static final int MAX_PATH_VIEW_DEPTH = 10;
 
     static Object encodePathValue(Object value, int depth) {
+        return encodePathValue(value, depth, PATH_SEGMENT_UNRESERVED);
+    }
+
+    private static Object encodePathValue(Object value, int depth, String unreserved) {
         if (value instanceof String stringValue) {
-            return encodePathSegment(stringValue);
+            return encodeSegment(stringValue, unreserved);
         }
         if (depth >= MAX_PATH_VIEW_DEPTH) {
             return value;
         }
         if (value instanceof Map<?, ?> nested) {
             var copy = new LinkedHashMap<Object, Object>(nested.size());
-            nested.forEach((nestedKey, nestedValue) -> copy.put(nestedKey, encodePathValue(nestedValue, depth + 1)));
+            nested.forEach((nestedKey, nestedValue) -> copy.put(nestedKey, encodePathValue(nestedValue, depth + 1, unreserved)));
             return copy;
         }
         if (value instanceof List<?> items) {
             var copy = new ArrayList<>(items.size());
             for (Object item : items) {
-                copy.add(encodePathValue(item, depth + 1));
+                copy.add(encodePathValue(item, depth + 1, unreserved));
             }
             return copy;
         }
@@ -1519,10 +1583,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     /** Percent-encodes every byte outside RFC 3986 unreserved, UTF-8. */
     static String encodePathSegment(String value) {
+        return encodeSegment(value, PATH_SEGMENT_UNRESERVED);
+    }
+
+    private static String encodeSegment(String value, String unreserved) {
         var out = new StringBuilder(value.length());
         for (byte b : value.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
             char c = (char) (b & 0xFF);
-            if (PATH_SEGMENT_UNRESERVED.indexOf(c) >= 0) {
+            if (unreserved.indexOf(c) >= 0) {
                 out.append(c);
             } else {
                 out.append('%').append(String.format("%02X", b & 0xFF));
