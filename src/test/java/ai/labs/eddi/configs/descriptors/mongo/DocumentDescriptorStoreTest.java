@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -117,6 +118,29 @@ class DocumentDescriptorStoreTest {
         store.setDescriptor("res-1", 1, descriptor);
 
         verify(internalStore).setDescriptor("res-1", 1, descriptor);
+    }
+
+    @Test
+    @DisplayName("F1: a conversation descriptor is never written through the configuration shape — set or update")
+    void conversationDescriptorWriteIsRefused() throws Exception {
+        DocumentDescriptor conversation = new DocumentDescriptor();
+        conversation.setResource(URI.create("eddi://ai.labs.conversation/conversationstore/conversations/conv-1?version=0"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.setDescriptor("conv-1", 0, conversation));
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.updateDescriptor("conv-1", 0, conversation));
+        verify(internalStore, never()).setDescriptor(anyString(), anyInt(), any());
+        verify(internalStore, never()).updateDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("a configuration descriptor is written as before")
+    void configurationDescriptorIsWritten() throws Exception {
+        DocumentDescriptor agent = new DocumentDescriptor();
+        agent.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/res-1?version=1"));
+
+        store.setDescriptor("res-1", 1, agent);
+
+        verify(internalStore).setDescriptor("res-1", 1, agent);
     }
 
     // ==================== createDescriptor ====================

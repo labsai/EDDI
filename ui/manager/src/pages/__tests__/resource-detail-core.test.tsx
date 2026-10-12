@@ -68,10 +68,15 @@ function renderPage(type: string, id = "res1", initialEntries: string[] = []) {
   );
 }
 
-// Stub console.error to reduce noise from intentional error tests
-const originalConsoleError = console.error;
+// The error tests silence the console.error React Query logs for an
+// intentional failure; a spy (not an assignment) so it is always restored.
+let consoleErrorSpy: ReturnType<typeof vi.spyOn> | undefined;
+function silenceConsoleError() {
+  consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+}
 afterEach(() => {
-  console.error = originalConsoleError;
+  consoleErrorSpy?.mockRestore();
+  consoleErrorSpy = undefined;
 });
 
 describe("ResourceDetailPage - Core Functions", () => {
@@ -261,43 +266,38 @@ describe("ResourceDetailPage - Core Functions", () => {
   });
 
   it("shows error state when version descriptors fail", async () => {
-    console.error = vi.fn(); // Suppress expected error output
+    silenceConsoleError();
+    // currentversion answers, but reading that version's descriptor 500s —
+    // getDescriptorVersions fails the whole list on anything but a 404.
     server.use(
-      http.get("*/:store/:plural/descriptors", () => {
-        return new HttpResponse(null, { status: 500 });
-      }),
-      http.get("*/:store/:plural/:id", () => {
+      http.get("*/llmstore/llms/:id/currentversion", () => HttpResponse.json(1)),
+      http.get("*/descriptorstore/descriptors/:id", () => {
         return new HttpResponse(null, { status: 500 });
       })
     );
 
     renderPage("llm", "res1");
 
-    // The page should still render with error indication
-    await waitFor(() => {
-      // Back link should still be present regardless of error
-      expect(screen.getByText(/Back to/i)).toBeInTheDocument();
-    });
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+    expect(screen.getByTestId("error-state-retry")).toBeInTheDocument();
+    // The back link survives the failure.
+    expect(screen.getByText(/Back to/i)).toBeInTheDocument();
   });
 
   it("shows error state when resource data fails with 500", async () => {
-    console.error = vi.fn();
+    silenceConsoleError();
     server.use(
-      http.get("*/:store/:plural/:id", ({ request }) => {
-        const url = new URL(request.url);
-        // Let currentversion pass through
-        if (url.pathname.endsWith("/currentversion")) return;
-        if (url.pathname.endsWith("/descriptors")) return;
+      http.get("*/llmstore/llms/:id", () => {
         return new HttpResponse(null, { status: 500 });
       })
     );
 
     renderPage("llm", "res1");
 
-    await waitFor(() => {
-      // Should show the header area even on error
-      expect(screen.getByText(/Back to/i)).toBeInTheDocument();
-    });
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+    // No editor is rendered over a config that never loaded.
+    expect(screen.queryByTestId("config-editor-layout")).not.toBeInTheDocument();
+    expect(screen.getByText(/Back to/i)).toBeInTheDocument();
   });
 
   // --- Different resource types render correctly ---
@@ -495,7 +495,7 @@ describe("ResourceDetailPage - Core Functions", () => {
   // --- Error state with retry ---
 
   it("shows error state with retry button when both data and versions fail", async () => {
-    console.error = vi.fn();
+    silenceConsoleError();
     server.use(
       http.get("*/:store/:plural/descriptors", () => {
         return HttpResponse.json(
@@ -512,10 +512,11 @@ describe("ResourceDetailPage - Core Functions", () => {
 
     renderPage("llm", "res1");
 
-    await waitFor(() => {
-      // Back link should always render
-      expect(screen.getByText(/Back to/i)).toBeInTheDocument();
-    });
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+    expect(screen.getByTestId("error-state-retry")).toBeInTheDocument();
+    expect(screen.queryByTestId("config-editor-layout")).not.toBeInTheDocument();
+    // Back link should always render
+    expect(screen.getByText(/Back to/i)).toBeInTheDocument();
   });
 
   // --- mcpcalls resource type ---

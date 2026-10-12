@@ -46,6 +46,11 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 public class RestAgentManagement implements IRestAgentManagement {
     public static final String KEY_LANG = "lang";
+    /**
+     * Seconds a client should wait before retrying when no agent version is ready.
+     */
+    static final int NOT_READY_RETRY_AFTER_SECONDS = 5;
+    static final String NOT_READY_MESSAGE = "No agent version is ready for interaction yet; retry shortly";
     private final IRestAgentEngine restAgentEngine;
     private final IUserConversationStore userConversationStore;
     private final IRestAgentTriggerStore restAgentManagementStore;
@@ -118,6 +123,10 @@ public class RestAgentManagement implements IRestAgentManagement {
             // loadConversationMemory is: Quarkus answers 401 with its authentication
             // challenge. The generic branch below would turn it into an opaque 500.
             response.resume(e);
+        } catch (AgentNotReadyForManagedConversationException e) {
+            // Not a server fault: no agent version is deployed yet (startup, rolling
+            // deploy). Keep the 503 and its Retry-After rather than the opaque 500 below.
+            response.resume(e.getResponse());
         } catch (Exception e) {
             int status = e instanceof WebApplicationException webApplicationException
                     ? webApplicationException.getResponse().getStatus()
@@ -181,6 +190,9 @@ public class RestAgentManagement implements IRestAgentManagement {
             } catch (CannotCreateConversationException e) {
                 // A concurrent request stored its conversation first; act on that one.
                 userConversation = getUserConversation(intent, userId);
+                if (userConversation == null) {
+                    throw e;
+                }
             }
             newlyCreatedConversation = true;
         }
@@ -328,6 +340,16 @@ public class RestAgentManagement implements IRestAgentManagement {
         initialContext.put(KEY_LANG, new Context(Context.ContextType.string, language));
         Response agentResponse = restAgentEngine.startConversationWithContext(agentId, agentDeployment.getEnvironment(), userId, initialContext);
         int responseHttpCode = agentResponse.getStatus();
+        if (responseHttpCode == Response.Status.NOT_FOUND.getStatusCode()
+                || responseHttpCode == Response.Status.SERVICE_UNAVAILABLE.getStatusCode()) {
+            // RestAgentEngine answers 404 when no version of the agent is ready for the
+            // environment (and 503 when the node is draining or saturated). Either way
+            // the conversation cannot be started YET: tell the client to retry instead
+            // of failing the request with a 500.
+            log.warnf("Agent %s not ready in environment %s (httpCode=%s)", sanitize(agentId), agentDeployment.getEnvironment(),
+                    responseHttpCode);
+            throw new AgentNotReadyForManagedConversationException();
+        }
         if (responseHttpCode == 201) {
             var locationUri = URI.create(agentResponse.getHeaders().get("location").getFirst().toString());
             var resourceId = RestUtilities.extractResourceId(locationUri);
@@ -390,6 +412,17 @@ public class RestAgentManagement implements IRestAgentManagement {
     private void checkUserAuthIfApplicable(Deployment.Environment environment) throws UnauthorizedException {
         if (checkForUserAuthentication && !production.equals(environment) && identity.isAnonymous()) {
             throw new UnauthorizedException();
+        }
+    }
+
+    /**
+     * 503 with {@code Retry-After}: the managed conversation cannot be started
+     * because no agent version is ready yet.
+     */
+    static class AgentNotReadyForManagedConversationException extends WebApplicationException {
+        AgentNotReadyForManagedConversationException() {
+            super(Response.status(Response.Status.SERVICE_UNAVAILABLE).type(MediaType.TEXT_PLAIN).entity(NOT_READY_MESSAGE)
+                    .header("Retry-After", String.valueOf(NOT_READY_RETRY_AFTER_SECONDS)).build());
         }
     }
 
