@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.rag;
 
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
@@ -72,7 +73,7 @@ public class RagIngestionService {
     /** Chunk metadata: the document name the chunk was ingested under. */
     static final String METADATA_SOURCE = "source";
     /** Chunk metadata: the knowledge base the chunk belongs to. */
-    static final String METADATA_KB_ID = "kbId";
+    static final String METADATA_KB_ID = KnowledgeBaseStorage.METADATA_KB_ID;
     /** Chunk metadata: the ingestion that wrote the chunk. */
     static final String METADATA_INGESTION_ID = "ingestionId";
 
@@ -88,15 +89,22 @@ public class RagIngestionService {
      *
      * @see #ingest(String, String, String, RagConfiguration, boolean)
      */
-    public String ingest(String kbId, String documentContent, String documentName, RagConfiguration ragConfig) {
-        return ingest(kbId, documentContent, documentName, ragConfig, false);
+    public String ingest(String ragConfigId, String documentContent, String documentName, RagConfiguration ragConfig) {
+        return ingest(ragConfigId, documentContent, documentName, ragConfig, false);
     }
 
     /**
      * Ingest a document into a knowledge base. Runs on a virtual thread.
+     * <p>
+     * The knowledge base is identified by its RAG configuration id and nothing
+     * else: the store it writes to and the {@code kbId} tag its chunks carry are
+     * both derived from that id and the configuration (see
+     * {@link KnowledgeBaseStorage}). Up to 6.5.0 this took a caller-chosen
+     * {@code kbId}, which is how one knowledge base's endpoint could write into —
+     * and with {@code replace} delete from — another's store.
      *
-     * @param kbId
-     *            knowledge base ID
+     * @param ragConfigId
+     *            the RAG configuration's id
      * @param documentContent
      *            raw text content of the document
      * @param documentName
@@ -110,17 +118,20 @@ public class RagIngestionService {
      *            both
      * @return ingestion ID for status polling
      */
-    public String ingest(String kbId, String documentContent, String documentName, RagConfiguration ragConfig, boolean replace) {
+    public String ingest(String ragConfigId, String documentContent, String documentName, RagConfiguration ragConfig, boolean replace) {
+        // Resolved before the thread starts, so a configuration that cannot be
+        // addressed is refused to the caller rather than reported as "failed" later.
+        String kbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, ragConfig);
         String ingestionId = UUID.randomUUID().toString();
         ingestionStatus.put(ingestionId, "pending");
 
-        Thread.startVirtualThread(() -> processIngestion(kbId, ingestionId, documentContent, documentName, ragConfig, replace));
+        Thread.startVirtualThread(() -> processIngestion(ragConfigId, kbId, ingestionId, documentContent, documentName, ragConfig, replace));
 
         return ingestionId;
     }
 
-    private void processIngestion(String kbId, String ingestionId, String documentContent, String documentName, RagConfiguration ragConfig,
-                                  boolean replace) {
+    private void processIngestion(String ragConfigId, String kbId, String ingestionId, String documentContent, String documentName,
+                                  RagConfiguration ragConfig, boolean replace) {
         try {
             ingestionStatus.put(ingestionId, "processing");
             LOGGER.infof("Starting ingestion %s for KB '%s', document '%s' (replace=%b)", ingestionId, sanitize(kbId), sanitize(documentName),
@@ -140,13 +151,13 @@ public class RagIngestionService {
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
             EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
-            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfig, kbId);
+            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
 
             EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
                     .build();
 
             if (replace) {
-                ReentrantLock replaceLock = replaceLocks.get(new ReplaceKey(kbId, documentName), key -> new ReentrantLock());
+                ReentrantLock replaceLock = replaceLocks.get(new ReplaceKey(ragConfigId + "|" + kbId, documentName), key -> new ReentrantLock());
                 replaceLock.lock();
                 try {
                     storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, true);
