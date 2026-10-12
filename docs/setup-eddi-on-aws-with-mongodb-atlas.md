@@ -72,7 +72,8 @@ aws secretsmanager create-secret --name eddi/vault-master-key \
 
 `valueFrom` takes the secret's name when the secret is in the task's region; otherwise use the secret's **complete** ARN as
 `create-secret` printed it, including the six-character random suffix Secrets Manager appends. The ECS
-**task execution role** must be allowed to read both secrets (`secretsmanager:GetSecretValue` on their ARNs).
+**task execution role** must be allowed to read both secrets (`secretsmanager:GetSecretValue` on their ARNs, plus
+`kms:Decrypt` on the key if they are encrypted with a customer-managed KMS key). Without it the task fails to start.
 
 ## Step 3: Set Up Amazon ECS
 
@@ -121,11 +122,11 @@ the `<...>` placeholders:
         }
       },
       "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:7070/q/health/ready || exit 1"],
+        "command": ["CMD-SHELL", "curl -f http://localhost:7070/q/health/live || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
-        "startPeriod": 60
+        "startPeriod": 300
       }
     }
   ]
@@ -144,6 +145,10 @@ listener to `0.0.0.0`, selects the JBoss log manager, sets the file encoding and
 supplied at runtime replaces the image's value instead of adding to it. Every EDDI and Quarkus property can be set as an
 environment variable instead: upper-case the name and replace `.` and `-` with `_`
 (`mongodb.connectionString` becomes `MONGODB_CONNECTIONSTRING`).
+
+The container health check probes **liveness** (`/q/health/live`), not readiness: ECS replaces a container whose
+check fails, and a first boot against a database upgraded from 5.x runs a migration that can keep EDDI not-ready for
+minutes. The 300-second `startPeriod` gives it that time; use readiness (below) for the load balancer instead.
 
 ### Authentication
 

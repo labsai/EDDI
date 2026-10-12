@@ -418,6 +418,14 @@ public class V6QuteMigration {
             unconvertible.add(fieldPath + ": a Thymeleaf expression is left after conversion");
             return null;
         }
+        String parseError = migrator.quteParseError(migrated);
+        if (parseError != null) {
+            // The conversion produced something Qute rejects, which would fail every
+            // render of it. The original is kept and the document is reported, exactly
+            // like a template the converter refuses up front.
+            unconvertible.add(fieldPath + ": the converted template is not valid Qute (" + parseError + ")");
+            return null;
+        }
         return migrated;
     }
 }

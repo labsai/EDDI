@@ -23,9 +23,12 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -46,6 +49,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -101,6 +106,10 @@ class RestConversationStoreTest {
                 documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                 30, 90, attachmentStorageInstance);
+    }
+
+    private static ConversationActivitySummary activity(String id, int agentVersion, ConversationState state) {
+        return new ConversationActivitySummary(id, state, "agent-1", agentVersion, null);
     }
 
     @Nested
@@ -512,6 +521,117 @@ class RestConversationStoreTest {
             assertEquals(List.of("eddi-admin", "eddi-editor"), Arrays.asList(active.value()));
             assertEquals(List.of("eddi-admin", "eddi-editor"), Arrays.asList(end.value()));
         }
+
+        @Test
+        @DisplayName("the deployment-wide bulk end of inactive conversations is admin-only, like the bulk delete")
+        void endInactiveIsAdminOnly() throws Exception {
+            RolesAllowed roles = IRestConversationStore.class
+                    .getMethod("endInactiveConversations", Integer.class, String.class, boolean.class)
+                    .getAnnotation(RolesAllowed.class);
+
+            assertNotNull(roles, "endInactiveConversations must declare @RolesAllowed");
+            assertEquals(List.of("eddi-admin"), Arrays.asList(roles.value()));
+        }
+    }
+
+    @Nested
+    @DisplayName("endInactiveConversations")
+    class EndInactiveConversations {
+
+        private AuditLedgerService auditLedger;
+
+        @BeforeEach
+        void ledger() {
+            auditLedger = mock(AuditLedgerService.class);
+            when(auditLedger.isEnabled()).thenReturn(true);
+            restConversationStore.auditLedgerService = auditLedger;
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> bodyOf(Response response) {
+            return (Map<String, Object>) response.getEntity();
+        }
+
+        @Test
+        @DisplayName("ends READY conversations idle past the cutoff in one store call and returns the count")
+        void endsInTheStore() throws Exception {
+            when(conversationMemoryStore.endIdleConversations(any(), any(), any(), anyBoolean())).thenReturn(42L);
+            Instant before = Instant.now();
+
+            Response response = restConversationStore.endInactiveConversations(30, null, false);
+
+            assertEquals(200, response.getStatus());
+            assertEquals(42L, bodyOf(response).get("count"));
+            assertEquals(false, bodyOf(response).get("dryRun"));
+            ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
+            verify(conversationMemoryStore).endIdleConversations(cutoff.capture(), isNull(), eq("idle"), eq(false));
+            // 30 days before "now", give or take the test's own run time
+            assertFalse(cutoff.getValue().isBefore(before.minus(Duration.ofDays(30))));
+            assertFalse(cutoff.getValue().isAfter(Instant.now().minus(Duration.ofDays(30))));
+            // nothing was loaded, and no conversation was ended one by one
+            verifyNoInteractions(conversationService);
+            verify(conversationMemoryStore, never()).loadActiveConversationMemorySnapshot(any(), any());
+        }
+
+        @Test
+        @DisplayName("dryRun asks the store to count only and reports it")
+        void dryRunOnlyCounts() throws Exception {
+            when(conversationMemoryStore.endIdleConversations(any(), any(), any(), eq(true))).thenReturn(7L);
+
+            Response response = restConversationStore.endInactiveConversations(30, null, true);
+
+            assertEquals(7L, bodyOf(response).get("count"));
+            assertEquals(true, bodyOf(response).get("dryRun"));
+            verify(conversationMemoryStore).endIdleConversations(any(), isNull(), eq("idle"), eq(true));
+        }
+
+        @Test
+        @DisplayName("an agentId restricts the store call to that agent; a blank one means every agent")
+        void agentFilter() throws Exception {
+            when(conversationMemoryStore.endIdleConversations(any(), any(), any(), anyBoolean())).thenReturn(1L);
+
+            restConversationStore.endInactiveConversations(30, "a1a1a1a1a1a1a1a1a1a1a1a1", false);
+            restConversationStore.endInactiveConversations(30, "", false);
+
+            verify(conversationMemoryStore).endIdleConversations(any(), eq("a1a1a1a1a1a1a1a1a1a1a1a1"), eq("idle"), eq(false));
+            verify(conversationMemoryStore).endIdleConversations(any(), isNull(), eq("idle"), eq(false));
+        }
+
+        @Test
+        @DisplayName("inactiveForDays is required and must be at least 1 — 0 would end every open conversation")
+        void validatesInactiveForDays() throws Exception {
+            assertThrows(BadRequestException.class, () -> restConversationStore.endInactiveConversations(null, null, false));
+            assertThrows(BadRequestException.class, () -> restConversationStore.endInactiveConversations(0, null, false));
+            assertThrows(BadRequestException.class, () -> restConversationStore.endInactiveConversations(-5, null, true));
+
+            verifyNoInteractions(conversationMemoryStore);
+        }
+
+        @Test
+        @DisplayName("records an audit entry naming the actor, the cutoff, the agent and the count")
+        void audited() throws Exception {
+            when(conversationMemoryStore.endIdleConversations(any(), any(), any(), anyBoolean())).thenReturn(5L);
+
+            restConversationStore.endInactiveConversations(90, "a1a1a1a1a1a1a1a1a1a1a1a1", false);
+
+            ArgumentCaptor<AuditEntry> entry = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditLedger).submit(entry.capture());
+            assertEquals(RestConversationStore.BULK_END_ACTOR, entry.getValue().output().get("actor"));
+            assertEquals(90, entry.getValue().output().get("inactiveForDays"));
+            assertEquals(5L, entry.getValue().output().get("count"));
+            assertEquals("a1a1a1a1a1a1a1a1a1a1a1a1", entry.getValue().output().get("agentId"));
+        }
+
+        @Test
+        @DisplayName("a failing audit never fails the operation")
+        void auditFailureIsSwallowed() throws Exception {
+            when(conversationMemoryStore.endIdleConversations(any(), any(), any(), anyBoolean())).thenReturn(5L);
+            doThrow(new RuntimeException("ledger down")).when(auditLedger).submit(any());
+
+            Response response = restConversationStore.endInactiveConversations(90, null, false);
+
+            assertEquals(5L, bodyOf(response).get("count"));
+        }
     }
 
     /**
@@ -764,11 +884,8 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("should return active conversation statuses")
         void returnsStatuses() throws Exception {
-            var snapshot = new ConversationMemorySnapshot();
-            snapshot.setId("conv-1");
-            snapshot.setConversationState(ConversationState.READY);
-            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", 1))
-                    .thenReturn(List.of(snapshot));
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), isNull(), anyInt()))
+                    .thenReturn(List.of(activity("conv-1", 1, ConversationState.READY)));
             var convDesc = new ConversationDescriptor();
             convDesc.setLastModifiedOn(new Date());
             when(conversationDescriptorStore.readDescriptor("conv-1", 0))
@@ -779,6 +896,38 @@ class RestConversationStoreTest {
             assertEquals(1, result.size());
             assertEquals("conv-1", result.get(0).getConversationId());
             assertEquals(ConversationState.READY, result.get(0).getConversationState());
+        }
+
+        /**
+         * With tens of thousands of open conversations of several hundred KB each this
+         * listing ran out of heap, because it loaded every conversation in full just to
+         * read three fields.
+         */
+        @Test
+        @DisplayName("never loads a conversation in full — the listing is built from the projection")
+        void neverLoadsFullSnapshots() throws Exception {
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), isNull(), anyInt()))
+                    .thenReturn(List.of(activity("conv-1", 1, ConversationState.READY)));
+            when(conversationDescriptorStore.readDescriptor("conv-1", 0)).thenReturn(new ConversationDescriptor());
+
+            restConversationStore.getActiveConversations("agent-1", 1);
+
+            verify(conversationMemoryStore, never()).loadActiveConversationMemorySnapshot(any(), any());
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(any());
+        }
+
+        @Test
+        @DisplayName("pages through every batch, keyed on the last id of the previous one")
+        void pagesThroughEveryBatch() throws Exception {
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), isNull(), anyInt()))
+                    .thenReturn(List.of(activity("conv-1", 1, ConversationState.READY)));
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), eq("conv-1"), anyInt()))
+                    .thenReturn(List.of(activity("conv-2", 1, ConversationState.IN_PROGRESS)));
+            when(conversationDescriptorStore.readDescriptor(anyString(), eq(0))).thenReturn(new ConversationDescriptor());
+
+            List<ConversationStatus> result = restConversationStore.getActiveConversations("agent-1", 1);
+
+            assertEquals(List.of("conv-1", "conv-2"), result.stream().map(ConversationStatus::getConversationId).toList());
         }
 
         @Test
@@ -805,13 +954,8 @@ class RestConversationStoreTest {
             // Regression: readDescriptor threw NotFound for it, which failed the whole
             // listing and with it undeploy-with-end — triggerable by any user
             // soft-deleting their own open conversation.
-            var soft = new ConversationMemorySnapshot();
-            soft.setId("conv-soft");
-            soft.setConversationState(ConversationState.READY);
-            var gone = new ConversationMemorySnapshot();
-            gone.setId("conv-gone");
-            gone.setConversationState(ConversationState.READY);
-            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", 1)).thenReturn(List.of(soft, gone));
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), eq(1), isNull(), anyInt()))
+                    .thenReturn(List.of(activity("conv-soft", 1, ConversationState.READY), activity("conv-gone", 1, ConversationState.READY)));
             when(conversationDescriptorStore.readDescriptor(anyString(), eq(0))).thenThrow(new ResourceNotFoundException("archived"));
             var archived = new ConversationDescriptor();
             var lastModified = new Date(1_000L);
@@ -830,16 +974,8 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("a null agentVersion lists every version, reporting each snapshot's own version")
         void nullVersionMeansEveryVersion() throws Exception {
-            var v1 = new ConversationMemorySnapshot();
-            v1.setId("conv-v1");
-            v1.setAgentVersion(1);
-            v1.setConversationState(ConversationState.READY);
-            var v2 = new ConversationMemorySnapshot();
-            v2.setId("conv-v2");
-            v2.setAgentVersion(2);
-            v2.setConversationState(ConversationState.IN_PROGRESS);
-            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent-1", null))
-                    .thenReturn(List.of(v1, v2));
+            when(conversationMemoryStore.loadOpenConversationActivity(eq("agent-1"), isNull(), isNull(), anyInt()))
+                    .thenReturn(List.of(activity("conv-v1", 1, ConversationState.READY), activity("conv-v2", 2, ConversationState.IN_PROGRESS)));
             var convDesc = new ConversationDescriptor();
             convDesc.setLastModifiedOn(new Date());
             when(conversationDescriptorStore.readDescriptor(anyString(), eq(0))).thenReturn(convDesc);
