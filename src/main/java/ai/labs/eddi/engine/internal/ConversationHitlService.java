@@ -148,9 +148,6 @@ class ConversationHitlService {
             return IConversationService.CancelOutcome.NOT_FOUND;
         }
 
-        // MAJOR-3: Delete stale HITL timeout schedule before cancel
-        deleteHitlTimeoutSchedule(conversationId);
-
         // #2: signal an in-flight execution on this pod. The pipeline checks the
         // flag at task boundaries and stops before the next lifecycle task.
         // CANCEL_IMMEDIATE currently degrades to graceful semantics on the
@@ -169,6 +166,16 @@ class ConversationHitlService {
                     ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
         }
         if (changed) {
+            // MAJOR-3: drop the stale HITL timeout schedule — but only once a state
+            // transition went through. Deleting it first meant a cancel whose CAS
+            // failed (a store error) left the pause in place with no timeout at all:
+            // a timeout ABORT that could not be applied was re-armed onto a row that
+            // no longer existed. And when neither CAS matched there is nothing of
+            // ours to clean up — deleting by name then could take the schedule of a
+            // pause that started a moment later. A row left behind for an already
+            // finished pause is harmless: its fire finds nothing awaiting a decision
+            // and completes.
+            deleteHitlTimeoutSchedule(conversationId);
             conversationService.cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             if (pauseCancelled) {
                 // A pending human approval was terminally resolved outside resume:
@@ -1513,11 +1520,8 @@ class ConversationHitlService {
             schedule.setEnabled(true);
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(Map.of(
-                    HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
-                    HitlSchedules.METADATA_POLICY_KEY, policy.name(),
-                    HitlSchedules.METADATA_SURFACE_KEY, HitlSchedules.SURFACE_REGULAR,
-                    HitlSchedules.METADATA_CONVERSATION_ID_KEY, conversationId));
+            schedule.setMetadata(HitlSchedules.timeoutMetadata(policy.name(), HitlSchedules.SURFACE_REGULAR, conversationId,
+                    HitlDecision.pauseIdOf(pausedAt)));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled HITL timeout for conversation %s at %s (policy: %s)",
                     sanitize(conversationId), fireAt, policy.name());

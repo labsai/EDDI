@@ -206,7 +206,7 @@ describe("Sidebar", () => {
     const stored = localStorage.getItem("eddi-sidebar-sections");
     expect(stored).toBeTruthy();
     const parsed = JSON.parse(stored!);
-    expect(parsed).toContain(3); // Admin is index 3
+    expect(parsed).toContain("nav.sectionAdmin");
   });
 
   // ── External links ─────────────────────────────────────────────────

@@ -432,4 +432,51 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
             assertEquals(List.of(plain.getId()), found.stream().map(IResourceStore.IResourceId::getId).toList());
         }
     }
+
+    @Nested
+    @DisplayName("Field index replacement on an upgraded database")
+    class FieldIndexReplacement {
+
+        private static final String LEGACY = "idx_resources_field_swapprobe";
+        private static final String REPLACEMENT = "idx_resources_fdesc_swapprobe";
+
+        @AfterEach
+        void dropProbeIndexes() throws SQLException {
+            try (var conn = ds.getConnection(); var stmt = conn.createStatement()) {
+                stmt.execute("DROP INDEX IF EXISTS " + LEGACY);
+                stmt.execute("DROP INDEX IF EXISTS " + REPLACEMENT);
+            }
+        }
+
+        @Test
+        @DisplayName("boot leaves the legacy index alone; the concurrent swap replaces it with a valid DESC NULLS LAST index")
+        void swapsTheLegacyIndexConcurrently() throws SQLException {
+            try (var conn = ds.getConnection(); var stmt = conn.createStatement()) {
+                stmt.execute("CREATE INDEX " + LEGACY + " ON resources (collection_name, (data ->> 'swapprobe'))");
+            }
+            var json = new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
+            @SuppressWarnings("unchecked")
+            Class<Map<String, Object>> type = (Class<Map<String, Object>>) (Class<?>) Map.class;
+
+            var upgraded = new PostgresResourceStorage<>(ds, COLLECTION, json, type, "swapprobe");
+            try (var conn = ds.getConnection()) {
+                assertEquals(Boolean.TRUE, PostgresFieldIndexSwaps.isValid(conn, LEGACY), "boot must not touch the legacy index");
+                assertNull(PostgresFieldIndexSwaps.isValid(conn, REPLACEMENT), "boot must not build the replacement with a blocking CREATE");
+            }
+
+            assertTrue(upgraded.fieldIndexSwaps().runWithRetries());
+
+            try (var conn = ds.getConnection(); var ps = conn.prepareStatement("SELECT pg_get_indexdef(to_regclass(?))")) {
+                assertNull(PostgresFieldIndexSwaps.isValid(conn, LEGACY));
+                assertEquals(Boolean.TRUE, PostgresFieldIndexSwaps.isValid(conn, REPLACEMENT));
+                ps.setString(1, REPLACEMENT);
+                try (var rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertTrue(rs.getString(1).contains("DESC NULLS LAST"), rs.getString(1));
+                }
+            }
+            // The next boot finds nothing to replace.
+            assertNull(new PostgresResourceStorage<>(ds, COLLECTION, json, type, "swapprobe").fieldIndexSwaps());
+        }
+    }
 }
