@@ -10,13 +10,13 @@ import {
 import {
   deleteAgent,
   undeployAgent,
-  deployAgent,
   getDeploymentStatus,
   getAgent,
   type Agent,
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
 import { markOperatorDescriptor } from "./operator-marker";
+import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import {
   buildEndpointFilter,
   buildToolApprovals,
@@ -955,7 +955,26 @@ export async function reactivateOperator(
   if (!config.agentId || config.version == null) {
     throw new Error("The operator has no provisioned agent to re-enable.");
   }
-  await deployAgent(config.environment, config.agentId, config.version);
+  // Through the grant flow, like activation: an operator whose model key is
+  // restricted needs its agent on the grant to come back up, and a plain deploy
+  // here used to fail (or be refused) with no way to fix it from this screen.
+  const outcome = await runDeployWithGrants({
+    agentId: config.agentId,
+    version: config.version,
+    environment: config.environment,
+  });
+  if (outcome.kind === "cancelled") {
+    throw new Error(
+      "The Platform Operator was not enabled: its vault key was not granted to the agent. Nothing was changed - enable it again to grant the key.",
+    );
+  }
+  if (outcome.kind === "failed") {
+    throw new Error(
+      outcome.message
+        ? `The Platform Operator could not be enabled: ${outcome.message}`
+        : `The Platform Operator could not be enabled (status: ${outcome.result.status}).`,
+    );
+  }
   const next: OperatorConfig = { ...config, enabled: true };
   await writeOperatorConfig(next);
   return next;

@@ -63,7 +63,9 @@ export function GrantRequiredDialog({ request, onDecision }: GrantRequiredDialog
   const title =
     request?.source === "failure"
       ? t("grantRequired.titleRefused", "Deployment refused: vault key not granted")
-      : t("grantRequired.title", "This agent is not granted its vault keys");
+      : request?.agents
+        ? t("grantRequired.titleMany", "These agents are not granted their vault keys")
+        : t("grantRequired.title", "This agent is not granted its vault keys");
   return (
     <AccessibleDialog
       open={request !== null}
@@ -74,7 +76,7 @@ export function GrantRequiredDialog({ request, onDecision }: GrantRequiredDialog
     >
       {request && (
         <GrantRequiredBody
-          key={`${request.agentId}/${request.version}/${request.source}`}
+          key={`${request.agents?.map((a) => a.agentId).join(",") ?? request.agentId}/${request.version}/${request.source}`}
           request={request}
           onDecision={onDecision}
         />
@@ -94,6 +96,9 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
   const [losingAccess, setLosingAccess] = useState<AffectedAgent[] | null>(null);
 
   const agentLabel = request.agentName || request.agentId;
+  /** A batch request spans several agents; each key lists the ones that need it. */
+  const batchAgents = request.agents;
+  const agentIdsFor = (issue: GrantIssue): string[] => issue.agentIds ?? [request.agentId];
   const grantable = request.issues.filter((issue) => issue.tenantId && issue.keyName);
   const unfixable = request.issues.filter((issue) => !issue.tenantId || !issue.keyName);
 
@@ -123,7 +128,9 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
     return looked && !grantsAllAgents(looked.allowedAgents) ? looked.allowedAgents : undefined;
   };
 
-  const endpoints = grantEndpoints(grantable, request.agentId);
+  const endpoints = [
+    ...new Set(grantable.flatMap((issue) => agentIdsFor(issue).flatMap((id) => grantEndpoints([issue], id)))),
+  ];
   const canDeployAnyway = request.enforcement === "WARN";
 
   const finish = (decision: GrantDecision) => {
@@ -147,8 +154,10 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
       if (losingAccess === null) {
         const losing: AffectedAgent[] = [];
         for (const issue of grantable) {
-          const dry = await grantAgentToSecret(issue.tenantId!, issue.keyName!, request.agentId, { dryRun: true });
-          losing.push(...(dry.agentsLosingAccess ?? []));
+          for (const id of agentIdsFor(issue)) {
+            const dry = await grantAgentToSecret(issue.tenantId!, issue.keyName!, id, { dryRun: true });
+            losing.push(...(dry.agentsLosingAccess ?? []));
+          }
         }
         // An append never removes anyone, so this is empty by construction. If
         // the backend ever says otherwise, the admin sees it before anything is
@@ -158,8 +167,13 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
           return;
         }
       }
+      // One confirmation, then an append per (key, agent): the backend's atomic
+      // append is per agent, and replacing a key's whole list from here would
+      // drop an agent someone else added a moment ago.
       for (const issue of grantable) {
-        await grantAgentToSecret(issue.tenantId!, issue.keyName!, request.agentId);
+        for (const id of agentIdsFor(issue)) {
+          await grantAgentToSecret(issue.tenantId!, issue.keyName!, id);
+        }
       }
       finish("granted");
     } catch (err) {
@@ -202,7 +216,15 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
             >
               <Lock className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
               <span>
-                {isAdmin && allowed && allowed.length > 0
+                {batchAgents
+                  ? t("grantRequired.issueMany", {
+                      key: issue.keyName,
+                      agents: agentIdsFor(issue)
+                        .map((id) => batchAgents.find((a) => a.agentId === id)?.agentName || nameById.get(id) || id)
+                        .join(", "),
+                      defaultValue: "Agents using the restricted key \"{{key}}\", which is granted only to other agents: {{agents}}.",
+                    })
+                  : isAdmin && allowed && allowed.length > 0
                   ? t("grantRequired.issueWithAgents", {
                       agent: agentLabel,
                       key: issue.keyName,
@@ -247,7 +269,9 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
           <p className="text-sm font-medium text-foreground">
             {allowAll
               ? t("grantRequired.questionAll", "Allow every agent to use these keys?")
-              : t("grantRequired.question", {
+              : batchAgents
+                ? t("grantRequired.questionMany", "Add all of these agents to the grant?")
+                : t("grantRequired.question", {
                   agent: agentLabel,
                   defaultValue: "Add \"{{agent}}\" to the grant?",
                 })}
@@ -281,10 +305,15 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
       {!isAdmin && grantable.length > 0 && (
         <div className="space-y-2 rounded-lg border border-border px-3 py-2" data-testid="grant-required-non-admin">
           <p className="text-xs text-muted-foreground">
-            {t(
-              "grantRequired.nonAdmin",
-              "Only an administrator can change who may use a vault key. Ask one to add this agent to the grant, then deploy again.",
-            )}
+            {batchAgents
+              ? t(
+                  "grantRequired.nonAdminMany",
+                  "Only an administrator can change who may use a vault key. Ask one to add these agents to the grant, then deploy them again.",
+                )
+              : t(
+                  "grantRequired.nonAdmin",
+                  "Only an administrator can change who may use a vault key. Ask one to add this agent to the grant, then deploy again.",
+                )}
           </p>
           <Button variant="outline" size="sm" onClick={handleCopy} data-testid="grant-required-copy">
             <Copy className="me-2 h-3.5 w-3.5" />

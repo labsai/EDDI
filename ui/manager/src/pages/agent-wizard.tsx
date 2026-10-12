@@ -33,13 +33,13 @@ import { Button } from "@/components/ui/button";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
 import { useDeployWithGrants, isGrantFailure } from "@/hooks/use-deploy-with-grants";
 import { deployFailureMessage, fixGrantAndRedeploy } from "@/lib/deploy-outcome";
-import { parseVersionFromLocation } from "@/lib/api/location-version";
-import { getAgentCurrentVersion, type DeploymentFailure } from "@/lib/api/agents";
+import { type DeploymentFailure } from "@/lib/api/agents";
 import {
   getProviderConfig,
   type SetupAgentRequest,
   type CreateApiAgentRequest,
   type SetupResult,
+  resolveSetupVersion,
 } from "@/lib/api/agent-setup";
 import {
   MODEL_SUGGESTIONS,
@@ -297,11 +297,7 @@ export function AgentWizardPage() {
    * deploy — the agent exists either way, and the view says what happened.
    */
   async function deployCreatedAgent(res: SetupResult): Promise<SetupResult> {
-    const location = (res.resources as { agentLocation?: unknown } | undefined)?.agentLocation;
-    let version = parseVersionFromLocation(typeof location === "string" ? location : null);
-    if (version == null) {
-      version = await getAgentCurrentVersion(res.agentId).catch(() => 1);
-    }
+    const version = await resolveSetupVersion(res);
     setCreatedVersion(version);
     const outcome = await deployWithGrants({
       agentId: res.agentId,
