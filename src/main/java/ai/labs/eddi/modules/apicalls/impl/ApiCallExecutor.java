@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -910,12 +911,25 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * through "Illegal character in path at index 42: https://…/&lt;secret&gt;/…".
      * The same holds for any other exception whose message quotes the request.
      */
+    private static String stringOf(Object value) {
+        return value == null ? null : value.toString();
+    }
+
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties)
             throws ITemplatingEngine.TemplateEngineException {
         var resolvedSecrets = new HashSet<String>();
         try {
-            return buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, resolvedSecrets);
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, resolvedSecrets);
+            if (ApprovedCallScope.isActive()) {
+                // A human-approved tool call: judge the request exactly as it will be
+                // sent, after preRequest.propertyInstructions ran — the preview the
+                // resumer checked before execution is built without them.
+                Map<String, Object> outgoing = built.request().toMap();
+                ApprovedCallScope.checkOutgoing(stringOf(outgoing.get(IRequest.KEY_METHOD)), stringOf(outgoing.get(IRequest.KEY_URI)),
+                        stringOf(outgoing.get(IRequest.KEY_BODY)));
+            }
+            return built;
         } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
             // A template failure after an earlier part of the request resolved a secret
             // is checked, and would otherwise reach the caller's log before these

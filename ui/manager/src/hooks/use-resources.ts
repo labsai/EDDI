@@ -4,7 +4,6 @@ import {
   getResource,
   getResourceVersions,
   createResource,
-  updateResource,
   deleteResource,
   duplicateResource,
   getResourceType,
@@ -117,29 +116,6 @@ export function useDuplicateResource(slug: string) {
     mutationFn: ({ id, version }: { id: string; version: number }) => {
       if (!rt) return Promise.reject(new Error(`Unknown resource type: ${slug}`));
       return duplicateResource(rt, id, version);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
-    },
-  });
-}
-
-export function useUpdateResource(slug: string) {
-  const queryClient = useQueryClient();
-  const rt = resolveType(slug);
-  return useMutation({
-    mutationFn: ({
-      id,
-      version,
-      body,
-    }: {
-      id: string;
-      version: number;
-      body: unknown;
-    }) => {
-      if (!rt)
-        return Promise.reject(new Error(`Unknown resource type: ${slug}`));
-      return updateResource(rt, id, version, body);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });

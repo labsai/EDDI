@@ -6,12 +6,11 @@ import type { SharedTaskList, TaskItem } from "./groups";
 // cadences) bolted onto a group, run unattended by a scheduler.
 // ─────────────────────────────────────────────────────────────────
 
-/** Backend `GroupWorkspace.MAX_BACKLOG_SIZE`. */
-export const WORKSPACE_MAX_BACKLOG_SIZE = 200;
-/** Backend `GroupWorkspace.DEFAULT_MAX_BACKLOG_TASKS_PER_RUN`, used when a cadence's own value is non-positive. */
-export const WORKSPACE_DEFAULT_MAX_BACKLOG_TASKS_PER_RUN = 5;
-/** Backend `RestGroupWorkspace.MAX_CADENCES_PER_WORKSPACE`. */
-export const WORKSPACE_MAX_CADENCES = 20;
+// Backend caps the UI does not enforce itself (the server rejects past them):
+// `GroupWorkspace.MAX_BACKLOG_SIZE` = 200, `RestGroupWorkspace.MAX_CADENCES_PER_WORKSPACE`
+// = 20, and `GroupWorkspace.DEFAULT_MAX_BACKLOG_TASKS_PER_RUN` = 5 (used when a
+// cadence's own value is non-positive).
+
 /** Backend `RestGroupWorkspace.MAX_INPUT_TEMPLATE_LENGTH`. */
 export const WORKSPACE_MAX_INPUT_TEMPLATE_LENGTH = 4000;
 /** Backend `SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH` — same cap the addBacklogTask endpoint enforces. */

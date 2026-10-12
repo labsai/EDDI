@@ -31,6 +31,7 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -231,6 +232,12 @@ public class RestScheduleStore implements IRestScheduleStore {
             // rogue one keeps starting conversations, and nothing on this path ever
             // set it — every schedule created through the public API had it null.
             schedule.setCreatedBy(callerPrincipal());
+            // ...and what the creator could reach at the time, so every fire can
+            // re-check that they may still use the agent (shares with their teams
+            // included) without a request around. Never taken from the body.
+            schedule.setCreatorTeams(resourceAccessGuard.currentTeamSubjects());
+            schedule.setCreatorAdmin(resourceAccessGuard.callerIsAdmin());
+            schedule.setDisabledReason(null);
 
             // A caller must not seed a schedule with a persistent conversation it does
             // not own: the fire path reuses persistentConversationId verbatim and
@@ -250,7 +257,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return Response.created(URI.create("/schedulestore/schedules/" + id)).entity(schedule).build();
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Invalid schedule configuration: " + e.getMessage());
-            return Response.status(Response.Status.BAD_REQUEST).entity("Invalid schedule configuration").build();
+            return invalidSchedule(e);
         } catch (ForbiddenException e) {
             // The USE gate's refusal. Without this rethrow the generic catch below
             // turns a clean 403 into a 500 — the caller cannot tell "you may not
@@ -393,7 +400,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             throw new NotFoundException("Schedule not found: " + scheduleId);
         } catch (IllegalArgumentException e) {
             LOGGER.warn("Invalid schedule update for " + scheduleId + ": " + e.getMessage());
-            return Response.status(Response.Status.BAD_REQUEST).entity("Invalid schedule configuration").build();
+            return invalidSchedule(e);
         } catch (ForbiddenException e) {
             // The USE gate's refusal. Without this rethrow the generic catch below
             // turns a clean 403 into a 500 — the caller cannot tell "you may not
@@ -746,7 +753,8 @@ public class RestScheduleStore implements IRestScheduleStore {
 
     /**
      * Copy the fields a PUT may not edit from the stored schedule onto the incoming
-     * body: provenance ({@code createdAt}, {@code createdBy}), fire history
+     * body: provenance ({@code createdAt}, {@code createdBy} and the creator's
+     * access snapshot), why the system disabled it, fire history
      * ({@code lastFired}), the claim record ({@code claimedBy}, {@code claimedAt},
      * {@code fireId}, {@code nextRetryAt}) and {@code persistentConversationId}.
      * <p>
@@ -801,6 +809,9 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
         schedule.setCreatedAt(stored.getCreatedAt());
         schedule.setCreatedBy(stored.getCreatedBy());
+        schedule.setCreatorTeams(stored.getCreatorTeams());
+        schedule.setCreatorAdmin(stored.isCreatorAdmin());
+        schedule.setDisabledReason(stored.getDisabledReason());
         schedule.setLastFired(stored.getLastFired());
         schedule.setClaimedBy(stored.getClaimedBy());
         schedule.setClaimedAt(stored.getClaimedAt());
@@ -875,6 +886,23 @@ public class RestScheduleStore implements IRestScheduleStore {
             resourceAccessGuard.requireAccess(groupId.toString(), AccessLevel.EDIT, "group");
         }
         return null;
+    }
+
+    /**
+     * The 400 for a schedule that failed validation, carrying the reason.
+     * <p>
+     * It used to say only "Invalid schedule configuration" and log the actual
+     * reason server-side, so a caller who sent a six-field cron could not learn
+     * that cron expressions here have exactly five. Every validation message is
+     * written for the caller (field names and the expected form, never stored
+     * data), so it is returned as is — the same JSON shape on create and update.
+     */
+    static Response invalidSchedule(IllegalArgumentException e) {
+        String reason = e.getMessage() != null && !e.getMessage().isBlank() ? e.getMessage() : "Invalid schedule configuration";
+        return Response.status(Response.Status.BAD_REQUEST)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(Map.of("error", "invalid_schedule", "message", reason))
+                .build();
     }
 
     /** True if the schedule carries the HITL approval-timeout metadata marker. */

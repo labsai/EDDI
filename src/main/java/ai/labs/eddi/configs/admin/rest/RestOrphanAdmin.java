@@ -13,6 +13,8 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.parser.IParserStore;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -41,6 +43,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * <ol>
  * <li>Enumerate all agents → collect referenced workflow URIs</li>
  * <li>Enumerate all workflows → collect referenced extension resource URIs</li>
+ * <li>Enumerate all parser documents → collect the dictionaries they
+ * reference</li>
  * <li>For each store type, enumerate all resources via document
  * descriptors</li>
  * <li>Any resource whose URI is NOT in the referenced set = orphan</li>
@@ -76,22 +80,29 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     private static final String WORKFLOW_TYPE = "ai.labs.workflow";
 
+    private static final String PARSER_TYPE = "ai.labs.parser";
+
+    private static final String DICTIONARY_TYPE = "ai.labs.dictionary";
+
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IResourceClientLibrary resourceClientLibrary;
     private final IRestWorkflowStore restWorkflowStore;
     private final IDeploymentStore deploymentStore;
+    private final IParserStore parserStore;
 
     @Inject
     public RestOrphanAdmin(IAgentStore agentStore, IWorkflowStore workflowStore, IDocumentDescriptorStore documentDescriptorStore,
-            IResourceClientLibrary resourceClientLibrary, IRestWorkflowStore restWorkflowStore, IDeploymentStore deploymentStore) {
+            IResourceClientLibrary resourceClientLibrary, IRestWorkflowStore restWorkflowStore, IDeploymentStore deploymentStore,
+            IParserStore parserStore) {
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.resourceClientLibrary = resourceClientLibrary;
         this.restWorkflowStore = restWorkflowStore;
         this.deploymentStore = deploymentStore;
+        this.parserStore = parserStore;
     }
 
     @Override
@@ -140,7 +151,8 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 // the two questions at different versions is how a guard that passes
                 // can still be followed by a delete of something in use.
                 Integer version = resolveVersion(orphan);
-                if (isReferencedNow(orphan, version) || isReferencedByADeployedVersionNow(orphan)) {
+                if (isReferencedNow(orphan, version) || isReferencedByADeployedVersionNow(orphan)
+                        || isReferencedByAParserDocumentNow(orphan)) {
                     log.warnf("Skipping orphan %s — it became referenced after the scan and before the purge", orphan.getResourceUri());
                     continue;
                 }
@@ -248,6 +260,46 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         }
         if (deployedReferences.contains(key)) {
             log.warnf("Skipping orphan %s — a deployed Agent version started referencing it after the scan", orphan.getResourceUri());
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * The third part of the fresh re-check, for dictionaries only: the references
+     * held by parser documents, which neither {@link #isReferencedNow} (it asks
+     * workflows) nor {@link #isReferencedByADeployedVersionNow} sees for a parser
+     * document no workflow pins at that version.
+     *
+     * <p>
+     * A dictionary is referenced from a parser document's
+     * {@code extensions.dictionaries[n].config.uri} at least as often as from a
+     * workflow step — it is the shape {@code /parserstore/parsers} documents and
+     * the export carries. The scan used to look at workflow steps only, so every
+     * such dictionary was reported as an orphan and the purge deleted it, leaving
+     * the parser document naming a dictionary that no longer exists — which breaks
+     * the parser and the export of every agent using it. Re-reads every parser
+     * document's current version, like the deployed-version re-check re-reads the
+     * deployments; fails CLOSED.
+     * </p>
+     */
+    private boolean isReferencedByAParserDocumentNow(OrphanInfo orphan) {
+        if (!DICTIONARY_TYPE.equals(orphan.getType())) {
+            return false;
+        }
+        String key = resourceKey(orphan.getResourceUri());
+        if (key == null) {
+            log.warnf("Cannot re-check orphan %s against parser documents (no usable key) — NOT purging it", orphan.getResourceUri());
+            return true;
+        }
+        Set<String> parserReferences = new HashSet<>();
+        String failureReason = collectParserDocumentReferences(parserReferences, null);
+        if (failureReason != null) {
+            log.warnf("Parser-document re-check of orphan %s was incomplete (%s) — NOT purging it", orphan.getResourceUri(), failureReason);
+            return true;
+        }
+        if (parserReferences.contains(key)) {
+            log.warnf("Skipping orphan %s — a parser document references it", orphan.getResourceUri());
             return true;
         }
         return false;
@@ -616,6 +668,11 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 }
             }
 
+            // Step 1b': every parser document's dictionaries. A parser step names its
+            // parser document by config.uri, and that document — not the workflow —
+            // names the dictionaries; see isReferencedByAParserDocumentNow.
+            failureReason = collectParserDocumentReferences(referencedResources, failureReason);
+
             // Step 1c: every DEPLOYED Agent version, not just the current one.
             //
             // Deployments are version-pinned: AgentDeploymentManagement.checkDeployments
@@ -706,9 +763,13 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
 
     /**
      * Extract all extension resource URIs from a workflow configuration. Follows
-     * the same traversal as RestWorkflowStore.deleteWorkflowCascade().
+     * the same traversal as RestWorkflowStore.deleteWorkflowCascade(), plus the
+     * dictionaries of the parser document a parser step pins — at the version it
+     * pins, which may be older than the current one {@link #scanReferencedUris()}
+     * reads.
      */
-    private void collectExtensionUris(WorkflowConfiguration workflowConfig, Set<String> referencedResources) {
+    private void collectExtensionUris(WorkflowConfiguration workflowConfig, Set<String> referencedResources)
+            throws IResourceStore.ResourceStoreException {
         for (WorkflowStep ext : workflowConfig.getWorkflowSteps()) {
             // Main extension resource URI (config.uri)
             Map<String, Object> config = ext.getConfig();
@@ -716,28 +777,117 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 Object uriObj = config.get("uri");
                 if (uriObj != null && !isNullOrEmpty(uriObj.toString())) {
                     addReference(referencedResources, uriObj);
+                    collectPinnedParserDictionaries(uriObj, referencedResources);
                 }
             }
 
             // Nested resources (e.g., parser → dictionaries)
-            Map<String, Object> extensions = ext.getExtensions();
-            if (extensions != null && extensions.containsKey("dictionaries")) {
-                Object dictObj = extensions.get("dictionaries");
-                if (dictObj instanceof List<?> dictionaries) {
-                    for (Object entry : dictionaries) {
-                        if (entry instanceof Map<?, ?> dictMap) {
-                            Object dictConfig = dictMap.get("config");
-                            if (dictConfig instanceof Map<?, ?> dictConfigMap) {
-                                Object dictUri = dictConfigMap.get("uri");
-                                if (dictUri != null && !isNullOrEmpty(dictUri.toString())) {
-                                    addReference(referencedResources, dictUri);
-                                }
-                            }
-                        }
-                    }
+            collectDictionaryUris(ext.getExtensions(), referencedResources);
+        }
+    }
+
+    /**
+     * Records {@code extensions.dictionaries[n].config.uri} — the shape a parser
+     * step's inline extensions and a parser document share.
+     */
+    private static void collectDictionaryUris(Map<String, Object> extensions, Set<String> referencedResources) {
+        if (extensions == null || !(extensions.get("dictionaries") instanceof List<?> dictionaries)) {
+            return;
+        }
+        for (Object entry : dictionaries) {
+            if (entry instanceof Map<?, ?> dictMap && dictMap.get("config") instanceof Map<?, ?> dictConfigMap) {
+                Object dictUri = dictConfigMap.get("uri");
+                if (dictUri != null && !isNullOrEmpty(dictUri.toString())) {
+                    addReference(referencedResources, dictUri);
                 }
             }
         }
+    }
+
+    /**
+     * When a workflow step's {@code config.uri} names a parser document, records
+     * the dictionaries of that document at the version the step pins. A parser
+     * document that is gone protects nothing; any other read failure propagates,
+     * which leaves the scan incomplete — the safe direction.
+     */
+    private void collectPinnedParserDictionaries(Object uriObj, Set<String> referencedResources)
+            throws IResourceStore.ResourceStoreException {
+        URI uri;
+        try {
+            uri = URI.create(uriObj.toString());
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        if (!PARSER_TYPE.equals(uri.getHost())) {
+            return;
+        }
+        IResourceStore.IResourceId resourceId;
+        try {
+            resourceId = RestUtilities.extractResourceId(uri);
+        } catch (IllegalArgumentException e) {
+            // A pin such as "?version=abc" names no parser version, so there is no
+            // pinned document to read — the runtime cannot resolve it either. Letting
+            // the exception out made the whole scan incomplete, and every purge a 409,
+            // until someone edited the workflow. Nothing is lost by skipping it: the
+            // parser's identity is already recorded, and its current version's
+            // dictionaries are collected by collectParserDocumentReferences. A parser
+            // document that cannot be READ still fails the scan, below and there.
+            log.warnf("Workflow step pins parser '%s' with an unparsable version; it names no readable version: %s", uri,
+                    e.getMessage());
+            return;
+        }
+        if (resourceId == null || isNullOrEmpty(resourceId.getId()) || resourceId.getVersion() == null || resourceId.getVersion() < 1) {
+            return;
+        }
+        try {
+            ParserConfiguration parser = parserStore.read(resourceId.getId(), resourceId.getVersion());
+            if (parser != null) {
+                collectDictionaryUris(parser.getExtensions(), referencedResources);
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // The pinned parser version is gone; it references nothing any more.
+        }
+    }
+
+    /**
+     * Records the dictionaries every parser document references, at its CURRENT
+     * version — descriptor versions go stale (see {@link #liveVersion}). Every
+     * parser document counts, referenced by a workflow or not: one that is itself
+     * an orphan keeps its dictionaries until it has been purged, so a purge needs a
+     * second run to reach them, and never deletes a dictionary out from under a
+     * parser that still exists.
+     *
+     * @return {@code currentFailure}, or a new reason when a parser document could
+     *         not be read — its dictionaries would otherwise look unreferenced
+     */
+    private String collectParserDocumentReferences(Set<String> referencedResources, String currentFailure) {
+        List<DocumentDescriptor> parserDescriptors;
+        try {
+            parserDescriptors = readAllDescriptors(PARSER_TYPE, false);
+        } catch (Exception e) {
+            log.warnf("Could not enumerate parser documents: %s", e.getMessage());
+            return "could not enumerate parser documents: " + e.getMessage();
+        }
+        String failureReason = currentFailure;
+        for (DocumentDescriptor parserDescriptor : parserDescriptors) {
+            var resourceId = RestUtilities.extractResourceId(parserDescriptor.getResource());
+            if (resourceId == null || isNullOrEmpty(resourceId.getId())) {
+                continue;
+            }
+            try {
+                var current = parserStore.getCurrentResourceId(resourceId.getId());
+                ParserConfiguration parser = parserStore.read(current.getId(), current.getVersion());
+                if (parser != null) {
+                    collectDictionaryUris(parser.getExtensions(), referencedResources);
+                }
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // Descriptor without a live parser document: it references nothing.
+            } catch (Exception e) {
+                log.warnf("Error reading parser document %s: %s", parserDescriptor.getResource(), e.getMessage());
+                failureReason = "could not read parser document " + parserDescriptor.getResource() + ": " + e.getMessage();
+            }
+        }
+        return failureReason;
     }
 
     /**
