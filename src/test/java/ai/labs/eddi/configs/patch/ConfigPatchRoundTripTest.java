@@ -21,6 +21,7 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -121,7 +122,7 @@ class ConfigPatchRoundTripTest {
             Type element = ((ParameterizedType) generic).getActualTypeArguments()[0];
             var list = new ArrayList<Object>();
             list.add(populate(raw(element), element, name + "Item", depth + 1));
-            return Set.class.isAssignableFrom(type) ? new java.util.LinkedHashSet<>(list) : list;
+            return Set.class.isAssignableFrom(type) ? new LinkedHashSet<>(list) : list;
         }
         if (Map.class.isAssignableFrom(type)) {
             Type[] args = ((ParameterizedType) generic).getActualTypeArguments();

@@ -9,10 +9,13 @@ import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.json.Json;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.io.StringReader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -171,7 +174,7 @@ class ConfigJsonPatcherTest {
     @Test
     @DisplayName("documents why the check exists: Parsson itself accepts a duplicate key silently, the last one winning")
     void parssonDefaultIsSilent() {
-        try (var reader = jakarta.json.Json.createReader(new java.io.StringReader("{\"a\":1,\"a\":2}"))) {
+        try (var reader = Json.createReader(new StringReader("{\"a\":1,\"a\":2}"))) {
             assertEquals(2, reader.readObject().getInt("a"));
         }
     }
