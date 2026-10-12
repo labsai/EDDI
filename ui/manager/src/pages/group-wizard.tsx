@@ -2018,7 +2018,7 @@ function MemberCard({
                         value={member.model}
                         onChange={(e) => onUpdate({ model: e.target.value })}
                         className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
+                        placeholder={t("groupWizard.modelPlaceholder", "e.g. {{model}}", { model: providerConfig?.defaultModel ?? "" })}
                       />
                     </div>
                   </div>
@@ -2197,7 +2197,7 @@ function ModeratorCard({
               onChange={(e) => onChange({ model: e.target.value })}
               aria-label={t("groupWizard.model")}
               className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
+              placeholder={t("groupWizard.modelPlaceholder", "e.g. {{model}}", { model: providerConfig?.defaultModel ?? "" })}
             />
           </div>
           {needsKey && (

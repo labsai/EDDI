@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { api } from "@/lib/api-client";
+import { RESOURCE_TYPES } from "@/lib/api/resources";
 
 /**
  * MSW resolves handlers in registration order, and `handlers.ts` registers two
@@ -121,7 +122,6 @@ describe("descriptor handlers are not shadowed", () => {
 
 describe("jsonSchema routes are not shadowed by the :id handlers", () => {
   const SCHEMA_ROUTES = [
-    "/agentstore/agents/jsonSchema",
     "/rulestore/rulesets/jsonSchema",
     "/apicallstore/apicalls/jsonSchema",
     "/outputstore/outputsets/jsonSchema",
@@ -143,4 +143,26 @@ describe("jsonSchema routes are not shadowed by the :id handlers", () => {
       expect.arrayContaining(["type", "properties"]),
     );
   });
+});
+
+describe("generic resource-store handlers answer in the backend's shapes", () => {
+  it.each(RESOURCE_TYPES.map((rt) => [rt.slug, rt] as const))(
+    "%s descriptors carry the store's own eddi:// extension",
+    async (_slug, rt) => {
+      const descriptors = await getJson<Array<Descriptor & { deleted?: boolean }>>(
+        `/${rt.store}/${rt.plural}/descriptors`,
+      );
+      expect(descriptors.length).toBeGreaterThan(0);
+      for (const d of descriptors) {
+        // parseResourceUri / version pickers read the id and version off this URI.
+        // Compared as a literal prefix rather than spliced into a RegExp, so no
+        // character of the extension, store or plural can act as a metacharacter.
+        const prefix = `eddi://${rt.extension}/${rt.store}/${rt.plural}/`;
+        const resource = d.resource ?? "";
+        expect(resource.startsWith(prefix), `${resource} should start with ${prefix}`).toBe(true);
+        expect(resource.slice(prefix.length)).toMatch(/^[^/?]+\?version=\d+$/);
+        expect(d.deleted).toBe(false);
+      }
+    },
+  );
 });

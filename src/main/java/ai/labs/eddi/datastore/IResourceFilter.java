@@ -7,23 +7,19 @@ package ai.labs.eddi.datastore;
 import java.util.List;
 
 /**
- * Query surface for listing resources by field, on top of the id-addressed
- * reads {@link IResourceStore} provides.
+ * The field filters {@link IResourceStorage#findResources} takes, for listing
+ * resources by field on top of the id-addressed reads {@link IResourceStore}
+ * provides.
  * <p>
  * A caller passes {@link QueryFilters} groups. Filters inside a group combine
  * under that group's {@link QueryFilters.ConnectingType} (AND or OR); the
  * groups themselves are always combined with AND, so a group's connector never
- * affects how it joins the other groups. Paging is index/limit, with the same
- * ceiling {@link IResourceStorage} enforces.
+ * affects how it joins the other groups.
  * <p>
- * Used by the REST layer to back list endpoints and their search parameters.
- *
- * @param <T>
- *            the configuration model being queried
+ * Only a namespace for the filter types now: its {@code readResources} method
+ * had a single, MongoDB-only implementation that nothing called any more.
  */
-public interface IResourceFilter<T> {
-    List<T> readResources(QueryFilters[] queryFilters, Integer index, Integer limit, String... sortTypes)
-            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+public interface IResourceFilter {
 
     class QueryFilters {
         public enum ConnectingType {

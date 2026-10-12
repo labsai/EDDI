@@ -18,7 +18,6 @@ import {
   useDuplicateGroup,
   useGroupConversations,
   useGroupConversation,
-  useStartDiscussion,
   useDeleteGroupConversation,
   useDeleteGroupWithMembers,
 } from "@/hooks/use-groups";
@@ -318,21 +317,6 @@ describe("useGroupConversation", () => {
       { wrapper: createWrapper() },
     );
     expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useStartDiscussion", () => {
-  it("starts a discussion successfully", async () => {
-    const { result } = renderHook(() => useStartDiscussion(), {
-      wrapper: createWrapper(),
-    });
-
-    result.current.mutate({
-      groupId: "group1",
-      question: "What is the meaning of life?",
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 });
 

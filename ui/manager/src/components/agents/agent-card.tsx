@@ -247,12 +247,15 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
       </div>
 
       {/* Footer: meta + actions */}
-      <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
-        <span className="text-xs text-muted-foreground" title={new Date(agent.lastModifiedOn).toLocaleString()}>
+      {/* Wraps instead of overflowing: on a 375px card the chat buttons plus
+          "Undeploy from production" do not fit beside the timestamp, and the
+          overflow was clipped by the card. The time never breaks mid-phrase. */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border pt-3">
+        <span className="whitespace-nowrap text-xs text-muted-foreground" title={new Date(agent.lastModifiedOn).toLocaleString()}>
           {timeAgo}
         </span>
 
-        <div className="flex items-center gap-2">
+        <div className="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           {/* One chat entry PER LIVE ENVIRONMENT. There are at most two, so a
               menu would be heavier than the choice deserves — and the previous
               single button silently targeted production, which is why a
@@ -319,7 +322,7 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
             disabled={isBusy}
             data-testid={`agent-deploy-toggle-${agent.id}`}
             className={cn(
-              "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+              "rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors",
               isProductionDeployed
                 ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
                 : "bg-primary/10 text-primary hover:bg-primary/20",

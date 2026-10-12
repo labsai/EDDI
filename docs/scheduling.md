@@ -51,7 +51,27 @@ version, and a `persistent` conversation follows compatible versions like any ot
 [Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions)).
 Undeploying a version disables the agent's schedules only when no version of the agent is left
 deployed in that environment — retiring an old version after deploying a new one leaves them
-running.
+running. The schedules it disables are marked as such (`disabledReason: "agent-undeployed"`), and
+the next **successful** deploy re-enables exactly those: a schedule you switched off yourself stays
+off, and so does one disabled because its creator lost access (below). A deploy that ends in
+`ERROR` (an unloadable workflow, a refused vault grant) neither announces the agent as ready nor
+re-enables anything. HITL approval timeouts are not disabled by an undeploy at all — they belong to
+the waiting conversation (see [hitl.md](hitl.md)).
+
+With workspaces enforced, every fire re-checks that the schedule's **creator** may still use its
+agent — the USE gate runs at create time, but a fire runs with server identity. The check honours
+shares with the teams the creator belonged to when the schedule was created; it cannot see them
+leave a team later, since nothing server-side knows that without their token. A fire whose creator
+lost access (grant revoked, agent unshared or unpublished) is recorded `FAILED` with the reason and
+the schedule is disabled (`disabledReason: "access-revoked"`); it does not come back on a redeploy —
+re-enable it once access is restored, and the next fire checks again. Schedules with no recorded
+creator or no access snapshot (rows created before this check existed), team cadences, ingestion and
+HITL timeouts are not re-checked this way.
+
+**Upgrading:** a schedule that a release before this one disabled on undeploy carries no
+`disabledReason`, so it is indistinguishable from one you switched off yourself and is **not**
+re-enabled by the next deploy — enable it once by hand (`POST .../schedules/{id}/enable`); schedules
+disabled from now on are marked and come back on their own.
 
 | Strategy | Behavior | Use When |
 |----------|----------|----------|
@@ -141,7 +161,7 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/schedulestore/schedules` | Create a schedule |
+| `POST` | `/schedulestore/schedules` | Create a schedule. A body that fails validation is `400` with `{"error":"invalid_schedule","message":"<reason>"}` — e.g. `Cron expression must have exactly 5 fields (min hour dom month dow), got 6`; `PUT` answers the same way |
 | `GET` | `/schedulestore/schedules` | List schedules, newest first (optional `?agentId=` filter; `?limit=` default 500, max 1000; `?offset=` default 0) |
 | `GET` | `/schedulestore/schedules/{id}` | Get a specific schedule |
 | `PUT` | `/schedulestore/schedules/{id}` | Update a schedule's configuration. Does **not** change `enabled` |
@@ -260,7 +280,7 @@ With authorization on, schedule access follows who the schedule **runs as**:
 
 ## Dream Consolidation
 
-Dream Consolidation is a specialized schedule that performs **background memory maintenance** on an agent's persistent user memories. It's configured in the agent's `UserMemoryConfig`, not as a standalone schedule.
+Dream Consolidation is a specialized schedule that performs **background memory maintenance** on an agent's persistent user memories. It takes two pieces: the agent's `userMemoryConfig.dream` block says *how* to consolidate (and `enabled` is its on/off switch), and a schedule says *when* and *for which user* — nothing runs without one (see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle)).
 
 ### What It Does
 
@@ -270,35 +290,45 @@ Dream Consolidation is a specialized schedule that performs **background memory 
 
 ### Configuration
 
-Dream consolidation is configured in the agent configuration:
+The consolidation settings live in the agent configuration (the agent document itself — `userMemoryConfig` is a top-level field, not nested under any wrapper):
 
 ```json
 {
-  "agentConfiguration": {
-    "enableMemoryTools": true,
-    "userMemoryConfig": {
-      "dream": {
-        "enabled": true,
-        "schedule": "0 3 * * *",
-        "detectContradictions": true,
-        "contradictionResolution": "keep_newest",
-        "pruneStaleAfterDays": 90,
-        "summarizeInteractions": true,
-        "summarizeMinEntries": 5,
-        "summarizeTargetEntries": 2,
-        "summarizeGroupBy": "category",
-        "preserveAgentProvenance": false,
-        "llmProvider": "anthropic",
-        "llmModel": "claude-sonnet-4-6",
-        "parameters": { "apiKey": "${vault:anthropic-api-key}" },
-        "maxCostPerRun": 0.50,
-        "batchSize": 50,
-        "maxUsersPerRun": 1000
-      }
+  "enableMemoryTools": true,
+  "userMemoryConfig": {
+    "dream": {
+      "enabled": true,
+      "detectContradictions": true,
+      "contradictionResolution": "keep_newest",
+      "pruneStaleAfterDays": 90,
+      "summarizeInteractions": true,
+      "summarizeMinEntries": 5,
+      "summarizeTargetEntries": 2,
+      "summarizeGroupBy": "category",
+      "preserveAgentProvenance": false,
+      "llmProvider": "anthropic",
+      "llmModel": "claude-sonnet-4-6",
+      "parameters": { "apiKey": "${vault:anthropic-api-key}" },
+      "maxCostPerRun": 0.50
     }
   }
 }
 ```
+
+And the schedule that runs it — one per user, created with `POST /schedulestore/schedules`:
+
+```json
+{
+  "name": "nightly-dream",
+  "triggerType": "CRON",
+  "cronExpression": "0 3 * * *",
+  "agentId": "<agentId>",
+  "userId": "<userId>",
+  "metadata": { "dreamType": "dream_consolidation" }
+}
+```
+
+`dream.schedule` in the agent config is never read — the cron lives on the schedule. `batchSize` and `maxUsersPerRun` are accepted for compatibility but not read either: a dream fire consolidates exactly the one user its schedule names. A long Dream run is bounded by `eddi.schedule.fire-timeout` like any other fire — raise it if your consolidations legitimately take longer (the lease follows it).
 
 > **Scope:** a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `crossAgentMaintenance: true` to maintain the user's whole memory set across agents — without it, agent A's `pruneStaleAfterDays` would delete agent B's memories and A's model endpoint would see B's private text.
 >
@@ -310,11 +340,9 @@ Dream cycles consume LLM tokens. Use `maxCostPerRun` (in the **Agent Configurati
 
 ```json
 {
-  "agentConfiguration": {
-    "userMemoryConfig": {
-      "dream": {
-        "maxCostPerRun": 0.50
-      }
+  "userMemoryConfig": {
+    "dream": {
+      "maxCostPerRun": 0.50
     }
   }
 }
@@ -444,14 +472,15 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.enabled` | `true` | Master switch. `false` stops all polling — schedules remain stored and simply never fire |
 | `eddi.schedule.poll-interval` | `15s` | How often each instance looks for due schedules. This is the floor on firing punctuality: a schedule due at `12:00:00` fires somewhere in `[12:00:00, 12:00:15)` |
 | `eddi.schedule.poll-batch-size` | `100` | Max schedules claimed per poll cycle. Claimed schedules dispatch concurrently on virtual threads; raise it to drain large bursts (e.g. many one-shot HITL approval timeouts expiring together) |
-| `eddi.schedule.lease-timeout` | `5m` | How long a claimed schedule is considered owned before another instance may re-claim it. Set it comfortably above your longest fire, or a slow run gets executed twice |
+| `eddi.schedule.lease-timeout` | `10m` | How long a claimed schedule is considered owned before another instance may re-claim it. It must outlast `fire-timeout` plus a 30 s grace, or a schedule becomes reclaimable while its fire is still running and fires twice; a shorter value is raised at startup to `fire-timeout + 30s + 1m`, with a warning |
 | `eddi.schedule.max-retries` | `5` | Attempts before a fire is `DEAD_LETTERED` |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` seconds |
 | `eddi.schedule.backoff-multiplier` | `4` | With the defaults: 15s, 60s, 4m, 16m, 64m |
 | `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request. Guards against schedule bombing; a rejected create returns a message naming this property |
 | `eddi.schedule.instance-id` | *(hostname)* | Identity used for cluster claim tracking |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone applied to schedules that do not name one |
-| `eddi.schedule.fire-timeout` | `5m` | How long one conversation fire may run before it is abandoned as failed. Keep it at or below `lease-timeout` — past the lease another instance may reclaim the schedule regardless |
+| `eddi.schedule.fire-timeout` | `5m` | How long one fire — a conversation turn, a Dream run, a team-cadence pull — may run before it is interrupted and recorded `FAILED` with "the fire exceeded eddi.schedule.fire-timeout", then retried with backoff. Raise it for long Dream runs; `lease-timeout` follows |
+| `eddi.schedule.hitl-timeout-retry-interval` | `2m` | When a HITL approval timeout cannot be applied yet (store blip, node draining, a decision still in flight), how long until it is tried again. These are re-armed, never dead-lettered — see [hitl.md](hitl.md) |
 | `eddi.schedule.persistent-conversation-max-steps` | `0` (off) | Steps after which a `persistent` schedule ends its conversation and starts a new one — see [Long-running persistent schedules](#long-running-persistent-schedules) |
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — note that a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The DELETE is by timestamp and therefore idempotent, so it needs no cluster claim |
@@ -500,7 +529,8 @@ history.
 | `eddi.schedule.fire.failed` | Counter | Fires that raised. Compare against `fire.count` for a failure rate |
 | `eddi.schedule.fire.skipped` | Counter | Fires dropped because the target conversation was busy or awaiting a human. Not failures and never dead-lettered, but a heartbeat that only ever skips is delivering nothing — compare against `fire.count` |
 | `eddi.schedule.fire.deadlettered` | Counter | Fires that exhausted `max-retries`. **Alert on any increase** — these need manual retry or dismissal |
-| `eddi.schedule.fire.duration` | Timer | If p99 approaches `lease-timeout`, double execution is imminent |
+| `eddi.schedule.fire.duration` | Timer | If p99 approaches `fire-timeout`, fires are about to be cut off |
+| `eddi.schedule.fire.timedout` | Counter | Fires interrupted at `fire-timeout`. Each one is a FAILED fire that will be retried — raise the timeout if the work is legitimately long |
 | `eddi.schedule.claim.conflict` | Counter | Instances racing for the same schedule. Normal and expected in a cluster; a sharp rise alongside falling `fire.count` suggests contention rather than work |
 | `eddi.schedule.firelog.pruned` | Counter | Fire logs removed by the retention sweep. Flat while the table grows means retention is disabled (`fire-log-retention=0`) or the sweep is failing — check the logs |
 

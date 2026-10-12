@@ -242,13 +242,14 @@ class McpAdminToolsSwitchCoverageTest {
         }
 
         @Test
-        @DisplayName("readResource version defaults to 1 when null")
+        @DisplayName("readResource version defaults to the latest when null")
         void readNullVersion() throws Exception {
-            when(ruleSetStore.readRuleSet("id1", 1)).thenReturn(new RuleSetConfiguration());
+            when(ruleSetStore.getCurrentVersion("id1")).thenReturn(5);
+            when(ruleSetStore.readRuleSet("id1", 5)).thenReturn(new RuleSetConfiguration());
             when(jsonSerialization.serialize(any())).thenReturn("{}");
             String result = tools.readResource("behavior", "id1", null);
             assertNotNull(result);
-            verify(ruleSetStore).readRuleSet("id1", 1);
+            verify(ruleSetStore).readRuleSet("id1", 5);
         }
     }
 

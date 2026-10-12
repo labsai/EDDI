@@ -5,6 +5,7 @@
 package ai.labs.eddi.connections.rest;
 
 import io.quarkus.security.Authenticated;
+import jakarta.annotation.security.PermitAll;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -85,6 +86,7 @@ public interface IRestConnectionAuthorization {
      */
     @GET
     @Path("/callback")
+    @PermitAll
     @Operation(summary = "OAuth redirect target", description = "Consumes the provider's authorization code. Guarded by a single-use state.")
     Response callback(@QueryParam("code") String code, @QueryParam("state") String state, @QueryParam("error") String error,
                       @Context HttpHeaders headers);

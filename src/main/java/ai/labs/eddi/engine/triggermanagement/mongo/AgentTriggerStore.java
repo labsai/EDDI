@@ -87,6 +87,47 @@ public class AgentTriggerStore implements IAgentTriggerStore {
         agentTriggerStore.deleteAgentTrigger(intent);
     }
 
+    /**
+     * The filter is the stored document itself, every field included, so the
+     * replace matches only while nothing about the trigger has changed since it was
+     * compared.
+     */
+    @Override
+    public boolean updateAgentTriggerIfUnchanged(String intent, AgentTriggerConfiguration expected, AgentTriggerConfiguration update)
+            throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
+        RuntimeUtilities.checkNotNull(update, "AgentTriggerConfiguration");
+        Document current = currentIfRoutingAs(intent, expected);
+        if (current == null) {
+            return false;
+        }
+        Document replacement = agentTriggerStore.createDocument(update);
+        return collection.replaceOne(current, replacement).getMatchedCount() == 1;
+    }
+
+    @Override
+    public boolean deleteAgentTriggerIfUnchanged(String intent, AgentTriggerConfiguration expected) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
+        Document current = currentIfRoutingAs(intent, expected);
+        return current != null && collection.deleteOne(current).getDeletedCount() == 1;
+    }
+
+    /**
+     * The stored document, or {@code null} when it is gone or routes differently.
+     */
+    private Document currentIfRoutingAs(String intent, AgentTriggerConfiguration expected) throws IResourceStore.ResourceStoreException {
+        Document current = collection.find(new Document(INTENT_FIELD, intent)).first();
+        if (current == null) {
+            return null;
+        }
+        try {
+            AgentTriggerConfiguration stored = documentBuilder.build(current, AgentTriggerConfiguration.class);
+            return IAgentTriggerStore.routesIdentically(expected, stored) ? current : null;
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
     private class AgentTriggerResourceStore {
         AgentTriggerConfiguration readAgentTrigger(String intent)
                 throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {

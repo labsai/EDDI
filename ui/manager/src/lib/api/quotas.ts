@@ -51,11 +51,6 @@ export function emptyUsage(tenantId: string): TenantUsage {
 
 const BASE = "/administration/quotas";
 
-/** List all tenant quotas. */
-export async function listQuotas(): Promise<TenantQuota[]> {
-  return api.get<TenantQuota[]>(BASE);
-}
-
 /**
  * Get quota for a specific tenant.
  * Returns local defaults when no record exists (404) so the UI can render.
