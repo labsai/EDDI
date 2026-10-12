@@ -54,12 +54,13 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("with apiKey — builder.apiKey() is called (no exception)")
         void withApiKey() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("elasticsearch");
             config.setStoreParameters(Map.of("apiKey", "test-api-key"));
 
             // Elasticsearch store construction doesn't connect eagerly, so this
             // should succeed without a live server
-            var store = factory.getOrCreate(config, "kb-es-apikey");
+            var store = factory.getOrCreate("kb-es-apikey", config);
             assertNotNull(store);
         }
 
@@ -67,13 +68,14 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("with userName and password — builder sets both")
         void withUserNameAndPassword() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("elasticsearch");
             var params = new HashMap<String, String>();
             params.put("userName", "elastic");
             params.put("password", "secret");
             config.setStoreParameters(params);
 
-            var store = factory.getOrCreate(config, "kb-es-user");
+            var store = factory.getOrCreate("kb-es-user", config);
             assertNotNull(store);
         }
 
@@ -81,10 +83,11 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("without apiKey or userName — minimal builder")
         void noAuth() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("elasticsearch");
             config.setStoreParameters(Map.of());
 
-            var store = factory.getOrCreate(config, "kb-es-noauth");
+            var store = factory.getOrCreate("kb-es-noauth", config);
             assertNotNull(store);
         }
 
@@ -92,10 +95,11 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("userName without password — no auth set (only both together)")
         void userNameWithoutPassword() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("elasticsearch");
             config.setStoreParameters(Map.of("userName", "elastic"));
 
-            var store = factory.getOrCreate(config, "kb-es-useronly");
+            var store = factory.getOrCreate("kb-es-useronly", config);
             assertNotNull(store);
         }
     }
@@ -110,6 +114,7 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("with apiKey — builder.apiKey() called")
         void withApiKey() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("qdrant");
             var params = new HashMap<String, String>();
             params.put("apiKey", "test-qdrant-key");
@@ -117,7 +122,7 @@ class EmbeddingStoreFactoryBranchTest {
 
             // Qdrant store build doesn't connect eagerly in the builder
             try {
-                factory.getOrCreate(config, "kb-qdrant-apikey");
+                factory.getOrCreate("kb-qdrant-apikey", config);
             } catch (Exception e) {
                 // Connection error expected — but should NOT be IllegalArgumentException
                 assertFalse(e instanceof IllegalArgumentException,
@@ -129,11 +134,12 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("useTls=true — builder sets TLS flag")
         void useTls() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("qdrant");
             config.setStoreParameters(Map.of("useTls", "true"));
 
             try {
-                factory.getOrCreate(config, "kb-qdrant-tls");
+                factory.getOrCreate("kb-qdrant-tls", config);
             } catch (Exception e) {
                 assertFalse(e instanceof IllegalArgumentException,
                         "Should not fail on parameter parsing, got: " + e.getMessage());
@@ -144,11 +150,12 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("custom port and host")
         void customPortAndHost() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("qdrant");
             config.setStoreParameters(Map.of("host", "localhost", "port", "6335"));
 
             try {
-                factory.getOrCreate(config, "kb-qdrant-custom");
+                factory.getOrCreate("kb-qdrant-custom", config);
             } catch (Exception e) {
                 assertFalse(e instanceof IllegalArgumentException,
                         "Should not fail on parameter parsing, got: " + e.getMessage());
@@ -166,6 +173,7 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("blank apiVersion — falls through to V2 default")
         void blankApiVersion() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("chroma");
             var params = new HashMap<String, String>();
             params.put("apiVersion", "   ");
@@ -174,7 +182,7 @@ class EmbeddingStoreFactoryBranchTest {
             // When apiVersion is blank, getOrDefault returns the blank string,
             // then parseChromaApiVersion sees blank → defaults to V2
             try {
-                factory.getOrCreate(config, "kb-chroma-blank");
+                factory.getOrCreate("kb-chroma-blank", config);
             } catch (IllegalArgumentException e) {
                 fail("Blank apiVersion should default to V2, got: " + e.getMessage());
             } catch (Exception e) {
@@ -188,11 +196,12 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("V1 apiVersion — accepted")
         void v1ApiVersion() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("chroma");
             config.setStoreParameters(Map.of("apiVersion", "V1"));
 
             try {
-                factory.getOrCreate(config, "kb-chroma-v1");
+                factory.getOrCreate("kb-chroma-v1", config);
             } catch (IllegalArgumentException e) {
                 fail("V1 should be a valid ChromaApiVersion, got: " + e.getMessage());
             } catch (Exception e) {
@@ -212,15 +221,17 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("same kbId but different storeParameters → different store instances")
         void differentParams() throws Exception {
             var config1 = new RagConfiguration();
+            config1.setStoreNamespace("id");
             config1.setStoreType("in-memory");
             config1.setStoreParameters(Map.of("extraKey", "value1"));
 
             var config2 = new RagConfiguration();
+            config2.setStoreNamespace("id");
             config2.setStoreType("in-memory");
             config2.setStoreParameters(Map.of("extraKey", "value2"));
 
-            var store1 = factory.getOrCreate(config1, "kb-same");
-            var store2 = factory.getOrCreate(config2, "kb-same");
+            var store1 = factory.getOrCreate("kb-same", config1);
+            var store2 = factory.getOrCreate("kb-same", config2);
 
             assertNotSame(store1, store2,
                     "Different storeParameters should produce different cache keys");
@@ -237,6 +248,7 @@ class EmbeddingStoreFactoryBranchTest {
         @DisplayName("null port value should use default (tested via pgvector)")
         void nullPort() throws Exception {
             var config = new RagConfiguration();
+            config.setStoreNamespace("id");
             config.setStoreType("pgvector");
             var params = new HashMap<String, String>();
             params.put("password", "secret");
@@ -246,7 +258,7 @@ class EmbeddingStoreFactoryBranchTest {
             // Will fail connecting, but should not throw IllegalArgumentException for
             // parsing
             try {
-                factory.getOrCreate(config, "kb-null-port");
+                factory.getOrCreate("kb-null-port", config);
             } catch (Exception e) {
                 assertFalse(e instanceof IllegalArgumentException,
                         "null port should use default, got: " + e.getMessage());

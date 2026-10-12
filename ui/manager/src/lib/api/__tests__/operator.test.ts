@@ -726,6 +726,129 @@ describe("deactivateOperator", () => {
   });
 });
 
+/**
+ * `config.version` is recorded once, at activation. An in-place edit of the
+ * operator afterwards (a model change in Studio repoints the agent) moves the
+ * agent to N+1, and the backend refuses a permanent delete addressed at any
+ * version but the live one — 409, with the current URI as the whole body. That
+ * left a reconfigure reporting "could not be removed (eddi://…?version=2)" with
+ * two operators deployed.
+ *
+ * The mock agentstore mirrors that guard: DELETE answers 409 unless `version`
+ * is the live one.
+ */
+describe("operator teardown after the agent moved past its recorded version", () => {
+  function serveMovedAgent(opts: { live: () => number | null; currentVersionFails?: boolean }) {
+    const calls: string[] = [];
+    server.use(
+      http.get("*/agentstore/agents/:id/currentversion", () => {
+        if (opts.currentVersionFails) return HttpResponse.text("boom", { status: 500 });
+        const live = opts.live();
+        return live == null
+          ? HttpResponse.text("No document found for id", { status: 404 })
+          : HttpResponse.json(live);
+      }),
+      http.post("*/administration/:env/undeploy/:agentId", ({ request }) => {
+        calls.push(`undeploy ${new URL(request.url).search}`);
+        return new HttpResponse(null, { status: 202 });
+      }),
+      http.delete("*/agentstore/agents/:id", ({ request }) => {
+        const version = Number(new URL(request.url).searchParams.get("version"));
+        calls.push(`delete v${version}`);
+        const live = opts.live();
+        if (live == null) return HttpResponse.text("not found", { status: 404 });
+        return version === live
+          ? new HttpResponse(null, { status: 200 })
+          : HttpResponse.text(`eddi://ai.labs.agent/agentstore/agents/op-1?version=${live}`, { status: 409 });
+      }),
+      http.put(`${BASE}/${OPERATOR_VARIABLE_KEY}`, () => new HttpResponse(null, { status: 204 })),
+      http.delete(`${BASE}/${OPERATOR_VARIABLE_KEY}`, () => new HttpResponse(null, { status: 204 })),
+    );
+    return calls;
+  }
+
+  const recorded = () => config({ enabled: true, agentId: "op-1", version: 1, environment: "test" });
+
+  it("resetOperator deletes at the live version, not the recorded one", async () => {
+    const calls = serveMovedAgent({ live: () => 2 });
+
+    await resetOperator(recorded());
+
+    expect(calls).toContain("delete v2");
+    expect(calls).not.toContain("delete v1");
+  });
+
+  /**
+   * The deployed version need not be the newest: an edit can be saved without a
+   * redeploy, leaving v1 live under a v2 document. Undeploying only one version
+   * leaves the other running.
+   */
+  it("resetOperator undeploys the live version and every earlier one", async () => {
+    const calls = serveMovedAgent({ live: () => 2 });
+
+    await resetOperator(recorded());
+
+    const undeploy = calls.find((call) => call.startsWith("undeploy"));
+    expect(undeploy).toContain("version=2");
+    expect(undeploy).toContain("undeployThisAndAllPreviousAgentVersions=true");
+    expect(undeploy).toContain("endAllActiveConversations=true");
+  });
+
+  /** The kill switch must stop whatever is running, not just the recorded version. */
+  it("deactivateOperator undeploys every version up to the live one", async () => {
+    const calls = serveMovedAgent({ live: () => 3 });
+
+    await deactivateOperator(recorded());
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("version=3");
+    expect(calls[0]).toContain("undeployThisAndAllPreviousAgentVersions=true");
+  });
+
+  it("retries once when the agent moves on between the lookup and the delete", async () => {
+    // At v2 until the first DELETE lands, at v3 from then on.
+    const calls: string[] = serveMovedAgent({
+      live: () => (calls.some((call) => call.startsWith("delete")) ? 3 : 2),
+    });
+
+    await resetOperator(recorded());
+
+    expect(calls.filter((call) => call.startsWith("delete"))).toEqual(["delete v2", "delete v3"]);
+  });
+
+  it("still reports a delete that keeps conflicting", async () => {
+    let live = 1;
+    serveMovedAgent({ live: () => ++live });
+
+    await expect(resetOperator(recorded())).rejects.toMatchObject({ status: 409 });
+  });
+
+  /** Retiring an agent that is already gone has reached the state it asked for. */
+  it("treats an agent that no longer exists as retired and clears the config", async () => {
+    let cleared = false;
+    serveMovedAgent({ live: () => null });
+    server.use(
+      http.delete(`${BASE}/${OPERATOR_VARIABLE_KEY}`, () => {
+        cleared = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    await resetOperator(recorded());
+
+    expect(cleared).toBe(true);
+  });
+
+  /** A failed lookup must never make teardown worse than addressing the recorded version. */
+  it("falls back to the recorded version when the live one cannot be read", async () => {
+    const calls = serveMovedAgent({ live: () => 1, currentVersionFails: true });
+
+    await resetOperator(recorded());
+
+    expect(calls).toContain("delete v1");
+  });
+});
+
 describe("assertProvisioned", () => {
   const base = {
     action: "api_agent_created",

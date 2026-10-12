@@ -76,7 +76,11 @@
     "monitoring": "Supervisión de conversaciones",
     "analytics": "Analíticas",
     "connections": "Conexiones",
-    "workspaces": "Espacios de trabajo"
+    "workspaces": "Espacios de trabajo",
+    "breadcrumb": "Ruta de navegación",
+    "checkingVersion": "Comprobando la versión...",
+    "expandSidebar": "Expandir la barra lateral",
+    "collapseSidebar": "Contraer la barra lateral"
   },
   "theme": {
     "light": "Claro",
@@ -481,7 +485,7 @@
     "backToAgents": "Volver a Agents",
     "next": "Siguiente",
     "back": "Atrás",
-    "createOnly": "Solo crear",
+    "createOnly": "Crear sin implementar",
     "createAndDeploy": "Crear y desplegar",
     "typeTitle": "¿Qué tipo de agent?",
     "typeDesc": "Elija el tipo de agent que desea crear",
@@ -571,7 +575,25 @@
     "specUrlScheme": "Solo se admiten URL http:// y https://",
     "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desactiva las herramientas integradas para desactivarlas todas.",
     "hfToken": "Token de Hugging Face",
-    "hfTokenHint": "Solo es necesario para repositorios restringidos o privados. Se guarda en la bóveda como una clave de API."
+    "hfTokenHint": "Solo es necesario para repositorios restringidos o privados. Se guarda en la bóveda como una clave de API.",
+    "stepLabel": "Paso {{n}} de {{total}}: {{name}}",
+    "createAndDeployProduction": "Crear e implementar en producción",
+    "createAndDeployTest": "Crear e implementar en prueba",
+    "reviewKeyNotNeeded": "No necesaria para este proveedor",
+    "reviewKeyNone": "Ninguna",
+    "reviewKeyVault": "Referencia de la bóveda {{ref}}",
+    "reviewKeyEntered": "Introducida aquí",
+    "reviewApiKey": "Clave de API",
+    "reviewBaseUrl": "URL base",
+    "deployTarget": "Destino de implementación",
+    "deployNoteProduction": "«Crear e implementar» pone el agente en producción de inmediato.",
+    "deployNoteTest": "«Crear e implementar» inicia el agente en el entorno de prueba; pásalo a producción cuando estés conforme.",
+    "step_type": "Tipo",
+    "step_info": "Identidad",
+    "step_llm": "Modelo",
+    "step_apispec": "Especificación de API",
+    "step_features": "Funciones",
+    "step_review": "Revisión"
   },
   "packages": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El workflow y todos sus datos se eliminarán permanentemente.",
@@ -903,6 +925,7 @@
     "savedNotLiveDescription": "El agente en ejecución sigue sirviendo la versión desplegada. Despliegue para aplicar este cambio.",
     "deployNow": "Desplegar",
     "deployStarted": "Despliegue iniciado",
+    "stay": "Quedarse",
     "invalidJsonNotSaved": "No guardado — el JSON no es válido: {{reason}}"
   },
   "rulesEditor": {
@@ -938,7 +961,21 @@
     "noRules": "No hay reglas en este grupo",
     "noConditions": "Sin condiciones",
     "sizeNoBound": "sin límite",
-    "sizeBoundInvalid": "Debe ser un número entero entre -2147483648 y 2147483647, o vacío para no tener límite."
+    "sizeBoundInvalid": "Debe ser un número entero entre -2147483648 y 2147483647, o vacío para no tener límite.",
+    "moveUp": "Subir {{name}}",
+    "moveDown": "Bajar {{name}}",
+    "configValueOf": "Valor de {{key}}",
+    "removeConfig": "Quitar {{key}}",
+    "toggleCondition": "Mostrar u ocultar los detalles de la condición",
+    "commaActionsWarning": "Una lista separada por comas significa Y: todas las acciones indicadas deben haberse producido, en ese orden. Para coincidir con cualquiera de varias acciones, añade una condición por acción bajo un conector O, o emite una acción compartida.",
+    "changeTypeTitle": "¿Cambiar el tipo de condición?",
+    "changeTypeDescription": "Cambiar a {{type}} sustituye los ajustes de esta condición por los valores predeterminados de ese tipo. Los valores que introdujiste se perderán.",
+    "changeTypeConfirm": "Cambiar tipo",
+    "toggleRule": "Mostrar u ocultar los detalles de la regla",
+    "thisRule": "esta regla",
+    "noLastStepWarning": "No hay ningún actionmatcher en lastStep: esta regla puede activarse en cualquier paso de la conversación, no solo tras la acción esperada. Añade una condición actionmatcher con occurrence lastStep.",
+    "toggleGroup": "Mostrar u ocultar el grupo",
+    "thisGroup": "este grupo"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No se encontraron endpoints en la especificación",
@@ -1376,7 +1413,22 @@
     "compatibleEndpointOverridden": "Punto de conexión: {{url}}",
     "modelType": "Tipo de modelo",
     "paramName": "Nombre del parámetro",
-    "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desmarca «Activar herramientas integradas» para desactivarlas todas."
+    "lastToolHint": "Debe quedar al menos una herramienta seleccionada. Desmarca «Activar herramientas integradas» para desactivarlas todas.",
+    "toggleTask": "Mostrar u ocultar los detalles de la tarea",
+    "noActionsWarning": "Esta tarea no tiene ninguna acción de activación, así que nunca se ejecuta. Añade la acción que emiten tus reglas de comportamiento, por ejemplo send_message.",
+    "model": "Modelo",
+    "deploymentName": "Nombre de la implementación",
+    "modelName": "Modelo",
+    "modelMissing": "No hay modelo definido: el proveedor rechazará todas las solicitudes.",
+    "apiKey": "Clave de API",
+    "apiKeyNotNeeded": "Este proveedor normalmente no necesita clave de API.",
+    "temperature": "Temperatura",
+    "temperaturePlaceholder": "Valor predeterminado del proveedor",
+    "temperatureInvalid": "Introduce un número, por ejemplo 0.7.",
+    "paramValueOf": "Valor de {{key}}",
+    "removeParam": "Quitar el parámetro {{key}}",
+    "accessToken": "Token de acceso",
+    "authToken": "Token de Hugging Face (opcional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",
@@ -1417,7 +1469,14 @@
     "maxLength": "Longitud máx.",
     "maxLengthShort": "máx",
     "validationMsgPlaceholder": "Mensaje de error de validación...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "no guardado; corrígelo o vacía el campo",
+    "itemType": "Tipo de salida",
+    "removeItem": "Quitar el elemento de salida",
+    "removeQuickReply": "Quitar la respuesta rápida",
+    "toggleOutput": "Mostrar u ocultar los detalles de la salida",
+    "timesOccurredLabel": "Veces ocurrido",
+    "removeAlternativeGroup": "Quitar el grupo de alternativas {{n}}"
   },
   "propertySetterEditor": {
     "setters": "Definidores de propiedades",
@@ -1441,7 +1500,10 @@
     "visibilityTitle": "Qué agents pueden ver esta propiedad longTerm",
     "editValue": "Editar valor",
     "toggleGroup": "Alternar grupo de propiedades",
-    "secretFromPathWarning": "Un secreto solo se guarda en la bóveda si proviene del campo de valor. Leído desde una «Ruta de origen» o dado de otra forma, se almacena en texto plano: introdúzcalo en el campo de valor o elija otro ámbito."
+    "secretFromPathWarning": "Un secreto solo se guarda en la bóveda si proviene del campo de valor. Leído desde una «Ruta de origen» o dado de otra forma, se almacena en texto plano: introdúzcalo en el campo de valor o elija otro ámbito.",
+    "scope": "Ámbito",
+    "visibility": "Visibilidad",
+    "removeProperty": "Quitar la propiedad"
   },
   "dictionaryEditor": {
     "language": "Idioma",
@@ -2408,7 +2470,8 @@
       "title": "Ayuda y Tour",
       "platformTour": "Tour de la plataforma",
       "resetAll": "Restablecer todos los tours",
-      "resetConfirm": "¿Restablecer el progreso de todos los tours?"
+      "resetConfirm": "¿Restablecer el progreso de todos los tours?",
+      "completed": "Completado"
     },
     "offer": {
       "message": "¿Es su primera vez? Haga el {{page}}",
@@ -2441,7 +2504,8 @@
     "quickCreateTitle": "Creación rápida de {{type}}",
     "quickCreateDesc": "Establezca un nombre y descripción, configure los detalles más tarde.",
     "guidedSetup": "Configuración guiada",
-    "guidedSetupDesc": "Asistente paso a paso con proveedor de LLM, prompts y despliegue."
+    "guidedSetupDesc": "Asistente paso a paso con proveedor de LLM, prompts y despliegue.",
+    "guidedSetupDescGroup": "Asistente paso a paso para el equipo, el estilo de discusión y las aprobaciones opcionales; también puede crear los agentes miembro."
   },
   "groups": {
     "actionConflict": "Otra operación sigue en curso, o esta discusión ya no acepta esa acción. Vuelva a intentarlo.",
@@ -3032,6 +3096,7 @@
       "humanNeedsId_one": "{{count}} miembro humano necesita el id de usuario de la persona.",
       "humanNeedsId_other": "{{count}} miembros humanos necesitan el id de usuario de la persona."
     },
+    "versionLookupFailed": "No se pudo determinar la versión actual de este grupo.",
     "deletePermanentlyHint": "No se puede deshacer: el grupo y su espacio de trabajo (pendientes, cadencias y sus programaciones) se eliminan definitivamente. Sin esta opción, el grupo solo se marca como eliminado y sigue siendo recuperable hasta que se purgue.",
     "deletePermanentlyWithMembersHint": "No se puede deshacer: el grupo, su espacio de trabajo y todos los agentes miembros se eliminan definitivamente. Sin esta opción, solo se marcan como eliminados y siguen siendo recuperables hasta que se purguen.",
     "deleteMembersFailedAfterGroup": "El grupo se eliminó, pero estos agentes miembros no: {{ids}}. Elimínelos desde la página Agentes.",
@@ -3382,14 +3447,61 @@
     "humanPrincipalIdPlaceholder": "ID de inicio de sesión/principal del usuario",
     "humanTurnSettingsHint": "La discusión se pausa y espera cuando le toca hablar a un miembro humano. Elija qué ocurre si no responde a tiempo.",
     "humanTurnSettingsTitle": "Configuración del turno de miembros humanos",
-    "humanTurnTimeoutInvalid": "No es una duración ISO-8601 válida, p. ej. PT24H o P1D.",
-    "humanTurnTimeoutLabel": "Tiempo de espera del turno (duración ISO-8601)",
-    "humanTurnTimeoutPlaceholder": "p. ej. PT24H — en blanco espera indefinidamente",
+    "humanTurnTimeoutInvalid": "Introduce un número mayor que cero.",
+    "humanTurnTimeoutLabel": "Tiempo de espera por turno",
+    "humanTurnTimeoutPlaceholder": "Déjalo vacío para esperar indefinidamente.",
     "memberTypeHuman": "Humano",
-    "memberPromptPlaceholder": "Eres {{name}}. Aporta un análisis perspicaz desde la perspectiva de tu ámbito.",
-    "memberPromptPlaceholderRole": "Eres {{name}}, experto en {{role}}. Aporta un análisis perspicaz desde la perspectiva de tu ámbito.",
-    "moderatorPromptPlaceholder": "Eres un moderador experimentado. Sintetiza la discusión del grupo en un resumen claro y equilibrado…",
-    "modelPlaceholder": "p. ej. {{model}}"
+    "modelPlaceholder": "p. ej. {{model}}",
+    "stepTemplate": "Plantilla",
+    "stepConfig": "Configuración",
+    "stepMembers": "Miembros",
+    "stepReview": "Revisión",
+    "stepsLabel": "Progreso del asistente",
+    "stepAria": "Paso {{n}}: {{title}}",
+    "blockersTitle": "Para continuar:",
+    "blockerName": "Introduce un nombre de grupo.",
+    "blockerHitlPhases": "Selecciona al menos una fase en la que pausar, o desactiva la aprobación humana.",
+    "blockerHitlTimeout": "Introduce un tiempo de espera de aprobación válido (por ejemplo, PT15M) o elige otra política de espera.",
+    "blockerStyle": "Elige un estilo de discusión compatible con este servidor.",
+    "blockerMemberName": "{{member}}: añade un nombre visible.",
+    "blockerMemberPrincipal": "{{member}}: introduce el ID principal de la persona.",
+    "blockerMemberGroup": "{{member}}: elige el grupo anidado.",
+    "blockerMemberAgent": "{{member}}: elige un agente existente o cambia a Crear nuevo.",
+    "blockerMemberKey": "{{member}}: añade una clave de API para {{provider}} o elige un proveedor que no la necesite (por ejemplo, Ollama).",
+    "blockerModeratorKey": "Moderador: añade una clave de API para {{provider}} o elige un proveedor que no la necesite (por ejemplo, Ollama).",
+    "blockerTurnTimeout": "Establece el tiempo de espera del turno humano en un número mayor que cero, o bórralo.",
+    "memberFallbackName": "Miembro {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "Lluvia de ideas abierta: todas las perspectivas sobre una cuestión.",
+      "PEER_REVIEW": "Revisar un borrador o propuesta desde varios ángulos.",
+      "DEVIL_ADVOCATE": "Poner a prueba un plan antes de comprometerse con él.",
+      "DELPHI": "Previsiones y estimaciones en las que las opiniones independientes deben converger.",
+      "DEBATE": "Sopesar una decisión con dos bandos opuestos.",
+      "TASK_FORCE": "Planificar y llevar a cabo trabajo de varios pasos con tareas asignadas.",
+      "NEGOTIATION": "Llegar a un acuerdo entre partes con intereses distintos."
+    },
+    "howItRuns": "Cómo funciona",
+    "roundsExplain": "Una ronda es cada miembro hablando una vez. Más rondas permiten que los miembros se respondan entre sí, pero cada ronda adicional suma llamadas al LLM y coste.",
+    "roundsEstimate": "Estimación: unas {{calls}} llamadas al LLM por discusión ({{members}} miembros × {{rounds}} rondas).",
+    "roundsEstimateModerator": "Estimación: unas {{calls}} llamadas al LLM por discusión ({{members}} miembros × {{rounds}} rondas + 1 moderador).",
+    "unitMinutes": "minutos",
+    "unitHours": "horas",
+    "unitDays": "días",
+    "durationNoLimit": "Sin límite",
+    "durationUnit": "Unidad",
+    "defaultMemberPrompt": "Eres {{name}}. Aporta ideas claras y accionables desde tu perspectiva de especialista.",
+    "defaultMemberPromptRole": "Eres {{name}}, especialista en {{role}}. Aporta ideas claras y accionables desde tu perspectiva de especialista.",
+    "defaultMemberPromptNoName": "Eres miembro de este grupo. Aporta ideas claras y accionables desde tu perspectiva de especialista.",
+    "defaultModeratorPrompt": "Eres un moderador experto. Sintetiza la discusión del grupo en un resumen claro y equilibrado que recoja las ideas clave, los puntos de acuerdo y los desacuerdos pendientes.",
+    "memberNameLabel": "Nombre visible",
+    "memberRoleLabel": "Rol",
+    "memberTypeLabel": "Tipo de miembro",
+    "bulkTitle": "Mismo proveedor y clave para todos los agentes nuevos",
+    "bulkHint": "Cada agente nuevo necesita un proveedor de LLM y, en la mayoría, una clave de API. Rellénalo una vez aquí y aplícalo a todos; después aún puedes cambiar un agente concreto.",
+    "bulkApply": "Aplicar a todos los agentes nuevos",
+    "apiKeyRequired": "{{provider}} necesita una clave de API antes de poder crear este agente.",
+    "presetsNote": "Son plantillas de inicio que rellenan este asistente. Para usar una discusión preconfigurada y asignar tus agentes existentes a sus roles, consulta",
+    "presetsLink": "Plantillas de grupo"
   },
   "groupTemplates": {
     "advisoryBoard": "Consejo asesor",
@@ -3446,7 +3558,9 @@
     "roleCount_one": "{{count}} rol por asignar",
     "roleCount_other": "{{count}} roles por asignar",
     "empty": "No hay plantillas disponibles",
-    "emptyDescription": "Este servidor no incluye plantillas de grupo. Aún puede crear un grupo desde cero con el asistente."
+    "emptyDescription": "Este servidor no incluye plantillas de grupo. Aún puede crear un grupo desde cero con el asistente.",
+    "wizardNote": "¿Prefieres crear agentes sobre la marcha o empezar desde cero? El asistente de grupo ofrece plantillas de inicio más ligeras.",
+    "wizardLink": "Abrir el asistente de grupo"
   },
   "channels": {
     "agentIdPlaceholder": "ID del agente para gestionar mensajes",
@@ -4727,7 +4841,13 @@
     "inputTemplateTooLong": "La plantilla de prompt está limitada a {{max}} caracteres.",
     "cronInvalid": "Esa no es una expresión cron válida.",
     "scheduleUnknown": "Programación no disponible",
-    "nextRun": "siguiente {{when}}"
+    "nextRun": "siguiente {{when}}",
+    "taskSubjectLabel": "Asunto",
+    "taskDescriptionLabel": "Descripción",
+    "inputTemplateLabel": "Plantilla de prompt",
+    "priorityTitle": "Prioridad {{n}}: los números más altos se eligen primero",
+    "backlogNote": "Cada ejecución de cadencia elige primero las tareas de mayor prioridad (P5 antes que P1). Una tarea no se puede editar ni eliminar una vez añadida; una ejecución la completa.",
+    "priorityHint": "Una ejecución de cadencia elige primero los números más altos. 0 es el valor por defecto."
   },
   "workforceWizard": {
     "title": "Equipo nuevo"
@@ -5334,5 +5454,22 @@
     "impactReasonLegacy": "anterior al seguimiento de versiones",
     "impactReasonBreaking": "cambio incompatible",
     "switchNotice": "El agente pasó de v{{from}} a v{{to}}"
+  },
+  "notFound": {
+    "title": "Página no encontrada",
+    "description": "No hay nada en esta dirección. Puede que se haya movido o que el enlace tenga un error.",
+    "backToDashboard": "Volver al panel",
+    "backToWorkforce": "Volver a Workforce",
+    "chooseWorkspace": "Elegir un espacio de trabajo"
+  },
+  "actionTags": {
+    "remove": "Quitar {{action}}",
+    "none": "Sin acciones",
+    "inputLabel": "Nueva acción",
+    "add": "Añadir acción"
+  },
+  "wizardLeave": {
+    "title": "¿Salir sin crear?",
+    "message": "La configuración de tu equipo, incluidos los prompts y las claves de API introducidos, aún no se ha creado y se perderá."
   }
 }

@@ -627,7 +627,9 @@ describe("ChatWidget — round-3 regressions", () => {
     fireEvent.change(input, { target: { value: "hunter2" } });
     fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
 
-    await screen.findByText(/reviewer must resolve/i);
+    await screen.findByText(/busy or waiting on a decision/i);
+    // The server's own text is an operator instruction; the user never sees it.
+    expect(screen.queryByText(/reviewer must resolve/i)).toBeNull();
 
     // Handed back — the server never consumed it — but masked and still in
     // secret mode, so a resend goes out with secretInput again.
@@ -638,7 +640,7 @@ describe("ChatWidget — round-3 regressions", () => {
     expect(composer.type).toBe("password");
     expect(screen.getByTestId("chat-secret-toggle")).toHaveAttribute(
       "title",
-      expect.stringContaining("Secret mode ON"),
+      expect.stringContaining("Secret mode is on"),
     );
     expect(screen.queryByText("hunter2")).toBeNull();
   });
@@ -1132,6 +1134,8 @@ describe("ChatWidget — New Conversation during a live stream", () => {
     await screen.findByTestId("chat-stop");
 
     fireEvent.click(screen.getByTestId("restart-btn"));
+    // A conversation with a message in it asks before it is thrown away.
+    fireEvent.click(await screen.findByTestId("restart-confirm-yes"));
 
     await waitFor(() => expect(starts).toBe(2));
     // The composer must accept the next turn.

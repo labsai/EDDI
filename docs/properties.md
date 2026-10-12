@@ -66,9 +66,9 @@ Properties also have a **visibility** dimension that controls which agents can s
 
 | Visibility | Who sees it | Use Case |
 |---|---|---|
-| `self` (default) | Only the owning agent | Agent-specific preferences, internal state |
+| `self` | Only the owning agent | Agent-specific preferences, internal state. The default when the agent declares a `userMemoryConfig` block (its `defaultVisibility` is `self` unless set otherwise) |
 | `group` | All agents in the same group conversation | Shared context in multi-agent orchestration |
-| `global` | All agents for this user | Cross-agent user preferences (e.g., language, timezone) |
+| `global` | All agents for this user | Cross-agent user preferences (e.g., language, timezone). The default when the agent declares **no** `userMemoryConfig` |
 
 Visibility is orthogonal to scope — a property can be `longTerm` + `self` (persists across sessions, visible only to the owning agent) or `longTerm` + `global` (persists and visible to all agents).
 
@@ -128,13 +128,17 @@ Properties can be set before or after any lifecycle task (HTTP calls, LLM calls)
     "propertyInstructions": [
       {
         "name": "lastApiResponse",
-        "fromObjectPath": "httpCalls.weatherApi",
+        "fromObjectPath": "weatherApi",
         "scope": "conversation"
       }
     ]
   }
 }
 ```
+
+Inside a call's `postResponse`, the response sits at the top of the template data under the call's **`responseObjectName`** (`weatherApi` above), so a path starts there — `weatherApi.current.temperature`. There is no `httpCalls.` root. A `property.json` instruction that runs in a later task reads the same response through conversation memory instead: `memory.current.httpCalls.weatherApi.current.temperature`.
+
+A `preRequest` / `postResponse` instruction and a `property.json` instruction are run by **one implementation** and behave identically: the same typed values, `override`, `toObjectPath`, `convertToObject`, the typed `value*` fields and the `scope: secret` rules below. The difference is what happens when one fails (a template that does not render): in `property.json` it fails the turn; in a `preRequest` / `postResponse` it is logged with the conversation id and recorded in the step under `propertyInstructions:errors` (visible in a detailed conversation snapshot), and the remaining instructions still run — except a `scope: secret` instruction, which fails closed everywhere. A `fromObjectPath` that reaches something that is not a JSON value (a live output item, say) sets nothing and logs a warning, in both.
 
 ### Via LLM Tools (Agent-Driven)
 
@@ -153,7 +157,7 @@ See [Persistent User Memory](user-memory.md) for full details on the LLM memory 
 
 Properties are available in **all** templates via the `properties` namespace.
 
-> ⚠️ **`properties` exposes raw values, not `Property` objects.** `MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context, and `toMap()` returns the unwrapped Java value that was stored (`String`, `Integer`, `Float`, `Boolean`, `List`, `Map`) — the `Property` wrapper never reaches the template. Use `{properties.key}` directly. A `.valueString` / `.valueInt` / … suffix resolves against the raw value (a `String` has no `valueString` property) and fails at render time. The `valueString`, `valueInt`, … names are **write-side** field names of the JSON property-setter config only. [Agent Config Authoring](agent-config-authoring.md#template-syntax) is the authoritative reference for the template data model.
+> ⚠️ **`properties` exposes raw values, not `Property` objects.** `MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context, and `toMap()` returns the unwrapped Java value that was stored (`String`, `Integer`, `Long`, `Float`, `Double`, `Boolean`, `List`, `Map`) — the `Property` wrapper never reaches the template. Use `{properties.key}` directly. A `.valueString` / `.valueInt` / … suffix resolves against the raw value (a `String` has no `valueString` property) and fails at render time. The `valueString`, `valueInt`, … names are **write-side** field names of the JSON property-setter config only. [Agent Config Authoring](agent-config-authoring.md#template-syntax) is the authoritative reference for the template data model.
 
 ### In Output Templates
 
@@ -179,16 +183,20 @@ They prefer {properties.preferred_language} responses.
 
 ### Reading the Different Value Types
 
-The property-setter config picks the value type by which `value*` field you write (`valueString`, `valueInt`, `valueFloat`, `valueObject`, `valueList`, `valueBoolean`). In templates, all of them are read the same way — through the property name:
+The property-setter config picks the value type by which `value*` field you write (`valueString`, `valueInt`, `valueLong`, `valueFloat`, `valueDouble`, `valueObject`, `valueList`, `valueBoolean`). In templates, all of them are read the same way — through the property name:
 
 | Written as | Read in a template | Example |
 |---|---|---|
 | `valueString` | `{properties.name}` | `Hello {properties.name}` |
 | `valueInt` | `{properties.age}` | `You are {properties.age}` |
+| `valueLong` | `{properties.epochMillis}` | a whole number beyond the `int` range |
 | `valueFloat` | `{properties.score}` | `Score: {properties.score}` |
+| `valueDouble` | `{properties.price}` | `Price: {properties.price}` — full precision, unlike `valueFloat` |
 | `valueObject` | `{properties.profile.<field>}` | `{properties.profile.email}` |
 | `valueList` | `{properties.tags}` | `{#for item in properties.tags}...{/for}` |
 | `valueBoolean` | `{properties.isPremium}` | `{#if properties.isPremium}...{/if}` |
+
+A decimal renders in plain digits — `12500000.5`, `0.00025` — not in the `1.25000005E7` / `2.5E-4` notation Java's `toString()` switches to (outside the range JavaScript also prints plainly, `1e-7 <= |x| < 1e21`, the notation is kept). A whole decimal keeps its `.0` (`3.0`).
 
 ---
 
@@ -249,7 +257,7 @@ Properties with `scope=secret` are automatically handled by the SecretsVault —
 3. The property value becomes a `${vault:<agentId>.u<userHash>.<nonce>.<name>}` reference with `conversation` scope
 4. Downstream consumers (`ChatModelRegistry`, `ApiCallExecutor`, `SecretResolver`) resolve the reference at point-of-use
 
-Only a string can be vaulted. `valueObject`, `valueList`, `valueInt`, `valueFloat` and `valueBoolean` are rejected under `scope: secret` when the configuration is saved, and so is a literal name containing `/`, `{`, `}` or `$`. A value that only turns out not to be a string at run time — a `fromObjectPath` that yields an object or a number, a `convertToObject: true` value that parses as JSON — fails the turn, in the property setter and in the httpcall, MCP and LLM instructions alike. None of them is ever stored in plaintext.
+Only a string can be vaulted. `valueObject`, `valueList`, `valueInt`, `valueLong`, `valueFloat`, `valueDouble` and `valueBoolean` are rejected under `scope: secret` when the configuration is saved, and so is a literal name containing `/`, `{`, `}` or `$`. A value that only turns out not to be a string at run time — a `fromObjectPath` that yields an object or a number, a `convertToObject: true` value that parses as JSON — fails the turn, in the property setter and in the httpcall, MCP and LLM instructions alike. None of them is ever stored in plaintext.
 
 If the vault is unavailable or disabled, the turn fails closed with a `LifecycleException` rather than persisting the plaintext — set `EDDI_VAULT_MASTER_KEY`. **The vault is disabled on a default install**, so there every `scope: secret` instruction fails its turn with an error naming `EDDI_VAULT_MASTER_KEY` — including a post-response instruction of an httpcall, which used to store the value in plaintext.
 
@@ -286,12 +294,14 @@ Instead of storing entire API responses, extract only what you need:
 ```json
 {
   "name": "temperature",
-  "fromObjectPath": "httpCalls.weatherApi.current.temperature",
+  "fromObjectPath": "memory.current.httpCalls.weatherApi.current.temperature",
   "scope": "conversation"
 }
 ```
 
-A value read through `fromObjectPath` is stored **exactly as found** — it is data, not a template, so braces in a user's message or an API response are kept literally and never evaluated. Only `valueString` (and the property `name`) are rendered as templates; to combine a navigated value with text, reference it from a `valueString`, e.g. `"valueString": "Temperature: {memory.current.httpCalls.weatherApi.current.temperature}"`.
+(In the call's own `postResponse`, the same value is `weatherApi.current.temperature` — see [Via Pre/Post Request Instructions](#via-prepost-request-instructions).)
+
+A value read through `fromObjectPath` is stored **exactly as found** — with its type: a JSON number stays a number (`valueInt`, `valueLong` beyond the `int` range, `valueDouble` for a decimal), a boolean a boolean, an object a `valueObject`, an array a `valueList`. It is data, not a template, so braces in a user's message or an API response are kept literally and never evaluated. A path that resolves to nothing sets nothing — the property keeps its previous value, if any. (A `postResponse` instruction used to store `""` for every non-string and for a missing path.) Only `valueString` (and the property `name`) are rendered as templates; to combine a navigated value with text, reference it from a `valueString`, e.g. `"valueString": "Temperature: {memory.current.httpCalls.weatherApi.current.temperature}"`.
 
 ### 3. Use Visibility for Multi-Agent Scenarios
 

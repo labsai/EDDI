@@ -268,6 +268,21 @@ When an agent is first imported into an EDDI instance, EDDI stores the **origin 
 
 This means the **agent ID stays the same** across merge imports — only the version increments. Deployments, triggers, and integrations that reference the agent ID continue to work without reconfiguration.
 
+**With workspaces enforced, the lookup in step 2 is scoped.** An origin ID is whatever id the
+exporting instance gave the resource, so every workspace that imported the same archive carries
+it. Only a resource the importer may **edit**, and — when the import writes into a definite space
+(the `X-EDDI-Space` header, or the caller's default) — one that **lives in that space**, counts as
+"found"; a match in another workspace is ignored and the merge creates the importer's own copy
+instead of overwriting the other team's. Resources from before ownership stamping (no space) are
+judged by the edit check alone. The preview applies the same rule, and so does a live sync
+looking for "the agent promoted from this source". With workspaces off nothing changes.
+
+**Administrators are scoped too.** An administrator may edit every resource, but the rule still asks where the
+import writes: with no `X-EDDI-Space` header that is the administrator's own personal space (or the
+deployment's default team), and the header only accepts a space the caller is a member of. An administrator who
+re-imports an archive to update a team's copy therefore has to be a member of that team and send its space in `X-EDDI-Space`;
+before this rule the merge reached into any workspace's copy, and now it creates a separate copy instead.
+
 ---
 
 ## API Reference
@@ -515,6 +530,22 @@ inflates to gigabytes is refused with `413` and the limit it crossed, instead of
 disk. The defaults (`10000` entries, 32 MiB per entry, 256 MiB in total) sit far above any real
 agent export; see `eddi.backup.import.*` in the
 [configuration reference](configuration-reference.md).
+
+An archive that is **malformed** is refused with `400` and the reason, never `500` (which
+would blame this server for the archive). Two kinds, with different guarantees:
+
+- **The archive itself** — an entry whose path would land outside the extraction directory
+  (`../../x`, "zip-slip"), an entry name that is not a valid path, corrupt compressed data, or a
+  truncated upload (including one cut off after its last complete entry, before the ZIP's central
+  directory). These are found while unpacking, before anything is imported, so **nothing is
+  written**.
+- **The agent, a workflow or an extension config is not valid JSON** — the import stops with
+  `400`, and whatever it had already created (snippets, connections, earlier resources) is
+  rolled back, as for any failed import.
+
+A **snippet or connection file** that is not valid JSON is *not* fatal: like any snippet or
+connection the importer cannot use, it is skipped with a warning in the log, and the rest of the
+archive is imported.
 
 ## Live Sync (Without ZIP)
 

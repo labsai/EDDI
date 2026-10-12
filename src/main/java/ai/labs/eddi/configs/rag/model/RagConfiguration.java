@@ -101,6 +101,21 @@ public class RagConfiguration {
      */
     private Map<String, String> storeParameters;
 
+    /**
+     * How the vector store is addressed — see {@link KnowledgeBaseStorage}.
+     * <ul>
+     * <li>{@code "id"} — by the RAG configuration's id: a dedicated default
+     * location ({@code eddi_kbid_<id>}), every chunk tagged with the id and
+     * retrieval filtered on it. Stamped on every knowledge base created, imported
+     * or duplicated from this release on.</li>
+     * <li>{@code "name"} or absent — the 6.5.0 layout, addressed by the name. Kept
+     * for knowledge bases that existed before the upgrade, so their stored vectors
+     * stay reachable. Cannot be chosen for a new knowledge base, and a knowledge
+     * base cannot be switched back to it.</li>
+     * </ul>
+     */
+    private String storeNamespace;
+
     // --- Chunking (for ingestion) ---
 
     /** The only chunking strategy the ingestion pipeline implements. */
@@ -228,6 +243,19 @@ public class RagConfiguration {
         if (unsupported != null) {
             throw new IllegalArgumentException(unsupported);
         }
+        if (storeNamespace != null && !KnowledgeBaseStorage.NAMESPACE_ID.equals(storeNamespace)
+                && !KnowledgeBaseStorage.NAMESPACE_NAME.equals(storeNamespace)) {
+            throw new IllegalArgumentException("Unsupported storeNamespace '" + storeNamespace + "' (supported: '"
+                    + KnowledgeBaseStorage.NAMESPACE_ID + "', or '" + KnowledgeBaseStorage.NAMESPACE_NAME
+                    + "' for a knowledge base created before 6.6)");
+        }
+        // A provider that cannot be pointed at the endpoint the operator configured
+        // must not save: building it would send every document to the provider's
+        // public default instead.
+        String embeddingProblem = EmbeddingParameters.findProblem(embeddingProvider, embeddingParameters);
+        if (embeddingProblem != null) {
+            throw new IllegalArgumentException(embeddingProblem);
+        }
         if (sources != null) {
             Set<String> keys = new HashSet<>();
             for (IngestionSource source : sources) {
@@ -331,6 +359,14 @@ public class RagConfiguration {
 
     public void setStoreParameters(Map<String, String> storeParameters) {
         this.storeParameters = storeParameters;
+    }
+
+    public String getStoreNamespace() {
+        return storeNamespace;
+    }
+
+    public void setStoreNamespace(String storeNamespace) {
+        this.storeNamespace = storeNamespace;
     }
 
     public String getChunkStrategy() {

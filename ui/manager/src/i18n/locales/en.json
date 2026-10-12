@@ -76,7 +76,11 @@
     "monitoring": "Conversation Monitoring",
     "analytics": "Analytics",
     "connections": "Connections",
-    "workspaces": "Workspaces"
+    "workspaces": "Workspaces",
+    "breadcrumb": "Breadcrumb",
+    "checkingVersion": "Checking version...",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar"
   },
   "theme": {
     "light": "Light",
@@ -230,7 +234,8 @@
     "quickCreateTitle": "Quick Create {{type}}",
     "quickCreateDesc": "Set a name and description, configure details later.",
     "guidedSetup": "Guided Setup",
-    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
+    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment.",
+    "guidedSetupDescGroup": "Step-by-step wizard for the team, discussion style, and optional approvals — it can create the member agents too."
   },
   "platform": {
     "status": "Platform Status",
@@ -507,7 +512,7 @@
     "backToAgents": "Back to Agents",
     "next": "Next",
     "back": "Back",
-    "createOnly": "Create Only",
+    "createOnly": "Create without deploying",
     "createAndDeploy": "Create & Deploy",
     "typeTitle": "What kind of agent?",
     "typeDesc": "Choose the type of agent you want to create",
@@ -597,7 +602,25 @@
     "specUrlScheme": "Only http:// and https:// URLs are supported",
     "lastToolHint": "At least one tool must stay selected. Turn built-in tools off to disable them all.",
     "hfToken": "Hugging Face token",
-    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key."
+    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key.",
+    "stepLabel": "Step {{n}} of {{total}}: {{name}}",
+    "createAndDeployProduction": "Create & deploy to production",
+    "createAndDeployTest": "Create & deploy to test",
+    "reviewKeyNotNeeded": "Not needed for this provider",
+    "reviewKeyNone": "None",
+    "reviewKeyVault": "Vault reference {{ref}}",
+    "reviewKeyEntered": "Entered here",
+    "reviewApiKey": "API key",
+    "reviewBaseUrl": "Base URL",
+    "deployTarget": "Deploy target",
+    "deployNoteProduction": "Create & deploy puts the agent live in production right away.",
+    "deployNoteTest": "Create & deploy starts the agent in the test environment; promote it to production when you are happy with it.",
+    "step_type": "Type",
+    "step_info": "Identity",
+    "step_llm": "Model",
+    "step_apispec": "API Spec",
+    "step_features": "Features",
+    "step_review": "Review"
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -929,6 +952,7 @@
     "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
     "deployNow": "Deploy",
     "deployStarted": "Deployment started",
+    "stay": "Stay",
     "invalidJsonNotSaved": "Not saved — the JSON is invalid: {{reason}}"
   },
   "rulesEditor": {
@@ -964,7 +988,21 @@
     "noRules": "No rules in this group",
     "noConditions": "No conditions",
     "sizeNoBound": "no limit",
-    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit."
+    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit.",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "configValueOf": "Value of {{key}}",
+    "removeConfig": "Remove {{key}}",
+    "toggleCondition": "Show or hide condition details",
+    "commaActionsWarning": "A comma list here means AND: every listed action must have occurred, in that order. To match any one of several actions, add one condition per action under an OR connector, or emit a shared action.",
+    "changeTypeTitle": "Change condition type?",
+    "changeTypeDescription": "Switching to {{type}} replaces this condition's settings with that type's defaults. The values you entered are lost.",
+    "changeTypeConfirm": "Change type",
+    "toggleRule": "Show or hide rule details",
+    "thisRule": "this rule",
+    "noLastStepWarning": "No actionmatcher on lastStep: this rule can fire on any step of the conversation, not just after the action you expect. Add an actionmatcher condition with occurrence lastStep.",
+    "toggleGroup": "Show or hide group",
+    "thisGroup": "this group"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No endpoints found in the spec",
@@ -1402,7 +1440,22 @@
     "compatibleEndpointOverridden": "Endpoint: {{url}}",
     "modelType": "Model type",
     "paramName": "Parameter name",
-    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
+    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all.",
+    "toggleTask": "Show or hide task details",
+    "noActionsWarning": "This task has no trigger action, so it never runs. Add the action your behavior rules emit, for example send_message.",
+    "model": "Model",
+    "deploymentName": "Deployment name",
+    "modelName": "Model",
+    "modelMissing": "No model set: the provider will reject every request.",
+    "apiKey": "API key",
+    "apiKeyNotNeeded": "This provider usually needs no API key.",
+    "temperature": "Temperature",
+    "temperaturePlaceholder": "Provider default",
+    "temperatureInvalid": "Enter a number, for example 0.7.",
+    "paramValueOf": "Value of {{key}}",
+    "removeParam": "Remove parameter {{key}}",
+    "accessToken": "Access token",
+    "authToken": "Hugging Face token (optional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -1443,7 +1496,14 @@
     "maxLength": "Max length",
     "maxLengthShort": "max",
     "validationMsgPlaceholder": "Validation error message...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "not saved; fix it or clear the field",
+    "itemType": "Output type",
+    "removeItem": "Remove output item",
+    "removeQuickReply": "Remove quick reply",
+    "toggleOutput": "Show or hide output details",
+    "timesOccurredLabel": "Times occurred",
+    "removeAlternativeGroup": "Remove alternative group {{n}}"
   },
   "propertySetterEditor": {
     "setters": "Property Setters",
@@ -1467,7 +1527,10 @@
     "visibilityTitle": "Which agents can see this longTerm property",
     "editValue": "Edit Value",
     "toggleGroup": "Toggle property group",
-    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope."
+    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope.",
+    "scope": "Scope",
+    "visibility": "Visibility",
+    "removeProperty": "Remove property"
   },
   "dictionaryEditor": {
     "language": "Language",
@@ -2467,7 +2530,8 @@
       "title": "Help & Tour",
       "platformTour": "Platform Tour",
       "resetAll": "Reset All Tours",
-      "resetConfirm": "Reset all tour progress?"
+      "resetConfirm": "Reset all tour progress?",
+      "completed": "Completed"
     },
     "offer": {
       "message": "New here? Take the {{page}}",
@@ -3050,6 +3114,7 @@
       "humanNeedsId_one": "{{count}} human member needs the person's user id.",
       "humanNeedsId_other": "{{count}} human members need the person's user id."
     },
+    "versionLookupFailed": "Could not find this group's current version.",
     "deletePermanentlyHint": "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.",
     "deletePermanentlyWithMembersHint": "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged.",
     "deleteMembersFailedAfterGroup": "The group was deleted, but these member agents could not be: {{ids}}. Delete them from the Agents page.",
@@ -3177,19 +3242,66 @@
     "humanOnTimeoutAbort": "Abort the discussion",
     "humanOnTimeoutSkip": "Skip their turn and continue",
     "humanTurnSettingsTitle": "Human member turn settings",
-    "humanTurnTimeoutLabel": "Turn timeout (ISO-8601 duration)",
-    "humanTurnTimeoutPlaceholder": "e.g. PT24H — blank waits indefinitely",
-    "humanTurnTimeoutInvalid": "Not a valid ISO-8601 duration, e.g. PT24H or P1D.",
+    "humanTurnTimeoutLabel": "Turn timeout",
+    "humanTurnTimeoutPlaceholder": "Leave empty to wait indefinitely.",
+    "humanTurnTimeoutInvalid": "Enter a number greater than zero.",
     "humanOnTimeoutLabel": "On timeout",
     "memberTypeHuman": "Human",
     "humanPrincipalId": "Principal ID",
     "humanPrincipalIdPlaceholder": "The user's login/principal id",
     "humanTurnSettingsHint": "The discussion pauses and waits when it's a human member's turn to speak. Choose what happens if they don't respond in time.",
     "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak.",
-    "memberPromptPlaceholder": "You are {{name}}. Provide insightful analysis from your domain perspective.",
-    "memberPromptPlaceholderRole": "You are {{name}}, a {{role}} expert. Provide insightful analysis from your domain perspective.",
-    "moderatorPromptPlaceholder": "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary…",
-    "modelPlaceholder": "e.g. {{model}}"
+    "modelPlaceholder": "e.g. {{model}}",
+    "stepTemplate": "Preset",
+    "stepConfig": "Setup",
+    "stepMembers": "Members",
+    "stepReview": "Review",
+    "stepsLabel": "Wizard progress",
+    "stepAria": "Step {{n}}: {{title}}",
+    "blockersTitle": "To continue:",
+    "blockerName": "Enter a group name.",
+    "blockerHitlPhases": "Select at least one phase to pause at, or turn off human approval.",
+    "blockerHitlTimeout": "Enter a valid approval timeout (for example PT15M), or choose a different timeout policy.",
+    "blockerStyle": "Pick a discussion style this server supports.",
+    "blockerMemberName": "{{member}}: add a display name.",
+    "blockerMemberPrincipal": "{{member}}: enter the person's principal ID.",
+    "blockerMemberGroup": "{{member}}: pick the nested group.",
+    "blockerMemberAgent": "{{member}}: pick an existing agent, or switch to Create New.",
+    "blockerMemberKey": "{{member}}: add an API key for {{provider}}, or choose a provider that needs none (for example Ollama).",
+    "blockerModeratorKey": "Moderator: add an API key for {{provider}}, or choose a provider that needs none (for example Ollama).",
+    "blockerTurnTimeout": "Set the human turn timeout to a number greater than zero, or clear it.",
+    "memberFallbackName": "Member {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "Open brainstorming — every perspective on a question.",
+      "PEER_REVIEW": "Reviewing a draft or proposal from several angles.",
+      "DEVIL_ADVOCATE": "Stress-testing a plan before you commit to it.",
+      "DELPHI": "Forecasts and estimates where independent opinions should converge.",
+      "DEBATE": "Weighing a decision with two opposing sides.",
+      "TASK_FORCE": "Planning and carrying out multi-step work with assigned tasks.",
+      "NEGOTIATION": "Reaching agreement between parties with different interests."
+    },
+    "howItRuns": "How it runs",
+    "roundsExplain": "One round is every member speaking once. More rounds let members respond to each other, but every extra round adds LLM calls and cost.",
+    "roundsEstimate": "Estimated: about {{calls}} LLM calls per discussion ({{members}} members × {{rounds}} rounds).",
+    "roundsEstimateModerator": "Estimated: about {{calls}} LLM calls per discussion ({{members}} members × {{rounds}} rounds + 1 moderator).",
+    "unitMinutes": "minutes",
+    "unitHours": "hours",
+    "unitDays": "days",
+    "durationNoLimit": "No limit",
+    "durationUnit": "Unit",
+    "defaultMemberPrompt": "You are {{name}}. Provide clear, actionable insights from your domain perspective.",
+    "defaultMemberPromptRole": "You are {{name}}, specialising in {{role}}. Provide clear, actionable insights from your domain perspective.",
+    "defaultMemberPromptNoName": "You are a member of this group. Provide clear, actionable insights from your domain perspective.",
+    "defaultModeratorPrompt": "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
+    "memberNameLabel": "Display name",
+    "memberRoleLabel": "Role",
+    "memberTypeLabel": "Member type",
+    "bulkTitle": "Same provider and key for all new agents",
+    "bulkHint": "Every new agent needs an LLM provider and, for most providers, an API key. Fill it in once here and apply it to all of them; you can still change a single agent afterwards.",
+    "bulkApply": "Apply to all new agents",
+    "apiKeyRequired": "{{provider}} needs an API key before this agent can be created.",
+    "presetsNote": "These are starter presets that fill in this wizard. To use a packaged, pre-tuned discussion and assign your existing agents to its roles instead, see",
+    "presetsLink": "Group Templates"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -3245,7 +3357,9 @@
     "roleCount_one": "{{count}} role to assign",
     "roleCount_other": "{{count}} roles to assign",
     "empty": "No templates available",
-    "emptyDescription": "This server ships no group templates. You can still build a group from scratch with the wizard."
+    "emptyDescription": "This server ships no group templates. You can still build a group from scratch with the wizard.",
+    "wizardNote": "Prefer to create new agents as you go, or build from scratch? The group wizard offers lighter starter presets.",
+    "wizardLink": "Open the group wizard"
   },
   "memories": {
     "title": "User Memory",
@@ -4678,7 +4792,13 @@
     "inputTemplateTooLong": "The prompt template is limited to {{max}} characters.",
     "cronInvalid": "That is not a valid cron expression.",
     "scheduleUnknown": "Schedule unavailable",
-    "nextRun": "next {{when}}"
+    "nextRun": "next {{when}}",
+    "taskSubjectLabel": "Subject",
+    "taskDescriptionLabel": "Description",
+    "inputTemplateLabel": "Prompt template",
+    "priorityTitle": "Priority {{n}} — higher numbers are picked first",
+    "backlogNote": "Each cadence run picks the highest-priority tasks first (P5 before P1). A task cannot be edited or removed once it is added; a run completes it.",
+    "priorityHint": "Higher numbers are picked first by a cadence run. 0 is the default."
   },
   "workforceWizard": {
     "title": "New Team"
@@ -5275,5 +5395,22 @@
     "impactReasonLegacy": "predates version following",
     "impactReasonBreaking": "breaking change",
     "switchNotice": "Agent moved from v{{from}} to v{{to}}"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "There is nothing at this address. It may have moved, or the link may be mistyped.",
+    "backToDashboard": "Back to Dashboard",
+    "backToWorkforce": "Back to Workforce",
+    "chooseWorkspace": "Choose a workspace"
+  },
+  "actionTags": {
+    "remove": "Remove {{action}}",
+    "none": "No actions",
+    "inputLabel": "New action",
+    "add": "Add action"
+  },
+  "wizardLeave": {
+    "title": "Leave without creating?",
+    "message": "Your team setup, including any prompts and API keys you entered, has not been created yet and will be lost."
   }
 }

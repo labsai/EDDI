@@ -66,6 +66,14 @@
 .PARAMETER EddiDir
     Installation directory (default: ~/.eddi, or EDDI_DIR env var).
 
+.PARAMETER DryRun
+    Print the EDDI image tag and the git ref the compose files would be
+    downloaded from, then exit without downloading, writing or starting
+    anything. The image tag comes from the EDDI_VERSION env var (default:
+    latest); the ref from EDDI_BRANCH when set, otherwise the EDDI_VERSION
+    release tag, and for latest the newest release (falling back to main,
+    with a warning, when the GitHub API cannot be reached).
+
 .EXAMPLE
     .\install.ps1
     Interactive wizard with all prompts.
@@ -102,7 +110,8 @@ param(
     [string]$EddiPort = $env:EDDI_PORT,
     [string]$EddiHttpsPort = $env:EDDI_HTTPS_PORT,
     [string]$MongoPort = $env:MONGO_PORT,
-    [string]$EddiDir = $env:EDDI_DIR
+    [string]$EddiDir = $env:EDDI_DIR,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -159,12 +168,77 @@ if (-not $EddiPort) { $EddiPort = "7070" }
 if (-not $EddiHttpsPort) { $EddiHttpsPort = "7443" }
 if (-not $EddiDir) { $EddiDir = Join-Path -Path $HOME -ChildPath ".eddi" }
 $EddiDir = $EddiDir.TrimEnd('\', '/')
-$EddiBranch = if ($env:EDDI_BRANCH) { $env:EDDI_BRANCH } else { "main" }
-# Validate branch name (prevent path traversal in download URLs)
-if ($EddiBranch -notmatch '^[a-zA-Z0-9._/-]+$') {
-    throw "Invalid EDDI_BRANCH: '$EddiBranch'. Only alphanumeric, dots, slashes, hyphens allowed."
+# The image tag docker-compose.yml pulls (labsai/eddi:${EDDI_VERSION:-latest}).
+$EddiVersion = if ($env:EDDI_VERSION) { $env:EDDI_VERSION } else { "latest" }
+if ($EddiVersion -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.-]*\z') {
+    throw "Invalid EDDI_VERSION: '$EddiVersion' (expected an image tag such as 6.5.0 or latest)."
+}
+
+# A git ref that is safe to splice into the raw.githubusercontent.com download URL.
+# The character class alone does NOT stop path traversal: '.' and '/' are in it, so
+# EDDI_BRANCH=../../someone/else/main passed, and the HTTP client resolves the dot
+# segments -- the "compose files" then came from another repository. git forbids
+# '..', '//', a leading or trailing '/', a component starting with '.', a trailing
+# '.' and a '.lock' suffix in ref names, so refusing them costs no real ref.
+function Test-GitRef([string]$Ref) {
+    # \z, not $: in .NET '$' also matches before a trailing newline.
+    if ($Ref -notmatch '^[a-zA-Z0-9._/-]+\z') { return $false }
+    if ($Ref -match '\.\.|//|^/|/$|^\.|/\.|^-|\.$|\.lock$') { return $false }
+    return $true
+}
+
+# The newest stable EDDI release tag from the GitHub releases API ('/latest' skips
+# drafts and pre-releases -- what the 'latest' image tracks), or $null when the API
+# is unreachable, rate-limited, or answers anything but MAJOR.MINOR.PATCH.
+function Get-LatestReleaseTag {
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/labsai/EDDI/releases/latest" `
+            -Headers @{ Accept = "application/vnd.github+json" } -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+        if ($release.tag_name -match '^\d+\.\d+\.\d+\z') { return [string]$release.tag_name }
+    }
+    catch { Write-Verbose $_.Exception.Message }
+    return $null
+}
+
+# Which git ref the compose/support files come from, and why (kept in .eddi-config
+# as EDDI_BRANCH_SOURCE so 'eddi update' knows whether to look again):
+#   explicit        EDDI_BRANCH was set -- always wins
+#   version         a pinned EDDI_VERSION -- its release tag (not v-prefixed)
+#   latest-release  EDDI_VERSION=latest -- the newest release's tag, so the files
+#                   match the image 'latest' points at
+#   fallback-main   that lookup failed -- main, which can be newer than the image
+if ($env:EDDI_BRANCH) {
+    $EddiBranch = $env:EDDI_BRANCH
+    $EddiBranchSource = "explicit"
+}
+elseif ($EddiVersion -ne "latest") {
+    $EddiBranch = $EddiVersion
+    $EddiBranchSource = "version"
+}
+else {
+    $EddiBranch = Get-LatestReleaseTag
+    $EddiBranchSource = "latest-release"
+    if (-not $EddiBranch) {
+        $EddiBranch = "main"
+        $EddiBranchSource = "fallback-main"
+        Write-Warning ("Could not look up the newest EDDI release (GitHub API unreachable or rate-limited). " +
+            "The compose files will come from 'main', which can be newer than the 'latest' image. " +
+            "Set EDDI_BRANCH=<release tag> or EDDI_VERSION=<tag> to match them exactly.")
+    }
+}
+if (-not (Test-GitRef $EddiBranch)) {
+    throw "Invalid EDDI_BRANCH: '$EddiBranch'. A git ref of letters, digits, '.', '_', '-' and '/', without '..', '//' or a leading/trailing '/'."
 }
 $ComposeBaseUrl = "https://raw.githubusercontent.com/labsai/EDDI/$EddiBranch"
+
+if ($DryRun) {
+    Write-Output "EDDI image:     labsai/eddi:$EddiVersion"
+    Write-Output "Compose files:  $EddiBranch ($EddiBranchSource)"
+    Write-Output "Download from:  $ComposeBaseUrl"
+    Write-Output "Install dir:    $EddiDir"
+    Write-Output "Dry run: nothing was downloaded, written or started."
+    exit 0
+}
 
 if ($Full) {
     $Database = "postgres"
@@ -882,6 +956,7 @@ COMPOSE_FILES=$($ComposeFiles -join " ")
 EDDI_PORT=$EddiPort
 EDDI_HTTPS_PORT=$EddiHttpsPort
 EDDI_BRANCH=$EddiBranch
+EDDI_BRANCH_SOURCE=$EddiBranchSource
 "@ | Set-Content -Path $configPath
 
     # Write .env file for docker compose variable substitution
@@ -895,6 +970,7 @@ EDDI_VAULT_MASTER_KEY="$escapedKey"
 EDDI_DATASTORE_TYPE=$Database
 EDDI_PORT=$EddiPort
 EDDI_HTTPS_PORT=$EddiHttpsPort
+EDDI_VERSION=$EddiVersion
 "@
     $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
     $envContent | Set-Content -Path $envPath
@@ -1521,15 +1597,19 @@ set "COMPOSE_FILES="
 set "EDDI_PORT="
 set "EDDI_HTTPS_PORT="
 set "CFG_BRANCH="
+set "CFG_SOURCE="
 for /f "usebackq tokens=1,* delims==" %%A in ("%CONFIG_FILE%") do (
     if "%%A"=="COMPOSE_FILES" set "COMPOSE_FILES=%%B"
     if "%%A"=="EDDI_PORT" set "EDDI_PORT=%%B"
     if "%%A"=="EDDI_HTTPS_PORT" set "EDDI_HTTPS_PORT=%%B"
     if "%%A"=="EDDI_BRANCH" set "CFG_BRANCH=%%B"
+    if "%%A"=="EDDI_BRANCH_SOURCE" set "CFG_SOURCE=%%B"
 )
-if not defined EDDI_BRANCH (
+set "BRANCH_FROM_ENV="
+if defined EDDI_BRANCH (set "BRANCH_FROM_ENV=1") else (
     if defined CFG_BRANCH (set "EDDI_BRANCH=!CFG_BRANCH!") else (set "EDDI_BRANCH=main")
 )
+call :check_ref || exit /b 1
 set "COMPOSE_BASE_URL=https://raw.githubusercontent.com/labsai/EDDI/!EDDI_BRANCH!"
 
 rem Build compose flags with delayed expansion for proper quoting
@@ -1579,6 +1659,54 @@ docker compose %FLAGS% logs %1 %2 %3 %4 %5 %6 %7 %8 %9
 goto :eof
 
 :cmd_update
+rem Fetch the compose files from the ref that matches the image about to be pulled.
+rem An EDDI_BRANCH from the environment, or one set explicitly at install time, wins;
+rem a pinned EDDI_VERSION uses its release tag; 'latest' is looked up again on every
+rem update (the newest release may have moved since the install), falling back to
+rem main with a warning when the GitHub API cannot be reached.
+if defined BRANCH_FROM_ENV goto update_ref_done
+if /i "!CFG_SOURCE!"=="explicit" goto update_ref_done
+set "TARGET_VERSION=%EDDI_VERSION%"
+if not defined TARGET_VERSION for /f "usebackq tokens=1,* delims==" %%A in ("%ENV_FILE%") do if "%%A"=="EDDI_VERSION" set "TARGET_VERSION=%%B"
+if not defined TARGET_VERSION set "TARGET_VERSION=latest"
+rem An install made before EDDI_BRANCH_SOURCE existed recorded only the ref, and the
+rem installer then only ever chose 'main' (or the version tag) by itself. Any other
+rem ref was set by hand: keep it, and record it as explicit from now on.
+if not defined CFG_SOURCE if /i not "!EDDI_BRANCH!"=="main" if /i not "!EDDI_BRANCH!"=="!TARGET_VERSION!" (
+    set "CFG_SOURCE=explicit"
+    goto update_ref_set
+)
+if /i not "!TARGET_VERSION!"=="latest" (
+    set "EDDI_BRANCH=!TARGET_VERSION!"
+    set "CFG_SOURCE=version"
+    goto update_ref_set
+)
+set "LATEST_TAG="
+rem No backticks (usebackq), no dollar signs and no exclamation marks here: this is a
+rem PowerShell here-string, which would eat the first two, and delayed expansion would
+rem eat the third. PowerShell itself keeps only a MAJOR.MINOR.PATCH tag, so nothing
+rem else from the API answer ever reaches a cmd.exe parser.
+for /f "delims=" %%T in ('powershell -NoProfile -NonInteractive -Command "try { (Invoke-RestMethod -TimeoutSec 10 -UseBasicParsing -Uri https://api.github.com/repos/labsai/EDDI/releases/latest).tag_name | Select-String -Pattern '^\d+\.\d+\.\d+\z' | ForEach-Object Line } catch {}"') do set "LATEST_TAG=%%T"
+if defined LATEST_TAG (
+    set "EDDI_BRANCH=!LATEST_TAG!"
+    set "CFG_SOURCE=latest-release"
+) else (
+    set "EDDI_BRANCH=main"
+    set "CFG_SOURCE=fallback-main"
+    echo Warning: could not look up the newest EDDI release; refreshing compose files from main,
+    echo          which can be newer than the 'latest' image.
+)
+:update_ref_set
+call :check_ref || exit /b 1
+set "COMPOSE_BASE_URL=https://raw.githubusercontent.com/labsai/EDDI/!EDDI_BRANCH!"
+rem Persist so start/restart/update know which ref the files came from.
+findstr /v /b /c:"EDDI_BRANCH=" /c:"EDDI_BRANCH_SOURCE=" "%CONFIG_FILE%" > "%CONFIG_FILE%.tmp"
+>> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH=!EDDI_BRANCH!
+>> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH_SOURCE=!CFG_SOURCE!
+type "%CONFIG_FILE%.tmp" > "%CONFIG_FILE%"
+del "%CONFIG_FILE%.tmp" >nul 2>nul
+:update_ref_done
+echo Compose files from: !EDDI_BRANCH!
 echo Refreshing compose files from GitHub...
 for %%F in (%COMPOSE_FILES%) do (
     for %%N in (%%~nxF) do (
@@ -1616,6 +1744,27 @@ docker compose %FLAGS% pull
 docker compose %FLAGS% up -d
 echo EDDI updated.
 goto :eof
+
+:check_ref
+rem Same rules as install.ps1's Test-GitRef: the character class alone lets '..'
+rem through, and the download then resolves into another repository's path.
+rem The value reaches findstr through a FILE, never through a pipe: each side of a
+rem pipe is re-parsed by a child cmd.exe, so a ref carrying an ampersand ran what
+rem followed it as a command, and only the part before it was checked. A redirect
+rem of a delayed expansion is not re-parsed: the file holds the value as it is.
+set "REF_FILE=%TEMP%\eddi-ref-%RANDOM%%RANDOM%.txt"
+> "!REF_FILE!" (echo(!EDDI_BRANCH!)
+set "REF_BAD="
+findstr /r /x "[a-zA-Z0-9._/-][a-zA-Z0-9._/-]*" "!REF_FILE!" >nul || set "REF_BAD=1"
+findstr /c:".." /c:"//" /c:"/." "!REF_FILE!" >nul && set "REF_BAD=1"
+findstr /r /b /c:"[/.-]" "!REF_FILE!" >nul && set "REF_BAD=1"
+findstr /r /e /c:"[/.]" /c:"\.lock" "!REF_FILE!" >nul && set "REF_BAD=1"
+del "!REF_FILE!" >nul 2>nul
+if defined REF_BAD goto check_ref_bad
+exit /b 0
+:check_ref_bad
+echo Invalid EDDI_BRANCH: !EDDI_BRANCH!
+exit /b 1
 
 :refresh_asset
 set "REL=%~1"
