@@ -55,9 +55,6 @@ public class BedrockLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = BedrockChatModel.builder();
-        // One retry layer: the task's retry policy (RetryConfiguration) — see
-        // ModelParameterValues#PROVIDER_MAX_RETRIES.
-        builder.maxRetries(ModelParameterValues.PROVIDER_MAX_RETRIES);
 
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_ID))) {
             builder.modelId(parameters.get(KEY_MODEL_ID));
@@ -71,6 +68,9 @@ public class BedrockLanguageModelBuilder implements ILanguageModelBuilder {
         if (requestParams != null) {
             builder.defaultRequestParameters(requestParams);
         }
+
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
 
         return builder.build();
     }

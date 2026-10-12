@@ -123,9 +123,6 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = VertexAiGeminiChatModel.builder();
-        // One retry layer: the task's retry policy (RetryConfiguration) — see
-        // ModelParameterValues#PROVIDER_MAX_RETRIES.
-        builder.maxRetries(ModelParameterValues.PROVIDER_MAX_RETRIES);
 
         if (!isNullOrEmpty(parameters.get(KEY_PROJECT_ID))) {
             builder.project(parameters.get(KEY_PROJECT_ID));
@@ -157,6 +154,9 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
             builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
         }
+
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
 
         return builder.build();
     }

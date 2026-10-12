@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import dev.langchain4j.exception.ToolArgumentsException;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -568,6 +569,9 @@ public class ToolExecutionService {
         if (callerIdentityContext != null) {
             work = callerIdentityContext.propagate(work);
         }
+        // An approved call's dispatch-time self-ungating check must follow it onto
+        // the timeout executor's thread, or it silently stops applying there.
+        work = ApprovedCallScope.propagate(work);
         return Context.current().wrap(work);
     }
 

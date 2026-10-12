@@ -13,6 +13,9 @@ import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -49,6 +52,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class PostgresScheduleStore implements IScheduleStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresScheduleStore.class);
+    private static final ObjectMapper TEAMS_MAPPER = new ObjectMapper();
 
     private static final String CREATE_SCHEDULES_TABLE = """
             CREATE TABLE IF NOT EXISTS eddi_schedules (
@@ -139,7 +143,12 @@ public class PostgresScheduleStore implements IScheduleStore {
             "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS message TEXT",
             "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS persistent_conversation_id VARCHAR(255)",
             "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS allow_self_scheduling BOOLEAN NOT NULL DEFAULT false",
-            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)"};
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS created_by VARCHAR(255)",
+            // Why the system disabled a schedule (undeploy vs access revoked), and the
+            // creator's access snapshot a fire re-checks USE against.
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS disabled_reason VARCHAR(64)",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS creator_teams TEXT",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS creator_admin BOOLEAN NOT NULL DEFAULT false"};
 
     /**
      * Bulk delete by user, overriding the portable scan-and-delete default.
@@ -297,8 +306,8 @@ public class PostgresScheduleStore implements IScheduleStore {
                     heartbeat_interval_seconds, conversation_strategy, max_cost_per_fire,
                     enabled, next_fire, fire_status, fail_count, metadata, created_at, updated_at,
                     message, one_time_at, time_zone, environment, agent_version,
-                    persistent_conversation_id, created_by, allow_self_scheduling)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    persistent_conversation_id, created_by, allow_self_scheduling, creator_teams, creator_admin)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -330,6 +339,8 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setString(22, schedule.getPersistentConversationId());
             ps.setString(23, schedule.getCreatedBy());
             ps.setBoolean(24, schedule.isAllowSelfScheduling());
+            ps.setString(25, serializeTeams(schedule.getCreatorTeams()));
+            ps.setBoolean(26, schedule.isCreatorAdmin());
             ps.executeUpdate();
             LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
                     schedule.getAgentId());
@@ -440,7 +451,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire)
+    public void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire, String disabledReason)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         ensureSchema();
         // Re-enabling always clears the failure state. Doing it only when a nextFire
@@ -448,9 +459,9 @@ public class PostgresScheduleStore implements IScheduleStore {
         // DEAD_LETTERED with a non-zero failCount, so it could never be claimed again.
         String sql = enabled
                 ? (nextFire != null
-                        ? "UPDATE eddi_schedules SET enabled=?, next_fire=?, fire_status=?, fail_count=0, next_retry_at=NULL, updated_at=? WHERE id=?"
-                        : "UPDATE eddi_schedules SET enabled=?, fire_status=?, fail_count=0, next_retry_at=NULL, updated_at=? WHERE id=?")
-                : "UPDATE eddi_schedules SET enabled=?, updated_at=? WHERE id=?";
+                        ? "UPDATE eddi_schedules SET enabled=?, next_fire=?, fire_status=?, fail_count=0, next_retry_at=NULL, disabled_reason=NULL, updated_at=? WHERE id=?"
+                        : "UPDATE eddi_schedules SET enabled=?, fire_status=?, fail_count=0, next_retry_at=NULL, disabled_reason=NULL, updated_at=? WHERE id=?")
+                : "UPDATE eddi_schedules SET enabled=?, disabled_reason=?, updated_at=? WHERE id=?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             long now = Instant.now().toEpochMilli();
             if (enabled && nextFire != null) {
@@ -466,8 +477,9 @@ public class PostgresScheduleStore implements IScheduleStore {
                 ps.setString(4, scheduleId);
             } else {
                 ps.setBoolean(1, enabled);
-                ps.setLong(2, now);
-                ps.setString(3, scheduleId);
+                ps.setString(2, disabledReason);
+                ps.setLong(3, now);
+                ps.setString(4, scheduleId);
             }
             int rows = ps.executeUpdate();
             if (rows == 0) {
@@ -1159,6 +1171,47 @@ public class PostgresScheduleStore implements IScheduleStore {
         return result;
     }
 
+    /**
+     * The creator's team subjects as a JSON array. {@code null} stays SQL NULL —
+     * "no access snapshot was taken" — and is kept distinct from {@code []} ("the
+     * creator was in no team"), because the fire-time USE re-check skips rows
+     * without one.
+     */
+    private String serializeTeams(List<String> teams) throws IResourceStore.ResourceStoreException {
+        if (teams == null) {
+            return null;
+        }
+        try {
+            return TEAMS_MAPPER.writeValueAsString(teams);
+        } catch (JsonProcessingException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to serialize creator teams", e);
+        }
+    }
+
+    private List<String> deserializeTeams(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            List<String> teams = TEAMS_MAPPER.readValue(json, new TypeReference<List<String>>() {
+            });
+            // The JSON literal null parses successfully — to a Java null, which reads as
+            // "no snapshot" and would skip the USE re-check. serializeTeams never writes
+            // it (no snapshot is SQL NULL), so it can only come from outside; treat it
+            // like any other unusable value.
+            return teams == null ? List.of() : teams;
+        } catch (JsonProcessingException e) {
+            // Fail closed, but for this row only. null would mean "no snapshot" and
+            // skip the fire-time USE re-check entirely (fail open); throwing, as
+            // deserializeMetadata does, would make every listing and the poller's due
+            // query fail on one corrupt row. An empty list keeps the check and judges
+            // the creator without team shares — the strictest reading of the row.
+            LOGGER.warnf("Unreadable creator_teams value on a schedule row — re-checking its creator without team shares: %s",
+                    e.getMessage());
+            return List.of();
+        }
+    }
+
     private ScheduleConfiguration fromResultSet(ResultSet rs) throws SQLException, IResourceStore.ResourceStoreException {
         ScheduleConfiguration config = new ScheduleConfiguration();
         config.setId(rs.getString("id"));
@@ -1186,6 +1239,9 @@ public class PostgresScheduleStore implements IScheduleStore {
         config.setConversationStrategy(rs.getString("conversation_strategy"));
         config.setPersistentConversationId(rs.getString("persistent_conversation_id"));
         config.setCreatedBy(rs.getString("created_by"));
+        config.setDisabledReason(rs.getString("disabled_reason"));
+        config.setCreatorTeams(deserializeTeams(rs.getString("creator_teams")));
+        config.setCreatorAdmin(rs.getBoolean("creator_admin"));
         config.setAllowSelfScheduling(rs.getBoolean("allow_self_scheduling"));
         config.setMaxCostPerFire(rs.getDouble("max_cost_per_fire"));
         config.setEnabled(rs.getBoolean("enabled"));

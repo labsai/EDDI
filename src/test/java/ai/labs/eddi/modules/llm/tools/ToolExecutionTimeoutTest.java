@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -133,6 +134,20 @@ class ToolExecutionTimeoutTest {
     private String runBounded(String toolName, Supplier<String> toolExecution, int timeoutMs) {
         return service.executeToolWrapped(ToolInvocation.of(toolName), "args", SCOPE, "conv-1",
                 toolExecution, false, false, false, 60, timeoutMs);
+    }
+
+    @Test
+    @DisplayName("an approved call's self-ungating scope follows it onto the timeout executor's thread")
+    void approvedCallScopeIsCarriedOntoTheExecutorThread() {
+        var seenOnWorker = new AtomicReference<Boolean>();
+        String result = ApprovedCallScope.run("agent-1", () -> runBounded("scopedTool", () -> {
+            seenOnWorker.set(ApprovedCallScope.isActive());
+            return "ok";
+        }, 5_000));
+
+        assertEquals("ok", result);
+        assertEquals(Boolean.TRUE, seenOnWorker.get(),
+                "without propagation the dispatch-time check silently stops applying on the worker thread");
     }
 
     // ==================== expiry ====================

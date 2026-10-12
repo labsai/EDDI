@@ -45,36 +45,54 @@ describe("useSaveAndDeploy", () => {
     expect(result.current.isRunning).toBe(false);
   });
 
-  it("opens drawer and sets step to saving on saveAndDeploy call", async () => {
-    // Mock deploy endpoint that returns READY immediately
+  it("saves, deploys the saved version to production, waits for READY and opens a chat", async () => {
+    // The real routes deployAgent / getDeploymentStatus call. The handlers used
+    // to sit on /deploymentstore/... — a path the hook never requests — so the
+    // test passed without a deploy ever being asked for.
+    const deploys: string[] = [];
+    const statusReads: string[] = [];
     server.use(
-      http.put("*/deploymentstore/deployments/:env/:agentId/:version", () => {
-        return new HttpResponse(null, { status: 200 });
+      http.post("*/administration/:env/deploy/:agentId", ({ params, request }) => {
+        const version = new URL(request.url).searchParams.get("version");
+        deploys.push(`${params.env}/${params.agentId}@${version}`);
+        return new HttpResponse(null, { status: 202 });
       }),
-      http.get("*/deploymentstore/deployments/:env/:agentId/:version", () => {
+      http.get("*/administration/:env/deploymentstatus/:agentId", ({ params, request }) => {
+        const version = new URL(request.url).searchParams.get("version");
+        statusReads.push(`${params.env}/${params.agentId}@${version}`);
         return HttpResponse.json({ status: "READY" });
       }),
     );
-
-    const { result } = renderHook(() => useSaveAndDeploy(), {
-      wrapper: createWrapper(),
-    });
-
-    const saveFn = vi.fn().mockResolvedValue({ newAgentVersion: 2 });
-
-    await act(async () => {
-      result.current.saveAndDeploy({
-        agentId: "agent-1",
-        agentName: "Test Agent",
-        save: saveFn,
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const { result } = renderHook(() => useSaveAndDeploy(), {
+        wrapper: createWrapper(),
       });
-      // Wait a tick for the save to start
-      await new Promise((r) => setTimeout(r, 50));
-    });
+      const saveFn = vi.fn().mockResolvedValue({ newAgentVersion: 2 });
 
-    expect(saveFn).toHaveBeenCalled();
-    // The drawer should have been opened
-    expect(useChatDrawerStore.getState().agentId).toBe("agent-1");
+      let done = false;
+      await act(async () => {
+        void result.current
+          .saveAndDeploy({ agentId: "agent-1", agentName: "Test Agent", save: saveFn })
+          .then(() => {
+            done = true;
+          });
+        for (let i = 0; i < 60 && !done; i++) {
+          await vi.advanceTimersByTimeAsync(100);
+        }
+      });
+
+      expect(done).toBe(true);
+      expect(saveFn).toHaveBeenCalledTimes(1);
+      expect(deploys).toEqual(["production/agent-1@2"]);
+      expect(statusReads).toEqual(["production/agent-1@2"]);
+      const drawer = useChatDrawerStore.getState();
+      expect(drawer.agentId).toBe("agent-1");
+      expect(drawer.errorMessage).toBeNull();
+      expect(drawer.step).toBe("ready");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sets step to error if save throws", async () => {

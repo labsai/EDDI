@@ -11,7 +11,9 @@
   whole turn (it used to freeze only the resumed part) into its batch.
 - **Model calls outside a task's retry policy keep one retry.** Turning provider SDK retries off removed the
   only retry the shared summarizer (rolling and stance summaries, Dream), the tool-response summarizer and the
-  cascade judge had. `TransientFailureRetry` gives each one retry after 500 ms, for transient failures only.
+  cascade judge had. `TransientFailureRetry` gave each one retry after 500 ms, for transient failures only.
+  *Superseded when main was merged in:* #994 runs these calls through `RetryConfiguration.executeWithDefaultRetry`
+  and builds the clients with `NO_LIBRARY_RETRIES`, so `TransientFailureRetry` and `PROVIDER_MAX_RETRIES` were removed.
 - **The web-scraper parse pool no longer answers "busy" with a free worker.** Admission is a semaphore with one
   permit per worker, released by the parse itself when it ends (or by the caller for a parse that never
   started); the `SynchronousQueue` hand-off refused a call in the instant between a worker finishing and

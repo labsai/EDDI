@@ -57,9 +57,6 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = AzureOpenAiChatModel.builder();
-        // One retry layer: the task's retry policy (RetryConfiguration) — see
-        // ModelParameterValues#PROVIDER_MAX_RETRIES.
-        builder.maxRetries(ModelParameterValues.PROVIDER_MAX_RETRIES);
 
         if (!isNullOrEmpty(parameters.get(KEY_ENDPOINT))) {
             builder.endpoint(parameters.get(KEY_ENDPOINT));
@@ -79,6 +76,9 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES))) {
             builder.logRequestsAndResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES)));
         }
+
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
 
         return builder.build();
     }

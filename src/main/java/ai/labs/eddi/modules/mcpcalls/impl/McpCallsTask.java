@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.mcpcalls.impl;
 
+import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.mcpcalls.model.McpCall;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
@@ -399,7 +400,8 @@ public class McpCallsTask implements ILifecycleTask {
         if (approvals == null || toolRequest.name() == null) {
             return false;
         }
-        var gateResult = toolApprovalGate.classify(List.of(toolRequest), Map.of(toolRequest.name(), TOOL_SOURCE_MCP), approvals, Set.of());
+        var gateResult = toolApprovalGate.classify(List.of(toolRequest), Map.of(toolRequest.name(), TOOL_SOURCE_MCP), approvals,
+                ClearedToolCalls.none());
         return !gateResult.gated().isEmpty();
     }
 
