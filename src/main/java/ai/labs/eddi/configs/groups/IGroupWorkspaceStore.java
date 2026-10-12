@@ -21,9 +21,11 @@ public interface IGroupWorkspaceStore {
     GroupWorkspace find(String groupId) throws IResourceStore.ResourceStoreException;
 
     /**
-     * The group's workspace, created empty on first access. Creation races are
-     * benign for an empty document: if two callers create concurrently, the later
-     * writer's empty workspace wins and neither loses data it had.
+     * The group's workspace, created empty on first access. Creation is atomic: the
+     * workspace is stored under the group id itself with an insert-only write, so
+     * of two concurrent creators — on one node or several — exactly one inserts and
+     * every other adopts that same document. All callers get the one workspace
+     * every later read returns.
      */
     GroupWorkspace readOrCreate(String groupId) throws IResourceStore.ResourceStoreException;
 

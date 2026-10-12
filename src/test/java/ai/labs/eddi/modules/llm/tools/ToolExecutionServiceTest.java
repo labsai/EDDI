@@ -6,6 +6,8 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.caching.CacheFactory;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.exception.ToolArgumentsException;
+import dev.langchain4j.exception.ToolExecutionException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +21,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
@@ -66,6 +69,62 @@ class ToolExecutionServiceTest {
         field.set(target, value);
     }
 
+    // ==================== failure semantics ====================
+
+    @Nested
+    @DisplayName("failures are never cached, and the model sees only what it may")
+    class FailureSemanticsTests {
+
+        @Test
+        @DisplayName("a ToolFailureException reaches the model verbatim and is not cached")
+        void typedFailureIsNotCached() {
+            when(rateLimiter.tryAcquire("conv-1", "extractWebPageText", 60)).thenReturn(true);
+            when(cacheService.get(SCOPE, "extractWebPageText", "args")).thenReturn(null);
+
+            var result = service.executeToolWrapped("extractWebPageText", "args", SCOPE, "conv-1", () -> {
+                throw new ToolFailureException("Error: Could not extract content from web page - HTTP 503");
+            }, true, true, true, 60);
+
+            assertEquals("Error: Could not extract content from web page - HTTP 503", result);
+            verify(cacheService, never()).put(any(), any(ToolInvocation.class), any(), any());
+            verify(costTracker, never()).trackToolCall(any(ToolInvocation.class), any());
+            assertEquals(1.0, meterRegistry.counter("eddi.tool.execution.failure", "tool", "extractWebPageText").count());
+        }
+
+        @Test
+        @DisplayName("a typed failure wrapped by langchain4j's executor is still recognised")
+        void wrappedTypedFailure() {
+            var result = service.executeToolWrapped("t", "args", null, "conv-1", () -> {
+                throw new ToolExecutionException(new ToolFailureException("Error: upstream timed out"));
+            }, false, false, false, 60);
+
+            assertEquals("Error: upstream timed out", result);
+        }
+
+        @Test
+        @DisplayName("an unexpected exception's raw text never reaches the model")
+        void rawExceptionTextIsHidden() {
+            var result = service.executeToolWrapped("t", "args", SCOPE, "conv-1", () -> {
+                throw new IllegalStateException("jdbc:postgresql://db.internal:5432/eddi password=hunter2");
+            }, false, true, false, 60);
+
+            assertTrue(ToolExecutionService.isInternalFailure(result, "t"), result);
+            assertFalse(result.contains("db.internal"), result);
+            assertFalse(result.contains("hunter2"), result);
+            verify(cacheService, never()).put(any(), any(ToolInvocation.class), any(), any());
+        }
+
+        @Test
+        @DisplayName("argument errors are reported so the model can correct its call")
+        void argumentErrorsAreReported() {
+            var result = service.executeToolWrapped("t", "args", null, "conv-1", () -> {
+                throw new ToolArgumentsException("Argument 'expression' is missing");
+            }, false, false, false, 60);
+
+            assertEquals("Error: invalid arguments for tool 't': Argument 'expression' is missing", result);
+        }
+    }
+
     // ==================== executeToolWrapped ====================
 
     @Nested
@@ -88,24 +147,9 @@ class ToolExecutionServiceTest {
             verify(costTracker).trackToolCall(ToolInvocation.of("testTool"), "conv-1");
         }
 
-        /**
-         * Every member of a group discussion runs as the same user, so a cached
-         * {@code listArtifacts()} served one member's stale "No artifacts yet" to the
-         * next — and a cached create would skip the create altogether.
-         */
-        @Test
-        @DisplayName("stateful group tools are never read from or written to the cache, even with caching on")
-        void statefulToolsBypassTheCache() {
-            when(rateLimiter.tryAcquire(anyString(), anyString(), anyInt())).thenReturn(true);
-            when(cacheService.get(anyString(), anyString(), anyString())).thenReturn("No artifacts yet. Create one with createArtifact.");
-
-            var result = service.executeToolWrapped("listArtifacts", "{}", SCOPE, "conv-1",
-                    () -> "Shared artifacts:\n- \"plan\" (MARKDOWN, DRAFT, v1)", true, true, true, 60);
-
-            assertEquals("Shared artifacts:\n- \"plan\" (MARKDOWN, DRAFT, v1)", result);
-            verify(cacheService, never()).get(nullable(String.class), anyString(), anyString());
-            verify(cacheService, never()).put(nullable(String.class), any(ToolInvocation.class), anyString(), anyString());
-        }
+        // Conversation-bound tools (artifacts, attachments, ...) are kept out of the
+        // cache by the dispatch loop, which knows the executor's class:
+        // ToolCacheServiceTest#IsConversationBound and ToolLoopRunnerToolPolicyTest.
 
         /**
          * The tool has already run when its cost is tracked. A tracking failure (the
@@ -245,8 +289,9 @@ class ToolExecutionServiceTest {
                     },
                     true, true, true, 60);
 
-            assertTrue(result.contains("Error executing tool"));
-            assertTrue(result.contains("tool failed"));
+            // Generic, with a reference the log line carries — never the raw text.
+            assertTrue(result.startsWith("Error: tool 'testTool' failed with an internal error (reference "), result);
+            assertFalse(result.contains("tool failed"), result);
         }
 
         @Test
@@ -273,8 +318,7 @@ class ToolExecutionServiceTest {
                     },
                     true, true, true, 60);
 
-            assertTrue(result.contains("Error executing tool"));
-            assertTrue(result.contains("NullPointerException"));
+            assertTrue(ToolExecutionService.isInternalFailure(result, "testTool"), result);
         }
 
         @Test

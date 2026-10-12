@@ -15,6 +15,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.utils.LogSanitizer;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -42,7 +43,16 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 /**
  * Discovers remote A2A agents and wraps their skills as
  * {@link ToolSpecification}s, mirroring the {@link McpToolProviderManager}
- * pattern. Remote agents are called via A2A {@code tasks/send} JSON-RPC.
+ * pattern.
+ * <p>
+ * <b>Protocol versions.</b> The dialect a peer is called in is read off its
+ * Agent Card: a card listing a JSON-RPC interface at protocol version 1.x is
+ * called with {@code SendMessage} (A2A 1.0, sending {@code A2A-Version: 1.0});
+ * a card with a 0.x {@code protocolVersion} with {@code message/send}; a card
+ * with neither — an EDDI up to 6.5, or any pre-0.2 peer — with the old
+ * {@code tasks/send}. Results are read tolerantly in all three shapes, and a
+ * task that did not complete is reported to the model as such rather than as an
+ * answer.
  *
  * @author ginccc
  */
@@ -101,6 +111,9 @@ public class A2AToolProviderManager {
     private static final int CIRCUIT_BREAKER_THRESHOLD = 3;
     private static final long CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
     private static final int MAX_RESPONSE_SIZE_BYTES = 1_048_576; // 1MB
+
+    /** The A2A 0.3+/1.0 well-known Agent Card path. */
+    static final String WELL_KNOWN_AGENT_CARD = "/.well-known/agent-card.json";
 
     /**
      * Default cap for a remote-authored description before it reaches the model.
@@ -261,6 +274,7 @@ public class A2AToolProviderManager {
         }
 
         String agentName = config.getName() != null ? config.getName() : (String) agentCard.getOrDefault("name", "a2a-agent");
+        RemoteEndpoint endpoint = resolveEndpoint(agentUrl, agentCard);
 
         // Build the parameter schema for the "message" parameter
         JsonObjectSchema paramSchema = JsonObjectSchema.builder().addStringProperty("message", "The message to send to the agent").build();
@@ -275,8 +289,8 @@ public class A2AToolProviderManager {
                     .parameters(paramSchema)
                     .build();
             toolSpecs.add(spec);
-            executors.put(toolName, createA2AToolExecutor(agentUrl, config));
-            requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(agentUrl, !isNullOrEmpty(config.getApiKey())));
+            executors.put(toolName, createA2AToolExecutor(endpoint, config));
+            requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(endpoint.url(), !isNullOrEmpty(config.getApiKey())));
             return;
         }
 
@@ -304,8 +318,8 @@ public class A2AToolProviderManager {
             ToolSpecification spec = ToolSpecification.builder().name(toolName).description(description).parameters(paramSchema).build();
 
             toolSpecs.add(spec);
-            executors.put(toolName, createA2AToolExecutor(agentUrl, config));
-            requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(agentUrl, !isNullOrEmpty(config.getApiKey())));
+            executors.put(toolName, createA2AToolExecutor(endpoint, config));
+            requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(endpoint.url(), !isNullOrEmpty(config.getApiKey())));
         }
     }
 
@@ -347,8 +361,36 @@ public class A2AToolProviderManager {
             return cached.agentCard();
         }
 
-        String cardUrl = agentUrl + "/agent.json";
+        Map<String, Object> card = null;
+        for (String cardUrl : cardUrlCandidates(agentUrl)) {
+            card = fetchAgentCardFrom(cardUrl, agentUrl, config);
+            if (card != null) {
+                break;
+            }
+        }
+        if (card == null) {
+            return null;
+        }
 
+        agentCache.put(agentUrl, new CachedAgentInfo(card, System.currentTimeMillis()));
+        return card;
+    }
+
+    /**
+     * Where an Agent Card may live, in the order they are tried: the URL itself
+     * when it names a card document; otherwise {@code {url}/agent.json} (EDDI's
+     * per-agent card), then the A2A 0.3+/1.0 well-known path and the older one
+     * below the URL — which is where an agent that is not EDDI publishes it.
+     */
+    static List<String> cardUrlCandidates(String agentUrl) {
+        if (agentUrl.endsWith(".json")) {
+            return List.of(agentUrl);
+        }
+        return List.of(agentUrl + "/agent.json", agentUrl + WELL_KNOWN_AGENT_CARD, agentUrl + "/.well-known/agent.json");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> fetchAgentCardFrom(String cardUrl, String agentUrl, A2AAgentConfig config) throws Exception {
         if (ssrfProtectionEnabled) {
             UrlValidationUtils.validateUrl(cardUrl);
         } else {
@@ -384,17 +426,104 @@ public class A2AToolProviderManager {
             LOGGER.warnf("Agent Card from %s missing 'name' field — rejecting", cardUrl);
             return null;
         }
-
-        agentCache.put(agentUrl, new CachedAgentInfo(card, System.currentTimeMillis()));
         return card;
     }
 
-    private ToolExecutor createA2AToolExecutor(String agentUrl, A2AAgentConfig config) {
+    /** Which wire dialect a remote agent is called in. */
+    enum RemoteDialect {
+        /** A2A 1.0: {@code SendMessage}, {@code A2A-Version: 1.0}. */
+        V1_0,
+        /** A2A 0.2/0.3: {@code message/send}. */
+        V0_3,
+        /** Pre-0.2: {@code tasks/send} — EDDI up to 6.5. */
+        LEGACY
+    }
+
+    /** Where, and in which dialect, a remote agent's JSON-RPC calls go. */
+    record RemoteEndpoint(String url, RemoteDialect dialect) {
+    }
+
+    /**
+     * Reads the dialect off the Agent Card, and the endpoint too when the
+     * configured URL named the card document itself.
+     * <p>
+     * Otherwise the configured URL stays the endpoint, whatever the card says: it
+     * is what an operator approved and what a HITL fingerprint pins, and a card —
+     * authored by the peer — must not be able to redirect the call somewhere else.
+     */
+    @SuppressWarnings("unchecked")
+    static RemoteEndpoint resolveEndpoint(String agentUrl, Map<String, Object> card) {
+        String v1Url = null;
+        String v03Url = null;
+        if (card.get("supportedInterfaces") instanceof List<?> interfaces) {
+            for (Object entry : interfaces) {
+                if (!(entry instanceof Map<?, ?> iface)) {
+                    continue;
+                }
+                Object binding = iface.get("protocolBinding") != null ? iface.get("protocolBinding") : iface.get("transport");
+                if (binding != null && !"JSONRPC".equalsIgnoreCase(binding.toString())) {
+                    continue;
+                }
+                String version = iface.get("protocolVersion") == null ? "" : iface.get("protocolVersion").toString();
+                String url = iface.get("url") == null ? null : iface.get("url").toString();
+                if (version.startsWith("0.")) {
+                    v03Url = v03Url == null ? url : v03Url;
+                } else if (v1Url == null) {
+                    v1Url = url;
+                }
+            }
+        }
+        RemoteDialect dialect;
+        String cardUrl;
+        if (v1Url != null) {
+            dialect = RemoteDialect.V1_0;
+            cardUrl = v1Url;
+        } else if (v03Url != null || card.get("protocolVersion") != null) {
+            dialect = RemoteDialect.V0_3;
+            cardUrl = v03Url != null ? v03Url : (card.get("url") instanceof String url ? url : null);
+        } else {
+            dialect = RemoteDialect.LEGACY;
+            cardUrl = card.get("url") instanceof String url ? url : null;
+        }
+        String endpointUrl = agentUrl;
+        if (agentUrl.endsWith(".json") && !isNullOrEmpty(cardUrl)) {
+            // The configured URL names a card document, so the card is the only thing
+            // that can say where to call. It may say a path on the same origin, never
+            // another host: the operator's credential is sent to the endpoint, and a
+            // card the peer authors must not be able to route it elsewhere.
+            if (!sameOrigin(agentUrl, cardUrl)) {
+                throw new IllegalArgumentException("The Agent Card at " + agentUrl + " names an endpoint on a different origin; refusing to call it");
+            }
+            endpointUrl = cardUrl;
+        }
+        return new RemoteEndpoint(endpointUrl, dialect);
+    }
+
+    /** Same scheme, host and port (default ports resolved). */
+    static boolean sameOrigin(String a, String b) {
+        try {
+            URI left = URI.create(a);
+            URI right = URI.create(b);
+            return left.getScheme() != null && left.getHost() != null && left.getScheme().equalsIgnoreCase(right.getScheme())
+                    && left.getHost().equalsIgnoreCase(right.getHost()) && effectivePort(left) == effectivePort(right);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static int effectivePort(URI uri) {
+        if (uri.getPort() != -1) {
+            return uri.getPort();
+        }
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    private ToolExecutor createA2AToolExecutor(RemoteEndpoint endpoint, A2AAgentConfig config) {
         return (request, memoryId) -> {
             try {
-                return executeA2ATask(agentUrl, config, request);
+                return executeA2ATask(endpoint, config, request);
             } catch (Exception e) {
-                LOGGER.errorf("A2A tool execution failed for %s: %s", agentUrl, e.getMessage());
+                LOGGER.errorf("A2A tool execution failed for %s: %s", endpoint.url(), e.getMessage());
                 // The operator gets the detail, in the log above. The MODEL gets a
                 // bounded sentence: an exception from an outbound call can quote a URL
                 // with a token in its query, or a provider body echoing the request,
@@ -404,24 +533,49 @@ public class A2AToolProviderManager {
         };
     }
 
-    @SuppressWarnings("unchecked")
-    private String executeA2ATask(String agentUrl, A2AAgentConfig config, ToolExecutionRequest request) throws Exception {
-
-        Map<String, Object> args = MAPPER.readValue(request.arguments(), Map.class);
-        String message = (String) args.getOrDefault("message", "");
-
-        // Build JSON-RPC request
+    /** The JSON-RPC request for one message, in the peer's dialect. */
+    static Map<String, Object> buildSendRequest(RemoteDialect dialect, String message) {
         Map<String, Object> jsonRpc = new LinkedHashMap<>();
         jsonRpc.put("jsonrpc", "2.0");
-        jsonRpc.put("method", "tasks/send");
         jsonRpc.put("id", UUID.randomUUID().toString());
 
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("id", UUID.randomUUID().toString());
-        params.put("message", Map.of("role", "user", "parts", List.of(Map.of("type", "text", "text", message))));
+        Map<String, Object> msg = new LinkedHashMap<>();
+        switch (dialect) {
+            case V1_0 -> {
+                jsonRpc.put("method", "SendMessage");
+                msg.put("messageId", UUID.randomUUID().toString());
+                msg.put("role", "ROLE_USER");
+                msg.put("parts", List.of(Map.of("text", message)));
+            }
+            case V0_3 -> {
+                jsonRpc.put("method", "message/send");
+                msg.put("kind", "message");
+                msg.put("messageId", UUID.randomUUID().toString());
+                msg.put("role", "user");
+                msg.put("parts", List.of(Map.of("kind", "text", "text", message)));
+                params.put("configuration", Map.of("blocking", true));
+            }
+            case LEGACY -> {
+                jsonRpc.put("method", "tasks/send");
+                params.put("id", UUID.randomUUID().toString());
+                msg.put("role", "user");
+                msg.put("parts", List.of(Map.of("type", "text", "text", message)));
+            }
+        }
+        params.put("message", msg);
         jsonRpc.put("params", params);
+        return jsonRpc;
+    }
 
-        String body = MAPPER.writeValueAsString(jsonRpc);
+    @SuppressWarnings("unchecked")
+    private String executeA2ATask(RemoteEndpoint endpoint, A2AAgentConfig config, ToolExecutionRequest request) throws Exception {
+
+        Map<String, Object> args = MAPPER.readValue(request.arguments(), Map.class);
+        String message = (String) args.getOrDefault("message", "");
+        String agentUrl = endpoint.url();
+
+        String body = MAPPER.writeValueAsString(buildSendRequest(endpoint.dialect(), message));
 
         if (ssrfProtectionEnabled) {
             UrlValidationUtils.validateUrl(agentUrl);
@@ -432,6 +586,9 @@ public class A2AToolProviderManager {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(agentUrl))
                 .timeout(Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000)).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body));
+        if (endpoint.dialect() == RemoteDialect.V1_0) {
+            requestBuilder.header("A2A-Version", "1.0");
+        }
 
         applyCredential(requestBuilder, config, agentUrl);
 
@@ -456,42 +613,137 @@ public class A2AToolProviderManager {
             return "Invalid A2A response: not a valid JSON-RPC 2.0 response";
         }
 
-        Map<String, Object> result = (Map<String, Object>) rpcResponse.get("result");
-        if (result == null) {
+        if (!(rpcResponse.get("result") instanceof Map<?, ?> rawResult)) {
             Map<String, Object> error = (Map<String, Object>) rpcResponse.get("error");
             if (error != null) {
                 return "A2A error: " + error.getOrDefault("message", "unknown");
             }
             return "No result from A2A agent";
         }
+        return readResult((Map<String, Object>) rawResult);
+    }
+
+    /**
+     * Turns a send result into the text the model sees, in any of the three shapes:
+     * A2A 1.0 wraps it ({@code {"task": …}} or {@code {"message": …}}), 0.3 marks
+     * it with {@code kind}, pre-0.2 does neither.
+     * <p>
+     * A task that did not complete is reported as such: a failed or rejected task's
+     * status message is an explanation, not an answer, and handing it to the model
+     * as one is how a failure turned into a confident wrong reply.
+     */
+    @SuppressWarnings("unchecked")
+    static String readResult(Map<String, Object> result) throws JsonProcessingException {
+        Map<String, Object> payload = result;
+        if (result.get("task") instanceof Map<?, ?> task) {
+            payload = (Map<String, Object>) task;
+        } else if (result.get("message") instanceof Map<?, ?> msg && !result.containsKey("status")) {
+            payload = (Map<String, Object>) msg;
+        }
+
+        // A direct message reply (no task at all).
+        if (payload.get("parts") instanceof List<?> parts && !payload.containsKey("status")) {
+            String text = partsText(parts);
+            if (text != null) {
+                return text;
+            }
+        }
+
+        String state = null;
+        String statusText = null;
+        Object status = payload.get("status");
+        if (status instanceof Map<?, ?> statusMap) {
+            state = statusMap.get("state") == null ? null : statusMap.get("state").toString();
+            if (statusMap.get("message") instanceof Map<?, ?> statusMessage) {
+                statusText = partsText(statusMessage.get("parts"));
+            }
+        } else if (status instanceof String statusString) {
+            state = statusString;
+        }
+        String normalized = normalizeState(state);
+
+        switch (normalized) {
+            case "failed", "rejected", "canceled" -> {
+                return "A2A agent task " + normalized + (statusText == null ? "" : ": " + statusText);
+            }
+            case "input_required", "auth_required" -> {
+                return "A2A agent task needs " + (normalized.equals("auth_required") ? "authentication" : "more input")
+                        + (statusText == null ? "" : ": " + statusText);
+            }
+            case "submitted", "working" -> {
+                return "A2A agent task is still " + normalized + " (task id " + payload.get("id") + "); no result yet";
+            }
+            default -> {
+                // completed, or a shape without a state
+            }
+        }
 
         // Extract artifacts → parts → text
-        List<Map<String, Object>> artifacts = (List<Map<String, Object>>) result.get("artifacts");
-        if (artifacts != null && !artifacts.isEmpty()) {
-            var firstArtifact = artifacts.get(0);
-            List<Map<String, Object>> parts = (List<Map<String, Object>>) firstArtifact.get("parts");
-            if (parts != null && !parts.isEmpty()) {
-                Object text = parts.get(0).get("text");
-                if (text != null) {
-                    return text.toString();
+        if (payload.get("artifacts") instanceof List<?> artifacts) {
+            List<String> texts = new ArrayList<>();
+            for (Object artifact : artifacts) {
+                if (artifact instanceof Map<?, ?> artifactMap) {
+                    String text = partsText(artifactMap.get("parts"));
+                    if (text != null) {
+                        texts.add(text);
+                    }
+                }
+            }
+            if (!texts.isEmpty()) {
+                return String.join("\n", texts);
+            }
+        }
+
+        // Fallback: the last agent message of the history
+        if (payload.get("history") instanceof List<?> history && !history.isEmpty()) {
+            for (int i = history.size() - 1; i >= 0; i--) {
+                if (history.get(i) instanceof Map<?, ?> msg) {
+                    Object role = msg.get("role");
+                    boolean fromAgent = role == null || role.toString().toLowerCase().contains("agent");
+                    String text = fromAgent ? partsText(msg.get("parts")) : null;
+                    if (text != null) {
+                        return text;
+                    }
                 }
             }
         }
 
-        // Fallback: try history
-        List<Map<String, Object>> history = (List<Map<String, Object>>) result.get("history");
-        if (history != null && !history.isEmpty()) {
-            var lastMsg = history.get(history.size() - 1);
-            List<Map<String, Object>> parts = (List<Map<String, Object>>) lastMsg.get("parts");
-            if (parts != null && !parts.isEmpty()) {
-                Object text = parts.get(0).get("text");
-                if (text != null) {
-                    return text.toString();
-                }
-            }
+        if (statusText != null) {
+            return statusText;
         }
-
         return MAPPER.writeValueAsString(result);
+    }
+
+    /**
+     * {@code TASK_STATE_INPUT_REQUIRED}, {@code input-required} →
+     * {@code input_required}.
+     */
+    static String normalizeState(String state) {
+        if (state == null) {
+            return "";
+        }
+        String normalized = state.trim().toLowerCase();
+        if (normalized.startsWith("task_state_")) {
+            normalized = normalized.substring("task_state_".length());
+        }
+        normalized = normalized.replace('-', '_');
+        return "cancelled".equals(normalized) ? "canceled" : normalized;
+    }
+
+    /**
+     * The text of a part list, joined; null when none of its parts carries text.
+     */
+    private static String partsText(Object partsObj) {
+        if (!(partsObj instanceof List<?> parts)) {
+            return null;
+        }
+        List<String> texts = new ArrayList<>();
+        for (Object part : parts) {
+            if (part instanceof Map<?, ?> partMap && partMap.get("text") != null) {
+                texts.add(partMap.get("text").toString());
+            }
+        }
+        return texts.isEmpty() ? null : String.join("\n", texts);
     }
 
     /**

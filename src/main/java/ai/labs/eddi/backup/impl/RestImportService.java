@@ -39,6 +39,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -48,6 +49,7 @@ import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
+import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -59,7 +61,9 @@ import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
@@ -77,6 +81,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
@@ -181,6 +186,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
+     * Applies the knowledge-base storage rules to imported knowledge bases. Null
+     * when built outside the container, where an import still gets the per-id
+     * layout but the explicit-location check is skipped.
+     */
+    private KnowledgeBaseStorageGuard knowledgeBaseStorageGuard;
+
+    @Inject
+    void useKnowledgeBaseStorageGuard(KnowledgeBaseStorageGuard guard) {
+        this.knowledgeBaseStorageGuard = guard;
+    }
+
+    /**
      * The request being served — read only to tell {@code ?selectedResources=} from
      * an absent parameter, which the framework hands over as the same null. Null
      * when built outside the container (unit tests).
@@ -278,7 +295,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             throw e;
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException("Preview failed: " + e.getMessage(), e);
+            throw archiveReadFailure("Preview failed: ", e);
         } finally {
             deleteTempDirectoryQuietly(targetDir.toPath());
         }
@@ -286,7 +303,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     /**
      * Unpacks an uploaded or fetched archive, answering an over-sized one with 413
-     * and the limit it crossed rather than a 500.
+     * and the limit it crossed, and a malformed one (zip-slip entry, corrupt or
+     * truncated data) with 400 and the reason — never a 500, which would blame this
+     * server for the archive's shape.
      */
     private void unzipArchive(InputStream archive, File targetDir) throws IOException {
         try {
@@ -296,7 +315,48 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     .entity(Map.of("error", e.getMessage()))
                     .type(MediaType.APPLICATION_JSON)
                     .build());
+        } catch (ZipArchive.MalformedArchiveException e) {
+            throw badArchive(e.getMessage());
         }
+    }
+
+    /**
+     * What a failure while reading an unpacked archive answers: 400 when a
+     * configuration file in it is not valid JSON (the archive's fault, and the
+     * uploader can fix it), 500 for everything else.
+     */
+    static WebApplicationException archiveReadFailure(String prefix, Exception e) {
+        if (deniedAccess(e)) {
+            // The guard's own message ("Access denied: you do not have edit access to
+            // this agent") is authored for the caller and names no id or internal.
+            String message = prefix + accessDenialMessage(e);
+            return new WebApplicationException(message, Response.status(Response.Status.FORBIDDEN)
+                    .entity(Map.of("error", message))
+                    .type(MediaType.APPLICATION_JSON)
+                    .build());
+        }
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof JsonProcessingException json) {
+                String detail = json.getOriginalMessage();
+                if (detail != null && detail.length() > 200) {
+                    detail = detail.substring(0, 200) + "…";
+                }
+                return badArchive("a configuration file in it is not valid JSON (" + LogSanitizer.sanitize(detail) + ")");
+            }
+            if (cause.getCause() == cause) {
+                break;
+            }
+        }
+        return new InternalServerErrorException(prefix + e.getMessage(), e);
+    }
+
+    /** A 400 naming what is wrong with the uploaded archive. */
+    private static WebApplicationException badArchive(String reason) {
+        String message = "Invalid import archive: " + reason;
+        return new WebApplicationException(message, Response.status(Response.Status.BAD_REQUEST)
+                .entity(Map.of("error", message))
+                .type(MediaType.APPLICATION_JSON)
+                .build());
     }
 
     private void addExtensionDiffs(List<ResourceDiff> diffs, String workflowFileString, Path workflowDir)
@@ -478,9 +538,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private ResourceDiff buildResourceDiff(String originId, String resourceType, String name) {
         try {
-            List<DocumentDescriptor> existing = documentDescriptorStore.findByOriginId(originId);
-            if (!existing.isEmpty()) {
-                DocumentDescriptor desc = existing.getFirst();
+            DocumentDescriptor desc = firstMergeTarget(documentDescriptorStore.findByOriginId(originId));
+            if (desc != null) {
                 IResourceId localResourceId = RestUtilities.extractResourceId(desc.getResource());
                 if (localResourceId != null) {
                     return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(), localResourceId.getVersion(),
@@ -497,7 +556,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IResourceId currentId = documentDescriptorStore.getCurrentResourceId(originId);
             if (currentId != null) {
                 DocumentDescriptor desc = documentDescriptorStore.readDescriptor(currentId.getId(), currentId.getVersion());
-                if (desc != null) {
+                if (isMergeTarget(desc)) {
                     IResourceId localResourceId = RestUtilities.extractResourceId(desc.getResource());
                     if (localResourceId != null) {
                         return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(),
@@ -622,7 +681,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         } catch (Exception e) {
             metrics.importFailed();
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getMessage(), e);
+            throw archiveReadFailure("", e);
         }
     }
 
@@ -763,7 +822,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 lastAgentUri = newAgentUri;
             } catch (IOException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
-                throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+                throw archiveReadFailure("", e);
             }
         }
         LOGGER.infof("Import complete: lastAgentUri=%s", LogSanitizer.sanitize(String.valueOf(lastAgentUri)));
@@ -958,7 +1017,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                     } catch (IOException | CallbackMatcher.CallbackMatcherException e) {
                         LOGGER.error(e.getLocalizedMessage(), e);
-                        throw new InternalServerErrorException(e.getMessage(), e);
+                        throw archiveReadFailure("", e);
                     }
                 });
 
@@ -966,7 +1025,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         } catch (IOException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException(e.getMessage(), e);
+            throw archiveReadFailure("", e);
         }
     }
 
@@ -1057,9 +1116,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private URI findLocalUriByOriginId(String originId) {
         try {
             // Try by originId first (standard merge path)
-            List<DocumentDescriptor> existing = documentDescriptorStore.findByOriginId(originId);
-            if (!existing.isEmpty()) {
-                return existing.getFirst().getResource();
+            DocumentDescriptor existing = firstMergeTarget(documentDescriptorStore.findByOriginId(originId));
+            if (existing != null) {
+                return existing.getResource();
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             LOGGER.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
@@ -1071,7 +1130,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IResourceId currentId = documentDescriptorStore.getCurrentResourceId(originId);
             if (currentId != null) {
                 DocumentDescriptor desc = documentDescriptorStore.readDescriptor(currentId.getId(), currentId.getVersion());
-                if (desc != null) {
+                if (isMergeTarget(desc)) {
                     return desc.getResource();
                 }
             }
@@ -1079,6 +1138,48 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             LOGGER.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
         }
         return null;
+    }
+
+    /**
+     * The first descriptor of {@code candidates} a merge may write into, or
+     * {@code null}.
+     */
+    private DocumentDescriptor firstMergeTarget(List<DocumentDescriptor> candidates) {
+        if (candidates == null) {
+            return null;
+        }
+        return candidates.stream().filter(this::isMergeTarget).findFirst().orElse(null);
+    }
+
+    /**
+     * Whether a local resource found by its origin id (or by its own id) may be the
+     * one a merge import updates.
+     * <p>
+     * The lookup itself is deployment-wide — {@code originId} is whatever id the
+     * exporting instance gave the resource, and every workspace that imported the
+     * same archive carries it. With workspaces enforced, matching on it alone made
+     * a merge into one workspace resolve another workspace's copy and overwrite it,
+     * or fail on that workspace's access check (review finding). So a candidate
+     * must be one the importer may edit, and — when the importer is writing into a
+     * definite space — one that lives in that space. A resource from before
+     * ownership stamping (no space) is judged by the access check alone. With
+     * enforcement off every caller already sees and edits everything, so nothing
+     * changes there.
+     */
+    boolean isMergeTarget(DocumentDescriptor descriptor) {
+        if (descriptor == null) {
+            return false;
+        }
+        WorkspaceSettings settings = resourceAccessGuard != null ? resourceAccessGuard.settings() : null;
+        if (settings == null || !settings.isEnforcing()) {
+            return true;
+        }
+        if (!resourceAccessGuard.canAccess(descriptor, AccessLevel.EDIT)) {
+            return false;
+        }
+        String targetSpace = spaceContext != null ? spaceContext.defaultWriteSpace() : null;
+        String space = descriptor.getSpaceId();
+        return targetSpace == null || space == null || space.isBlank() || targetSpace.equals(space);
     }
 
     private URI createOrUpdateAgent(AgentConfiguration agentConfiguration, String agentOriginId, ImportTransaction transaction) {
@@ -1617,6 +1718,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // orphaning the history), nothing was validated, and no schedule was
             // created, so a source with a cron looked scheduled and never ran.
             prepareImportedRag(config);
+            // An imported knowledge base is a new one, addressed by its new id: an
+            // archive's knowledge base named like a local one must not land in the
+            // local one's store.
+            applyStorageRulesToNewRag(config);
             URI created = createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
             syncImportedRagSchedules(created, config);
             return created;
@@ -1663,8 +1768,32 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateRag(RagConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRagStore store = getRestResourceStore(IRestRagStore.class);
+        // Which layout the local knowledge base stores its vectors in is a fact about
+        // this deployment, not about the archive: an archive exported from another
+        // instance must not move the local one to a new, empty store (or ask for the
+        // refused switch back to "name"). Absent, the update keeps the stored value.
+        if (config != null) {
+            config.setStoreNamespace(null);
+        }
         URI updated = updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, store::updateRag, transaction);
-        return updated != null ? updated : createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+        if (updated != null) {
+            return updated;
+        }
+        // The local knowledge base is gone, so this is a create like any other.
+        applyStorageRulesToNewRag(config);
+        return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
+    }
+
+    /**
+     * A created knowledge base is addressed by its own id — see
+     * {@link KnowledgeBaseStorageGuard}.
+     */
+    void applyStorageRulesToNewRag(RagConfiguration config) {
+        if (knowledgeBaseStorageGuard != null) {
+            knowledgeBaseStorageGuard.prepareNew(config, false);
+        } else if (config != null) {
+            config.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
+        }
     }
 
     // ==================== Connection Import ====================
@@ -3102,7 +3231,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             throw e;
         } catch (Exception e) {
             LOGGER.error("Upgrade preview failed: " + e.getMessage(), e);
-            throw new InternalServerErrorException("Upgrade preview failed: " + e.getMessage(), e);
+            throw archiveReadFailure("Upgrade preview failed: ", e);
         } finally {
             deleteTempDirectoryQuietly(targetDir.toPath());
         }
@@ -3147,7 +3276,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             throw e;
         } catch (Exception e) {
             LOGGER.error("Upgrade from ZIP failed: " + e.getMessage(), e);
-            throw new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e);
+            throw archiveReadFailure("Upgrade failed: ", e);
         } finally {
             deleteTempDirectoryQuietly(targetDir.toPath());
         }
@@ -3406,7 +3535,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 : cause.getMessage();
         Response.Status status = causedByRemoteRead(cause)
                 ? Response.Status.BAD_GATEWAY
-                : Response.Status.INTERNAL_SERVER_ERROR;
+                : (deniedAccess(cause) ? Response.Status.FORBIDDEN : Response.Status.INTERNAL_SERVER_ERROR);
         // The message is set explicitly as well as the entity: a batch records
         // getMessage() per row, and the Response-only constructor derives that from
         // the status ("HTTP 502 Bad Gateway"), which is exactly the row where the
@@ -3416,6 +3545,35 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         .entity(Map.of("error", what + ": " + reason))
                         .type(MediaType.APPLICATION_JSON)
                         .build());
+    }
+
+    /**
+     * Whether this failure, or anything that caused it, was the access guard
+     * refusing the caller. The upgrade executor and the structural matcher wrap
+     * whatever they catch, so a refusal arrived here as a 500 "Upgrade failed".
+     */
+    static boolean deniedAccess(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof ForbiddenException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static String accessDenialMessage(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof ForbiddenException && current.getMessage() != null) {
+                return current.getMessage();
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return "Access denied";
     }
 
     /**
@@ -3577,6 +3735,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             }
             return found.stream()
                     .filter(descriptor -> sourceAgentId.equals(descriptor.getOriginId()) && !descriptor.isDeleted())
+                    .filter(this::isMergeTarget)
                     .map(DocumentDescriptor::getResource)
                     .filter(uri -> uri != null && uri.toString().startsWith(IRestAgentStore.resourceURI))
                     .map(RestUtilities::extractResourceId)
