@@ -153,10 +153,17 @@ export function useApprovalStatus(
   const [attempt, setAttempt] = useState(0);
   const watching = verifyPause && !!options?.onResolved;
   // The pause was seen stored (so any later non-AWAITING read is a genuine
-  // resolution), and whether that resolution was already reported. Written only
-  // from the async query function and the interval callback, read there too.
-  const seenRef = useRef(false);
-  const resolvedRef = useRef(false);
+  // resolution), and whether that resolution was already reported — for ONE
+  // watched pause. A mounted notice can move on to another conversation or
+  // pause; carried over, "resolved" would silence the new one and "seen" would
+  // read its not-yet-stored READY as a decision. Read and written only from the
+  // async query function and the interval callback, never during render.
+  const watchKey = `${conversationId ?? ""}|${expectedPausedAt ?? ""}`;
+  const watchRef = useRef({ key: watchKey, seen: false, resolved: false });
+  const watchFor = (key: string) => {
+    if (watchRef.current.key !== key) watchRef.current = { key, seen: false, resolved: false };
+    return watchRef.current;
+  };
   const onResolvedRef = useRef(options?.onResolved);
   useEffect(() => {
     onResolvedRef.current = options?.onResolved;
@@ -176,10 +183,11 @@ export function useApprovalStatus(
     queryFn: async () => {
       const status = await getApprovalStatus(conversationId!);
       if (watching) {
+        const watch = watchFor(watchKey);
         if (describesPause(status, expectedPausedAt)) {
-          seenRef.current = true;
-        } else if (seenRef.current && !resolvedRef.current && status.state !== "AWAITING_HUMAN") {
-          resolvedRef.current = true;
+          watch.seen = true;
+        } else if (watch.seen && !watch.resolved && status.state !== "AWAITING_HUMAN") {
+          watch.resolved = true;
           onResolvedRef.current?.();
         }
       }
@@ -195,7 +203,7 @@ export function useApprovalStatus(
     // state, so flipping it re-renders and the observer picks up the new options.
     refetchInterval: verifyPause
       ? (q) => {
-          if (resolvedRef.current) return false;
+          if (watchFor(watchKey).resolved) return false;
           if (describesPause(q.state.data, expectedPausedAt)) return watching ? APPROVAL_WATCH_MS : false;
           if (timedOut) return false;
           const polls = q.state.dataUpdateCount + q.state.errorUpdateCount;

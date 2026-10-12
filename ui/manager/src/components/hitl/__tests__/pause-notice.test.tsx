@@ -92,4 +92,29 @@ describe("PauseNotice (read-only pause surface)", () => {
     await advance(2_000);
     expect(onResolved).toHaveBeenCalled();
   });
+  it("watches a NEW pause from scratch when a mounted notice moves on to it", async () => {
+    // One notice stays mounted while the chat moves to a later pause. What it
+    // learned about the first pause (seen, already resolved) must not carry
+    // over: the second pause's not-yet-stored READY is not a decision, and its
+    // real resolution must still be reported.
+    const SECOND_AT = "2026-08-03T11:00:00.000Z";
+    const storedSecond: ApprovalStatusSummary = { ...stored, pausedAt: SECOND_AT, pauseId: String(Date.parse(SECOND_AT)) };
+    const onResolved = vi.fn();
+    mockStatus.mockResolvedValueOnce(stored).mockResolvedValue(decided);
+    const { rerender } = renderWithProviders(
+      <PauseNotice conversationId="c1" pausedAt={PAUSED_AT} onResolved={onResolved} />,
+    );
+    await advance(0);
+    await advance(5100);
+    expect(onResolved).toHaveBeenCalledTimes(1);
+
+    mockStatus.mockReset();
+    mockStatus.mockResolvedValueOnce(notYetStored).mockResolvedValueOnce(storedSecond).mockResolvedValue(decided);
+    rerender(<PauseNotice conversationId="c1" pausedAt={SECOND_AT} onResolved={onResolved} />);
+    await advance(0);
+    await advance(600);
+    expect(onResolved).toHaveBeenCalledTimes(1);
+    await advance(5100);
+    expect(onResolved).toHaveBeenCalledTimes(2);
+  });
 });
