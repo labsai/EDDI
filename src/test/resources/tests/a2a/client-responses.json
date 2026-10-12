@@ -1,0 +1,57 @@
+{
+  "_comment": "Send results as remote A2A agents return them, one per dialect, plus the Agent Cards the client reads the dialect from. legacy-eddi-6.5 and card-eddi-6.5 were captured from a stock labsai/eddi:6.5.0.",
+  "v1_0-completed": {
+    "task": {
+      "id": "t1", "contextId": "c1",
+      "status": {"state": "TASK_STATE_COMPLETED", "timestamp": "2026-10-03T10:00:00Z"},
+      "artifacts": [{"artifactId": "a1", "parts": [{"text": "Sunny, 75°F"}]}]
+    }
+  },
+  "v1_0-failed": {
+    "task": {
+      "id": "t2", "contextId": "c1",
+      "status": {"state": "TASK_STATE_FAILED", "message": {"messageId": "m", "role": "ROLE_AGENT", "parts": [{"text": "upstream model unavailable"}]}}
+    }
+  },
+  "v1_0-message": {
+    "message": {"messageId": "m1", "role": "ROLE_AGENT", "parts": [{"text": "a direct reply"}]}
+  },
+  "v1_0-working": {
+    "task": {"id": "t3", "contextId": "c1", "status": {"state": "TASK_STATE_WORKING"}}
+  },
+  "v0_3-completed": {
+    "kind": "task", "id": "t4", "contextId": "c4",
+    "status": {"state": "completed"},
+    "artifacts": [{"artifactId": "a", "parts": [{"kind": "text", "text": "Order shipped"}]}]
+  },
+  "v0_3-input-required": {
+    "kind": "task", "id": "t5", "contextId": "c5",
+    "status": {"state": "input-required", "message": {"kind": "message", "messageId": "m", "role": "agent", "parts": [{"kind": "text", "text": "Which order?"}]}}
+  },
+  "legacy-eddi-6.5": {
+    "id": "legacy-task-1",
+    "status": "completed",
+    "history": [
+      {"role": "user", "parts": [{"type": "text", "text": "hello legacy"}]},
+      {"role": "agent", "parts": [{"type": "text", "text": "hello back"}]}
+    ],
+    "artifacts": [{"name": "response", "parts": [{"type": "text", "text": "hello back"}], "index": 0}]
+  },
+  "card-eddi-6.5": {
+    "name": "plain650", "description": "plain650 test agent", "url": "http://127.0.0.1:7270/a2a/agents/6ac0e172aeb329d222d606fa",
+    "provider": "EDDI", "version": "6.0.0",
+    "capabilities": {"streaming": false, "pushNotifications": false, "stateTransitionHistory": true},
+    "skills": [{"id": "chat", "name": "Conversational AI", "description": "General conversational AI agent powered by EDDI", "tags": ["chat", "ai"]}]
+  },
+  "card-v0_3": {
+    "name": "geo", "description": "d", "url": "https://geo.example.com/a2a/v1", "protocolVersion": "0.3.0", "preferredTransport": "JSONRPC",
+    "version": "1", "capabilities": {}, "defaultInputModes": ["text/plain"], "defaultOutputModes": ["text/plain"], "skills": []
+  },
+  "card-v1_0": {
+    "name": "GeoSpatial Route Planner Agent", "description": "d",
+    "supportedInterfaces": [
+      {"url": "https://georoute-agent.example.com/a2a/v1", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+    ],
+    "version": "1.2.0", "capabilities": {"streaming": true}, "defaultInputModes": ["text/plain"], "defaultOutputModes": ["text/plain"], "skills": []
+  }
+}
