@@ -15,6 +15,7 @@ import {
   useGroupConversations,
   useGroupConversation,
   useDeleteGroupConversation,
+  useGroupVersionLookup,
 } from "@/hooks/use-groups";
 import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
@@ -128,11 +129,18 @@ export function GroupDetailPage() {
   const { id: groupId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  // Backend requires version — default to 1 if missing from URL (e.g. wizard link).
-  const version = useMemo(
-    () => (searchParams.get("version") ? Number(searchParams.get("version")) : 1),
-    [searchParams],
-  );
+  // Resolved, not defaulted to 1: a version-less link (the wizard, a bookmark)
+  // used to open the group's FIRST version — its original name, members and
+  // phases — and every save or delete from there 409'd against the current one.
+  // `undefined` while the current version is being looked up.
+  // A failed lookup is shown with a retry (below), never read as version 1:
+  // that loaded a stale document whose next save or delete 409'd.
+  const {
+    version: resolvedVersion,
+    lookupFailed: versionLookupFailed,
+    retry: retryVersionLookup,
+  } = useGroupVersionLookup(groupId, searchParams.get("version"));
+  const version = resolvedVersion ?? 1;
   /**
    * Move the page onto the version a config save created.
    *
@@ -207,7 +215,7 @@ export function GroupDetailPage() {
     isLoading: configLoading,
     isError: configError,
     refetch: refetchConfig,
-  } = useGroup(groupId || "", version);
+  } = useGroup(resolvedVersion ? (groupId ?? "") : "", version);
 
   const {
     data: conversations,
@@ -538,7 +546,20 @@ export function GroupDetailPage() {
     setHistoryOpen(false);
   }
 
-  if (configLoading) {
+  if (versionLookupFailed) {
+    return (
+      <div className="space-y-4">
+        <BackLink to="/manage/groups" label={t("groups.backToGroups", "Back to Groups")} />
+        <ErrorState
+          message={t("groups.versionLookupFailed", "Could not find this group's current version.")}
+          onRetry={retryVersionLookup}
+          retryLabel={t("common.retry")}
+        />
+      </div>
+    );
+  }
+
+  if (configLoading || resolvedVersion === undefined) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-1/3" />

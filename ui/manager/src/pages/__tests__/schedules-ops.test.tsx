@@ -22,9 +22,10 @@ describe("SchedulesPage - operations", () => {
     renderWithProviders(<SchedulesPage />, { initialRoute: "/manage/schedules" });
     await userEvent.setup().click(await screen.findByTestId("toggle-sched-1"));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
-    const msg = String(toastMock.error.mock.calls[toastMock.error.mock.calls.length - 1]![0]);
-    expect(msg).toContain("Failed to toggle schedule");
-    expect(msg).toContain("Schedule is system-managed");
+    // The title says what failed; the server's reason is the toast's description.
+    const [title, options] = toastMock.error.mock.calls[toastMock.error.mock.calls.length - 1]!;
+    expect(String(title)).toContain("Failed to toggle schedule");
+    expect((options as { description?: string } | undefined)?.description).toContain("Schedule is system-managed");
   });
 
   it("restores the active tab from the URL and writes it back on change", async () => {

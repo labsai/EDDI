@@ -32,6 +32,13 @@ import {
 
 /* ─── Target Card ─────────────────────────────────────────────── */
 
+let targetKeySeq = 0;
+/** A React key for a target card, unique for the page's lifetime. */
+function nextTargetKey(): string {
+  targetKeySeq += 1;
+  return `target-${targetKeySeq}`;
+}
+
 function TargetCard({
   target, index, isDefault, onUpdate, onRemove, onSetDefault,
 }: {
@@ -54,7 +61,7 @@ function TargetCard({
   return (
     <div data-testid={`target-card-${index}`} className="rounded-xl border border-border/50 bg-card overflow-hidden">
       <div className="flex items-center gap-3 px-4 py-3 bg-muted/30 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${target.type === "GROUP" ? "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400" : "bg-primary/10 text-primary"}`}>
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${target.type === "GROUP" ? "bg-secondary text-secondary-foreground ring-1 ring-border" : "bg-primary/10 text-primary"}`}>
           {target.type === "GROUP" ? <Users className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
         </div>
         <div className="flex-1 min-w-0">
@@ -129,11 +136,11 @@ function TargetCard({
             <p className="text-xs text-muted-foreground">{t("channelDetail.triggerHint", 'Users type "keyword: message" to route to this target')}</p>
             <div className="flex gap-1.5 flex-wrap">
               {target.triggers.map((tr) => (
-                <Badge key={tr} variant="secondary" className="text-xs gap-1 font-mono">{tr}:<button aria-label={`Remove ${tr}`} onClick={() => onUpdate({ ...target, triggers: target.triggers.filter((x) => x !== tr) })} className="hover:text-destructive"><X className="h-3 w-3" /></button></Badge>
+                <Badge key={tr} variant="secondary" className="text-xs gap-1 font-mono">{tr}:<button aria-label={t("common.removeItem", { item: tr, defaultValue: "Remove {{item}}" })} onClick={() => onUpdate({ ...target, triggers: target.triggers.filter((x) => x !== tr) })} className="hover:text-destructive"><X className="h-3 w-3" /></button></Badge>
               ))}
             </div>
             <div className="flex gap-1">
-              <Input id={`${uid}-trigger`} className="h-7 text-xs" value={triggerInput} onChange={(e) => setTriggerInput(e.target.value)} placeholder={t("channelDetail.addTrigger", "Add trigger...")} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTrigger())} />
+              <Input id={`${uid}-trigger`} data-testid={`target-trigger-input-${index}`} className="h-7 text-xs" value={triggerInput} onChange={(e) => setTriggerInput(e.target.value)} placeholder={t("channelDetail.addTrigger", "Add trigger...")} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTrigger())} />
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addTrigger}>{t("common.add", "Add")}</Button>
             </div>
           </div>
@@ -146,7 +153,7 @@ function TargetCard({
                 <Star className="h-3 w-3" />{t("channelDetail.setDefault", "Set as Default")}
               </Button>
             )}
-            <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive ms-auto gap-1" onClick={onRemove}>
+            <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive ms-auto gap-1" onClick={onRemove} data-testid={`remove-target-${index}`}>
               <Trash2 className="h-3 w-3" />{t("channelDetail.removeTarget", "Remove")}
             </Button>
           </div>
@@ -225,6 +232,11 @@ export function ChannelDetailPage() {
   const deleteMutation = useDeleteChannel();
 
   const [draft, setDraft] = useState<ChannelIntegrationConfiguration | null>(null);
+  // React keys for the target cards, parallel to `draft.targets`. Not on the
+  // targets themselves, which are saved verbatim. The cards keep local state
+  // (a half-typed trigger, collapsed or not); keyed by index, removing one
+  // card handed its state to the card that slid into its place.
+  const [targetKeys, setTargetKeys] = useState<string[]>([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -250,6 +262,7 @@ export function ChannelDetailPage() {
       seededFor.current = key;
       setDraft({ ...config });
       setBaseline(JSON.stringify(config));
+      setTargetKeys(config.targets.map(() => nextTargetKey()));
     }
   }, [config, id, version]);
 
@@ -328,6 +341,7 @@ export function ChannelDetailPage() {
       }
       return { ...prev, targets: remaining, defaultTargetName };
     });
+    setTargetKeys((keys) => keys.filter((_, i) => i !== index));
   }, []);
 
   const setDefaultTarget = useCallback((name: string) => {
@@ -347,6 +361,7 @@ export function ChannelDetailPage() {
       };
       return { ...prev, targets: [...prev.targets, newTarget] };
     });
+    setTargetKeys((keys) => [...keys, nextTargetKey()]);
   }, []);
 
   const copyWebhookUrl = async () => {
@@ -538,7 +553,7 @@ export function ChannelDetailPage() {
         </div>
         <div className="space-y-3">
           {draft.targets.map((target, i) => (
-            <TargetCard key={i} target={target} index={i} isDefault={draft.defaultTargetName === target.name}
+            <TargetCard key={targetKeys[i] ?? `index-${i}`} target={target} index={i} isDefault={draft.defaultTargetName === target.name}
               onUpdate={(t) => updateTarget(i, t)} onRemove={() => removeTarget(i)} onSetDefault={() => { if (target.name) setDefaultTarget(target.name); }} />
           ))}
         </div>

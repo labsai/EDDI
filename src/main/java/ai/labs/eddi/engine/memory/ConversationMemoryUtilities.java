@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationS
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -313,6 +314,28 @@ public class ConversationMemoryUtilities {
         return value;
     }
 
+    /**
+     * The reason an ERROR turn failed, taken from the last digest the failing task
+     * left in the latest turn's {@code taskErrors}; {@code null} when the
+     * conversation is not in ERROR or nothing was reported (strict write's
+     * {@code exclude_all} deliberately reports nothing).
+     */
+    static SimpleConversationMemorySnapshot.TurnError turnError(ConversationState state, List<ConversationOutput> outputs) {
+        if (state != ConversationState.ERROR || outputs == null || outputs.isEmpty()) {
+            return null;
+        }
+        Object errors = outputs.getLast().get(TASK_ERRORS);
+        if (!(errors instanceof List<?> list) || list.isEmpty() || !(list.getLast() instanceof Map<?, ?> digest)) {
+            return null;
+        }
+        return new SimpleConversationMemorySnapshot.TurnError(stringOrNull(digest.get("taskId")), stringOrNull(digest.get("taskType")),
+                stringOrNull(digest.get("errorType")), stringOrNull(digest.get("text")));
+    }
+
+    private static String stringOrNull(Object value) {
+        return value != null ? value.toString() : null;
+    }
+
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
                                                                                    boolean returnDetailed, boolean returnCurrentStepOnly) {
 
@@ -373,6 +396,8 @@ public class ConversationMemoryUtilities {
                 }
             }
         }
+
+        newSnapshot.setError(turnError(newSnapshot.getConversationState(), allOutputs));
 
         var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
         int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;

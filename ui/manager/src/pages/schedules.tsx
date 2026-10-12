@@ -424,9 +424,7 @@ function FailedFiresPanel({
       onSuccess: () =>
         toast.success(t("schedules.retrySuccess", "Schedule re-queued")),
       onError: (err) =>
-        toast.error(
-          `${t("schedules.retryError", "Failed to retry schedule")}: ${getErrorMessage(err)}`
-        ),
+        toast.error(t("schedules.retryError", "Failed to retry schedule"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -435,9 +433,7 @@ function FailedFiresPanel({
       onSuccess: () =>
         toast.success(t("schedules.dismissSuccess", "Dead letter dismissed")),
       onError: (err) =>
-        toast.error(
-          `${t("schedules.dismissError", "Failed to dismiss dead letter")}: ${getErrorMessage(err)}`
-        ),
+        toast.error(t("schedules.dismissError", "Failed to dismiss dead letter"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -845,7 +841,8 @@ function ScheduleFormDialog({
           },
           onError: (err) =>
             toast.error(
-              `${t("schedules.updateError", "Failed to update schedule")}: ${getErrorMessage(err)}`
+              t("schedules.updateError", "Failed to update schedule"),
+              { description: getErrorMessage(err) }
             ),
         }
       );
@@ -858,9 +855,7 @@ function ScheduleFormDialog({
           onClose();
         },
         onError: (err) =>
-          toast.error(
-            `${t("schedules.createError", "Failed to create schedule")}: ${getErrorMessage(err)}`
-          ),
+          toast.error(t("schedules.createError", "Failed to create schedule"), { description: getErrorMessage(err) }),
       });
     }
   };
@@ -1379,9 +1374,7 @@ export function SchedulesPage() {
               : t("schedules.enabled", "Schedule enabled")
           ),
         onError: (err) =>
-          toast.error(
-            `${t("schedules.toggleError", "Failed to toggle schedule")}: ${getErrorMessage(err)}`
-          ),
+          toast.error(t("schedules.toggleError", "Failed to toggle schedule"), { description: getErrorMessage(err) }),
       }
     );
   };
@@ -1403,9 +1396,7 @@ export function SchedulesPage() {
       },
       onError: (err) => {
         setConfirmFireId(null);
-        toast.error(
-          `${t("schedules.fireError", "Failed to fire schedule")}: ${getErrorMessage(err)}`
-        );
+        toast.error(t("schedules.fireError", "Failed to fire schedule"), { description: getErrorMessage(err) });
       },
     });
   };
@@ -1424,9 +1415,7 @@ export function SchedulesPage() {
         setConfirmDeleteId(null);
       },
       onError: (err) =>
-        toast.error(
-          `${t("schedules.deleteError", "Failed to delete schedule")}: ${getErrorMessage(err)}`
-        ),
+        toast.error(t("schedules.deleteError", "Failed to delete schedule"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -1435,9 +1424,7 @@ export function SchedulesPage() {
       onSuccess: () =>
         toast.success(t("schedules.retrySuccess", "Schedule re-queued")),
       onError: (err) =>
-        toast.error(
-          `${t("schedules.retryError", "Failed to retry schedule")}: ${getErrorMessage(err)}`
-        ),
+        toast.error(t("schedules.retryError", "Failed to retry schedule"), { description: getErrorMessage(err) }),
     });
   };
 

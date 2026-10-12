@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.nlp;
 
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.TestMemoryFactory;
 import ai.labs.eddi.engine.TestMemoryFactory.MemoryContext;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
@@ -44,6 +45,7 @@ import static org.mockito.Mockito.*;
 class InputParserTaskBranchTest {
 
     private InputParserTask task;
+    private final IResourceClientLibrary resourceClientLibrary = mock(IResourceClientLibrary.class);
     private IExpressionProvider expressionProvider;
     private Map<String, Provider<INormalizerProvider>> normalizerProviders;
     private Map<String, Provider<IDictionaryProvider>> dictionaryProviders;
@@ -65,7 +67,7 @@ class InputParserTaskBranchTest {
         correctionProviders = new HashMap<>();
         objectMapper = new ObjectMapper();
         task = new InputParserTask(expressionProvider, normalizerProviders, dictionaryProviders,
-                correctionProviders, objectMapper);
+                correctionProviders, objectMapper, resourceClientLibrary);
     }
 
     /**
