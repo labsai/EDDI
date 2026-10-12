@@ -57,7 +57,7 @@ class RagIngestionServiceTest {
     @Test
     void ingest_shouldReturnIngestionId() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreateForIngestion(any(), anyString())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -83,7 +83,7 @@ class RagIngestionServiceTest {
     @Test
     void ingest_asksForADocumentModel() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreateForIngestion(any(), anyString())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -101,7 +101,7 @@ class RagIngestionServiceTest {
     @Test
     void getStatus_shouldReturnPendingInitially() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreateForIngestion(any(), anyString())).thenReturn(embeddingStore);
 
         var config = createConfig();
         String ingestionId = service.ingest("test-kb", "Content", "doc.txt", config);
@@ -245,7 +245,7 @@ class RagIngestionServiceTest {
             }
         };
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(fixed);
-        when(embeddingStoreFactory.getOrCreate(any(), anyString())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreateForIngestion(any(), anyString())).thenReturn(store);
     }
 
     private void awaitCompleted(String ingestionId) {

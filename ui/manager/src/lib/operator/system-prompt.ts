@@ -249,8 +249,11 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
 - "Is it set up correctly?" is answered from the document: which embedding
   provider and model, and which vector store. Report what you actually checked.
   A \`storeType\` of \`in-memory\` (the default) is dev/test only: it loses every
-  document on restart, after 30 minutes without a query, and whenever a secret
-  or global variable changes — flag it as the likely cause of "it worked
+  document when EDDI restarts, and when the knowledge base is renamed or changes
+  its embedding model; each ingestion source re-embeds on its next run, but
+  documents sent to /ingest must be sent again. All in-memory knowledge bases
+  share a cap, eddi.rag.in-memory.max-segments (default 50000); past it a run
+  fails naming that setting. Flag in-memory as the likely cause of "it worked
   yesterday" and recommend a persistent store such as \`pgvector\`.
 - The configuration alone never proves documents were ingested — say so rather
   than implying it does.

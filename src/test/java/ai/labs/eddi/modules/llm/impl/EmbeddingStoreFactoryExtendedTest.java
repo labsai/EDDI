@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
+import com.github.benmanes.caffeine.cache.Ticker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -246,12 +247,15 @@ class EmbeddingStoreFactoryExtendedTest {
         @Test
         @DisplayName("Same type and kbId with null vs empty params should produce different stores")
         void nullVsEmptyParams() {
+            var factory = EmbeddingStoreFactoryInMemoryTest.offlineFactory(globalVariableResolver, secretResolver, 50_000,
+                    Ticker.systemTicker());
+            // An external store: in-memory stores are keyed by knowledge base alone.
             var config1 = new RagConfiguration();
-            config1.setStoreType("in-memory");
+            config1.setStoreType("elasticsearch");
             config1.setStoreParameters(null);
 
             var config2 = new RagConfiguration();
-            config2.setStoreType("in-memory");
+            config2.setStoreType("elasticsearch");
             config2.setStoreParameters(Map.of());
 
             var store1 = factory.getOrCreate(config1, "kb1");
@@ -446,16 +450,30 @@ class EmbeddingStoreFactoryExtendedTest {
         }
 
         @Test
-        @DisplayName("clearCache should invalidate cached instances")
+        @DisplayName("clearCache should invalidate cached external-store clients")
         void clearCacheInvalidates() {
+            var factory = EmbeddingStoreFactoryInMemoryTest.offlineFactory(globalVariableResolver, secretResolver, 50_000,
+                    Ticker.systemTicker());
             var config = new RagConfiguration();
-            config.setStoreType("in-memory");
+            config.setStoreType("elasticsearch");
 
             var store1 = factory.getOrCreate(config, "kb-clear");
             factory.clearCache();
             var store2 = factory.getOrCreate(config, "kb-clear");
 
             assertNotSame(store1, store2, "After clearCache, new instance should be created");
+        }
+
+        @Test
+        @DisplayName("clearCache keeps in-memory stores, which are data rather than clients")
+        void clearCacheKeepsInMemoryStores() {
+            var config = new RagConfiguration();
+            config.setStoreType("in-memory");
+
+            var store1 = factory.getOrCreate(config, "kb-clear");
+            factory.clearCache();
+
+            assertSame(store1, factory.getOrCreate(config, "kb-clear"));
         }
     }
 

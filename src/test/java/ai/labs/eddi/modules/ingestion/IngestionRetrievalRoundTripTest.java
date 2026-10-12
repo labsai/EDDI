@@ -43,6 +43,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.stubbing.Answer;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -118,11 +119,15 @@ class IngestionRetrievalRoundTripTest {
                 });
 
         storeFactory = mock(EmbeddingStoreFactory.class);
-        when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenAnswer(invocation -> {
+        // Ingestion writes through getOrCreateForIngestion, retrieval reads through
+        // getOrCreate; both must resolve the same key to the same store.
+        Answer<Object> storeForKey = invocation -> {
             String key = invocation.getArgument(1);
             requestedKeys.add(key);
             return storesByKey.computeIfAbsent(key, ignored -> new InMemoryEmbeddingStore<>());
-        });
+        };
+        when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenAnswer(storeForKey);
+        when(storeFactory.getOrCreateForIngestion(any(RagConfiguration.class), anyString())).thenAnswer(storeForKey);
 
         var agentStore = mock(IAgentStore.class);
         var workflowStore = mock(IWorkflowStore.class);
