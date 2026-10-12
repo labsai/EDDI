@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useTheme } from "./useTheme";
+import { useTheme, nextTheme } from "./useTheme";
 
 describe("useTheme", () => {
   afterEach(() => {
@@ -85,5 +85,32 @@ describe("useTheme", () => {
     window.localStorage.setItem("eddi-chat-theme", "neon");
     renderHook(() => useTheme("dark"));
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  });
+
+  it("lets ?theme= beat a remembered preference", () => {
+    window.localStorage.setItem("eddi-chat-theme", "dark");
+    window.history.replaceState(null, "", "/chat/production/a?theme=light");
+    try {
+      renderHook(() => useTheme("dark"));
+      expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  it("uses the remembered preference when the URL says nothing", () => {
+    window.localStorage.setItem("eddi-chat-theme", "light");
+    renderHook(() => useTheme("dark"));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+  });
+
+  it("cycles dark -> light -> system -> dark, so system can be returned to", () => {
+    expect(nextTheme("dark")).toBe("light");
+    expect(nextTheme("light")).toBe("system");
+    expect(nextTheme("system")).toBe("dark");
+    const { result } = renderHook(() => useTheme("light"));
+    expect(result.current.getMode()).toBe("light");
+    act(() => result.current.setTheme("system"));
+    expect(result.current.getMode()).toBe("system");
   });
 });
