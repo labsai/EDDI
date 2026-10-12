@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { NumberInput } from "./number-input";
 import {
@@ -91,15 +91,22 @@ function JsonFieldInput({
   const [text, setText] = useState(serialized);
   const [focused, setFocused] = useState(false);
   const [invalid, setInvalid] = useState(false);
+  const errorId = useId();
+  const lastSerialized = useRef(serialized);
 
   // Re-sync from the external value only while the field is not being edited,
   // so parent-driven updates are reflected without clobbering in-progress typing.
+  // Invalid text is kept on blur — it used to snap back to the last valid value,
+  // silently throwing away what the user had typed — and is replaced only when
+  // the value changes from outside.
   useEffect(() => {
-    if (!focused) {
-      setText(serialized);
-      setInvalid(false);
-    }
-  }, [serialized, focused]);
+    const changedExternally = lastSerialized.current !== serialized;
+    lastSerialized.current = serialized;
+    if (focused) return;
+    if (invalid && !changedExternally) return;
+    setText(serialized);
+    setInvalid(false);
+  }, [serialized, focused, invalid]);
 
   const handleChange = (raw: string) => {
     setText(raw);
@@ -132,13 +139,17 @@ function JsonFieldInput({
         onBlur={() => setFocused(false)}
         readOnly={readOnly}
         placeholder={placeholder}
+        aria-label={placeholder}
         data-testid={testId}
         aria-invalid={invalid}
+        aria-describedby={invalid ? errorId : undefined}
         className={`h-7 w-full rounded border bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${invalid ? "border-destructive" : "border-input"}`}
       />
       {invalid && (
-        <span className="text-[10px] text-destructive">
+        <span id={errorId} role="alert" className="text-[10px] text-destructive">
           {t("outputEditor.invalidJson", "Invalid JSON")}
+          {" — "}
+          {t("outputEditor.invalidJsonKept", "not saved; fix it or clear the field")}
         </span>
       )}
     </div>
@@ -156,46 +167,47 @@ function OutputItemEditor({
     <div className="flex items-start gap-1.5" data-testid="output-item-row">
       <select value={item.type} onChange={(e) => onChange({ ...item, type: e.target.value })}
         disabled={readOnly}
+        aria-label={t("outputEditor.itemType", "Output type")}
         className="h-7 rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60">
         {OUTPUT_TYPES.map((ot) => (<option key={ot} value={ot}>{ot}</option>))}
       </select>
       {item.type === "text" ? (
         <>
           <input type="text" value={item.text ?? ""} onChange={(e) => onChange({ ...item, text: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.textPlaceholder", "Output text...")}
+            readOnly={readOnly} placeholder={t("outputEditor.textPlaceholder", "Output text...")} aria-label={t("outputEditor.textPlaceholder", "Output text...")}
             className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <NumberInput placeholder="0" integer value={item.delay} onChange={(v) => onChange({ ...item, delay: v })}
-            readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-text-delay"
+            readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} aria-label={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-text-delay"
             className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </>
       ) : item.type === "image" ? (
         <>
           <input type="text" value={item.uri ?? ""} onChange={(e) => onChange({ ...item, uri: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.uriPlaceholder", "Image URL...")} data-testid="output-image-uri"
+            readOnly={readOnly} placeholder={t("outputEditor.uriPlaceholder", "Image URL...")} aria-label={t("outputEditor.uriPlaceholder", "Image URL...")} data-testid="output-image-uri"
             className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="text" value={item.alt ?? ""} onChange={(e) => onChange({ ...item, alt: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.altPlaceholder", "Alt text...")} data-testid="output-image-alt"
+            readOnly={readOnly} placeholder={t("outputEditor.altPlaceholder", "Alt text...")} aria-label={t("outputEditor.altPlaceholder", "Alt text...")} data-testid="output-image-alt"
             className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </>
       ) : item.type === "applicationLink" ? (
         <>
           <input type="text" value={item.path ?? ""} onChange={(e) => onChange({ ...item, path: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.pathPlaceholder", "Link path...")} data-testid="output-link-path"
+            readOnly={readOnly} placeholder={t("outputEditor.pathPlaceholder", "Link path...")} aria-label={t("outputEditor.pathPlaceholder", "Link path...")} data-testid="output-link-path"
             className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="text" value={item.label ?? ""} onChange={(e) => onChange({ ...item, label: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.labelPlaceholder", "Link label...")} data-testid="output-link-label"
+            readOnly={readOnly} placeholder={t("outputEditor.labelPlaceholder", "Link label...")} aria-label={t("outputEditor.labelPlaceholder", "Link label...")} data-testid="output-link-label"
             className="h-7 w-24 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <NumberInput placeholder="0" integer value={item.delay} onChange={(v) => onChange({ ...item, delay: v })}
-            readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-link-delay"
+            readOnly={readOnly} title={t("outputEditor.delayMs", "Delay (ms)")} aria-label={t("outputEditor.delayMs", "Delay (ms)")} data-testid="output-link-delay"
             className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </>
       ) : item.type === "button" ? (
         <div className="flex flex-1 flex-wrap items-center gap-1.5" data-testid="output-button-fields">
           <input type="text" value={item.buttonType ?? ""} onChange={(e) => onChange({ ...item, buttonType: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.buttonTypePlaceholder", "Button type (e.g. postback)")} data-testid="output-button-type"
+            readOnly={readOnly} placeholder={t("outputEditor.buttonTypePlaceholder", "Button type (e.g. postback)")} aria-label={t("outputEditor.buttonTypePlaceholder", "Button type (e.g. postback)")} data-testid="output-button-type"
             className="h-7 w-40 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="text" value={item.label ?? ""} onChange={(e) => onChange({ ...item, label: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.buttonLabelPlaceholder", "Label...")} data-testid="output-button-label"
+            readOnly={readOnly} placeholder={t("outputEditor.buttonLabelPlaceholder", "Label...")} aria-label={t("outputEditor.buttonLabelPlaceholder", "Label...")} data-testid="output-button-label"
             className="h-7 flex-1 min-w-[100px] rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <JsonFieldInput value={item.onPress} onChange={(v) => onChange({ ...item, onPress: v })}
             readOnly={readOnly} placeholder={t("outputEditor.onPressPlaceholder", '{"action":"..."}')} testId="output-button-onpress" />
@@ -203,25 +215,25 @@ function OutputItemEditor({
       ) : item.type === "inputField" ? (
         <div className="flex flex-1 flex-wrap items-center gap-1.5" data-testid="output-inputfield-fields">
           <input type="text" value={item.subType ?? ""} onChange={(e) => onChange({ ...item, subType: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.subTypePlaceholder", "Sub type (e.g. text, email)")} data-testid="output-input-subtype"
+            readOnly={readOnly} placeholder={t("outputEditor.subTypePlaceholder", "Sub type (e.g. text, email)")} aria-label={t("outputEditor.subTypePlaceholder", "Sub type (e.g. text, email)")} data-testid="output-input-subtype"
             className="h-7 w-32 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="text" value={item.placeholder ?? ""} onChange={(e) => onChange({ ...item, placeholder: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.inputPlaceholderPlaceholder", "Placeholder...")} data-testid="output-input-placeholder"
+            readOnly={readOnly} placeholder={t("outputEditor.inputPlaceholderPlaceholder", "Placeholder...")} aria-label={t("outputEditor.inputPlaceholderPlaceholder", "Placeholder...")} data-testid="output-input-placeholder"
             className="h-7 w-32 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="text" value={item.label ?? ""} onChange={(e) => onChange({ ...item, label: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.inputLabelPlaceholder", "Label...")} data-testid="output-input-label"
+            readOnly={readOnly} placeholder={t("outputEditor.inputLabelPlaceholder", "Label...")} aria-label={t("outputEditor.inputLabelPlaceholder", "Label...")} data-testid="output-input-label"
             className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="text" value={item.defaultValue ?? ""} onChange={(e) => onChange({ ...item, defaultValue: e.target.value })}
-            readOnly={readOnly} placeholder={t("outputEditor.defaultValuePlaceholder", "Default value...")} data-testid="output-input-default"
+            readOnly={readOnly} placeholder={t("outputEditor.defaultValuePlaceholder", "Default value...")} aria-label={t("outputEditor.defaultValuePlaceholder", "Default value...")} data-testid="output-input-default"
             className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="number" value={item.validation?.minLength ?? ""} onChange={(e) => onChange({ ...item, validation: { ...item.validation, minLength: e.target.value === "" ? undefined : parseInt(e.target.value, 10) } })}
-            readOnly={readOnly} title={t("outputEditor.minLength", "Min length")} placeholder={t("outputEditor.minLengthShort", "min")} data-testid="output-input-minlength"
+            readOnly={readOnly} title={t("outputEditor.minLength", "Min length")} aria-label={t("outputEditor.minLength", "Min length")} placeholder={t("outputEditor.minLengthShort", "min")} data-testid="output-input-minlength"
             className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="number" value={item.validation?.maxLength ?? ""} onChange={(e) => onChange({ ...item, validation: { ...item.validation, maxLength: e.target.value === "" ? undefined : parseInt(e.target.value, 10) } })}
-            readOnly={readOnly} title={t("outputEditor.maxLength", "Max length")} placeholder={t("outputEditor.maxLengthShort", "max")} data-testid="output-input-maxlength"
+            readOnly={readOnly} title={t("outputEditor.maxLength", "Max length")} aria-label={t("outputEditor.maxLength", "Max length")} placeholder={t("outputEditor.maxLengthShort", "max")} data-testid="output-input-maxlength"
             className="h-7 w-16 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
           <input type="text" value={item.validation?.validationErrorMessage ?? ""} onChange={(e) => onChange({ ...item, validation: { ...item.validation, validationErrorMessage: e.target.value } })}
-            readOnly={readOnly} placeholder={t("outputEditor.validationMsgPlaceholder", "Validation error message...")} data-testid="output-input-validationmsg"
+            readOnly={readOnly} placeholder={t("outputEditor.validationMsgPlaceholder", "Validation error message...")} aria-label={t("outputEditor.validationMsgPlaceholder", "Validation error message...")} data-testid="output-input-validationmsg"
             className="h-7 flex-1 min-w-[120px] rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </div>
       ) : (
@@ -234,8 +246,8 @@ function OutputItemEditor({
         />
       )}
       {!readOnly && (
-        <button type="button" onClick={onRemove} className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors">
-          <X className="h-3 w-3" />
+        <button type="button" onClick={onRemove} aria-label={t("outputEditor.removeItem", "Remove output item")} className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors">
+          <X className="h-3 w-3" aria-hidden="true" />
         </button>
       )}
     </div>
@@ -252,10 +264,10 @@ function QuickReplyRow({
   return (
     <div className="flex items-center gap-1.5" data-testid="quickreply-row">
       <input type="text" value={qr.value} onChange={(e) => onChange({ ...qr, value: e.target.value })}
-        readOnly={readOnly} placeholder={t("outputEditor.qrValue", "Button text")}
+        readOnly={readOnly} placeholder={t("outputEditor.qrValue", "Button text")} aria-label={t("outputEditor.qrValue", "Button text")}
         className="h-7 w-36 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
       <input type="text" value={qr.expressions} onChange={(e) => onChange({ ...qr, expressions: e.target.value })}
-        readOnly={readOnly} placeholder={t("outputEditor.qrExpressions", "Expressions")}
+        readOnly={readOnly} placeholder={t("outputEditor.qrExpressions", "Expressions")} aria-label={t("outputEditor.qrExpressions", "Expressions")}
         className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
       <label className="inline-flex items-center gap-1 text-xs text-foreground">
         <input type="checkbox" checked={qr.isDefault ?? false} onChange={(e) => onChange({ ...qr, isDefault: e.target.checked })}
@@ -263,8 +275,8 @@ function QuickReplyRow({
         {t("outputEditor.default", "Default")}
       </label>
       {!readOnly && (
-        <button type="button" onClick={onRemove} className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors">
-          <X className="h-3 w-3" />
+        <button type="button" onClick={onRemove} aria-label={t("outputEditor.removeQuickReply", "Remove quick reply")} className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors">
+          <X className="h-3 w-3" aria-hidden="true" />
         </button>
       )}
     </div>
@@ -284,6 +296,8 @@ function OutputConfigEditor({
     <div className="rounded-xl border border-border bg-card shadow-sm" data-testid="output-config-editor">
       <div className="flex items-center gap-2 p-3">
         <button type="button" onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          aria-label={t("outputEditor.toggleOutput", "Show or hide output details")}
           className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors">
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
@@ -291,12 +305,13 @@ function OutputConfigEditor({
           {config.action || "—"}
         </span>
         <input type="text" value={config.action} onChange={(e) => onChange({ ...config, action: e.target.value })}
-          readOnly={readOnly} placeholder={t("outputEditor.actionName", "Action name")}
+          readOnly={readOnly} placeholder={t("outputEditor.actionName", "Action name")} aria-label={t("outputEditor.actionName", "Action name")}
           className="h-8 flex-1 rounded-md border border-input bg-background px-3 text-sm font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           data-testid="output-action-input" />
         <div className="flex items-center gap-1">
           <label className="text-xs text-muted-foreground whitespace-nowrap">{t("outputEditor.timesOccurred", "×")}</label>
           <NumberInput emptyValue={0} integer value={config.timesOccurred}
+            aria-label={t("outputEditor.timesOccurredLabel", "Times occurred")}
             onChange={(v) => onChange({ ...config, timesOccurred: v ?? 0 })}
             readOnly={readOnly} className="h-8 w-14 rounded-md border border-input bg-background px-2 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
         </div>
@@ -325,8 +340,9 @@ function OutputConfigEditor({
                     </span>
                     {!readOnly && (
                       <button type="button" onClick={() => onChange({ ...config, outputs: (config.outputs ?? []).filter((_, j) => j !== oi) })}
+                        aria-label={t("outputEditor.removeAlternativeGroup", "Remove alternative group {{n}}", { n: oi + 1 })}
                         className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors">
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-3 w-3" aria-hidden="true" />
                       </button>
                     )}
                   </div>
@@ -392,6 +408,7 @@ export interface OutputEditorProps {
 
 export function OutputEditor({ data, onChange, readOnly }: OutputEditorProps) {
   const { t } = useTranslation();
+  const langId = useId();
 
   const addOutput = useCallback(() => {
     const newEntry: OutputConfiguration = {
@@ -405,8 +422,8 @@ export function OutputEditor({ data, onChange, readOnly }: OutputEditorProps) {
   return (
     <div className="space-y-6" data-testid="output-editor">
       <div className="flex items-center gap-2">
-        <label className="text-sm font-medium text-foreground">{t("outputEditor.language", "Language")}</label>
-        <input type="text" value={data.lang ?? ""} onChange={(e) => onChange({ ...data, lang: e.target.value })}
+        <label htmlFor={langId} className="text-sm font-medium text-foreground">{t("outputEditor.language", "Language")}</label>
+        <input id={langId} type="text" value={data.lang ?? ""} onChange={(e) => onChange({ ...data, lang: e.target.value })}
           readOnly={readOnly} placeholder={t("outputEditor.langPlaceholder", "e.g. en, de")}
           className="h-8 w-24 rounded-md border border-input bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
       </div>
