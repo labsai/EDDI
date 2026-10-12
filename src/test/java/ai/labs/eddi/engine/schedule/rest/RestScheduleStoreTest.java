@@ -148,6 +148,22 @@ class RestScheduleStoreTest {
     }
 
     @Test
+    void create_rejectsSixFieldCron_withTheReasonInTheBody() {
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setCronExpression("0 0 9 * * *");
+        schedule.setMessage("Hello");
+
+        Response response = rest.createSchedule(schedule);
+
+        assertEquals(400, response.getStatus());
+        @SuppressWarnings("unchecked")
+        var body = (Map<String, Object>) response.getEntity();
+        assertEquals("invalid_schedule", body.get("error"));
+        assertTrue(String.valueOf(body.get("message")).contains("5 fields"), String.valueOf(body.get("message")));
+    }
+
+    @Test
     void create_rejectsCronWithoutMessage() {
         var schedule = new ScheduleConfiguration();
         schedule.setAgentId("agent-1");
@@ -225,7 +241,10 @@ class RestScheduleStoreTest {
         Response response = rest.createSchedule(schedule);
 
         assertEquals(400, response.getStatus());
-        assertTrue(((String) response.getEntity()).contains("Invalid schedule"));
+        @SuppressWarnings("unchecked")
+        var body = (Map<String, Object>) response.getEntity();
+        assertEquals("invalid_schedule", body.get("error"));
+        assertTrue(String.valueOf(body.get("message")).contains("below minimum"), String.valueOf(body.get("message")));
     }
 
     @Test

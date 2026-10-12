@@ -271,6 +271,7 @@ eddi_schedule_poll_count_total              # Poll cycles
 eddi_schedule_fire_count_total              # Schedules fired
 eddi_schedule_fire_failed_total             # Fire failures
 eddi_schedule_fire_skipped_total            # Fires the coordinator dropped without running the turn
+eddi_schedule_fire_timedout_total           # Fires interrupted at eddi.schedule.fire-timeout (recorded FAILED, retried)
 eddi_schedule_claim_conflict_total          # Claim conflicts (multi-instance)
 eddi_schedule_fire_deadlettered_total       # Dead-lettered schedules
 eddi_schedule_fire_duration_seconds         # Fire latency (timer)
