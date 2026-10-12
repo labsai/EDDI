@@ -3410,6 +3410,7 @@
     "createThisAgent": "Create Agent",
     "creatingAgent": "Creating agent…",
     "agentReady": "Agent created & deployed",
+    "agentNotDeployed": "تم إنشاء الوكيل ولكن لم يتم نشره",
     "agentCreated": "Agent \"{{name}}\" created",
     "agentCreateFailed": "Failed to create agent: {{error}}",
     "moderator": "Moderator",

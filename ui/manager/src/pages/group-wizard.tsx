@@ -1758,6 +1758,19 @@ function MemberCard({
 
       {/* Created confirmation */}
       {member.created && (
+        member.pendingDeploy ? (
+          // Created, but the deploy was cancelled or failed: the next Create
+          // deploys it, so it must not read as done.
+          <div className="px-4 py-2 bg-warning/5 border-t border-warning/20 flex items-center gap-2" data-testid="member-not-deployed">
+            <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+            <span className="text-xs text-warning font-medium">
+              {t("groupWizard.agentNotDeployed", "Agent created but not deployed")}
+            </span>
+            <span className="text-[10px] text-muted-foreground font-mono ms-auto">
+              {member.agentId.slice(0, 12)}…
+            </span>
+          </div>
+        ) : (
         <div className="px-4 py-2 bg-emerald-500/5 border-t border-emerald-500/20 flex items-center gap-2">
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
@@ -1767,6 +1780,7 @@ function MemberCard({
             {member.agentId.slice(0, 12)}…
           </span>
         </div>
+        )
       )}
     </div>
   );
@@ -1790,6 +1804,21 @@ function ModeratorCard({
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const providerConfig = LLM_PROVIDERS.find((p) => p.id === moderator.provider);
+
+  if (moderator.created && moderator.pendingDeploy) {
+    // Created, but the deploy was cancelled or failed: the next Create deploys it.
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-warning/5 border border-warning/20 p-2.5" data-testid="moderator-not-deployed">
+        <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
+        <span className="text-xs text-warning font-medium flex-1">
+          {t("groupWizard.agentNotDeployed", "Agent created but not deployed")}
+        </span>
+        <span className="text-[10px] text-muted-foreground font-mono">
+          {moderator.agentId.slice(0, 12)}…
+        </span>
+      </div>
+    );
+  }
 
   if (moderator.created) {
     return (

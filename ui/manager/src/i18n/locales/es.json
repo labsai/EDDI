@@ -3299,6 +3299,7 @@
     "createThisAgent": "Crear agente",
     "creatingAgent": "Creando agente…",
     "agentReady": "Agente creado y desplegado",
+    "agentNotDeployed": "Agente creado pero no desplegado",
     "agentCreated": "Agente \"{{name}}\" creado",
     "agentCreateFailed": "Error al crear agente: {{error}}",
     "moderator": "Moderador",

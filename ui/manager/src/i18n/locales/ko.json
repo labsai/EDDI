@@ -3262,6 +3262,7 @@
     "createThisAgent": "Create Agent",
     "creatingAgent": "Creating agent…",
     "agentReady": "Agent created & deployed",
+    "agentNotDeployed": "에이전트가 생성되었지만 배포되지 않았습니다",
     "agentCreated": "Agent \"{{name}}\" created",
     "agentCreateFailed": "Failed to create agent: {{error}}",
     "moderator": "Moderator",

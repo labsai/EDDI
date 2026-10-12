@@ -177,4 +177,16 @@ describe("GroupWizardPage - vault grants for new members", () => {
     expect(setupBodies).toHaveLength(2);
     expect(calls.filter((c) => c.startsWith("deploy"))).toEqual(["deploy new-agent-1", "deploy new-agent-2"]);
   });
+
+  it("after a cancelled deploy, member cards say created but not deployed - not ready", async () => {
+    serve();
+    const user = userEvent.setup();
+    await user.click(await reachReview(user));
+    await screen.findByTestId("grant-required-dialog");
+    await user.click(screen.getByTestId("grant-required-cancel"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+
+    await user.click(screen.getByTestId("group-wizard-back"));
+    expect(await screen.findAllByTestId("member-not-deployed")).toHaveLength(2);
+  });
 });
