@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.ui;
 
+import jakarta.annotation.security.PermitAll;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -18,6 +19,11 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
  * Internal SPA serving endpoint — not a public API.
  */
 @Path("/")
+// Explicitly public — the Manager SPA shell and its runtime auth config: the
+// browser loads them before it holds a token, and the HTTP policy permits
+// these paths. quarkus.security.jaxrs.deny-unannotated-endpoints denies
+// anything unannotated.
+@PermitAll
 public interface IRestManagerResource {
 
     @GET

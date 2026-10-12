@@ -199,10 +199,28 @@ final class McpToolUtils {
             log.debugf("%s rejected: %s", tool, describe(e));
             return errorJson(tool + " failed: " + describe(e));
         }
+        return internalFailure(log, tool, tool + " failed", e);
+    }
+
+    /**
+     * The error for a failure that is this server's problem: the exception is
+     * logged in full (with the stack) under a short reference id, and the caller
+     * gets {@code what} plus that reference — errorCode {@code INTERNAL}, the
+     * reference in {@code details} — never the exception's own text.
+     *
+     * @param log
+     *            the tool class's logger
+     * @param tool
+     *            the tool name, as the client called it
+     * @param what
+     *            the caller-facing description of what failed, e.g.
+     *            {@code "Failed to read group"}
+     */
+    static String internalFailure(Logger log, String tool, String what, Throwable e) {
         String reference = UUID.randomUUID().toString().substring(0, 8);
         log.errorf(e, "%s failed [reference %s]", tool, reference);
-        return errorJson(tool + " failed with an internal error (reference " + reference
-                + "). The details are in the server log under that reference.", "INTERNAL_ERROR", Map.of("reference", reference));
+        return errorJson(what + " with an internal error (reference " + reference + "). The details are in the server log under that reference.",
+                "INTERNAL", Map.of("reference", reference));
     }
 
     /** Whether a failure is one the caller made and may be told about verbatim. */

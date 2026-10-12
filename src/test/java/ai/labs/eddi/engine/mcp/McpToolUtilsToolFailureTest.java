@@ -36,7 +36,7 @@ class McpToolUtilsToolFailureTest {
                 new IllegalArgumentException("members[1] repeats members[0] ('a')"));
 
         assertTrue(result.contains("members[1] repeats members[0]"), result);
-        assertFalse(result.contains("INTERNAL_ERROR"), result);
+        assertFalse(result.contains("\"errorCode\":\"INTERNAL\""), result);
     }
 
     @Test
@@ -48,7 +48,7 @@ class McpToolUtilsToolFailureTest {
         String result = McpToolUtils.toolFailure(LOG, "read_group", nio);
 
         assertFalse(result.contains("secret-dir"), result);
-        assertTrue(result.contains("\"errorCode\":\"INTERNAL_ERROR\""), result);
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""), result);
     }
 
     @Test
@@ -61,7 +61,7 @@ class McpToolUtilsToolFailureTest {
 
         assertFalse(result.contains("Holder"), result);
         assertFalse(result.contains("McpToolUtilsToolFailureTest"), result);
-        assertTrue(result.contains("\"errorCode\":\"INTERNAL_ERROR\""), result);
+        assertTrue(result.contains("\"errorCode\":\"INTERNAL\""), result);
     }
 
     @Test

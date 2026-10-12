@@ -64,6 +64,12 @@ export interface ChatMessage {
    * the full English fallback.
    */
   detail?: string;
+  /**
+   * An agent bubble that reports a failed turn (a send that errored, or a
+   * stream that ended on an `error` frame). The chat offers "Retry Last Step"
+   * on it. A flag rather than a match on the text, which is translated.
+   */
+  isError?: boolean;
 }
 
 export type SSEEventType =
