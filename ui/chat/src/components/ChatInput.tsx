@@ -13,7 +13,9 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Eye, EyeOff, LoaderCircle, Lock, LockOpen, Paperclip, SendHorizontal, X } from "lucide-react";
-import { useChatState, useChatDispatch, useComposerConversationRef } from "@/store/chat-store";
+import { useChatState, useChatDispatch, useComposerConversationRef, DEFAULT_PLACEHOLDER } from "@/store/chat-store";
+import { isImeComposing } from "@/ime";
+import { t } from "@/i18n";
 import {
   uploadAttachment,
   deleteAttachment,
@@ -62,29 +64,35 @@ function describeUploadFailure(err: unknown, fileName: string): string {
     // Quarkus enforces its own request-body cap before the attachment layer
     // runs, so an oversize upload can arrive as a bare 413 with no envelope.
     if (err.status === 413 || code === "ATTACHMENT_TOO_LARGE") {
-      return `${fileName} is too large to upload.`;
+      return t("attach.tooLarge", { file: fileName });
     }
     if (err.status === 401 || err.status === 403) {
-      return `You are not allowed to attach files to this conversation.`;
+      return t("attach.notAllowed");
     }
     // ATTACHMENT_REJECTED is a catch-all: a declared-vs-detected MIME mismatch
     // (there is no type allowlist), the per-conversation file-count and byte
     // quotas, empty files — and on Postgres any wrapped SQLException, so an
     // outage arrives dressed as a rejection too. Only the server's own text
     // separates them, so prefer it to a guess.
-    if (message) return `${fileName} was rejected — ${message}`;
-    if (code) return `${fileName} was rejected.`;
+    if (message) return t("attach.rejectedWhy", { file: fileName, message });
+    if (code) return t("attach.rejected", { file: fileName });
   }
-  return `Failed to upload ${fileName}.`;
+  return t("attach.failed", { file: fileName });
 }
 
 interface ChatInputProps {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
   conversationId?: string | null;
+  /**
+   * Bumped by the parent when focus should land in the composer — after the
+   * agent-requested field it replaced goes away. Not focused on mount: an
+   * embedded widget must not grab the host page's focus when it loads.
+   */
+  focusSignal?: number;
 }
 
-export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }: ChatInputProps) {
   const { isProcessing, config, isSecretMode, pendingAttachments, restoreDraft } =
     useChatState();
   const dispatch = useChatDispatch();
@@ -101,6 +109,21 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   const isUploading = uploading.length > 0;
   const [secretVisible, setSecretVisible] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** Set when a secret send swaps the password field for the textarea. */
+  const refocusAfterSecretRef = useRef(false);
+
+  useEffect(() => {
+    if (focusSignal > 0) textareaRef.current?.focus();
+  }, [focusSignal]);
+
+  // Leaving secret mode unmounts the focused password field; without this the
+  // next thing a keyboard user types goes nowhere.
+  useEffect(() => {
+    if (!isSecretMode && refocusAfterSecretRef.current) {
+      refocusAfterSecretRef.current = false;
+      textareaRef.current?.focus();
+    }
+  }, [isSecretMode]);
 
   // A turn the server refused (409) was never consumed — put the text back so
   // the user does not have to retype it.
@@ -125,6 +148,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
     onSend(trimmed, isSecretMode);
     setValue("");
     if (isSecretMode) {
+      refocusAfterSecretRef.current = true;
       dispatch({ type: "TOGGLE_SECRET_MODE" });
       setSecretVisible(false);
     }
@@ -144,7 +168,8 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      // Enter that confirms an IME candidate (CJK, many phone keyboards) is not "send".
+      if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
         e.preventDefault();
         handleSend();
       }
@@ -228,6 +253,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         message: {
           id: `error-${Date.now()}-${Math.random()}`,
           role: "agent",
+          kind: "notice",
           content: `⚠️ ${sentence}`,
           timestamp: Date.now(),
         },
@@ -278,9 +304,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
       const room =
         MAX_ATTACHMENTS_PER_TURN - pendingAttachments.length - uploading.length;
       if (room <= 0) {
-        notify(
-          `You can attach at most ${MAX_ATTACHMENTS_PER_TURN} files per message.`,
-        );
+        notify(t("attach.maxFiles", { max: MAX_ATTACHMENTS_PER_TURN }));
         return;
       }
       const accepted = picked.slice(0, room);
@@ -288,11 +312,13 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         // Name the casualties: slice() keeps FileList order, which is
         // OS-determined, so "2 not attached" leaves the user guessing which.
         notify(
-          `You can attach at most ${MAX_ATTACHMENTS_PER_TURN} files per message. ` +
-            `Not attached: ${picked
-              .slice(room)
-              .map((f) => f.name)
-              .join(", ")}`,
+          `${t("attach.maxFiles", { max: MAX_ATTACHMENTS_PER_TURN })} ` +
+            t("attach.notAttached", {
+              files: picked
+                .slice(room)
+                .map((f) => f.name)
+                .join(", "),
+            }),
         );
       }
 
@@ -322,8 +348,8 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             dispatch({ type: "ADD_ATTACHMENT", attachment: result });
             announce(
               result.forwardableInline === false
-                ? `${file.name} attached, but it is too large to send directly — the assistant may not be able to read it.`
-                : `${file.name} attached.`,
+                ? t("attach.doneLarge", { file: file.name })
+                : t("attach.done", { file: file.name }),
             );
           } catch (err) {
             notify(describeUploadFailure(err, file.name));
@@ -372,7 +398,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         discardAttachment(owner, storageRef);
       }
       dispatch({ type: "REMOVE_ATTACHMENT", storageRef });
-      announce(`${fileName} removed.`);
+      announce(t("attach.removed", { file: fileName }));
     },
     [conversationId, dispatch, announce],
   );
@@ -407,8 +433,12 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
                 // gives a screen-reader user no way to tell them apart.
                 aria-label={
                   duplicateNames.has(a.fileName)
-                    ? `Remove ${a.fileName} (${i + 1} of ${pendingAttachments.length})`
-                    : `Remove ${a.fileName}`
+                    ? t("attach.removeNth", {
+                        file: a.fileName,
+                        n: i + 1,
+                        total: pendingAttachments.length,
+                      })
+                    : t("attach.remove", { file: a.fileName })
                 }
                 aria-describedby={
                   a.forwardableInline === false ? `warn-${a.storageRef}` : undefined
@@ -424,7 +454,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
                   className="chat-attachments__warn"
                   data-testid="attachment-warn"
                 >
-                  too large to send directly
+                  {t("attach.chipLarge")}
                 </span>
               )}
             </span>
@@ -440,7 +470,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
                 <LoaderCircle className="chat-attachments__icon chat-icon-spin" size="1em" /> {u.name}
               </span>
               {/* The spinner is the only visual difference from a staged chip. */}
-              <span className="chat-sr-only">Uploading</span>
+              <span className="chat-sr-only">{t("attach.uploading")}</span>
             </span>
           ))}
         </div>
@@ -464,9 +494,13 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         // Gate on the cap, not on "an upload is running" — blocking the whole
         // button while one large file uploads defeats the parallel batch.
         disabled={!conversationId || atCapacity || isProcessing || disabled}
-        title={atCapacity ? `Attachment limit (${MAX_ATTACHMENTS_PER_TURN}) reached` : "Attach file"}
+        title={
+          atCapacity
+            ? t("input.attachLimit", { max: MAX_ATTACHMENTS_PER_TURN })
+            : t("input.attach")
+        }
         data-testid="chat-attach-btn"
-        aria-label={isUploading ? "Attach file (upload in progress)" : "Attach file"}
+        aria-label={isUploading ? t("input.attachBusy") : t("input.attach")}
       >
         {isUploading ? (
           <LoaderCircle className="chat-icon-spin" size="1em" />
@@ -479,9 +513,14 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         type="button"
         className={`chat-input__secret-toggle ${isSecretMode ? "chat-input__secret-toggle--active" : ""}`}
         onClick={toggleSecretMode}
-        title={isSecretMode ? "Secret mode ON — input will be encrypted" : "Toggle secret mode"}
+        // The label is fixed and the state is aria-pressed, so a screen reader
+        // hears "Secret mode, toggle button, pressed" instead of a verb that
+        // flips. A turn in flight keeps the mode it was sent with.
+        disabled={isProcessing}
+        title={isSecretMode ? t("input.secretOn") : t("input.secretOff")}
         data-testid="chat-secret-toggle"
-        aria-label="Toggle secret mode"
+        aria-label={t("input.secretToggle")}
+        aria-pressed={isSecretMode}
       >
         {isSecretMode ? <Lock size="1em" /> : <LockOpen size="1em" />}
       </button>
@@ -495,8 +534,9 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Enter secret value..."
+            placeholder={t("input.secretPlaceholder")}
             disabled={disabled}
+            aria-label={t("input.label")}
             className="chat-input__secret-field"
             autoComplete="off"
           />
@@ -504,8 +544,8 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             type="button"
             className="chat-input__eye-toggle"
             onClick={() => setSecretVisible((v) => !v)}
-            title={secretVisible ? "Hide" : "Show"}
-            aria-label={secretVisible ? "Hide secret" : "Show secret"}
+            title={secretVisible ? t("input.hide") : t("input.show")}
+            aria-label={secretVisible ? t("input.secretHide") : t("input.secretShow")}
             data-testid="chat-eye-toggle"
           >
             {/* Shows the action, like the aria-label: an open eye reveals. */}
@@ -523,7 +563,12 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             handleInput();
           }}
           onKeyDown={handleKeyDown}
-          placeholder={config.placeholder ?? "Type a message..."}
+          placeholder={
+            config.placeholder && config.placeholder !== DEFAULT_PLACEHOLDER
+              ? config.placeholder
+              : t("input.placeholder")
+          }
+          aria-label={t("input.label")}
           disabled={disabled}
           rows={1}
           className="chat-input__textarea"
@@ -535,7 +580,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         onClick={handleSend}
         disabled={!canSend}
         className={`chat-input__send ${canSend ? "chat-input__send--active" : "chat-input__send--disabled"}`}
-        aria-label="Send message"
+        aria-label={t("input.send")}
       >
         {isProcessing ? (
           <span className="chat-input__spinner" />

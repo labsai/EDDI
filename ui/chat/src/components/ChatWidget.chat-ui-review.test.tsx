@@ -5,7 +5,7 @@
    ────────────────────────────────────────────── */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import {
   ChatWidget,
@@ -83,8 +83,8 @@ describe("a refused turn that lands after New conversation", () => {
   // posted a warning without checking the generation, so a refusal for the
   // abandoned turn was written into the conversation that replaced it.
   it.each([
-    [409, "a reviewer must resolve the pending approval", /reviewer must resolve/],
-    [401, "", /not allowed to continue/],
+    [409, "a reviewer must resolve the pending approval", /busy or waiting on a decision/],
+    [401, "", /session has expired/],
     [403, "", /not allowed to continue/],
   ])("does not write a %i into the new conversation", async (status, body, warning) => {
     const held = backendWithHeldTurn(status, body);
@@ -98,6 +98,8 @@ describe("a refused turn that lands after New conversation", () => {
       ),
     );
     fireEvent.click(screen.getByTestId("restart-btn"));
+    // There is a user message to lose, so New conversation asks first.
+    fireEvent.click(await screen.findByTestId("restart-confirm-yes"));
     await waitFor(() =>
       expect(globalThis.fetch).toHaveBeenCalledWith(
         expect.stringContaining("/agent-1/start"),
@@ -145,6 +147,8 @@ describe("a Stop whose cancel lands after New conversation", () => {
     await send("long question");
     fireEvent.click(await screen.findByTestId("chat-stop"));
     fireEvent.click(screen.getByTestId("restart-btn"));
+    // There is a user message to lose, so New conversation asks first.
+    fireEvent.click(await screen.findByTestId("restart-confirm-yes"));
     await waitFor(() => expect(started).toBe(2));
     await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
 
@@ -178,10 +182,7 @@ describe("the embedding token hand-off (?tokenOrigin=)", () => {
     window.dispatchEvent(ev);
   }
 
-  it("starts the conversation with the host's token, even though the first attempt beat it", async () => {
-    // With auth on, the widget's first request used to go out anonymously, be
-    // refused, and end in "not allowed" — the token the host posted a moment
-    // later was installed but never used for the start.
+  function authBackend() {
     const auths: Array<string | null> = [];
     globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -199,36 +200,74 @@ describe("the embedding token hand-off (?tokenOrigin=)", () => {
         { status: 200 },
       );
     }) as typeof fetch;
+    return auths;
+  }
 
+  it("holds the start until the host's token arrives, then starts with it", async () => {
+    const auths = authBackend();
     renderAt(`/chat/production/agent-1?tokenOrigin=${encodeURIComponent(HOST)}`);
 
     await waitFor(() => expect(posted.some((p) => p.data.type === MSG_READY)).toBe(true));
     expect(posted.every((p) => p.origin === HOST)).toBe(true);
-    await waitFor(() =>
-      expect(posted.some((p) => p.data.type === MSG_TOKEN_REQUEST)).toBe(true),
-    );
+    expect(auths).toEqual([]);
 
     hostSends({ type: MSG_TOKEN, token: "host-token" });
 
     expect(await screen.findByText("Hello, signed-in user")).toBeInTheDocument();
-    expect(auths).toEqual([null, "Bearer host-token"]);
+    expect(auths).toEqual(["Bearer host-token"]);
     expect(screen.queryByText(/not allowed/)).not.toBeInTheDocument();
   });
 
+  it("starts with the host's token even when it answers only after the widget stopped waiting", async () => {
+    // With auth on, a start that went out anonymously used to be refused and
+    // end in "not allowed" — the token the host posted a moment later was
+    // installed but never used for the start. The 401 now asks for a token and
+    // repeats the start with it.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const auths = authBackend();
+      renderAt(`/chat/production/agent-1?tokenOrigin=${encodeURIComponent(HOST)}`);
+      await waitFor(() => expect(posted.some((p) => p.data.type === MSG_READY)).toBe(true));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5100);
+      });
+      await waitFor(() =>
+        expect(posted.some((p) => p.data.type === MSG_TOKEN_REQUEST)).toBe(true),
+      );
+
+      hostSends({ type: MSG_TOKEN, token: "host-token" });
+
+      expect(await screen.findByText("Hello, signed-in user")).toBeInTheDocument();
+      expect(auths).toEqual([null, "Bearer host-token"]);
+      expect(screen.queryByText(/not allowed/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("ignores a token posted from an origin that is not allow-listed", async () => {
-    const auths: Array<string | null> = [];
-    globalThis.fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      auths.push(new Headers(init?.headers).get("Authorization"));
-      return new Response(READY, { status: 200 });
-    }) as typeof fetch;
-    renderAt(`/chat/production/agent-1?tokenOrigin=${encodeURIComponent(HOST)}`);
-    await waitFor(() => expect(posted.some((p) => p.data.type === MSG_READY)).toBe(true));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const auths: Array<string | null> = [];
+      globalThis.fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        auths.push(new Headers(init?.headers).get("Authorization"));
+        return new Response(READY, { status: 200 });
+      }) as typeof fetch;
+      renderAt(`/chat/production/agent-1?tokenOrigin=${encodeURIComponent(HOST)}`);
+      await waitFor(() => expect(posted.some((p) => p.data.type === MSG_READY)).toBe(true));
 
-    hostSends({ type: MSG_TOKEN, token: "evil-token" }, "https://evil.example");
-    await new Promise((r) => setTimeout(r, 20));
+      hostSends({ type: MSG_TOKEN, token: "evil-token" }, "https://evil.example");
+      // The foreign token does not release the held start; the give-up does.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5100);
+      });
 
-    expect(auths.length).toBeGreaterThan(0);
-    expect(auths).not.toContain("Bearer evil-token");
+      await waitFor(() => expect(auths.length).toBeGreaterThan(0));
+      expect(auths).not.toContain("Bearer evil-token");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -277,16 +316,16 @@ describe("?theme= and the colour parameters", () => {
     );
     const style = document.documentElement.style;
     expect(style.getPropertyValue("--chat-accent")).toBe("#123");
-    // Derived variants are built from the expanded six-digit form.
-    expect(style.getPropertyValue("--chat-accent-soft")).toBe("#11223322");
+    // Derived variants are tints of the validated accent.
+    expect(style.getPropertyValue("--chat-accent-soft")).toContain("color-mix(in srgb, #123 13%");
     expect(style.getPropertyValue("--chat-bg")).toBe("");
     expect(style.getPropertyValue("--chat-font")).toBe("Inter, sans-serif");
   });
 
-  it("derives no alpha variants from a non-hex accent", () => {
-    applyColorOverrides(new URLSearchParams({ accentColor: "rebeccapurple" }));
+  it("derives no variants from an unsafe accent", () => {
+    applyColorOverrides(new URLSearchParams({ accentColor: "url(https://tracker.example/x.png)" }));
     const style = document.documentElement.style;
-    expect(style.getPropertyValue("--chat-accent")).toBe("rebeccapurple");
+    expect(style.getPropertyValue("--chat-accent")).toBe("");
     expect(style.getPropertyValue("--chat-accent-soft")).toBe("");
   });
 });

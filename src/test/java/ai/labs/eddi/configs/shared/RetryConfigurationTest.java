@@ -134,6 +134,126 @@ class RetryConfigurationTest {
         }
     }
 
+    // ==================== failure classes and Retry-After ====================
+
+    /**
+     * What the provider's own delay hint does to the retry loop, and which failures
+     * are retried at all.
+     */
+    @Nested
+    @DisplayName("executeWithRetry: failure classes and retry delays")
+    class FailureClassRetryTests {
+
+        private static final String RATE_LIMIT_BODY_200MS = "{\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"slow\","
+                + "\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.RetryInfo\",\"retryDelay\":\"0.2s\"}]}}";
+        private static final String RATE_LIMIT_BODY_20S = RATE_LIMIT_BODY_200MS.replace("0.2s", "20s");
+        private static final String QUOTA_BODY = "{\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"quota\","
+                + "\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.QuotaFailure\",\"violations\":[{\"quotaId\":"
+                + "\"GenerateRequestsPerDayPerProjectPerModel-FreeTier\"}]},{\"@type\":\"type.googleapis.com/google.rpc.RetryInfo\","
+                + "\"retryDelay\":\"1s\"}]}}";
+
+        private Callable<String> failOnceWith(AtomicInteger attempts, HttpException failure) {
+            return () -> {
+                if (attempts.incrementAndGet() == 1) {
+                    throw failure;
+                }
+                return "ok";
+            };
+        }
+
+        @Test
+        @DisplayName("sleeps the provider's retry delay, not the (1ms) configured backoff")
+        void honoursTheProviderDelay() throws LifecycleException {
+            AtomicInteger attempts = new AtomicInteger();
+            long start = System.nanoTime();
+
+            var result = RetryConfiguration.executeWithRetry(failOnceWith(attempts, new HttpException(429, RATE_LIMIT_BODY_200MS)),
+                    fastRetryConfig(3), "test-action");
+
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertEquals("ok", result);
+            assertEquals(2, attempts.get());
+            assertTrue(elapsedMs >= 190, "the 200ms RetryInfo delay must be slept, was " + elapsedMs + "ms");
+        }
+
+        @Test
+        @DisplayName("honorRetryAfter=false ignores the hint and uses the configured backoff")
+        void canBeSwitchedOff() throws LifecycleException {
+            var config = fastRetryConfig(3);
+            config.setHonorRetryAfter(false);
+            AtomicInteger attempts = new AtomicInteger();
+            long start = System.nanoTime();
+
+            RetryConfiguration.executeWithRetry(failOnceWith(attempts, new HttpException(429, RATE_LIMIT_BODY_200MS)), config, "test-action");
+
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertEquals(2, attempts.get());
+            assertTrue(elapsedMs < 150, "the hint must be ignored, but the call took " + elapsedMs + "ms");
+        }
+
+        @Test
+        @DisplayName("a requested wait above maxRetryAfterMs stops at once, without sleeping, so the cascade can escalate")
+        void overlongDelayGivesUpImmediately() {
+            AtomicInteger attempts = new AtomicInteger();
+            long start = System.nanoTime();
+
+            var ex = assertThrows(LifecycleException.class, () -> RetryConfiguration.executeWithRetry(
+                    failOnceWith(attempts, new HttpException(429, RATE_LIMIT_BODY_20S)), fastRetryConfig(3), "test-action"));
+
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertEquals(1, attempts.get(), "no second attempt");
+            assertTrue(elapsedMs < 1000, "must not sleep the requested 20s, took " + elapsedMs + "ms");
+            assertTrue(ex.getMessage().contains("maxRetryAfterMs"), ex.getMessage());
+            assertTrue(RetryConfiguration.isRetryableError(ex), "the cause chain still classifies as RATE_LIMITED for the cascade");
+            assertEquals(FailureClass.RATE_LIMITED, LlmFailureClassifier.classify(ex).cls());
+        }
+
+        @Test
+        @DisplayName("maxRetryAfterMs is configurable")
+        void maxRetryAfterIsConfigurable() throws LifecycleException {
+            var config = fastRetryConfig(3);
+            config.setMaxRetryAfterMs(100L);
+            AtomicInteger attempts = new AtomicInteger();
+            assertThrows(LifecycleException.class, () -> RetryConfiguration.executeWithRetry(
+                    failOnceWith(attempts, new HttpException(429, RATE_LIMIT_BODY_200MS)), config, "test-action"));
+            assertEquals(1, attempts.get(), "200ms > the configured 100ms cap");
+
+            config.setMaxRetryAfterMs(500L);
+            attempts.set(0);
+            assertEquals("ok", RetryConfiguration.executeWithRetry(
+                    failOnceWith(attempts, new HttpException(429, RATE_LIMIT_BODY_200MS)), config, "test-action"));
+            assertEquals(2, attempts.get());
+        }
+
+        @Test
+        @DisplayName("a daily-quota 429 is not retried at all")
+        void quotaIsNotRetried() {
+            AtomicInteger attempts = new AtomicInteger();
+            assertThrows(LifecycleException.class, () -> RetryConfiguration.executeWithRetry(
+                    failOnceWith(attempts, new HttpException(429, QUOTA_BODY)), fastRetryConfig(3), "test-action"));
+            assertEquals(1, attempts.get());
+        }
+
+        @Test
+        @DisplayName("HTTP 500 is retried (bug fix)")
+        void http500IsRetried() throws LifecycleException {
+            AtomicInteger attempts = new AtomicInteger();
+            assertEquals("ok", RetryConfiguration.executeWithRetry(
+                    failOnceWith(attempts, new HttpException(500, "upstream")), fastRetryConfig(3), "test-action"));
+            assertEquals(2, attempts.get());
+        }
+
+        @Test
+        @DisplayName("an engine-ceiling clamp applies to maxRetryAfterMs")
+        void maxRetryAfterIsClamped() {
+            var config = new RetryConfiguration();
+            config.setMaxRetryAfterMs(10 * 60_000L);
+            assertEquals(RetryConfiguration.MAX_BACKOFF_CEILING_MS, RetryConfiguration.effectiveMaxRetryAfterMs(config));
+            config.setMaxRetryAfterMs(-5L);
+            assertEquals(0L, RetryConfiguration.effectiveMaxRetryAfterMs(config));
+        }
+    }
+
     // ==================== isRetryableError ====================
 
     @Nested
@@ -306,7 +426,13 @@ class RetryConfigurationTest {
         void langchain4jHttpExceptionNonRetryableStatus() {
             assertFalse(RetryConfiguration.isRetryableError(new HttpException(400, "malformed body")));
             assertFalse(RetryConfiguration.isRetryableError(new HttpException(401, "bad key")));
-            assertFalse(RetryConfiguration.isRetryableError(new HttpException(500, "upstream")));
+            assertFalse(RetryConfiguration.isRetryableError(new HttpException(404, "no such model")));
+        }
+
+        @Test
+        @DisplayName("HTTP 500 is retryable (bug fix: it used to fail on the first attempt)")
+        void http500IsRetryable() {
+            assertTrue(RetryConfiguration.isRetryableError(new HttpException(500, "upstream")));
         }
 
         @Test
@@ -762,6 +888,8 @@ class RetryConfigurationTest {
             assertEquals(1000L, config.getBackoffDelayMs());
             assertEquals(2.0, config.getBackoffMultiplier());
             assertEquals(10000L, config.getMaxBackoffDelayMs());
+            assertEquals(Boolean.TRUE, config.getHonorRetryAfter());
+            assertEquals(10000L, config.getMaxRetryAfterMs());
         }
 
         @Test

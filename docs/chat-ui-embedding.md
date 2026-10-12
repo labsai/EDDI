@@ -33,7 +33,7 @@ With OIDC enabled, every API call the widget makes needs a bearer token. The wid
 
 | Direction | Message | When |
 | --- | --- | --- |
-| widget → host | `{ type: "eddi-chat-ready", protocol: 1 }` | Once, as soon as the widget is listening |
+| widget → host | `{ type: "eddi-chat-ready", protocol: 1 }` | As soon as the widget is listening, then every second until the first token arrives or the widget stops waiting |
 | widget → host | `{ type: "eddi-chat-token-request", protocol: 1 }` | About a minute before the current token expires, and whenever the backend answers `401` |
 | host → widget | `{ type: "eddi-chat-token", token: "<access token>" }` | In answer to either message, and at any other time the host has a newer token |
 
@@ -43,6 +43,7 @@ Rules the widget enforces:
 - **Never a `*` target.** Every message the widget sends is posted with an allow-listed origin as its `targetOrigin`. If the parent is at any other origin, the browser discards the message.
 - **Only the parent, only from an allow-listed origin.** A token is accepted only when `event.source` is the widget's own parent window and `event.origin` is in the list. A message from a sibling frame, a popup or any other origin is ignored. The token must be printable ASCII without whitespace, at most 16 KB.
 - **Refresh.** If the token is a JWT, the widget reads its `exp` claim, only to schedule the next request, and asks for a new token a minute before it expires; for a token shorter-lived than five minutes it asks at about 80 % of its life. The backend still verifies every token.
+- **The start waits for the first token.** With `tokenOrigin` set, the widget holds the start of the conversation (and the agent profile lookup) until the first token arrives, for up to five seconds. A host that never answers cannot leave it blank: after five seconds it starts without a token, and an agent that needs a login answers with its "Please sign in" message.
 - **401 retry.** When a request is answered `401`, the widget asks for a new token, waits up to ten seconds, and sends the request once more. The same applies to a request that went out before the first token arrived. If no token comes, the `401` is shown as usual.
 - **Memory only.** The token is held in a JavaScript variable. It is never written to the URL, `localStorage`, `sessionStorage` or a cookie.
 

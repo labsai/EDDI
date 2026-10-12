@@ -95,6 +95,8 @@ export function tokenExpiryMs(token: string): number | null {
 }
 
 export interface EmbedAuth {
+  /** Post "ready" again, for a host whose listener was not there for the first one. */
+  announce(): void;
   /** Remove the listener, the 401 handler and any pending refresh. */
   stop(): void;
 }
@@ -120,7 +122,7 @@ export function startEmbedAuth({
 }: EmbedAuthOptions): EmbedAuth {
   const host = win.parent;
   if (allowedOrigins.length === 0 || !host || host === win) {
-    return { stop() {} };
+    return { announce() {}, stop() {} };
   }
 
   let stopped = false;
@@ -201,6 +203,9 @@ export function startEmbedAuth({
   post(MSG_READY);
 
   return {
+    announce() {
+      if (!stopped) post(MSG_READY);
+    },
     stop() {
       stopped = true;
       win.removeEventListener("message", onMessage);
