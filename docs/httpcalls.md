@@ -123,6 +123,15 @@ because the client is cached and a session opened with one user's token would be
 reused by everyone after them. See
 [`mcp-server.md`](mcp-server.md#calling-an-mcp-server-as-the-chatting-user).
 
+### Cookies are not kept between calls
+
+The HTTP client behind httpcalls is shared by every agent, conversation and
+user, so it holds no cookie jar: a `Set-Cookie` in one response is neither stored
+nor sent on a later call, even to the same host. An API that needs a session
+credential on a follow-up call must have it passed explicitly, as a header (for
+example `Authorization`) or from a property. `Set-Cookie` is also never recorded
+in conversation memory.
+
 ### Running behind a reverse proxy
 
 The origin is taken from the inbound request as EDDI sees it. Behind a
