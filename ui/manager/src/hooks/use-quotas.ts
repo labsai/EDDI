@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  listQuotas,
   getQuota,
   updateQuota,
   getUsage,
@@ -18,14 +17,6 @@ const quotaKeys = {
 };
 
 /* ─── Hooks ─── */
-
-/** List all tenant quotas. */
-export function useQuotas() {
-  return useQuery({
-    queryKey: quotaKeys.list,
-    queryFn: listQuotas,
-  });
-}
 
 /** Get quota for a single tenant. */
 export function useQuota(tenantId: string) {
