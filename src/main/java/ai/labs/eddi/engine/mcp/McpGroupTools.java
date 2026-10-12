@@ -36,7 +36,6 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -153,13 +152,15 @@ public class McpGroupTools {
 
     /**
      * The error a group tool answers with when it fails. The caller's own mistakes
-     * — an invalid argument, unparseable JSON in an argument, a 4xx from the store
-     * such as a validation message — are described, because the caller can act on
-     * them. A missing group or conversation is reported as such. Anything else is a
-     * server-side failure: its exception text can carry datastore or configuration
-     * detail (and a {@code NullPointerException} reads literally as "null"), so it
-     * goes to the log, and the caller gets a fixed message with errorCode
-     * {@code INTERNAL}.
+     * — a validation refusal EDDI raised, unparseable JSON in an argument, a 4xx
+     * from the store such as a validation message, a stale version — are described,
+     * because the caller can act on them ({@link McpToolUtils#isCallerFacing}
+     * decides, so an {@link IllegalArgumentException} a library raised is not one
+     * of them). A missing group or conversation is reported as such. Anything else
+     * is a server-side failure: its exception text can carry datastore or
+     * configuration detail (and a {@code NullPointerException} reads literally as
+     * "null"), so it is logged under a short reference id and the caller gets a
+     * fixed message with errorCode {@code INTERNAL} and that reference.
      */
     private String failure(String tool, String message, Exception e) {
         if (e instanceof IResourceStore.ResourceNotFoundException || e instanceof NotFoundException) {
@@ -169,11 +170,11 @@ public class McpGroupTools {
         // JsonProcessingException: a JSON argument the caller sent (roleAssignments,
         // tasks) did not parse — the caller's mistake, and the parser's message
         // quotes only the caller's own input.
-        if (e instanceof IllegalArgumentException || e instanceof ClientErrorException || e instanceof JsonProcessingException) {
+        if (e instanceof JsonProcessingException || isCallerFacing(e)) {
+            LOGGER.debugf("%s rejected: %s", tool, LogSanitizer.sanitize(describe(e)));
             return errorJson(message, e);
         }
-        LOGGER.error(tool + " failed", e);
-        return errorJson(message, "INTERNAL", null);
+        return internalFailure(LOGGER, tool, message, e);
     }
 
     // --- Discovery ---
@@ -364,7 +365,11 @@ public class McpGroupTools {
                     TaskDefinition[] taskArray = jsonSerialization.deserialize(tasks, TaskDefinition[].class);
                     config.setTasks(List.of(taskArray));
                 } catch (Exception ex) {
-                    return errorJson("Invalid tasks JSON", ex);
+                    // Curated: the parser's own message names model classes and field
+                    // paths (CWE-209), which is not the caller's business.
+                    LOGGER.debugf("create_group: tasks JSON rejected: %s", ex.getMessage());
+                    return errorJson("Invalid tasks JSON: expected a JSON array of task definitions "
+                            + "(subject, description, assignToRole, dependsOn, priority, assignmentMode)");
                 }
             }
 
@@ -406,10 +411,7 @@ public class McpGroupTools {
             groupStore.updateGroup(groupId, ver, config);
             return "Updated group " + groupId;
         } catch (Exception e) {
-            LOGGER.errorf("update_group failed: %s", e.getMessage());
-            // describe(), not getMessage(): the strict parser's rejection travels as a
-            // response entity, and getMessage() on that is just "HTTP 400 Bad Request".
-            return errorJson("Failed to update group", e);
+            return failure("update_group", "Failed to update group", e);
         }
     }
 

@@ -42,7 +42,7 @@ ship as `eddi`/`eddi`, `viewer`/`viewer` and `user`/`user`.
 Start MongoDB:
 
 ```bash
-docker run --name mongodb -d mongo:6.0
+docker run --name mongodb -d mongo:7.0.43
 ```
 
 Start EDDI (without auth) — **local development only:**

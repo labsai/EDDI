@@ -86,7 +86,7 @@ public class SizeMatcher implements IRuleCondition {
 
         int size = 0;
         try {
-            Object rawValue = PathNavigator.getValue(valuePath, memoryItemConverter.convert(memory));
+            Object rawValue = PathNavigator.getValue(valuePath, TemplateDataScope.templateData(memory, memoryItemConverter));
             size = determineSize(rawValue);
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);

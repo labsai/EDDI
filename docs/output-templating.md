@@ -115,7 +115,7 @@ Make sure the templating is defined after the output, not before.
 | `item_index` | 0-based index |
 | `item_indexParity` | `odd` or `even` |
 | `item_hasNext` | `true` if not the last item |
-| `item_count` | Total items in the collection |
+| `item_count` | 1-based index (`item_index + 1`) — **not** the size of the collection; use `{items.size}` for that |
 | `item_isFirst` | `true` if first item |
 | `item_isLast` | `true` if last item |
 

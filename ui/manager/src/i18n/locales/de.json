@@ -3053,6 +3053,7 @@
       "humanNeedsId_one": "{{count}} menschliches Mitglied braucht die Benutzer-ID der Person.",
       "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person."
     },
+    "versionLookupFailed": "Die aktuelle Version dieser Gruppe konnte nicht ermittelt werden.",
     "deletePermanentlyHint": "Kann nicht rückgängig gemacht werden: Die Gruppe und ihr Arbeitsbereich (Backlog, Rhythmen und deren Zeitpläne) werden endgültig entfernt. Ohne diese Option wird die Gruppe nur als gelöscht markiert und bleibt wiederherstellbar, bis sie bereinigt wird.",
     "deletePermanentlyWithMembersHint": "Kann nicht rückgängig gemacht werden: Die Gruppe, ihr Arbeitsbereich und alle Mitglieds-Agenten werden endgültig entfernt. Ohne diese Option werden sie nur als gelöscht markiert und bleiben wiederherstellbar, bis sie bereinigt werden.",
     "deleteMembersFailedAfterGroup": "Die Gruppe wurde gelöscht, diese Mitglieds-Agenten jedoch nicht: {{ids}}. Löschen Sie sie auf der Seite „Agenten“.",
