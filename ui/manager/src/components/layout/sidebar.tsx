@@ -109,7 +109,12 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
       const parsed = JSON.parse(stored) as unknown;
       if (!Array.isArray(parsed)) return new Set();
       const ids = parsed
-        .map((entry) => (typeof entry === "number" ? NAV_SECTIONS[entry]?.id : entry))
+        .map((entry) =>
+          typeof entry === "number"
+            ? NAV_SECTIONS[entry]?.id
+            : // Builds between the role filter (#939) and the route registry stored label keys.
+              (NAV_SECTIONS.find((section) => section.labelKey === entry)?.id ?? entry),
+        )
         .filter((id): id is string => typeof id === "string");
       return new Set(ids);
     } catch {

@@ -106,6 +106,16 @@ describe("Sidebar — collapsible sections", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
+  it("still understands collapse state saved by section label key", () => {
+    // Builds between the role filter and the route registry stored label keys.
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["nav.sectionAdmin"]));
+
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+
+    expect(screen.queryByText("Secrets")).not.toBeInTheDocument();
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  });
+
   it("shows all items in icon mode even when sections are collapsed", () => {
     // Pre-set collapsed state
     localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["admin"]));
