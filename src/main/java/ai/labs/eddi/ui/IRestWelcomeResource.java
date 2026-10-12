@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.ui;
 
+import jakarta.annotation.security.PermitAll;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
@@ -18,6 +19,10 @@ import org.jboss.resteasy.reactive.Cache;
  */
 @Path("/welcome")
 @Produces(MediaType.TEXT_HTML)
+// Explicitly public — the welcome page: loaded by the browser before it holds
+// a token. quarkus.security.jaxrs.deny-unannotated-endpoints denies anything
+// unannotated.
+@PermitAll
 public interface IRestWelcomeResource {
 
     @GET

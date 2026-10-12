@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/layout/theme-provider";
@@ -71,7 +71,11 @@ async function startApp() {
       const res = await fetch("/agentstore/agents/descriptors?limit=1", {
         signal: AbortSignal.timeout(1500),
       });
-      if (!res.ok) throw new Error("Backend not OK");
+      // 401/403 is an answer from EDDI with authentication on (the probe runs
+      // before sign-in): the backend is there. Reading it as "unreachable" put
+      // every authenticated dev session onto the mock API, where an editor saw
+      // the mocks' admin data instead of the server's refusals.
+      if (!res.ok && res.status !== 401 && res.status !== 403) throw new Error("Backend not OK");
       console.log("[EDDI] Backend detected — using real API");
     } catch {
       // Say which of the two reasons it was. Logging "backend not reachable"
@@ -104,18 +108,23 @@ async function startApp() {
   // to English inside i18next.
   await i18nReady;
 
+  // A DATA router, so `useBlocker` works: with <BrowserRouter> an editor could
+  // only guard against a tab close (`beforeunload`), and any in-app link —
+  // the sidebar, a breadcrumb, the browser's Back button — dropped unsaved edits
+  // without a word. The route table itself stays the declarative <Routes> in
+  // <App />, mounted under one catch-all route.
+  const router = createBrowserRouter([{ path: "*", element: <App /> }]);
+
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <BrowserRouter>
-        <AuthProvider>
-          <QueryClientProvider client={queryClient}>
-            <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
-              <App />
-              <Toaster position="bottom-right" richColors closeButton />
-            </ThemeProvider>
-          </QueryClientProvider>
-        </AuthProvider>
-      </BrowserRouter>
+      <AuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
+            <RouterProvider router={router} />
+            <Toaster position="bottom-right" richColors closeButton />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </AuthProvider>
     </StrictMode>
   );
 }

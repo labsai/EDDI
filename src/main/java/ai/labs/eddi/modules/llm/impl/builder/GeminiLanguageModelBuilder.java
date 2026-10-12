@@ -123,6 +123,9 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
         builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, THINKING_DEFAULT));
         builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, THINKING_DEFAULT));
 
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
+
         return builder.build();
     }
 

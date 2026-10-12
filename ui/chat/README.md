@@ -4,7 +4,7 @@
 
 > Embeddable chat widget for [**EDDI**](https://github.com/labsai/EDDI) — the open-source multi-agent orchestration middleware for conversational AI.
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-46-brightgreen)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-420%2B-brightgreen)
 
 EDDI Chat UI is a standalone, themeable React chat widget that connects to any EDDI agent. It ships **inside** the EDDI Docker image and can also be embedded as an `<iframe>` in any web page. Supports SSE streaming, rich Markdown, LaTeX math, code highlighting, quick replies, and full conversation control — all configurable via URL parameters or a typed config object.
 
@@ -41,6 +41,8 @@ EDDI Chat UI is a standalone, themeable React chat widget that connects to any E
 - 🔧 **Fully Configurable** — Every feature togglable via URL query parameters or typed `ChatConfig`
 - 📱 **Responsive** — Mobile-first design with adaptive breakpoints
 - 🎭 **Demo Mode** — Full showcase without a running backend (`/chat/demo/showcase`)
+- 🌍 **Translated** — English, German, French and Spanish widget text, chosen by `?lang=` or the browser language (see [Language](#language))
+- 📋 **Copy** — a copy button on every agent message and code block
 - 🏷️ **Agent Name Display** — Auto-fetches and shows the agent's display name from the backend
 
 ---
@@ -87,12 +89,15 @@ All features can be toggled via **URL query parameters** — ideal for iframe em
 
 | Parameter             | Example                     | Effect                             |
 | --------------------- | --------------------------- | ---------------------------------- |
-| `theme`               | `?theme=light`              | Set initial theme (`dark`/`light`) |
-| `title`               | `?title=My%20Agent`         | Override header title              |
+| `theme`               | `?theme=light`              | Set the theme (`dark`/`light`/`system`). The URL wins over a theme the visitor chose earlier; the header toggle cycles dark, light, system |
+| `title`               | `?title=My%20Agent`         | Header title text and browser tab title (replaces the agent name in the header) |
+| `lang`                | `?lang=de`                  | Widget language (`en`, `de`, `fr`, `es`); default: the browser language. Also sets `<html lang>` |
+| `accentColor`         | `?accentColor=%23cc3366`    | Accent colour — any CSS colour works (`%23hex`, `rgb(...)`, a name); the tints are derived with `color-mix()` |
+| `tokenOrigin`         | `?tokenOrigin=https://app.example.com` | Allow that origin to send the bearer token by `postMessage` (comma-separated list); see [Passing a token](#passing-a-token-from-the-embedding-page) |
 | `hideUndo`            | `?hideUndo=true`            | Hide undo button                   |
 | `hideRedo`            | `?hideRedo=true`            | Hide redo button                   |
 | `hideNewConversation` | `?hideNewConversation=true` | Hide restart button                |
-| `hideLogo`            | `?hideLogo=true`            | Show text title instead of logo    |
+| `hideLogo`            | `?hideLogo=true`            | Show the text title (default "EDDI") instead of the logo |
 | `hideQuickReplies`    | `?hideQuickReplies=true`    | Hide quick reply buttons           |
 
 <details>
@@ -144,10 +149,39 @@ Only `/chat` takes this setting; the Manager and the API always refuse to be fra
 ></iframe>
 ```
 
+### Passing a token from the embedding page
+
+A page that signs the user in itself hands the widget its bearer token with `postMessage`, so it never appears in the address bar, history or `Referer`. Name the embedding origin in `?tokenOrigin=` (exact `scheme://host[:port]`, comma-separated for several); with no value no token is accepted.
+
+The iframe loads **before** the host can know it is ready, so there is a handshake, and the widget waits for it before it starts the conversation:
+
+1. The widget posts `{ "type": "eddi-chat-ready" }` to its parent, once to **each** allowed origin (the `targetOrigin` is that origin, never `*`), and repeats it every second while it waits.
+2. The host answers with `{ "type": "eddi-chat-token", "token": "<jwt>" }` sent to the iframe's own origin. The widget only accepts it from its own parent window and from an allowed origin.
+3. The widget then starts the conversation. If no token arrives within **5 seconds** it starts anyway, without one, so a parent that never answers cannot leave the widget blank; an agent that needs a login then shows its "Please sign in" message.
+
+```js
+const frame = document.getElementById("chat");
+window.addEventListener("message", (event) => {
+  if (event.origin !== "https://your-eddi-server") return;
+  if (event.source === frame.contentWindow && event.data?.type === "eddi-chat-ready") {
+    frame.contentWindow.postMessage(
+      { type: "eddi-chat-token", token: currentAccessToken() },
+      "https://your-eddi-server",
+    );
+  }
+});
+```
+
+Register the `message` listener **before** the iframe is added to the page. Send a fresh token the same way whenever yours is refreshed.
+
+### Language
+
+The widget's own text (buttons, notices, hints, screen-reader labels) is available in English, German, French and Spanish. `?lang=de` picks one; without it the browser's language list is used, falling back to English. `<html lang>` follows. What an agent says is never translated. To add a language, add a table to `src/i18n.ts`: any key you leave out shows in English.
+
 Combine query parameters to create a minimal, focused chat experience:
 
 ```
-?hideUndo=true&hideRedo=true&hideNewConversation=true&hideLogo=true&title=Support%20Agent&theme=light
+?hideUndo=true&hideRedo=true&hideNewConversation=true&hideLogo=true&title=Support%20Agent&theme=light&lang=de
 ```
 
 ---
@@ -157,7 +191,7 @@ Combine query parameters to create a minimal, focused chat experience:
 ```bash
 npm run dev          # Dev server (port 5174) with proxy to EDDI backend
 npm run build        # Production build
-npm run test         # Run tests (46 Vitest unit/component tests)
+npm run test         # Run tests (Vitest unit/component tests)
 npm run typecheck    # TypeScript type checking (tsc -b --noEmit)
 ```
 
