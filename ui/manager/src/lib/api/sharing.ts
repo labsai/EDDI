@@ -27,20 +27,12 @@ export function levelIncludes(held: AccessLevel | null | undefined, required: Ac
  * Deliberately *not* named after the `self / group / global` of persistent user
  * memory — that vocabulary refers to *agent* groups and means something else
  * entirely.
+ *
+ * Narrowest first. `internal` sits between `space` and `published`: everyone
+ * signed in may *use* it, nobody reads its configuration through visibility
+ * alone, and anonymous callers are not admitted at all.
  */
 export type ResourceVisibility = "private" | "space" | "internal" | "published";
-
-/**
- * The visibilities, narrowest first. `internal` sits between `space` and
- * `published`: everyone signed in may *use* it, nobody reads its configuration
- * through visibility alone, and anonymous callers are not admitted at all.
- */
-export const RESOURCE_VISIBILITIES: readonly ResourceVisibility[] = [
-  "private",
-  "space",
-  "internal",
-  "published",
-];
 
 /** One explicit share of one resource with one subject. */
 export interface ResourceGrant {

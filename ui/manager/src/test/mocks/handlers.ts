@@ -290,6 +290,63 @@ function isNotAnId(pathname: string): boolean {
  */
 const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore"];
 
+/**
+ * The extension each resource store stamps on its `eddi://` URIs — the backend's
+ * `IRest*Store.resourceBaseType`, mirrored in `RESOURCE_TYPES` (lib/api/resources.ts).
+ * Note `ai.labs.property` for property setters and the singular `ai.labs.snippet`.
+ * Inlined rather than imported: e2e/fixtures.ts loads this module under Node.
+ */
+const STORE_EXTENSIONS: Record<string, string> = {
+  rulestore: "ai.labs.rules",
+  apicallstore: "ai.labs.apicalls",
+  outputstore: "ai.labs.output",
+  dictionarystore: "ai.labs.dictionary",
+  llmstore: "ai.labs.llm",
+  propertysetterstore: "ai.labs.property",
+  mcpcallsstore: "ai.labs.mcpcalls",
+  ragstore: "ai.labs.rag",
+  snippetstore: "ai.labs.snippet",
+  parserstore: "ai.labs.parser",
+};
+
+/**
+ * A freshly created, empty config per store, in the backend model's own shape
+ * and with its Java field defaults — what `createResourceHandlers` answers for a
+ * config GET the store's dedicated handler lets through. It used to answer
+ * `{ type, config: {} }` for every store, a shape no store returns.
+ */
+const EMPTY_CONFIGS: Record<string, object> = {
+  // RuleSetConfiguration
+  rules: { appendActions: true, expressionsAsActions: false, behaviorGroups: [] },
+  // ApiCallsConfiguration
+  apicalls: { httpCalls: [] },
+  // OutputConfigurationSet
+  output: { outputSet: [] },
+  // DictionaryConfiguration
+  dictionary: { lang: "en", words: [], phrases: [], regExs: [] },
+  // LlmConfiguration (record)
+  llm: { tasks: [] },
+  // PropertySetterConfiguration
+  propertysetter: { setOnActions: [] },
+  // McpCallsConfiguration
+  mcpcalls: { transport: "http", timeoutMs: 30000, exposeResources: false, mcpCalls: [] },
+  // RagConfiguration
+  rag: {
+    embeddingProvider: "openai",
+    storeType: "in-memory",
+    chunkStrategy: "recursive",
+    chunkSize: 512,
+    chunkOverlap: 64,
+    maxResults: 5,
+    minScore: 0.6,
+    sources: [],
+  },
+  // ParserConfiguration
+  parser: { extensions: {}, config: {} },
+  // PromptSnippet
+  snippets: { name: "", category: "", description: "", content: "", tags: [], templateEnabled: true },
+};
+
 const RESOURCE_SCHEMAS: Record<string, object> = {
   behavior: {
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -1012,58 +1069,6 @@ export const handlers = [
     });
   }),
 
-  // JSON Schema endpoints for agents and packages
-  http.get("*/agentstore/agents/jsonSchema", () => {
-    return HttpResponse.json({
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      type: "object",
-      title: "AgentConfiguration",
-      properties: {
-        workflows: {
-          type: "array",
-          description: "List of workflow URIs that make up this agent",
-          items: { type: "string", format: "uri" },
-        },
-        channels: {
-          type: "array",
-          description: "Channel connectors for this agent",
-          items: {
-            type: "object",
-            properties: {
-              type: { type: "string", description: "Channel type identifier" },
-              config: { type: "object", additionalProperties: true, description: "Channel-specific configuration" },
-            },
-          },
-        },
-      },
-    });
-  }),
-  http.get("*/workflowstore/workflows/jsonSchema", () => {
-    return HttpResponse.json({
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      type: "object",
-      title: "WorkflowConfiguration",
-      properties: {
-        workflowSteps: {
-          type: "array",
-          description: "List of steps in this workflow",
-          items: {
-            type: "object",
-            properties: {
-              type: { type: "string", description: "Extension type (e.g. ai.labs.rules, ai.labs.llm)" },
-              extensions: { type: "object", additionalProperties: true, description: "Extension-specific configuration" },
-              config: {
-                type: "object",
-                properties: {
-                  uri: { type: "string", format: "uri", description: "Resource URI for this extension" },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-  }),
 
   // Agent descriptors
   // Honours `filter`, `limit` and `index`, because the backend does.
@@ -1542,18 +1547,6 @@ export const handlers = [
     });
   }),
 
-  // Raw conversation log
-  http.get("*/conversationstore/conversations/:id", () => {
-    return HttpResponse.json({
-      agentId: "agent1",
-      agentVersion: 1,
-      conversationId: "conv1",
-      conversationState: "READY",
-      environment: "production",
-      conversationSteps: [],
-    });
-  }),
-
   // Delete conversation
   http.delete("*/conversationstore/conversations/:id", () => {
     return new HttpResponse(null, { status: 204 });
@@ -1834,12 +1827,17 @@ export const handlers = [
     if (!storeVal.endsWith("store")) return;
     if (STORES_WITH_DEDICATED_DESCRIPTORS.includes(storeVal)) return;
 
+    // Shaped like the backend's DocumentDescriptor (ResourceDescriptor + name/
+    // description): the URI carries the store's real extension, dates are epoch
+    // millis, and `deleted` is always present (a primitive boolean in Java).
+    const extension = STORE_EXTENSIONS[storeVal] ?? `ai.labs.${storeVal.replace(/store$/, "")}`;
     const descriptor = (id: string, ageHours: number) => ({
-      resource: `eddi://ai.labs.mock/${storeVal}/${params.plural}/${id}?version=1`,
+      resource: `eddi://${extension}/${storeVal}/${params.plural}/${id}?version=1`,
       name: `Mock ${id}`,
       description: "Mock resource descriptor",
       createdOn: Date.now() - 86400000,
       lastModifiedOn: Date.now() - ageHours * 3600000,
+      deleted: false,
     });
 
     // A filter is TWO different things to this app. On a list page it is the
@@ -2748,22 +2746,6 @@ export const handlers = [
     ]);
   }),
 
-  http.get("*/groupstore/groups/jsonSchema", () => {
-    return HttpResponse.json({
-      $schema: "https://json-schema.org/draft/2020-12/schema",
-      type: "object",
-      title: "AgentGroupConfiguration",
-      properties: {
-        name: { type: "string", description: "Group name" },
-        description: { type: "string", description: "Group description" },
-        members: { type: "array", items: { type: "object" }, description: "Group members" },
-        moderatorAgentId: { type: "string", description: "Moderator agent ID" },
-        style: { type: "string", description: "Discussion style" },
-        maxRounds: { type: "integer", description: "Maximum rounds" },
-      },
-    });
-  }),
-
   http.get("*/groupstore/groups/:id", ({ params }) => {
     const groupConfigs: Record<string, object> = {
       grp1: {
@@ -3417,7 +3399,7 @@ function createResourceHandlers(
       });
     }),
     http.get(`*/${store}/${plural}/:id`, () => {
-      return HttpResponse.json({ type: label, config: {} });
+      return HttpResponse.json(EMPTY_CONFIGS[label] ?? {});
     }),
     http.post(`*/${store}/${plural}`, () => {
       return new HttpResponse(null, {
@@ -4204,17 +4186,11 @@ export const auditHandlers = [
     HttpResponse.json(mockAuditVerification("conversation", params.conversationId as string)),
   ),
 
-  // Get audit trail by conversation
-  http.get("*/auditstore/:conversationId/count", () => {
-    return HttpResponse.json(MOCK_AUDIT_ENTRIES.length);
-  }),
-
   http.get("*/auditstore/agent/:agentId", () => {
     return HttpResponse.json(MOCK_AUDIT_ENTRIES);
   }),
 
-  http.get("*/auditstore/:conversationId", ({ params }) => {
-    if (params.conversationId === "count") return;
+  http.get("*/auditstore/:conversationId", () => {
     return HttpResponse.json(MOCK_AUDIT_ENTRIES);
   }),
 ];
@@ -4240,9 +4216,6 @@ const MOCK_USAGE = {
 };
 
 export const quotaHandlers = [
-  http.get("*/administration/quotas", () => {
-    return HttpResponse.json([MOCK_QUOTA]);
-  }),
 
   http.get("*/administration/quotas/:tenantId/usage", () => {
     return HttpResponse.json(MOCK_USAGE);
@@ -4492,87 +4465,7 @@ export const scheduleHandlers = [
     });
   }),
 
-  // Tool rate limit
-  http.get("*/llm/tools/ratelimit/:tool", ({ params }) => {
-    return HttpResponse.json({
-      tool: params.tool as string,
-      limit: 60,
-      remaining: 42,
-      resetTimeMs: Date.now() + 60_000,
-    });
-  }),
-
-  // Cache stats
-  http.get("*/llm/tools/cache/stats", () => {
-    return HttpResponse.json({
-      size: 35,
-      hits: 23,
-      misses: 12,
-      hitRate: 0.657,
-      perToolStats: {
-        fetch_weather: { hits: 15, misses: 5 },
-        websearch: { hits: 8, misses: 7 },
-      },
-      details: "Cache: 35 entries, 23 hits, 12 misses (65.7%)",
-    });
-  }),
-
-  // Tool history
-  // A `ToolExecutionTrace` OBJECT (RestToolHistory.getToolHistory), not an array:
-  // the calls sit under `toolCalls`, with `arguments` as the JSON string the
-  // model sent.
-  http.get("*/llm/tools/history/:convId", () => {
-    const toolCalls = [
-      {
-        toolName: "fetch_weather",
-        arguments: '{"city":"Vienna"}',
-        result: '{"temp": 22, "condition": "sunny"}',
-        executionTimeMs: 156,
-        error: null,
-        success: true,
-        cost: 0.0005,
-        fromCache: false,
-        timestamp: Date.now(),
-      },
-      {
-        toolName: "websearch",
-        arguments: '{"query":"EDDI AI platform"}',
-        result: '{"results": [{"title": "EDDI docs", "url": "https://docs.labs.ai"}]}',
-        executionTimeMs: 342,
-        error: null,
-        success: true,
-        cost: 0.001,
-        fromCache: false,
-        timestamp: Date.now(),
-      },
-    ];
-    return HttpResponse.json({
-      toolCalls,
-      totalExecutionTimeMs: 498,
-      hasErrors: false,
-      totalCost: 0.0015,
-      cacheHits: 0,
-      cacheMisses: 0,
-      toolMetrics: {},
-    });
-  }),
-
-  // Global tool costs
-  http.get("*/llm/tools/costs", () => {
-    return HttpResponse.json({
-      totalCost: 0.045,
-      summary: "Tool Cost Summary:\nTotal Cost: $0.0450\nPer-Tool Costs:\n  - fetch_weather: 8 calls, $0.0120 total, $0.0015 avg\n  - websearch: 7 calls, $0.0330 total, $0.0047 avg\n",
-    });
-  }),
-
   // Rerun last conversation step (replay) — handler at end of file uses /rerun path
-
-  // Recent logs (log viewer)
-  http.get("*/logs/recent", () => {
-    return HttpResponse.json([
-      { level: "INFO", message: "Agent started", loggerName: "ai.labs.AgentOrchestrator", timestamp: new Date().toISOString() },
-    ]);
-  }),
 
   // Log SSE stream (log viewer) — return empty stream
   http.get("*/logs/stream", () => {
@@ -4768,28 +4661,6 @@ export const userMemoryHandlers = [
     return HttpResponse.json(MOCK_MEMORIES);
   }),
 
-  http.get("*/usermemorystore/memories/:userId/search", ({ request }) => {
-    const url = new URL(request.url);
-    const q = (url.searchParams.get("q") ?? "").toLowerCase();
-    const filtered = MOCK_MEMORIES.filter(
-      (m) => m.key.toLowerCase().includes(q) || String(m.value).toLowerCase().includes(q),
-    );
-    return HttpResponse.json(filtered);
-  }),
-
-  http.get("*/usermemorystore/memories/:userId/category/:category", ({ params }) => {
-    const filtered = MOCK_MEMORIES.filter((m) => m.category === params.category);
-    return HttpResponse.json(filtered);
-  }),
-
-  http.get("*/usermemorystore/memories/:userId/count", () => {
-    return HttpResponse.json({ count: MOCK_MEMORIES.length });
-  }),
-
-  http.put("*/usermemorystore/memories", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
-
   http.delete("*/usermemorystore/memories/entry/:entryId", () => {
     return new HttpResponse(null, { status: 204 });
   }),
@@ -4899,12 +4770,6 @@ const MOCK_TRIGGERS = [
 export const triggerHandlers = [
   http.get("*/AgentTriggerStore/agenttriggers", () => {
     return HttpResponse.json(MOCK_TRIGGERS);
-  }),
-
-  http.get("*/AgentTriggerStore/agenttriggers/:intent", ({ params }) => {
-    const found = MOCK_TRIGGERS.find((t) => t.intent === params.intent);
-    if (!found) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json(found);
   }),
 
   http.post("*/AgentTriggerStore/agenttriggers", () => {

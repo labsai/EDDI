@@ -81,7 +81,7 @@ class UserMemoryToolScopingTest {
     void forgetFactRefusesForeignSelfEntry() throws Exception {
         var foreignPrivate = entry("foreign-1", "salary", Visibility.self, AGENT_A, List.of(), Instant.now());
         when(store.getByKey(USER, "salary")).thenReturn(Optional.of(foreignPrivate));
-        when(store.filterEntries(USER, "salary")).thenReturn(List.of(foreignPrivate));
+        when(store.getAllEntries(USER)).thenReturn(List.of(foreignPrivate));
 
         String result = toolFor(AGENT_B, List.of()).forgetFact("salary");
 
@@ -95,13 +95,29 @@ class UserMemoryToolScopingTest {
         var foreignPrivate = entry("foreign-1", "salary", Visibility.self, AGENT_A, List.of(), Instant.now());
         var ownEntry = entry("own-1", "salary", Visibility.self, AGENT_B, List.of(), Instant.now());
         when(store.getByKey(USER, "salary")).thenReturn(Optional.of(foreignPrivate));
-        when(store.filterEntries(USER, "salary")).thenReturn(List.of(foreignPrivate, ownEntry));
+        when(store.getAllEntries(USER)).thenReturn(List.of(foreignPrivate, ownEntry));
 
         String result = toolFor(AGENT_B, List.of()).forgetFact("salary");
 
         assertTrue(result.contains("✅ Forgotten"), result);
         verify(store).deleteEntry("own-1");
         verify(store, never()).deleteEntry("foreign-1");
+    }
+
+    @Test
+    @DisplayName("forgetFact finds this agent's own entry even when the capped search would not return it")
+    void forgetFactDoesNotDependOnTheCappedSearch() throws Exception {
+        var foreignPrivate = entry("foreign-1", "name", Visibility.self, AGENT_A, List.of(), Instant.now());
+        var ownEntry = entry("own-1", "name", Visibility.self, AGENT_B, List.of(), Instant.now().minusSeconds(3600));
+        when(store.getByKey(USER, "name")).thenReturn(Optional.of(foreignPrivate));
+        // The search's page is full of newer entries whose keys merely contain "name".
+        when(store.filterEntries(USER, "name")).thenReturn(List.of(foreignPrivate));
+        when(store.getAllEntries(USER)).thenReturn(List.of(foreignPrivate, ownEntry));
+
+        String result = toolFor(AGENT_B, List.of()).forgetFact("name");
+
+        assertTrue(result.contains("✅ Forgotten"), result);
+        verify(store).deleteEntry("own-1");
     }
 
     // ==================== G4 — onCapReached ====================

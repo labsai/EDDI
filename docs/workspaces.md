@@ -309,10 +309,27 @@ Three properties are worth knowing:
   any colleague's live agent.
 - **Starting a conversation** requires `USE`. An anonymous caller on the public
   production endpoints therefore reaches **published agents only**.
-- **Schedules, triggers and group membership** are checked when they are
-  *authored*: creating or re-pointing one at an agent requires `USE` on that
-  agent. The fire (or the group's member turn) runs system-initiated and is
-  deliberately not re-checked — the vet happens where the human is.
+- **Schedules and group membership** are checked when they are *authored*:
+  creating or re-pointing one at an agent requires `USE` on that agent. The fire
+  (or the group's member turn) runs system-initiated and is deliberately not
+  re-checked — the vet happens where the human is.
+- **Agent triggers** (managed-agent intents) require `EDIT` on every agent the
+  trigger routes to — the agents it routes to now *and*, for an update, the ones
+  it routed to before — to create, re-point or delete one. A trigger has no owner
+  of its own, and re-pointing an intent hands every conversation it routes to a
+  different agent: that is a change to how those agents are reached, not a use
+  of them. (Up to 6.5 the bar was `USE`, so anybody an agent had been shared with
+  for chatting could aim another team's intent at their own agent.) A `PUT` must
+  name the intent it addresses, or none; renaming is a create plus a delete.
+- **Deployment and capability listings** (`GET /deploymentstore/deployments`,
+  `GET /capabilities`, `GET /administration/{env}/deploymentstatus/{agentId}`)
+  answer only for agents the caller may `USE`, like the deployment-status
+  listing always did.
+- **User memories recalled for a group** (`…/visible?groupId=`, MCP
+  `get_visible_memories`) require `USE` on each group named. With workspaces
+  off they require that the caller takes part in the group — started a
+  discussion of it or is one of its `HUMAN` members — because a group id also
+  admits the team-owned `group:<id>` lessons a RETRO writes.
 - **The OpenAI-compatible `/v1` API** serves **published agents only** under
   enforcement, and lists only those. It authenticates with one shared key and
   takes the user id from a header, so there is no verified principal to scope

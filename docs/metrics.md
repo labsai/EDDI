@@ -271,6 +271,7 @@ eddi_schedule_poll_count_total              # Poll cycles
 eddi_schedule_fire_count_total              # Schedules fired
 eddi_schedule_fire_failed_total             # Fire failures
 eddi_schedule_fire_skipped_total            # Fires the coordinator dropped without running the turn
+eddi_schedule_fire_timedout_total           # Fires interrupted at eddi.schedule.fire-timeout (recorded FAILED, retried)
 eddi_schedule_claim_conflict_total          # Claim conflicts (multi-instance)
 eddi_schedule_fire_deadlettered_total       # Dead-lettered schedules
 eddi_schedule_fire_duration_seconds         # Fire latency (timer)
@@ -438,6 +439,7 @@ eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMo
 eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
 eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
 eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
+eddi_llm_failure_total                      # Failed cascade steps by failure class; tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
@@ -454,6 +456,8 @@ expensive one.
 
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
+eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty)
+eddi_llm_recovery_total                     # Turns answered with the configured fallback; tags: action (fallback), outcome (served), trigger (onError|validation)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)

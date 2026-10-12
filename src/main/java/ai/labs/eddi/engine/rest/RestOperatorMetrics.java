@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.rest;
 
+import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -29,7 +30,6 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * REST implementation of {@link IRestOperatorMetrics}. Validates, then
@@ -152,7 +152,7 @@ public class RestOperatorMetrics implements IRestOperatorMetrics {
                 .arguments("{}")
                 .build();
         ToolApprovalGate.GateResult result = toolApprovalGate.classify(
-                List.of(synthetic), toolSources, toolEndpoints, approvals, Set.of());
+                List.of(synthetic), toolSources, toolEndpoints, approvals, ClearedToolCalls.none());
 
         boolean gated = !result.gated().isEmpty();
         return new OperatorGateDryRunResult(true, gated, gated ? result.gateReasonByCallId().get("gate-dry-run") : null);

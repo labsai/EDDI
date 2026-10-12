@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -186,7 +185,7 @@ class ToolApprovalRulesTest {
                 rule("http.post:/agentstore/agents", HitlTimeoutPolicy.AUTO_APPROVE, "PT1M"));
         var batch = List.of(req("1", "listAgents"), req("2", "createAgent"));
 
-        var result = new ToolApprovalGate().classify(batch, SOURCES, ENDPOINTS, config, Set.of());
+        var result = new ToolApprovalGate().classify(batch, SOURCES, ENDPOINTS, config, ClearedToolCalls.none());
 
         // The exempt GET stays allowed although a rule names it; the required POST
         // stays gated although its rule is the most permissive policy there is.

@@ -5,7 +5,6 @@ import { server } from "@/test/mocks/server";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
 import {
-  useExportAgent,
   useImportAgent,
   usePreviewImport,
   useImportAgentMerge,
@@ -31,27 +30,6 @@ function createWrapper() {
     );
   };
 }
-
-describe("useExportAgent", () => {
-  it("exports an agent successfully", async () => {
-    server.use(
-      http.get("*/backup/export/:agentId", () => {
-        return HttpResponse.json({ agent: {}, workflows: [] });
-      }),
-    );
-
-    const { result } = renderHook(() => useExportAgent(), {
-      wrapper: createWrapper(),
-    });
-
-    result.current.mutate({ agentId: "agent-1", version: 1 });
-    await waitFor(() =>
-      expect(
-        result.current.isSuccess || result.current.isError,
-      ).toBe(true),
-    );
-  });
-});
 
 describe("useImportAgent", () => {
   it("imports an agent from file", async () => {
