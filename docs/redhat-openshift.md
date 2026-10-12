@@ -177,7 +177,7 @@ docker run -i --rm --network eddi -p 127.0.0.1:7070:7070 \
   -e EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_MCP_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true \
-  labsai/eddi:6.4.0
+  labsai/eddi:6.5.0
 ```
 
 Open `http://localhost:7070`. Clean up with `docker rm -f mongodb` and `docker network rm eddi`.

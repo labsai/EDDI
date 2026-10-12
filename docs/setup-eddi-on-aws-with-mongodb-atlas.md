@@ -93,7 +93,7 @@ the `<...>` placeholders:
   "containerDefinitions": [
     {
       "name": "eddi",
-      "image": "docker.io/labsai/eddi:6.4.0",
+      "image": "docker.io/labsai/eddi:6.5.0",
       "essential": true,
       "portMappings": [
         { "containerPort": 7070, "hostPort": 7070, "protocol": "tcp" }
