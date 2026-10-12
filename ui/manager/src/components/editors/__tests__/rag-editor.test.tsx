@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useState } from "react";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
@@ -157,7 +157,7 @@ describe("RagEditor", () => {
 
   // ── Provider switching ─────────────────────────────────────────────────────
 
-  it("changes embedding provider and auto-populates params", async () => {
+  it("changes embedding provider without pre-filling any parameter", async () => {
     const user = userEvent.setup();
     renderWithProviders(
       <RagEditor data={populatedConfig} onChange={onChange} />
@@ -169,10 +169,7 @@ describe("RagEditor", () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         embeddingProvider: "ollama",
-        embeddingParameters: expect.objectContaining({
-          model: "",
-          baseUrl: "",
-        }),
+        embeddingParameters: undefined,
       })
     );
   });
@@ -181,10 +178,8 @@ describe("RagEditor", () => {
     renderWithProviders(
       <RagEditor data={populatedConfig} onChange={onChange} />
     );
-    expect(screen.getByDisplayValue("model")).toBeInTheDocument();
-    expect(
-      screen.getByDisplayValue("text-embedding-3-small")
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("embed-row-model")).toHaveAttribute("data-state", "custom");
+    expect(screen.getByTestId("embed-value-model")).toHaveValue("text-embedding-3-small");
   });
 
   // ── Store type switching ───────────────────────────────────────────────────
@@ -198,9 +193,7 @@ describe("RagEditor", () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         storeType: "mongodb-atlas",
-        storeParameters: expect.objectContaining({
-          connectionString: "${vault:mongo-uri}",
-        }),
+        storeParameters: undefined,
       })
     );
   });
@@ -209,8 +202,8 @@ describe("RagEditor", () => {
     renderWithProviders(
       <RagEditor data={populatedConfig} onChange={onChange} />
     );
-    expect(screen.getByDisplayValue("host")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("localhost")).toBeInTheDocument();
+    expect(screen.getByTestId("store-row-host")).toBeInTheDocument();
+    expect(screen.getByTestId("store-value-host")).toHaveValue("localhost");
   });
 
   it("marks pgvector store button as selected", () => {
@@ -380,35 +373,103 @@ describe("RagEditor", () => {
     expect(screen.getByTestId("store-chroma")).toBeInTheDocument();
   });
 
-  // ── Auto-suggest hint keys ─────────────────────────────────────────────────
+  // ── Known parameters: defaults, examples, required ─────────────────────────
 
-  it("shows auto-suggest hint buttons for missing embedding params", () => {
-    const configWithMinimalParams: RagConfig = {
-      embeddingProvider: "openai",
-      embeddingParameters: {},
-    };
+  it("lists every known parameter, each saying what an empty field does", () => {
     renderWithProviders(
-      <RagEditor data={configWithMinimalParams} onChange={onChange} />
+      <RagEditor data={{ embeddingProvider: "openai", embeddingParameters: {} }} onChange={onChange} />
     );
-    // OpenAI hints include "model" and "apiKey" which are not in empty params
-    expect(screen.getByText("+ model")).toBeInTheDocument();
-    expect(screen.getByText("+ apiKey")).toBeInTheDocument();
+    expect(screen.getByTestId("embed-row-model")).toHaveAttribute("data-state", "default");
+    expect(screen.getByTestId("embed-value-model")).toHaveValue("");
+    expect(screen.getByTestId("embed-value-model")).toHaveAttribute(
+      "placeholder",
+      "Default: text-embedding-3-small",
+    );
+    expect(screen.getByTestId("embed-row-apiKey")).toBeInTheDocument();
+    expect(screen.getByTestId("embed-defaults-note")).toBeInTheDocument();
   });
 
-  it("adds a hint key when clicked", async () => {
-    const user = userEvent.setup();
-    const configWithMinimalParams: RagConfig = {
-      embeddingProvider: "openai",
-      embeddingParameters: {},
-    };
+  it("names the real backend default, not a sample, for a per-KB table", () => {
     renderWithProviders(
-      <RagEditor data={configWithMinimalParams} onChange={onChange} />
+      <RagEditor
+        data={{ storeType: "pgvector", storeParameters: {} }}
+        onChange={onChange}
+        resourceId="6789abcdef0123456789abcd"
+      />
     );
-    await user.click(screen.getByText("+ model"));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embeddingParameters: expect.objectContaining({ model: "" }),
-      })
+    // EmbeddingStoreFactory derives eddi_kb_<id>; the old hint showed a fixed
+    // "embeddings", which made every KB that copied it share one table.
+    expect(screen.getByTestId("store-value-table")).toHaveAttribute(
+      "placeholder",
+      "Default: eddi_kb_6789abcdef0123456789abcd",
+    );
+    expect(screen.getByTestId("store-value-user")).toHaveAttribute("placeholder", "Default: eddi");
+  });
+
+  it("marks a sample value as a sample and a required field as required", () => {
+    renderWithProviders(
+      <RagEditor data={{ embeddingProvider: "vertex", embeddingParameters: {} }} onChange={onChange} />
+    );
+    expect(screen.getByTestId("embed-value-project")).toHaveAttribute(
+      "placeholder",
+      "Required — e.g. my-gcp-project",
+    );
+  });
+
+  it("removes the key when a field is cleared — it never saves an empty value", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor
+        data={{ embeddingProvider: "ollama", embeddingParameters: { model: "x" } }}
+        onChange={onChange}
+      />
+    );
+    await user.clear(screen.getByTestId("embed-value-model"));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ embeddingParameters: undefined })
+    );
+  });
+
+  it("sets a known parameter when one is typed", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={{ embeddingProvider: "ollama", embeddingParameters: {} }} onChange={onChange} />
+    );
+    await user.type(screen.getByTestId("embed-value-model"), "b");
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ embeddingParameters: { model: "b" } })
+    );
+  });
+
+  it("flags an empty value saved by an older editor and resets it to the default", async () => {
+    // A key present with "" is not absent: the backend's getOrDefault returns
+    // "" and the provider gets an empty model name.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor
+        data={{ embeddingProvider: "ollama", embeddingParameters: { model: "", baseUrl: "http://o:1" } }}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByTestId("embed-empty-model")).toBeInTheDocument();
+    expect(screen.queryByTestId("embed-empty-baseUrl")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("embed-use-default-model"));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ embeddingParameters: { baseUrl: "http://o:1" } })
+    );
+  });
+
+  it("drops every empty value when it saves anything", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor
+        data={{ embeddingProvider: "ollama", embeddingParameters: { model: "", baseUrl: "" } }}
+        onChange={onChange}
+      />
+    );
+    await user.type(screen.getByTestId("embed-value-model"), "m");
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ embeddingParameters: { model: "m" } })
     );
   });
 
@@ -439,156 +500,131 @@ describe("RagEditor", () => {
     );
   });
 
-  // ── Vault reference values ─────────────────────────────────────────────────
+  // ── Nothing invented on a switch ───────────────────────────────────────────
 
-  it("renders vault reference placeholder for apiKey in hint buttons", () => {
-    const configWithMinimalParams: RagConfig = {
-      embeddingProvider: "openai",
-      embeddingParameters: {},
-    };
-    renderWithProviders(
-      <RagEditor data={configWithMinimalParams} onChange={onChange} />
-    );
-    // apiKey hint should auto-populate the vault placeholder when clicked
-    expect(screen.getByText("+ apiKey")).toBeInTheDocument();
+  // The defect this guards: switching provider or store wrote each hint's
+  // example into the config as its value, so a knowledge base ended up
+  // referencing ${vault:openai-key}, ${eddivault:gemini-key}, … — vault keys
+  // nobody had created — and every other parameter as "", which the backend
+  // uses instead of its default.
+  it.each(["openai", "azure-openai", "ollama", "mistral", "bedrock", "cohere", "vertex", "gemini"])(
+    "switching the embedding provider to %s writes no parameter at all",
+    async (provider) => {
+      const user = userEvent.setup();
+      renderWithProviders(
+        <RagEditor data={{ embeddingProvider: provider === "openai" ? "cohere" : "openai" }} onChange={onChange} />
+      );
+      await user.selectOptions(screen.getByTestId("embedding-provider"), provider);
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ embeddingProvider: provider, embeddingParameters: undefined })
+      );
+    },
+  );
+
+  it.each(["pgvector", "mongodb-atlas", "elasticsearch", "qdrant", "chroma"])(
+    "switching the vector store to %s writes no parameter at all",
+    async (store) => {
+      const user = userEvent.setup();
+      renderWithProviders(<RagEditor data={{ storeType: "in-memory" }} onChange={onChange} />);
+      await user.click(screen.getByTestId(`store-${store}`));
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ storeType: store, storeParameters: undefined })
+      );
+    },
+  );
+
+  it("restores what a provider had earlier in the session when switching back", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [data, setData] = useState<RagConfig>({
+        embeddingProvider: "ollama",
+        embeddingParameters: { model: "bge-m3" },
+      });
+      return <RagEditor data={data} onChange={setData} />;
+    }
+    renderWithProviders(<Harness />);
+    await user.selectOptions(screen.getByTestId("embedding-provider"), "openai");
+    expect(screen.getByTestId("embed-value-model")).toHaveValue("");
+    await user.selectOptions(screen.getByTestId("embedding-provider"), "ollama");
+    expect(screen.getByTestId("embed-value-model")).toHaveValue("bge-m3");
   });
 
-  it("auto-fills vault placeholder when clicking apiKey hint", async () => {
-    const user = userEvent.setup();
-    const configWithMinimalParams: RagConfig = {
-      embeddingProvider: "openai",
-      embeddingParameters: {},
-    };
+  it("asks for a vault secret on a credential field instead of suggesting a key name", () => {
     renderWithProviders(
-      <RagEditor data={configWithMinimalParams} onChange={onChange} />
+      <RagEditor data={{ embeddingProvider: "gemini", embeddingParameters: {} }} onChange={onChange} />
     );
-    await user.click(screen.getByText("+ apiKey"));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embeddingParameters: expect.objectContaining({
-          apiKey: "${vault:openai-key}",
-        }),
-      })
-    );
+    const row = screen.getByTestId("embed-row-apiKey");
+    expect(row.innerHTML).not.toMatch(/gemini-key|openai-key/);
+    expect(row.innerHTML).toContain("Required — pick a vault secret");
   });
 
-  // ── KeyValue editing ───────────────────────────────────────────────────────
+  // ── Parameters the editor has no hint for ──────────────────────────────────
 
-  it("adds parameter via Add Parameter button", async () => {
+  function StatefulEditor({ initial, spy }: { initial: RagConfig; spy: (c: RagConfig) => void }) {
+    const [data, setData] = useState<RagConfig>(initial);
+    return (
+      <RagEditor
+        data={data}
+        onChange={(c) => {
+          spy(c);
+          setData(c);
+        }}
+      />
+    );
+  }
+
+  it("keeps an added parameter on screen but out of the config until it has a value", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
+      <StatefulEditor initial={{ embeddingProvider: "ollama", embeddingParameters: {} }} spy={onChange} />
     );
-    // Click "Add Parameter" for store params
-    const addBtns = screen.getAllByText("Add Parameter");
-    // At least one "Add Parameter" button for embedding params and one for store params
-    await user.click(addBtns[0]!);
-    expect(onChange).toHaveBeenCalled();
-  });
+    await user.click(screen.getByTestId("embed-add"));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("embed-custom-row")).toBeInTheDocument();
 
-  // ── Embedding provider switching ───────────────────────────────────────────
-
-  it("switches embedding provider to azure-openai", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
-    );
-    await user.selectOptions(
-      screen.getByTestId("embedding-provider"),
-      "azure-openai"
-    );
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embeddingProvider: "azure-openai",
-        embeddingParameters: expect.objectContaining({
-          endpoint: "",
-        }),
-      })
-    );
-  });
-
-  it("switches embedding provider to mistral", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
-    );
-    await user.selectOptions(
-      screen.getByTestId("embedding-provider"),
-      "mistral"
-    );
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embeddingProvider: "mistral",
-      })
-    );
-  });
-
-  it("switches embedding provider to gemini", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
-    );
-    await user.selectOptions(
-      screen.getByTestId("embedding-provider"),
-      "gemini"
-    );
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embeddingProvider: "gemini",
-        embeddingParameters: expect.objectContaining({
-          apiKey: "${eddivault:gemini-key}",
-        }),
-      })
+    const key = screen.getByTestId("embed-custom-key");
+    await user.clear(key);
+    await user.type(key, "timeout");
+    await user.type(screen.getByTestId("embed-value-timeout"), "30");
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ embeddingParameters: { timeout: "30" } })
     );
   });
 
-  // ── Store type switching ───────────────────────────────────────────────────
-
-  it("switches to elasticsearch store", async () => {
+  it("clearing a custom value removes it from the config but keeps the row, in place and focused", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
+      <StatefulEditor
+        initial={{ embeddingProvider: "ollama", embeddingParameters: { timeout: "30", retries: "2" } }}
+        spy={onChange}
+      />
     );
-    await user.click(screen.getByTestId("store-elasticsearch"));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        storeType: "elasticsearch",
-        storeParameters: expect.objectContaining({
-          serverUrl: "",
-        }),
-      })
+    const input = screen.getByTestId("embed-value-timeout");
+    await user.clear(input);
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ embeddingParameters: { retries: "2" } })
+    );
+    // Same element: typing continues where it was.
+    expect(screen.getByTestId("embed-value-timeout")).toBe(input);
+    expect(input).toHaveFocus();
+    const rows = screen.getAllByTestId("embed-custom-row").map((r) => r.getAttribute("data-key"));
+    expect(rows).toEqual(["timeout", "retries"]);
+    await user.type(input, "5");
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ embeddingParameters: { timeout: "5", retries: "2" } })
     );
   });
 
-  it("switches to qdrant store", async () => {
+  it("refuses to rename a custom parameter onto a known one", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
+      <StatefulEditor initial={{ embeddingProvider: "ollama", embeddingParameters: { x: "1" } }} spy={onChange} />
     );
-    await user.click(screen.getByTestId("store-qdrant"));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        storeType: "qdrant",
-        storeParameters: expect.objectContaining({
-          host: "",
-        }),
-      })
-    );
-  });
-
-  it("switches to chroma store", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <RagEditor data={populatedConfig} onChange={onChange} />
-    );
-    await user.click(screen.getByTestId("store-chroma"));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        storeType: "chroma",
-        storeParameters: expect.objectContaining({
-          baseUrl: "",
-        }),
-      })
+    const key = screen.getByTestId("embed-custom-key");
+    await user.clear(key);
+    await user.type(key, "model");
+    expect(onChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ embeddingParameters: expect.objectContaining({ model: "1" }) })
     );
   });
 
@@ -793,9 +829,9 @@ describe("RagEditor", () => {
     renderWithProviders(
       <RagEditor data={config} onChange={onChange} />
     );
-    // MongoDB Atlas hints include connectionString, databaseName, etc.
-    expect(screen.getByText("+ connectionString")).toBeInTheDocument();
-    expect(screen.getByText("+ databaseName")).toBeInTheDocument();
+    // MongoDB Atlas parameters include connectionString, databaseName, etc.
+    expect(screen.getByTestId("store-row-connectionString")).toBeInTheDocument();
+    expect(screen.getByTestId("store-row-databaseName")).toBeInTheDocument();
   });
 
   // ── ${connection:…} is refused by embedding models and vector stores ──────
@@ -810,8 +846,8 @@ describe("RagEditor", () => {
     };
     renderWithProviders(<RagEditor data={config} onChange={onChange} />);
 
-    expect(screen.getByTestId("embed-connection-warning-1")).toHaveTextContent("${vault:");
-    expect(screen.queryByTestId("embed-connection-warning-0")).not.toBeInTheDocument();
+    expect(screen.getByTestId("embed-connection-warning-apiKey")).toHaveTextContent("${vault:");
+    expect(screen.queryByTestId("embed-connection-warning-model")).not.toBeInTheDocument();
   });
 
   it("warns about one in a vector-store parameter too, and offers no connection picker", () => {
@@ -821,7 +857,7 @@ describe("RagEditor", () => {
     };
     renderWithProviders(<RagEditor data={config} onChange={onChange} />);
 
-    expect(screen.getByTestId("store-connection-warning-0")).toBeInTheDocument();
+    expect(screen.getByTestId("store-connection-warning-apiKey")).toBeInTheDocument();
     expect(screen.queryByTestId("store-apiKey-connection-btn")).not.toBeInTheDocument();
   });
 });
