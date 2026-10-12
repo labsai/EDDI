@@ -411,7 +411,7 @@ public class PrePostUtils {
         var rowDelimiter = "eddiRow" + nonce;
 
         var template = new StringBuilder();
-        template.append("{#for ").append(iterationObjectName).append(" in ").append(pathToTargetArray).append("}");
+        template.append("{#for ").append(iterationObjectName).append(" in ").append(orEmpty(pathToTargetArray)).append("}");
 
         boolean filtered = !isNullOrEmpty(templateFilterExpression);
         if (filtered) {
@@ -457,6 +457,29 @@ public class PrePostUtils {
         }
 
         return rows;
+    }
+
+    /**
+     * Make an iterable expression tolerant of a missing value. Without it, a path
+     * the upstream response did not contain (e.g. an LLM reply without a
+     * {@code quickReplies} array) makes Qute fail the whole turn with
+     * {@code Iteration error - {...} not found}; with it, the loop simply runs zero
+     * times, which is what the 5.x engine did.
+     * <p>
+     * The suffix is left off when the author already handled the missing case: an
+     * expression that already ends in {@code .orEmpty}, one using an elvis/default
+     * operator ({@code ?:}, {@code ??}, {@code or}), or a literal range.
+     */
+    static String orEmpty(String iterable) {
+        if (iterable == null) {
+            return null;
+        }
+        var trimmed = iterable.strip();
+        if (trimmed.isEmpty() || trimmed.endsWith(".orEmpty") || trimmed.endsWith(".orEmpty()") || trimmed.contains("?:")
+                || trimmed.contains("??") || trimmed.contains(" or ") || trimmed.contains("..")) {
+            return trimmed;
+        }
+        return trimmed + ".orEmpty";
     }
 
     private static Map<String, Object> createOutputItem(String outputType, String text) {

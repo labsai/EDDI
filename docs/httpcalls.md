@@ -249,6 +249,8 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.postResponse.propertyInstructions.httpCodeValidator.runOnHttpCode  | (`Array`: \<Integer> ) a list of http code that enables this property instruction e.g \[`200`]                                                                                                                                   |
 | httpCall.postResponse.propertyInstructions.httpCodeValidator.skipOnHttpCode | (`Array`: \<Integer>) list of http code that enables this property instruction e.g \[`500,501,400`]                                                                                                                              |
 
+**A missing array is an empty loop.** Quick-reply and output build instructions iterate `pathToTargetArray` with `.orEmpty` appended (unless you already wrote it, or use `?:`, `??` or `or`), so a response that does not contain the array yields no quick replies or output items instead of failing the turn with `Iteration error ... not found`.
+
 ### HttpCall API endpoints
 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |
