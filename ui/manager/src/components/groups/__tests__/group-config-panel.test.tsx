@@ -97,20 +97,23 @@ describe("GroupConfigPanel", () => {
     const user = userEvent.setup();
 
     const deletedAgents: string[] = [];
+    const agentPermanentFlags: (string | null)[] = [];
     let groupDeleted = false;
+    let groupDeleteUrl: URL | null = null;
 
     server.use(
       http.get("*/agentstore/agents/:agentId/currentversion", () => {
         return HttpResponse.json(1);
       }),
-      http.delete("*/agentstore/agents/:agentId", ({ params }) => {
+      http.delete("*/agentstore/agents/:agentId", ({ params, request }) => {
+        agentPermanentFlags.push(new URL(request.url).searchParams.get("permanent"));
         deletedAgents.push(params.agentId as string);
         return new HttpResponse(null, { status: 204 });
       }),
       http.delete("*/groupstore/groups/:groupId", ({ request }) => {
-        const url = new URL(request.url);
-        expect(url.searchParams.get("permanent")).toBe("false");
-        expect(url.searchParams.get("version")).toBe("1");
+        // Recorded and asserted OUTSIDE the handler: an `expect` that throws in
+        // here only turns into a 500, which the test would read as "deleted".
+        groupDeleteUrl = new URL(request.url);
         groupDeleted = true;
         return new HttpResponse(null, { status: 204 });
       })
@@ -125,14 +128,15 @@ describe("GroupConfigPanel", () => {
 
     await user.click(deleteBtn);
 
-    // Warning should show up
-    expect(screen.getByText(/This will soft-delete the group/)).toBeInTheDocument();
+    // Warning should show up, with the hard-delete option unticked
+    expect(screen.getByTestId("group-delete-warning")).toBeInTheDocument();
+    expect(screen.getByTestId("permanent-delete-checkbox")).not.toBeChecked();
 
     // Cancel deletes
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     await user.click(cancelBtn);
 
-    expect(screen.queryByText(/This will soft-delete the group/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("group-delete-warning")).not.toBeInTheDocument();
 
     // Open again and confirm deletion
     const deleteBtnFresh = screen.getByRole("button", { name: "Delete Group + All Agents" });
@@ -146,6 +150,62 @@ describe("GroupConfigPanel", () => {
       expect(deletedAgents).toContain("agent-mod");
       expect(deletedAgents).toContain("agent-peer");
       expect(deletedAgents).not.toContain("agent-group-sub");
+    });
+    expect(groupDeleteUrl!.searchParams.get("permanent")).toBe("false");
+    expect(groupDeleteUrl!.searchParams.get("version")).toBe("1");
+    // Soft for the agents too — deleteAgent only sends the flag when it is true.
+    expect(agentPermanentFlags.every((f) => f === null)).toBe(true);
+  });
+
+  describe("Delete Group Only (review 2026-10-02 #7)", () => {
+    function captureGroupDelete() {
+      const urls: URL[] = [];
+      server.use(
+        http.delete("*/groupstore/groups/:groupId", ({ request }) => {
+          urls.push(new URL(request.url));
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+      return urls;
+    }
+
+    it("soft-deletes by default — it used to send permanent=true and take the workspace with it", async () => {
+      const user = userEvent.setup();
+      const urls = captureGroupDelete();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="grp-1" groupVersion={4} />);
+
+      await user.click(screen.getByTestId("group-delete-only-btn"));
+      expect(screen.getByTestId("permanent-delete-checkbox")).not.toBeChecked();
+      await user.click(screen.getByTestId("group-delete-confirm-btn"));
+
+      await waitFor(() => expect(urls).toHaveLength(1));
+      expect(urls[0]!.searchParams.get("permanent")).toBe("false");
+      expect(urls[0]!.searchParams.get("version")).toBe("4");
+    });
+
+    it("hard-deletes only when 'Delete permanently' is ticked, and says so on the button", async () => {
+      const user = userEvent.setup();
+      const urls = captureGroupDelete();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="grp-1" groupVersion={4} />);
+
+      await user.click(screen.getByTestId("group-delete-only-btn"));
+      await user.click(screen.getByTestId("permanent-delete-checkbox"));
+      expect(screen.getByTestId("group-delete-confirm-btn")).toHaveTextContent("Delete permanently");
+      await user.click(screen.getByTestId("group-delete-confirm-btn"));
+
+      await waitFor(() => expect(urls).toHaveLength(1));
+      expect(urls[0]!.searchParams.get("permanent")).toBe("true");
+    });
+
+    it("forgets the permanent choice when the confirmation is cancelled", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="grp-1" groupVersion={4} />);
+
+      await user.click(screen.getByTestId("group-delete-only-btn"));
+      await user.click(screen.getByTestId("permanent-delete-checkbox"));
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await user.click(screen.getByTestId("group-delete-only-btn"));
+      expect(screen.getByTestId("permanent-delete-checkbox")).not.toBeChecked();
     });
   });
 

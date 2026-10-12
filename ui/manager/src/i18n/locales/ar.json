@@ -218,7 +218,9 @@
     "removeItem": "إزالة {{item}}",
     "stepOf": "الخطوة {{current}} من {{total}}",
     "versionShort": "الإصدار {{version}}",
-    "resizePanel": "تغيير حجم {{panel}}"
+    "resizePanel": "تغيير حجم {{panel}}",
+    "deletePermanently": "حذف نهائي",
+    "deletePermanentlyHint": "لا يمكن التراجع عن ذلك. بدون هذا الخيار، يتم وضع علامة الحذف على العنصر فقط ويظل قابلاً للاستعادة حتى تتم إزالته نهائياً."
   },
   "agents": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة الوكيل وجميع بياناته نهائياً.",
@@ -462,7 +464,8 @@
       "notice": "ما تُبلغ به المحادثة الأشخاص (اتركه فارغاً لاستخدام الصياغة القياسية)",
       "noticePlaceholder": "قد يقرأ الأشخاص الذين يشرفون على هذا الوكيل المحادثات معه، بهدف تحسينه.",
       "versionNote": "يشمل المحادثات على الإصدار الذي ينشئه هذا التغيير وما يليه — وليس أبداً ما قيل من قبل. لا تستطيع Slack وTeams وعملاء API عرض الإشعار؛ إذا كان الأشخاص يصلون إلى هذا الوكيل من خلالها، فاذكر ذلك في رسالة الترحيب."
-    }
+    },
+    "copyUrl": "نسخ عنوان URL"
   },
   "wizard": {
     "title": "معالج Agent"
@@ -481,7 +484,7 @@
     "backToAgents": "العودة إلى Agents",
     "next": "التالي",
     "back": "رجوع",
-    "createOnly": "إنشاء فقط",
+    "createOnly": "إنشاء دون نشر",
     "createAndDeploy": "إنشاء ونشر",
     "typeTitle": "ما نوع Agent؟",
     "typeDesc": "اختر نوع Agent الذي تريد إنشاءه",
@@ -571,7 +574,25 @@
     "specUrlScheme": "يتم دعم عناوين http:// و https:// فقط",
     "lastToolHint": "يجب أن تبقى أداة واحدة على الأقل محددة. أوقف تشغيل الأدوات المدمجة لتعطيلها جميعًا.",
     "hfToken": "رمز Hugging Face",
-    "hfTokenHint": "مطلوب فقط للمستودعات المقيّدة أو الخاصة. يُخزَّن في الخزنة مثل مفتاح API."
+    "hfTokenHint": "مطلوب فقط للمستودعات المقيّدة أو الخاصة. يُخزَّن في الخزنة مثل مفتاح API.",
+    "stepLabel": "الخطوة {{n}} من {{total}}: {{name}}",
+    "createAndDeployProduction": "إنشاء ونشر في الإنتاج",
+    "createAndDeployTest": "إنشاء ونشر في الاختبار",
+    "reviewKeyNotNeeded": "غير مطلوب لهذا المزوّد",
+    "reviewKeyNone": "لا شيء",
+    "reviewKeyVault": "مرجع الخزنة {{ref}}",
+    "reviewKeyEntered": "أُدخل هنا",
+    "reviewApiKey": "مفتاح API",
+    "reviewBaseUrl": "عنوان URL الأساسي",
+    "deployTarget": "هدف النشر",
+    "deployNoteProduction": "يؤدي «إنشاء ونشر» إلى تشغيل الوكيل في الإنتاج فورًا.",
+    "deployNoteTest": "يبدأ «إنشاء ونشر» الوكيل في بيئة الاختبار؛ انقله إلى الإنتاج عندما تكون راضيًا عنه.",
+    "step_type": "النوع",
+    "step_info": "الهوية",
+    "step_llm": "النموذج",
+    "step_apispec": "مواصفات API",
+    "step_features": "الميزات",
+    "step_review": "المراجعة"
   },
   "packages": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة مسار العمل وجميع بياناته نهائياً.",
@@ -812,7 +833,9 @@
     "reviewNoticeLabel": "مراجعة المحادثات",
     "sendRejected": "لم يتم إرسال رسالتك: {{reason}}",
     "sendWhileLoading": "لم يتم إرسال رسالتك: لا تزال المحادثة قيد التحميل. حاول مرة أخرى بعد لحظة.",
-    "turnFailed": "تعذّر على الوكيل الرد على هذه الرسالة. راجع سجل الخادم أو سجل تدقيق المحادثة لمعرفة السبب."
+    "turnFailed": "تعذّر على الوكيل الرد على هذه الرسالة. راجع سجل الخادم أو سجل تدقيق المحادثة لمعرفة السبب.",
+    "errorWithReason": "خطأ: {{reason}}",
+    "endConversationFailed": "تعذّر إنهاء المحادثة: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "العودة إلى مسار العمل",
@@ -939,7 +962,8 @@
     "savedNotLive": "تم الحفظ — غير مُفعَّل بعد",
     "savedNotLiveDescription": "لا يزال الوكيل قيد التشغيل يقدّم النسخة المنشورة. انشر لتفعيل هذا التغيير.",
     "deployNow": "نشر",
-    "deployStarted": "بدأ النشر"
+    "deployStarted": "بدأ النشر",
+    "invalidJsonNotSaved": "لم يتم الحفظ — JSON غير صالح: {{reason}}"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -974,7 +998,21 @@
     "noRules": "لا توجد قواعد في هذه المجموعة",
     "noConditions": "لا توجد شروط",
     "sizeNoBound": "بلا حد",
-    "sizeBoundInvalid": "يجب أن يكون عددًا صحيحًا بين -2147483648 و2147483647، أو فارغًا لعدم وجود حد."
+    "sizeBoundInvalid": "يجب أن يكون عددًا صحيحًا بين -2147483648 و2147483647، أو فارغًا لعدم وجود حد.",
+    "moveUp": "نقل {{name}} للأعلى",
+    "moveDown": "نقل {{name}} للأسفل",
+    "configValueOf": "قيمة {{key}}",
+    "removeConfig": "إزالة {{key}}",
+    "toggleCondition": "إظهار تفاصيل الشرط أو إخفاؤها",
+    "commaActionsWarning": "تعني القائمة المفصولة بفواصل هنا «و»: يجب أن تكون كل الإجراءات المذكورة قد حدثت، بهذا الترتيب. لمطابقة أي إجراء من عدة إجراءات، أضف شرطًا لكل إجراء ضمن موصّل «أو»، أو أصدر إجراءً مشتركًا.",
+    "changeTypeTitle": "تغيير نوع الشرط؟",
+    "changeTypeDescription": "سيؤدي التبديل إلى {{type}} إلى استبدال إعدادات هذا الشرط بالقيم الافتراضية لذلك النوع. ستفقد القيم التي أدخلتها.",
+    "changeTypeConfirm": "تغيير النوع",
+    "toggleRule": "إظهار تفاصيل القاعدة أو إخفاؤها",
+    "thisRule": "هذه القاعدة",
+    "noLastStepWarning": "لا يوجد actionmatcher على lastStep: قد تُنفَّذ هذه القاعدة في أي خطوة من المحادثة، وليس فقط بعد الإجراء المتوقع. أضف شرط actionmatcher مع occurrence بقيمة lastStep.",
+    "toggleGroup": "إظهار المجموعة أو إخفاؤها",
+    "thisGroup": "هذه المجموعة"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "لم يتم العثور على نقاط نهاية في المواصفة",
@@ -1412,7 +1450,22 @@
     "compatibleEndpointOverridden": "نقطة النهاية: {{url}}",
     "modelType": "نوع النموذج",
     "paramName": "اسم المعامل",
-    "lastToolHint": "يجب أن تبقى أداة واحدة على الأقل محددة. ألغِ تحديد «تمكين الأدوات المدمجة» لتعطيلها جميعًا."
+    "lastToolHint": "يجب أن تبقى أداة واحدة على الأقل محددة. ألغِ تحديد «تمكين الأدوات المدمجة» لتعطيلها جميعًا.",
+    "toggleTask": "إظهار تفاصيل المهمة أو إخفاؤها",
+    "noActionsWarning": "ليس لهذه المهمة إجراء تشغيل، لذلك لن تُنفَّذ أبدًا. أضف الإجراء الذي تُصدره قواعد السلوك لديك، مثل send_message.",
+    "model": "النموذج",
+    "deploymentName": "اسم النشر",
+    "modelName": "النموذج",
+    "modelMissing": "لم يتم تحديد نموذج: سيرفض المزوّد كل الطلبات.",
+    "apiKey": "مفتاح API",
+    "apiKeyNotNeeded": "لا يحتاج هذا المزوّد عادةً إلى مفتاح API.",
+    "temperature": "درجة الحرارة",
+    "temperaturePlaceholder": "الافتراضي للمزوّد",
+    "temperatureInvalid": "أدخل رقمًا، مثل 0.7.",
+    "paramValueOf": "قيمة {{key}}",
+    "removeParam": "إزالة المعامل {{key}}",
+    "accessToken": "رمز الوصول",
+    "authToken": "رمز Hugging Face (اختياري)"
   },
   "outputEditor": {
     "labelPlaceholder": "تسمية الرابط...",
@@ -1453,7 +1506,14 @@
     "maxLength": "الحد الأقصى للطول",
     "maxLengthShort": "الأقصى",
     "validationMsgPlaceholder": "رسالة خطأ التحقق...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "لم يُحفظ؛ صحّحه أو امسح الحقل",
+    "itemType": "نوع المخرج",
+    "removeItem": "إزالة عنصر المخرج",
+    "removeQuickReply": "إزالة الرد السريع",
+    "toggleOutput": "إظهار تفاصيل المخرج أو إخفاؤها",
+    "timesOccurredLabel": "عدد مرات الحدوث",
+    "removeAlternativeGroup": "إزالة مجموعة البدائل {{n}}"
   },
   "propertySetterEditor": {
     "setters": "معيني الخصائص",
@@ -1477,7 +1537,10 @@
     "visibilityTitle": "الوكلاء الذين يمكنهم رؤية خاصية longTerm هذه",
     "editValue": "تعديل القيمة",
     "toggleGroup": "تبديل مجموعة الخصائص",
-    "secretFromPathWarning": "لا يُحفَظ السر في الخزنة إلا إذا جاء من حقل القيمة. إذا قُرئ من «من المسار» أو أُعطي بأي طريقة أخرى فإنه يُخزَّن كنص صريح — أدخله في حقل القيمة أو اختر نطاقًا آخر."
+    "secretFromPathWarning": "لا يُحفَظ السر في الخزنة إلا إذا جاء من حقل القيمة. إذا قُرئ من «من المسار» أو أُعطي بأي طريقة أخرى فإنه يُخزَّن كنص صريح — أدخله في حقل القيمة أو اختر نطاقًا آخر.",
+    "scope": "النطاق",
+    "visibility": "الرؤية",
+    "removeProperty": "إزالة الخاصية"
   },
   "dictionaryEditor": {
     "language": "اللغة",
@@ -1592,7 +1655,8 @@
     "purgeError": "فشل الحذف",
     "empty": "لا تتوفر بيانات المنسق",
     "emptyHint": "قد تكون خدمة المنسق لا تزال في طور البدء. ستظهر البيانات تلقائيًا.",
-    "lastNSnapshots": "آخر {{count}} لقطة"
+    "lastNSnapshots": "آخر {{count}} لقطة",
+    "refreshInterval": "فاصل التحديث التلقائي"
   },
   "contentEditor": {
     "expand": "توسيع",
@@ -2315,7 +2379,8 @@
       "readyTitle": "هل أنت مستعد للبدء؟",
       "readySubtitle": "يمكنك إعادة تشغيل الجولة في أي وقت من قائمة المساعدة في الشريط الجانبي",
       "startTour": "بدء الجولة",
-      "exploreOwn": "سأستكشف بنفسي"
+      "exploreOwn": "سأستكشف بنفسي",
+      "panelN": "اللوحة {{n}}"
     },
     "tour": {
       "back": "الخلف",
@@ -2583,7 +2648,7 @@
     "count_one": "مجموعة {{count}}",
     "count_other": "{{count}} مجموعات",
     "confirmDelete": "حذف هذه المجموعة؟",
-    "confirmDeleteDesc": "سيتم حذف تكوين المجموعة نهائيًا.",
+    "confirmDeleteDesc": "يتم وضع علامة الحذف على المجموعة وتختفي من هذه القائمة.",
     "duplicateSuccess": "تم تكرار المجموعة",
     "noDescription": "بدون وصف",
     "members": "أعضاء",
@@ -2705,8 +2770,8 @@
     "deleteGroupOnlySuccess": "تم حذف المجموعة (تم الاحتفاظ بالوكلاء)",
     "deleteGroupOnlyWarning": "سيؤدي هذا إلى حذف المجموعة. سيتم الاحتفاظ بجميع الوكلاء الأعضاء.",
     "deleteGroupAndAgents": "حذف المجموعة + جميع الوكلاء",
-    "deleteWithMembersSuccess": "تم حذف المجموعة وجميع الوكلاء الأعضاء (حذف مؤقت)",
-    "deleteWithMembersWarning": "سيؤدي هذا إلى الحذف المؤقت للمجموعة وجميع الوكلاء الأعضاء البالغ عددهم {{count}}. يمكن استعادتهم.",
+    "deleteWithMembersSuccess": "تم حذف المجموعة وجميع الوكلاء الأعضاء",
+    "deleteWithMembersWarning": "سيؤدي هذا إلى حذف المجموعة وجميع الوكلاء الأعضاء البالغ عددهم {{count}}.",
     "hideDiscussions": "إخفاء لوحة المناقشات",
     "showDiscussions": "إظهار لوحة المناقشات",
     "hideConfig": "إخفاء لوحة الإعدادات",
@@ -3132,6 +3197,10 @@
       "humanNeedsId_zero": "{{count}} أعضاء بشريون يحتاجون إلى معرّف المستخدم للشخص.",
       "humanNeedsId_other": "{{count}} أعضاء بشريون يحتاجون إلى معرّف المستخدم للشخص."
     },
+    "deletePermanentlyHint": "لا يمكن التراجع عن ذلك: تُحذف المجموعة ومساحة عملها (المهام المعلّقة والوتيرات وجداولها) نهائياً. بدون هذا الخيار، يتم وضع علامة الحذف على المجموعة فقط وتظل قابلة للاستعادة حتى تتم إزالتها نهائياً.",
+    "deletePermanentlyWithMembersHint": "لا يمكن التراجع عن ذلك: تُحذف المجموعة ومساحة عملها وجميع الوكلاء الأعضاء نهائياً. بدون هذا الخيار، يتم وضع علامة الحذف عليهم فقط ويظلون قابلين للاستعادة حتى تتم إزالتهم نهائياً.",
+    "deleteMembersFailedAfterGroup": "تم حذف المجموعة، لكن تعذّر حذف هؤلاء الوكلاء الأعضاء: {{ids}}. احذفهم من صفحة الوكلاء.",
+    "deleteMembersFailedGroupKept": "تم الإبقاء على المجموعة: تعذّر حذف هؤلاء الوكلاء الأعضاء: {{ids}}. حاول مرة أخرى لإكمال العملية.",
     "transcriptLabel": "نص المناقشة",
     "announceAwaitingApproval": "المناقشة متوقفة مؤقتًا وتنتظر موافقتك.",
     "announceAwaitingHuman": "المناقشة تنتظر رد أحد الأعضاء.",
@@ -3199,7 +3268,9 @@
     "created": "تاريخ الإنشاء",
     "updated": "تاريخ التحديث",
     "sourceConversation": "المحادثة المصدر",
-    "conflicted": "متعارض"
+    "conflicted": "متعارض",
+    "deleteEntryTitle": "حذف هذه الذاكرة؟",
+    "deleteEntryDesc": "تتم إزالة \"{{key}}\" نهائيًا لهذا المستخدم. لن يتذكرها الوكلاء بعد الآن. لا يمكن التراجع عن هذا الإجراء."
   },
   "properties": {
     "title": "خصائص المستخدم",
@@ -3314,7 +3385,9 @@
     "schedulesSkipped_two": "لم يُستورد جدولان زمنيان من الأرشيف لأن التحديد لم يشملهما.",
     "schedulesSkipped_few": "لم تُستورد {{count}} جداول زمنية من الأرشيف لأن التحديد لم يشملها.",
     "schedulesSkipped_many": "لم يُستورد {{count}} جدولاً زمنياً من الأرشيف لأن التحديد لم يشملها.",
-    "schedulesSkipped_other": "لم تُستورد {{count}} جدول زمني من الأرشيف لأن التحديد لم يشملها."
+    "schedulesSkipped_other": "لم تُستورد {{count}} جدول زمني من الأرشيف لأن التحديد لم يشملها.",
+    "moveUp": "نقل لأعلى",
+    "moveDown": "نقل لأسفل"
   },
   "syncPage": {
     "title": "مزامنة الوكلاء",
@@ -3497,7 +3570,11 @@
     "humanTurnTimeoutInvalid": "ليست مدة صالحة بصيغة ISO-8601، مثل PT24H أو P1D.",
     "humanTurnTimeoutLabel": "مهلة الدور (مدة بصيغة ISO-8601)",
     "humanTurnTimeoutPlaceholder": "مثل PT24H — اتركه فارغًا للانتظار إلى أجل غير مسمى",
-    "memberTypeHuman": "بشري"
+    "memberTypeHuman": "بشري",
+    "memberPromptPlaceholder": "أنت {{name}}. قدّم تحليلًا ثاقبًا من منظور مجال تخصصك.",
+    "memberPromptPlaceholderRole": "أنت {{name}}، خبير في {{role}}. قدّم تحليلًا ثاقبًا من منظور مجال تخصصك.",
+    "moderatorPromptPlaceholder": "أنت مشرف حوار متمرّس. لخّص نقاش المجموعة في ملخص واضح ومتوازن…",
+    "modelPlaceholder": "مثال: {{model}}"
   },
   "groupTemplates": {
     "advisoryBoard": "مجلس استشاري",
@@ -3730,6 +3807,7 @@
     "confirmApproveGroupDescription": "الموافقة على المرحلة المتوقفة بالكامل واستئناف النقاش. تُعتمد معها كل مهمة معلَّقة — افتح المجموعة للبتّ فيها فرديًا.",
     "confirmRejectGroupDescription": "رفض المرحلة المتوقفة بالكامل. تُرفض معها كل مهمة تنتظر هذا التوقف، ولا تتجاوزه المناقشة — افتح المجموعة لاتخاذ القرار في كل مهمة على حدة.",
     "pauseChanged": "تغيّر هذا الطلب منذ أن فتحته — لم يُتخذ أي قرار. راجعه مرة أخرى.",
+    "regularTruncated": "يتم عرض أول {{limit}} من موافقات المحادثات — توجد موافقات أخرى معلّقة. اتخذ قرارًا بشأن بعضها لرؤية البقية.",
     "conversationColumn": "المحادثة",
     "groupReviewLoadError": "تعذّر تحميل المناقشة.",
     "groupReviewNoEntries": "لم يُقل أي شيء بعد."
@@ -3762,7 +3840,9 @@
     "secretVault": "خزنة الأسرار",
     "vaultDown": "الخزنة غير متاحة",
     "vaultUp": "الخزنة جاهزة",
-    "viewLogs": "عرض السجلات"
+    "viewLogs": "عرض السجلات",
+    "coordAdminOnly": "المنسق: يتطلب صلاحية المسؤول",
+    "vaultAdminOnly": "الخزنة: تتطلب صلاحية المسؤول"
   },
   "errorBoundary": {
     "retry": "حاول مجدداً",
@@ -3855,7 +3935,10 @@
     "found_other": "تم العثور على {{count}} يتيم",
     "scanIncomplete": "لم يكتمل هذا الفحص",
     "scanIncompleteBody": "قد تظهر موارد لا تزال قيد الاستخدام على أنها يتيمة. التطهير معطَّل حتى يكتمل فحص كامل.",
-    "confirmPurge": "هل تريد حذف جميع الموارد اليتيمة البالغ عددها {{count}} نهائيًا؟ لا يمكن التراجع عن ذلك."
+    "confirmPurge": "هل تريد حذف جميع الموارد اليتيمة البالغ عددها {{count}} نهائيًا؟ لا يمكن التراجع عن ذلك.",
+    "purgeIncompleteScan": "لم يُحذف أي شيء: لم يتمكن EDDI من إكمال التحقق من الموارد التي لا تزال قيد الاستخدام. أعد الفحص ثم حاول مرة أخرى.",
+    "purgeFailed": "فشل التنظيف",
+    "scanFailed": "فشل الفحص: {{reason}}"
   },
   "quotas": {
     "apiCallsMinute": "استدعاءات API / دقيقة",
@@ -3868,7 +3951,6 @@
     "enabled": "مُفعّل",
     "enforcementOff": "الفرض متوقف.",
     "enforcementOffHint": "لا يتم فرض الحصص. فعّل الفرض واحفظ لبدء تطبيق الحدود.",
-    "limitHint": "-1 = غير محدود",
     "liveUsage": "الاستخدام المباشر",
     "maxAgentsPerTenant": "الحد الأقصى للوكلاء / مستأجر",
     "maxApiCallsPerMinute": "الحد الأقصى لاستدعاءات API / دقيقة",
@@ -3881,7 +3963,9 @@
     "resetSuccess": "تمت إعادة تعيين عدّادات الاستخدام",
     "saveSuccess": "تم حفظ الحصة",
     "tenantId": "معرف المستأجر",
-    "title": "حصص المستأجرين"
+    "title": "حصص المستأجرين",
+    "limitHintEmpty": "فارغ أو ‎-1 = غير محدود، 0 = محظور",
+    "invalidNumber": "أدخل رقمًا، أو اترك الحقل فارغًا لعدم التقييد."
   },
   "secretPicker": {
     "clearVault": "مسح مرجع الخزنة",
@@ -4274,7 +4358,7 @@
       "deleteBoard": "حل فريق العمل",
       "deleteBoardDesc": "إزالة إعدادات فريق العمل هذا. سيبقى الوكلاء كما هم.",
       "deleteBoardAll": "حل فريق العمل + جميع الوكلاء",
-      "deleteBoardAllDesc": "إزالة فريق العمل هذا وجميع الوكلاء الأعضاء نهائياً.",
+      "deleteBoardAllDesc": "إزالة فريق المهام هذا وجميع الوكلاء الأعضاء فيه.",
       "unsavedChanges": "لديك تغييرات غير محفوظة",
       "templateSaved": "تم الحفظ كقالب",
       "saveAsTemplate": "الحفظ كقالب",
@@ -4282,8 +4366,8 @@
       "saveChanges": "حفظ التغييرات",
       "deleteAllTitle": "حل فريق العمل وجميع الوكلاء؟",
       "deleteTitle": "حل فريق العمل؟",
-      "deleteAllConfirm": "سيؤدي ذلك إلى حل فريق العمل هذا نهائياً وإزالة جميع الوكلاء الأعضاء فيه. لا يمكن التراجع عن هذا الإجراء.",
-      "deleteConfirm": "سيؤدي ذلك إلى حل إعدادات فريق العمل هذا نهائياً. لن يتأثر الوكلاء الأعضاء.",
+      "deleteAllConfirm": "سيؤدي هذا إلى حل فريق المهام هذا وحذف جميع الوكلاء الأعضاء فيه.",
+      "deleteConfirm": "سيؤدي هذا إلى حل فريق المهام هذا. لن يتأثر الوكلاء الأعضاء.",
       "title": "الإعدادات"
     },
     "nav": {
@@ -4339,7 +4423,7 @@
     },
     "dashboard": {
       "assembleTaskForce": "تشكيل فريق مهام",
-      "bulkDeleteConfirm": "يؤدي هذا إلى حلّ كل فريق مهام محدد ولا يمكن التراجع عنه.",
+      "bulkDeleteConfirm": "سيؤدي هذا إلى حل جميع فرق المهام المحددة. لن يتأثر الوكلاء الأعضاء.",
       "bulkDeleteTitle_few": "حلّ {{count}} فرق مهام؟",
       "bulkDeleteTitle_many": "حلّ {{count}} فريق مهام؟",
       "bulkDeleteTitle_one": "حلّ فريق المهام هذا؟",
@@ -4347,7 +4431,7 @@
       "bulkDeleteTitle_two": "حلّ فريقَي المهام؟",
       "bulkDeleteTitle_zero": "حلّ فرق المهام المحددة؟",
       "cancel": "إلغاء",
-      "deleteConfirm": "هل تريد بالتأكيد حلّ فريق المهام هذا؟ لا يمكن التراجع عن هذا الإجراء.",
+      "deleteConfirm": "هل تريد بالتأكيد حلّ فريق المهام هذا؟ لن يتأثر الوكلاء الأعضاء.",
       "deleteError": "فشل حذف فريق المهام",
       "deletePartialFail": "{{success}} تم حذفها، {{fail}} فشلت",
       "deleteSelected": "حذف",
@@ -4416,7 +4500,8 @@
       "tryDifferent": "جرّب مصطلح بحث آخر",
       "untitled": "محادثة بدون عنوان",
       "loadListError": "فشل تحميل المحادثات",
-      "rejected": "مرفوضة"
+      "rejected": "مرفوضة",
+      "deleteFailed": "تعذّر حذف المحادثة"
     },
     "insights": "الرؤى",
     "memberCount": "{{count}} عضواً",
@@ -5449,7 +5534,10 @@
     "legacyAdminOnly": "مرئية للمسؤولين فقط — بعد تعيين المالكين",
     "lastChanged": "آخر تغيير بواسطة {{who}}",
     "neverChanged": "لم يتغير هنا بعد",
-    "saved": "تم حفظ الإعدادات"
+    "saved": "تم حفظ الإعدادات",
+    "deleteVariableTitle": "حذف هذا المتغير؟",
+    "deleteVariableDescription": "تفقد الوكلاء التي تستخدمه قيمته حتى يتم تخزينه مرة أخرى. لا يمكن التراجع عن هذا الإجراء.",
+    "legacyDefault": "غير محدد هنا — تُطبَّق القيمة الافتراضية (مرئي للجميع)"
   },
   "cascadeSave": {
     "workflowChanged": "تم تغيير سير العمل {{workflowId}} في مكان آخر (الإصدار الحالي {{current}}، وهذه الصفحة تعرض الإصدار {{version}}). أعد تحميل الصفحة. لم يُحفظ شيء.",
@@ -5500,5 +5588,11 @@
     "impactReasonLegacy": "أقدم من تتبّع الإصدارات",
     "impactReasonBreaking": "تغيير غير متوافق",
     "switchNotice": "انتقل الوكيل من v{{from}} إلى v{{to}}"
+  },
+  "actionTags": {
+    "remove": "إزالة {{action}}",
+    "none": "لا توجد إجراءات",
+    "inputLabel": "إجراء جديد",
+    "add": "إضافة إجراء"
   }
 }

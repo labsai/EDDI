@@ -303,29 +303,6 @@ function mergedHeaders(sourceAuth?: string): Record<string, string> {
 // ==================== Existing Export Functions ==
 
 /**
- * Step 1: Trigger export — backend prepares a zip and returns a Location header.
- * POST /backup/export/{agentId}?agentVersion={version}
- */
-export async function exportAgent(
-  agentId: string,
-  version = 1
-): Promise<string> {
-  const res = await fetch(
-    `${api.getBaseUrl()}/backup/export/${agentId}?agentVersion=${version}`,
-    { method: "POST", headers: api.getAuthHeader() }
-  );
-  if (!res.ok) {
-    throw new Error(`Export failed: ${res.statusText}`);
-  }
-  // Location header contains the download path, e.g. /backup/export/myagent-abc-1.zip
-  const location = res.headers.get("Location");
-  if (!location) {
-    throw new Error("Export succeeded but no Location header returned");
-  }
-  return location;
-}
-
-/**
  * Step 2: Download the zip file at the given path.
  * GET /backup/export/{filename}
  */
@@ -350,17 +327,6 @@ export async function downloadAgentZip(downloadPath: string): Promise<void> {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
-}
-
-/**
- * Combined: export + download in one call.
- */
-export async function exportAndDownloadAgent(
-  agentId: string,
-  version = 1
-): Promise<void> {
-  const location = await exportAgent(agentId, version);
-  await downloadAgentZip(location);
 }
 
 // ==================== Existing Import Functions ====================

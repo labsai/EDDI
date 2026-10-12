@@ -78,3 +78,22 @@ export function requireVersionFromLocation(
   }
   return version;
 }
+
+/**
+ * The resource id in a Location URI like `/groupstore/groups/{id}?version=1`
+ * or `eddi://ai.labs.group/groupstore/groups/{id}?version=1`, or `null` when
+ * there is none.
+ *
+ * The last path segment WITHOUT the query string: `location.split("/").pop()`
+ * returns `{id}?version=1`, and a route built from that
+ * (`/workforce/${id}/settings`) becomes `/workforce/{id}?version=1/settings` —
+ * the router reads the id fine and silently drops `/settings` into the query.
+ */
+export function parseIdFromLocation(location: string | undefined | null): string | null {
+  if (!location) {
+    return null;
+  }
+  const path = location.split(/[?#]/, 1)[0] ?? "";
+  const id = path.split("/").filter(Boolean).pop() ?? "";
+  return id.length > 0 ? id : null;
+}

@@ -246,16 +246,18 @@ class ConversationServiceHitlCoverageTest {
         }
 
         @Test
-        @DisplayName("deleteSchedulesByName returns >0 → cleanup log branch, cancel proceeds")
+        @DisplayName("deleteSchedulesByName returns >0 → cleanup log branch, after the cancel's transition")
         void deleteScheduleReturnsPositive_cleanupBranch() throws Exception {
-            doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            // The schedule is cleaned up only once a state transition went through
+            // (PR #947): a cancel that changed nothing leaves it alone.
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
             doReturn(3).when(scheduleStore).deleteSchedulesByName(anyString());
-            doReturn(false).when(conversationMemoryStore).compareAndSetState(any(), any(), any());
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(any(), any(), any());
 
             var outcome = conversationService.cancelConversation(
                     CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL, "reviewer-1");
 
-            assertEquals(CancelOutcome.NOTHING_TO_CANCEL, outcome);
+            assertEquals(CancelOutcome.CANCELLED, outcome);
             verify(scheduleStore).deleteSchedulesByName(anyString());
         }
     }

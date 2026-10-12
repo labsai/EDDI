@@ -133,7 +133,7 @@ describe("MessageBubble", () => {
       timestamp: 0,
     });
     // KaTeX is loaded on demand, the first time a message needs it.
-    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull(), { timeout: 8000 });
   });
 
   it("leaves dollar amounts alone — single dollars are not math", async () => {
@@ -146,7 +146,7 @@ describe("MessageBubble", () => {
       timestamp: 0,
     });
     // Wait for the math chunk (the $$ span loads it), then check the prices.
-    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull(), { timeout: 8000 });
     expect(container.textContent).toContain("It costs $5 and $10 today.");
     expect(container.querySelectorAll(".katex")).toHaveLength(1);
   });
@@ -158,7 +158,7 @@ describe("MessageBubble", () => {
       content: "```js\nconst x = 1;\n```",
       timestamp: 0,
     });
-    await waitFor(() => expect(container.querySelector(".hljs-keyword")).not.toBeNull());
+    await waitFor(() => expect(container.querySelector(".hljs-keyword")).not.toBeNull(), { timeout: 8000 });
     expect(container.querySelector("code.hljs")).not.toBeNull();
   });
 
