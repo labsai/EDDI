@@ -79,6 +79,11 @@ task store, streaming, the bound, deprecations; the disabled endpoint answers
 The Platform Operator holds no A2A endpoint and cannot change A2A settings, so
 its prompt and allow-list are unchanged.
 
+The two new card paths, `GET /.well-known/agent-card.json` and
+`GET /a2a/agents/{agentId}/.well-known/agent-card.json`, are added to the Manager's
+`ui/manager/src/test/mocks/openapi-operations.json`; without them the `OpenAPI Snapshot`
+and `Backend E2E` checks (and so `E2E Gate`) failed on this branch.
+
 **Files:** [`A2AModels.java`](../../src/main/java/ai/labs/eddi/engine/a2a/A2AModels.java),
 [`A2AWireFormat.java`](../../src/main/java/ai/labs/eddi/engine/a2a/A2AWireFormat.java),
 [`A2ATaskHandler.java`](../../src/main/java/ai/labs/eddi/engine/a2a/A2ATaskHandler.java),
