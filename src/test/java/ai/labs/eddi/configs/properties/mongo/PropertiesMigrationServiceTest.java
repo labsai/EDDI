@@ -15,7 +15,6 @@ import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
-import io.quarkus.runtime.StartupEvent;
 import org.bson.Document;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,13 +44,11 @@ class PropertiesMigrationServiceTest {
 
     private MongoDatabase database;
     private IUserMemoryStore userMemoryStore;
-    private StartupEvent startupEvent;
 
     @BeforeEach
     void setUp() {
         database = mock(MongoDatabase.class);
         userMemoryStore = mock(IUserMemoryStore.class);
-        startupEvent = mock(StartupEvent.class);
     }
 
     @Test
@@ -60,12 +57,28 @@ class PropertiesMigrationServiceTest {
         PropertiesMigrationService service = service("postgres");
 
         // When
-        service.onStartup(startupEvent);
+        service.runIfNeeded();
 
         // Then
         // Verify database is never touched
         verifyNoInteractions(database);
         verifyNoInteractions(userMemoryStore);
+    }
+
+    @Test
+    void isRunningWhileMigratingAndNotBefore_orAfter() {
+        PropertiesMigrationService service = service("mongodb");
+        boolean[] runningDuringMigration = new boolean[1];
+        when(database.listCollectionNames()).thenAnswer(invocation -> {
+            runningDuringMigration[0] = service.isRunning();
+            throw new RuntimeException("Simulated failure");
+        });
+
+        assertFalse(service.isRunning());
+        service.runIfNeeded();
+
+        assertTrue(runningDuringMigration[0]);
+        assertFalse(service.isRunning(), "a failed migration must not leave the flag set");
     }
 
     @Test
@@ -75,7 +88,7 @@ class PropertiesMigrationServiceTest {
         when(database.listCollectionNames()).thenThrow(new RuntimeException("Simulated check"));
 
         // When
-        service.onStartup(startupEvent);
+        service.runIfNeeded();
 
         // Then
         verify(database).listCollectionNames();
@@ -94,7 +107,7 @@ class PropertiesMigrationServiceTest {
             when(database.listCollectionNames()).thenReturn(iterable);
 
             // When
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             // Then — no collection access beyond listing
             verify(database, never()).getCollection("properties");
@@ -115,7 +128,7 @@ class PropertiesMigrationServiceTest {
             when(legacyCollection.countDocuments()).thenReturn(0L);
 
             // When
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             // Then
             verifyNoInteractions(userMemoryStore);
@@ -154,7 +167,7 @@ class PropertiesMigrationServiceTest {
             when(cursor.next()).thenReturn(doc);
 
             // When
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             // Then — upsert called for each non-system key
             verify(userMemoryStore, times(2)).insertIfAbsent(any(UserMemoryEntry.class));
@@ -190,7 +203,7 @@ class PropertiesMigrationServiceTest {
             when(cursor.next()).thenReturn(doc);
 
             // When
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             // Then — upsert NOT called since there's no userId
             verify(userMemoryStore, never()).insertIfAbsent(any());
@@ -237,7 +250,7 @@ class PropertiesMigrationServiceTest {
             doThrow(new RuntimeException("DB error")).when(userMemoryStore).insertIfAbsent(any());
 
             // When — should not throw
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             // Then — the loop still runs to the end, but the source is NOT retired
             verify(userMemoryStore).insertIfAbsent(any(UserMemoryEntry.class));
@@ -276,7 +289,7 @@ class PropertiesMigrationServiceTest {
             when(cursor.hasNext()).thenReturn(true, false);
             when(cursor.next()).thenReturn(doc);
 
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             verify(userMemoryStore, never()).insertIfAbsent(any());
             verify(legacyCollection).renameCollection(any(MongoNamespace.class));
@@ -312,7 +325,7 @@ class PropertiesMigrationServiceTest {
             when(userMemoryStore.insertIfAbsent(argThat(e -> e != null && "lang".equals(e.key())))).thenReturn(null);
             when(userMemoryStore.insertIfAbsent(argThat(e -> e != null && "color".equals(e.key())))).thenReturn("new-id");
 
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             // Never an updating upsert: an existing value must not be replaced, and the
             // insert-if-absent is what makes that atomic.
@@ -351,7 +364,7 @@ class PropertiesMigrationServiceTest {
             when(cursor.hasNext()).thenReturn(false);
 
             // When
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             // Then — backup collection dropped before rename
             verify(backupCollection).drop();
@@ -384,7 +397,7 @@ class PropertiesMigrationServiceTest {
             doThrow(new RuntimeException("Rename failed")).when(legacyCollection).renameCollection(any(MongoNamespace.class));
 
             // When — should not throw
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             // Then — rename was attempted
             verify(legacyCollection).renameCollection(any(MongoNamespace.class));
@@ -426,7 +439,7 @@ class PropertiesMigrationServiceTest {
             when(cursor.next()).thenReturn(legacy);
             when(userMemoryStore.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
-            service.onStartup(startupEvent);
+            service.runIfNeeded();
 
             var captor = ArgumentCaptor.forClass(UserMemoryEntry.class);
             verify(userMemoryStore, atLeast(0)).insertIfAbsent(captor.capture());
@@ -589,7 +602,7 @@ class PropertiesMigrationServiceTest {
             when(cursor.next()).thenReturn(legacy);
             when(userMemoryStore.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
 
-            service().onStartup(startupEvent);
+            service().runIfNeeded();
 
             var captor = ArgumentCaptor.forClass(UserMemoryEntry.class);
             verify(userMemoryStore, atLeast(0)).insertIfAbsent(captor.capture());

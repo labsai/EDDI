@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces;
 
+import ai.labs.eddi.configs.descriptors.ConfigResourceTypes;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +62,7 @@ class ResourceSharingServiceTest {
 
     private static DocumentDescriptor descriptor(String owner) {
         DocumentDescriptor d = new DocumentDescriptor();
+        d.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/0123456789abcdef01234567?version=1"));
         d.setOwnerId(owner);
         d.setSpaceId(Subjects.personalSpace(owner));
         d.setVisibility(ResourceVisibility.space.wireName());
@@ -133,7 +136,8 @@ class ResourceSharingServiceTest {
         @SuppressWarnings("unchecked")
         Event<SharingChangedEvent> event = mock(Event.class);
         sharingChanged = event;
-        service = new ResourceSharingService(store, accessGuard, graphResolver, mock(UserDirectory.class), null, sharingChanged);
+        service = new ResourceSharingService(store, accessGuard, graphResolver, mock(UserDirectory.class), null, sharingChanged,
+                ConfigResourceTypes.of("agent", "ai.labs.agent", "ai.labs.workflow"));
     }
 
     @Test
@@ -382,5 +386,42 @@ class ResourceSharingServiceTest {
         when(accessGuard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/engineering")));
 
         assertThrows(ForbiddenException.class, () -> service.moveToSpace(BORROWED_CHILD, Subjects.teamSpace("engineering"), false, false));
+    }
+
+    // --- F1: sharing is a property of configuration. A conversation descriptor in
+    // the same collection must not be shared, re-filed or re-owned — every one of
+    // those writes it back without its owner. ---
+
+    private static final String CONVERSATION = "conv00000000000000000";
+
+    private void conversationStored() {
+        DocumentDescriptor conversation = new DocumentDescriptor();
+        conversation.setResource(URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + CONVERSATION + "?version=0"));
+        descriptors.put(CONVERSATION, conversation);
+    }
+
+    @Test
+    @DisplayName("F1: no sharing operation touches a conversation descriptor")
+    void conversationsAreNotShareable() throws Exception {
+        conversationStored();
+
+        assertThrows(NotFoundException.class, () -> service.describe(CONVERSATION));
+        assertThrows(NotFoundException.class, () -> service.share(CONVERSATION, "user:bob", AccessLevel.VIEW, false));
+        assertThrows(NotFoundException.class, () -> service.revoke(CONVERSATION, "user:bob", false));
+        assertThrows(NotFoundException.class, () -> service.setVisibility(CONVERSATION, ResourceVisibility.published, false));
+        assertThrows(NotFoundException.class, () -> service.moveToSpace(CONVERSATION, "team:x", false, false));
+        when(accessGuard.isAdmin()).thenReturn(true);
+        assertThrows(NotFoundException.class, () -> service.transferOwnership(CONVERSATION, "mallory", null, false));
+
+        verify(store, never()).setDescriptor(eq(CONVERSATION), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("F1: a configuration resource is still shared")
+    void configurationIsStillShareable() throws Exception {
+        var result = service.share(AGENT, "user:bob", AccessLevel.VIEW, false);
+
+        assertEquals(List.of(AGENT), result.updatedIds());
+        verify(store).setDescriptor(eq(AGENT), anyInt(), any());
     }
 }

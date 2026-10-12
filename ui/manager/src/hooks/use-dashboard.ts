@@ -27,11 +27,14 @@ export function useRecentConversations(limit = 5) {
 }
 
 /** Lightweight coordinator status for the dashboard health strip */
-export function useCoordinatorStatusLight() {
+export function useCoordinatorStatusLight(options: { enabled?: boolean } = {}) {
   return useQuery<CoordinatorStatus>({
     queryKey: ["dashboard", "coordinator-status"],
     queryFn: getCoordinatorStatus,
     staleTime: 60_000,
     retry: 1,
+    // `/administration/coordinator` is eddi-admin only: not requested at all
+    // for a role the backend would refuse.
+    enabled: options.enabled ?? true,
   });
 }

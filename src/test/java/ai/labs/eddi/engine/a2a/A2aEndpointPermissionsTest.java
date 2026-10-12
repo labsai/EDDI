@@ -258,7 +258,7 @@ class A2aEndpointPermissionsTest {
         }
         assertEquals(8, checked,
                 "Expected the six @PermitAll cards/capabilities (four card paths, two capability paths), the"
-                        + " @Authenticated agent listing and the @RolesAllowed JSON-RPC endpoint; if an endpoint was added or"
+                        + " @RolesAllowed agent listing and the @RolesAllowed JSON-RPC endpoint; if an endpoint was added or"
                         + " removed, say so here deliberately");
     }
 
