@@ -370,7 +370,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                 ? event.displayName()
                 : event.memberId();
         String msg = String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
-                escapeMrkdwnHuman(name), escapeMrkdwnHuman(event.phaseName()),
+                name, event.phaseName(),
                 groupConversationId != null ? groupConversationId : "unknown");
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, msg);
@@ -379,16 +379,6 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         // down, SlackEventHandler blocks its full awaitCompletion timeout on
         // every human pause (the same rule onHitlPause follows).
         completionLatch.countDown();
-    }
-
-    /**
-     * Escapes Slack's three mrkdwn control characters — a member display name
-     * containing {@code <!channel>} must render as text, not broadcast.
-     */
-    private static String escapeMrkdwnHuman(String value) {
-        return value == null
-                ? ""
-                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     @Override
@@ -401,9 +391,9 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String emoji = event.created() ? "📄" : "✏️";
         String verb = event.created() ? "created" : "updated";
         var sb = new StringBuilder();
-        sb.append(String.format("%s *Artifact \"%s\"* %s (v%d)", emoji, escapeMrkdwn(event.name()), verb, event.version()));
+        sb.append(String.format("%s *Artifact \"%s\"* %s (v%d)", emoji, event.name(), verb, event.version()));
         if (event.editorAgentId() != null && !event.editorAgentId().isBlank()) {
-            sb.append(String.format(" by %s", escapeMrkdwn(event.editorAgentId())));
+            sb.append(String.format(" by %s", event.editorAgentId()));
         }
         if ("FINAL".equals(event.status())) {
             sb.append(" — FINAL");
@@ -411,17 +401,6 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, sb.toString().stripTrailing());
-    }
-
-    /**
-     * Escapes Slack's three mrkdwn control characters. Without this, an
-     * LLM-authored artifact name (or an agent id) containing e.g.
-     * {@code <!channel>} renders as a real channel broadcast.
-     */
-    private static String escapeMrkdwn(String value) {
-        return value == null
-                ? null
-                : value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     // ─── HITL (human-in-the-loop) ───
@@ -777,7 +756,33 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      *
      * @return the message ts on success, or null on any failure
      */
+    /**
+     * Every message of a discussion is composed from member output, display names,
+     * artifact names, task subjects or the user's question — none of it written by
+     * EDDI — and none needs a Slack control sequence, so the whole text is escaped
+     * here, once ({@link SlackMrkdwn}). It used to be escaped field by field, and
+     * the fields that carry the most text (contributions, syntheses, feedback) were
+     * not: a member replying {@code <!channel>} pinged the channel.
+     */
     private String postSafe(String channel, String threadTs, String text) {
+        // Escaped, then split into messages Slack will not truncate; the first
+        // message's ts is the one callers thread under. A failed chunk ends the
+        // message: posting the rest would show a text without its beginning (or a
+        // gap in the middle), which reads as if it were complete.
+        String firstTs = null;
+        for (String chunk : SlackMrkdwn.escapeInChunks(text, SlackMrkdwn.MAX_MESSAGE_LENGTH)) {
+            String ts = postChunk(channel, threadTs, chunk);
+            if (ts == null) {
+                break;
+            }
+            if (firstTs == null) {
+                firstTs = ts;
+            }
+        }
+        return firstTs;
+    }
+
+    private String postChunk(String channel, String threadTs, String text) {
         try {
             return slackApi.postMessage(authToken, channel, threadTs, text);
         } catch (SlackDeliveryException e) {

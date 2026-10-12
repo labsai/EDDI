@@ -136,8 +136,8 @@ class PrePostUtilsFromObjectPathObjectTest {
                 200, false, memory, templateData);
 
         assertEquals(1, ((Map<?, ?>) memory.getConversationProperties().get("parsed").getValueObject()).get("a"));
-        // unchanged documented behaviour: a number reached through the path is stored
-        // as ""
-        assertEquals("", memory.getConversationProperties().get("num").getValueString());
+        // a number reached through the path is stored with its type (it used to be
+        // stored as "")
+        assertEquals(5, memory.getConversationProperties().get("num").getValueInt());
     }
 }

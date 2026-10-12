@@ -23,9 +23,10 @@ import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
@@ -63,12 +64,10 @@ class RestImportServiceTemplateConversionTest {
     @SuppressWarnings("unchecked")
     private Map<String, Object> importJson(String json) throws Exception {
         Files.writeString(dir.resolve(ID + ".langchain.json"), json);
-        // The last argument is the set of LLM documents to migrate as 5.x — none
-        // here, so only the template conversion under test runs.
         Method read = RestImportService.class.getDeclaredMethod("readResource", URI.class, Path.class, String.class, Class.class, boolean.class,
                 Set.class);
         read.setAccessible(true);
-        return (Map<String, Object>) read.invoke(service, URI_OF_RESOURCE, dir, "langchain", Map.class, false, Set.of());
+        return (Map<String, Object>) read.invoke(service, URI_OF_RESOURCE, dir, "langchain", Map.class, false, new HashSet<String>());
     }
 
     @Test

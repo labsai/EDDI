@@ -696,3 +696,34 @@ describe("groupAgentsByName", () => {
     expect(result[0]!.version).toBe(1);
   });
 });
+
+describe("useAgent placeholder data (review 2026-10-02)", () => {
+  it("keeps the previous version of the SAME agent, never another agent's document", async () => {
+    let releaseB: () => void = () => {};
+    const gateB = new Promise<void>((r) => (releaseB = r));
+    server.use(
+      http.get("*/agentstore/agents/:id", async ({ params, request }) => {
+        const v = new URL(request.url).searchParams.get("version");
+        if (params.id === "agentB") await gateB;
+        return HttpResponse.json({ workflows: [`eddi://ai.labs.workflow/workflowstore/workflows/${params.id}-${v}?version=1`] });
+      }),
+    );
+    const { result, rerender } = renderHook(({ id, v }) => useAgent(id, v), {
+      wrapper: createWrapper(),
+      initialProps: { id: "agentA", v: 1 },
+    });
+    await waitFor(() => expect(result.current.data?.workflows?.[0]).toContain("agentA-1"));
+
+    // Same agent, another version: the previous version stands in (flagged).
+    rerender({ id: "agentA", v: 2 });
+    expect(result.current.isPlaceholderData).toBe(true);
+    expect(result.current.data?.workflows?.[0]).toContain("agentA-1");
+    await waitFor(() => expect(result.current.data?.workflows?.[0]).toContain("agentA-2"));
+
+    // Another agent: nothing stands in — A's config must not render under B's id.
+    rerender({ id: "agentB", v: 1 });
+    expect(result.current.data).toBeUndefined();
+    act(() => releaseB());
+    await waitFor(() => expect(result.current.data?.workflows?.[0]).toContain("agentB-1"));
+  });
+});

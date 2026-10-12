@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
-import { UnsavedChangesDialog, UnsavedChangesPrompt } from "@/components/ui/unsaved-changes-dialog";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { ConnectionCredentialFields } from "@/components/connections/connection-credential-fields";
@@ -33,7 +33,7 @@ import {
   useUpdateConnection,
   useDeleteConnection,
 } from "@/hooks/use-connections";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { getErrorMessage } from "@/lib/api-client";
 import { commitPending } from "@/lib/chip-values";
 import { authTypeLabel } from "@/lib/connection-labels";
@@ -231,11 +231,12 @@ export function ConnectionDetailPage() {
     pendingScope.trim() !== "" ||
     pendingOrigin.trim() !== "";
 
-  // Covers tab close and reload, and — through the data router's blocker — every
-  // in-app way out: the sidebar, the command palette, Back. This page's own two
-  // exits (the back link and the linked-accounts link) still ask through
-  // `leaveFor` first and then let that one navigation through.
-  const unsavedGuard = useUnsavedChangesGuard(isDirty);
+  // Covers tab close and reload (`beforeunload`) AND in-app navigation: the
+  // app-level blocker in NavigationGuardDialog holds any path change, from the
+  // sidebar, the command palette or Back, while this page is dirty. The explicit
+  // `leaveFor` prompt below remains for this page's own two exits (the back link
+  // and the linked-accounts link), where the page confirms before navigating.
+  useUnsavedChangesGuard(isDirty);
 
   /** Leave for `to`, asking first when there are unsaved edits. */
   const leaveFor = useCallback(
@@ -390,9 +391,9 @@ export function ConnectionDetailPage() {
     if (!id) return;
     try {
       await deleteMutation.mutateAsync({ id, version, permanent: deletePermanently });
-      unsavedGuard.allowNextNavigation();
       // Deliberately `navigate`, not `leaveFor`: the document is gone, so there
       // is nothing left for an "unsaved changes" prompt to protect.
+      allowNextNavigation();
       navigate("/manage/connections");
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -854,13 +855,13 @@ export function ConnectionDetailPage() {
           const to = pendingExit;
           setPendingExit(null);
           if (to) {
-            unsavedGuard.allowNextNavigation();
+            // Discard was just confirmed here; the route guard must not ask again.
+            allowNextNavigation();
             navigate(to);
           }
         }}
         onCancel={() => setPendingExit(null)}
       />
-      <UnsavedChangesPrompt guard={unsavedGuard} />
 
       <AlertDialog
         open={pendingAuthChange !== null}

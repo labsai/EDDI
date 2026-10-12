@@ -118,8 +118,8 @@ class IngestionRetrievalRoundTripTest {
                 });
 
         storeFactory = mock(EmbeddingStoreFactory.class);
-        when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenAnswer(invocation -> {
-            String key = invocation.getArgument(1);
+        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenAnswer(invocation -> {
+            String key = invocation.getArgument(0);
             requestedKeys.add(key);
             return storesByKey.computeIfAbsent(key, ignored -> new InMemoryEmbeddingStore<>());
         });
@@ -134,7 +134,7 @@ class IngestionRetrievalRoundTripTest {
 
         var step = new WorkflowConfiguration.WorkflowStep();
         step.setType(URI.create("eddi://ai.labs.rag"));
-        step.setConfig(Map.of("uri", "eddi://ai.labs.rag/ragstore/rag/rag-1?version=1"));
+        step.setConfig(Map.of("uri", "eddi://ai.labs.rag/ragstore/rags/" + KB_RESOURCE_ID + "?version=1"));
         var workflow = new WorkflowConfiguration();
         workflow.setWorkflowSteps(List.of(step));
         var agent = new AgentConfiguration();
@@ -157,7 +157,7 @@ class IngestionRetrievalRoundTripTest {
 
         assertNotNull(context, "the crawled page must reach the LLM context");
         assertTrue(context.contains("fourteen days"), context);
-        assertEquals(List.of(KB_NAME, KB_NAME), requestedKeys,
+        assertEquals(List.of(KB_RESOURCE_ID, KB_RESOURCE_ID), requestedKeys,
                 "ingestion and retrieval must ask the factory for the same store");
         // The same store, but deliberately NOT the same model. An asymmetric provider
         // bakes the role in at construction and the factory keys its cache on it, so
@@ -343,6 +343,10 @@ class IngestionRetrievalRoundTripTest {
     private static RagConfiguration knowledgeBase() {
         var config = new RagConfiguration();
         config.setName(KB_NAME);
+        // The per-id layout every new knowledge base gets: ingestion tags each chunk
+        // with
+        // the id and retrieval filters on it, so this round trip proves the two agree.
+        config.setStoreNamespace("id");
         config.setStoreType("in-memory");
         config.setChunkSize(400);
         config.setChunkOverlap(0);

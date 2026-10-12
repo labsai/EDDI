@@ -14,7 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Resolution of the per-tool execution timeout — the table
- * {@code ToolLoopRunner#executeSingleToolCall} consults before every tool call.
+ * {@code ToolLoopRunner#executeSingleToolCallResult} consults before every tool
+ * call.
  *
  * <p>
  * The end-to-end wiring (that the resolved value actually reaches
