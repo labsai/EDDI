@@ -35,7 +35,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard accessGuard;
 
-    private static final Logger log = Logger.getLogger(RestDocumentDescriptorStore.class);
+    private static final Logger LOGGER = Logger.getLogger(RestDocumentDescriptorStore.class);
 
     @Inject
     public RestDocumentDescriptorStore(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard) {
@@ -55,7 +55,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
             accessGuard.redactAllForCaller(descriptors);
             return descriptors;
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
@@ -75,7 +75,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
             accessGuard.redactUnlessOwner(descriptor, callerLevel);
             return descriptor;
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
@@ -151,7 +151,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
             documentDescriptorStore.setDescriptor(id, version, documentDescriptor);
             requireStillCurrent(id, version);
         } catch (IResourceStore.ResourceStoreException e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
