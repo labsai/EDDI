@@ -5,10 +5,11 @@
    ────────────────────────────────────────────── */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
+import { Hand, MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { useChatState, useChatDispatch } from "@/store/chat-store";
+import { t } from "@/i18n";
 import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
@@ -101,21 +102,47 @@ function makeAgentMessage(content: string, images?: OutputImage[]): ChatMessage 
   };
 }
 
+/**
+ * Text the widget itself wrote — a refused send, a failed undo — as opposed to
+ * something the agent said. It renders as a system notice, never as an agent
+ * bubble, so a reader cannot take "Undo failed" for the agent speaking.
+ */
+function makeNotice(content: string): ChatMessage {
+  return {
+    id: `notice-${Date.now()}-${Math.random()}`,
+    role: "agent",
+    kind: "notice",
+    content,
+    timestamp: Date.now(),
+  };
+}
+
 /** Transcript copy for a conversation that could not be started. */
 function startFailureMessage(err: unknown, environment?: string): string {
   if (err instanceof ApiError && err.status === 404) {
     return environment
-      ? `⚠️ This agent is not available in the "${environment}" environment. It may not be deployed there.`
-      : "⚠️ This agent is not available. It may not be deployed.";
+      ? t("start.notFoundEnv", { env: environment })
+      : t("start.notFound");
   }
-  if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-    return "⚠️ You are not allowed to start a conversation with this agent.";
+  // 401 is "no valid credentials"; 403 is "refused". A 403 can also be the
+  // server declining an origin it does not recognise, which nothing in the
+  // response distinguishes, so the copy stays factual and blames nobody.
+  if (err instanceof ApiError && err.status === 401) {
+    return t("start.unauthorized");
+  }
+  if (err instanceof ApiError && err.status === 403) {
+    return t("start.forbidden");
   }
   if (err instanceof ApiError && err.status === 400) {
-    return "⚠️ The conversation could not be started. Check the address — the environment must be \"production\" or \"test\".";
+    return t("start.badRequest");
   }
-  return "⚠️ The conversation could not be started. Please try again.";
+  return t("start.generic");
 }
+
+/** How long to wait for a postMessage token before starting without one. */
+const TOKEN_WAIT_MS = 5000;
+/** How often to repeat the ready signal while waiting, in case the parent was not listening yet. */
+const READY_REPEAT_MS = 1000;
 
 /**
  * Color query params → CSS variable mappings.
@@ -155,11 +182,15 @@ function applyColorOverrides(params: URLSearchParams): void {
   // accentColor also derives soft/hover variants automatically
   const accent = params.get("accentColor");
   if (accent) {
-    root.style.setProperty("--chat-accent-soft", accent + "22");
-    root.style.setProperty("--chat-qr-border", accent + "66");
-    root.style.setProperty("--chat-qr-bg", accent + "2e");
+    // color-mix works for any CSS color — a named color, rgb(), hsl() — where
+    // appending a hex alpha only ever worked for a 6-digit #rrggbb.
+    const tint = (percent: number) =>
+      `color-mix(in srgb, ${accent} ${percent}%, transparent)`;
+    root.style.setProperty("--chat-accent-soft", tint(13));
+    root.style.setProperty("--chat-qr-border", tint(40));
+    root.style.setProperty("--chat-qr-bg", tint(18));
     root.style.setProperty("--chat-qr-text", accent);
-    root.style.setProperty("--chat-qr-hover", accent + "55");
+    root.style.setProperty("--chat-qr-hover", tint(33));
   }
 }
 
@@ -241,6 +272,24 @@ export function ChatWidget() {
    * user copied or bookmarked.
    */
   const [urlToken] = useState(() => searchParams.get("token"));
+  const tokenOriginParam = searchParams.get("tokenOrigin");
+  /**
+   * False while a token is still expected from the embedding page. With
+   * `?tokenOrigin=` set the host sends the bearer token by postMessage AFTER
+   * the iframe loads, so starting at once ran the start request (and the
+   * profile lookup) unauthenticated and failed with a 401 the user could only
+   * clear by reloading. The widget therefore says it is ready and waits.
+   */
+  const [tokenReady, setTokenReady] = useState(
+    () =>
+      parseAllowedTokenOrigins(searchParams).length === 0 ||
+      !!urlToken ||
+      !!state.config.authToken,
+  );
+  const tokenReadyRef = useRef(tokenReady);
+  useEffect(() => {
+    tokenReadyRef.current = tokenReady;
+  }, [tokenReady]);
   useEffect(() => {
     if (!searchParams.has("token")) return;
     setSearchParams(
@@ -262,7 +311,19 @@ export function ChatWidget() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  /**
+   * Whether the view should follow new content. True while the reader is at
+   * (or near) the bottom; scrolling up to read turns it off, so a streaming
+   * reply stops dragging them back down every token.
+   */
+  const stickToBottomRef = useRef(true);
   const initializedRef = useRef(false);
+  /** Why the conversation could not be started, so the user can retry. */
+  const [startFailed, setStartFailed] = useState(false);
+  /** Inline "start a new conversation?" confirmation is showing. */
+  const [confirmingRestart, setConfirmingRestart] = useState(false);
+  /** Bumped to move focus into the composer once the field that replaced it goes. */
+  const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   /** Controller for the in-flight SSE read, so it can be stopped on demand. */
   const abortRef = useRef<AbortController | null>(null);
   /**
@@ -344,8 +405,11 @@ export function ChatWidget() {
      Referer. Only origins named in ?tokenOrigin= are honoured, and only when
      the message comes from our own parent frame. */
   useEffect(() => {
-    const allowed = parseAllowedTokenOrigins(searchParams);
+    const allowed = tokenOriginParam
+      ? parseAllowedTokenOrigins(new URLSearchParams({ tokenOrigin: tokenOriginParam }))
+      : [];
     if (allowed.length === 0) return;
+    let received = false;
     const onMessage = (event: MessageEvent) => {
       if (!allowed.includes(event.origin)) return;
       if (event.source !== window.parent) return;
@@ -357,11 +421,36 @@ export function ChatWidget() {
         typeof (data as { token?: unknown }).token === "string"
       ) {
         setAuthToken((data as { token: string }).token);
+        received = true;
+        setTokenReady(true);
       }
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [searchParams]);
+
+    // Handshake: tell the parent we can take the token now. Posted to each
+    // allowed origin by name — never "*" — so only a page the operator listed
+    // learns that this widget is waiting. Repeated while waiting because the
+    // parent's listener may not exist yet when the first one goes out.
+    const announceReady = () => {
+      if (window.parent === window) return;
+      for (const origin of allowed) {
+        window.parent.postMessage({ type: "eddi-chat-ready" }, origin);
+      }
+    };
+    announceReady();
+    const repeat = setInterval(() => {
+      if (received || tokenReadyRef.current) clearInterval(repeat);
+      else announceReady();
+    }, READY_REPEAT_MS);
+    // A parent that never answers must not leave the widget on a blank start
+    // for good: go ahead unauthenticated, so the failure is the clear 401 copy.
+    const giveUp = setTimeout(() => setTokenReady(true), TOKEN_WAIT_MS);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      clearInterval(repeat);
+      clearTimeout(giveUp);
+    };
+  }, [tokenOriginParam]);
 
   /* ─── SSE event handler (declared early to avoid reference issues) ──
      Returns `true` when the stream is logically complete (done / error),
@@ -468,7 +557,7 @@ export function ChatWidget() {
             }
             dispatch({
               type: "ADD_MESSAGE",
-              message: makeAgentMessage(
+              message: makeNotice(
                 skippedTurnMessage(snapshot?.conversationState),
               ),
             });
@@ -552,10 +641,10 @@ export function ChatWidget() {
             }
             dispatch({
               type: "ADD_MESSAGE",
-              message: makeAgentMessage(
+              message: makeNotice(
                 code === "awaiting_approval"
-                  ? "⚠️ Your message was not sent — this conversation is waiting on a decision."
-                  : `⚠️ Your message was not sent — ${message}`,
+                  ? t("send.awaiting")
+                  : t("send.notSent", { message }),
               ),
             });
             dispatch({ type: "FINISH_STREAMING" });
@@ -566,7 +655,7 @@ export function ChatWidget() {
             dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
             dispatch({
               type: "ADD_MESSAGE",
-              message: makeAgentMessage(`⚠️ ${message}`),
+              message: makeNotice(`⚠️ ${message}`),
             });
           } else {
             dispatch({
@@ -715,6 +804,7 @@ export function ChatWidget() {
   const openConversation = useCallback(
     async (fresh: boolean) => {
       const gen = generationRef.current;
+      setStartFailed(false);
       try {
         if (isDemo) {
           // Demo mode: use mock data
@@ -758,8 +848,10 @@ export function ChatWidget() {
         // on "Starting conversation…" for good.
         dispatch({
           type: "ADD_MESSAGE",
-          message: makeAgentMessage(startFailureMessage(err, environment)),
+          message: makeNotice(startFailureMessage(err, environment)),
         });
+        // The composer is closed until a conversation exists; this is the way out.
+        setStartFailed(true);
       }
     },
     [
@@ -776,12 +868,13 @@ export function ChatWidget() {
   );
 
   /* ─── Auto-start conversation ───────────────── */
+  // Held until the token the host promised has arrived (or the wait ran out).
   useEffect(() => {
-    if (initializedRef.current) return;
+    if (!tokenReady || initializedRef.current) return;
     initializedRef.current = true;
     openConversation(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [tokenReady]);
 
   /* ─── Review notice ─────────────────────────── */
   // The agent's name comes from loadAgentName, per conversation. This only asks
@@ -808,6 +901,12 @@ export function ChatWidget() {
     // A new target starts without the previous one's notice, and a slower answer
     // for the previous target cannot overwrite the new one's.
     dispatch({ type: "SET_REVIEW_NOTICE", notice: null });
+    if (!tokenReady) {
+      // The lookup is authenticated; asked before the token arrived it would
+      // fail and read as "no notice".
+      setProfileSettled(false);
+      return;
+    }
     if (profileAgentId === undefined && !isDemo) {
       // A managed conversation still loading: its agent is not known yet.
       setProfileSettled(false);
@@ -830,7 +929,7 @@ export function ChatWidget() {
     return () => {
       cancelled = true;
     };
-  }, [profileAgentId, environment, isDemo, dispatch]);
+  }, [profileAgentId, environment, isDemo, dispatch, tokenReady]);
 
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(
@@ -876,7 +975,7 @@ export function ChatWidget() {
         ? attachments
             .map((a) =>
               a.forwardableInline === false
-                ? `📎 ${a.fileName} — too large to send directly`
+                ? t("attach.largeLine", { file: a.fileName })
                 : `📎 ${a.fileName}`,
             )
             .join("\n")
@@ -922,6 +1021,17 @@ export function ChatWidget() {
       dispatch({ type: "SET_ESCALATING", value: false });
       dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
 
+      // This turn's controller. Every transport honours it — the SSE read, and
+      // the plain fetches of the non-streaming and managed routes — so Stop and
+      // New conversation can actually stop a turn instead of only hiding it.
+      const abort = new AbortController();
+      abortRef.current = abort;
+      /** True once Stop or New conversation has taken this turn over. */
+      const stopped = () => abortRef.current !== abort;
+      const turn = newTurn(conversationStateRef.current, turnId);
+      // Sending always follows the conversation to the bottom again.
+      stickToBottomRef.current = true;
+
       try {
         if (isDemo) {
           // Demo mode: simulated streaming response
@@ -955,8 +1065,11 @@ export function ChatWidget() {
             userId,
             text,
             context,
+            abort.signal,
           );
-          if (sendGen !== generationRef.current) return;
+          // Stopped, or the conversation was replaced, while the reply was in
+          // flight: it belongs to a turn nobody is waiting for any more.
+          if (sendGen !== generationRef.current || stopped()) return;
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
           dispatch({ type: "SET_PROCESSING", value: false });
@@ -978,13 +1091,10 @@ export function ChatWidget() {
             },
           });
 
-          // AbortController: break out of the for-await when "done" fires.
-          // Proxies (Vite dev, nginx) may not forward the SSE close signal,
-          // so reader.read() would hang forever without this.
-          const abort = new AbortController();
-          abortRef.current = abort;
+          // The controller also lets us break out of the for-await when "done"
+          // fires: proxies (Vite dev, nginx) may not forward the SSE close
+          // signal, so reader.read() would hang forever without it.
           const gen = generationRef.current;
-          const turn = newTurn(conversationStateRef.current, turnId);
           let streamDone = false;
 
           const events = sendMessageStreaming(
@@ -1054,8 +1164,7 @@ export function ChatWidget() {
             // set — and with it the recovery banner. handleStop clears
             // abortRef, so a controller that is no longer current means this
             // turn was stopped and its refresh must not speak for the state.
-            const wasStopped = abortRef.current !== abort;
-            if (after.conversationState && !wasStopped) {
+            if (after.conversationState && !stopped()) {
               dispatch({
                 type: "SET_CONVERSATION_STATE",
                 state: after.conversationState,
@@ -1077,31 +1186,35 @@ export function ChatWidget() {
             text,
             userId,
             context,
+            abort.signal,
           );
-          if (sendGen !== generationRef.current) return;
+          if (sendGen !== generationRef.current || stopped()) return;
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
           dispatch({ type: "SET_PROCESSING", value: false });
         }
       } catch (err) {
+        // Stop (or New conversation) ended this turn on purpose — the abort
+        // surfaces here as a rejected fetch. The UI was reset by whoever
+        // stopped it, and what happens next must not be reported as a failure.
+        if (!isDemo && stopped()) return;
+
         dispatch({ type: "SET_PROCESSING", value: false });
         dispatch({ type: "SET_THINKING", value: false });
         // This path never reaches FINISH_STREAMING, so clear it here too.
         dispatch({ type: "SET_ESCALATING", value: false });
+        dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
 
-        if (err instanceof ApiError && err.status === 409) {
+        const status = err instanceof ApiError ? err.status : null;
+
+        if (status === 409) {
           // The turn was refused and NEVER consumed — most often because the
           // conversation is awaiting a human decision. Withdraw the optimistic
-          // bubble, hand the text back to the composer, and say why.
+          // bubble, hand the text back to the composer, and say why. The
+          // server's own text ("…resolve it via POST /agents/<id>/resume…")
+          // is an operator instruction, not something to show an end user.
           withdrawTurn();
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: makeAgentMessage(
-              err.body?.trim()
-                ? `⚠️ ${err.body.trim()}`
-                : "⚠️ Your message was not sent — this conversation is waiting on a decision.",
-            ),
-          });
+          dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("send.conflict")) });
           // Re-read so the paused state (and its card) appears immediately.
           // Gated on conversationId ALONE: readConversation ignores
           // environment/agentId, and the managed route never has them — so
@@ -1115,6 +1228,7 @@ export function ChatWidget() {
                 state.conversationId,
                 true,
               );
+              if (sendGen !== generationRef.current) return;
               if (snap.conversationState) {
                 dispatch({
                   type: "SET_CONVERSATION_STATE",
@@ -1129,12 +1243,10 @@ export function ChatWidget() {
           return;
         }
 
-        if (err instanceof ApiError && err.status === 410 && state.conversationId) {
+        if (status === 410 && state.conversationId) {
           // The conversation has ended (RestAgentEngine answers 410 GONE) and
-          // the turn was never consumed. Only an agent update that retired
-          // the conversation's version gets its own handling: say so, and
-          // point at a new conversation. Every other ended case keeps the
-          // generic handling below.
+          // the turn was never consumed. Ask why: an agent update that retired
+          // the conversation's version gets its own footer.
           let endReason: string | null = null;
           try {
             const snap = await readConversation(
@@ -1145,47 +1257,98 @@ export function ChatWidget() {
             );
             endReason = snap.endReason ?? null;
           } catch {
-            // best effort — falls through to the generic handling
+            // best effort — the generic ended footer still applies
           }
           // The user may have started a new conversation while the reread was in
           // flight; this send's outcome must not land in that one.
           if (sendGen !== generationRef.current) return;
-          if (endReason === END_REASON_AGENT_VERSION_RETIRED) {
-            withdrawTurn();
-            dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason });
-            return;
+          withdrawTurn();
+          dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason });
+          if (endReason !== END_REASON_AGENT_VERSION_RETIRED) {
+            dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("send.ended")) });
           }
+          return;
         }
 
-        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        // Every other 4xx refused the turn before it ran: the message was never
+        // consumed, so withdraw the bubble and hand the text back. Each has
+        // its own copy because the remedies differ (sign in again, shorten,
+        // wait, ask the operator) and "could not be sent" says none of them.
+        if (status !== null && status >= 400 && status < 500) {
           withdrawTurn();
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: makeAgentMessage(
-              "⚠️ You are not allowed to continue this conversation. It may belong to a different user.",
-            ),
-          });
+          const copy =
+            status === 401
+              ? t("send.sessionExpired")
+              : status === 403
+                ? t("send.forbidden")
+                : status === 404
+                  ? t("send.notFound")
+                  : status === 413
+                    ? t("send.tooLarge")
+                    : status === 429
+                      ? t("send.rateLimited")
+                      : t("send.failed");
+          dispatch({ type: "ADD_MESSAGE", message: makeNotice(copy) });
           return;
         }
 
         console.error("Failed to send message:", err);
-        // Nothing further will withdraw this turn, so release its record.
+        // From here the failure is a dropped connection or a server error.
+        if (turn.tokenCount === 0) {
+          // Nothing of the answer arrived, so the user has nothing to keep:
+          // take the bubble back and put the text in the composer again.
+          // (withdrawTurn also drops the empty streaming placeholder.)
+          withdrawTurn();
+          dispatch({ type: "FINISH_STREAMING" });
+          dispatch({
+            type: "ADD_MESSAGE",
+            message: makeNotice(
+              status === 503 ? t("send.unavailable") : t("send.failed"),
+            ),
+          });
+          return;
+        }
+        // Part of the answer is already on screen. Keep it, say it may be
+        // cut short, and re-read the conversation: the server may have
+        // finished the turn, or still be running it — either way the next
+        // send must not run on a guessed state (it answered 409 before).
         pendingTurnsRef.current.delete(turnId);
-        // Without this the empty placeholder stays in the transcript flagged
-        // isStreaming forever, rendering as a perpetually-typing bubble.
-        dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
         dispatch({ type: "FINISH_STREAMING" });
         dispatch({
-          type: "ADD_MESSAGE",
-          message: makeAgentMessage(
-            "⚠️ Your message could not be sent. Please try again.",
-          ),
+          type: "APPEND_TO_LAST_AGENT",
+          token: `\n\n⚠️ ${t("send.connectionLost")}`,
         });
+        if (state.conversationId) {
+          try {
+            const after = await readConversation(
+              "",
+              "",
+              state.conversationId,
+              true,
+            );
+            if (sendGen !== generationRef.current || stopped()) return;
+            dispatch({
+              type: "SET_UNDO_REDO",
+              undoAvailable: after.undoAvailable ?? false,
+              redoAvailable: after.redoAvailable ?? false,
+            });
+            if (after.conversationState) {
+              dispatch({
+                type: "SET_CONVERSATION_STATE",
+                state: after.conversationState,
+                endReason: after.endReason ?? null,
+              });
+            }
+          } catch {
+            // best effort
+          }
+        }
       } finally {
         // Release this turn's record. Only the failure paths deleted it, so a
         // long session accumulated one entry (text + attachments) per
         // successful turn, forever.
         pendingTurnsRef.current.delete(turnId);
+        if (abortRef.current === abort) abortRef.current = null;
       }
     },
     [
@@ -1202,6 +1365,52 @@ export function ChatWidget() {
       state.config.enableStreaming,
       state.pendingAttachments,
     ],
+  );
+
+  /**
+   * Rebuild the view after an undo or redo from the snapshot the endpoint
+   * returns — transcript, undo/redo availability, and what the composer is
+   * offering (quick replies, a requested input field). The last two used to be
+   * left as the undone turn had set them, so Undo kept showing the buttons of a
+   * step that no longer existed.
+   */
+  const applyHistorySnapshot = useCallback(
+    (
+      snapshot: ConversationSnapshot,
+      fallback: { undoAvailable: boolean; redoAvailable: boolean },
+    ) => {
+      // Rebuild from the shape the endpoint really returns. An empty result
+      // usually means "could not rebuild", NOT "the conversation is empty" —
+      // replacing a populated transcript with [] is how this wiped the whole
+      // chat. Only an explicitly empty step list, with no outputs, is empty.
+      const msgs = stepsToMessages(
+        snapshot.conversationSteps,
+        secretTextsRef.current,
+        snapshot.conversationOutputs,
+      );
+      if (msgs.length) {
+        dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
+      } else if (
+        Array.isArray(snapshot.conversationSteps) &&
+        snapshot.conversationSteps.length === 0 &&
+        !snapshot.conversationOutputs?.length
+      ) {
+        // Undone all the way back: the old bubbles must not linger.
+        dispatch({ type: "REPLACE_MESSAGES", messages: [] });
+      }
+      dispatch({
+        type: "SET_UNDO_REDO",
+        undoAvailable: snapshot.undoAvailable ?? fallback.undoAvailable,
+        redoAvailable: snapshot.redoAvailable ?? fallback.redoAvailable,
+      });
+      const outputs = snapshot.conversationOutputs;
+      const last = outputs?.length ? outputs[outputs.length - 1] : undefined;
+      dispatch({ type: "SET_QUICK_REPLIES", replies: last?.quickReplies ?? [] });
+      const field = findInputField(last?.output);
+      if (field) dispatch({ type: "SET_INPUT_FIELD", field });
+      else dispatch({ type: "CLEAR_INPUT_FIELD" });
+    },
+    [dispatch],
   );
 
   /* ─── Undo ──────────────────────────────────── */
@@ -1225,35 +1434,23 @@ export function ChatWidget() {
       // A New Conversation while this was in flight must not have its
       // transcript replaced by the old conversation's history.
       if (gen !== generationRef.current) return;
-      const msgs = stepsToMessages(
-        snapshot.conversationSteps,
-        secretTextsRef.current,
-        snapshot.conversationOutputs,
-      );
-      if (msgs.length) {
-        dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
-      }
-      dispatch({
-        type: "SET_UNDO_REDO",
-        undoAvailable: snapshot.undoAvailable ?? false,
-        redoAvailable: snapshot.redoAvailable ?? true,
-      });
+      applyHistorySnapshot(snapshot, { undoAvailable: false, redoAvailable: true });
     } catch (err) {
       // 409 is expected while the conversation is paused or a turn is running —
       // undo/redo availability is deliberately NOT pause-aware server-side, so
       // the button can be enabled while the operation is refused.
       dispatch({
         type: "ADD_MESSAGE",
-        message: makeAgentMessage(
+        message: makeNotice(
           err instanceof ApiError && err.status === 409
-            ? "⚠️ Undo is not possible right now."
-            : "⚠️ Undo failed.",
+            ? t("undo.notNow")
+            : t("undo.failed"),
         ),
       });
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, state.conversationId, isDemo]);
+  }, [dispatch, state.conversationId, isDemo, applyHistorySnapshot]);
 
   /* ─── Redo ──────────────────────────────────── */
   const handleRedo = useCallback(async () => {
@@ -1273,32 +1470,20 @@ export function ChatWidget() {
       // A New Conversation while this was in flight must not have its
       // transcript replaced by the old conversation's history.
       if (gen !== generationRef.current) return;
-      const msgs = stepsToMessages(
-        snapshot.conversationSteps,
-        secretTextsRef.current,
-        snapshot.conversationOutputs,
-      );
-      if (msgs.length) {
-        dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
-      }
-      dispatch({
-        type: "SET_UNDO_REDO",
-        undoAvailable: snapshot.undoAvailable ?? true,
-        redoAvailable: snapshot.redoAvailable ?? false,
-      });
+      applyHistorySnapshot(snapshot, { undoAvailable: true, redoAvailable: false });
     } catch (err) {
       dispatch({
         type: "ADD_MESSAGE",
-        message: makeAgentMessage(
+        message: makeNotice(
           err instanceof ApiError && err.status === 409
-            ? "⚠️ Redo is not possible right now."
-            : "⚠️ Redo failed.",
+            ? t("redo.notNow")
+            : t("redo.failed"),
         ),
       });
     } finally {
       dispatch({ type: "SET_PROCESSING", value: false });
     }
-  }, [dispatch, state.conversationId, isDemo]);
+  }, [dispatch, state.conversationId, isDemo, applyHistorySnapshot]);
 
   /* ─── Quick reply handler ───────────────────── */
   const handleQuickReply = useCallback(
@@ -1317,8 +1502,33 @@ export function ChatWidget() {
     abortRef.current = null;
     generationRef.current += 1;
     pendingTurnsRef.current.clear();
+    setConfirmingRestart(false);
     dispatch({ type: "CLEAR_MESSAGES" });
     await openConversation(true);
+  }, [dispatch, openConversation]);
+
+  /**
+   * The toolbar's New conversation. It discards the transcript (and, on the
+   * managed route, ends the conversation server-side), and it sits next to
+   * Stop — so when there is something to lose it asks first. An untouched
+   * conversation has nothing to lose and restarts at once.
+   */
+  const requestRestart = useCallback(() => {
+    if (state.messages.some((m) => m.role === "user")) {
+      setConfirmingRestart(true);
+    } else {
+      void handleRestart();
+    }
+  }, [state.messages, handleRestart]);
+
+  /* ─── Failed start: try again ───────────────── */
+  const handleRetryStart = useCallback(async () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    generationRef.current += 1;
+    pendingTurnsRef.current.clear();
+    dispatch({ type: "CLEAR_MESSAGES" });
+    await openConversation(false);
   }, [dispatch, openConversation]);
 
   /* ─── HITL: watch a paused conversation ─────── */
@@ -1375,7 +1585,7 @@ export function ChatWidget() {
       dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
       dispatch({
         type: "ADD_MESSAGE",
-        message: makeAgentMessage("This request was cancelled."),
+        message: makeNotice(t("send.cancelled")),
       });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
@@ -1414,10 +1624,10 @@ export function ChatWidget() {
     } catch (err) {
       dispatch({
         type: "ADD_MESSAGE",
-        message: makeAgentMessage(
+        message: makeNotice(
           err instanceof ApiError && err.status === 409
-            ? "⚠️ There is nothing to retry right now."
-            : "⚠️ Retrying failed. You can start a new conversation instead.",
+            ? t("retry.nothing")
+            : t("retry.failed"),
         ),
       });
     } finally {
@@ -1451,26 +1661,55 @@ export function ChatWidget() {
   }, [dispatch, state.conversationId, isDemo]);
 
   /* ─── Auto-scroll ───────────────────────────── */
+  // Follow new content only while the reader is at the bottom. It used to
+  // scroll on every token, smoothly, which fought anyone scrolling up to
+  // re-read mid-reply (and the smooth animation never caught up with the
+  // tokens). Following is an instant jump; leaving the bottom ends it.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = messagesContainerRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
   }, [state.messages, state.isProcessing]);
 
   const handleScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
     const atBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight <= 20;
+      el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+    stickToBottomRef.current = atBottom;
     setShowScrollBtn(!atBottom);
   }, []);
 
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    stickToBottomRef.current = true;
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    messagesEndRef.current?.scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
+    setShowScrollBtn(false);
   }, []);
+
+  /* ─── Composer focus handoff ────────────────── */
+  // The agent-requested field replaces the composer, and leaving it (sending or
+  // cancelling) unmounts whatever had focus. Moving it to the composer keeps a
+  // keyboard user's place.
+  const handleRequestedFieldSend = useCallback(
+    (value: string, isSecret: boolean) => {
+      setComposerFocusSignal((n) => n + 1);
+      handleSend(value, isSecret);
+    },
+    [handleSend],
+  );
+  const handleRequestedFieldCancel = useCallback(() => {
+    dispatch({ type: "CLEAR_INPUT_FIELD" });
+    setComposerFocusSignal((n) => n + 1);
+  }, [dispatch]);
 
   /* ─── Derived state ─────────────────────────── */
   const isEnded = state.conversationState === "ENDED";
   const showInput =
     !isEnded && (state.quickReplies.length === 0 || state.messages.length > 0);
+  const showStartRetry = startFailed && !state.conversationId && !isEnded;
 
   return (
     <div className="chat-root">
@@ -1490,15 +1729,19 @@ export function ChatWidget() {
         // complete, instead of reading it out token by token.
         role="log"
         aria-live="polite"
-        aria-label="Conversation"
+        aria-label={t("transcript.label")}
         aria-busy={state.isProcessing}
         data-testid="chat-transcript"
       >
         {state.messages.length === 0 && !state.isProcessing && !isPaused ? (
           <div className="chat-empty">
             <MessagesSquare className="chat-empty__icon" size="1em" />
+            {/* Keyed on whether a conversation exists, not on whether it has
+                messages: an agent with no greeting is READY, not "starting". */}
             <p className="chat-empty__text">
-              Starting conversation…
+              {state.conversationId
+                ? t("transcript.ready")
+                : t("transcript.starting")}
             </p>
           </div>
         ) : (
@@ -1510,6 +1753,7 @@ export function ChatWidget() {
                 enableMarkdown={state.config.enableMarkdown !== false}
                 enableMath={state.config.enableMath !== false}
                 enableCodeHighlight={state.config.enableCodeHighlight !== false}
+                agentName={state.agentName}
               />
             ))}
 
@@ -1519,6 +1763,17 @@ export function ChatWidget() {
                 onCancel={handleCancel}
                 cancelDisabled={state.isProcessing}
               />
+            ) : isPaused ? (
+              // Paused but the approval status has not arrived (still polling, or
+              // the poll is failing). The composer is closed meanwhile, so say why
+              // instead of showing an unexplained dead end.
+              <div className="paused-card paused-card--pending" data-testid="paused-pending">
+                <div className="paused-card__head">
+                  <Hand className="paused-card__icon" size="1em" aria-hidden="true" />
+                  <span className="paused-card__title">{t("paused.title")}</span>
+                </div>
+                <p className="paused-card__text">{t("paused.pending")}</p>
+              </div>
             ) : (
               <>
                 {(state.isThinking || state.isEscalating || state.activeTool) && (
@@ -1571,8 +1826,8 @@ export function ChatWidget() {
         <div className="recovery-banner" role="status" data-testid="recovery-banner">
           <span className="recovery-banner__text">
             {state.conversationState === "EXECUTION_INTERRUPTED"
-              ? "This request was interrupted before it finished."
-              : "Something went wrong on the last step."}
+              ? t("recovery.interrupted")
+              : t("recovery.error")}
           </span>
           <div className="recovery-banner__actions">
             <button
@@ -1581,7 +1836,7 @@ export function ChatWidget() {
               disabled={state.isProcessing}
               data-testid="recovery-retry"
             >
-              Try again
+              {t("recovery.retry")}
             </button>
             <button
               className="recovery-banner__btn"
@@ -1589,7 +1844,21 @@ export function ChatWidget() {
               disabled={state.isProcessing}
               data-testid="recovery-restart"
             >
-              Start over
+              {t("recovery.restart")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showStartRetry && (
+        <div className="recovery-banner" data-testid="start-failed">
+          <div className="recovery-banner__actions">
+            <button
+              className="recovery-banner__btn"
+              onClick={handleRetryStart}
+              data-testid="start-retry"
+            >
+              {t("start.retry")}
             </button>
           </div>
         </div>
@@ -1605,13 +1874,13 @@ export function ChatWidget() {
               role="status"
               data-testid="chat-ended-retired"
             >
-              This assistant was updated. Start a new conversation to continue.
+              {t("ended.retired")}
             </span>
           ) : (
-            <span className="chat-ended__label">Conversation Ended</span>
+            <span className="chat-ended__label">{t("ended.label")}</span>
           )}
           <button className="chat-ended__restart" onClick={handleRestart}>
-            Start New Conversation
+            {t("ended.restart")}
           </button>
         </div>
       ) : (
@@ -1626,7 +1895,8 @@ export function ChatWidget() {
                       className="chat-actions__btn"
                       onClick={handleUndo}
                       disabled={!state.undoAvailable || state.isProcessing}
-                      title="Undo last message"
+                      title={t("undo.title")}
+                      aria-label={t("undo.title")}
                       data-testid="undo-btn"
                       style={{ opacity: state.undoAvailable && !state.isProcessing ? 1 : 0.35 }}
                     >
@@ -1638,7 +1908,8 @@ export function ChatWidget() {
                       className="chat-actions__btn"
                       onClick={handleRedo}
                       disabled={!state.redoAvailable || state.isProcessing}
-                      title="Redo message"
+                      title={t("redo.title")}
+                      aria-label={t("redo.title")}
                       data-testid="redo-btn"
                       style={{ opacity: state.redoAvailable && !state.isProcessing ? 1 : 0.35 }}
                     >
@@ -1651,8 +1922,8 @@ export function ChatWidget() {
                     <button
                       className="chat-actions__btn chat-actions__btn--stop"
                       onClick={handleStop}
-                      title="Stop generating"
-                      aria-label="Stop generating"
+                      title={t("action.stop")}
+                      aria-label={t("action.stop")}
                       data-testid="chat-stop"
                     >
                       <Square size="1em" fill="currentColor" />
@@ -1661,8 +1932,10 @@ export function ChatWidget() {
                   {state.config.enableNewConversation !== false && (
                     <button
                       className="chat-actions__btn"
-                      onClick={handleRestart}
-                      title="New conversation"
+                      onClick={requestRestart}
+                      title={t("action.new")}
+                      aria-label={t("action.new")}
+                      aria-expanded={confirmingRestart}
                       data-testid="restart-btn"
                     >
                       {/* Not a circular arrow: that reads as retry, and this discards the
@@ -1674,13 +1947,50 @@ export function ChatWidget() {
               </div>
             )}
 
+            {confirmingRestart && (
+              <div
+                className="chat-confirm"
+                role="alertdialog"
+                aria-label={t("action.new")}
+                aria-describedby="chat-confirm-text"
+                data-testid="restart-confirm"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setConfirmingRestart(false);
+                }}
+              >
+                <span id="chat-confirm-text" className="chat-confirm__text">
+                  {t("action.newConfirm")}
+                </span>
+                <div className="chat-confirm__actions">
+                  <button
+                    type="button"
+                    className="chat-confirm__btn chat-confirm__btn--danger"
+                    onClick={handleRestart}
+                    data-testid="restart-confirm-yes"
+                  >
+                    {t("action.newYes")}
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-confirm__btn"
+                    onClick={() => setConfirmingRestart(false)}
+                    autoFocus
+                    data-testid="restart-confirm-cancel"
+                  >
+                    {t("action.newCancel")}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {state.activeInputField ? (
               <SecretInput
                 label={state.activeInputField.label}
                 placeholder={state.activeInputField.placeholder}
                 defaultValue={state.activeInputField.defaultValue}
                 subType={state.activeInputField.subType}
-                onSend={handleSend}
+                onSend={handleRequestedFieldSend}
+                onCancel={handleRequestedFieldCancel}
                 disabled={state.isProcessing}
               />
             ) : (
@@ -1688,6 +1998,7 @@ export function ChatWidget() {
                 onSend={handleSend}
                 disabled={(!state.conversationId && !isManagedAgent) || isPaused || !profileSettled}
                 conversationId={state.conversationId}
+                focusSignal={composerFocusSignal}
               />
             )}
           </div>
