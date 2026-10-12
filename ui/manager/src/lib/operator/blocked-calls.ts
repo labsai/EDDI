@@ -85,7 +85,7 @@ export function findBlockedCalls(
   const gateReason: Record<GateCarryingReason, string> = {
     "carries-gate": t(
       "operator.approval.blockedGateCarrying",
-      "This request writes an LLM configuration that sets or changes its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
+      "This request writes an LLM configuration that sets its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
     ),
     "unsupported-patch-op": t(
       "operator.approval.blockedGatePatchOp",
