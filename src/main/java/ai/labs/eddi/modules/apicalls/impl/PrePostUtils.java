@@ -166,7 +166,13 @@ public class PrePostUtils {
                                         + "' with scope 'secret': only string values can be vaulted, but the instruction produced a "
                                         + propertyValue.getClass().getSimpleName() + ". Refusing to persist it in plaintext.", null);
                             }
-                            propertyValue = "";
+                            // An object or array reached through fromObjectPath is kept as it is:
+                            // an LLM task's postResponse names its own response object
+                            // (convertToObject: true stores it as a Map) and used to get an
+                            // empty property back. Any other non-string value is still "".
+                            if (!(fromPath && (propertyValue instanceof Map<?, ?> || propertyValue instanceof List<?>))) {
+                                propertyValue = "";
+                            }
                         }
 
                         if (scope == Property.Scope.secret) {
