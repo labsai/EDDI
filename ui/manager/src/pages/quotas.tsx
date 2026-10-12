@@ -409,7 +409,7 @@ function QuotaField({
   // Follow the server value (load, save) unless the text already means it.
   useEffect(() => {
     setText((prev) => (parseQuotaLimit(prev, { integer }) === value ? prev : String(value)));
-  }, [value]);
+  }, [value, integer]);
   // A number input reports half-typed text ("-", "1e") as "" with
   // `validity.badInput` set. Read as text, that "" would mean "empty", i.e.
   // unlimited, while the field still shows the "-" — so it is tracked apart.
