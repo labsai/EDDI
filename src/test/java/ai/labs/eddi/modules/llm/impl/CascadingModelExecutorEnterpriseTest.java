@@ -18,6 +18,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.exception.HttpException;
+import dev.langchain4j.exception.RateLimitException;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -215,6 +217,64 @@ class CascadingModelExecutorEnterpriseTest {
 
         assertEquals(1.0, meterRegistry.find("eddi.llm.cascade.executions").counter().count(), 0.001);
         assertEquals(1.0, meterRegistry.find("eddi.llm.cascade.accepted.step").tag("step", "0").counter().count(), 0.001);
+    }
+
+    // ─── Failure class on error escalations ──────────────────────────
+
+    private static final String GEMINI_DAILY_QUOTA = "{\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"quota\","
+            + "\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.QuotaFailure\",\"violations\":[{\"quotaId\":"
+            + "\"GenerateRequestsPerDayPerProjectPerModel-FreeTier\"}]}]}}";
+
+    private CascadingModelExecutor.CascadeResult runFailingThenOk(Exception failure, MeterRegistry meterRegistry) throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var first = new CascadeStep();
+        first.setType("openai");
+        first.setConfidenceThreshold(0.5);
+        var second = new CascadeStep();
+        second.setType("anthropic");
+        cascade.setSteps(List.of(first, second));
+
+        ChatModel failing = mock(ChatModel.class);
+        when(failing.chat(anyList())).thenThrow(failure);
+        ChatModel recovered = modelReturning("recovered");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(failing);
+        when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(recovered);
+        return run(registry, cascade, meterRegistry);
+    }
+
+    @Test
+    @DisplayName("an escalation by quota exhaustion records the failure class in the trace and a counter; status/error keep their shape")
+    void errorEscalation_recordsFailureClass() throws Exception {
+        var meterRegistry = new SimpleMeterRegistry();
+
+        var result = runFailingThenOk(new RateLimitException(new HttpException(429, GEMINI_DAILY_QUOTA)), meterRegistry);
+
+        assertEquals("recovered", result.response());
+        var entry = result.trace().get(0);
+        assertEquals("QUOTA_EXHAUSTED", entry.get("failureClass"));
+        assertEquals("error", entry.get("status"), "a quota 429 is not a retryable_error");
+        assertTrue(entry.containsKey("error") && entry.containsKey("durationMs"), "existing trace fields are untouched");
+        assertFalse(entry.containsKey("retryAfterMs"));
+        assertEquals(1.0, meterRegistry.find("eddi.llm.failure").tag("class", "QUOTA_EXHAUSTED").tag("model", "openai").counter().count(), 0.001);
+    }
+
+    @Test
+    @DisplayName("a transient escalation records TRANSIENT and the provider's delay hint when there is one")
+    void errorEscalation_recordsRetryAfter() throws Exception {
+        var meterRegistry = new SimpleMeterRegistry();
+        String rateLimit = "{\"error\":{\"code\":429,\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":"
+                + "\"type.googleapis.com/google.rpc.RetryInfo\",\"retryDelay\":\"13s\"}]}}";
+
+        var result = runFailingThenOk(new RateLimitException(new HttpException(429, rateLimit)), meterRegistry);
+
+        var entry = result.trace().get(0);
+        assertEquals("RATE_LIMITED", entry.get("failureClass"));
+        assertEquals("retryable_error", entry.get("status"));
+        assertEquals(13_000L, entry.get("retryAfterMs"));
+        assertEquals(1.0, meterRegistry.find("eddi.llm.failure").tag("class", "RATE_LIMITED").counter().count(), 0.001);
     }
 
     // ─── Trace enrichment ────────────────────────────────────────────

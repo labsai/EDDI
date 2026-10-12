@@ -90,6 +90,8 @@ public class LlmTask implements ILifecycleTask {
     private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
     private static final String KEY_INCLUDE_FIRST_AGENT_MESSAGE = "includeFirstAgentMessage";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
+    /** Step key prefix for the convertToObject parse outcome (task id appended). */
+    static final String KEY_OUTPUT_OUTCOME = "llm:output:outcome:";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
     private static final String KEY_RESPONSE_SCHEMA = "responseSchema";
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
@@ -103,6 +105,7 @@ public class LlmTask implements ILifecycleTask {
     private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
     private final IJsonSerialization jsonSerialization;
+    private final ModelOutputParser modelOutputParser;
     private final PrePostUtils prePostUtils;
 
     private final ChatModelRegistry chatModelRegistry;
@@ -188,6 +191,7 @@ public class LlmTask implements ILifecycleTask {
         this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
         this.jsonSerialization = jsonSerialization;
+        this.modelOutputParser = new ModelOutputParser(jsonSerialization);
         this.prePostUtils = prePostUtils;
 
         this.meterRegistry = meterRegistry;
@@ -680,7 +684,7 @@ public class LlmTask implements ILifecycleTask {
         currentStep.storeData(langchainData);
 
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId()));
+            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -1018,30 +1022,37 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * The {@code convertToObject} view of a response: a JSON object becomes a Map,
-     * a JSON array a List, and anything else — plain text, or JSON the model
-     * truncated or malformed — stays the raw string.
+     * The {@code convertToObject} view of a response, shared by the live and the
+     * HITL-resume path: a JSON object becomes a Map, a JSON array a List (after
+     * {@link ModelOutputParser}'s fence stripping / extraction), and anything else
+     * stays the raw string. It never throws: a model that ran out of tokens
+     * mid-object used to fail the whole turn, after it had been paid for.
      * <p>
-     * An array used to be deserialized as a Map and a malformed object thrown
-     * straight out of the task, so a model that answered {@code [...]} or ran out
-     * of tokens mid-object failed the whole turn — after it had been paid for, and
-     * although the plain-text fallback right beside it existed for exactly this.
+     * The outcome ({@code valid|repaired|invalid|empty}) is recorded on the step
+     * under {@code llm:output:outcome:<taskId>} and counted in
+     * {@code eddi.llm.output{outcome}}. The key's prefix keeps it out of client
+     * snapshots.
      */
-    Object convertResponseToObject(String responseContent, String taskId) {
-        String trimmed = responseContent != null ? responseContent.trim() : "";
-        Class<?> target = trimmed.startsWith("{") ? Map.class : trimmed.startsWith("[") ? List.class : null;
-        if (target == null) {
-            // LLM returned plain text despite structured output instruction
-            LOGGER.warnf("convertToObject=true but the response of task '%s' is not JSON, storing as string", taskId);
-            return responseContent;
+    Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep) {
+        ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true);
+        String label = outcome.label();
+        switch (outcome.kind()) {
+            case INVALID -> LOGGER.warnf("convertToObject=true but the response of task '%s' is not valid JSON (%s), storing as string", taskId,
+                    outcome.reason());
+            case EMPTY -> LOGGER.warnf("convertToObject=true but the response of task '%s' is empty, storing as string", taskId);
+            default -> {
+                if (outcome.repaired()) {
+                    LOGGER.debugf("convertToObject: response of task '%s' needed fence stripping/extraction before it parsed", taskId);
+                }
+            }
         }
-        try {
-            return jsonSerialization.deserialize(trimmed, target);
-        } catch (IOException | RuntimeException e) {
-            LOGGER.warnf("convertToObject=true but the response of task '%s' is not valid JSON (%s), storing as string", taskId,
-                    e.getMessage());
-            return responseContent;
+        if (currentStep != null) {
+            currentStep.storeData(dataFactory.createData(KEY_OUTPUT_OUTCOME + taskId, label));
         }
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi.llm.output", "outcome", label).increment();
+        }
+        return outcome.value();
     }
 
     /**
@@ -1184,7 +1195,7 @@ public class LlmTask implements ILifecycleTask {
         currentStep.storeData(langchainData);
 
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
-            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId()));
+            templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -1256,7 +1267,7 @@ public class LlmTask implements ILifecycleTask {
      * Parameters that should NOT be processed by the template engine (credentials,
      * secrets).
      */
-    private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
+    public static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
     /**
      * A configuration reference MENTIONED in an LLM parameter —
@@ -1269,7 +1280,7 @@ public class LlmTask implements ILifecycleTask {
      * Qute namespace resolver — so to Qute every one of them is an unresolvable
      * namespaced expression, not just {@code vault}.
      */
-    static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
+    public static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
      * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}

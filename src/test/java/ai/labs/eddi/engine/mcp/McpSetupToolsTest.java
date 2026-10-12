@@ -464,7 +464,7 @@ class McpSetupToolsTest {
 
     @Test
     void createLlmConfig_withJsonFormat_setsPostResponse() {
-        String jsonPrompt = McpSetupTools.buildPromptResponseJson(true, true);
+        String jsonPrompt = AgentSetupService.buildPromptResponseJson(true, true);
         var config = service.createLlmConfig("openai", "gpt-4o", "key", "prompt", false, null, null, jsonPrompt, true, true, null);
 
         var task = config.tasks().get(0);
@@ -587,7 +587,7 @@ class McpSetupToolsTest {
 
     @Test
     void buildPromptResponseJson_quickRepliesOnly() {
-        String result = McpSetupTools.buildPromptResponseJson(true, false);
+        String result = AgentSetupService.buildPromptResponseJson(true, false);
         assertNotNull(result);
         assertTrue(result.contains("quickReplies"));
         assertTrue(result.contains("htmlResponseText"));
@@ -596,7 +596,7 @@ class McpSetupToolsTest {
 
     @Test
     void buildPromptResponseJson_sentimentOnly() {
-        String result = McpSetupTools.buildPromptResponseJson(false, true);
+        String result = AgentSetupService.buildPromptResponseJson(false, true);
         assertNotNull(result);
         assertTrue(result.contains("\"sentiment\":"));
         assertTrue(result.contains("\"score\":"));
@@ -609,7 +609,7 @@ class McpSetupToolsTest {
 
     @Test
     void buildPromptResponseJson_both() {
-        String result = McpSetupTools.buildPromptResponseJson(true, true);
+        String result = AgentSetupService.buildPromptResponseJson(true, true);
         assertNotNull(result);
         assertTrue(result.contains("quickReplies"));
         assertTrue(result.contains("\"sentiment\":"));
@@ -621,29 +621,29 @@ class McpSetupToolsTest {
 
     @Test
     void buildPromptResponseJson_neither_returnsNull() {
-        assertNull(McpSetupTools.buildPromptResponseJson(false, false));
+        assertNull(AgentSetupService.buildPromptResponseJson(false, false));
     }
 
     @Test
     void isLocalLlmProvider_recognizesNoApiKeyProviders() {
         // Local inference — no apiKey needed
-        assertTrue(McpSetupTools.isLocalLlmProvider("ollama"));
-        assertTrue(McpSetupTools.isLocalLlmProvider("Ollama"));
-        assertTrue(McpSetupTools.isLocalLlmProvider("jlama"));
-        assertTrue(McpSetupTools.isLocalLlmProvider("JLAMA"));
+        assertTrue(AgentSetupService.isLocalLlmProvider("ollama"));
+        assertTrue(AgentSetupService.isLocalLlmProvider("Ollama"));
+        assertTrue(AgentSetupService.isLocalLlmProvider("jlama"));
+        assertTrue(AgentSetupService.isLocalLlmProvider("JLAMA"));
         // Cloud services with native auth (no apiKey param)
-        assertTrue(McpSetupTools.isLocalLlmProvider("bedrock"));
-        assertTrue(McpSetupTools.isLocalLlmProvider("Bedrock"));
-        assertTrue(McpSetupTools.isLocalLlmProvider("oracle-genai"));
-        assertTrue(McpSetupTools.isLocalLlmProvider("Oracle-GenAI"));
+        assertTrue(AgentSetupService.isLocalLlmProvider("bedrock"));
+        assertTrue(AgentSetupService.isLocalLlmProvider("Bedrock"));
+        assertTrue(AgentSetupService.isLocalLlmProvider("oracle-genai"));
+        assertTrue(AgentSetupService.isLocalLlmProvider("Oracle-GenAI"));
         // Cloud services that require apiKey
-        assertFalse(McpSetupTools.isLocalLlmProvider("anthropic"));
-        assertFalse(McpSetupTools.isLocalLlmProvider("openai"));
-        assertFalse(McpSetupTools.isLocalLlmProvider("mistral"));
-        assertFalse(McpSetupTools.isLocalLlmProvider("azure-openai"));
+        assertFalse(AgentSetupService.isLocalLlmProvider("anthropic"));
+        assertFalse(AgentSetupService.isLocalLlmProvider("openai"));
+        assertFalse(AgentSetupService.isLocalLlmProvider("mistral"));
+        assertFalse(AgentSetupService.isLocalLlmProvider("azure-openai"));
         // Edge cases
-        assertFalse(McpSetupTools.isLocalLlmProvider(null));
-        assertFalse(McpSetupTools.isLocalLlmProvider(""));
+        assertFalse(AgentSetupService.isLocalLlmProvider(null));
+        assertFalse(AgentSetupService.isLocalLlmProvider(""));
     }
 
     @Test

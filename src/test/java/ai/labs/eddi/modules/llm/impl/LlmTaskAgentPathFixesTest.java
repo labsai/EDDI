@@ -330,31 +330,36 @@ class LlmTaskAgentPathFixesTest {
     @DisplayName("M-L4 — convertToObject never fails the turn")
     class ConvertToObject {
 
-        private final LlmTask realJson = newTask(new JsonSerialization(new ObjectMapper()));
+        private LlmTask realJson;
+
+        @BeforeEach
+        void realSerializer() {
+            realJson = newTask(new JsonSerialization(new ObjectMapper()));
+        }
 
         @Test
         @DisplayName("a JSON object becomes a map")
         void objectBecomesMap() {
-            assertEquals(Map.of("a", 1), realJson.convertResponseToObject("{\"a\":1}", "t"));
+            assertEquals(Map.of("a", 1), realJson.convertResponseToObject("{\"a\":1}", "t", currentStep));
         }
 
         @Test
         @DisplayName("a JSON array becomes a list instead of failing as a map")
         void arrayBecomesList() {
-            assertEquals(List.of(1, 2), realJson.convertResponseToObject(" [1,2] ", "t"));
+            assertEquals(List.of(1, 2), realJson.convertResponseToObject(" [1,2] ", "t", currentStep));
         }
 
         @Test
         @DisplayName("truncated JSON is kept as the raw string instead of throwing")
         void truncatedJsonStaysString() {
             String truncated = "{\"answer\": \"the model ran out of tok";
-            assertEquals(truncated, realJson.convertResponseToObject(truncated, "t"));
+            assertEquals(truncated, realJson.convertResponseToObject(truncated, "t", currentStep));
         }
 
         @Test
         @DisplayName("plain text stays a string")
         void plainTextStaysString() {
-            assertEquals("hello", realJson.convertResponseToObject("hello", "t"));
+            assertEquals("hello", realJson.convertResponseToObject("hello", "t", currentStep));
         }
     }
 

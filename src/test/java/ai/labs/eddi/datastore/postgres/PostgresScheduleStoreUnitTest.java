@@ -127,6 +127,19 @@ class PostgresScheduleStoreUnitTest {
     }
 
     @Test
+    void createSchedule_keepsNoSnapshotApartFromNoTeams() throws Exception {
+        var legacy = newScheduleConfig();
+        legacy.setCreatorTeams(null);
+        sut.createSchedule(legacy);
+        verify(preparedStatement).setString(25, null);
+
+        var noTeams = newScheduleConfig();
+        noTeams.setCreatorTeams(List.of());
+        sut.createSchedule(noTeams);
+        verify(preparedStatement).setString(25, "[]");
+    }
+
+    @Test
     void updateSchedule_persistsUserId() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
         var config = newScheduleConfig();
@@ -380,6 +393,46 @@ class PostgresScheduleStoreUnitTest {
         assertEquals("conv-1", result.getPersistentConversationId());
         assertEquals("alice", result.getCreatedBy());
         assertTrue(result.isAllowSelfScheduling());
+    }
+
+    @Test
+    void readSchedule_jsonNullCreatorTeams_failsClosedAsNoTeams_notAsNoSnapshot() throws Exception {
+        // The JSON literal null is valid JSON and parses to a Java null, which the
+        // fire path reads as "no snapshot" and skips the USE re-check.
+        setupResultSetForSchedule();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("created_by")).thenReturn("alice");
+        when(resultSet.getString("creator_teams")).thenReturn("null");
+
+        ScheduleConfiguration result = sut.readSchedule("sched-1");
+
+        assertNotNull(result.getCreatorTeams());
+        assertTrue(result.getCreatorTeams().isEmpty());
+    }
+
+    @Test
+    void readSchedule_sqlNullCreatorTeams_staysNoSnapshot() throws Exception {
+        // Rows written before the snapshot existed: SQL NULL means "no snapshot".
+        setupResultSetForSchedule();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("creator_teams")).thenReturn(null);
+
+        assertNull(sut.readSchedule("sched-1").getCreatorTeams());
+    }
+
+    @Test
+    void readSchedule_unreadableCreatorTeams_failsClosedAsNoTeams_notAsNoSnapshot() throws Exception {
+        // null would mean "no snapshot" and skip the fire-time USE re-check (fail
+        // open). A corrupt value must keep the check, judged without team shares.
+        setupResultSetForSchedule();
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("created_by")).thenReturn("alice");
+        when(resultSet.getString("creator_teams")).thenReturn("{not json");
+
+        ScheduleConfiguration result = sut.readSchedule("sched-1");
+
+        assertNotNull(result.getCreatorTeams());
+        assertTrue(result.getCreatorTeams().isEmpty());
     }
 
     /**
@@ -940,9 +993,20 @@ class PostgresScheduleStoreUnitTest {
         // when
         sut.setScheduleEnabled("sched-1", false, null);
 
-        // then — should use the shorter SQL
+        // then — should use the shorter SQL, recording no system reason
         verify(preparedStatement).setBoolean(1, false);
-        verify(preparedStatement).setString(3, "sched-1");
+        verify(preparedStatement).setString(2, null);
+        verify(preparedStatement).setString(4, "sched-1");
+    }
+
+    @Test
+    void setScheduleEnabled_disableWithReason_recordsIt() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.setScheduleEnabled("sched-1", false, null, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+
+        verify(preparedStatement).setString(2, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+        verify(preparedStatement).setString(4, "sched-1");
     }
 
     @Test

@@ -300,6 +300,8 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 
 A property instruction here runs on the same implementation as a `property.json` instruction, so the two store the same values. A failing one (a template that does not render) no longer disappears into the log: it is logged with the conversation id and recorded in the step under `propertyInstructions:errors`, and the remaining instructions still run. See [Properties](properties.md#via-prepost-request-instructions).
 
+**A missing array is an empty loop.** Quick-reply and output build instructions iterate `pathToTargetArray` with `.orEmpty` appended (unless you already wrote it, or use `?:`, `??` or `or`), so a response that does not contain the array yields no quick replies or output items instead of failing the turn with `Iteration error ... not found`.
+
 ### HttpCall API endpoints
 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |
