@@ -78,25 +78,13 @@ describe("Sidebar — collapsible sections", () => {
     const stored = localStorage.getItem("eddi-sidebar-sections");
     expect(stored).toBeTruthy();
     const parsed = JSON.parse(stored!);
-    // Stored by section key, not by position: a role that hides a whole
-    // section shifts every later index.
-    expect(parsed).toEqual(["nav.sectionAdmin"]);
+    // Keyed by the section's stable id, not its position.
+    expect(parsed).toContain("admin");
   });
 
   it("restores collapsed state from localStorage", () => {
-    localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["nav.sectionAdmin"]));
-
-    renderWithProviders(
-      <Sidebar collapsed={false} onToggle={() => {}} />,
-    );
-
-    expect(screen.queryByText("Secrets")).not.toBeInTheDocument();
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
-  });
-
-  it("reads a position stored by an earlier build against the full section list", () => {
-    // Legacy format: Admin is index 3 of the unfiltered sections.
-    localStorage.setItem("eddi-sidebar-sections", JSON.stringify([3]));
+    // Pre-set collapsed state: Admin (index 3) collapsed
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["admin"]));
 
     renderWithProviders(
       <Sidebar collapsed={false} onToggle={() => {}} />,
@@ -108,9 +96,29 @@ describe("Sidebar — collapsible sections", () => {
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
+  it("still understands collapse state saved by position before ids existed", () => {
+    // Older saves held section INDEXES; 3 was Admin.
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify([3]));
+
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+
+    expect(screen.queryByText("Secrets")).not.toBeInTheDocument();
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  });
+
+  it("still understands collapse state saved by section label key", () => {
+    // Builds between the role filter and the route registry stored label keys.
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["nav.sectionAdmin"]));
+
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+
+    expect(screen.queryByText("Secrets")).not.toBeInTheDocument();
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  });
+
   it("shows all items in icon mode even when sections are collapsed", () => {
     // Pre-set collapsed state
-    localStorage.setItem("eddi-sidebar-sections", JSON.stringify([3]));
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["admin"]));
 
     renderWithProviders(
       <Sidebar collapsed={true} onToggle={() => {}} />,

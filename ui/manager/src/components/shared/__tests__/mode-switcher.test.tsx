@@ -1,87 +1,77 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
 
-const { mockNavigate } = vi.hoisted(() => ({ mockNavigate: vi.fn() }));
-vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual("react-router-dom");
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-    useLocation: () => ({ pathname: "/manage/agents" }),
-  };
-});
-
 describe("ModeSwitcher", () => {
   beforeEach(() => {
-    mockNavigate.mockClear();
     localStorage.clear();
   });
 
-  it("renders the segmented pill with both options visible", () => {
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
-    expect(screen.getByTestId("mode-option-manager")).toBeInTheDocument();
-    expect(screen.getByTestId("mode-option-workforce")).toBeInTheDocument();
+  it("renders both options as links", () => {
+    renderWithProviders(<ModeSwitcher collapsed={false} />, { initialRoute: "/manage/agents" });
+    expect(screen.getByTestId("mode-option-manager")).toHaveAttribute("href", "/manage");
+    expect(screen.getByTestId("mode-option-workforce")).toHaveAttribute("href", "/workforce");
   });
 
   it("shows both 'Manager' and 'Workforce' labels when expanded", () => {
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
+    renderWithProviders(<ModeSwitcher collapsed={false} />, { initialRoute: "/manage/agents" });
     expect(screen.getByText("Manager")).toBeInTheDocument();
     expect(screen.getByText("Workforce")).toBeInTheDocument();
   });
 
-  it("marks Manager as active tab when on /manage route", () => {
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
-    const managerTab = screen.getByTestId("mode-option-manager");
-    const workforceTab = screen.getByTestId("mode-option-workforce");
-    expect(managerTab).toHaveAttribute("aria-selected", "true");
-    expect(workforceTab).toHaveAttribute("aria-selected", "false");
+  it("marks Manager as the current page when on a /manage route", () => {
+    renderWithProviders(<ModeSwitcher collapsed={false} />, { initialRoute: "/manage/agents" });
+    expect(screen.getByTestId("mode-option-manager")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("mode-option-workforce")).not.toHaveAttribute("aria-current");
   });
 
-  it("renders icon-only toggle when collapsed", () => {
-    renderWithProviders(<ModeSwitcher collapsed={true} />);
-    // Collapsed shows only a single toggle button (opposite mode icon)
-    const trigger = screen.getByRole("button", { name: /switch workspace/i });
-    expect(trigger).toBeInTheDocument();
+  it("is not an ARIA tablist: arrow keys must not swap the whole app", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ModeSwitcher collapsed={false} />, { initialRoute: "/manage/agents" });
+
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: /switch workspace/i })).toBeInTheDocument();
+
+    screen.getByTestId("mode-option-manager").focus();
+    await user.keyboard("{ArrowRight}");
+    // Still on Manager — nothing navigated.
+    expect(screen.getByTestId("mode-option-manager")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("renders an icon-only link to the other mode when collapsed", () => {
+    renderWithProviders(<ModeSwitcher collapsed={true} />, { initialRoute: "/manage/agents" });
+    const trigger = screen.getByRole("link", { name: /switch workspace/i });
+    expect(trigger).toHaveAttribute("href", "/workforce");
     // No text labels in collapsed mode
     expect(screen.queryByText("Manager")).not.toBeInTheDocument();
     expect(screen.queryByText("Workforce")).not.toBeInTheDocument();
   });
 
-  it("navigates to /workforce and persists preference when clicking Workforce", async () => {
+  it("collapsed link points at the Manager when already in Workforce", () => {
+    renderWithProviders(<ModeSwitcher collapsed={true} />, { initialRoute: "/workforce/board-1" });
+    expect(screen.getByRole("link", { name: /switch workspace/i })).toHaveAttribute("href", "/manage");
+  });
+
+  it("does NOT rewrite the saved landing preference when switching mode", async () => {
+    // The preference is the visitor's explicit answer on the welcome chooser; a
+    // hop to Workforce for one task must not overwrite it.
+    localStorage.setItem("eddi-landing-preference", "manage");
     const user = userEvent.setup();
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
+    renderWithProviders(<ModeSwitcher collapsed={false} />, { initialRoute: "/manage/agents" });
 
     await user.click(screen.getByTestId("mode-option-workforce"));
 
-    expect(mockNavigate).toHaveBeenCalledWith("/workforce");
-    expect(localStorage.getItem("eddi-landing-preference")).toBe("workforce");
+    expect(localStorage.getItem("eddi-landing-preference")).toBe("manage");
   });
 
-  it("does not navigate when clicking the already-active mode", async () => {
+  it("clicking the already-active mode stays where it is", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
+    renderWithProviders(<ModeSwitcher collapsed={false} />, { initialRoute: "/manage/agents" });
 
-    // Click Manager (already active since pathname is /manage/agents)
-    await user.click(screen.getByTestId("mode-option-manager"));
-
-    expect(mockNavigate).not.toHaveBeenCalled();
-  });
-
-  it("collapsed toggle navigates to opposite mode", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<ModeSwitcher collapsed={true} />);
-
-    // When on /manage, clicking should navigate to /workforce
-    await user.click(screen.getByRole("button", { name: /switch workspace/i }));
-
-    expect(mockNavigate).toHaveBeenCalledWith("/workforce");
-    expect(localStorage.getItem("eddi-landing-preference")).toBe("workforce");
-  });
-
-  it("has tablist role for accessibility", () => {
-    renderWithProviders(<ModeSwitcher collapsed={false} />);
-    expect(screen.getByRole("tablist")).toBeInTheDocument();
+    const manager = screen.getByTestId("mode-option-manager");
+    await user.click(manager);
+    // The click is swallowed, so the active link keeps its current marker.
+    expect(manager).toHaveAttribute("aria-current", "page");
   });
 });

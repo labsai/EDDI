@@ -84,7 +84,9 @@ export function AccessibleDialog({
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // A dialog stacked on top (the unsaved-changes prompt) handles Escape in
+      // the capture phase and marks it handled — leave that one to it.
+      if (e.key === "Escape" && !e.defaultPrevented) {
         e.stopPropagation();
         onClose();
       }
