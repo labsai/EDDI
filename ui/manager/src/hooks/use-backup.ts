@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentKeys } from "@/lib/query-keys";
 import {
-  exportAndDownloadAgent,
   exportAgentSelective,
   importAgent,
   previewImport,
@@ -25,13 +24,6 @@ import type {
 
 
 // ==================== Existing Hooks ====================
-
-export function useExportAgent() {
-  return useMutation({
-    mutationFn: ({ agentId, version = 1 }: { agentId: string; version?: number }) =>
-      exportAndDownloadAgent(agentId, version),
-  });
-}
 
 export function useImportAgent() {
   const queryClient = useQueryClient();

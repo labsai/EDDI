@@ -102,6 +102,13 @@ public interface IConversationService {
     String END_REASON_AGENT_VERSION_RETIRED = "agent-version-retired";
 
     /**
+     * End reason for a conversation ended because nobody interacted with it for
+     * longer than the configured idle limit — by the scheduled idle sweep or by the
+     * admin bulk end of inactive conversations.
+     */
+    String END_REASON_IDLE = "idle";
+
+    /**
      * Get the current state of a conversation (from cache or DB).
      *
      * @throws ConversationNotFoundException

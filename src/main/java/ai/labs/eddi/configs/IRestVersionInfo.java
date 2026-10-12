@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 
 import jakarta.ws.rs.*;
@@ -17,17 +18,17 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 /**
  * Version-resolution mixin for the configuration stores.
  * <p>
- * <strong>Deliberately carries no {@code @RolesAllowed}.</strong> It has no
- * {@code @Path} of its own, so it is never an addressable resource — its two
- * default methods only become endpoints through a {@code @Path}-bearing
- * sub-interface, and every one of those already declares
- * {@code @RolesAllowed({"eddi-admin", "eddi-editor"})} at class level. A role
- * here would therefore protect nothing that is not already protected, while
- * putting a security annotation on the declaring type of methods that
- * {@link ai.labs.eddi.configs.rest.RestVersionInfo} — a plain, non-CDI helper
- * shared by every store implementation — calls in-process from
- * {@code validateParameters()} during config resolution and ZIP import. Guard
- * new stores at the store interface, not here.
+ * It has no {@code @Path} of its own, so it is never an addressable resource —
+ * its two default methods only become endpoints through a {@code @Path}-bearing
+ * sub-interface. <strong>The two endpoint methods carry their own
+ * {@code @RolesAllowed}</strong>, the authoring tier every configuration store
+ * declares at class level: Quarkus resolves a class-level security annotation
+ * from the type that <em>declares</em> the method, and for these default
+ * methods that is this mixin, not the store interface. Without it they carried
+ * no check at all — any token reached {@code …/{id}/currentversion} on every
+ * store — and under {@code quarkus.security.jaxrs.deny-unannotated-endpoints}
+ * nobody did. The type itself stays unannotated: guard new stores at the store
+ * interface, not here.
  *
  * @author ginccc
  */
@@ -36,6 +37,7 @@ public interface IRestVersionInfo {
 
     @POST
     @Path("/{id}/currentversion")
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     @Operation(description = "Redirect to latest version.")
     default Response redirectToLatestVersion(@PathParam("id") String id) {
         try {
@@ -49,6 +51,7 @@ public interface IRestVersionInfo {
 
     @GET
     @Path("/{id}/currentversion")
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
     @Produces(MediaType.TEXT_PLAIN)
     @Operation(description = "Get current version of this resource.")
     default Integer getCurrentVersion(@PathParam("id") String id) {

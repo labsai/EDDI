@@ -3,24 +3,36 @@
    theme toggle. Undo/redo/restart moved to input area.
    ────────────────────────────────────────────── */
 
+import { useEffect } from "react";
 import { SunMoon } from "lucide-react";
 
 import { useChatState } from "@/store/chat-store";
-import { useTheme, type ThemeMode } from "@/hooks/useTheme";
+import { DEFAULT_TITLE } from "@/store/chat-store";
+import { useTheme, nextTheme } from "@/hooks/useTheme";
+import { t } from "@/i18n";
 
 export function ChatHeader() {
   const { config, agentName } = useChatState();
-  const { setTheme } = useTheme(config.theme ?? "dark");
+  const { setTheme, getMode } = useTheme(config.theme ?? "dark");
 
-  const cycleTheme = () => {
-    const current = document.documentElement.getAttribute("data-theme");
-    const next: ThemeMode = current === "dark" ? "light" : "dark";
-    setTheme(next);
-  };
+  const cycleTheme = () => setTheme(nextTheme(getMode()));
 
-  // Determine what to show in the branding area
   const showLogo = config.showLogo !== false;
-  const showAgentName = config.showAgentName !== false && !!agentName;
+  const title = config.title?.trim() || DEFAULT_TITLE;
+  // `?title=` / config.title was never rendered. An explicit title is shown as
+  // text (beside the logo, when there is one) and replaces the agent name;
+  // with the logo hidden and no name, the title keeps the header from being
+  // an empty bar.
+  const titleOverridden = title !== DEFAULT_TITLE;
+  const showAgentName =
+    config.showAgentName !== false && !!agentName && !titleOverridden;
+  const showTitleText = titleOverridden || (!showLogo && !showAgentName);
+
+  // The tab/window title, so a bookmark or a browser tab says what this is.
+  useEffect(() => {
+    const name = config.showAgentName !== false ? agentName : null;
+    document.title = titleOverridden ? title : name ? `${name} — EDDI Chat` : "EDDI Chat";
+  }, [title, titleOverridden, agentName, config.showAgentName]);
 
   return (
     <header className="chat-header">
@@ -29,8 +41,13 @@ export function ChatHeader() {
           <img
             className="chat-header__logo"
             src={config.logoUrl ?? "/img/logo_eddi.png"}
-            alt={config.title ?? "EDDI"}
+            alt={showTitleText ? "" : title}
           />
+        )}
+        {showTitleText && (
+          <span className="chat-header__title" data-testid="chat-title">
+            {title}
+          </span>
         )}
         {showAgentName && (
           <span className="chat-header__agent-name">{agentName}</span>
@@ -42,8 +59,8 @@ export function ChatHeader() {
         <button
           className="chat-header__btn"
           onClick={cycleTheme}
-          title="Toggle theme"
-          aria-label="Toggle theme"
+          title={t("theme.toggle")}
+          aria-label={t("theme.toggle")}
           data-testid="theme-toggle"
         >
           <SunMoon size="1em" />

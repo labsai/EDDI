@@ -844,7 +844,8 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
-| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout` | (none) |
+| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | (none) |
+| `onError`                  | object   | `{"action": "fallback" \| "error"}`. With `fallback`, a failed model phase serves the configured fallback and the turn completes normally instead of failing — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | `error` |
 | **Retrieval (RAG)**        |          | Requires the agent's workflow to bind the knowledge base with an `eddi://ai.labs.rag` step — see [RAG](rag.md#configuration) | |
 | `knowledgeBases`           | object[] | Knowledge bases this task retrieves from, by `name`, each optionally overriding `maxResults` / `minScore`. The name must match a KB the workflow binds; an unmatched name is skipped silently | (none) |
 | `enableWorkflowRag`        | boolean  | Retrieve from **every** knowledge base the workflow binds, instead of listing them. Ignored when `knowledgeBases` contains at least one reference; an empty `knowledgeBases` array does **not** suppress it | false |
@@ -1127,6 +1128,7 @@ The Langchain task supports advanced pre-request and post-response processing fo
 - **postResponse.propertyInstructions**: Defines properties to be set based on the LLM response
   - **name**: The property name
   - **valueString**: The value to be assigned (supports templating)
+  - **fromObjectPath**: Read the value from the template data instead, e.g. the task's own response object (named by `responseObjectName`, or the task id). With `convertToObject: "true"` on the task that object is a map, and `"fromObjectPath": "aiOutput"` stores the whole object as the property, so `{properties.aiOutputObject.htmlResponseText}` resolves; a dotted path such as `aiOutput.htmlResponseText` stores a single field. The value is data and is never rendered as a template. A path that resolves to nothing stores an empty string.
   - **scope**: The scope of the property
 
 - **postResponse.outputBuildInstructions**: Configures how the response should be transformed into output (alternative to `addToOutput`)
@@ -1214,7 +1216,11 @@ When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit`
 
 `retry` on an LLM task bounds how the engine re-attempts a failed model call. Only errors the
 engine classifies as retriable are retried — transport faults, rate limits and 5xx responses —
-never a malformed request or an authentication failure.
+never a malformed request, an authentication failure or a spent quota.
+
+**An LLM task with no `retry` block still retries**: the defaults below apply, so a transient
+failure is attempted up to 3 times before the cascade (if any) escalates. To turn retries off set
+`"retry": { "maxAttempts": 1 }`.
 
 ```json
 {
@@ -1222,21 +1228,56 @@ never a malformed request or an authentication failure.
     "maxAttempts": 3,
     "backoffDelayMs": 1000,
     "backoffMultiplier": 2.0,
-    "maxBackoffDelayMs": 10000
+    "maxBackoffDelayMs": 10000,
+    "honorRetryAfter": true,
+    "maxRetryAfterMs": 10000
   }
 }
 ```
 
-| Parameter            | Type   | Description                                          | Default |
-| -------------------- | ------ | ---------------------------------------------------- | ------- |
-| `maxAttempts`        | int    | Total attempts including the first                   | 3       |
-| `backoffDelayMs`     | long   | Delay before the second attempt                      | 1000    |
-| `backoffMultiplier`  | double | Multiplier applied to the delay after each failure   | 2.0     |
-| `maxBackoffDelayMs`  | long   | Ceiling on any single delay                          | 10000   |
+| Parameter            | Type    | Description                                                                                  | Default |
+| -------------------- | ------- | -------------------------------------------------------------------------------------------- | ------- |
+| `maxAttempts`        | int     | Total attempts including the first                                                           | 3       |
+| `backoffDelayMs`     | long    | Delay before the second attempt                                                              | 1000    |
+| `backoffMultiplier`  | double  | Multiplier applied to the delay after each failure                                           | 2.0     |
+| `maxBackoffDelayMs`  | long    | Ceiling on any single delay                                                                  | 10000   |
+| `honorRetryAfter`    | boolean | Sleep the delay the provider asked for (when the error carries one) instead of the backoff   | true    |
+| `maxRetryAfterMs`    | long    | Longest provider-requested wait accepted; a longer request stops retrying **without sleeping** | 10000   |
 
 The engine clamps these so a config cannot pin a pipeline thread: at most 10 attempts, at most
-30 seconds for one backoff, and at most 60 seconds of backoff in total across the retry sequence.
-A clamped value is reported once in a WARN.
+30 seconds for one backoff (and for `maxRetryAfterMs`), and at most 60 seconds of backoff in total
+across the retry sequence. A clamped value is reported once in a WARN.
+
+#### Error classification
+
+Every failure is classified into one class (`FailureClass`); only `TRANSIENT`, `RATE_LIMITED` and
+`TIMEOUT` are retried. The class is taken from the HTTP status **and the provider's error body**,
+because a status alone cannot tell a rate limit from a spent quota:
+
+| Class              | Retried | Typical signals                                                                                                              |
+| ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `TRANSIENT`        | yes     | HTTP 500/502/503/529; Gemini `INTERNAL`/`UNAVAILABLE`; Anthropic `overloaded_error`/`api_error`; connect failure, DNS         |
+| `RATE_LIMITED`     | yes     | HTTP 429; Gemini `RESOURCE_EXHAUSTED` (per-minute quota); OpenAI `rate_limit_exceeded`; Anthropic `rate_limit_error`        |
+| `TIMEOUT`          | yes     | read/connect timeout, HTTP 408/504, Gemini `DEADLINE_EXCEEDED`, a cascade step timeout                                       |
+| `QUOTA_EXHAUSTED`  | no      | OpenAI `insufficient_quota`; Gemini `RESOURCE_EXHAUSTED` whose `QuotaFailure` names a per-day quota (e.g. `...PerDay...`)    |
+| `AUTH`             | no      | HTTP 401/403; Gemini `PERMISSION_DENIED`, `API_KEY_INVALID`; Anthropic `authentication_error`                                 |
+| `MODEL_NOT_FOUND`  | no      | HTTP 404, Gemini `NOT_FOUND`, OpenAI `model_not_found`, Anthropic `not_found_error`                                          |
+| `CONTEXT_TOO_LONG` | no      | HTTP 400 saying "input token count exceeds", `context_length_exceeded`, "prompt is too long", "maximum context length"     |
+| `BAD_REQUEST`      | no      | any other HTTP 400/422                                                                                                       |
+| `UNKNOWN`          | no      | anything unrecognised                                                                                                        |
+
+For a rate limit the provider's own delay is read from the body — Gemini `RetryInfo.retryDelay`
+(`"13s"`, `"1.5s"`) or the "retry in 13s" / "try again in 250ms" sentence OpenAI and Gemini put in
+the message — and slept instead of the configured backoff (`honorRetryAfter`). If it is longer than
+`maxRetryAfterMs` the engine does not sleep: retrying stops at once and the failure (still
+classified `RATE_LIMITED`) goes up so a [model cascade](model-cascade.md) escalates immediately. An
+HTTP `Retry-After` **header** is not used: the langchain4j HTTP exception keeps only the status
+code and the body, not the headers.
+
+**EDDI is the only retry loop.** The provider clients are built with `maxRetries(0)` (OpenAI,
+Anthropic, Gemini, Vertex AI Gemini, Mistral, Ollama, Azure OpenAI, Bedrock), so `maxAttempts: 3`
+means three provider calls, not up to nine. The Hugging Face and OCI GenAI clients expose no such
+setting and the streaming clients have none; streaming retries are EDDI's own loop. Helper calls that go straight to a model without a task retry policy (the cascade judge model, the tool-response summariser and the summarisation service) run through the default policy, `RetryConfiguration.executeWithDefaultRetry` (3 attempts, same classification), so every model call has exactly one retry owner.
 
 **In a tool loop, the unit of retry is one model request.** A failure on the fifth model call of
 a tool-calling turn resends that one request — with every tool result gathered so far — rather
@@ -1247,7 +1288,7 @@ HITL resume continues the turn with a fresh budget.)
 
 When `convertToObject` requests the provider's native JSON mode and the call still fails after
 its retries, the engine falls back to a plain request only if the failure could mean "JSON mode
-is not supported". A timeout, rate limit or 5xx is rethrown instead of being paid for twice. A
+is not supported". A timeout, rate limit or 5xx (500 included) is rethrown instead of being paid for twice. A
 self-hosted OpenAI-compatible gateway that answers an unsupported `response_format` with a **5xx**
 rather than a 4xx therefore fails the turn instead of falling back; set `jsonResponseFormat: "off"`
 on that task (see the provider matrix below) so the format is never sent.
@@ -1804,6 +1845,62 @@ When `convertToObject=true`, the LLM's JSON response is stored in conversation m
   }]
 }
 ```
+
+### How the reply is parsed (never throws)
+
+Models do not always answer with a bare JSON document. Under `convertToObject=true` EDDI normalises the reply with exactly three steps, in order, and nothing else:
+
+1. **Trim** surrounding whitespace.
+2. **Strip one surrounding markdown fence** — ```` ``` ```` or ```` ```json ```` (the language tag is case-insensitive).
+3. If it still does not parse, **extract the outermost balanced `{...}` or `[...]`** from the text (string- and escape-aware, so braces inside string values and `\"` do not confuse it) and parse that. This handles a prose prefix and/or suffix such as `Sure! Here you go: {...} Hope that helps.` An extracted fragment is accepted only if it is a JSON object with at least one key; a top-level array is accepted only when it is the whole (fence-stripped) reply. So prose like `Pick option [1] or [2].` or `The empty set {} is...` stays the raw string instead of being replaced by a fragment.
+
+Invalid JSON itself is **never "fixed"** — there is no trailing-comma repair or quote swapping. A reply either parses or it does not.
+
+**Invalid output no longer fails the turn.** A reply that is truncated mid-object, prose, or otherwise not JSON used to throw out of the LLM task and fail the whole turn (HTTP 500) after the model call had been paid for. It now keeps the behaviour that plain-text replies always had: the raw string is stored under `responseObjectName`, a WARN is logged (with an EDDI-generated reason such as `truncated JSON`, `not JSON`, `unbalanced braces` — never model output), and the pipeline continues. The same code path serves a conversation that resumes after a human-in-the-loop approval.
+
+Every `convertToObject` reply gets an outcome, recorded on the step under `llm:output:outcome:<taskId>` and counted in the Micrometer counter `eddi.llm.output` (tag `outcome`):
+
+| Outcome | Meaning |
+| --- | --- |
+| `valid` | Parsed as received (after trimming) |
+| `repaired` | Parsed only after fence stripping or extraction |
+| `invalid` | Not parseable; the raw string is stored |
+| `empty` | Null or blank reply; the raw value is stored |
+
+A rising `invalid` rate for one agent usually points at a prompt, schema or model-version problem. The key is not part of the public conversation snapshot.
+
+### Fallback answers and `onError`
+
+Two things can leave a turn without a model answer: a `responseValidation` policy set to `fallback` (empty, truncated or filtered reply), and a model phase that fails outright (provider error after its retries and any cascade, an unusable model configuration, a validation policy of `error`). Both serve the same configurable fallback.
+
+```json
+{
+  "convertToObject": "true",
+  "onError": { "action": "fallback" },
+  "responseValidation": {
+    "enabled": true,
+    "onEmpty": "fallback",
+    "fallbackMessage": "{#if properties.language == 'de'}Entschuldigung, das hat gerade nicht geklappt. Bitte versuche es noch einmal.{#else}Sorry, I could not answer that just now. Please try again.{/if}",
+    "fallbackField": "htmlResponseText",
+    "fallbackQuickReplies": [ { "value": "Try again", "expressions": "retry_last" } ]
+  }
+}
+```
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `onError.action` | `fallback` absorbs a failure of the task's model phase: the task serves the fallback and returns normally, so the turn completes with HTTP 200 and the conversation is **not** set to `ERROR`. `error` lets it fail the turn. Only that failure is absorbed: a human-in-the-loop tool pause, a conversation cancel, a graceful-shutdown interrupt and a thread interrupt always propagate | `error` |
+| `responseValidation.fallbackMessage` | The text served. It is a template (Qute, like every author-written config field) rendered with the task's template data, so `{properties.x}`, `{snippets.x}` and `{#if}` all work. A template that fails to render, or renders blank, falls back to the default sentence | `I'm sorry, I wasn't able to generate a complete response. Please try again.` |
+| `responseValidation.fallbackField` | Under `convertToObject`, the fallback is stored under `responseObjectName` as the object `{"<fallbackField>": "<message>"}`, so a `postResponse` output template such as `{properties.aiOutputObject.htmlResponseText}` renders it unchanged. Unset, the fallback stays a plain string | (none) |
+| `responseValidation.fallbackQuickReplies` | Quick replies (`value`, `expressions`, both templates) added to the step next to the fallback, exactly as an output set adds them | (none) |
+
+`onError` works without a `responseValidation` block (the defaults above apply), and the fallback fields work without `onError` (they shape the validation `fallback` action).
+
+**What is recorded.** The step gets `llm:fallback:<taskId>` = `true` for any fallback, and, for an absorbed failure, `llm:error:<taskId>` = `{class, message}`: the simple class name of the root cause and its message, with secrets redacted, URLs replaced by `[url]` and the text cut at 200 characters (never a request body or stack trace). Data the failed phase had already written to the step is marked uncommitted (see [Memory Policy](memory-policy.md)), and the audit ledger's model-response field is left empty rather than recording the fallback as something the model said. The Micrometer counter `eddi.llm.recovery` counts each one (`action=fallback`, `outcome=served`, `trigger=onError|validation`).
+
+**The model never sees the fallback.** When the next turn's history is built for the model, the assistant message of a fallback turn is left out; the user's question stays. To keep the roles alternating (some providers reject two user messages in a row) the following user message is merged into it. The conversation log and the UI still show the fallback, and an output item the task itself adds under `addToOutput` carries `"fallback": true`. The rolling summary and the recall tool still see the turn.
+
+**Not covered:** the resume path after a human-in-the-loop tool approval does not apply `onError`; a failure there fails the turn as before.
 
 ### Debugging
 

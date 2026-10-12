@@ -103,9 +103,13 @@ describe("PausedCard", () => {
     expect(screen.queryByRole("button", { name: /reject/i })).toBeNull();
   });
 
-  it("announces itself to assistive technology", () => {
+  it("does not nest a live region inside the transcript log", () => {
     renderCard(<PausedCard status={status()} onCancel={vi.fn()} />);
 
-    expect(screen.getByTestId("paused-card")).toHaveAttribute("role", "status");
+    // Not a live region of its own: it lands inside the transcript's log, and a
+    // nested one read the card twice and again on every countdown tick.
+    const card = screen.getByTestId("paused-card");
+    expect(card).not.toHaveAttribute("role", "status");
+    expect(card).not.toHaveAttribute("aria-live");
   });
 });

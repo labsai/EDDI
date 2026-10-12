@@ -31,7 +31,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import org.bson.BsonString;
 import org.bson.BsonDouble;
@@ -302,6 +301,12 @@ class HitlJournalCodecCoverageTest {
             return ToolExecutionRequest.builder().id(id).name(name).arguments("{}").build();
         }
 
+        private static ClearedToolCalls cleared(String id, String name, String args) {
+            var c = ClearedToolCalls.none();
+            c.clear(id, name, args);
+            return c;
+        }
+
         private static ToolApprovalsConfig cfg(List<String> require, List<String> exempt) {
             var c = new ToolApprovalsConfig();
             c.setRequireApproval(require);
@@ -316,7 +321,7 @@ class HitlJournalCodecCoverageTest {
             var batch = List.of(req("1", "read_file"));
             var sources = Map.of("read_file", "mcp");
             var result = gate.classify(batch, sources,
-                    cfg(List.of("mcp:*"), List.of("mcp:read_*")), Set.of());
+                    cfg(List.of("mcp:*"), List.of("mcp:read_*")), ClearedToolCalls.none());
             assertTrue(result.gated().isEmpty(), "exempt must beat require");
             assertEquals(1, result.allowed().size());
         }
@@ -327,7 +332,7 @@ class HitlJournalCodecCoverageTest {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("1", "delete_account"));
             var result = gate.classify(batch, Map.of("delete_account", "http"),
-                    cfg(List.of("delete_*"), null), Set.of("1"));
+                    cfg(List.of("delete_*"), null), cleared("1", "delete_account", "{}"));
             assertTrue(result.gated().isEmpty());
             assertEquals(1, result.allowed().size());
         }
@@ -338,7 +343,7 @@ class HitlJournalCodecCoverageTest {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("call-9", "delete_account"));
             var result = gate.classify(batch, Map.of("delete_account", "http"),
-                    cfg(List.of("delete_*"), null), Set.of());
+                    cfg(List.of("delete_*"), null), ClearedToolCalls.none());
             assertEquals(1, result.gated().size());
             assertEquals("delete_*", result.gateReasonByCallId().get("call-9"),
                     "the matched require-pattern must be recorded as the gate reason");

@@ -19,6 +19,7 @@ import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
 import { WorkforceCard } from "@/components/workforce/workforce-card";
 import { AgentWorkforceCard } from "@/components/workforce/agent-workforce-card";
 import { KnowledgeHealthCard } from "@/components/workforce/knowledge-health-card";
@@ -48,7 +49,7 @@ function getStoredViewMode(): "grid" | "list" {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-8">
+    <div data-testid="workforce-dashboard-skeleton" className="space-y-8">
       {/* Workforce skeleton */}
       <div>
         <Skeleton className="h-5 w-40 mb-4" />
@@ -262,6 +263,8 @@ function WorkforceDashboard() {
   const [viewMode, setViewMode] = useState<"grid" | "list">(getStoredViewMode);
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  /** Hard delete for the bulk action — explicit opt-in, soft otherwise. */
+  const [bulkPermanent, setBulkPermanent] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const pinnedBoards = useMemo(
@@ -299,7 +302,7 @@ function WorkforceDashboard() {
       const board = boards?.find((b) => b.id === id);
       if (!board) continue;
       try {
-        await deleteGroup.mutateAsync({ id, version: board.version ?? 1 });
+        await deleteGroup.mutateAsync({ id, version: board.version ?? 1, permanent: bulkPermanent });
         successCount++;
       } catch {
         failCount++;
@@ -307,6 +310,7 @@ function WorkforceDashboard() {
     }
     bulkDeleting.current = false;
     setBulkDeleteOpen(false);
+    setBulkPermanent(false);
     setSelectedIds(new Set());
     setBulkMode(false);
     if (failCount === 0) {
@@ -325,7 +329,7 @@ function WorkforceDashboard() {
         }),
       );
     }
-  }, [selectedIds, boards, deleteGroup, t]);
+  }, [selectedIds, boards, deleteGroup, bulkPermanent, t]);
 
   useEffect(() => {
     try {
@@ -335,10 +339,16 @@ function WorkforceDashboard() {
     }
   }, [viewMode]);
 
+  // Every state below is its own scroller. `workforce-main` clips its content
+  // (see the scroll contract in workforce-scroll-contract.test.tsx), so a state
+  // rendered without one loses everything below the fold. The empty state did:
+  // the onboarding hero is taller than a laptop screen, and its templates — the
+  // way to create a first task force — could not be scrolled into view.
+
   // Loading
   if (isLoading) {
     return (
-      <div className="p-5 md:p-8">
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 md:p-8">
         <DashboardSkeleton />
       </div>
     );
@@ -347,7 +357,7 @@ function WorkforceDashboard() {
   // Error
   if (isError) {
     return (
-      <div className="p-5 md:p-8">
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 md:p-8">
         <DashboardError onRetry={() => refetch()} />
       </div>
     );
@@ -355,7 +365,11 @@ function WorkforceDashboard() {
 
   // Empty
   if (!boards || boards.length === 0) {
-    return <OnboardingHero />;
+    return (
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <OnboardingHero />
+      </div>
+    );
   }
 
   // Populated — 3-pillar Intelligence Dashboard
@@ -622,7 +636,10 @@ function WorkforceDashboard() {
           carrying the weaker guard. Same dialog, count in the wording. */}
       <AlertDialog
         open={bulkDeleteOpen}
-        onOpenChange={setBulkDeleteOpen}
+        onOpenChange={(open) => {
+          setBulkDeleteOpen(open);
+          if (!open) setBulkPermanent(false);
+        }}
         title={t("Workforce.dashboard.bulkDeleteTitle", {
           defaultValue: "Dissolve this task force?",
           defaultValue_other: "Dissolve {{count}} task forces?",
@@ -630,13 +647,23 @@ function WorkforceDashboard() {
         })}
         description={t(
           "Workforce.dashboard.bulkDeleteConfirm",
-          "This dissolves every selected task force and cannot be undone.",
+          "This dissolves every selected task force. Member agents are not affected.",
         )}
-        confirmLabel={t("common.delete", "Delete")}
+        confirmLabel={
+          bulkPermanent
+            ? t("common.deletePermanently", "Delete permanently")
+            : t("common.delete", "Delete")
+        }
         cancelLabel={t("common.cancel", "Cancel")}
         isPending={deleteGroup.isPending}
         onConfirm={handleBulkDelete}
-      />
+      >
+        <PermanentDeleteOption
+          checked={bulkPermanent}
+          onChange={setBulkPermanent}
+          consequence={t("groups.deletePermanentlyHint", "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.")}
+        />
+      </AlertDialog>
 
       {/* Mobile FAB */}
       <MobileFab />
