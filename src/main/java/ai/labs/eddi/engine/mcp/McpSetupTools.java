@@ -26,6 +26,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  * @author ginccc
  */
 @ApplicationScoped
+@McpErrorResults
 public class McpSetupTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpSetupTools.class);
@@ -51,43 +52,33 @@ public class McpSetupTools {
     public String setupAgent(@ToolArg(description = "Agent name (required)") String agentName,
                              @ToolArg(description = "System prompt / role for the LLM (required). "
                                      + "Describes the agent's personality and purpose.") String systemPrompt,
-                             @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', "
-                                     + "'gemini-vertex', 'huggingface', 'ollama', 'jlama', 'mistral', "
-                                     + "'azure-openai', 'bedrock', 'oracle-genai', or an OpenAI-compatible provider: "
-                                     + "'xai', 'deepseek', 'moonshot' (Kimi), 'qwen', 'zhipu' (Z.ai GLM), 'minimax', "
-                                     + "'openrouter' or 'groq'") String provider,
-                             @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default for anthropic; named OpenAI-compatible providers use their own default model), 'gpt-5.4', "
-                                     + "'gemini-3.1-pro-preview', 'deepseek-flash', 'llama3.2:1b' (ollama)") String model,
-                             @ToolArg(description = "API key for the LLM provider. Required for most cloud providers "
-                                     + "(anthropic, openai, gemini, mistral). Not needed for bedrock (uses IAM), "
-                                     + "oracle-genai (uses OCI auth), or local LLMs (ollama, jlama). "
-                                     + "Can be a vault reference like '${vault:openai-key}'. To put several agents on ONE key, "
-                                     + "pass the apiKeyVaultReference returned by an earlier setup_agent call here — that always "
-                                     + "reuses the named entry. A plaintext key the vault already holds is reused too, but only "
-                                     + "when the deployment leaves eddi.setup.vault-key-reuse at 'checksum' and the existing entry "
-                                     + "is granted to all agents; otherwise it is stored as a new entry.") String apiKey,
-                             @ToolArg(description = "Base URL for the LLM provider (optional). "
-                                     + "Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434'). "
-                                     + "For China-mainland endpoints of qwen/moonshot/zhipu/minimax pass that region's URL.") String baseUrl,
-                             @ToolArg(description = "Greeting message shown when a conversation starts (optional)") String introMessage,
-                             @ToolArg(description = "Enable built-in tools like calculator, "
-                                     + "datetime, websearch? (default: false)") Boolean enableBuiltInTools,
-                             @ToolArg(description = "Comma-separated list of specific "
-                                     + "built-in tools to enable (e.g. 'calculator,datetime,websearch'). "
-                                     + "Only used if enableBuiltInTools is true.") String builtInToolsWhitelist,
-                             @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false). "
-                                     + "When enabled, the LLM returns structured JSON with quick reply suggestions. "
-                                     + "Note: streaming is not supported when this is enabled.") Boolean enableQuickReplies,
-                             @ToolArg(description = "Enable ad-hoc sentiment analysis in Agent responses? (default: false). "
-                                     + "When enabled, the LLM returns structured JSON with sentiment scores, "
-                                     + "emotion detection, intent classification, and urgency rating. "
-                                     + "Note: streaming is not supported when this is enabled.") Boolean enableSentimentAnalysis,
-                             @ToolArg(description = "Comma-separated MCP server URLs to connect to (optional). "
-                                     + "Each URL creates a McpCalls workflow extension that the agent auto-discovers. "
-                                     + "Example: 'http://localhost:7070/mcp, http://tools.example.com/mcp'") String mcpServerUrls,
-                             @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)") Boolean deploy,
-                             @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
-        requireRole(identity, authEnabled, "eddi-editor");
+                             @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', 'gemini-vertex', 'huggingface', 'ollama', 'jlama', 'mistral', 'azure-openai', 'bedrock', 'oracle-genai', or an OpenAI-compatible provider: 'xai', 'deepseek', 'moonshot' (Kimi), 'qwen', 'zhipu' (Z.ai GLM), 'minimax', 'openrouter' or 'groq'",
+                                      required = false, defaultValue = "anthropic") String provider,
+                             @ToolArg(description = "Model name (optional; default: 'claude-sonnet-4-6' for anthropic, named OpenAI-compatible providers use their own default model), e.g. 'gpt-5.4', 'gemini-3.1-pro-preview', 'deepseek-flash', 'llama3.2:1b' (ollama)",
+                                      required = false) String model,
+                             @ToolArg(description = "API key for the LLM provider (optional, but needed by most cloud providers: anthropic, openai, gemini, mistral). Not needed for bedrock (uses IAM), oracle-genai (uses OCI auth), or local LLMs (ollama, jlama). Can be a vault reference like '${vault:openai-key}'. To put several agents on ONE key, pass the apiKeyVaultReference returned by an earlier setup_agent call here — that always reuses the named entry. A plaintext key the vault already holds is reused too, but only when the deployment leaves eddi.setup.vault-key-reuse at 'checksum' and the existing entry is granted to all agents; otherwise it is stored as a new entry.",
+                                      required = false) String apiKey,
+                             @ToolArg(description = "Base URL for the LLM provider (optional). Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434'). For China-mainland endpoints of qwen/moonshot/zhipu/minimax pass that region's URL.",
+                                      required = false) String baseUrl,
+                             @ToolArg(description = "Greeting message shown when a conversation starts (optional)",
+                                      required = false) String introMessage,
+                             @ToolArg(description = "Enable built-in tools like calculator, datetime, websearch? (default: false)", required = false,
+                                      defaultValue = "false") Boolean enableBuiltInTools,
+                             @ToolArg(description = "Comma-separated list of specific built-in tools to enable (optional), e.g. 'calculator,datetime,websearch'. Only used if enableBuiltInTools is true.",
+                                      required = false) String builtInToolsWhitelist,
+                             @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false). When enabled, the LLM returns structured JSON with quick reply suggestions. Note: streaming is not supported when this is enabled.",
+                                      required = false, defaultValue = "false") Boolean enableQuickReplies,
+                             @ToolArg(description = "Enable ad-hoc sentiment analysis in Agent responses? (default: false). When enabled, the LLM returns structured JSON with sentiment scores, emotion detection, intent classification, and urgency rating. Note: streaming is not supported when this is enabled.",
+                                      required = false, defaultValue = "false") Boolean enableSentimentAnalysis,
+                             @ToolArg(description = "Comma-separated MCP server URLs to connect to (optional). Each URL creates a McpCalls workflow extension that the agent auto-discovers. Example: 'http://localhost:7070/mcp, http://tools.example.com/mcp'",
+                                      required = false) String mcpServerUrls,
+                             @ToolArg(description = "Automatically deploy the Agent after creation? (default: true)", required = false,
+                                      defaultValue = "true") Boolean deploy,
+                             @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
+                                      defaultValue = "production") String environment) {
+        // Admin-only, exactly like REST /administration/agents/setup: provisioning
+        // writes the caller's API key into the vault and picks the new agent's tools.
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         try {
             // hitlConfig is deliberately null and has no @ToolArg: this tool already
             // lets the caller choose the created agent's own tool surface
@@ -103,10 +94,9 @@ public class McpSetupTools {
                     // plaintext apiKey de-duplicates by checksum wherever the
                     // deployment has that enabled. What vaultKeyName adds
                     // is choosing the NAME of a newly created entry and a
-                    // value-must-match check on an existing one — and these tools are
-                    // reachable by eddi-editor while REST setup is eddi-admin. Neither
-                    // is needed to provision an agent, and neither belongs on the
-                    // lower tier: name-squatting an entry an operator intends to create,
+                    // value-must-match check on an existing one. Neither is needed to
+                    // provision an agent, and neither belongs on a tool surface driven
+                    // by a model: name-squatting an entry an operator intends to create,
                     // and a per-request "does key X hold value V" oracle.
                     null);
             var result = agentSetupService.setupAgent(request);
@@ -128,29 +118,30 @@ public class McpSetupTools {
                                  @ToolArg(description = "System prompt for the LLM (required). "
                                          + "Include instructions on how to use the API.") String systemPrompt,
                                  @ToolArg(description = "OpenAPI 3.x spec as JSON/YAML string or a URL (required)") String openApiSpec,
-                                 @ToolArg(description = "LLM provider: 'anthropic' (default), 'openai', 'gemini', 'mistral', "
-                                         + "'azure-openai', 'bedrock', 'oracle-genai', 'xai', 'deepseek', 'moonshot', 'qwen', 'zhipu', "
-                                         + "'minimax', 'openrouter', 'groq', etc.") String provider,
-                                 @ToolArg(description = "Model name (default for anthropic: 'claude-sonnet-4-6'; named OpenAI-compatible providers use their own default model)") String model,
-                                 @ToolArg(description = "LLM API key (required for most cloud providers: anthropic, openai, gemini, mistral). "
-                                         + "Not needed for bedrock (IAM) or oracle-genai (OCI auth). "
-                                         + "Use vault reference: '${vault:key-name}', e.g. the apiKeyVaultReference returned by an "
-                                         + "earlier setup call, to share one key across agents.") String apiKey,
-                                 @ToolArg(description = "Override the API base URL from the spec (optional)") String apiBaseUrl,
-                                 @ToolArg(description = "Authorization header for API calls, e.g. 'Bearer token123' (optional). "
-                                         + "Use vault reference: '${vault:api-token}'.") String apiAuth,
-                                 @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders'. "
-                                         + "If omitted, all non-deprecated endpoints are included.") String endpoints,
-                                 @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false)") Boolean enableQuickReplies,
-                                 @ToolArg(description = "Enable sentiment analysis "
-                                         + "in Agent responses? (default: false)") Boolean enableSentimentAnalysis,
-                                 @ToolArg(description = "Deploy after creation? (default: true)") Boolean deploy,
-                                 @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment,
-                                 @ToolArg(description = "Base URL of the LLM provider itself, for local models "
-                                         + "(e.g. 'http://localhost:11434' for Ollama). Not the API's base URL — that is apiBaseUrl.") String llmBaseUrl,
-                                 @ToolArg(description = "Comma-separated MCP server URLs whose tools the agent should also get, "
-                                         + "alongside the ones generated from the OpenAPI spec (optional).") String mcpServerUrls) {
-        requireRole(identity, authEnabled, "eddi-editor");
+                                 @ToolArg(description = "LLM provider (default: 'anthropic'): 'anthropic', 'openai', 'gemini', 'mistral', 'azure-openai', 'bedrock', 'oracle-genai', 'xai', 'deepseek', 'moonshot', 'qwen', 'zhipu', 'minimax', 'openrouter', 'groq', etc.",
+                                          required = false, defaultValue = "anthropic") String provider,
+                                 @ToolArg(description = "Model name (optional; default: 'claude-sonnet-4-6' for anthropic, named OpenAI-compatible providers use their own default model)",
+                                          required = false) String model,
+                                 @ToolArg(description = "LLM API key (optional, but needed by most cloud providers: anthropic, openai, gemini, mistral). Not needed for bedrock (IAM) or oracle-genai (OCI auth). Use vault reference: '${vault:key-name}', e.g. the apiKeyVaultReference returned by an earlier setup call, to share one key across agents.",
+                                          required = false) String apiKey,
+                                 @ToolArg(description = "Override the API base URL from the spec (optional)", required = false) String apiBaseUrl,
+                                 @ToolArg(description = "Authorization header for API calls, e.g. 'Bearer token123' (optional). Use vault reference: '${vault:api-token}'.",
+                                          required = false) String apiAuth,
+                                 @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders' (optional). If omitted, all non-deprecated endpoints are included.",
+                                          required = false) String endpoints,
+                                 @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false)", required = false,
+                                          defaultValue = "false") Boolean enableQuickReplies,
+                                 @ToolArg(description = "Enable sentiment analysis in Agent responses? (default: false)", required = false,
+                                          defaultValue = "false") Boolean enableSentimentAnalysis,
+                                 @ToolArg(description = "Deploy after creation? (default: true)", required = false,
+                                          defaultValue = "true") Boolean deploy,
+                                 @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
+                                          defaultValue = "production") String environment,
+                                 @ToolArg(description = "Base URL of the LLM provider itself, for local models (optional), e.g. 'http://localhost:11434' for Ollama. Not the API's base URL — that is apiBaseUrl.",
+                                          required = false) String llmBaseUrl,
+                                 @ToolArg(description = "Comma-separated MCP server URLs whose tools the agent should also get, alongside the ones generated from the OpenAPI spec (optional).",
+                                          required = false) String mcpServerUrls) {
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         try {
             // hitlConfig is deliberately null and has no @ToolArg: this tool already
             // provisions an agent with a caller-chosen endpoint filter, so also letting
@@ -171,32 +162,5 @@ public class McpSetupTools {
             LOGGER.error("MCP create_api_agent failed", e);
             return errorJson("Failed to create API agent", e);
         }
-    }
-
-    // ==================== Static Delegates for Test Compatibility
-    // ====================
-
-    /**
-     * @see AgentSetupService#buildPromptResponseJson(boolean, boolean)
-     */
-    public static String buildPromptResponseJson(boolean quickReplies, boolean sentiment) {
-        return AgentSetupService.buildPromptResponseJson(quickReplies, sentiment);
-    }
-
-    /**
-     * @see AgentSetupService#isLocalLlmProvider(String)
-     */
-    public static boolean isLocalLlmProvider(String provider) {
-        return AgentSetupService.isLocalLlmProvider(provider);
-    }
-
-    // ==================== Service Accessors for Tests ====================
-
-    /**
-     * Provide access to the underlying service for tests that need to call config
-     * builder methods directly.
-     */
-    AgentSetupService getService() {
-        return agentSetupService;
     }
 }

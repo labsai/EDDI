@@ -6,10 +6,13 @@ package ai.labs.eddi.engine.security;
 
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,8 +20,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.security.Principal;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -211,13 +216,77 @@ class ConversationAccessGuardTest {
         }
 
         @Test
-        @DisplayName("admits an unowned (legacy) conversation")
-        void admitsUnownedConversation() throws Exception {
+        @DisplayName("F1: a conversation that records no owner anywhere is refused to a non-admin (fail closed)")
+        void refusesUnownedConversation() throws Exception {
             descriptorOwnedBy(null);
             var guard = guardFor(identityOf(OTHER, "eddi-viewer"), true);
 
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
+            assertThrows(ForbiddenException.class, () -> guard.requireExistingConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("F1: a role-less token is refused an unowned conversation too")
+        void refusesUnownedConversationToRolelessToken() throws Exception {
+            descriptorOwnedBy(null);
+            var guard = guardFor(identityOf(OTHER), true);
+
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("an administrator still reaches a conversation that records no owner")
+        void admitsAdminToUnownedConversation() throws Exception {
+            descriptorOwnedBy(null);
+            var guard = guardFor(identityOf(OTHER, "eddi-admin"), true);
+
             assertNull(guard.requireConversationOwner(CONVERSATION_ID));
         }
+
+        @Test
+        @DisplayName("F1: a descriptor stripped of its owner falls back to the owner the conversation memory recorded")
+        void strippedDescriptorFallsBackToMemoryOwner() throws Exception {
+            descriptorOwnedBy(null);
+            var memory = memoryRecording(OWNER);
+
+            var intruder = guardFor(identityOf(OTHER, "eddi-editor"), true);
+            intruder.conversationMemoryStoreInstance = memory;
+            assertThrows(ForbiddenException.class, () -> intruder.requireConversationOwner(CONVERSATION_ID));
+            assertThrows(ForbiddenException.class, () -> intruder.requireExistingConversationOwner(CONVERSATION_ID));
+            assertThrows(ForbiddenException.class, () -> intruder.requireConversationOwnerStrict(CONVERSATION_ID));
+
+            var owner = guardFor(identityOf(OWNER, "eddi-user"), true);
+            owner.conversationMemoryStoreInstance = memory;
+            assertEquals(OWNER, owner.requireConversationOwner(CONVERSATION_ID));
+            assertEquals(OWNER, owner.requireConversationOwnerStrict(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("a memory lookup that fails never widens access")
+        void failingMemoryLookupStaysClosed() throws Exception {
+            descriptorOwnedBy(null);
+            var store = mock(IConversationMemoryStore.class);
+            when(store.loadListingSummaries(anyCollection())).thenThrow(new ResourceStoreException("down"));
+            var guard = guardFor(identityOf(OTHER, "eddi-user"), true);
+            guard.conversationMemoryStoreInstance = instanceOf(store);
+
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Instance<IConversationMemoryStore> instanceOf(IConversationMemoryStore store) {
+        Instance<IConversationMemoryStore> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(store);
+        return instance;
+    }
+
+    private static Instance<IConversationMemoryStore> memoryRecording(String owner) throws Exception {
+        var store = mock(IConversationMemoryStore.class);
+        when(store.loadListingSummaries(anyCollection())).thenReturn(Map.of(CONVERSATION_ID,
+                new ConversationListingSummary(CONVERSATION_ID, owner, null, null, null, null, 0)));
+        return instanceOf(store);
     }
 
     @Nested
@@ -340,12 +409,21 @@ class ConversationAccessGuardTest {
         }
 
         @Test
-        @DisplayName("an unowned conversation stays visible — same rule as the read gate")
-        void unownedVisible() {
+        @DisplayName("F1: a conversation with no owner anywhere is not listed to a non-admin — same rule as the read gate")
+        void unownedHidden() throws Exception {
             var guard = guardFor(identityOf(OWNER, "eddi-viewer"), true);
 
-            assertTrue(guard.canAccessConversation(null));
-            assertTrue(guard.canAccessConversation("  "));
+            assertFalse(guard.canAccessConversation(null));
+            assertFalse(guard.canAccessConversation("  "));
+
+            descriptorOwnedBy(null);
+            assertThrows(ForbiddenException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("an administrator lists unowned conversations")
+        void unownedVisibleToAdmin() {
+            assertTrue(guardFor(identityOf(OWNER, "eddi-admin"), true).canAccessConversation(null));
         }
 
         @Test

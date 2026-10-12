@@ -64,7 +64,7 @@ describe("ConfigEditorLayout — save feedback", () => {
     expect(onSave).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("json-view")).toBeInTheDocument();
-    expect(screen.getByTestId("json-parse-error")).toBeInTheDocument();
+    expect(screen.getByTestId("save-invalid-json")).toBeInTheDocument();
   });
 
   it("refuses an invalid-JSON Save & Test the same way", async () => {
@@ -77,16 +77,16 @@ describe("ConfigEditorLayout — save feedback", () => {
     await userEvent.setup().click(screen.getByTestId("save-test-btn"));
     expect(onSaveAndDeploy).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("json-parse-error")).toBeInTheDocument();
+    expect(screen.getByTestId("save-invalid-json")).toBeInTheDocument();
   });
 
   it("clears the parse error once the JSON is edited again", async () => {
     renderWithProviders(<ConfigEditorLayout {...props} />);
     fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: "{ nope" } });
     await userEvent.setup().click(screen.getByTestId("save-btn"));
-    expect(screen.getByTestId("json-parse-error")).toBeInTheDocument();
+    expect(screen.getByTestId("save-invalid-json")).toBeInTheDocument();
     fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: '{"a": 2}' } });
-    expect(screen.queryByTestId("json-parse-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("save-invalid-json")).not.toBeInTheDocument();
   });
 
   it("hides the stale 'saved' tick as soon as there are unsaved edits again", () => {
