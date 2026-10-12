@@ -913,7 +913,7 @@ describe("useSendMessage", () => {
       }),
       // A 409 is read as a pause only when the conversation says so.
       http.get("*/agents/:conversationId", () =>
-        HttpResponse.json({ conversationState: "AWAITING_HUMAN", conversationSteps: [] }),
+        HttpResponse.json({ conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-10-12T09:00:00.000Z", conversationSteps: [] }),
       ),
     );
 
@@ -931,6 +931,8 @@ describe("useSendMessage", () => {
     expect(state.messages.some((m) => m.content === "already paused, try again")).toBe(false);
     expect(state.messages).toHaveLength(0);
     expect(state.isPaused).toBe(true);
+    // The pause's identity is kept, so the notice verifies this pause.
+    expect(state.pausedAt).toBe("2026-10-12T09:00:00.000Z");
     expect(state.isProcessing).toBe(false);
   });
 

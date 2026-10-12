@@ -530,11 +530,14 @@ export function useStartConversation() {
  */
 class RejectedSendError extends Error {
   readonly paused: boolean;
+  /** The pause's `hitlPausedAt`, when the refusal was confirmed by a conversation read. */
+  readonly pausedAt: string | null;
 
-  constructor(message: string, paused: boolean) {
+  constructor(message: string, paused: boolean, pausedAt: string | null = null) {
     super(message);
     this.name = "RejectedSendError";
     this.paused = paused;
+    this.pausedAt = pausedAt;
   }
 }
 
@@ -612,13 +615,15 @@ function parseStreamError(data: string): { message: string; code?: string } {
 async function classifyRejectedSend(error: unknown, conversationId: string): Promise<unknown> {
   if (!isApiError(error) || error.status !== 409) return error;
   let paused = false;
+  let pausedAt: string | null = null;
   try {
     const snapshot = await readConversation("production", "", conversationId, true);
     paused = snapshot.conversationState === "AWAITING_HUMAN";
+    pausedAt = paused ? (snapshot.hitlPausedAt ?? null) : null;
   } catch {
     // Unconfirmed: a refusal, not a pause.
   }
-  return new RejectedSendError(error.message, paused);
+  return new RejectedSendError(error.message, paused, pausedAt);
 }
 
 /** Send a message — auto-branches between streaming and non-streaming.
@@ -972,8 +977,9 @@ export function useSendMessage() {
           store.setState({ isSecretMode: true });
         }
         if (error.paused) {
-          // The localized pause banner (via isPaused), not an error bubble.
-          state.setPaused(true, null);
+          // The localized pause banner (via isPaused), not an error bubble. The
+          // pause's identity goes with it, so the notice verifies THIS pause.
+          state.setPaused(true, null, error.pausedAt);
         } else {
           toast.error(
             t("chat.sendRejected", "Your message was not sent: {{reason}}", {
