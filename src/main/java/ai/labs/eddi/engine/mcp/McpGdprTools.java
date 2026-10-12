@@ -17,7 +17,7 @@ import org.jboss.logging.Logger;
 import java.util.LinkedHashMap;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
-import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
 
 /**
  * MCP tools for GDPR compliance operations. Provides AI-orchestrated data
@@ -27,6 +27,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
  * @since 6.0.0
  */
 @ApplicationScoped
+@McpErrorResults
 public class McpGdprTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpGdprTools.class);
@@ -69,7 +70,7 @@ public class McpGdprTools {
     public String deleteUserData(
                                  @ToolArg(description = "User ID to erase (required)") String userId,
                                  @ToolArg(description = "Must be 'CONFIRM' to proceed") String confirmation) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (userId == null || userId.isBlank()) {
             return errorJson("userId is required");
         }
@@ -134,7 +135,7 @@ public class McpGdprTools {
             + "'failedConversationIds' names conversations that could not be loaded at all.")
     public String exportUserData(
                                  @ToolArg(description = "User ID to export (required)") String userId) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (userId == null || userId.isBlank()) {
             return errorJson("userId is required");
         }

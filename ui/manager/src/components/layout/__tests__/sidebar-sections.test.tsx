@@ -78,11 +78,24 @@ describe("Sidebar — collapsible sections", () => {
     const stored = localStorage.getItem("eddi-sidebar-sections");
     expect(stored).toBeTruthy();
     const parsed = JSON.parse(stored!);
-    expect(parsed).toContain(3); // Admin is index 3
+    // Stored by section key, not by position: a role that hides a whole
+    // section shifts every later index.
+    expect(parsed).toEqual(["nav.sectionAdmin"]);
   });
 
   it("restores collapsed state from localStorage", () => {
-    // Pre-set collapsed state: Admin (index 3) collapsed
+    localStorage.setItem("eddi-sidebar-sections", JSON.stringify(["nav.sectionAdmin"]));
+
+    renderWithProviders(
+      <Sidebar collapsed={false} onToggle={() => {}} />,
+    );
+
+    expect(screen.queryByText("Secrets")).not.toBeInTheDocument();
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+  });
+
+  it("reads a position stored by an earlier build against the full section list", () => {
+    // Legacy format: Admin is index 3 of the unfiltered sections.
     localStorage.setItem("eddi-sidebar-sections", JSON.stringify([3]));
 
     renderWithProviders(

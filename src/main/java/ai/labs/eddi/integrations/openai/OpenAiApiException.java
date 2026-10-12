@@ -40,6 +40,12 @@ public class OpenAiApiException extends RuntimeException {
                 OpenAiErrorResponse.TYPE_INVALID_REQUEST, OpenAiErrorResponse.CODE_INVALID_API_KEY, message);
     }
 
+    /** Authenticated, but without a role that admits the request. */
+    public static OpenAiApiException forbidden(String message) {
+        return new OpenAiApiException(Response.Status.FORBIDDEN.getStatusCode(),
+                OpenAiErrorResponse.TYPE_INVALID_REQUEST, OpenAiErrorResponse.CODE_INSUFFICIENT_PERMISSIONS, message);
+    }
+
     public static OpenAiApiException notFound(String code, String message) {
         return new OpenAiApiException(Response.Status.NOT_FOUND.getStatusCode(),
                 OpenAiErrorResponse.TYPE_INVALID_REQUEST, code, message);

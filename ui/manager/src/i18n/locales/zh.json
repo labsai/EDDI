@@ -225,6 +225,8 @@
     "stepOf": "第 {{current}} 步，共 {{total}} 步",
     "versionShort": "v{{version}}",
     "resizePanel": "调整{{panel}}大小",
+    "deletePermanently": "永久删除",
+    "deletePermanentlyHint": "无法撤消。不勾选此项时，该项仅被标记为已删除，在被清除前仍可恢复。",
     "errors": {
       "network": "无法连接到 EDDI。请检查网络连接后重试。",
       "unauthorized": "您的会话已过期，请重新登录。",
@@ -470,7 +472,8 @@
       "notice": "聊天向用户显示的提示（留空则使用标准措辞）",
       "noticePlaceholder": "与此智能体的对话可能会被其维护者阅读，以便改进它。",
       "versionNote": "适用于此次更改所创建版本及之后版本上的对话——绝不包括之前的内容。Slack、Teams 和 API 客户端无法显示此提示；如果用户通过这些渠道使用此智能体，请在问候语中说明。"
-    }
+    },
+    "copyUrl": "复制 URL"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -489,7 +492,7 @@
     "backToAgents": "返回 Agents",
     "next": "下一步",
     "back": "上一步",
-    "createOnly": "仅创建",
+    "createOnly": "仅创建，不部署",
     "createAndDeploy": "创建并部署",
     "typeTitle": "选择 Agent 类型",
     "typeDesc": "选择您要创建的 Agent 类型",
@@ -579,7 +582,25 @@
     "specUrlScheme": "仅支持 http:// 和 https:// 网址",
     "lastToolHint": "至少必须保留一个已选工具。关闭内置工具即可全部禁用。",
     "hfToken": "Hugging Face 令牌",
-    "hfTokenHint": "仅在访问受限或私有仓库时需要。它会像 API 密钥一样存储在保管库中。"
+    "hfTokenHint": "仅在访问受限或私有仓库时需要。它会像 API 密钥一样存储在保管库中。",
+    "stepLabel": "第 {{n}} 步，共 {{total}} 步：{{name}}",
+    "createAndDeployProduction": "创建并部署到生产环境",
+    "createAndDeployTest": "创建并部署到测试环境",
+    "reviewKeyNotNeeded": "此提供商不需要",
+    "reviewKeyNone": "无",
+    "reviewKeyVault": "保管库引用 {{ref}}",
+    "reviewKeyEntered": "已在此输入",
+    "reviewApiKey": "API 密钥",
+    "reviewBaseUrl": "基础 URL",
+    "deployTarget": "部署目标",
+    "deployNoteProduction": "“创建并部署”会立即让代理在生产环境上线。",
+    "deployNoteTest": "“创建并部署”会在测试环境中启动代理；满意后再将其提升到生产环境。",
+    "step_type": "类型",
+    "step_info": "身份",
+    "step_llm": "模型",
+    "step_apispec": "API 规范",
+    "step_features": "功能",
+    "step_review": "检查"
   },
   "packages": {
     "confirmDeleteDescription": "此操作无法撤销。该工作流及其所有数据将被永久删除。",
@@ -784,7 +805,9 @@
     "reviewNoticeLabel": "对话审阅",
     "sendRejected": "您的消息未发送：{{reason}}",
     "sendWhileLoading": "您的消息未发送：对话仍在加载中。请稍后再试。",
-    "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。"
+    "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。",
+    "errorWithReason": "错误：{{reason}}",
+    "endConversationFailed": "无法结束对话：{{reason}}"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -895,7 +918,8 @@
     "savedNotLive": "已保存 — 尚未生效",
     "savedNotLiveDescription": "运行中的智能体仍在使用已部署的版本。请部署以使此更改生效。",
     "deployNow": "部署",
-    "deployStarted": "部署已开始"
+    "deployStarted": "部署已开始",
+    "invalidJsonNotSaved": "未保存 — JSON 无效：{{reason}}"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -930,7 +954,21 @@
     "noRules": "此组中没有规则",
     "noConditions": "无条件",
     "sizeNoBound": "无限制",
-    "sizeBoundInvalid": "必须是 -2147483648 到 2147483647 之间的整数，留空表示无限制。"
+    "sizeBoundInvalid": "必须是 -2147483648 到 2147483647 之间的整数，留空表示无限制。",
+    "moveUp": "上移 {{name}}",
+    "moveDown": "下移 {{name}}",
+    "configValueOf": "{{key}} 的值",
+    "removeConfig": "移除 {{key}}",
+    "toggleCondition": "显示或隐藏条件详情",
+    "commaActionsWarning": "此处以逗号分隔的列表表示“与”：所列的每个动作都必须已按该顺序发生。若要匹配多个动作中的任意一个，请在 OR 连接器下为每个动作添加一个条件，或发出一个共用动作。",
+    "changeTypeTitle": "更改条件类型？",
+    "changeTypeDescription": "切换到 {{type}} 会用该类型的默认值替换此条件的设置，您输入的值将丢失。",
+    "changeTypeConfirm": "更改类型",
+    "toggleRule": "显示或隐藏规则详情",
+    "thisRule": "此规则",
+    "noLastStepWarning": "lastStep 上没有 actionmatcher：此规则可能在对话的任意步骤触发，而不仅限于预期动作之后。请添加 occurrence 为 lastStep 的 actionmatcher 条件。",
+    "toggleGroup": "显示或隐藏分组",
+    "thisGroup": "此分组"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "在规范中未找到端点",
@@ -1368,7 +1406,22 @@
     "compatibleEndpointOverridden": "端点：{{url}}",
     "modelType": "模型类型",
     "paramName": "参数名称",
-    "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。"
+    "lastToolHint": "至少必须保留一个已选工具。取消勾选“启用内置工具”即可全部禁用。",
+    "toggleTask": "显示或隐藏任务详情",
+    "noActionsWarning": "此任务没有触发动作，因此永远不会运行。请添加行为规则发出的动作，例如 send_message。",
+    "model": "模型",
+    "deploymentName": "部署名称",
+    "modelName": "模型",
+    "modelMissing": "未设置模型：提供商将拒绝所有请求。",
+    "apiKey": "API 密钥",
+    "apiKeyNotNeeded": "此提供商通常不需要 API 密钥。",
+    "temperature": "温度",
+    "temperaturePlaceholder": "提供商默认值",
+    "temperatureInvalid": "请输入数字，例如 0.7。",
+    "paramValueOf": "{{key}} 的值",
+    "removeParam": "移除参数 {{key}}",
+    "accessToken": "访问令牌",
+    "authToken": "Hugging Face 令牌（可选）"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -1409,7 +1462,14 @@
     "maxLength": "最大长度",
     "maxLengthShort": "最大",
     "validationMsgPlaceholder": "验证错误消息...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "未保存；请修正或清空该字段",
+    "itemType": "输出类型",
+    "removeItem": "移除输出项",
+    "removeQuickReply": "移除快捷回复",
+    "toggleOutput": "显示或隐藏输出详情",
+    "timesOccurredLabel": "出现次数",
+    "removeAlternativeGroup": "移除备选组 {{n}}"
   },
   "propertySetterEditor": {
     "setters": "属性设置器",
@@ -1433,7 +1493,10 @@
     "visibilityTitle": "哪些 Agent 可以看到此 longTerm 属性",
     "editValue": "编辑值",
     "toggleGroup": "切换属性组",
-    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。通过“来源路径”读取或以其他方式提供时，它会以明文存储——请在值字段中输入，或选择其他作用域。"
+    "secretFromPathWarning": "只有来自值字段的 secret 才会存入保险库。通过“来源路径”读取或以其他方式提供时，它会以明文存储——请在值字段中输入，或选择其他作用域。",
+    "scope": "作用域",
+    "visibility": "可见性",
+    "removeProperty": "移除属性"
   },
   "dictionaryEditor": {
     "language": "语言",
@@ -1548,7 +1611,8 @@
     "purgeError": "清除失败",
     "empty": "没有可用的 Coordinator 数据",
     "emptyHint": "Coordinator 服务可能仍在启动中，数据将自动出现。",
-    "lastNSnapshots": "最近 {{count}} 个快照"
+    "lastNSnapshots": "最近 {{count}} 个快照",
+    "refreshInterval": "自动刷新间隔"
   },
   "contentEditor": {
     "expand": "展开",
@@ -2239,7 +2303,8 @@
       "readyTitle": "准备好了吗？",
       "readySubtitle": "您可以随时从侧边栏的帮助菜单重新启动导览",
       "startTour": "开始导览",
-      "exploreOwn": "我要自己探索"
+      "exploreOwn": "我要自己探索",
+      "panelN": "第 {{n}} 页"
     },
     "tour": {
       "back": "上一步",
@@ -2507,7 +2572,7 @@
     "count_one": "{{count}} 个群组",
     "count_other": "{{count}} 个群组",
     "confirmDelete": "删除此群组？",
-    "confirmDeleteDesc": "群组配置将被永久删除。",
+    "confirmDeleteDesc": "群组将被标记为已删除，并从此列表中消失。",
     "duplicateSuccess": "群组已复制",
     "noDescription": "暂无描述",
     "members": "成员",
@@ -2629,8 +2694,8 @@
     "deleteGroupOnlySuccess": "群组已删除（代理已保留）",
     "deleteGroupOnlyWarning": "这将删除群组。所有成员代理将被保留。",
     "deleteGroupAndAgents": "删除群组 + 所有代理",
-    "deleteWithMembersSuccess": "群组和所有成员代理已删除（软删除）",
-    "deleteWithMembersWarning": "这将软删除群组和所有 {{count}} 个成员代理。它们可以被恢复。",
+    "deleteWithMembersSuccess": "群组及所有成员代理已删除",
+    "deleteWithMembersWarning": "这将删除群组及全部 {{count}} 个成员代理。",
     "hideDiscussions": "隐藏讨论面板",
     "showDiscussions": "显示讨论面板",
     "hideConfig": "隐藏配置面板",
@@ -2999,7 +3064,11 @@
       "humanNeedsName_other": "{{count}} 名人类成员需要显示名称。",
       "humanNeedsId_one": "{{count}} 名人类成员需要此人的用户 ID。",
       "humanNeedsId_other": "{{count}} 名人类成员需要此人的用户 ID。"
-    }
+    },
+    "deletePermanentlyHint": "无法撤消：群组及其工作区（待办事项、节奏及其计划任务）将被永久删除。不勾选此项时，群组仅被标记为已删除，在被清除前仍可恢复。",
+    "deletePermanentlyWithMembersHint": "无法撤消：群组、其工作区以及所有成员代理将被永久删除。不勾选此项时，它们仅被标记为已删除，在被清除前仍可恢复。",
+    "deleteMembersFailedAfterGroup": "群组已删除，但以下成员代理无法删除：{{ids}}。请在“代理”页面中删除它们。",
+    "deleteMembersFailedGroupKept": "群组已保留：以下成员代理无法删除：{{ids}}。请重试以完成操作。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3050,7 +3119,9 @@
     "created": "创建时间",
     "updated": "更新时间",
     "sourceConversation": "来源对话",
-    "conflicted": "有冲突"
+    "conflicted": "有冲突",
+    "deleteEntryTitle": "删除此记忆？",
+    "deleteEntryDesc": "将为该用户永久删除“{{key}}”。智能体将不再记起它。此操作无法撤销。"
   },
   "properties": {
     "title": "用户属性",
@@ -3165,7 +3236,9 @@
     "partialBody": "智能体的其余部分已写入。这些资源保持原样，需要处理。",
     "partialCounts": "已创建 {{created}} 个，已更新 {{updated}} 个，失败 {{failed}} 个。",
     "schedulesSkipped_other": "存档中有 {{count}} 个计划任务未被导入，因为所选内容未包含它们。",
-    "schedulesSkipped_one": "存档中有 {{count}} 个计划任务未被导入，因为所选内容未包含它们。"
+    "schedulesSkipped_one": "存档中有 {{count}} 个计划任务未被导入，因为所选内容未包含它们。",
+    "moveUp": "上移",
+    "moveDown": "下移"
   },
   "syncPage": {
     "title": "智能体同步",
@@ -3348,7 +3421,11 @@
     "humanTurnTimeoutInvalid": "不是有效的 ISO-8601 时长，例如 PT24H 或 P1D。",
     "humanTurnTimeoutLabel": "发言超时（ISO-8601 时长）",
     "humanTurnTimeoutPlaceholder": "例如 PT24H——留空表示无限期等待",
-    "memberTypeHuman": "人类"
+    "memberTypeHuman": "人类",
+    "memberPromptPlaceholder": "你是 {{name}}。请从你所在领域的视角提供有见地的分析。",
+    "memberPromptPlaceholderRole": "你是 {{name}}，一位 {{role}} 专家。请从你所在领域的视角提供有见地的分析。",
+    "moderatorPromptPlaceholder": "你是一位经验丰富的主持人。请将小组讨论整合成清晰、平衡的总结…",
+    "modelPlaceholder": "例如 {{model}}"
   },
   "groupTemplates": {
     "advisoryBoard": "顾问团",
@@ -3576,7 +3653,8 @@
     "groupLinkUnavailable": "未找到该群组，因此无法提供可靠的链接。",
     "confirmApproveGroupDescription": "批准整个暂停阶段并继续讨论。该暂停下等待的每项任务都会一并批准；如需逐项决定，请打开该群组。",
     "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。",
-    "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。"
+    "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。",
+    "regularTruncated": "仅显示前 {{limit}} 个对话审批，还有更多待处理。处理部分审批后即可看到其余审批。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -3607,6 +3685,8 @@
     "vaultDown": "Vault 不可用",
     "vaultUp": "Vault 就绪",
     "viewLogs": "查看日志",
+    "coordAdminOnly": "协调器：需要管理员权限",
+    "vaultAdminOnly": "Vault：需要管理员权限",
     "vaultChecking": "正在检查保险库…",
     "statsPartial": "部分计数无法加载——显示为不可用，而不是零。",
     "countUnavailable": "无法加载",
@@ -3699,8 +3779,9 @@
     "scanIncomplete": "本次扫描未完成",
     "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。",
     "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。",
-    "scanFailed": "扫描失败",
-    "rescanFailed": "上次扫描失败——正在显示之前的结果。",
+    "purgeIncompleteScan": "未删除任何内容：EDDI 未能完成对仍在使用的资源的检查。请重新扫描后再试。",
+    "purgeFailed": "清理失败",
+    "scanFailed": "扫描失败：{{reason}}",
     "reviewHint": "请先从列表中打开资源进行查看；列表中的所有孤立资源都会被删除。",
     "typeToConfirm": "输入 {{count}} 以确认"
   },
@@ -3715,7 +3796,6 @@
     "enabled": "已启用",
     "enforcementOff": "强制执行已关闭。",
     "enforcementOffHint": "配额未被强制执行。启用强制执行并保存以开始应用限制。",
-    "limitHint": "-1 = 无限制",
     "liveUsage": "实时用量",
     "maxAgentsPerTenant": "每租户最大智能体数",
     "maxApiCallsPerMinute": "每分钟最大 API 调用数",
@@ -3728,7 +3808,9 @@
     "resetSuccess": "用量计数器已重置",
     "saveSuccess": "配额已保存",
     "tenantId": "租户 ID",
-    "title": "租户配额"
+    "title": "租户配额",
+    "limitHintEmpty": "留空或 -1 = 不限，0 = 禁止",
+    "invalidNumber": "请输入数字，或留空表示不限。"
   },
   "secretPicker": {
     "clearVault": "清除保管库引用",
@@ -4117,7 +4199,7 @@
       "deleteBoard": "解散任务小组",
       "deleteBoardDesc": "移除此任务小组的配置。智能体将保留。",
       "deleteBoardAll": "解散任务小组及全部智能体",
-      "deleteBoardAllDesc": "永久移除此任务小组及其全部成员智能体。",
+      "deleteBoardAllDesc": "移除此任务组及其所有成员智能体。",
       "unsavedChanges": "您有未保存的更改",
       "templateSaved": "已保存为模板",
       "saveAsTemplate": "另存为模板",
@@ -4125,8 +4207,8 @@
       "saveChanges": "保存更改",
       "deleteAllTitle": "解散任务小组及全部智能体？",
       "deleteTitle": "解散任务小组？",
-      "deleteAllConfirm": "此操作将永久解散该任务小组并移除其全部成员智能体，且无法撤销。",
-      "deleteConfirm": "此操作将永久解散该任务小组的配置。成员智能体不受影响。",
+      "deleteAllConfirm": "这将解散此任务组并删除其所有成员智能体。",
+      "deleteConfirm": "这将解散此任务组。成员智能体不受影响。",
       "title": "设置"
     },
     "nav": {
@@ -4182,11 +4264,11 @@
     },
     "dashboard": {
       "assembleTaskForce": "组建任务组",
-      "bulkDeleteConfirm": "此操作将解散所有选中的任务组，且无法撤消。",
+      "bulkDeleteConfirm": "这将解散所有选中的任务组。成员智能体不受影响。",
       "bulkDeleteTitle_one": "解散此任务组？",
       "bulkDeleteTitle_other": "解散 {{count}} 个任务组？",
       "cancel": "取消",
-      "deleteConfirm": "确定要解散此任务组吗？此操作无法撤消。",
+      "deleteConfirm": "确定要解散此任务组吗？成员智能体不受影响。",
       "deleteError": "删除任务组失败",
       "deletePartialFail": "{{success}} 个已删除，{{fail}} 个失败",
       "deleteSelected": "删除",
@@ -4251,7 +4333,8 @@
       "tryDifferent": "请尝试其他搜索词",
       "untitled": "无标题对话",
       "loadListError": "加载对话失败",
-      "rejected": "已否决"
+      "rejected": "已否决",
+      "deleteFailed": "无法删除该对话"
     },
     "insights": "洞察",
     "memberCount": "{{count}} 名成员",
@@ -5232,7 +5315,10 @@
     "legacyAdminOnly": "仅管理员可见——在分配所有者之后",
     "lastChanged": "最后由 {{who}} 更改",
     "neverChanged": "尚未在此更改",
-    "saved": "设置已保存"
+    "saved": "设置已保存",
+    "deleteVariableTitle": "删除此变量？",
+    "deleteVariableDescription": "使用它的智能体将失去其值，直到再次保存。此操作无法撤销。",
+    "legacyDefault": "此处未设置 — 使用默认值（所有人可见）"
   },
   "cascadeSave": {
     "workflowChanged": "工作流 {{workflowId}} 已在别处被修改（当前为版本 {{current}}，本页为版本 {{version}}）。请重新加载页面。未保存任何内容。",
@@ -5275,5 +5361,11 @@
     "switchNotice": "智能体已从 v{{from}} 切换到 v{{to}}",
     "impactFollow_one": "v{{from}} 上的 {{count}} 个活跃会话将在 v{{to}} 上继续",
     "impactStay_one": "v{{from}} 上的 {{count}} 个活跃会话将保留在 v{{from}}"
+  },
+  "actionTags": {
+    "remove": "移除 {{action}}",
+    "none": "无动作",
+    "inputLabel": "新动作",
+    "add": "添加动作"
   }
 }

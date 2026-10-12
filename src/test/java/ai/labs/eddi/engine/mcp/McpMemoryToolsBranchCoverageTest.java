@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -20,6 +20,7 @@ import org.mockito.Mock;
 
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -44,7 +45,7 @@ class McpMemoryToolsBranchCoverageTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, mock(ResourceAccessGuard.class), false);
+        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, mock(GroupMemoryAccessGuard.class), false);
     }
 
     // ─── listUserMemories ────────────────────────────────────────────────
@@ -347,9 +348,15 @@ class McpMemoryToolsBranchCoverageTest {
             assertTrue(tools.deleteUserMemory("  ").contains("error"));
         }
 
+        private void entryExists(String entryId) throws Exception {
+            when(userMemoryStore.findEntryById(entryId)).thenReturn(Optional.of(new UserMemoryEntry(entryId, "user1", "color", "blue", "fact",
+                    Visibility.self, "agent", List.of(), "conv", false, 0, Instant.now(), Instant.now())));
+        }
+
         @Test
         @DisplayName("success")
         void success() throws Exception {
+            entryExists("entry123");
             when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"deleted\"}");
             String result = tools.deleteUserMemory("entry123");
             assertTrue(result.contains("deleted"));
@@ -357,8 +364,18 @@ class McpMemoryToolsBranchCoverageTest {
         }
 
         @Test
+        @DisplayName("an id that names no entry is an error, not a deletion")
+        void unknownEntryIsNotReportedAsDeleted() throws Exception {
+            when(userMemoryStore.findEntryById("xyz")).thenReturn(Optional.empty());
+            String result = tools.deleteUserMemory("xyz");
+            assertTrue(result.contains("error") && result.contains("not found"), result);
+            verify(userMemoryStore, never()).deleteEntry(anyString());
+        }
+
+        @Test
         @DisplayName("exception returns error")
         void exception() throws Exception {
+            entryExists("entry123");
             doThrow(new RuntimeException("fail")).when(userMemoryStore).deleteEntry(anyString());
             assertTrue(tools.deleteUserMemory("entry123").contains("error"));
         }

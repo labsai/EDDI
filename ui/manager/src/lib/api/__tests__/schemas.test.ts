@@ -3,8 +3,6 @@ import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
   getJsonSchema,
-  getAgentJsonSchema,
-  getWorkflowJsonSchema,
 } from "../schemas";
 import type { ResourceTypeConfig } from "../resources";
 
@@ -54,22 +52,6 @@ describe("schemas API", () => {
       const first = await getJsonSchema(rt);
       const second = await getJsonSchema(rt);
       expect(first).toEqual(second);
-    });
-  });
-
-  describe("getAgentJsonSchema", () => {
-    it("fetches agent JSON schema", async () => {
-      const result = await getAgentJsonSchema();
-      expect(result).toBeDefined();
-      expect(result).toHaveProperty("type");
-    });
-  });
-
-  describe("getWorkflowJsonSchema", () => {
-    it("fetches workflow JSON schema", async () => {
-      const result = await getWorkflowJsonSchema();
-      expect(result).toBeDefined();
-      expect(result).toHaveProperty("type");
     });
   });
 });

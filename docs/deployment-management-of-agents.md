@@ -113,7 +113,12 @@ The undeployment of a specific agent is done through a **`POST`** to **`/adminis
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **undeploy**.               |
 | version       | (`Query parameter`, **required**):`Integer` version of the agent that you wish to **undeploy**. |
 | endAllActiveConversations | (`Query parameter`, optional, default `false`):`Boolean` end the agent's active conversations instead of refusing. Without it, undeploying an agent that has active conversations returns `409`. Conversations that can move to another deployed, compatible version are neither counted nor ended — see [Running conversations and new agent versions](#running-conversations-and-new-agent-versions). |
-| undeployThisAndAllPreviousAgentVersions | (`Query parameter`, optional, default `false`):`Boolean` also undeploy every earlier version, counting down to version 1. |
+| undeployThisAndAllPreviousAgentVersions | (`Query parameter`, optional, default `false`):`Boolean` also undeploy every earlier version, counting down to version 1. Every version is attempted: one that fails (`500`, naming the version) or that is refused for its open conversations (`409`) no longer stops the lower versions, and the response reports what was not undeployed. |
+
+Ending the open conversations reads only a small projection of each (never the conversations
+themselves), so it is safe on a version with tens of thousands of open conversations. To end idle
+conversations across the whole deployment instead, see
+[Ending a backlog of idle conversations](upgrading-from-5x.md#ending-a-backlog-of-idle-conversations-in-one-call).
 
 ### Example :
 
@@ -476,14 +481,18 @@ Returns a report listing all unreferenced resources across all stores (workflows
 ```
 
 > **Check `scanComplete` before acting on this list.** It is `false` when part of the traversal
-> failed — an unreadable agent or workflow, an unreadable deployment record, a store type past the
+> failed — an unreadable agent, workflow or parser document, an unreadable deployment record, a store type past the
 > scan ceiling — and `scanWarning` then says which. Every failure *removes* entries from the
 > referenced set, so a partial scan lists live, in-use resources as orphans. The read-only scan still
 > answers so you can see the cause; the purge refuses outright (409, below).
 
 What counts as a reference: the current version of every agent, the current version of every
 workflow, **and** every agent version named by a `deployed` deployment record together with the exact
-workflow versions that version pins. A resource referenced only by a superseded *and* undeployed
+workflow versions that version pins. Dictionaries are also referenced from **parser documents**
+(`extensions.dictionaries[n].config.uri`): every parser document's current version counts, and so does
+the parser version a workflow step pins. A parser that is itself an orphan keeps its dictionaries
+until it has been purged, so the next purge reaches them; an unreadable parser document makes the scan
+incomplete. A resource referenced only by a superseded *and* undeployed
 agent version is still reported as an orphan — history is not a reference — so rolling an agent back
 to an older version after a purge can leave it unresolvable. References are compared by resource
 identity, not by URI string, so a version-pinned reference protects every version of the resource,
@@ -523,7 +532,7 @@ above.
 > old default now purges *less*; pass `includeDeleted=true` to restore the wider sweep.
 
 The purge refuses with **409** rather than proceeding when the referenced-resource scan could not be
-completed (an unreadable Agent or workflow, an unreadable deployment record, or a store type
+completed (an unreadable Agent, workflow or parser document, an unreadable deployment record, or a store type
 exceeding the scan ceiling). A partial reference set makes live, in-use resources look unreferenced,
 so purging against one could destroy working configuration.
 

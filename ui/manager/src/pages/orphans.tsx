@@ -17,7 +17,7 @@ import { useOrphanScan, usePurgeOrphans } from "@/hooks/use-orphans";
 import { isScanComplete, type OrphanInfo } from "@/lib/api/orphans";
 import { getExtensionTypeConfig, getResourceSlugForExtension } from "@/lib/api/extensions";
 import { RESOURCE_TYPES } from "@/lib/api/resources";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
@@ -86,10 +86,10 @@ export function OrphansPage() {
   const {
     data: report,
     isFetching: isScanning,
-    refetch: scan,
-    dataUpdatedAt,
     isError: scanFailed,
     error: scanError,
+    refetch: scan,
+    dataUpdatedAt,
   } = useOrphanScan(includeDeleted);
 
   const purge = usePurgeOrphans();
@@ -111,9 +111,26 @@ export function OrphansPage() {
         setPurgeConfirmText("");
         scan();
       },
-      // The server says why a purge was refused (409 incomplete_scan, a resource
-      // that became referenced, …) — "Something went wrong" threw that away.
-      onError: (err) => toast.error(getErrorMessage(err)),
+      onError: (err) => {
+        setShowPurgeConfirm(false);
+        // The purge endpoint's one 409 is `incomplete_scan`: EDDI re-scanned
+        // references before deleting, the scan did not finish, and it refused
+        // rather than delete on a partial picture. Say that in the user's
+        // language, keep the backend's cause as the detail, and re-scan so the
+        // incomplete-scan banner explains the list.
+        if (isApiError(err) && err.status === 409) {
+          toast.error(
+            t(
+              "orphans.purgeIncompleteScan",
+              "Nothing was deleted: EDDI could not finish checking which resources are still in use. Re-scan and try again.",
+            ),
+            { description: getErrorMessage(err) },
+          );
+          scan();
+          return;
+        }
+        toast.error(t("orphans.purgeFailed", "Purge failed"), { description: getErrorMessage(err) });
+      },
     });
   }, [purge, includeDeleted, t, scan]);
 
@@ -185,18 +202,24 @@ export function OrphansPage() {
         </div>
       </div>
 
-      {/* Pre-scan empty state */}
-      {/* A failed scan must not fall back to the empty "scan your platform"
-          state: that reads as though nothing was ever attempted. */}
-      {scanFailed && !report && !isScanning && (
-        <ErrorState
-          error={scanError}
-          message={t("orphans.scanFailed", "The scan failed")}
-          onRetry={handleScan}
-          retryLabel={t("orphans.scan", "Scan")}
-        />
+      {/* A failed scan used to fall back to the pre-scan prompt, as if nothing
+          had been asked. */}
+      {scanFailed && !isScanning && !report && (
+        <div data-testid="orphans-scan-error">
+          <ErrorState
+            message={t("orphans.scanFailed", "The scan failed: {{reason}}", { reason: getErrorMessage(scanError) })}
+            onRetry={handleScan}
+            retryLabel={t("common.retry")}
+          />
+        </div>
+      )}
+      {scanFailed && !isScanning && report && (
+        <div data-testid="orphans-scan-error">
+          <RefetchErrorNotice onRetry={handleScan} message={t("orphans.scanFailed", "The scan failed: {{reason}}", { reason: getErrorMessage(scanError) })} />
+        </div>
       )}
 
+      {/* Pre-scan empty state */}
       {!report && !isScanning && !scanFailed && (
         <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-card/50 px-6 py-16 text-center" data-testid="pre-scan-state">
           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
@@ -236,12 +259,6 @@ export function OrphansPage() {
       {/* Results */}
       {report && (
         <div className="space-y-4">
-          {scanFailed && (
-            <RefetchErrorNotice
-              onRetry={handleScan}
-              message={t("orphans.rescanFailed", "The last scan failed — showing the previous results.")}
-            />
-          )}
           {/* An incomplete reference scan makes MORE resources look
               unreferenced, never fewer, so the list below is a set of false
               positives rather than a shorter true one. EDDI refuses to purge on

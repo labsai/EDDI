@@ -243,6 +243,13 @@ year. Use `deletePermanently=true` or a GDPR erasure when it has to go at once.
 (Earlier releases purged such a conversation at the next daily sweep if it had
 already ended, and never if it was still open.)
 
+**Ending idle conversations does not restart the retention clock.** Both the
+daily idle sweep and the admin bulk end
+(`POST /conversationstore/conversations/end-inactive`, see
+[Upgrading from EDDI 5](upgrading-from-5x.md)) set the conversation to `ENDED`
+without touching its descriptor, so `deleteEndedConversationsOnceOlderThanDays`
+keeps counting from the **last interaction**.
+
 **Per-category retention** allows different retention periods for:
 - **Conversations** — 365 days (default)
 - **User memories** — disabled by default (configure per-deployment)

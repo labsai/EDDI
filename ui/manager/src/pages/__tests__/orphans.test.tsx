@@ -159,9 +159,14 @@ describe("OrphansPage", () => {
     await user.type(screen.getByTestId("orphans-purge-confirm-input"), "5");
     await user.click(screen.getByTestId("alert-dialog-confirm"));
 
+    // The title explains the refusal in the user's language; the server's
+    // reason is kept as the detail.
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        expect.stringContaining("incomplete_scan: reverse lookup failed"),
+        expect.any(String),
+        expect.objectContaining({
+          description: expect.stringContaining("incomplete_scan: reverse lookup failed"),
+        }),
       ),
     );
   });
@@ -210,7 +215,7 @@ describe("OrphansPage", () => {
     await user.click(screen.getByTestId("scan-button"));
 
     await waitFor(() => expect(screen.getByTestId("error-state")).toBeInTheDocument());
-    expect(screen.getByTestId("error-state-detail")).toHaveTextContent("Reference scan unavailable");
+    expect(screen.getByTestId("orphans-scan-error")).toHaveTextContent("Reference scan unavailable");
     expect(screen.queryByTestId("pre-scan-state")).not.toBeInTheDocument();
   });
 

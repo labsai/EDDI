@@ -402,11 +402,8 @@ public class GroupHitlCoordinator {
             schedule.setOneTimeAt(fireAt.toString());
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(Map.of(
-                    HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
-                    HitlSchedules.METADATA_POLICY_KEY, policy.name(),
-                    HitlSchedules.METADATA_SURFACE_KEY, HitlSchedules.SURFACE_GROUP,
-                    HitlSchedules.METADATA_CONVERSATION_ID_KEY, gc.getId()));
+            schedule.setMetadata(HitlSchedules.timeoutMetadata(policy.name(), HitlSchedules.SURFACE_GROUP, gc.getId(),
+                    HitlDecision.pauseIdOf(pausedAt)));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled group HITL timeout for %s at %s (policy: %s)",
                     LogSanitizer.sanitize(gc.getId()), fireAt, policy);
@@ -1121,11 +1118,8 @@ public class GroupHitlCoordinator {
             schedule.setOneTimeAt(fireAt.toString());
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(Map.of(
-                    HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
-                    HitlSchedules.METADATA_POLICY_KEY, pending.onTimeout(),
-                    HitlSchedules.METADATA_SURFACE_KEY, HitlSchedules.SURFACE_GROUP_HUMAN,
-                    HitlSchedules.METADATA_CONVERSATION_ID_KEY, gc.getId()));
+            schedule.setMetadata(HitlSchedules.timeoutMetadata(pending.onTimeout(), HitlSchedules.SURFACE_GROUP_HUMAN, gc.getId(),
+                    HitlDecision.pauseIdOf(pausedAt)));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled human-turn timeout for %s at %s (policy: %s)",
                     LogSanitizer.sanitize(gc.getId()), fireAt, LogSanitizer.sanitize(pending.onTimeout()));
@@ -1189,6 +1183,10 @@ public class GroupHitlCoordinator {
                     groupConversationId, pending.memberId());
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to skip timed-out human turn for %s", groupConversationId);
+            // Not swallowed: HitlTimeoutHandler decides whether the pause is still
+            // waiting (re-arm the timeout) or was decided meanwhile (done). Returning
+            // normally here made the fire COMPLETED and dropped the timeout.
+            throw new IllegalStateException("Failed to skip timed-out human turn for " + groupConversationId, e);
         }
     }
 

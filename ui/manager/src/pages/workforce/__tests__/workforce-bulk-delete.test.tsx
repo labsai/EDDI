@@ -30,12 +30,17 @@ class ResizeObserverMock {
 }
 window.ResizeObserver = ResizeObserverMock;
 
-/** Records every DELETE the page actually sends. */
+/** The `permanent` flag of every DELETE recorded by the latest `watchDeletes()`. */
+let permanentFlags: (string | null)[] = [];
+
+/** Records every DELETE the page actually sends (and its `permanent` flag). */
 function watchDeletes() {
   const deleted: string[] = [];
+  permanentFlags = [];
   server.use(
-    http.delete("*/groupstore/groups/:id", ({ params }) => {
+    http.delete("*/groupstore/groups/:id", ({ params, request }) => {
       deleted.push(String(params.id));
+      permanentFlags.push(new URL(request.url).searchParams.get("permanent"));
       return new HttpResponse(null, { status: 204 });
     }),
   );
@@ -149,7 +154,37 @@ describe("WorkforceDashboard bulk delete", () => {
     expect(within(dialog).getByRole("heading")).toHaveTextContent(
       "Dissolve this task force?",
     );
-    expect(within(dialog).getByText(/cannot be undone/i)).toBeInTheDocument();
+    // A soft delete by default; the hard delete is offered, unticked.
+    expect(within(dialog).getByTestId("permanent-delete-checkbox")).not.toBeChecked();
+  });
+
+  it("soft-deletes by default — the bulk action used to send the store's hard delete", async () => {
+    const deleted = watchDeletes();
+    const user = userEvent.setup();
+    renderWithProviders(<WorkforceDashboard />);
+
+    await selectFirstTaskForce(user);
+    await user.click(screen.getByTestId("bulk-delete-btn"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(deleted).toHaveLength(1));
+    expect(permanentFlags).toEqual(["false"]);
+  });
+
+  it("hard-deletes only when 'Delete permanently' is ticked", async () => {
+    const deleted = watchDeletes();
+    const user = userEvent.setup();
+    renderWithProviders(<WorkforceDashboard />);
+
+    await selectFirstTaskForce(user);
+    await user.click(screen.getByTestId("bulk-delete-btn"));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByTestId("permanent-delete-checkbox"));
+    await user.click(within(dialog).getByRole("button", { name: "Delete permanently" }));
+
+    await waitFor(() => expect(deleted).toHaveLength(1));
+    expect(permanentFlags).toEqual(["true"]);
   });
 
   /**
