@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
@@ -20,6 +21,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -46,6 +48,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -456,6 +459,155 @@ class AgentOrchestratorToolPauseTest {
                     real.builtInSpecs(), real.toolCanonicalNames(), real.toolEndpoints(), Map.of("calculate", resolver));
         }).when(spied).buildToolSetup(any(), any());
         return spied;
+    }
+
+    /** Routes each named tool to its resolver. */
+    private AgentOrchestrator withResolvers(Map<String, ToolRequestResolver> resolvers) {
+        var spied = spy(orchestrator);
+        doAnswer(invocation -> {
+            var real = (AgentOrchestrator.ToolSetup) invocation.callRealMethod();
+            return new AgentOrchestrator.ToolSetup(real.toolSpecs(), real.toolExecutors(), real.toolSources(),
+                    real.builtInSpecs(), real.toolCanonicalNames(), real.toolEndpoints(), resolvers);
+        }).when(spied).buildToolSetup(any(), any());
+        return spied;
+    }
+
+    private ToolApprovalsConfig gateBoth() {
+        var cfg = new ToolApprovalsConfig();
+        cfg.setRequireApproval(List.of("calculate", "getCurrentDateTime"));
+        return cfg;
+    }
+
+    private static HitlDecision decision(HitlDecision.HitlVerdict verdict) {
+        var d = new HitlDecision();
+        d.setVerdict(verdict);
+        d.setDecidedBy("reviewer-1");
+        return d;
+    }
+
+    private static List<ToolExecutionResultMessage> resultsOf(ChatRequest request) {
+        return request.messages().stream().filter(m -> m instanceof ToolExecutionResultMessage)
+                .map(m -> (ToolExecutionResultMessage) m).toList();
+    }
+
+    /**
+     * A transcript with a tool call that has no result — or two — is a 400 at
+     * Anthropic and a rejection at OpenAI. So the refused call's result, appended
+     * before the pause, has to survive the pause/resume round trip exactly once.
+     */
+    @Test
+    @DisplayName("resume after a mixed batch: the refused call keeps exactly one result and never runs — approve and reject")
+    void doomedAndHealthy_resumeKeepsOneResultPerCall() throws Exception {
+        for (var verdict : List.of(HitlDecision.HitlVerdict.APPROVED, HitlDecision.HitlVerdict.REJECTED)) {
+            reset(calculatorTool, dateTimeTool, journalStore);
+            when(journalStore.tryClaim(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(true);
+            var task = twoToolTask();
+            var doomed = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1\"}").build();
+            var healthy = ToolExecutionRequest.builder().id("c2").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+            ChatModel pauseModel = mock(ChatModel.class);
+            when(pauseModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(doomed, healthy));
+            var spied = withResolvers(Map.of("calculate", req -> {
+                throw new ConfigReferenceRefusedException(DOOMED_MESSAGE);
+            }));
+
+            var ex = assertThrows(ToolApprovalRequiredException.class,
+                    () -> spied.executeIfToolsEnabled(pauseModel, "sys", List.of(UserMessage.from("hi")), task, memory, gateBoth(), 0));
+
+            ChatModel resumeModel = mock(ChatModel.class);
+            var captor = ArgumentCaptor.forClass(ChatRequest.class);
+            when(resumeModel.chat(captor.capture())).thenReturn(toolBatchFreeText("done"));
+            spied.resumeToolLoop(resumeModel, task, memory, ex.getBatch(), decision(verdict), true);
+
+            var results = resultsOf(captor.getValue());
+            assertEquals(List.of("c1", "c2"), results.stream().map(ToolExecutionResultMessage::id).sorted().toList(),
+                    verdict + ": exactly one result per tool-call id");
+            var refused = results.stream().filter(r -> "c1".equals(r.id())).findFirst().orElseThrow();
+            assertTrue(refused.text().contains("vaultKeyName"), verdict + ": the refusal itself is what is replayed: " + refused.text());
+            verify(calculatorTool, never()).calculate(anyString());
+            if (verdict == HitlDecision.HitlVerdict.APPROVED) {
+                verify(dateTimeTool, times(1)).getCurrentDateTime(anyString());
+            } else {
+                verify(dateTimeTool, never()).getCurrentDateTime(anyString());
+            }
+            verify(journalStore, never()).tryClaim(anyString(), anyString(), eq("c1"), anyString(), anyString());
+        }
+    }
+
+    private ChatResponse toolBatchFreeText(String text) {
+        return ChatResponse.builder().aiMessage(AiMessage.from(text)).build();
+    }
+
+    @Test
+    @DisplayName("each gated call is resolved once: the pin step reuses the screening's resolution")
+    void gatedCallIsResolvedOnce() {
+        var task = twoToolTask();
+        var healthy = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1\"}").build();
+        var doomed = ToolExecutionRequest.builder().id("c2").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(healthy, doomed));
+        var healthyResolutions = new AtomicInteger();
+        var failingResolutions = new AtomicInteger();
+        var spied = withResolvers(Map.of(
+                "calculate", req -> {
+                    healthyResolutions.incrementAndGet();
+                    return ResolvedRequest.of("POST", "https://eddi.example/x", Map.of(), Map.of(), "{}", true);
+                },
+                "getCurrentDateTime", req -> {
+                    failingResolutions.incrementAndGet();
+                    throw new ConfigReferenceRefusedException(DOOMED_MESSAGE);
+                }));
+
+        var ex = assertThrows(ToolApprovalRequiredException.class,
+                () -> spied.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory, gateBoth(), 0));
+
+        assertEquals(1, healthyResolutions.get(), "the surviving call is resolved once, not once to screen and again to pin");
+        assertEquals(1, failingResolutions.get());
+        assertEquals(1, ex.getBatch().getCalls().size());
+        assertTrue(ex.getBatch().getCalls().get(0).isRequestPinned(), "and it is still pinned from that one resolution");
+    }
+
+    @Test
+    @DisplayName("a resolve failure that is not the guard's still cannot stop the pause, and is not retried to pin")
+    void otherResolveFailureStillPausesUnpinned() {
+        var task = twoToolTask();
+        var gatedReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1\"}").build();
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(gatedReq));
+        var attempts = new AtomicInteger();
+        var spied = withResolvers(Map.of("calculate", req -> {
+            attempts.incrementAndGet();
+            throw new LifecycleException("boom");
+        }));
+
+        var ex = assertThrows(ToolApprovalRequiredException.class,
+                () -> spied.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory, gateCalculate(), 0));
+
+        assertFalse(ex.getBatch().getCalls().get(0).isRequestPinned());
+        assertEquals(1, attempts.get());
+    }
+
+    @Test
+    @DisplayName("when the ONLY call of the turn is a doomed gated one: no pause, no pause count, and the model gets the refusal")
+    void onlyCallIsDoomed_noPauseAndModelGetsRefusal() throws Exception {
+        var task = twoToolTask();
+        var doomed = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"1\"}").build();
+        ChatModel chatModel = mock(ChatModel.class);
+        var captor = ArgumentCaptor.forClass(ChatRequest.class);
+        when(chatModel.chat(captor.capture())).thenReturn(toolBatch(doomed))
+                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("corrected")).build());
+        var spied = withResolver(req -> {
+            throw new ConfigReferenceRefusedException(DOOMED_MESSAGE);
+        });
+
+        var result = spied.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory, gateCalculate(), 0);
+
+        assertEquals("corrected", result.response());
+        verify(memory, never()).setHitlPendingToolCalls(any());
+        verify(calculatorTool, never()).calculate(anyString());
+        var results = resultsOf(captor.getAllValues().get(1));
+        assertEquals(1, results.size());
+        assertEquals("c1", results.get(0).id());
+        assertTrue(results.get(0).text().contains("vaultKeyName"), results.get(0).text());
     }
 
     @Test

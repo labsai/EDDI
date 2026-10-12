@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
@@ -446,10 +447,13 @@ class ToolLoopRunner {
                     // calls. clearedCallIds carries the human-approved ids on resume so
                     // they are never re-gated. Inert when effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
-                    var gateResult = refuseDoomedGatedCalls(
+                    var screened = refuseDoomedGatedCalls(
                             toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources, setup.toolEndpoints(),
                                     effectiveToolApprovals, clearedCallIds),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
+                    var gateResult = screened.gateResult();
+                    // The pin step below reuses what the screening already resolved.
+                    var pinResolvers = screened.resolvers();
 
                     if (!gateResult.gated().isEmpty()) {
                         int pausesSoFar = ToolApprovalGateSupport.readToolPauseCount(memory);
@@ -538,7 +542,7 @@ class ToolLoopRunner {
                             PendingToolCallBatch batch = gateSupport.buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, ToolApprovalGateSupport.activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
                                     toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
-                                    setup.toolRequestResolvers());
+                                    pinResolvers);
                             memory.setHitlPendingToolCalls(batch);
                             ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
                             throw new ToolApprovalRequiredException(
@@ -637,15 +641,20 @@ class ToolLoopRunner {
      * material being rendered), so those calls stay gated and are approved
      * unpinned, exactly as before.
      */
-    private static ToolApprovalGate.GateResult refuseDoomedGatedCalls(ToolApprovalGate.GateResult gateResult,
-                                                                      Map<String, ToolRequestResolver> resolvers,
-                                                                      List<ChatMessage> currentMessages, AiMessage aiMessage,
-                                                                      List<Map<String, Object>> trace,
-                                                                      ToolExchangeRecorder exchangeRecorder) {
+    private static Screened refuseDoomedGatedCalls(ToolApprovalGate.GateResult gateResult,
+                                                   Map<String, ToolRequestResolver> resolvers,
+                                                   List<ChatMessage> currentMessages, AiMessage aiMessage,
+                                                   List<Map<String, Object>> trace,
+                                                   ToolExchangeRecorder exchangeRecorder) {
         if (resolvers == null || resolvers.isEmpty() || gateResult.gated().isEmpty()) {
-            return gateResult;
+            return new Screened(gateResult, resolvers);
         }
         List<ToolExecutionRequest> stillGated = new ArrayList<>();
+        // Each gated call is resolved ONCE: the pin step that builds the pending batch
+        // is handed this outcome instead of building the same request a second time.
+        // A failure is remembered too and rethrown there, so the pin step still treats
+        // it exactly as before — a failure that may never stop a pause.
+        Map<ToolExecutionRequest, Object> outcomes = new IdentityHashMap<>();
         for (ToolExecutionRequest req : gateResult.gated()) {
             var resolver = resolvers.get(req.name());
             if (resolver == null) {
@@ -653,7 +662,7 @@ class ToolLoopRunner {
                 continue;
             }
             try {
-                resolver.resolve(req);
+                outcomes.put(req, resolver.resolve(req));
                 stillGated.add(req);
             } catch (ConfigReferenceRefusedException refused) {
                 LOGGER.warnf("Refusing gated tool '%s' before asking for approval: a credential reference in its request came "
@@ -667,19 +676,47 @@ class ToolLoopRunner {
             } catch (Exception e) {
                 // Not known to be deterministic: leave it to the pause, which pins it
                 // best-effort and approves it unpinned.
+                outcomes.put(req, e);
                 stillGated.add(req);
             }
         }
-        if (stillGated.size() == gateResult.gated().size()) {
-            return gateResult;
+        var screenedGate = stillGated.size() == gateResult.gated().size()
+                ? gateResult
+                : new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
+        Map<String, ToolRequestResolver> memoised = new HashMap<>();
+        for (var entry : resolvers.entrySet()) {
+            ToolRequestResolver original = entry.getValue();
+            memoised.put(entry.getKey(), req -> {
+                Object outcome = outcomes.get(req);
+                if (outcome == null) {
+                    return original.resolve(req);
+                }
+                if (outcome instanceof RuntimeException failure) {
+                    throw failure;
+                }
+                if (outcome instanceof LifecycleException failure) {
+                    throw failure;
+                }
+                return (ResolvedRequest) outcome;
+            });
         }
-        return new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
+        return new Screened(screenedGate, memoised);
     }
+
+    /**
+     * The gate result after screening, and the resolvers to pin it with — the same
+     * ones, except that a call already resolved during screening answers from that
+     * resolution.
+     */
+    private record Screened(ToolApprovalGate.GateResult gateResult, Map<String, ToolRequestResolver> resolvers) {
+    }
+
+    private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
 
     /** One JSON object with an {@code error} string, escaped. */
     private static String errorJson(String message) {
         try {
-            return new ObjectMapper().writeValueAsString(Map.of("error", message != null ? message : "refused"));
+            return ERROR_MAPPER.writeValueAsString(Map.of("error", message != null ? message : "refused"));
         } catch (Exception e) {
             return "{\"error\":\"refused\"}";
         }
