@@ -25,12 +25,15 @@ public record OpenAiErrorResponse(OpenAiError error) {
 
     // --- code values (adapter-specific, stable) ---
     public static final String CODE_INVALID_API_KEY = "invalid_api_key";
+    /** An authenticated caller whose token holds no EDDI role that may converse. */
+    public static final String CODE_INSUFFICIENT_PERMISSIONS = "insufficient_permissions";
     public static final String CODE_MODEL_NOT_FOUND = "model_not_found";
     public static final String CODE_AMBIGUOUS_MODEL = "ambiguous_model";
     public static final String CODE_NO_USER_MESSAGE = "no_user_message";
     public static final String CODE_AGENT_NOT_READY = "agent_not_ready";
     public static final String CODE_UNKNOWN_ENDPOINT = "unknown_endpoint";
     public static final String CODE_INVALID_REQUEST_FIELD = "invalid_request_field";
+    public static final String CODE_INVALID_REQUEST_BODY = "invalid_request_body";
     public static final String CODE_TIMEOUT = "timeout";
 
     public static OpenAiErrorResponse of(String message, String type, String code) {

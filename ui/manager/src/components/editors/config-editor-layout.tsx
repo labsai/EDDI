@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { UnsavedChangesDialog, UnsavedChangesPrompt } from "@/components/ui/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { JsonEditor } from "./json-editor";
 import { VersionPicker, type VersionInfo } from "./version-picker";
@@ -90,10 +90,34 @@ export function ConfigEditorLayout({
     hasFormEditor ? "form" : "json"
   );
   const [editedData, setEditedData] = useState(data);
+  /** The text last handed to `onSave` / `onSaveAndDeploy`, while that save is in flight. */
+  const savedPayloadRef = useRef<string | null>(null);
+  /** The source text `editedData` was last reset to. */
+  const syncedDataRef = useRef(data);
+  /** `editedData` as of the last render, for the reset effect below. */
+  const editedDataRef = useRef(editedData);
+  editedDataRef.current = editedData;
+  /** Why the last Save click did nothing — shown instead of a silent no-op. */
+  const [invalidJson, setInvalidJson] = useState<string | null>(null);
 
-  // Reset edited data when the source data changes (version switch, initial load)
+  // Reset edited data when the source data changes (version switch, initial
+  // load, the new version a save created) — but only when doing so loses
+  // nothing. A save refetches and changes `data`; an unconditional reset threw
+  // away whatever was typed while the save was in flight. The edit buffer is
+  // replaced only if it is untouched since the last reset, or still exactly
+  // what was saved.
+  //
+  // Decided here, not inside a `setEditedData(current => …)` updater: the
+  // decision moves the refs it reads, and React may call an updater more than
+  // once (StrictMode, a re-run render) — a second call would see the refs the
+  // first one moved and keep the stale document.
   useEffect(() => {
-    setEditedData(data);
+    const current = editedDataRef.current;
+    const untouched = current === syncedDataRef.current;
+    const justSaved = savedPayloadRef.current !== null && current === savedPayloadRef.current;
+    syncedDataRef.current = data;
+    savedPayloadRef.current = null;
+    if (untouched || justSaved) setEditedData(data);
   }, [data]);
 
   // Handler for form editors to push data changes
@@ -106,36 +130,48 @@ export function ConfigEditorLayout({
   // Discard confirmation state
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
-  // Navigation guard — shows native browser prompt on close/reload when dirty
-  useUnsavedChangesGuard(isDirty && !readOnly);
+  // Navigation guard — the browser prompt on close/reload, and the in-app
+  // prompt (rendered below) for links, Back and navigate() calls.
+  const unsavedGuard = useUnsavedChangesGuard(isDirty && !readOnly);
 
   const handleDiscard = useCallback(() => {
     setEditedData(data);
     setShowDiscardConfirm(false);
   }, [data]);
 
-  const handleSave = useCallback(() => {
-    // Validate JSON before saving
+  /**
+   * Parse before saving. An invalid document used to make Save a silent no-op —
+   * the button stayed enabled, nothing was sent and nothing said why; the only
+   * hint was a squiggle in a tab the user might not be looking at.
+   */
+  const validJsonOrExplain = useCallback((): boolean => {
     try {
       JSON.parse(editedData);
-      onSave(editedData);
-    } catch {
-      // Invalid JSON — don't save (Monaco will show squiggly lines)
+      setInvalidJson(null);
+      return true;
+    } catch (e) {
+      setInvalidJson(e instanceof Error ? e.message : String(e));
+      setActiveTab("json");
+      return false;
     }
-  }, [editedData, onSave]);
+  }, [editedData]);
+
+  const handleSave = useCallback(() => {
+    if (!validJsonOrExplain()) return;
+    savedPayloadRef.current = editedData;
+    onSave(editedData);
+  }, [editedData, onSave, validJsonOrExplain]);
 
   const handleSaveAndDeploy = useCallback(() => {
     if (!onSaveAndDeploy) return;
-    try {
-      JSON.parse(editedData);
-      onSaveAndDeploy(editedData);
-    } catch {
-      // Invalid JSON
-    }
-  }, [editedData, onSaveAndDeploy]);
+    if (!validJsonOrExplain()) return;
+    savedPayloadRef.current = editedData;
+    onSaveAndDeploy(editedData);
+  }, [editedData, onSaveAndDeploy, validJsonOrExplain]);
 
   const handleJsonChange = useCallback((val: string) => {
     setEditedData(val);
+    setInvalidJson(null);
   }, []);
 
   return (
@@ -183,6 +219,13 @@ export function ConfigEditorLayout({
           {saveError && (
             <span className="text-xs font-medium text-destructive" data-testid="save-error">
               {saveError}
+            </span>
+          )}
+          {invalidJson && (
+            <span className="text-xs font-medium text-destructive" role="alert" data-testid="save-invalid-json">
+              {t("editor.invalidJsonNotSaved", "Not saved — the JSON is invalid: {{reason}}", {
+                reason: invalidJson,
+              })}
             </span>
           )}
           {!readOnly && (
@@ -353,6 +396,7 @@ export function ConfigEditorLayout({
         title={t("editor.discardTitle", "Discard Changes?")}
         message={t("editor.discardMessage", "Are you sure you want to discard all unsaved changes? This action cannot be undone.")}
       />
+      <UnsavedChangesPrompt guard={unsavedGuard} />
 
     </div>
   );

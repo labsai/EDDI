@@ -529,10 +529,10 @@ class ApiCallExecutorBranchCoverageTest {
          * choosing which headers may be STORED, and only the second one closes this. An
          * operation that qualifies on its documented 201 still answers some calls — the
          * error path especially — with a {@code Set-Cookie}, and that value is a live
-         * session credential: {@code HttpClientModule} builds a cookie-aware,
-         * application-scoped {@code WebClientSession}, so EDDI actively replays it. It
-         * must reach neither the tool result, the template data, nor conversation
-         * memory.
+         * session credential: the outbound client keeps no cookie jar (see
+         * {@code HttpClientModuleCookieTest}), but the value is still a live
+         * credential. It must reach neither the tool result, the template data, nor
+         * conversation memory.
          */
         @Test
         @DisplayName("should never store or return credential-bearing response headers")

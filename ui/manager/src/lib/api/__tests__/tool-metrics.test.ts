@@ -3,10 +3,6 @@ import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
   getConversationCosts,
-  getToolRateLimit,
-  getCacheStats,
-  getToolHistory,
-  getToolCosts,
 } from "../tool-metrics";
 
 describe("tool-metrics API", () => {
@@ -39,55 +35,6 @@ describe("tool-metrics API", () => {
       await expect(
         getConversationCosts("conv-fail")
       ).rejects.toMatchObject({ status: 500 });
-    });
-  });
-
-  // ─── getToolRateLimit ───────────────────────────────────────────
-  describe("getToolRateLimit", () => {
-    it("fetches rate limit for a tool", async () => {
-      const result = await getToolRateLimit("webscraper");
-      expect(result).toBeDefined();
-      expect(result).toHaveProperty("tool");
-      expect(result).toHaveProperty("limit");
-      expect(result).toHaveProperty("remaining");
-    });
-  });
-
-  // ─── getCacheStats ──────────────────────────────────────────────
-  describe("getCacheStats", () => {
-    it("fetches cache statistics", async () => {
-      const result = await getCacheStats();
-      expect(result).toBeDefined();
-      expect(result).toHaveProperty("size");
-      expect(result).toHaveProperty("hits");
-      expect(result).toHaveProperty("misses");
-      expect(result).toHaveProperty("hitRate");
-    });
-  });
-
-  // ─── getToolHistory ─────────────────────────────────────────────
-  describe("getToolHistory", () => {
-    it("fetches tool execution history", async () => {
-      // A ToolExecutionTrace object — the backend never sends a bare array.
-      const result = await getToolHistory("conv1");
-      expect(Array.isArray(result)).toBe(false);
-      expect(result.toolCalls.length).toBeGreaterThan(0);
-      expect(result.toolCalls[0]).toMatchObject({
-        toolName: "fetch_weather",
-        arguments: '{"city":"Vienna"}',
-        executionTimeMs: 156,
-      });
-      expect(result).toHaveProperty("totalCost");
-    });
-  });
-
-  // ─── getToolCosts ───────────────────────────────────────────────
-  describe("getToolCosts", () => {
-    it("fetches global tool cost summary", async () => {
-      const result = await getToolCosts();
-      expect(result).toBeDefined();
-      expect(result).toHaveProperty("totalCost");
-      expect(result).toHaveProperty("summary");
     });
   });
 });

@@ -14,6 +14,7 @@ import {
   pauseHeadline,
   type ApprovalStatus,
 } from "@/api/hitl-api";
+import { t, getLocale } from "@/i18n";
 
 interface PausedCardProps {
   status: ApprovalStatus;
@@ -23,7 +24,7 @@ interface PausedCardProps {
 
 /** Coarse "time left" text — seconds precision is noise at approval timescales. */
 function formatRemaining(ms: number): string {
-  if (ms <= 0) return "any moment now";
+  if (ms <= 0) return t("paused.anyMoment");
   const totalMinutes = Math.floor(ms / 60_000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -36,13 +37,13 @@ function formatRemaining(ms: number): string {
 function describePolicy(policy: string): string {
   switch (policy) {
     case "AUTO_APPROVE":
-      return "approved automatically";
+      return t("paused.policy.approve");
     case "AUTO_REJECT":
-      return "rejected automatically";
+      return t("paused.policy.reject");
     case "ABORT":
-      return "cancelled automatically";
+      return t("paused.policy.abort");
     default:
-      return "decided automatically";
+      return t("paused.policy.other");
   }
 }
 
@@ -59,12 +60,15 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
   const tools = gatedToolNames(status);
 
   return (
-    <div className="paused-card" role="status" aria-live="polite" data-testid="paused-card">
+    // No live region of its own: the card lands inside the transcript's log,
+    // which announces what is added, and a nested region read the card twice
+    // and again on every countdown tick.
+    <div className="paused-card" data-testid="paused-card">
       <div className="paused-card__head">
         {/* A raised hand: the same "waiting on a human" icon the Manager uses
             for a paused conversation, so both UIs say it the same way. */}
-        <Hand className="paused-card__icon" size="1em" />
-        <span className="paused-card__title">Waiting for approval</span>
+        <Hand className="paused-card__icon" size="1em" aria-hidden="true" />
+        <span className="paused-card__title">{t("paused.title")}</span>
       </div>
 
       <p className="paused-card__text">{pauseHeadline(status)}</p>
@@ -80,9 +84,29 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
       )}
 
       {deadline !== null && (
-        <p className="paused-card__deadline" data-testid="paused-deadline">
-          {`Otherwise ${describePolicy(status.timeoutPolicy)} in ${formatRemaining(deadline - now)}.`}
-        </p>
+        <>
+          {/* The countdown ticks, so it is for eyes only. Assistive technology
+              gets the fixed clock time instead, which never changes under it. */}
+          <p
+            className="paused-card__deadline"
+            aria-hidden="true"
+            data-testid="paused-deadline"
+          >
+            {t("paused.deadline", {
+              policy: describePolicy(status.timeoutPolicy),
+              remaining: formatRemaining(deadline - now),
+            })}
+          </p>
+          <p className="chat-sr-only" data-testid="paused-deadline-sr">
+            {t("paused.deadlineAt", {
+              policy: describePolicy(status.timeoutPolicy),
+              time: new Date(deadline).toLocaleTimeString(getLocale(), {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            })}
+          </p>
+        </>
       )}
 
       <div className="paused-card__actions">
@@ -93,7 +117,7 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
           disabled={cancelDisabled}
           data-testid="paused-cancel"
         >
-          Cancel this request
+          {t("paused.cancel")}
         </button>
       </div>
     </div>

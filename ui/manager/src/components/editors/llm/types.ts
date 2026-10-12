@@ -161,18 +161,18 @@ export interface LlmTask {
    */
   responseValidation?: ResponseValidation;
   /**
-   * What the task does when its model phase fails outright. `fallback` serves
-   * the configured fallback (see `ResponseValidation.fallbackMessage`) and
-   * completes the turn; `error` (the default) fails it.
-   */
-  onError?: TaskOnError;
-  /**
    * Top-level or dotted fields (`"htmlResponseText"`, `"answer.text"`) of the
    * parsed `convertToObject` reply that must hold a non-blank string. A
    * violation is outcome `schema_mismatch`; the parsed object is still stored.
    * Independent of `responseValidation.enabled`.
    */
   nonBlankFields?: string[];
+  /**
+   * What the task does when its model phase fails outright. `fallback` serves
+   * the configured fallback (see `ResponseValidation.fallbackMessage`) and
+   * completes the turn; `error` (the default) fails it.
+   */
+  onError?: TaskOnError;
   /**
    * Timeout (seconds) for streaming chat completions. Overrides the engine
    * default (120s). Only applies while streaming is active.

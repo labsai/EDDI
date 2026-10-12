@@ -15,6 +15,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -83,6 +85,32 @@ class GroupWorkspaceStoreMongoContainerTest extends MongoTestBase {
         GroupWorkspace after = store.find(GROUP_ID);
         assertEquals("gc-first", after.getRunningDiscussionId());
         assertEquals("1", after.getRevision());
+    }
+
+    @Test
+    @DisplayName("concurrent creators of a real group get ONE workspace, keyed by the group id, and no write is lost")
+    void concurrentCreate_convergesOnOneDocument_andKeepsEveryWrite() throws Exception {
+        for (int round = 0; round < 10; round++) {
+            String realGroupId = new ObjectId().toHexString();
+
+            var outcome = WorkspaceCreateRace.run(store, realGroupId, 8);
+
+            assertEquals(Set.of(realGroupId), outcome.idsReturned(), "every caller got the canonical document");
+            assertEquals(8, outcome.writesCounted(), "a write that reported success must be in the workspace reads return");
+            assertEquals(1, getDatabase().getCollection(COLLECTION).countDocuments(Filters.eq("groupId", realGroupId)));
+        }
+    }
+
+    @Test
+    @DisplayName("a workspace created before canonical ids is still found, and no second one is created")
+    void legacyGeneratedIdWorkspace_isStillFound() throws Exception {
+        String realGroupId = new ObjectId().toHexString();
+        var legacy = new Document("groupId", realGroupId).append("revision", "0").append("_version", 1);
+        getDatabase().getCollection(COLLECTION).insertOne(legacy);
+        String legacyId = legacy.getObjectId("_id").toHexString();
+
+        assertEquals(legacyId, store.readOrCreate(realGroupId).getId());
+        assertEquals(1, getDatabase().getCollection(COLLECTION).countDocuments(Filters.eq("groupId", realGroupId)));
     }
 
     @Test

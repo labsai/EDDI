@@ -41,14 +41,8 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  * @since 6.3.0
  */
 @ApplicationScoped
+@McpErrorResults
 public class McpDocTools {
-
-    /**
-     * Immutable, and a {@code List} rather than an array: a {@code static final}
-     * array is still element-mutable, which is both a static-analysis finding and a
-     * real hazard for a constant that decides an authorization check.
-     */
-    private static final List<String> DOC_READ_ROLES = List.of("eddi-admin", "eddi-editor", "eddi-user", "eddi-approver", "eddi-viewer");
 
     private final DocsService docsService;
     private final SecurityIdentity identity;
@@ -68,16 +62,17 @@ public class McpDocTools {
             + "deployment, one per line, without the .md suffix. The runtime set is smaller than the repository's — "
             + "read this list rather than assuming a page exists, then read pages with read_docs.")
     public String listDocs() {
-        requireAnyRole(identity, authEnabled, DOC_READ_ROLES);
+        requireAnyRole(identity, authEnabled, McpRoles.DOCS);
         if (!docsService.isAvailable()) {
             // Not an error to the model: an absent or disabled docs directory is a
             // legitimate deployment state, and the message says which it is.
-            return "No documentation is available on this deployment (docs directory: "
-                    + docsService.docsDirectory() + ").";
+            // The server-side directory is deliberately not named: it is deployment
+            // layout, not something a caller can act on.
+            return "No documentation is available on this deployment.";
         }
         List<String> docs = docsService.listDocs();
         if (docs.isEmpty()) {
-            return "No documentation pages found (docs directory: " + docsService.docsDirectory() + ").";
+            return "No documentation pages found on this deployment.";
         }
         return String.join("\n", docs);
     }
@@ -87,7 +82,7 @@ public class McpDocTools {
             + "not every page in the public repository ships on every deployment.")
     public String readDocs(
                            @ToolArg(description = "Page name without the .md suffix (required)") String name) {
-        requireAnyRole(identity, authEnabled, DOC_READ_ROLES);
+        requireAnyRole(identity, authEnabled, McpRoles.DOCS);
         String content = docsService.readDoc(name);
         if (content != null) {
             return content;
