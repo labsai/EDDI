@@ -71,9 +71,6 @@ const EXEMPT: Record<string, string> = {
 
   "POST */snippetstore/snippets/:id":
     "DRIFT, tracked: the backend exposes put/get/delete on {id} for snippets, not post. parserstore does have post, which is probably where this was copied from.",
-
-  "GET */logs/recent":
-    "Dead mock: production reads /administration/logs (logs.ts BASE + query string), which the snapshot does contain. Nothing calls this.",
 };
 
 /**

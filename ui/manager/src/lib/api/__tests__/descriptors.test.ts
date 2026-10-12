@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import { updateDescriptor, getDescriptors, getDescriptorVersions } from "../descriptors";
+import { updateDescriptor, getDescriptorVersions } from "../descriptors";
 
 describe("descriptors API", () => {
   describe("updateDescriptor", () => {
@@ -23,29 +23,6 @@ describe("descriptors API", () => {
       await expect(
         updateDescriptor("res-fail", 1, { name: "Fail" })
       ).rejects.toMatchObject({ status: 500 });
-    });
-  });
-
-  describe("getDescriptors", () => {
-    it("fetches descriptors for a resource type with defaults", async () => {
-      const result = await getDescriptors("agentstore/agents");
-      expect(result).toBeDefined();
-      expect(Array.isArray(result)).toBe(true);
-    });
-
-    it("passes custom limit, index, and filter", async () => {
-      const result = await getDescriptors(
-        "workflowstore/workflows",
-        50,
-        5,
-        "test"
-      );
-      expect(result).toBeDefined();
-    });
-
-    it("omits filter when empty", async () => {
-      const result = await getDescriptors("rulestore/rulesets", 100, 0, "");
-      expect(result).toBeDefined();
     });
   });
 

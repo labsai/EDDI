@@ -1,4 +1,6 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useId, useMemo, useRef } from "react";
+import type { TFunction } from "i18next";
+import { isSecretReference, referenceLabel } from "@/lib/secret-reference";
 import { useTranslation } from "react-i18next";
 import {
   Wand2,
@@ -85,8 +87,8 @@ interface WizardState {
   endpoints: string;
   specInputMode: "url" | "file" | "paste";
   specUrl: string;
-  // Deploy
-  deploy: boolean;
+  // Deploy target, used by "Create & Deploy". Whether to deploy at all is the
+  // button the user presses, not a separate switch that could disagree with it.
   environment: string;
 }
 
@@ -95,7 +97,9 @@ const INITIAL_STATE: WizardState = {
   name: "",
   systemPrompt: "",
   provider: "anthropic",
-  model: "",
+  // Prefilled with the provider's default so the Model step is never a blank
+  // field that blocks Next while its own placeholder suggests a value.
+  model: getProviderConfig("anthropic")?.defaultModel ?? "",
   apiKey: "",
   baseUrl: "",
   introMessage: "",
@@ -109,8 +113,9 @@ const INITIAL_STATE: WizardState = {
   endpoints: "",
   specInputMode: "url",
   specUrl: "",
-  deploy: true,
-  environment: "production",
+  // Test, not production: a wizard-created agent has never been tried, and
+  // deploying it to production by default put an untested agent live.
+  environment: "test",
 };
 
 
@@ -168,7 +173,9 @@ export function AgentWizardPage() {
   function handleProviderChange(providerId: string) {
     update({
       provider: providerId,
-      model: "",
+      // The new provider's default, not blank: a model id from the previous
+      // provider would be rejected, and an empty field blocks Next.
+      model: getProviderConfig(providerId)?.defaultModel ?? "",
       // A key is issued by one vendor. Carried across a provider switch it would be
       // sent to another vendor's endpoint — an OpenAI key to DeepSeek, or a Jlama
       // Hugging Face token to OpenAI and back — so any switch clears it (the
@@ -195,6 +202,9 @@ export function AgentWizardPage() {
       case "llm": {
         const prov = getProviderConfig(state.provider);
         if (prov?.needsKey && !state.apiKey.trim()) return false;
+        // The field is marked required and the backend has no default to fall
+        // back on for a model server the deployment has to name.
+        if (isBaseUrlRequired(state.provider) && !state.baseUrl.trim()) return false;
         return state.model.trim().length > 0;
       }
       case "apispec":
@@ -215,7 +225,7 @@ export function AgentWizardPage() {
     if (currentStep > 0) setCurrentStep(currentStep - 1);
   }
 
-  async function handleCreate(deployOverride?: boolean) {
+  async function handleCreate(deploy: boolean) {
     setError("");
     try {
       let res: SetupResult;
@@ -236,7 +246,7 @@ export function AgentWizardPage() {
           endpoints: state.endpoints || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          deploy: deployOverride ?? state.deploy,
+          deploy,
           environment: state.environment,
         };
         res = await createApiAgent.mutateAsync(req);
@@ -253,7 +263,7 @@ export function AgentWizardPage() {
           builtInToolsWhitelist: state.builtInToolsWhitelist || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          deploy: deployOverride ?? state.deploy,
+          deploy,
           environment: state.environment,
         };
         res = await setupAgent.mutateAsync(req);
@@ -431,8 +441,15 @@ export function AgentWizardPage() {
             <div key={s.id} className="flex flex-1 items-center gap-2">
               <div className="flex flex-col items-center gap-1">
                 <button
+                  type="button"
                   onClick={() => i < currentStep && setCurrentStep(i)}
                   disabled={i > currentStep}
+                  aria-label={t("setupWizard.stepLabel", "Step {{n}} of {{total}}: {{name}}", {
+                    n: i + 1,
+                    total: steps.length,
+                    name: t(`setupWizard.step_${s.id}`, s.label),
+                  })}
+                  aria-current={isActive ? "step" : undefined}
                   className={cn(
                     "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-300",
                     isActive &&
@@ -445,9 +462,9 @@ export function AgentWizardPage() {
                   )}
                 >
                   {isComplete ? (
-                    <Check className="h-4 w-4" />
+                    <Check className="h-4 w-4" aria-hidden="true" />
                   ) : (
-                    <Icon className="h-4 w-4" />
+                    <Icon className="h-4 w-4" aria-hidden="true" />
                   )}
                 </button>
                 <span
@@ -458,7 +475,7 @@ export function AgentWizardPage() {
                     !isActive && !isComplete && "text-muted-foreground",
                   )}
                 >
-                  {s.label}
+                  {t(`setupWizard.step_${s.id}`, s.label)}
                 </span>
               </div>
               {i < steps.length - 1 && (
@@ -516,7 +533,13 @@ export function AgentWizardPage() {
         {step?.id === "features" && (
           <FeaturesStep state={state} onChange={update} />
         )}
-        {step?.id === "review" && <ReviewStep state={state} error={error} />}
+        {step?.id === "review" && (
+          <ReviewStep
+            state={state}
+            error={error}
+            onEnvironmentChange={(environment) => update({ environment })}
+          />
+        )}
       </div>
 
       {/* Navigation */}
@@ -559,7 +582,7 @@ export function AgentWizardPage() {
               ) : (
                 <Check className="h-4 w-4" />
               )}
-              {t("setupWizard.createOnly", "Create Only")}
+              {t("setupWizard.createOnly", "Create without deploying")}
             </button>
             <button
               onClick={() => handleCreate(true)}
@@ -572,7 +595,9 @@ export function AgentWizardPage() {
               ) : (
                 <Rocket className="h-4 w-4" />
               )}
-              {t("setupWizard.createAndDeploy", "Create & Deploy")}
+              {state.environment === "production"
+                ? t("setupWizard.createAndDeployProduction", "Create & deploy to production")
+                : t("setupWizard.createAndDeployTest", "Create & deploy to test")}
             </button>
           </div>
         )}
@@ -787,7 +812,11 @@ function LlmStep({
   const apiKeyUrl = getApiKeyUrl(provider);
 
   return (
-    <div>
+    // A form, so the browser has the credential field in context: it neither
+    // warns about a password field outside a form nor offers to save it as a
+    // login. Enter must not reload the page, and the wizard's Next button owns
+    // navigation.
+    <form autoComplete="off" onSubmit={(e) => e.preventDefault()} noValidate>
       <h2 className="text-xl font-semibold text-foreground">
         {t("setupWizard.llmTitle", "LLM Configuration")}
       </h2>
@@ -872,6 +901,7 @@ function LlmStep({
               {t("setupWizard.apiKey", "API Key")} *
             </label>
             <SecretKeyPicker
+              id="wizard-apikey"
               value={apiKey}
               onChange={onApiKeyChange}
               placeholder={getKeyPlaceholder(provider)}
@@ -907,6 +937,7 @@ function LlmStep({
               </span>
             </label>
             <SecretKeyPicker
+              id="wizard-apikey"
               value={apiKey}
               onChange={onApiKeyChange}
               placeholder="hf_..."
@@ -999,7 +1030,7 @@ function LlmStep({
           </div>
         )}
       </div>
-    </div>
+    </form>
   );
 }
 
@@ -1534,37 +1565,6 @@ function FeaturesStep({
             )}
           </div>
         )}
-
-        {/* Deploy toggle */}
-        <div className="mt-2 rounded-lg border border-primary/20 bg-primary/5 p-4">
-          <FeatureToggle
-            icon={Rocket}
-            label={t("setupWizard.autoDeploy", "Auto-Deploy")}
-            description={t("setupWizard.autoDeployDesc", "Deploy the agent immediately after creation")}
-            checked={state.deploy}
-            onChange={(on) => onChange({ deploy: on })}
-            data-testid="wizard-toggle-deploy"
-          />
-          {state.deploy && (
-            <div className="mt-3 flex items-center gap-3 ps-9">
-              <label className="text-sm font-medium text-foreground">
-                {t("setupWizard.environment", "Environment")}:
-              </label>
-              <div className="relative">
-                <select
-                  value={state.environment}
-                  onChange={(e) => onChange({ environment: e.target.value })}
-                  className="appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-                  data-testid="wizard-environment"
-                >
-                  <option value="production">{t("setupWizard.envProduction", "Production")}</option>
-                  <option value="test">{t("setupWizard.envTest", "Test")}</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              </div>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -1574,15 +1574,38 @@ function FeaturesStep({
    Step 5: Review
    ================================================================ */
 
+/** What the Review step says about the credential. Never the key itself. */
+function describeApiKey(
+  apiKey: string,
+  needsKey: boolean | undefined,
+  t: TFunction,
+): string {
+  const key = apiKey.trim();
+  if (!key) {
+    return needsKey === false
+      ? t("setupWizard.reviewKeyNotNeeded", "Not needed for this provider")
+      : t("setupWizard.reviewKeyNone", "None");
+  }
+  if (isSecretReference(key)) {
+    return t("setupWizard.reviewKeyVault", "Vault reference {{ref}}", { ref: referenceLabel(key) });
+  }
+  // No storage promise: whether a literal key is vaulted depends on the server
+  // (see AgentSetupService.vaultApiKey); the success screen reports the reference.
+  return t("setupWizard.reviewKeyEntered", "Entered here");
+}
+
 function ReviewStep({
   state,
   error,
+  onEnvironmentChange,
 }: {
   state: WizardState;
   error: string;
+  onEnvironmentChange: (env: string) => void;
 }) {
   const { t } = useTranslation();
   const prov = getProviderConfig(state.provider);
+  const envId = useId();
 
   const rows: [string, string][] = [
     [t("setupWizard.reviewType", "Type"), state.mode === "api" ? t("setupWizard.apiAgent", "API Agent") : t("setupWizard.standardAgent", "Standard Agent")],
@@ -1590,7 +1613,9 @@ function ReviewStep({
     [t("setupWizard.reviewPrompt", "System Prompt"), state.systemPrompt.length > 80 ? state.systemPrompt.slice(0, 80) + "…" : state.systemPrompt],
     [t("setupWizard.reviewProvider", "Provider"), prov?.name ?? state.provider],
     [t("setupWizard.reviewModel", "Model"), state.model],
+    [t("setupWizard.reviewApiKey", "API key"), describeApiKey(state.apiKey, prov?.needsKey, t)],
   ];
+  if (state.baseUrl.trim()) rows.push([t("setupWizard.reviewBaseUrl", "Base URL"), state.baseUrl.trim()]);
 
   if (state.mode === "api" && state.openApiSpec) {
     rows.push([t("setupWizard.reviewSpec", "OpenAPI Spec"), `${state.openApiSpec.length.toLocaleString()} chars`]);
@@ -1601,7 +1626,6 @@ function ReviewStep({
   if (state.enableQuickReplies) rows.push([t("setupWizard.quickReplies", "Quick Replies"), "✓"]);
   if (state.enableSentimentAnalysis) rows.push([t("setupWizard.sentiment", "Sentiment Analysis"), "✓"]);
   if (state.enableBuiltInTools) rows.push([t("setupWizard.builtInTools", "Built-in Tools"), "✓"]);
-  rows.push([t("setupWizard.reviewDeploy", "Deploy"), state.deploy ? `✓ (${state.environment})` : "—"]);
 
   return (
     <div data-testid="wizard-review">
@@ -1629,6 +1653,31 @@ function ReviewStep({
             </span>
           </div>
         ))}
+      </div>
+
+      {/* The only deploy control: the target, then the two buttons below. */}
+      <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+        <label htmlFor={envId} className="text-sm font-medium text-foreground">
+          {t("setupWizard.deployTarget", "Deploy target")}
+        </label>
+        <div className="relative">
+          <select
+            id={envId}
+            value={state.environment}
+            onChange={(e) => onEnvironmentChange(e.target.value)}
+            className="appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+            data-testid="wizard-environment"
+          >
+            <option value="test">{t("setupWizard.envTest", "Test")}</option>
+            <option value="production">{t("setupWizard.envProduction", "Production")}</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+        </div>
+        <p className="basis-full text-xs text-muted-foreground" data-testid="wizard-deploy-note">
+          {state.environment === "production"
+            ? t("setupWizard.deployNoteProduction", "Create & deploy puts the agent live in production right away.")
+            : t("setupWizard.deployNoteTest", "Create & deploy starts the agent in the test environment; promote it to production when you are happy with it.")}
+        </p>
       </div>
 
       {error && (

@@ -7,7 +7,6 @@ import {
 import {
   getConversationDescriptors,
   getSimpleConversationLog,
-  getRawConversationLog,
   deleteConversation,
   getActiveConversations,
   endActiveConversations,
@@ -73,14 +72,6 @@ export function useSimpleConversation(
   });
 }
 
-export function useRawConversation(id: string) {
-  return useQuery({
-    queryKey: [...CONVERSATIONS_KEY, "raw", id],
-    queryFn: () => getRawConversationLog(id),
-    enabled: !!id,
-  });
-}
-
 export function useDeleteConversation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -143,21 +134,5 @@ export function usePurgeEndedConversations() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
     },
-  });
-}
-
-/**
- * Lazily fetch step count for a single conversation.
- * Uses returnDetailed=false to minimize data transfer.
- */
-export function useConversationStepCount(id: string) {
-  return useQuery({
-    queryKey: [...CONVERSATIONS_KEY, "stepCount", id],
-    queryFn: async () => {
-      const data = await getSimpleConversationLog(id, false, false);
-      return data.conversationSteps?.length ?? 0;
-    },
-    enabled: !!id,
-    staleTime: 60_000,
   });
 }

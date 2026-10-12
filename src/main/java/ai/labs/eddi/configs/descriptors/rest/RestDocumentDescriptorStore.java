@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.descriptors.rest;
 
+import ai.labs.eddi.configs.descriptors.ConfigResourceTypes;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.patch.PatchInstruction;
@@ -34,17 +35,62 @@ import java.util.List;
 public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard accessGuard;
+    private final ConfigResourceTypes configTypes;
 
     private static final Logger log = Logger.getLogger(RestDocumentDescriptorStore.class);
 
     @Inject
-    public RestDocumentDescriptorStore(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard) {
+    public RestDocumentDescriptorStore(IDocumentDescriptorStore documentDescriptorStore, ResourceAccessGuard accessGuard,
+            ConfigResourceTypes configTypes) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.accessGuard = accessGuard;
+        this.configTypes = configTypes;
+    }
+
+    /**
+     * Refuses a listing that is not of one configuration type.
+     * <p>
+     * The type is matched as a prefix of the resource URI, so a blank type listed
+     * every descriptor in the collection and {@code ai.labs.conversation} listed
+     * conversations — searchable by their owner's user id. This endpoint is the
+     * cross-<em>configuration</em> listing; conversations have their own, owner
+     * filtered, at {@code /conversationstore/conversations}.
+     */
+    private void requireConfigType(String type) {
+        if (!configTypes.isConfigType(type)) {
+            throw new BadRequestException("'type' must name a configuration resource type, one of " + configTypes.types());
+        }
+    }
+
+    /**
+     * Answers "not found" for an id whose descriptor is not a configuration
+     * descriptor — a conversation, above all. Its descriptor lives in the same
+     * collection but has fields this API does not model, so reading it here
+     * disclosed it and writing it back stripped its owner. Decided against the
+     * current descriptor, before any access check, so the answer is the same for
+     * every caller and says nothing about what the id is.
+     */
+    private void requireConfigDescriptor(String id) {
+        if (id == null || id.isBlank()) {
+            return; // the operation fails on its own terms
+        }
+        DocumentDescriptor current;
+        try {
+            current = documentDescriptorStore.readCurrentDescriptor(id);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return; // the operation answers its own 404
+        } catch (IResourceStore.ResourceStoreException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        }
+        if (current != null && !configTypes.isConfigDescriptor(current)) {
+            throw new NotFoundException("No configuration resource with id " + id);
+        }
     }
 
     @Override
     public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, String space, String ownership) {
+        requireConfigType(type);
         try {
             // The cross-resource listing: it takes the descriptor type as a query
             // parameter rather than deriving it from a store, which makes it the one
@@ -67,6 +113,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
         // The level is decided against the CURRENT descriptor and carried into the
         // redaction below, because the version being read may be an older one whose
         // recorded owner and grants predate a transfer or a re-share.
+        requireConfigDescriptor(id);
         AccessLevel callerLevel = accessGuard.requireAccess(id, AccessLevel.VIEW, "resource");
         try {
             // Redaction mutates in place; the return value is deliberately unused so the
@@ -111,7 +158,10 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
         // expected instead.
         // Renaming somebody else's agent is a modification of it, even though the
         // configuration document is untouched — the name is what everyone identifies it
-        // by in every listing.
+        // by in every listing. A conversation is not a configuration resource: its
+        // descriptor carries its owner, and writing it back through this shape
+        // dropped it — so it is refused before anything is read for writing.
+        requireConfigDescriptor(id);
         accessGuard.requireAccess(id, AccessLevel.EDIT, "resource");
 
         if (patchInstruction == null || patchInstruction.getOperation() == null) {
