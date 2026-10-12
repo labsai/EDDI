@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.DescriptorStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.AccessScope;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -68,6 +69,7 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
     public Integer updateDescriptor(String resourceId, Integer version, DocumentDescriptor descriptor)
             throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
 
+        requireOwnShape(resourceId, descriptor);
         return descriptorStore.updateDescriptor(resourceId, version, descriptor);
     }
 
@@ -75,7 +77,30 @@ public class DocumentDescriptorStore implements IDocumentDescriptorStore {
     public void setDescriptor(String resourceId, Integer version, DocumentDescriptor descriptor)
             throws ResourceStoreException, ResourceNotFoundException {
 
+        requireOwnShape(resourceId, descriptor);
         descriptorStore.setDescriptor(resourceId, version, descriptor);
+    }
+
+    /**
+     * Refuses to write a conversation descriptor through the configuration shape.
+     * <p>
+     * Both kinds live in the one {@code descriptors} collection and a write here
+     * replaces the whole document, so a conversation descriptor read as a
+     * {@link DocumentDescriptor} and written back lost everything that shape does
+     * not model — {@code userId}, {@code agentResource}, {@code environment},
+     * {@code conversationState} — and with the owner gone the conversation was open
+     * to every caller. Conversation descriptors are written through
+     * {@code IConversationDescriptorStore}, which models all of them. This is the
+     * last line behind the REST layer's own refusal, so that no future caller of
+     * this store can repeat the strip.
+     */
+    private static void requireOwnShape(String resourceId, DocumentDescriptor descriptor) throws ResourceStoreException {
+        if (descriptor != null && descriptor.getResource() != null
+                && descriptor.getResource().toString().startsWith(IConversationDescriptorStore.resourceUri)) {
+            throw new ResourceStoreException("Refusing to write the descriptor of conversation " + resourceId
+                    + " through the configuration descriptor store: it would drop the fields only a conversation descriptor has, "
+                    + "its owner among them");
+        }
     }
 
     @Override

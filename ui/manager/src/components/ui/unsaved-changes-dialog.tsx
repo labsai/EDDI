@@ -132,3 +132,15 @@ export function UnsavedChangesDialog({
     </>
   );
 }
+
+/**
+ * The in-app navigation prompt for a page guarded by `useUnsavedChangesGuard`.
+ * Renders nothing until a navigation away from the dirty page is held.
+ */
+export function UnsavedChangesPrompt({
+  guard,
+}: {
+  guard: { blocked: boolean; proceed: () => void; stay: () => void };
+}) {
+  return <UnsavedChangesDialog open={guard.blocked} onConfirm={guard.proceed} onCancel={guard.stay} />;
+}
