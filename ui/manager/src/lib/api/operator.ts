@@ -13,6 +13,7 @@ import {
   deployAgent,
   getDeploymentStatus,
   getAgent,
+  getAgentCurrentVersion,
   type Agent,
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
@@ -961,8 +962,12 @@ export async function deactivateOperator(
   config: OperatorConfig,
 ): Promise<OperatorConfig> {
   if (config.agentId && config.version != null) {
-    await undeployAgent(config.environment, config.agentId, config.version, {
+    // Every version up to the current one, not just the recorded one: the kill
+    // switch has to stop whatever is running — see liveOperatorVersion.
+    const version = Math.max(await liveOperatorVersion(config.agentId, config.version), config.version);
+    await undeployAgent(config.environment, config.agentId, version, {
       endAllActiveConversations: true,
+      undeployAllPreviousVersions: true,
     });
   }
   const next: OperatorConfig = { ...config, enabled: false };
@@ -982,19 +987,92 @@ export async function deactivateOperator(
  */
 export async function resetOperator(config: OperatorConfig): Promise<void> {
   if (config.agentId && config.version != null) {
-    try {
-      await undeployAgent(config.environment, config.agentId, config.version, {
-        endAllActiveConversations: true,
-      });
-    } catch {
-      // Already undeployed, or the environment is gone — deletion is what matters.
-    }
-    await deleteAgent(config.agentId, config.version, {
-      cascade: true,
-      permanent: true,
-    });
+    await retireOperatorAgent(config.environment, config.agentId, config.version);
   }
   await clearOperatorConfig();
+}
+
+/**
+ * The version an operator agent lives at NOW, which is not necessarily the one
+ * its config recorded.
+ *
+ * `config.version` is captured once, at activation, and never refreshed. Any
+ * in-place edit of the operator afterwards — a model or prompt change through
+ * Studio or the resource editors, which repoints the agent — writes agent N+1.
+ * Teardown addressed at the recorded version then fails: a permanent delete is
+ * refused with a 409 unless it names the live version (the backend's guard
+ * against a stale tab erasing a resource that moved on), and an undeploy of the
+ * recorded version leaves the newer one running. Both happened: a reconfigure
+ * reported "could not be removed (eddi://…?version=2)" and left two operators
+ * deployed.
+ *
+ * Falls back to the recorded version when the lookup fails — including the 404
+ * of an agent with no live version, whose leftover history a permanent delete
+ * of any version still purges — so this is never worse than addressing the
+ * recorded version directly.
+ */
+async function liveOperatorVersion(agentId: string, recordedVersion: number): Promise<number> {
+  try {
+    return (await getAgentCurrentVersion(agentId)) ?? recordedVersion;
+  } catch {
+    return recordedVersion;
+  }
+}
+
+/**
+ * Take an operator agent out of service and delete it, whatever version it has
+ * moved to since it was recorded.
+ *
+ * - Undeploys the live version AND every earlier one, ending their
+ *   conversations: the deployed version need not be the newest (an edit can be
+ *   saved without redeploying), and the admin's own operator chat is almost
+ *   always open, which the backend would otherwise answer with 409.
+ * - Deletes permanently at the live version, the only one the backend accepts
+ *   for an ID-scoped permanent delete. Permanent deletion drops every version, so
+ *   addressing the current one destroys nothing the recorded one would not have.
+ * - Retries once on 409: the agent can move on between the lookup and the
+ *   delete, and the second lookup sees where it went.
+ * - An agent that is already gone (404) counts as retired — that is the state
+ *   every caller is asking for.
+ *
+ * The delete's failure is NOT swallowed; callers report it.
+ */
+export async function retireOperatorAgent(
+  environment: string,
+  agentId: string,
+  recordedVersion: number,
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    const version = await liveOperatorVersion(agentId, recordedVersion);
+    try {
+      // Never below the recorded version: "this and every earlier one" can then
+      // only ever cover more than the recorded version alone did.
+      await undeployAgent(environment, agentId, Math.max(version, recordedVersion), {
+        endAllActiveConversations: true,
+        undeployAllPreviousVersions: true,
+      });
+    } catch {
+      // Already undeployed, or the environment is gone — the delete below is what
+      // actually retires it, and it also undeploys whatever is still live.
+    }
+    try {
+      await deleteAgent(agentId, version, { cascade: true, permanent: true });
+      return;
+    } catch (error) {
+      if (isNotFound(error)) return;
+      if (attempt === 0 && isConflict(error)) continue;
+      throw error;
+    }
+  }
+}
+
+function isConflict(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: number }).status === 409
+  );
 }
 
 /* ─── Metrics relay ─── */
