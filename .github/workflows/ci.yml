@@ -1878,6 +1878,7 @@ jobs:
           docker build \
             --build-arg EDDI_VERSION="${LABEL_VERSION}" \
             --build-arg EDDI_RELEASE="${{ github.run_number }}" \
+            --build-arg EDDI_COMMIT="${{ github.sha }}" \
             -f src/main/docker/Dockerfile \
             -t "${DOCKER_IMAGE}:ci" \
             .

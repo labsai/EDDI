@@ -132,6 +132,10 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /administration/coordinator/status",
   "GET /administration/logs",
   "GET /administration/quotas",
+  // Which build is running (version + git commit). A live read of the process, so
+  // the operator can answer "what version am I on?" correctly after an upgrade —
+  // the system prompt cannot, because it was written at activation.
+  "GET /administration/version",
   // EDDI's own documentation, served read-only over REST since EDDI 6.2.0
   // precisely so an OpenAPI-generated agent picks it up as ordinary tools
   // (`DocsService`; see `docs/mcp-server.md` → "The same docs over REST" in the

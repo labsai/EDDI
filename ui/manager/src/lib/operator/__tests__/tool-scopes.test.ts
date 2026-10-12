@@ -55,6 +55,10 @@ describe("tool-scopes", () => {
       expect(READ_ENDPOINTS).toContain("GET /administration/logs");
     });
 
+    it("can look up which EDDI build is running", () => {
+      expect(READ_ENDPOINTS).toContain("GET /administration/version");
+    });
+
     it("can see the schedule it might later be asked to disable", () => {
       // WRITE_ENDPOINTS can bind /disable without this — but an operator that
       // cannot list schedules would recommend disabling one it cannot name.
