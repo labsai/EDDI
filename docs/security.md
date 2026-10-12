@@ -111,6 +111,13 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            labsai/eddi:latest
 ```
 
+> **A misconfigured start is refused first.** With OIDC off in production and no explicit
+> opt-out (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED`, and for `/mcp` and `/secretstore` their own
+> `EDDI_MCP_ALLOW_UNAUTHENTICATED` / `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED`), EDDI stops with
+> the guard's message before any startup step touches the database. Earlier releases ran the
+> vault and index setup first, so a start that also had no reachable database spent its
+> server-selection timeout on MongoDB and exited with a MongoDB error instead of the reason.
+
 ### The Token Must Name the User
 
 EDDI files conversations, memories and approvals under the principal name.

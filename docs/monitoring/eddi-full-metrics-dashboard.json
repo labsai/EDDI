@@ -1173,7 +1173,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_processing_conversation_count`",
+          "description": "`eddi_processing_conversation_count`, and `eddi_conversation_abandoned_running` — turns the agent-timeout watchdog gave up on whose pipeline is still running (normally 0).",
           "gridPos": {
             "h": 7,
             "w": 6,
@@ -1184,6 +1184,17 @@
             {
               "refId": "A",
               "expr": "sum(eddi_processing_conversation_count{job=~\"$job\"})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "B",
+              "expr": "sum(eddi_conversation_abandoned_running{job=~\"$job\"})",
+              "legendFormat": "abandoned, still running",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
