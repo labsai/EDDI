@@ -777,6 +777,29 @@ describe("useSendMessage", () => {
     expect(userMessages[0]!.content).toBe("Hello");
   });
 
+  it("records which pause a non-streaming send landed on", async () => {
+    // The pause notice verifies approval-status against this instant, as the
+    // streamed path already does; without it any stored pause would match.
+    server.use(
+      http.post("*/agents/:conversationId", () =>
+        HttpResponse.json({
+          conversationState: "AWAITING_HUMAN",
+          hitlPausedAt: "2026-10-12T10:00:00.000Z",
+          conversationSteps: [],
+          conversationOutputs: [{ "output:text:pending": "Waiting for approval." }],
+        }),
+      ),
+    );
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper: createWrapper() });
+    result.current.mutate({ message: "Delete it" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const state = useChatStore.getState();
+    expect(state.isPaused).toBe(true);
+    expect(state.pausedAt).toBe("2026-10-12T10:00:00.000Z");
+  });
+
   it("shows why a turn failed instead of rendering nothing", async () => {
     server.use(
       http.post("*/agents/:conversationId", () =>

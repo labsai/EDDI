@@ -918,7 +918,7 @@ export function useSendMessage() {
         // read did not exist on the wire), and the banner overlays the real
         // reason from approval-status.
         if (snapshot.conversationState === "AWAITING_HUMAN") {
-          state.setPaused(true, null);
+          state.setPaused(true, null, snapshot.hitlPausedAt ?? null);
         }
       }
     },
@@ -1783,7 +1783,11 @@ async function moveStepAndReload(move: "undo" | "redo"): Promise<boolean> {
     if (store.getState().conversationId !== conversationId) return moved;
     store.getState().replaceMessages(snapshotToMessages(snapshot));
     store.getState().setUndoRedo(...undoRedoFlags(snapshot));
-    store.getState().setPaused(snapshot.conversationState === "AWAITING_HUMAN", null);
+    store.getState().setPaused(
+      snapshot.conversationState === "AWAITING_HUMAN",
+      null,
+      snapshot.hitlPausedAt ?? null,
+    );
     return moved;
   } finally {
     stepMoveInFlight = false;
