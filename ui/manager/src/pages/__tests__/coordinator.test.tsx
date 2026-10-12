@@ -336,6 +336,26 @@ describe("CoordinatorPage", () => {
     expect(select.value).toBe("5");
   });
 
+  it("polls both reads at the chosen interval and labels the selector", async () => {
+    // The hooks used to hard-code 5 s / 10 s, so picking 60 s changed nothing.
+    const { queryClient } = renderCoordinator();
+    const user = userEvent.setup();
+    const select = await screen.findByTestId("refresh-interval");
+    expect(select).toHaveAccessibleName("Auto-refresh interval");
+
+    const intervalOf = (key: string[]) =>
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: key })
+        ?.observers.map((o) => o.options.refetchInterval);
+
+    await user.selectOptions(select, "60");
+    await waitFor(() => {
+      expect(intervalOf(["coordinator", "status"])).toEqual([60_000]);
+      expect(intervalOf(["coordinator", "dead-letters"])).toEqual([60_000]);
+    });
+  });
+
   // --- Active queues ---
 
   it("shows active queues section with queue entries", async () => {
