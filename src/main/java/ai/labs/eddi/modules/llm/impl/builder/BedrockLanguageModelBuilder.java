@@ -69,6 +69,9 @@ public class BedrockLanguageModelBuilder implements ILanguageModelBuilder {
             builder.defaultRequestParameters(requestParams);
         }
 
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
+
         return builder.build();
     }
 

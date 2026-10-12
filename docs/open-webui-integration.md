@@ -233,7 +233,7 @@ Because every message goes through `IConversationService`, the whole pipeline ap
 |---|---|---|
 | `eddi.openai-compat.enabled` | `false` | Master switch. |
 | `eddi.openai-compat.api-key` | *(empty)* | Shared bearer secret. Required when `http-policy=permit` and authorization is on. |
-| `eddi.openai-compat.http-policy` | `permit` | `permit` → the adapter authenticates; `authenticated` → Quarkus OIDC does. |
+| `eddi.openai-compat.http-policy` | `permit` | `permit` → the adapter authenticates; `authenticated` → Quarkus OIDC does, and with `authorization.enabled=true` the token must carry `eddi-admin`, `eddi-editor` or `eddi-user`. |
 | `eddi.openai-compat.trust-user-headers` | `true` | Believe `X-OpenWebUI-User-Id` as the EDDI userId. |
 | `eddi.openai-compat.allow-anonymous` | `false` | Serve callers with no resolvable identity. See the warning in §4. |
 | `eddi.openai-compat.default-user` | `openai-anonymous` | The identity used when anonymity is allowed. |
@@ -256,7 +256,7 @@ Every property has an environment-variable form: `eddi.openai-compat.api-key` �
 
 **`http-policy=permit` (default).** Quarkus lets `/v1/*` through and the adapter enforces the shared API key itself, with a constant-time comparison. This mode exists because Open WebUI sends an opaque `sk-…` secret, which Quarkus OIDC would reject as a malformed JWT before any application code ran.
 
-**`http-policy=authenticated`.** Quarkus OIDC validates a real bearer token first; the adapter reads the resulting principal as the EDDI userId and ignores both the API key and the user headers. Suited to SDK/LangChain/LiteLLM clients — Open WebUI cannot currently mint per-user OIDC tokens for upstream connections.
+**`http-policy=authenticated`.** Quarkus OIDC validates a real bearer token first; the adapter reads the resulting principal as the EDDI userId and ignores both the API key and the user headers. With `authorization.enabled=true` (it follows `quarkus.oidc.tenant-enabled`), the token must carry one of the EDDI roles that may converse — `eddi-admin`, `eddi-editor` or `eddi-user`, the same tier `POST /agents/{id}/start` and A2A require; any other token gets `403` (`insufficient_permissions`). With authorization disabled no role is checked. Up to 6.5 any token the realm issued was served. Suited to SDK/LangChain/LiteLLM clients — Open WebUI cannot currently mint per-user OIDC tokens for upstream connections.
 
 ### Identity resolution
 

@@ -37,6 +37,7 @@ import {
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import type { AuditEntry } from "@/lib/api/audit";
+import { mergeById } from "@/lib/audit-pages";
 import { useDeployedAgents } from "@/hooks/use-chat";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -550,79 +551,91 @@ export function AuditPage() {
 
   const [skip, setSkip] = useState(0);
 
-  // Queries
-  const convQuery = useAuditTrail(
-    mode === "conversation" ? searchValue : "",
+  // Queries. The NEWEST page (offset 0) has a query of its own that stays
+  // mounted however far the user has paged, so auto-refresh and window-focus
+  // refetches always re-read the head of the trail — the only place new rows
+  // appear. "Load more" pages use a second query at the current offset; it is
+  // disabled at offset 0, where it would only duplicate the head query.
+  const headConv = useAuditTrail(mode === "conversation" ? searchValue : "", 0, PAGE_SIZE);
+  const headAgent = useAuditTrailByAgent(
+    mode === "agent" ? activeAgentId : "",
+    activeAgentVersion,
+    0,
+    PAGE_SIZE,
+  );
+  const pageConv = useAuditTrail(
+    mode === "conversation" && skip > 0 ? searchValue : "",
     skip,
     PAGE_SIZE,
   );
-  const agentQuery = useAuditTrailByAgent(
-    mode === "agent" ? activeAgentId : "",
+  const pageAgent = useAuditTrailByAgent(
+    mode === "agent" && skip > 0 ? activeAgentId : "",
     activeAgentVersion,
     skip,
     PAGE_SIZE,
   );
+  const headQuery = mode === "conversation" ? headConv : headAgent;
+  const pageQuery = mode === "conversation" ? pageConv : pageAgent;
 
-  const pageEntries = mode === "conversation" ? convQuery.data : agentQuery.data;
-  const isLoading = mode === "conversation" ? convQuery.isLoading : agentQuery.isLoading;
+  const headEntries = headQuery.data;
+  const pageEntries = pageQuery.data;
+  const isLoading = headQuery.isLoading;
   // Without this a 500 rendered the "No audit entries found" empty state — the
   // most misleading possible result on a compliance screen.
-  const isError = mode === "conversation" ? convQuery.isError : agentQuery.isError;
-  const refetch = () => (mode === "conversation" ? convQuery.refetch() : agentQuery.refetch());
-  const isFetching = mode === "conversation" ? convQuery.isFetching : agentQuery.isFetching;
+  const isError = headQuery.isError || pageQuery.isError;
+  const refetch = () => {
+    void headQuery.refetch();
+    if (skip > 0) void pageQuery.refetch();
+  };
+  const isFetching = headQuery.isFetching || pageQuery.isFetching;
   const hasSearched = mode === "conversation" ? !!searchValue : !!activeAgentId;
 
   // ─── Paging accumulator ──────────────────────────────────────
-  // `skip` lives in the react-query key, so each "Load more" fetches a fresh
-  // window. Keep every fetched page (keyed by its skip offset) and render the
-  // flattened union so paging *appends* rather than replacing earlier rows.
-  const [pages, setPages] = useState<Record<number, AuditEntry[]>>({});
+  // One flat list, deduplicated by entry id. The ledger is newest-first and
+  // offset-paged, so every row written after page 1 was read shifts every later
+  // page down: a page-per-offset map showed the shifted rows twice. Merging by
+  // id makes overlap harmless, and the next offset is simply how many distinct
+  // rows are loaded — the loaded rows are always a contiguous run from the head.
+  const [loaded, setLoaded] = useState<AuditEntry[]>([]);
+  // Whether the last page read (head or "Load more") came back full.
+  const [lastPageFull, setLastPageFull] = useState(false);
 
   // When the newest page (skip 0) last arrived. Only that page can bring rows
   // newer than a verification report; older pages are covered (or not) by
   // `uncoveredCount`.
   const [headFetchedAt, setHeadFetchedAt] = useState(0);
-  const trailUpdatedAt = mode === "conversation" ? convQuery.dataUpdatedAt : agentQuery.dataUpdatedAt;
+  const trailUpdatedAt = headQuery.dataUpdatedAt;
 
   // Reset the accumulator whenever the search context changes. `skip` is reset
   // by whatever changes the context (the search handlers *and* the mode
   // toggles) so that it lands in the SAME render batch as the context change.
-  // Resetting it here instead would be too late: the merge effect below would
-  // run once more with the stale offset and immediately re-populate the
-  // accumulator this effect just cleared.
   useEffect(() => {
-    setPages({});
+    setLoaded([]);
+    setLastPageFull(false);
     setHeadFetchedAt(0);
   }, [mode, searchValue, activeAgentId, activeAgentVersion]);
 
-  // Merge each freshly-fetched page. Same-skip refetches (auto-refresh) replace
-  // that page; a new skip appends a page.
+  // The head page: new rows go in front, rows already loaded stay where they are.
+  // `skip` is read but deliberately not a dependency: paging must not re-merge
+  // the head, and a head refresh after paging must not reset `hasMore`.
+  const skipRef = useRef(skip);
+  skipRef.current = skip;
   useEffect(() => {
-    if (!pageEntries) return;
-    setPages((prev) => {
-      if (prev[skip] === pageEntries) return prev;
-      return { ...prev, [skip]: pageEntries };
-    });
-    if (skip === 0) setHeadFetchedAt(trailUpdatedAt);
-  }, [pageEntries, skip, trailUpdatedAt]);
+    if (!headEntries) return;
+    setLoaded((prev) => mergeById(headEntries, prev));
+    if (skipRef.current === 0) setLastPageFull(headEntries.length >= PAGE_SIZE);
+    setHeadFetchedAt(trailUpdatedAt);
+  }, [headEntries, trailUpdatedAt]);
 
-  const entries = useMemo(
-    () =>
-      Object.keys(pages)
-        .map(Number)
-        .sort((a, b) => a - b)
-        .flatMap((k) => pages[k]!),
-    [pages],
-  );
+  // A "Load more" page: appended, minus anything already loaded.
+  useEffect(() => {
+    if (!pageEntries || skipRef.current === 0) return;
+    setLoaded((prev) => mergeById(prev, pageEntries));
+    setLastPageFull(pageEntries.length >= PAGE_SIZE);
+  }, [pageEntries]);
 
-  // Only show the "Load more" affordance while the highest-skip page came back
-  // full (a partial page means we've reached the end).
-  const hasMore = useMemo(() => {
-    const skips = Object.keys(pages).map(Number);
-    if (skips.length === 0) return false;
-    const maxSkip = Math.max(...skips);
-    return (pages[maxSkip]?.length ?? 0) >= PAGE_SIZE;
-  }, [pages]);
+  const entries = loaded;
+  const hasMore = lastPageFull;
 
   // Skeleton only for the very first page; later pages keep prior rows visible.
   const showInitialLoading = isLoading && entries.length === 0;
@@ -718,7 +731,8 @@ export function AuditPage() {
     for (const problem of verification.data?.problems ?? []) map.set(problem.entryId, problem.status);
     return map;
   }, [verification.data]);
-  const activeQueryFn = mode === "conversation" ? convQuery.refetch : agentQuery.refetch;
+  // Auto-refresh re-reads the head page, wherever the user has paged to.
+  const activeQueryFn = headQuery.refetch;
   const autoRefreshRef = useRef(autoRefresh);
   autoRefreshRef.current = autoRefresh;
 
@@ -1034,7 +1048,7 @@ export function AuditPage() {
             <div className="flex justify-center">
               <button
                 type="button"
-                onClick={() => setSkip((s) => s + PAGE_SIZE)}
+                onClick={() => setSkip(entries.length)}
                 className="rounded-lg bg-foreground/5 px-6 py-2 text-sm font-medium text-foreground/60 transition-all hover:bg-foreground/10 hover:text-foreground/80"
                 data-testid="load-more"
               >

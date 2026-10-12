@@ -265,6 +265,34 @@ class ResourceAccessGuardTest {
         }
 
         @Test
+        @DisplayName("a share with one of the principal's teams counts when their team snapshot is passed")
+        void teamShareCountsWithSnapshot() throws Exception {
+            var shared = ownedBy("alice");
+            shared.setGrants(List.of(new ResourceGrant(Subjects.team("support"), AccessLevel.USE.name(), "alice", new Date(0))));
+            DescriptorAccess.rebuildIndex(shared);
+            var guard = guardReturning(shared);
+
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "bob"), "the bare principal form refuses team shares");
+            assertTrue(guard.principalMayUse(RESOURCE_ID, "bob", List.of(Subjects.team("support")), false));
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "bob", List.of(Subjects.team("sales")), false));
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "bob", null, false));
+            assertTrue(guard.principalMayUse(RESOURCE_ID, "bob", List.of(), true), "an admin creator is admitted");
+        }
+
+        @Test
+        @DisplayName("checkPrincipalUse tells a store failure (UNKNOWN) apart from a denial")
+        void storeFailureIsUnknownNotDenied() throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+            var guard = guard(identity("alice"), settings, store);
+
+            assertEquals(ResourceAccessGuard.UseCheck.UNKNOWN, guard.checkPrincipalUse(RESOURCE_ID, "alice", List.of(), false));
+            assertFalse(guard.principalMayUse(RESOURCE_ID, "alice", List.of(), false), "the boolean form stays fail-closed");
+            assertEquals(ResourceAccessGuard.UseCheck.DENIED,
+                    guardReturning(ownedBy("alice")).checkPrincipalUse(RESOURCE_ID, "mallory", List.of(), false));
+        }
+
+        @Test
         @DisplayName("with workspaces off everything is admitted, as everywhere else")
         void disabledAdmitsEverything() {
             var off = settings(false, true, WorkspaceSettings.LEGACY_SHARED);

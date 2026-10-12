@@ -57,16 +57,6 @@ public class DocsService {
     boolean docsEnabled = true; // initialized so plain construction (tests) matches the config default
 
     /**
-     * The configured docs directory, for diagnostics. Callers surface this when
-     * {@link #isAvailable()} is false — "0 documents" reads as success, whereas a
-     * mis-set {@code eddi.docs.path} is the realistic misconfiguration and should
-     * say so.
-     */
-    public String docsDirectory() {
-        return docsEnabled ? docsPath : docsPath + " (disabled via eddi.docs.enabled=false)";
-    }
-
-    /**
      * Whether docs are enabled and the configured directory exists and is a
      * directory.
      */

@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -25,6 +26,8 @@ import com.mongodb.client.MongoDatabase;
 import de.undercouch.bson4jackson.BsonFactory;
 import de.undercouch.bson4jackson.BsonParser;
 import java.time.Instant;
+import org.bson.Document;
+import org.bson.types.ObjectId;
 import java.util.LinkedHashMap;
 import org.bson.codecs.*;
 import org.bson.codecs.configuration.CodecRegistry;
@@ -34,6 +37,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.List;
+import java.util.TreeSet;
+import java.util.Date;
+import java.util.ArrayList;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
 import com.mongodb.ConnectionString;
@@ -697,6 +704,185 @@ class MongoConversationMemoryStoreTest {
         @DisplayName("no ids, no query")
         void emptyRequest() {
             assertTrue(store.loadListingSummaries(List.of()).isEmpty());
+        }
+    }
+
+    @Nested
+    @DisplayName("idle conversation activity")
+    class IdleActivity {
+
+        private static final String SWEEP_AGENT = "idleAgent";
+
+        /** A conversation whose step data carries exactly the given timestamps. */
+        private ConversationMemorySnapshot withTimestamps(String agentId, ConversationState state, Instant... timestamps) {
+            var snapshot = createSnapshot(null, agentId, 1, "idle-user", state);
+            for (Instant timestamp : timestamps) {
+                var result = new ConversationMemorySnapshot.ResultSnapshot();
+                result.setKey("input");
+                result.setTimestamp(Date.from(timestamp));
+                var workflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
+                workflow.setLifecycleTasks(List.of(result));
+                var step = new ConversationMemorySnapshot.ConversationStepSnapshot();
+                step.setWorkflows(List.of(workflow));
+                snapshot.getConversationSteps().add(step);
+            }
+            return snapshot;
+        }
+
+        private String storeSnapshot(ConversationMemorySnapshot snapshot) throws Exception {
+            return store.storeConversationMemorySnapshot(snapshot);
+        }
+
+        @Test
+        @DisplayName("the projection reports the newest step timestamp, the state, the agent and its version — without a full load")
+        void projectionReportsTheNewestTimestamp() throws Exception {
+            Instant newest = Instant.now().minus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MILLIS);
+            String id = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY, newest.minus(10, ChronoUnit.DAYS), newest,
+                    newest.minus(5, ChronoUnit.DAYS)));
+
+            ConversationActivitySummary activity = store.loadConversationActivity(id);
+
+            assertEquals(new ConversationActivitySummary(id, ConversationState.READY, SWEEP_AGENT, 1, newest), activity);
+            assertNull(store.loadConversationActivity("0123456789abcdef01234567"), "an unknown id has no summary");
+            assertNull(store.loadConversationActivity("not-an-id"), "a malformed id has no summary");
+        }
+
+        /**
+         * The persistence mapper writes dates as ISO strings, but a document written by
+         * EDDI 5 (or another mapper configuration) can hold a BSON date or epoch
+         * milliseconds. All three must age a conversation, or one shape would make it
+         * look untimestamped (never ended) or — worse — old.
+         */
+        @Test
+        @DisplayName("BSON dates, epoch milliseconds and ISO strings all count; the newest wins")
+        void everyStoredTimestampShapeCounts() throws Exception {
+            Instant bsonDate = Instant.now().minus(80, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MILLIS);
+            Instant epochMillis = Instant.now().minus(60, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MILLIS);
+            Instant isoString = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MILLIS);
+            var rawId = new ObjectId();
+            database.getCollection("conversationmemories").insertOne(new Document("_id", rawId)
+                    .append("agentId", SWEEP_AGENT).append("agentVersion", 1).append("conversationState", "READY")
+                    .append("conversationSteps", List.of(rawStep(Date.from(bsonDate)), rawStep(epochMillis.toEpochMilli()),
+                            rawStep(isoString.toString()))));
+
+            assertEquals(isoString, store.loadConversationActivity(rawId.toHexString()).lastInteraction());
+            // aged by that newest timestamp: not idle for 30 days, idle for 2
+            assertEquals(0, store.endIdleConversations(Instant.now().minus(30, ChronoUnit.DAYS), SWEEP_AGENT, null, true));
+            assertEquals(1, store.endIdleConversations(Instant.now().minus(2, ChronoUnit.DAYS), SWEEP_AGENT, null, true));
+        }
+
+        private Document rawStep(Object timestamp) {
+            return new Document("workflows",
+                    List.of(new Document("lifecycleTasks", List.of(new Document("key", "input").append("timestamp", timestamp)))));
+        }
+
+        @Test
+        @DisplayName("a conversation without any timestamp has none to report")
+        void noTimestamp() throws Exception {
+            String id = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY));
+
+            assertNull(store.loadConversationActivity(id).lastInteraction());
+        }
+
+        @Test
+        @DisplayName("open conversations are paged in id order; ended ones and other agents' are not listed")
+        void pagesOpenConversations() throws Exception {
+            Instant old = Instant.now().minus(40, ChronoUnit.DAYS);
+            var expected = new TreeSet<String>();
+            for (int i = 0; i < 5; i++) {
+                expected.add(storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY, old)));
+            }
+            String ended = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY, old));
+            store.setConversationState(ended, ConversationState.ENDED);
+            storeSnapshot(withTimestamps("someOtherAgent", ConversationState.READY, old));
+
+            List<String> seen = new ArrayList<>();
+            String after = null;
+            int batches = 0;
+            while (true) {
+                var batch = store.loadOpenConversationActivity(SWEEP_AGENT, 1, after, 2);
+                if (batch.isEmpty()) {
+                    break;
+                }
+                assertTrue(batch.size() <= 2, "a batch never exceeds the limit");
+                batch.forEach(activity -> seen.add(activity.conversationId()));
+                after = batch.getLast().conversationId();
+                batches++;
+            }
+
+            assertEquals(3, batches);
+            assertEquals(List.copyOf(expected), seen, "every open conversation exactly once, in id order");
+            assertEquals(5, store.loadOpenConversationActivity(SWEEP_AGENT, null, null, 100).size(), "a null version means every version");
+            assertEquals(0, store.loadOpenConversationActivity(SWEEP_AGENT, 2, null, 100).size());
+        }
+
+        @Test
+        @DisplayName("endIdleConversations ends only READY conversations idle past the cutoff, records the reason, and leaves the revision alone")
+        void endsOnlyIdleReadyConversations() throws Exception {
+            Instant cutoff = Instant.now().minus(30, ChronoUnit.DAYS);
+            String idle = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY, Instant.now().minus(90, ChronoUnit.DAYS)));
+            // the NEWEST timestamp decides: an old first step does not make this idle
+            String recentlyActive = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY,
+                    Instant.now().minus(90, ChronoUnit.DAYS), Instant.now().minus(1, ChronoUnit.DAYS)));
+            String paused = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.AWAITING_HUMAN, Instant.now().minus(90, ChronoUnit.DAYS)));
+            String running = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.IN_PROGRESS, Instant.now().minus(90, ChronoUnit.DAYS)));
+            // cannot be proven idle
+            String untimestamped = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY));
+            Long revisionBefore = store.getRevision(idle);
+
+            long ended = store.endIdleConversations(cutoff, null, "idle", false);
+
+            assertEquals(1, ended);
+            assertEquals(ConversationState.ENDED, store.getConversationState(idle));
+            assertEquals("idle", store.loadConversationMemorySnapshot(idle).getEndReason());
+            assertEquals(revisionBefore, store.getRevision(idle), "a narrow write: the revision does not move");
+            assertEquals(ConversationState.READY, store.getConversationState(recentlyActive));
+            assertEquals(ConversationState.AWAITING_HUMAN, store.getConversationState(paused));
+            assertEquals(ConversationState.IN_PROGRESS, store.getConversationState(running));
+            assertEquals(ConversationState.READY, store.getConversationState(untimestamped));
+            assertEquals(0, store.endIdleConversations(cutoff, null, "idle", false), "nothing left to end");
+        }
+
+        @Test
+        @DisplayName("dryRun counts without ending anything")
+        void dryRunChangesNothing() throws Exception {
+            Instant old = Instant.now().minus(90, ChronoUnit.DAYS);
+            String first = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY, old));
+            String second = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY, old));
+
+            assertEquals(2, store.endIdleConversations(Instant.now().minus(30, ChronoUnit.DAYS), null, "idle", true));
+
+            assertEquals(ConversationState.READY, store.getConversationState(first));
+            assertEquals(ConversationState.READY, store.getConversationState(second));
+            assertNull(store.loadConversationMemorySnapshot(first).getEndReason());
+        }
+
+        @Test
+        @DisplayName("an agentId restricts the bulk end to that agent")
+        void agentFilter() throws Exception {
+            Instant old = Instant.now().minus(90, ChronoUnit.DAYS);
+            String mine = storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY, old));
+            String other = storeSnapshot(withTimestamps("someOtherAgent", ConversationState.READY, old));
+            Instant cutoff = Instant.now().minus(30, ChronoUnit.DAYS);
+
+            assertEquals(1, store.endIdleConversations(cutoff, SWEEP_AGENT, null, true));
+            assertEquals(1, store.endIdleConversations(cutoff, SWEEP_AGENT, null, false));
+
+            assertEquals(ConversationState.ENDED, store.getConversationState(mine));
+            assertNull(store.loadConversationMemorySnapshot(mine).getEndReason(), "a null reason records none");
+            assertEquals(ConversationState.READY, store.getConversationState(other));
+        }
+
+        @Test
+        @DisplayName("more idle conversations than one batch are all ended")
+        void endsMoreThanOneBatch() throws Exception {
+            Instant old = Instant.now().minus(90, ChronoUnit.DAYS);
+            for (int i = 0; i < 12; i++) {
+                storeSnapshot(withTimestamps(SWEEP_AGENT, ConversationState.READY, old));
+            }
+
+            assertEquals(12, store.endIdleConversations(Instant.now().minus(30, ChronoUnit.DAYS), SWEEP_AGENT, "idle", false));
+            assertEquals(0, store.loadOpenConversationActivity(SWEEP_AGENT, null, null, 100).size());
         }
     }
 
