@@ -366,6 +366,10 @@ export function GroupWizardPage() {
         }));
         setIsBatchCreating(false);
         setCreationProgress(null);
+        // Keep the members created above. Without this, a retry after a failed
+        // moderator found them still marked "new" and created every one again —
+        // a duplicate set of deployed agents per attempt.
+        setState((s) => ({ ...s, members: updatedMembers }));
         return;
       }
     }
@@ -1585,7 +1589,11 @@ function MemberCard({
                     <textarea
                       value={member.systemPrompt}
                       onChange={(e) => onUpdate({ systemPrompt: e.target.value })}
-                      placeholder={`You are ${member.displayName}${member.role ? `, a ${member.role} expert` : ""}. Provide insightful analysis from your domain perspective.`}
+                      placeholder={
+                        member.role
+                          ? t("groupWizard.memberPromptPlaceholderRole", "You are {{name}}, a {{role}} expert. Provide insightful analysis from your domain perspective.", { name: member.displayName, role: member.role })
+                          : t("groupWizard.memberPromptPlaceholder", "You are {{name}}. Provide insightful analysis from your domain perspective.", { name: member.displayName })
+                      }
                       rows={2}
                       className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
                     />
@@ -1623,7 +1631,7 @@ function MemberCard({
                         value={member.model}
                         onChange={(e) => onUpdate({ model: e.target.value })}
                         className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
+                        placeholder={t("groupWizard.modelPlaceholder", "e.g. {{model}}", { model: providerConfig?.defaultModel ?? "" })}
                       />
                     </div>
                   </div>
@@ -1765,7 +1773,7 @@ function ModeratorCard({
           <textarea
             value={moderator.systemPrompt}
             onChange={(e) => onChange({ systemPrompt: e.target.value })}
-            placeholder="You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary…"
+            placeholder={t("groupWizard.moderatorPromptPlaceholder", "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary…")}
             rows={2}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
           />
@@ -1786,7 +1794,7 @@ function ModeratorCard({
               value={moderator.model}
               onChange={(e) => onChange({ model: e.target.value })}
               className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
+              placeholder={t("groupWizard.modelPlaceholder", "e.g. {{model}}", { model: providerConfig?.defaultModel ?? "" })}
             />
           </div>
           {providerConfig?.needsKey && (

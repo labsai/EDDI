@@ -5,6 +5,7 @@
    ────────────────────────────────────────────── */
 
 import type { ConversationState, ConversationOutput, InputField } from "@/types";
+import { t } from "@/i18n";
 
 /** The trimmed snapshot the `done` event carries — NOT the full snapshot. */
 export interface DoneSnapshot {
@@ -344,12 +345,12 @@ export function extractOutputTexts(output: unknown): string[] {
 export function skippedTurnMessage(state: ConversationState | undefined): string {
   switch (state) {
     case "AWAITING_HUMAN":
-      return "This conversation is waiting for a reviewer to approve the previous step. Your message was not sent.";
+      return t("skipped.awaiting");
     case "IN_PROGRESS":
-      return "The agent is still working on your previous message. Your message was not sent — please try again in a moment.";
+      return t("skipped.busy");
     case "ENDED":
-      return "This conversation has ended. Your message was not sent.";
+      return t("skipped.ended");
     default:
-      return "Your message was not processed.";
+      return t("skipped.default");
   }
 }

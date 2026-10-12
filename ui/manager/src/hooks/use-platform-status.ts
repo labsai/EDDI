@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { api } from "@/lib/api-client";
+import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -25,10 +26,18 @@ interface HealthResult {
 
 // ─── Fetch with latency measurement ──────────────────────────────
 
-async function checkPlatformHealth(): Promise<HealthResult> {
+/**
+ * The probe for a user whose token shows EDDI roles WITHOUT eddi-admin: the
+ * docs index (`IRestDocs`), which every EDDI role may read and which is a list
+ * of names. The admin probe answered such a user with a 403 every 15 seconds —
+ * harmless, but a red line in the console per poll.
+ */
+const NON_ADMIN_PROBE = "/administration/docs";
+
+async function checkPlatformHealth(adminProbe: boolean): Promise<HealthResult> {
   const start = performance.now();
   const res = await fetch(
-    `${window.location.origin}/administration/logs/instance-id`,
+    `${window.location.origin}${adminProbe ? "/administration/logs/instance-id" : NON_ADMIN_PROBE}`,
     { signal: AbortSignal.timeout(5000), headers: api.getAuthHeader() },
   );
   const latencyMs = Math.round(performance.now() - start);
@@ -44,6 +53,8 @@ async function checkPlatformHealth(): Promise<HealthResult> {
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
+
+  if (!adminProbe) return { instanceId: null, latencyMs };
 
   const data = (await res.json()) as { instanceId: string };
   return { instanceId: data.instanceId, latencyMs };
@@ -68,9 +79,10 @@ const QUERY_KEY = ["platform", "health"] as const;
  * — no extra useState — so each poll causes exactly one render.
  */
 export function usePlatformStatus(): PlatformStatus {
+  const adminProbe = useIsAdminOrUnknown();
   const query = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: checkPlatformHealth,
+    queryKey: [...QUERY_KEY, adminProbe ? "admin" : "any-role"],
+    queryFn: () => checkPlatformHealth(adminProbe),
     refetchInterval: 15_000,
     staleTime: 10_000,
     retry: 1,

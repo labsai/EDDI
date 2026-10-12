@@ -70,8 +70,6 @@ class ImportStyleTest {
      * The only permitted inline FQNs, each a genuine collision where one of two
      * same-named types can only be written in full.
      * <ul>
-     * <li>The two {@code HistorizedResourceStore} files declare a class whose
-     * simple name collides with the superclass it extends.</li>
      * <li>{@code NatsConversationCoordinator} imports {@code io.nats.client.api.*},
      * which brings in {@code io.nats.client.api.Error}; its
      * {@code catch (RuntimeException |
@@ -82,8 +80,6 @@ class ImportStyleTest {
      * </ul>
      */
     private static final Set<String> ALLOWED = Set.of(
-            "src/main/java/ai/labs/eddi/datastore/mongo/HistorizedResourceStore.java",
-            "src/main/java/ai/labs/eddi/datastore/mongo/ModifiableHistorizedResourceStore.java",
             "src/main/java/ai/labs/eddi/engine/runtime/internal/NatsConversationCoordinator.java");
 
     /** Blanks out comments and string literals so neither is ever matched. */
