@@ -102,7 +102,8 @@ public class TeardownAgentTool {
             + "can be torn down. Optionally delete the agent configuration permanently.")
     public String teardownAgent(
                                 @P("The ID of the agent to tear down") String agentId,
-                                @P("If true, permanently delete the agent config after undeploying. Default: false") Boolean delete) {
+                                @P(value = "If true, permanently delete the agent config after undeploying. Default: false",
+                                   required = false) Boolean delete) {
 
         try {
             // --- Validate parameters ---
