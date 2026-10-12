@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import java.util.List;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -15,6 +16,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.ObservesAsync;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -102,18 +105,37 @@ public class SlackHitlResumeObserver {
 
         String summary = decisionSummary(event.verdict(), event.decidedBy(), event.snapshot());
 
-        var sb = new StringBuilder(summary);
         // Append genuine agent continuation only when the resume actually continued
         // (APPROVED and not ERROR). A rejection/cancellation/failure carries no
         // continuation to show; placeholders (leading "_") are always suppressed.
+        List<String> continuationChunks = List.of();
         if (event.verdict() == HitlVerdict.APPROVED && !isError(event.snapshot())) {
             String continuation = SlackHitlSupport.extractSlackResponseText(event.snapshot());
             if (continuation != null && !continuation.startsWith("_")) {
-                sb.append("\n\n").append(continuation);
+                // The agent's text, after EDDI's own summary (which may mention the
+                // approver): only the continuation is escaped, and split so Slack does
+                // not truncate it. The summary and its mention stay in the first message.
+                continuationChunks = SlackMrkdwn.escapeInChunks(continuation, SlackMrkdwn.MAX_MESSAGE_LENGTH);
             }
         }
 
-        postSafe(auth, route.channelId(), route.threadTs(), sb.toString());
+        if (continuationChunks.isEmpty()) {
+            postSafe(auth, route.channelId(), route.threadTs(), summary);
+            return;
+        }
+        String firstChunk = continuationChunks.getFirst();
+        boolean delivered;
+        if (summary.length() + 2 + firstChunk.length() <= SlackMrkdwn.MAX_MESSAGE_LENGTH) {
+            delivered = postSafe(auth, route.channelId(), route.threadTs(), summary + "\n\n" + firstChunk);
+            continuationChunks = continuationChunks.subList(1, continuationChunks.size());
+        } else {
+            delivered = postSafe(auth, route.channelId(), route.threadTs(), summary);
+        }
+        // A failed message ends the delivery: the rest of the continuation would
+        // arrive without its beginning (or without the decision it follows).
+        for (int i = 0; delivered && i < continuationChunks.size(); i++) {
+            delivered = postSafe(auth, route.channelId(), route.threadTs(), continuationChunks.get(i));
+        }
     }
 
     private static boolean isError(SimpleConversationMemorySnapshot snapshot) {
@@ -160,14 +182,22 @@ public class SlackHitlResumeObserver {
 
     /**
      * Render a {@code slack:U123} decidedBy as a Slack mention {@code <@U123>};
-     * otherwise return it verbatim.
+     * otherwise return it escaped ({@link SlackMrkdwn}) — it is a principal name
+     * from the identity provider, not EDDI's text, and a {@code <!channel>} in it
+     * must not broadcast. A {@code slack:} id that is not a Slack user id is
+     * escaped the same way rather than wrapped into a control sequence.
      */
-    private static String slackMention(String decidedBy) {
+    static String slackMention(String decidedBy) {
         if (decidedBy.startsWith("slack:")) {
-            return "<@" + decidedBy.substring("slack:".length()) + ">";
+            String userId = decidedBy.substring("slack:".length());
+            if (SLACK_USER_ID.matcher(userId).matches()) {
+                return "<@" + userId + ">";
+            }
         }
-        return decidedBy;
+        return SlackMrkdwn.escape(decidedBy);
     }
+
+    private static final Pattern SLACK_USER_ID = Pattern.compile("[A-Z0-9]{1,32}");
 
     /**
      * Parse a Slack-routed managed-conversation intent into channel + thread.
@@ -207,11 +237,13 @@ public class SlackHitlResumeObserver {
         return new SlackRoute(channelId, threadTs);
     }
 
-    private void postSafe(String auth, String channelId, String threadTs, String text) {
+    /** @return whether Slack accepted the message */
+    private boolean postSafe(String auth, String channelId, String threadTs, String text) {
         try {
-            slackApi.postMessage(auth, channelId, threadTs, text);
+            return slackApi.postMessage(auth, channelId, threadTs, text) != null;
         } catch (SlackDeliveryException e) {
             LOGGER.warnf("Slack HITL outcome post failed (channel=%s): %s", sanitize(channelId), e.getMessage());
+            return false;
         }
     }
 

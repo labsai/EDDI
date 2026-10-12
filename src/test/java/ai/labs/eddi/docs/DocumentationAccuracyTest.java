@@ -189,7 +189,7 @@ class DocumentationAccuracyTest {
     @Test
     @DisplayName("no page claims a secret-scoped property falls back to plaintext")
     void secretScopeIsDocumentedAsFailingClosed() {
-        String task = read("src/main/java/ai/labs/eddi/modules/properties/impl/PropertySetterTask.java");
+        String task = read("src/main/java/ai/labs/eddi/modules/properties/impl/PropertyInstructionExecutor.java");
         assertTrue(task.contains("Refusing to persist the value in plaintext"),
                 "autoVaultSecret no longer fails closed — this test's premise is gone, revisit the docs it guards");
 

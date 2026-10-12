@@ -238,11 +238,50 @@ class GroupWorkspaceStoreTest {
                 .thenReturn(List.of(idAaa));
         when(storage.newResource(any(GroupWorkspace.class))).thenReturn(inserted);
         when(storage.read("aaa", 1)).thenReturn(survivorResource);
+        // A group id this backend cannot use as a storage id: the legacy path.
+        when(storage.newResource(eq(GROUP_ID), anyInt(), any(GroupWorkspace.class)))
+                .thenThrow(new IllegalArgumentException("not an ObjectId"));
 
         GroupWorkspace result = store.readOrCreate(GROUP_ID);
 
         verify(storage).removeAllPermanently("bbb");
         assertEquals("aaa", result.getId(), "the loser adopts the earlier insert");
+    }
+
+    @Test
+    @DisplayName("readOrCreate inserts under the group id itself, insert-only")
+    void readOrCreate_createsCanonicalDocument() throws Exception {
+        when(storage.findResources(any(), eq("lastModified"), eq(0), eq(50))).thenReturn(List.of());
+        var canonical = resource(new GroupWorkspace(), GROUP_ID);
+        when(storage.newResource(eq(GROUP_ID), eq(1), any(GroupWorkspace.class))).thenReturn(canonical);
+
+        GroupWorkspace result = store.readOrCreate(GROUP_ID);
+
+        assertEquals(GROUP_ID, result.getId());
+        verify(storage).createNew(canonical);
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+        verify(storage, never()).newResource(any(GroupWorkspace.class));
+    }
+
+    @Test
+    @DisplayName("a creator whose insert hits the primary key adopts the winner's document")
+    void readOrCreate_lostInsert_adoptsWinner() throws Exception {
+        when(storage.findResources(any(), eq("lastModified"), eq(0), eq(50))).thenReturn(List.of());
+        var mine = resource(new GroupWorkspace(), GROUP_ID);
+        when(storage.newResource(eq(GROUP_ID), eq(1), any(GroupWorkspace.class))).thenReturn(mine);
+        doThrow(new RuntimeException("E11000 duplicate key")).when(storage).createNew(mine);
+        var winner = new GroupWorkspace();
+        winner.setGroupId(GROUP_ID);
+        winner.setRevision("3");
+        var winnerResource = resource(winner, GROUP_ID);
+        // nothing at the first find(); the winner's document once the insert failed
+        when(storage.read(GROUP_ID, 1)).thenReturn(null).thenReturn(winnerResource);
+
+        GroupWorkspace result = store.readOrCreate(GROUP_ID);
+
+        assertEquals("3", result.getRevision(), "the winner's document, not this caller's empty one");
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+        verify(storage, never()).removeAllPermanently(anyString());
     }
 
     @Test

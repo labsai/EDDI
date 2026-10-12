@@ -19,6 +19,7 @@ import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
+import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -100,7 +101,7 @@ class WeatherToolExtendedTest {
 
             mockResponse(200, json);
 
-            String result = weatherTool.getCurrentWeather("London", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
             assertTrue(result.contains("22") && (result.contains("22.5") || result.contains("22,5")),
                     "Should contain temperature. Got: " + result);
@@ -124,7 +125,7 @@ class WeatherToolExtendedTest {
 
             mockResponse(200, json);
 
-            String result = weatherTool.getCurrentWeather("New York", "imperial");
+            String result = textOf(() -> weatherTool.getCurrentWeather("New York", "imperial"));
 
             assertTrue(result.contains("°F"), "Should contain Fahrenheit units");
             assertTrue(result.contains("mph"), "Should contain mph wind units");
@@ -135,7 +136,7 @@ class WeatherToolExtendedTest {
         void handles404() throws Exception {
             mockResponse(404, "");
 
-            String result = weatherTool.getCurrentWeather("NonexistentCity", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("NonexistentCity", "metric"));
 
             assertTrue(result.contains("not found"));
         }
@@ -145,7 +146,7 @@ class WeatherToolExtendedTest {
         void handlesServerError() throws Exception {
             mockResponse(500, "Internal Server Error");
 
-            String result = weatherTool.getCurrentWeather("London", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
             assertTrue(result.contains("Error"));
         }
@@ -160,7 +161,7 @@ class WeatherToolExtendedTest {
 
             mockResponse(200, json);
 
-            String result = weatherTool.getCurrentWeather("London", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
             assertTrue(result.contains("20") && (result.contains("20.0") || result.contains("20,0")),
                     "Should contain temperature. Got: " + result);
@@ -178,7 +179,7 @@ class WeatherToolExtendedTest {
 
             mockResponse(200, json);
 
-            String result = weatherTool.getCurrentWeather("Berlin", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("Berlin", "metric"));
 
             assertTrue(result.contains("rain"), "Should contain weather description");
             assertFalse(result.contains("Wind Speed:"), "Should not contain wind speed");
@@ -195,7 +196,7 @@ class WeatherToolExtendedTest {
 
             mockResponse(200, json);
 
-            String result = weatherTool.getCurrentWeather("Paris", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("Paris", "metric"));
 
             assertFalse(result.contains("Temperature:"), "Should not contain temperature without main");
             assertTrue(result.contains("sunny"), "Should contain weather description");
@@ -212,7 +213,7 @@ class WeatherToolExtendedTest {
 
             mockResponse(200, json);
 
-            String result = weatherTool.getCurrentWeather("Rome", null);
+            String result = textOf(() -> weatherTool.getCurrentWeather("Rome", null));
 
             assertTrue(result.contains("°C"),
                     "Should use metric Celsius symbol. Got: " + result);
@@ -223,7 +224,7 @@ class WeatherToolExtendedTest {
         void handlesMalformedJson() throws Exception {
             mockResponse(200, "not valid json {{{");
 
-            String result = weatherTool.getCurrentWeather("London", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
             assertTrue(result.contains("could not be formatted") || result.contains("Error"),
                     "Should report formatting or error");
@@ -235,7 +236,7 @@ class WeatherToolExtendedTest {
             when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("Connection refused"));
 
-            String result = weatherTool.getCurrentWeather("London", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
             assertTrue(result.contains("Error"));
             assertTrue(result.contains("Connection refused"));
@@ -262,7 +263,7 @@ class WeatherToolExtendedTest {
 
             mockResponse(200, json);
 
-            String result = weatherTool.getWeatherForecast("London", 3, "metric");
+            String result = textOf(() -> weatherTool.getWeatherForecast("London", 3, "metric"));
 
             assertTrue(result.contains("2026-04-22"), "Should contain first day");
             assertTrue(result.contains("2026-04-23"), "Should contain second day");
@@ -275,7 +276,7 @@ class WeatherToolExtendedTest {
         void handlesForecast404() throws Exception {
             mockResponse(404, "");
 
-            String result = weatherTool.getWeatherForecast("FakeCity", 3, "metric");
+            String result = textOf(() -> weatherTool.getWeatherForecast("FakeCity", 3, "metric"));
 
             assertTrue(result.contains("not found"));
         }
@@ -285,7 +286,7 @@ class WeatherToolExtendedTest {
         void handlesMissingList() throws Exception {
             mockResponse(200, "{}");
 
-            String result = weatherTool.getWeatherForecast("London", 3, "metric");
+            String result = textOf(() -> weatherTool.getWeatherForecast("London", 3, "metric"));
 
             assertTrue(result.contains("No forecast data available"));
         }
@@ -295,7 +296,7 @@ class WeatherToolExtendedTest {
         void handlesForecastServerError() throws Exception {
             mockResponse(503, "Service Unavailable");
 
-            String result = weatherTool.getWeatherForecast("London", 3, "metric");
+            String result = textOf(() -> weatherTool.getWeatherForecast("London", 3, "metric"));
 
             assertTrue(result.contains("Error"));
         }
@@ -305,7 +306,7 @@ class WeatherToolExtendedTest {
         void clampsNullDaysTo3() throws Exception {
             mockResponse(404, "");
 
-            String result = weatherTool.getWeatherForecast("London", null, "metric");
+            String result = textOf(() -> weatherTool.getWeatherForecast("London", null, "metric"));
 
             assertTrue(result.contains("Error") || result.contains("not found"));
         }
@@ -315,7 +316,7 @@ class WeatherToolExtendedTest {
         void clampsDaysTo5() throws Exception {
             mockResponse(404, "");
 
-            String result = weatherTool.getWeatherForecast("London", 10, "metric");
+            String result = textOf(() -> weatherTool.getWeatherForecast("London", 10, "metric"));
 
             assertTrue(result.contains("Error") || result.contains("not found"));
         }
@@ -325,7 +326,7 @@ class WeatherToolExtendedTest {
         void defaultsUnitsToMetric() throws Exception {
             mockResponse(404, "");
 
-            String result = weatherTool.getWeatherForecast("London", 3, "");
+            String result = textOf(() -> weatherTool.getWeatherForecast("London", 3, ""));
 
             assertTrue(result.contains("Error") || result.contains("not found"));
         }
@@ -335,7 +336,7 @@ class WeatherToolExtendedTest {
         void handlesMalformedForecastJson() throws Exception {
             mockResponse(200, "{invalid json}");
 
-            String result = weatherTool.getWeatherForecast("London", 3, "metric");
+            String result = textOf(() -> weatherTool.getWeatherForecast("London", 3, "metric"));
 
             assertTrue(result.contains("could not be formatted") || result.contains("Error"),
                     "Should report formatting or error");
@@ -365,8 +366,8 @@ class WeatherToolExtendedTest {
         void unitsWithASpaceIsRefusedBeforeAnyRequest() throws Exception {
             // The reproduced leak: "metric x" made URI.create throw with the full URL,
             // appid=<key> included, as its message — returned verbatim as the answer.
-            String current = weatherTool.getCurrentWeather("London", "metric x");
-            String forecast = weatherTool.getWeatherForecast("London", 3, "metric x");
+            String current = textOf(() -> weatherTool.getCurrentWeather("London", "metric x"));
+            String forecast = textOf(() -> weatherTool.getWeatherForecast("London", 3, "metric x"));
 
             assertFalse(current.contains(KEY), current);
             assertFalse(forecast.contains(KEY), forecast);
@@ -391,8 +392,8 @@ class WeatherToolExtendedTest {
             when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
                     .thenThrow(new IOException("failed: https://api.openweathermap.org/data/2.5/weather?q=London&appid=" + KEY + "&units=metric"));
 
-            String current = weatherTool.getCurrentWeather("London", "metric");
-            String forecast = weatherTool.getWeatherForecast("London", 2, null);
+            String current = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
+            String forecast = textOf(() -> weatherTool.getWeatherForecast("London", 2, null));
 
             assertFalse(current.contains(KEY), current);
             assertFalse(forecast.contains(KEY), forecast);
@@ -407,7 +408,7 @@ class WeatherToolExtendedTest {
             apiKeyField.set(weatherTool, Optional.of("a b&c"));
             mockResponse(200, "{}");
 
-            weatherTool.getCurrentWeather("London", "metric");
+            textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
             ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
             verify(mockHttpClient).sendBounded(captor.capture(), anyLong());
@@ -419,7 +420,7 @@ class WeatherToolExtendedTest {
         void answerIsBounded() throws Exception {
             mockResponse(200, "{\"main\": {\"temp\": 2", true);
 
-            String result = weatherTool.getCurrentWeather("London", "metric");
+            String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
             assertTrue(result.contains("exceeded " + WeatherTool.MAX_RESPONSE_BYTES + " bytes"), result);
             verify(mockHttpClient).sendBounded(any(HttpRequest.class), eq(WeatherTool.MAX_RESPONSE_BYTES));
@@ -432,7 +433,7 @@ class WeatherToolExtendedTest {
                     {"main": {"temp": 295.1, "feels_like": 294.0, "humidity": 50}, "wind": {"speed": 3.0}}
                     """);
 
-            String result = weatherTool.getCurrentWeather("London", "standard");
+            String result = textOf(() -> weatherTool.getCurrentWeather("London", "standard"));
 
             assertTrue(result.contains(String.format("%.1f", 295.1) + " K"), result);
             assertFalse(result.contains("°F"), result);

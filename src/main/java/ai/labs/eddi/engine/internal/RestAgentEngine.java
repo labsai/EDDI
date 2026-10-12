@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
+import ai.labs.eddi.engine.exception.IllegalArgumentExceptionMapper;
 import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
@@ -366,6 +367,14 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .entity(Map.of("error", "capacity_exceeded",
                             "message", e.getMessage() != null ? e.getMessage() : "Service temporarily unavailable"))
                     .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build());
+        } catch (IllegalArgumentException e) {
+            // A malformed conversation id (the store rejects it before any lookup) or
+            // another invalid argument. GET on the same id already answers 400 through
+            // IllegalArgumentExceptionMapper; this path is resumed through an
+            // AsyncResponse, which no mapper sees, so the catch-all below turned it
+            // into a 500 with an ERROR stack trace for what is a client mistake.
+            LOGGER.debugf("Rejected turn for conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            response.resume(IllegalArgumentExceptionMapper.responseOf(e));
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("An internal error occurred");

@@ -94,15 +94,33 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .build();
         }
 
-        // Use provided kbId, or fall back to the RAG config name, or the config ID
-        String effectiveKbId = kbId != null && !kbId.isBlank() ? kbId : ragConfig.getName() != null ? ragConfig.getName() : ragConfigId;
+        // The knowledge base written to is the one in the path — the one EDIT was just
+        // checked on — and nothing else. ?kbId= used to override it: a caller with
+        // EDIT on their own knowledge base could name another's and write into its
+        // store, or with replace=true delete from it. It is still accepted when it
+        // names this knowledge base (its id, or the name it defaulted to), so
+        // existing clients keep working, and refused otherwise rather than ignored:
+        // a client that meant another knowledge base must not be told 202.
+        if (kbId != null && !kbId.isBlank() && !kbId.equals(ragConfigId) && !kbId.equals(ragConfig.getName())) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "kbId names a different knowledge base. Documents are always ingested into the "
+                            + "knowledge base in the path; omit kbId, or ingest through the other knowledge base's own endpoint."))
+                    .build();
+        }
 
-        String ingestionId = ragIngestionService.ingest(effectiveKbId, documentContent, documentName, ragConfig, replacing);
+        String ingestionId;
+        try {
+            ingestionId = ragIngestionService.ingest(ragConfigId, documentContent, documentName, ragConfig, replacing);
+        } catch (IllegalArgumentException e) {
+            // The configuration cannot be addressed (a 6.5.0-layout knowledge base
+            // with no name, say).
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        }
 
-        LOGGER.infof("Ingestion started: id=%s, kb=%s, doc=%s, chars=%d", ingestionId, sanitize(effectiveKbId), sanitize(documentName),
+        LOGGER.infof("Ingestion started: id=%s, kb=%s, doc=%s, chars=%d", ingestionId, sanitize(ragConfigId), sanitize(documentName),
                 documentContent.length());
 
-        return Response.accepted(Map.of("ingestionId", ingestionId, "kbId", effectiveKbId, "status", "pending")).build();
+        return Response.accepted(Map.of("ingestionId", ingestionId, "kbId", ragConfigId, "status", "pending")).build();
     }
 
     @Override

@@ -9,6 +9,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import ai.labs.eddi.utils.LogBanner;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -110,7 +111,7 @@ public class ComplianceStartupChecks {
                     + "Set EDDI_VAULT_MASTER_KEY (or the independent EDDI_AUDIT_HMAC_KEY), or disable the requirement.");
         }
 
-        LOGGER.warn("""
+        LogBanner.warn(LOGGER, """
 
                 +------------------------------------------------------------------+
                 |  COMPLIANCE: Audit ledger is UNSIGNED                            |
@@ -156,7 +157,7 @@ public class ComplianceStartupChecks {
 
     private void checkTls() {
         if (!tlsConfigured) {
-            LOGGER.warn("""
+            LogBanner.warn(LOGGER, """
 
                     +------------------------------------------------------------------+
                     |  COMPLIANCE: No TLS certificate configured                       |
@@ -181,7 +182,7 @@ public class ComplianceStartupChecks {
 
     private void checkDatabaseEncryption() {
         if (!dbEncryptionAcknowledged) {
-            LOGGER.warn("""
+            LogBanner.warn(LOGGER, """
 
                     +------------------------------------------------------------------+
                     |  COMPLIANCE: Database encryption status unknown                  |

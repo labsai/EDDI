@@ -14,12 +14,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,6 +66,8 @@ class RemoteApiResourceSourceFailurePathTest {
     private final Map<String, String> bodyByPath = new HashMap<>();
     /** Every path this source asked the remote instance for, in order. */
     private final List<String> requestedPaths = new ArrayList<>();
+    /** Path suffixes whose body is over the sync response cap. */
+    private final Set<String> tooLargePaths = new HashSet<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -76,6 +80,10 @@ class RemoteApiResourceSourceFailurePathTest {
                     ? ""
                     : "?" + request.uri().getQuery());
             requestedPaths.add(path);
+            if (tooLargePaths.stream().anyMatch(path::contains)) {
+                // What HttpClient.send throws when CappedStringBodyHandler refuses the body.
+                throw new IOException("body refused", new CappedStringBodyHandler.ResponseTooLargeException(16));
+            }
             HttpResponse<String> response = mock(HttpResponse.class);
             int status = statusByPath.entrySet().stream()
                     .filter(entry -> path.contains(entry.getKey()))
@@ -179,6 +187,42 @@ class RemoteApiResourceSourceFailurePathTest {
         assertEquals("langchain", readable.type());
         assertEquals("{\"model\":\"gpt\"}", readable.contentJson(),
                 "the config the remote did hand over has to arrive intact");
+    }
+
+    /**
+     * The other side of the rule above: an extension the remote <em>answered</em>
+     * with a body over the size cap is not an unreadable extension to leave out.
+     * Leaving it out hands the upgrade incomplete source data — a missing workflow
+     * reads as one the source removed — so the whole read fails instead.
+     */
+    @Test
+    @DisplayName("an extension over the response cap fails the whole read instead of being left out")
+    void oversizedExtensionFailsTheRead() throws Exception {
+        tooLargePaths.add("/llmstore/llms/" + LLM_ID);
+        bodyByPath.put("/llmstore/llms/" + READABLE_LLM_ID, "{\"model\":\"gpt\"}");
+        stubAgentWithOneWorkflow();
+        stubWorkflowWithTwoLlmSteps();
+        when(jsonSerialization.deserialize(anyString(), eq(DocumentDescriptor[].class)))
+                .thenReturn(new DocumentDescriptor[0]);
+
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, httpClient);
+
+        var thrown = assertThrows(RemoteApiResourceSource.RemoteReadException.class, source::readWorkflows);
+        assertTrue(RemoteApiResourceSource.isTooLarge(thrown), String.valueOf(thrown));
+    }
+
+    @Test
+    @DisplayName("a descriptor listing over the response cap fails the read rather than costing only the name")
+    void oversizedDescriptorListingFailsTheRead() throws Exception {
+        tooLargePaths.add("/agentstore/agents/descriptors");
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of());
+        when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class))).thenReturn(agentConfig);
+
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 3, null, jsonSerialization, httpClient);
+
+        var thrown = assertThrows(RemoteApiResourceSource.RemoteReadException.class, source::readAgent);
+        assertTrue(RemoteApiResourceSource.isTooLarge(thrown), String.valueOf(thrown));
     }
 
     /**

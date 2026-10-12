@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.nlp;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
@@ -14,8 +16,9 @@ import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.nlp.bootstrap.ParserCorrectionExtensions;
 import ai.labs.eddi.modules.nlp.bootstrap.ParserDictionaryExtensions;
 import ai.labs.eddi.modules.nlp.bootstrap.ParserNormalizerExtensions;
@@ -81,11 +84,18 @@ public class InputParserTask implements ILifecycleTask {
     private static final String KEY_EXPRESSIONS = "expressions";
     private static final String KEY_TYPE = "type";
     private static final String KEY_CONFIG = "config";
+    private static final String KEY_URI = "uri";
+    private static final String KEY_QUICK_REPLIES = "quickReplies";
+    private static final String KEY_VALUE = "value";
+    private static final String KEY_IS_DEFAULT = "isDefault";
+    private static final String TEMPLATED_TWIN_PRE = ":preTemplated";
+    private static final String TEMPLATED_TWIN_POST = ":postTemplated";
 
     private final IExpressionProvider expressionProvider;
     private final Map<String, Provider<INormalizerProvider>> normalizerProviders;
     private final Map<String, Provider<IDictionaryProvider>> dictionaryProviders;
     private final Map<String, Provider<ICorrectionProvider>> correctionProviders;
+    private final IResourceClientLibrary resourceClientLibrary;
 
     private static final Logger log = Logger.getLogger(InputParserTask.class);
 
@@ -93,8 +103,10 @@ public class InputParserTask implements ILifecycleTask {
     public InputParserTask(IExpressionProvider expressionProvider,
             @ParserNormalizerExtensions Map<String, Provider<INormalizerProvider>> normalizerProviders,
             @ParserDictionaryExtensions Map<String, Provider<IDictionaryProvider>> dictionaryProviders,
-            @ParserCorrectionExtensions Map<String, Provider<ICorrectionProvider>> correctionProviders, ObjectMapper objectMapper) {
+            @ParserCorrectionExtensions Map<String, Provider<ICorrectionProvider>> correctionProviders, ObjectMapper objectMapper,
+            IResourceClientLibrary resourceClientLibrary) {
         this.expressionProvider = expressionProvider;
+        this.resourceClientLibrary = resourceClientLibrary;
         this.normalizerProviders = normalizerProviders;
         this.dictionaryProviders = dictionaryProviders;
         this.correctionProviders = correctionProviders;
@@ -144,34 +156,81 @@ public class InputParserTask implements ILifecycleTask {
         storeResultInMemory(memory.getCurrentStep(), parsedSolutions, parser.getConfig());
     }
 
+    /**
+     * The quick replies the agent offered on the previous step become a temporary
+     * dictionary for this one, so clicking one yields its expressions.
+     * <p>
+     * They are read from the previous step's {@code quickReplies:*} <em>data</em>,
+     * not from its conversation output, because only the data tells who wrote them:
+     * the output generation task stores a data entry for quick replies of the
+     * agent's output set and for those a {@code postResponse} built, but quick
+     * replies a client injected through {@code context} reach the output only — for
+     * display. They used to be read from the output like the others, so a client
+     * could offer itself a quick reply with any expression (or a value whose
+     * generated expression was whatever it liked) and have it parsed into that
+     * expression on the next turn — an action on every agent with
+     * {@code expressionsAsActions}.
+     */
     private List<IDictionary> prepareTemporaryDictionaries(IConversationMemory memory) {
-        List<ConversationOutput> conversationOutputs = memory.getConversationOutputs();
-        if (conversationOutputs.isEmpty() || conversationOutputs.size() < 2) {
+        var previousSteps = memory.getPreviousSteps();
+        if (previousSteps == null || previousSteps.size() == 0) {
             return Collections.emptyList();
         }
 
-        ConversationOutput conversationOutput = conversationOutputs.get(conversationOutputs.size() - 2);
-        List<IDictionary> temporaryDictionaries = Collections.emptyList();
-        List<Map<String, Object>> quickRepliesOutput = convertObjectToListOfMaps(conversationOutput);
-        if (quickRepliesOutput != null) {
-            List<QuickReply> quickReplies = extractQuickReplies(quickRepliesOutput);
-            temporaryDictionaries = convertQuickReplies(quickReplies, expressionProvider);
+        List<QuickReply> quickReplies = new LinkedList<>();
+        List<IData<Object>> quickReplyData = previousSteps.get(0).getAllData(KEY_QUICK_REPLIES);
+        if (quickReplyData != null) {
+            for (IData<Object> data : quickReplyData) {
+                String key = data.getKey();
+                if (key == null || key.endsWith(TEMPLATED_TWIN_PRE) || key.endsWith(TEMPLATED_TWIN_POST)) {
+                    // The templating task's before/after record of the same quick replies.
+                    continue;
+                }
+                quickReplies.addAll(extractQuickReplies(data.getResult()));
+            }
         }
 
-        return temporaryDictionaries;
+        return quickReplies.isEmpty() ? Collections.emptyList() : convertQuickReplies(quickReplies, expressionProvider);
     }
 
-    private List<Map<String, Object>> convertObjectToListOfMaps(ConversationOutput conversationOutput) {
-        return convertObjectToListOfMaps(conversationOutput.get("quickReplies"));
-    }
-
-    private static List<QuickReply> extractQuickReplies(List<Map<String, Object>> quickReplyOutputList) {
-        return quickReplyOutputList.stream().filter(Objects::nonNull).map(quickReplyData -> {
-            String value = quickReplyData.get("value").toString();
-            Object exprObj = quickReplyData.get("expressions");
-            String expressions = (exprObj != null && !exprObj.toString().isBlank()) ? exprObj.toString() : generateExpression(value);
-            return new QuickReply(value, expressions, (Boolean) quickReplyData.get("default"));
-        }).toList();
+    /**
+     * Reads the quick replies of one data entry: {@link QuickReply} objects on the
+     * live memory, maps once the step has been stored and loaded again. A quick
+     * reply without a value is skipped — it used to throw a
+     * {@code NullPointerException} that failed the parser.
+     */
+    private List<QuickReply> extractQuickReplies(Object result) {
+        if (!(result instanceof List<?> list)) {
+            return List.of();
+        }
+        List<QuickReply> quickReplies = new LinkedList<>();
+        for (Object item : list) {
+            String value;
+            Object expressions;
+            Object isDefault;
+            if (item instanceof QuickReply quickReply) {
+                value = quickReply.getValue();
+                expressions = quickReply.getExpressions();
+                isDefault = quickReply.getIsDefault();
+            } else if (item instanceof Map<?, ?> map) {
+                value = map.get(KEY_VALUE) != null ? map.get(KEY_VALUE).toString() : null;
+                expressions = map.get(KEY_EXPRESSIONS);
+                // QuickReply serializes its flag as "isDefault"; this used to read
+                // "default", which is never written, so the flag was always null.
+                isDefault = map.get(KEY_IS_DEFAULT);
+            } else {
+                continue;
+            }
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            String expressionString = expressions != null && !expressions.toString().isBlank()
+                    ? expressions.toString()
+                    : generateExpression(value);
+            quickReplies.add(new QuickReply(value, expressionString,
+                    isDefault instanceof Boolean flag ? flag : isDefault != null ? Boolean.valueOf(isDefault.toString()) : null));
+        }
+        return quickReplies;
     }
 
     private static String generateExpression(String value) {
@@ -234,6 +293,12 @@ public class InputParserTask implements ILifecycleTask {
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions)
             throws WorkflowConfigurationException, IllegalExtensionConfigurationException, UnrecognizedExtensionException {
 
+        ParserConfiguration document = loadParserDocument(configuration);
+        if (document != null) {
+            configuration = mergeConfig(document.getConfig(), configuration);
+            extensions = mergeExtensions(document.getExtensions(), extensions);
+        }
+
         var config = new IInputParser.Config();
 
         Object appendExpressions = configuration.get(CONFIG_APPEND_EXPRESSIONS);
@@ -277,6 +342,76 @@ public class InputParserTask implements ILifecycleTask {
         }
 
         return new InputParser(normalizers, dictionaries, corrections, config, limits);
+    }
+
+    /**
+     * The {@code parserstore} document a step references through {@code config.uri}
+     * — the shape {@code AgentSetupService}, the MCP setup tools and the Manager's
+     * pipeline builder write. {@code null} when the step has no {@code uri}, i.e.
+     * carries its parser inline.
+     * <p>
+     * This used to be ignored: such a step ran with no dictionaries, normalizers or
+     * corrections at all, and nothing said so.
+     */
+    private ParserConfiguration loadParserDocument(Map<String, Object> configuration) throws WorkflowConfigurationException {
+        Object uriObj = configuration == null ? null : configuration.get(KEY_URI);
+        if (isNullOrEmpty(uriObj)) {
+            return null;
+        }
+        URI uri = ResourceUris.require(uriObj, ID);
+        try {
+            var document = resourceClientLibrary.getResource(uri, ParserConfiguration.class);
+            if (document == null) {
+                throw new WorkflowConfigurationException("Parser configuration " + uriObj + " could not be found.");
+            }
+            return document;
+        } catch (ServiceException e) {
+            throw new WorkflowConfigurationException("Error while fetching ParserConfiguration " + uriObj + "!\n" + e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * The document's {@code config}, overlaid with the step's own {@code config}: a
+     * key the step sets wins, so a workflow can tune one parser document per step.
+     */
+    private static Map<String, Object> mergeConfig(Map<String, Object> documentConfig, Map<String, Object> stepConfig) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        if (documentConfig != null) {
+            merged.putAll(documentConfig);
+        }
+        if (stepConfig != null) {
+            stepConfig.forEach((key, value) -> {
+                if (!KEY_URI.equals(key)) {
+                    merged.put(key, value);
+                }
+            });
+        }
+        return merged;
+    }
+
+    /**
+     * The document's extensions followed by the step's own: per extension point
+     * (normalizer, dictionaries, corrections) the step's entries are appended after
+     * the document's, so the document's normalizers run first and the step can add
+     * a dictionary without restating the document's.
+     */
+    private Map<String, Object> mergeExtensions(Map<String, Object> documentExtensions, Map<String, Object> stepExtensions) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        for (var source : Arrays.asList(documentExtensions, stepExtensions)) {
+            if (source == null) {
+                continue;
+            }
+            source.forEach((name, value) -> {
+                List<Map<String, Object>> entries = convertObjectToListOfMaps(value);
+                if (entries == null) {
+                    return;
+                }
+                @SuppressWarnings("unchecked")
+                List<Object> existing = (List<Object>) merged.computeIfAbsent(name, ignored -> new ArrayList<>());
+                existing.addAll(entries);
+            });
+        }
+        return merged;
     }
 
     /**
@@ -341,6 +476,7 @@ public class InputParserTask implements ILifecycleTask {
         });
 
         Map<String, ConfigValue> extensionConfigs = new HashMap<>();
+        extensionConfigs.put(KEY_URI, new ConfigValue("Resource URI", ExtensionDescriptor.FieldType.URI, true, null));
         extensionConfigs.put(CONFIG_APPEND_EXPRESSIONS, new ConfigValue("Append Expressions", BOOLEAN, true, true));
         extensionConfigs.put(CONFIG_INCLUDE_UNUSED, new ConfigValue("Include Unused Expressions", BOOLEAN, true, true));
         extensionConfigs.put(CONFIG_INCLUDE_UNKNOWN, new ConfigValue("Include Unknown Expressions", BOOLEAN, true, true));
