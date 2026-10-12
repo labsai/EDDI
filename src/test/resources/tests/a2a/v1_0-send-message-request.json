@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "method": "SendMessage",
+  "params": {
+    "message": {
+      "messageId": "msg-1",
+      "role": "ROLE_USER",
+      "parts": [{"text": "What is the weather?"}, {"data": {"city": "Vienna"}}],
+      "contextId": "ctx-1"
+    },
+    "configuration": {
+      "returnImmediately": true,
+      "historyLength": 0
+    }
+  },
+  "id": 1
+}
