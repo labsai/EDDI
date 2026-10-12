@@ -119,6 +119,10 @@ Audit chain allocation across replicas (P11), the watchdog / GDPR `stopInFlightW
 reachability (P7), MCP `isError` (#937), the Manager's GDPR cache and a Manager tile for
 `auditEntriesRedacted` (#940), the PostgreSQL retention hold (#943).
 
+**OpenAPI snapshot.** The new `GET /auditstore/admin-actions` is added to the Manager's
+`ui/manager/src/test/mocks/openapi-operations.json`; without it the `OpenAPI Snapshot` and
+`Backend E2E` checks (and so `E2E Gate`) failed on this branch.
+
 **Files:** [`AuditLedgerService.java`](../../src/main/java/ai/labs/eddi/engine/audit/AuditLedgerService.java),
 [`IAuditStore.java`](../../src/main/java/ai/labs/eddi/engine/audit/IAuditStore.java),
 [`AdminActionAuditFilter.java`](../../src/main/java/ai/labs/eddi/engine/audit/rest/AdminActionAuditFilter.java),
