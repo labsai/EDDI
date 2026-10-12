@@ -22,6 +22,7 @@ The open backend PRs of the 6.5 review (#944, #945, #946, #947, #950, #952) adde
   - The *Administrative actions* tab is shown only to `eddi-admin` (`useHasRole`); its 401/403 state stays as the fallback. The pipeline trail is now a labelled `tabpanel`.
 - **Platform Operator.** The cheat sheet now covers the tool-call caps and `NOT_EXECUTED`, the typed `value*` fields and MCP `maxResponseSizeInBytes`, and one seat per agent in groups. Revision 2 → 3. The admin-actions read is **not** added to the allow-list here: #952 adds it, and `findMissingEndpoints` would refuse operator activation on any backend without that endpoint if this PR merged first.
 - **i18n:** 99 new keys in all 11 locales.
+- **E2E (MSW):** `e2e/schedules.spec.ts` › "disabled schedule shows disabled status" asserted `getByText(/disabled/i).first().or(getByText(/dead.lettered/i).first())`. The new "Disabled by a person" note made the two halves match different elements, and `or` failed Playwright's strict mode. The test now checks sched-4's "Disabled" badge and `disabled-reason-sched-4`, and sched-3's `disabled-by-person-sched-3`.
 
 ### Design decisions
 
