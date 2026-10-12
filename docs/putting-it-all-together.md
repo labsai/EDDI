@@ -15,7 +15,7 @@ Dictionary → Parser → Behavior Rules → Actions → HTTP Calls / LLM → Ou
   words     meaning    to do        execution    or call AI   response
 ```
 
-Each component is a **separate configuration** that's **combined into packages**, which are **assembled into agents**.
+Each component is a **separate configuration** that's **combined into workflows**, which are **assembled into agents**.
 
 ## Real-World Example: Hotel Booking Agent
 
@@ -38,7 +38,7 @@ We'll need:
 - **HTTP Calls**: Check availability and create bookings
 - **Output Templates**: Display results dynamically
 - **Workflow**: Combine everything
-- **Agent**: Reference the package
+- **Agent**: Reference the workflow
 
 ## Step 1: Create the Dictionary
 
@@ -132,14 +132,6 @@ curl -X POST http://localhost:7070/rulestore/rulesets \
                   "expressions": "intent(check_availability)",
                   "occurrence": "currentStep"
                 }
-              },
-              {
-                "type": "contextmatcher",
-                "configs": {
-                  "contextKey": "city",
-                  "contextType": "string",
-                  "string": "Paris"
-                }
               }
             ],
             "actions": ["httpcall(check-availability)"]
@@ -152,14 +144,6 @@ curl -X POST http://localhost:7070/rulestore/rulesets \
                 "configs": {
                   "expressions": "intent(book)",
                   "occurrence": "currentStep"
-                }
-              },
-              {
-                "type": "contextmatcher",
-                "configs": {
-                  "contextKey": "selectedRoom",
-                  "contextType": "string",
-                  "string": "101"
                 }
               }
             ],
@@ -176,10 +160,10 @@ curl -X POST http://localhost:7070/rulestore/rulesets \
 **How it connects**:
 
 - Welcome rule triggers on first message → shows welcome output
-- Check Availability rule triggers when user asks about availability AND the `city` context equals the configured value → calls API
-- Book Room rule triggers when user wants to book AND the `selectedRoom` context equals the configured value → creates booking
+- Check Availability rule triggers when the user asks about availability → calls the API. The city and the dates are not part of the rule: the client sends them as context, and Step 3 stores them as properties
+- Book Room rule triggers when the user picks a room — the room quick replies built in Step 4 carry `intent(book)` → creates the booking
 
-> A `contextmatcher` with `contextType: "string"` must also carry the `string` value it compares against — it is an equality test, not a presence test. Omitting it fails rule-set deserialization, and the agent deployment ends in `ERROR` instead of `READY`.
+> Why no `contextmatcher` here? A `contextmatcher` with `contextType: "string"` is an equality test against the `string` value it carries, not a presence test — `"string": "Paris"` would make the rule fire for Paris only. (Omitting the value fails rule-set deserialization, and the deployment ends in `ERROR` instead of `READY`.) Use it to branch on a known value, not to check that a value was sent.
 
 ## Step 3: Create Property Configuration
 
@@ -193,21 +177,9 @@ curl -X POST http://localhost:7070/propertysetterstore/propertysetters \
       {
         "actions": ["httpcall(check-availability)"],
         "setProperties": [
-          {
-            "name": "city",
-            "fromObjectPath": "memory.current.input",
-            "scope": "conversation"
-          }
-        ]
-      },
-      {
-        "actions": ["httpcall(create-booking)"],
-        "setProperties": [
-          {
-            "name": "selectedRoom",
-            "fromObjectPath": "memory.current.input",
-            "scope": "conversation"
-          }
+          { "name": "city", "fromObjectPath": "context.city", "scope": "conversation" },
+          { "name": "checkInDate", "fromObjectPath": "context.checkInDate", "scope": "conversation" },
+          { "name": "checkOutDate", "fromObjectPath": "context.checkOutDate", "scope": "conversation" }
         ]
       }
     ]
@@ -216,7 +188,7 @@ curl -X POST http://localhost:7070/propertysetterstore/propertysetters \
 
 **Returns**: `eddi://ai.labs.property/propertysetterstore/propertysetters/PROPERTY_ID?version=1`
 
-**How it connects**: Property instructions are keyed by the actions that trigger them — when the behavior rule emits `httpcall(check-availability)`, the property setter saves the turn's input as the `city` property, available as `{properties.city}` in HTTP calls and output templates
+**How it connects**: Property instructions are keyed by the actions that trigger them — when the behavior rule emits `httpcall(check-availability)`, the property setter copies the `city`, `checkInDate` and `checkOutDate` the client sent as context into conversation properties, available as `{properties.city}` etc. in HTTP calls and output templates — also in later turns, when the client no longer sends them. The room the user picks needs no instruction: its quick reply carries the expression `property(room_id(<id>))`, and the property setter turns every `property(...)` expression into a property (`{properties.room_id}`).
 
 ## Step 4: Create HTTP Calls
 
@@ -237,9 +209,9 @@ curl -X POST http://localhost:7070/apicallstore/apicalls \
           "method": "GET",
           "path": "/availability",
           "queryParams": {
-            "city": "{context.city}",
-            "checkIn": "{context.checkInDate}",
-            "checkOut": "{context.checkOutDate}"
+            "city": "{properties.city}",
+            "checkIn": "{properties.checkInDate}",
+            "checkOut": "{properties.checkOutDate}"
           }
         },
         "postResponse": {
@@ -248,7 +220,7 @@ curl -X POST http://localhost:7070/apicallstore/apicalls \
               "pathToTargetArray": "availableRooms.rooms",
               "iterationObjectName": "room",
               "quickReplyValue": "{room.name}",
-              "quickReplyExpressions": "property(room_id({room.id}))"
+              "quickReplyExpressions": "intent(book), property(room_id({room.id}))"
             }
           ]
         }
@@ -262,7 +234,7 @@ curl -X POST http://localhost:7070/apicallstore/apicalls \
           "method": "POST",
           "path": "/bookings",
           "contentType": "application/json",
-          "body": "{\\\"roomId\\\": \\\"{context.selectedRoom}\\\", \\\"userId\\\": \\\"{context.userId}\\\", \\\"checkIn\\\": \\\"{context.checkInDate}\\\", \\\"checkOut\\\": \\\"{context.checkOutDate}\\\"}"
+          "body": "{\"roomId\": \"{properties.room_id}\", \"userId\": \"{userInfo.userId}\", \"checkIn\": \"{properties.checkInDate}\", \"checkOut\": \"{properties.checkOutDate}\"}"
         },
         "postResponse": {
           "propertyInstructions": [
@@ -288,7 +260,7 @@ curl -X POST http://localhost:7070/apicallstore/apicalls \
 **How it connects**:
 
 - `check-availability` call is triggered by behavior rule → fetches available rooms → creates quick reply buttons
-- `create-booking` call is triggered after user selects room → creates booking → stores booking ID and price
+- `create-booking` call is triggered after user selects room → creates booking → stores booking ID and price as properties. `fromObjectPath` starts at the call's `responseObjectName` (`bookingConfirmation`), and the value is stored with its type — `totalPrice` stays a number
 
 ## Step 5: Create Output Templates
 
@@ -319,7 +291,7 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
             "valueAlternatives": [
               {
                 "type": "text",
-                "text": "Great! I found {memory.current.httpCalls.availableRooms.rooms.size()} available rooms in {context.city}. Here are your options:"
+                "text": "Great! I found {memory.current.httpCalls.availableRooms.rooms.size()} available rooms in {properties.city}. Here are your options:"
               }
             ]
           }
@@ -332,7 +304,7 @@ curl -X POST http://localhost:7070/outputstore/outputsets \
             "valueAlternatives": [
               {
                 "type": "text",
-                "text": "🎉 Booking confirmed! Your booking ID is {context.bookingId}. Total price: ${context.totalPrice}. We'\''ve sent a confirmation email. Have a great stay!"
+                "text": "🎉 Booking confirmed! Your booking ID is {properties.bookingId}. Total price: {properties.totalPrice} USD. We'\''ve sent a confirmation email. Have a great stay!"
               }
             ]
           }
@@ -375,7 +347,7 @@ curl -X POST http://localhost:7070/workflowstore/workflows \
         }
       },
       {
-        "type": "eddi://ai.labs.rules",
+        "type": "eddi://ai.labs.behavior",
         "config": {
           "uri": "eddi://ai.labs.rules/rulestore/rulesets/BEHAVIOR_ID?version=1",
           "appendActions": true
@@ -388,7 +360,7 @@ curl -X POST http://localhost:7070/workflowstore/workflows \
         }
       },
       {
-        "type": "eddi://ai.labs.apicalls",
+        "type": "eddi://ai.labs.httpcalls",
         "config": {
           "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/HTTP_ID?version=1"
         }
@@ -419,7 +391,7 @@ curl -X POST http://localhost:7070/workflowstore/workflows \
 curl -X POST http://localhost:7070/agentstore/agents \
   -H "Content-Type: application/json" \
   -d '{
-    "packages": [
+    "workflows": [
       "eddi://ai.labs.workflow/workflowstore/workflows/WORKFLOW_ID?version=1"
     ]
   }'
@@ -427,7 +399,7 @@ curl -X POST http://localhost:7070/agentstore/agents \
 
 **Returns**: Agent ID (e.g., `AGENT_ID`)
 
-**How it connects**: Agent references the package, which contains all the components
+**How it connects**: Agent references the workflow, which contains all the components
 
 ## Step 8: Deploy Agent
 
@@ -471,9 +443,9 @@ curl -X POST "http://localhost:7070/agents/CONV_ID" \
 
 **What happens internally**:
 
-1. **Parser**: "check availability in Paris" → `["intent(check_availability)", "entity(hotel)"]`
-2. **Behavior Rules**: Matches "Check Availability" rule (has intent + city in context)
-3. **Actions**: Triggers `httpcall(check-availability)`
+1. **Parser**: "check availability in Paris" → `["intent(check_availability)"]` (the dictionary has no entry for "in" or "Paris")
+2. **Behavior Rules**: Matches the "Check Availability" rule
+3. **Actions**: Triggers `httpcall(check-availability)`; the property setter stores `city`, `checkInDate` and `checkOutDate` from the context
 4. **HTTP Call**: `GET https://api.hotels.example.com/availability?city=Paris&checkIn=2025-06-01&checkOut=2025-06-05`
 5. **Response Processing**: Creates quick reply buttons from room list
 6. **Output**: Shows available rooms with dynamic count
@@ -493,9 +465,9 @@ curl -X POST "http://localhost:7070/agents/CONV_ID" \
         }
       ],
       "quickReplies": [
-        { "value": "Deluxe Suite", "expressions": "property(room_id(101))" },
-        { "value": "Standard Room", "expressions": "property(room_id(102))" },
-        { "value": "Executive Suite", "expressions": "property(room_id(103))" }
+        { "value": "Deluxe Suite", "expressions": "intent(book), property(room_id(101))" },
+        { "value": "Standard Room", "expressions": "intent(book), property(room_id(102))" },
+        { "value": "Executive Suite", "expressions": "intent(book), property(room_id(103))" }
       ]
     }
   ]
@@ -508,19 +480,17 @@ curl -X POST "http://localhost:7070/agents/CONV_ID" \
 curl -X POST "http://localhost:7070/agents/CONV_ID" \
   -H "Content-Type: application/json" \
   -d '{
-    "input": "book Deluxe Suite",
-    "context": {
-      "selectedRoom": {"type": "string", "value": "101"},
-      "userId": {"type": "string", "value": "user-789"}
-    }
+    "input": "Deluxe Suite"
   }'
 ```
 
+The user clicks the "Deluxe Suite" quick reply, which sends its value as the input.
+
 **What happens internally**:
 
-1. **Parser**: "book Deluxe Suite" → `["intent(book)", "entity(room)"]`
-2. **Behavior Rules**: Matches "Book Room" rule (has intent + selectedRoom)
-3. **Actions**: Triggers `httpcall(create-booking)` and `booking_confirmed`
+1. **Parser**: "Deluxe Suite" matches the quick reply offered in the previous turn → `["intent(book)", "property(room_id(101))"]`. Only quick replies the agent itself offered (from its output set or a `postResponse`) are matched this way — quick replies a client injects through `context` are displayed but never turned into expressions
+2. **Behavior Rules**: Matches the "Book Room" rule
+3. **Actions**: Triggers `httpcall(create-booking)` and `booking_confirmed`; the property setter stores `room_id` = `101`
 4. **HTTP Call**: `POST https://api.hotels.example.com/bookings` with room details
 5. **Response Processing**: Extracts bookingId and totalPrice, stores in properties
 6. **Output**: Shows confirmation with dynamic booking details
@@ -534,7 +504,7 @@ curl -X POST "http://localhost:7070/agents/CONV_ID" \
       "output": [
         {
           "type": "text",
-          "text": "🎉 Booking confirmed! Your booking ID is BK-12345. Total price: $450. We've sent a confirmation email. Have a great stay!",
+          "text": "🎉 Booking confirmed! Your booking ID is BK-12345. Total price: 450 USD. We've sent a confirmation email. Have a great stay!",
           "delay": 0
         }
       ]
@@ -556,7 +526,7 @@ User: "check availability in Paris"
     ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. BEHAVIOR RULES                                            │
-│    Condition: intent(check_availability) + context.city     │
+│    Condition: intent(check_availability)                    │
 │    Match: YES                                                │
 │    Action: httpcall(check-availability)                      │
 └─────────────────────────────────────────────────────────────┘
@@ -577,8 +547,9 @@ User: "check availability in Paris"
     ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 5. OUTPUT TEMPLATING                                         │
-│    Template: "I found {availableRooms.rooms.size()}           │
-│              rooms in {context.city}"                         │
+│    Template: "I found {memory.current.httpCalls.            │
+│              availableRooms.rooms.size} rooms in            │
+│              {properties.city}"                             │
 │    Result: "I found 5 rooms in Paris"                        │
 └─────────────────────────────────────────────────────────────┘
     ↓
@@ -598,7 +569,7 @@ Each component (dictionary, behavior rules, HTTP calls, outputs) is:
 
 ### 2. Workflows Define Execution Order
 
-The order in the package matters:
+The order of the workflow steps matters:
 
 ```
 Parser → Behavior Rules → Properties → HTTP Calls → Output → Templating
@@ -619,8 +590,8 @@ Behavior rules decide:
 Everything stores data in and reads from conversation memory:
 
 - HTTP Calls store responses: `memory.current.httpCalls.availableRooms`
-- Properties store extracted data: `context.city`
-- Outputs read data: `{context.bookingId}`
+- Properties store extracted data: `{properties.city}` (copied from the client's `context.city`)
+- Outputs read data: `{properties.bookingId}`
 
 ### 5. Context Bridges External Systems
 

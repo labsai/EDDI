@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -95,7 +96,8 @@ class ConversationSecretClientInputTest {
         lifecycleManager = mock(ILifecycleManager.class);
         lenient().when(workflow.getLifecycleManager()).thenReturn(lifecycleManager);
         lenient().when(workflow.getWorkflowId()).thenReturn("wf1");
-        parserTask = new InputParserTask(mock(IExpressionProvider.class), new HashMap<>(), new HashMap<>(), new HashMap<>(), new ObjectMapper());
+        parserTask = new InputParserTask(mock(IExpressionProvider.class), new HashMap<>(), new HashMap<>(), new HashMap<>(), new ObjectMapper(),
+                mock(IResourceClientLibrary.class));
     }
 
     /**

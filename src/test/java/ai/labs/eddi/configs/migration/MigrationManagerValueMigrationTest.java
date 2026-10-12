@@ -112,9 +112,15 @@ class MigrationManagerValueMigrationTest {
         }
 
         @Test
-        @DisplayName("Double (BSON double) → valueFloat, value preserved")
+        @DisplayName("Double (BSON double) → valueDouble, value preserved")
         void doubleValue() {
-            assertMigratedTo("valueFloat", 2.71828d, 2.71828d);
+            assertMigratedTo("valueDouble", 2.718281828459045d, 2.718281828459045d);
+        }
+
+        @Test
+        @DisplayName("Long beyond the int range → valueLong")
+        void longBeyondIntRange() {
+            assertMigratedTo("valueLong", 1_759_400_000_000L, 1_759_400_000_000L);
         }
 
         @Test
@@ -158,12 +164,6 @@ class MigrationManagerValueMigrationTest {
         @DisplayName("ObjectId is left under 'value'")
         void objectIdValue() {
             assertPreserved(new ObjectId("5262b802dc6c4008b54c7c0b"));
-        }
-
-        @Test
-        @DisplayName("Long beyond int range is left under 'value' rather than truncated")
-        void oversizedLongValue() {
-            assertPreserved(7_000_000_000L);
         }
 
         private void assertPreserved(Object legacyValue) {
