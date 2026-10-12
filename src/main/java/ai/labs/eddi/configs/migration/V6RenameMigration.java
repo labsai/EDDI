@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.utils.ProgressLogger;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
@@ -129,6 +130,7 @@ public class V6RenameMigration {
     private static final String FIELD_STEP_TYPE = "type";
 
     private static final String COLLECTION_WORKFLOWS = "workflows";
+    private static final String COLLECTION_LLMS = "llms";
 
     /** Store path rewrites (old → new) — applied inside URI strings. */
     private static final String[][] STORE_PATH_REWRITES = {{"regulardictionarystore/regulardictionaries", "dictionarystore/dictionaries"},
@@ -187,6 +189,19 @@ public class V6RenameMigration {
     private final boolean enabled;
 
     /**
+     * True on a PostgreSQL deployment ({@code eddi.datastore.type=postgres}). This
+     * migration renames EDDI 5 MongoDB collections, and EDDI 5 never ran on
+     * PostgreSQL, so there it has nothing to do — and must not touch
+     * {@link #database} at all: the injected {@code MongoDatabase} is a lazy client
+     * proxy, and its first use creates a MongoClient against
+     * {@code mongodb.connectionString} (by default
+     * {@code mongodb://mongodb:27017}), which on a PostgreSQL-only deployment times
+     * out after 30 seconds and, in {@link #holdsRetention()}, held the conversation
+     * retention sweep for ever with a false "this database comes from EDDI 5" log.
+     */
+    private final boolean postgres;
+
+    /**
      * Latches once the migration is known not to be pending, so that
      * {@link #isPending()} stops reading the migration log on every call. Only ever
      * set from false to true, and only after a completed migration has been
@@ -196,10 +211,19 @@ public class V6RenameMigration {
 
     @Inject
     public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore,
-            @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled) {
+            @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled,
+            @ConfigProperty(name = "eddi.datastore.type", defaultValue = "mongodb") String datastoreType) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;
         this.enabled = enabled;
+        this.postgres = "postgres".equals(datastoreType);
+    }
+
+    /**
+     * A MongoDB deployment — what every existing caller of this constructor means.
+     */
+    public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore, boolean enabled) {
+        this(database, migrationLogStore, enabled, "mongodb");
     }
 
     /**
@@ -227,7 +251,7 @@ public class V6RenameMigration {
      * </p>
      */
     public boolean isPending() {
-        if (!enabled || knownNotPending) {
+        if (!enabled || postgres || knownNotPending) {
             return false;
         }
         try {
@@ -260,6 +284,11 @@ public class V6RenameMigration {
      * </p>
      */
     public boolean holdsRetention() {
+        if (postgres) {
+            // No EDDI 5 database can be a PostgreSQL one, and nothing here may open a
+            // MongoClient on a deployment that has no MongoDB (see #postgres).
+            return false;
+        }
         try {
             return isPending() || migrationLogStore.readMigrationLog(RETENTION_HOLD_KEY) != null
                     || database.getCollection(V5_MARKER_COLLECTION).estimatedDocumentCount() > 0;
@@ -273,6 +302,12 @@ public class V6RenameMigration {
      * Run the v6 rename migration if enabled and not already applied.
      */
     public void runIfNeeded() {
+        if (postgres) {
+            if (enabled) {
+                LOGGER.info("V6 rename migration skipped: it migrates EDDI 5 MongoDB collections, and this deployment uses PostgreSQL");
+            }
+            return;
+        }
         if (!enabled) {
             LOGGER.info("V6 rename migration is disabled (eddi.migration.v6-rename.enabled=false)");
             return;
@@ -506,7 +541,9 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "agents");
         for (Document doc : collection == null ? List.<Document>of() : collection.find()) {
+            progress.advance();
             boolean changed = false;
 
             for (String[] mapping : AGENT_FIELD_RENAMES) {
@@ -533,6 +570,7 @@ public class V6RenameMigration {
             return new MigrationResult(migrated, failed).plus(unread);
         }
         for (Document doc : historyCollection == null ? List.<Document>of() : historyCollection.find()) {
+            progress.advance();
             boolean changed = false;
             for (String[] mapping : AGENT_FIELD_RENAMES) {
                 if (doc.containsKey(mapping[0])) {
@@ -572,10 +610,18 @@ public class V6RenameMigration {
 
         boolean isWorkflowCollection = collectionName.equals(COLLECTION_WORKFLOWS)
                 || collectionName.equals(COLLECTION_WORKFLOWS + ".history");
+        // Every document in the LLM collection at this point was written by 5.x (this
+        // migration runs once, before anything v6 can have stored there), so the 5.x
+        // behaviour of an LLM task can be carried over: JSON mode, and tools off.
+        boolean isLlmCollection = collectionName.equals(COLLECTION_LLMS) || collectionName.equals(COLLECTION_LLMS + ".history");
+        var llmMigration = LegacyDocumentMigrations.llm();
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, collectionName);
         for (Document doc : collection.find()) {
+            progress.advance();
             boolean stepTypesRewritten = isWorkflowCollection && rewriteStepTypes(doc);
+            stepTypesRewritten |= isLlmCollection && llmMigration.migrate(doc) != null;
             Document rewritten = rewriteUrisInDocument(doc);
             if (rewritten != null || stepTypesRewritten) {
                 if (saveDocument(collection, doc, collectionName.endsWith(".history"))) {
@@ -637,7 +683,9 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, collectionName);
         for (Document doc : collection.find()) {
+            progress.advance();
             Document rewritten = rewriteUrisInDocument(doc);
             if (rewritten != null) {
                 if (saveDocument(collection, doc, collectionName.endsWith(".history"))) {
@@ -811,7 +859,9 @@ public class V6RenameMigration {
         bumpRevision(set);
         long migrated;
         try {
-            migrated = collection.updateMany(or(holdsV5Step), List.of(new Document("$set", set))).getModifiedCount();
+            try (ProgressLogger.Heartbeat heartbeat = ProgressLogger.every10Seconds(LOGGER, "conversationmemories step shape").startHeartbeat()) {
+                migrated = collection.updateMany(or(holdsV5Step), List.of(new Document("$set", set))).getModifiedCount();
+            }
         } catch (Exception e) {
             LOGGER.errorf("  %s: the conversation steps could not be renamed (%s → %s) — counted as a failure, so the "
                     + "migration is NOT recorded as complete and runs again on the next start: %s", COLLECTION_CONVERSATIONS,
@@ -943,8 +993,10 @@ public class V6RenameMigration {
 
         long migrated;
         try {
-            migrated = collection.updateMany(and(or(v5Shaped), nor(ambiguous)),
-                    List.of(new Document("$set", set), new Document("$unset", v5Fields))).getModifiedCount();
+            try (ProgressLogger.Heartbeat heartbeat = ProgressLogger.every10Seconds(LOGGER, "conversationmemories field names").startHeartbeat()) {
+                migrated = collection.updateMany(and(or(v5Shaped), nor(ambiguous)),
+                        List.of(new Document("$set", set), new Document("$unset", v5Fields))).getModifiedCount();
+            }
         } catch (Exception e) {
             LOGGER.errorf("  %s: the v5 field names could not be migrated — counted as a failure, so the migration is NOT "
                     + "recorded as complete and runs again on the next start: %s", COLLECTION_CONVERSATIONS, e.toString());
@@ -1157,8 +1209,11 @@ public class V6RenameMigration {
 
         long migrated;
         try {
-            migrated = collection.updateMany(and(v5Shaped, nor(ambiguous)), List.of(new Document("$set", set),
-                    new Document("$unset", List.of(FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_NAME_V5)))).getModifiedCount();
+            try (ProgressLogger.Heartbeat heartbeat = ProgressLogger.every10Seconds(LOGGER, "conversation descriptors field names")
+                    .startHeartbeat()) {
+                migrated = collection.updateMany(and(v5Shaped, nor(ambiguous)), List.of(new Document("$set", set),
+                        new Document("$unset", List.of(FIELD_AGENT_RESOURCE_V5, FIELD_AGENT_NAME_V5)))).getModifiedCount();
+            }
         } catch (Exception e) {
             LOGGER.errorf("  %s: the v5 field names of the conversation descriptors could not be renamed — counted as a "
                     + "failure, so this runs again on the next start: %s", collectionName, e.toString());
@@ -1331,7 +1386,9 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, "agent triggers");
         for (Document trigger : collection.find(exists(FIELD_BOT_DEPLOYMENTS))) {
+            progress.advance();
             Object intent = trigger.get("intent");
             if (trigger.containsKey(FIELD_AGENT_DEPLOYMENTS)) {
                 LOGGER.warnf("  %s: the trigger for intent '%s' holds both '%s' and '%s' — left unchanged; merge them by hand",
@@ -1450,9 +1507,11 @@ public class V6RenameMigration {
 
         long migrated;
         try {
-            migrated = collection.updateMany(v5Shaped, List.of(
-                    new Document("$set", new Document(FIELD_AGENT_ID, agentId).append(FIELD_ENVIRONMENT, environment)),
-                    new Document("$unset", FIELD_BOT_ID))).getModifiedCount();
+            try (ProgressLogger.Heartbeat heartbeat = ProgressLogger.every10Seconds(LOGGER, "user conversations").startHeartbeat()) {
+                migrated = collection.updateMany(v5Shaped, List.of(
+                        new Document("$set", new Document(FIELD_AGENT_ID, agentId).append(FIELD_ENVIRONMENT, environment)),
+                        new Document("$unset", FIELD_BOT_ID))).getModifiedCount();
+            }
         } catch (Exception e) {
             LOGGER.errorf("  %s could not be migrated — counted as a failure, so the migration is NOT recorded as complete "
                     + "and runs again on the next start: %s", COLLECTION_USER_CONVERSATIONS, e.toString());
@@ -1505,7 +1564,9 @@ public class V6RenameMigration {
 
         int migrated = 0;
         int failed = 0;
+        ProgressLogger progress = ProgressLogger.every10Seconds(LOGGER, collectionName);
         for (Document doc : collection.find()) {
+            progress.advance();
             boolean changed = false;
 
             // Rename old field names (e.g., botId → agentId, botVersion → agentVersion)

@@ -25,7 +25,6 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.readiness.IAgentsReadiness;
-import ai.labs.eddi.engine.runtime.service.ServiceException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -435,7 +434,7 @@ class AgentDeploymentManagementBranchTest {
         }
 
         @Test
-        @DisplayName("ServiceException during deploy is handled")
+        @DisplayName("an unexpected failure during deploy is handled")
         void serviceExceptionHandled() throws Exception {
             var info = new DeploymentInfo();
             info.setAgentId("agent1");
@@ -443,7 +442,7 @@ class AgentDeploymentManagementBranchTest {
             info.setEnvironment(Environment.production);
 
             when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of(info));
-            doThrow(new ServiceException("deploy error")).when(agentFactory)
+            doThrow(new IllegalStateException("deploy error")).when(agentFactory)
                     .deployAgent(any(), anyString(), anyInt(), any());
 
             assertDoesNotThrow(() -> management.checkDeployments());

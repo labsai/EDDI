@@ -167,6 +167,16 @@ terms on anything that is not a letter or digit, and an entry matches when
 `"dog name"`, `"dog_name"` and `"dog-name"` all find the key `dog_name`.
 Punctuation-only queries match nothing.
 
+"Its value" means a **string** value, or a string element of an **array** value.
+Numbers, booleans and the fields of an object value are not searched — `true` or
+`42` finds nothing, and neither does a field name inside an object value. This is
+the same on MongoDB and PostgreSQL (PostgreSQL used to match the value's JSON text,
+so `true` found every boolean entry). The search returns the newest **200**
+matches at most (`IUserMemoryStore.MAX_FILTER_RESULTS`); the agent's visibility
+filter is applied to those, so a user with many matching entries from other agents
+can see fewer here. The REST `search` endpoint and the `search_user_memories` MCP
+tool use the same search and the same cap.
+
 ```
 Parameters:
   query - Search text (e.g. "color")
@@ -219,7 +229,7 @@ Base path: `/usermemorystore/memories`
 |---|---|---|
 | `GET` | `/{userId}` | Get all memories for a user |
 | `GET` | `/{userId}/visible?agentId=&groupId=&order=&limit=` | Get memories visible to a specific agent |
-| `GET` | `/{userId}/search?q=` | Search memories by keyword |
+| `GET` | `/{userId}/search?q=` | Search memories by keyword — string values and keys, newest 200 at most (see [`searchMemory`](#searchmemory)) |
 | `GET` | `/{userId}/category/{category}` | Get memories filtered by category |
 | `GET` | `/{userId}/key/{key}` | Get a specific memory by key |
 | `PUT` | `/` | Upsert a memory entry (JSON body) — validated, see below |
@@ -262,14 +272,16 @@ curl "http://localhost:7070/usermemorystore/memories/user-123/visible?agentId=ag
 
 | Tool | Role | Description |
 |---|---|---|
-| `list_user_memories` | `eddi-viewer` | List all entries for a user |
-| `get_visible_memories` | `eddi-viewer` | Get entries visible to a specific agent |
-| `search_user_memories` | `eddi-viewer` | Search by keyword |
-| `get_memory_by_key` | `eddi-viewer` | Look up by key name |
-| `count_user_memories` | `eddi-viewer` | Count entries |
+| `list_user_memories` | conversation tier¹ | List all entries for a user |
+| `get_visible_memories` | conversation tier¹ | Get entries visible to a specific agent |
+| `search_user_memories` | conversation tier¹ | Search by keyword |
+| `get_memory_by_key` | conversation tier¹ | Look up by key name |
+| `count_user_memories` | conversation tier¹ | Count entries |
 | `upsert_user_memory` | `eddi-admin` | Insert or update an entry (`groupIds` — comma-separated — for `group` visibility) |
-| `delete_user_memory` | `eddi-admin` | Delete a specific entry |
+| `delete_user_memory` | `eddi-admin` | Delete a specific entry; an id that names no entry is an error |
 | `delete_all_user_memories` | `eddi-admin` | Delete all memories except the `_gdpr_` bookkeeping entries (requires `CONFIRM`) |
+
+¹ Any of `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`; a non-admin reads only their own `userId`. See [MCP Server → Role Mapping](mcp-server.md#role-mapping).
 
 ### GDPR Compliance
 

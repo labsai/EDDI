@@ -32,6 +32,8 @@ import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.ParameterizedTest;
 
 import java.time.Instant;
 import java.util.List;
@@ -59,6 +61,26 @@ class MongoUserMemoryStoreTest {
         when(database.getCollection("usermemories")).thenReturn(collection);
         IdentityIndexStubs.stubInstalledIdentityIndexes(collection);
         store = new MongoUserMemoryStore(database);
+    }
+
+    // ==================== id contract ====================
+
+    /**
+     * An entry id that is not an ObjectId (a UUID-text id from the PostgreSQL
+     * store, a typo) names no entry: not found, delete is a no-op, no query. It
+     * used to reach {@code new ObjectId(id)} and throw IllegalArgumentException,
+     * which REST answers with 400 where the PostgreSQL store answers 404.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"xyz", "------------------", "", "00000000-0000-4000-8000-000000000000"})
+    @DisplayName("an entry id that is not an ObjectId names no entry")
+    void malformedEntryIdIsNotFound(String id) throws Exception {
+        clearInvocations(collection);
+
+        assertEquals(Optional.empty(), store.findEntryById(id));
+        store.deleteEntry(id);
+
+        verifyNoInteractions(collection);
     }
 
     // ==================== reserved keys (H9c) ====================
