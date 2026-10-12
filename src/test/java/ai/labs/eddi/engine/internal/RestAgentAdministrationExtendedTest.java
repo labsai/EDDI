@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -21,7 +22,6 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -74,6 +74,15 @@ class RestAgentAdministrationExtendedTest {
         lenient().when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
         lenient().when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of());
         lenient().when(tenantQuotaService.checkAgentQuota(any(), anyInt())).thenReturn(QuotaCheckResult.OK);
+        // A deployment succeeds unless a test says otherwise: AgentFactory reports the
+        // outcome through the callback (it never throws for a failed deployment).
+        lenient().doAnswer(invocation -> {
+            var callback = invocation.getArgument(3, IAgentFactory.DeploymentProcess.class);
+            if (callback != null) {
+                callback.completed(Deployment.Status.READY);
+            }
+            return null;
+        }).when(agentFactory).deployAgent(any(), anyString(), anyInt(), any());
         admin = new RestAgentAdministration(runtime, agentFactory, mock(IAgentStore.class), deploymentStore,
                 conversationMemoryStore, restConversationStore, documentDescriptorStore,
                 deploymentListener, scheduleStore, tenantQuotaService, mock(ResourceAccessGuard.class));
@@ -111,7 +120,30 @@ class RestAgentAdministrationExtendedTest {
             captureAndExecuteCallable();
 
             verify(agentFactory).deployAgent(eq(Deployment.Environment.test), eq("agent-1"), eq(1), any());
-            verify(deploymentListener).onDeploymentEvent(any(DeploymentEvent.class));
+            verify(deploymentListener).onDeploymentEvent(argThat(event -> event.status() == Deployment.Status.READY));
+            verify(scheduleStore).readSchedulesByAgentId("agent-1");
+        }
+
+        @Test
+        @DisplayName("a deployment that ends in ERROR fires ERROR, never READY, and leaves the schedules alone")
+        void failedDeploymentIsNotAnnouncedReady() throws Exception {
+            // AgentFactory marks a failed load (or a refused vault grant) ERROR, reports it
+            // to the callback and returns normally — it does not throw.
+            when(agentFactory.getAgent(any(), eq("agent-1"), eq(1))).thenReturn(null);
+            doAnswer(invocation -> {
+                invocation.getArgument(3, IAgentFactory.DeploymentProcess.class).completed(Deployment.Status.ERROR);
+                return null;
+            }).when(agentFactory).deployAgent(any(), anyString(), anyInt(), any());
+            when(runtime.submitCallable(any(Callable.class), any()))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            admin.deployAgent(Deployment.Environment.test, "agent-1", 1, true, false);
+            captureAndExecuteCallable();
+
+            verify(deploymentListener).onDeploymentEvent(argThat(event -> event.status() == Deployment.Status.ERROR));
+            verify(deploymentListener, never()).onDeploymentEvent(argThat(event -> event.status() == Deployment.Status.READY));
+            verify(scheduleStore, never()).readSchedulesByAgentId(anyString());
+            verify(deploymentStore, never()).setDeploymentInfo(anyString(), anyString(), anyInt(), any());
         }
 
         @Test
@@ -166,9 +198,9 @@ class RestAgentAdministrationExtendedTest {
         @Test
         @DisplayName("handleDeploymentException fires ERROR event for ServiceException")
         void handlesServiceException() throws Exception {
-            when(agentFactory.getAgent(any(), eq("agent-1"), eq(1))).thenReturn(null);
-            doThrow(new ServiceException("Deploy failed"))
-                    .when(agentFactory).deployAgent(any(), anyString(), anyInt(), any());
+            // The status lookup is what can throw ServiceException; deployAgent itself
+            // reports failures through its callback.
+            when(agentFactory.getAgent(any(), eq("agent-1"), eq(1))).thenThrow(new ServiceException("Deploy failed"));
             when(runtime.submitCallable(any(Callable.class), any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
 
@@ -182,10 +214,10 @@ class RestAgentAdministrationExtendedTest {
         }
 
         @Test
-        @DisplayName("handleDeploymentException fires ERROR event for IllegalAccessException")
-        void handlesIllegalAccessException() throws Exception {
+        @DisplayName("handleDeploymentException fires ERROR event for an unexpected runtime failure")
+        void handlesUnexpectedRuntimeFailure() throws Exception {
             when(agentFactory.getAgent(any(), eq("agent-1"), eq(1))).thenReturn(null);
-            doThrow(new IllegalAccessException("Deployment locked"))
+            doThrow(new IllegalStateException("Deployment locked"))
                     .when(agentFactory).deployAgent(any(), anyString(), anyInt(), any());
             when(runtime.submitCallable(any(Callable.class), any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
@@ -195,7 +227,8 @@ class RestAgentAdministrationExtendedTest {
             var captor = ArgumentCaptor.forClass(Callable.class);
             verify(runtime).submitCallable(captor.capture(), any());
 
-            assertThrows(WebApplicationException.class, () -> captor.getValue().call());
+            assertThrows(IllegalStateException.class, () -> captor.getValue().call());
+            verify(deploymentListener).onDeploymentEvent(argThat(event -> event.status() == Deployment.Status.ERROR));
         }
     }
 
@@ -206,12 +239,13 @@ class RestAgentAdministrationExtendedTest {
     class ScheduleHooks {
 
         @Test
-        @DisplayName("enableSchedulesForAgent enables disabled schedules")
+        @DisplayName("enableSchedulesForAgent re-enables the schedules the undeploy disabled")
         void enablesDisabledSchedules() throws Exception {
             var schedule = new ScheduleConfiguration();
             schedule.setId("sched-1");
             schedule.setName("Daily task");
             schedule.setEnabled(false);
+            schedule.setDisabledReason(ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
             schedule.setNextFire(Instant.now());
 
             when(agentFactory.getAgent(any(), eq("agent-1"), eq(1))).thenReturn(null);
@@ -233,6 +267,7 @@ class RestAgentAdministrationExtendedTest {
             schedule.setId("sched-2");
             schedule.setName("Weekly task");
             schedule.setEnabled(false);
+            schedule.setDisabledReason(ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
             schedule.setNextFire(null);
 
             when(agentFactory.getAgent(any(), eq("agent-1"), eq(1))).thenReturn(null);
@@ -245,6 +280,29 @@ class RestAgentAdministrationExtendedTest {
             captureAndExecuteCallable();
 
             verify(scheduleStore).setScheduleEnabled(eq("sched-2"), eq(true), any(Instant.class));
+        }
+
+        @Test
+        @DisplayName("a redeploy leaves a user-disabled (or access-revoked) schedule disabled")
+        void leavesUserDisabledSchedulesAlone() throws Exception {
+            var userDisabled = new ScheduleConfiguration();
+            userDisabled.setId("sched-user");
+            userDisabled.setEnabled(false);
+            var revoked = new ScheduleConfiguration();
+            revoked.setId("sched-revoked");
+            revoked.setEnabled(false);
+            revoked.setDisabledReason(ScheduleConfiguration.DISABLED_ACCESS_REVOKED);
+
+            when(agentFactory.getAgent(any(), eq("agent-1"), eq(1))).thenReturn(null);
+            when(scheduleStore.readSchedulesByAgentId("agent-1")).thenReturn(List.of(userDisabled, revoked));
+            when(runtime.submitCallable(any(Callable.class), any()))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            admin.deployAgent(Deployment.Environment.test, "agent-1", 1, false, false);
+            captureAndExecuteCallable();
+
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), eq(true), any());
+            verify(scheduleStore, never()).setScheduleEnabled(anyString(), eq(true), any(), any());
         }
 
         @Test
@@ -308,41 +366,25 @@ class RestAgentAdministrationExtendedTest {
             verify(agentFactory).undeployAgent(Deployment.Environment.test, "agent-1", 1);
             verify(deploymentStore).setDeploymentInfo("test", "agent-1", 1,
                     DeploymentInfo.DeploymentStatus.undeployed);
-            verify(scheduleStore).setScheduleEnabled("sched-1", false, null);
+            verify(scheduleStore).setScheduleEnabled("sched-1", false, null, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
         }
 
         @Test
-        @DisplayName("undeploy handles ServiceException")
-        void handlesServiceException() throws Exception {
+        @DisplayName("undeploy leaves HITL approval timeouts armed")
+        void undeployKeepsHitlTimeoutsArmed() throws Exception {
             when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(0L);
             when(runtime.submitCallable(any(Callable.class), any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
-            doThrow(new ServiceException("Undeploy failed"))
-                    .when(agentFactory).undeployAgent(any(), anyString(), anyInt());
+            var timeout = new ScheduleConfiguration();
+            timeout.setId("hitl-1");
+            timeout.setEnabled(true);
+            timeout.setMetadata(HitlSchedules.timeoutMetadata("AUTO_REJECT", HitlSchedules.SURFACE_REGULAR, "conv-1", "1"));
+            when(scheduleStore.readSchedulesByAgentId("agent-1")).thenReturn(List.of(timeout));
 
             admin.undeployAgent(Deployment.Environment.test, "agent-1", 1, false, false);
+            captureAndExecuteCallable();
 
-            var captor = ArgumentCaptor.forClass(Callable.class);
-            verify(runtime).submitCallable(captor.capture(), any());
-
-            assertThrows(ServiceException.class, () -> captor.getValue().call());
-        }
-
-        @Test
-        @DisplayName("undeploy handles IllegalAccessException with FORBIDDEN")
-        void handlesIllegalAccessException() throws Exception {
-            when(conversationMemoryStore.getActiveConversationCount("agent-1", 1)).thenReturn(0L);
-            when(runtime.submitCallable(any(Callable.class), any()))
-                    .thenReturn(CompletableFuture.completedFuture(null));
-            doThrow(new IllegalAccessException("Already in progress"))
-                    .when(agentFactory).undeployAgent(any(), anyString(), anyInt());
-
-            admin.undeployAgent(Deployment.Environment.test, "agent-1", 1, false, false);
-
-            var captor = ArgumentCaptor.forClass(Callable.class);
-            verify(runtime).submitCallable(captor.capture(), any());
-
-            assertThrows(WebApplicationException.class, () -> captor.getValue().call());
+            verify(scheduleStore, never()).setScheduleEnabled(eq("hitl-1"), eq(false), any(), any());
         }
 
         @Test

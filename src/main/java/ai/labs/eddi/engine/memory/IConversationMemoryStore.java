@@ -5,11 +5,13 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -123,8 +125,68 @@ public interface IConversationMemoryStore {
         return summaries;
     }
 
+    /**
+     * Loads every open conversation of an agent <strong>in full</strong>. Memory
+     * grows with the number of open conversations times their size (a production
+     * 5.x deployment held tens of thousands of conversations of several hundred KB
+     * each), so a sweep or listing over open conversations must use
+     * {@link #loadOpenConversationActivity} instead.
+     */
     List<ConversationMemorySnapshot> loadActiveConversationMemorySnapshot(String agentId, Integer agentVersion)
             throws IResourceStore.ResourceStoreException;
+
+    /**
+     * One batch of the open (not {@code ENDED}) conversations of an agent, as a
+     * projection: id, state, agent, version and last-interaction time, never the
+     * steps. Batches are keyset-paged in ascending id order, so a sweep that ends
+     * conversations while it pages neither skips nor repeats one.
+     *
+     * @param agentId
+     *            the agent
+     * @param agentVersion
+     *            one version, or {@code null} for every version
+     * @param afterConversationId
+     *            the last id of the previous batch, or {@code null} for the first
+     *            batch
+     * @param limit
+     *            the largest batch to return
+     * @return at most {@code limit} summaries; an empty list ends the paging
+     */
+    List<ConversationActivitySummary> loadOpenConversationActivity(String agentId, Integer agentVersion, String afterConversationId, int limit)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
+     * The activity projection of one conversation — the re-check a sweep makes
+     * right before it ends a conversation, without loading it in full.
+     *
+     * @return the summary, or {@code null} when the conversation does not exist
+     */
+    ConversationActivitySummary loadConversationActivity(String conversationId) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Ends idle conversations in the database, in one pass: every {@code READY}
+     * conversation whose last interaction is older than {@code idleSince} (and that
+     * belongs to {@code agentId}, when given) gets state {@code ENDED} and the
+     * {@code endReason}. Nothing is loaded into the application.
+     * <p>
+     * Only {@code READY} is touched: a paused ({@code AWAITING_HUMAN}) conversation
+     * is a live pending approval that needs the HITL-aware end, and an
+     * {@code IN_PROGRESS} one is running. A conversation that carries no timestamp
+     * at all cannot be proven idle and is left alone. Like
+     * {@link #setConversationState}, the write is narrow: it does not move the
+     * document revision, and it does not touch the conversation descriptor.
+     *
+     * @param idleSince
+     *            conversations last active strictly before this instant qualify
+     * @param agentId
+     *            restrict to one agent, or {@code null} for every agent
+     * @param endReason
+     *            the reason to record, or {@code null} for none
+     * @param dryRun
+     *            count what would be ended without ending anything
+     * @return how many conversations were ended (or would be, for a dry run)
+     */
+    long endIdleConversations(Instant idleSince, String agentId, String endReason, boolean dryRun) throws IResourceStore.ResourceStoreException;
 
     void setConversationState(String conversationId, ConversationState conversationState);
 

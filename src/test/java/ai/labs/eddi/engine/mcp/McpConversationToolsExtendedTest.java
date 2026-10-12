@@ -268,13 +268,28 @@ class McpConversationToolsExtendedTest {
     }
 
     @Test
-    void getAgent_nullVersion_defaultsToOne() throws IOException {
-        when(agentStore.readAgent(AGENT_ID, 1)).thenReturn(new AgentConfiguration());
+    void getAgent_nullVersion_defaultsToLatest() throws IOException {
+        // The description promised "default: latest" while the code read version 1,
+        // so an updated agent was answered with its first configuration.
+        when(agentStore.getCurrentVersion(AGENT_ID)).thenReturn(3);
+        when(agentStore.readAgent(AGENT_ID, 3)).thenReturn(new AgentConfiguration());
         when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         tools.getAgent(AGENT_ID, null);
 
-        verify(agentStore).readAgent(AGENT_ID, 1);
+        verify(agentStore).readAgent(AGENT_ID, 3);
+        verify(agentStore, never()).readAgent(AGENT_ID, 1);
+    }
+
+    @Test
+    void getAgent_explicitVersion_isReadAsGiven() throws IOException {
+        when(agentStore.readAgent(AGENT_ID, 2)).thenReturn(new AgentConfiguration());
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+        tools.getAgent(AGENT_ID, 2);
+
+        verify(agentStore).readAgent(AGENT_ID, 2);
+        verify(agentStore, never()).getCurrentVersion(any());
     }
 
     @Test

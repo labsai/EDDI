@@ -8,7 +8,6 @@ import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import {
   useSchedules,
-  useSchedule,
   useCreateSchedule,
   useUpdateSchedule,
   useDeleteSchedule,
@@ -59,23 +58,6 @@ describe("useSchedules", () => {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
-  });
-});
-
-describe("useSchedule", () => {
-  it("fetches a single schedule", async () => {
-    const { result } = renderHook(() => useSchedule("sched-1"), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data!.name).toBe("Daily Health Check");
-  });
-
-  it("is disabled when id is empty", () => {
-    const { result } = renderHook(() => useSchedule(""), {
-      wrapper: createWrapper(),
-    });
-    expect(result.current.fetchStatus).toBe("idle");
   });
 });
 
