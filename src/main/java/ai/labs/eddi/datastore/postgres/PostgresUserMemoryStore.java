@@ -571,6 +571,25 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         }
     }
 
+    /**
+     * One search term against an entry: its key, its value when that is a JSON
+     * string, or a string element of its value when that is an array — what a
+     * MongoDB {@code $regex} on the same two fields matches, and nothing more. It
+     * used to be {@code value::text ILIKE ?}, the value's JSON text: {@code "true"}
+     * found every boolean, a number matched by its digits, and the field names of
+     * an object value matched as if they were content, so the same search answered
+     * differently on the two datastores. The {@code CASE} keeps
+     * {@code jsonb_array_elements} off non-arrays — SQL does not promise that the
+     * {@code jsonb_typeof} test is evaluated first.
+     */
+    static final String TERM_MATCH = "(key ILIKE ?"
+            + " OR (jsonb_typeof(value) = 'string' AND value #>> '{}' ILIKE ?)"
+            + " OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(value) = 'array' THEN value ELSE '[]'::jsonb END) e"
+            + " WHERE jsonb_typeof(e) = 'string' AND e #>> '{}' ILIKE ?))";
+
+    /** How many times {@link #TERM_MATCH} binds the term's pattern. */
+    private static final int TERM_MATCH_PARAMETERS = 3;
+
     @Override
     public List<UserMemoryEntry> filterEntries(String userId, String query) throws IResourceStore.ResourceStoreException {
         ensureSchema();
@@ -585,16 +604,16 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         if (terms.isEmpty()) {
             return new ArrayList<>();
         }
-        String sql = "SELECT * FROM usermemories WHERE user_id = ?"
-                + " AND (key ILIKE ? OR value::text ILIKE ?)".repeat(terms.size())
-                + " ORDER BY updated_at DESC";
+        String sql = "SELECT * FROM usermemories WHERE user_id = ?" + (" AND " + TERM_MATCH).repeat(terms.size())
+                + " ORDER BY updated_at DESC LIMIT " + MAX_FILTER_RESULTS;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             int parameterIndex = 2;
             for (String term : terms) {
                 String pattern = "%" + term + "%";
-                ps.setString(parameterIndex++, pattern);
-                ps.setString(parameterIndex++, pattern);
+                for (int i = 0; i < TERM_MATCH_PARAMETERS; i++) {
+                    ps.setString(parameterIndex++, pattern);
+                }
             }
             List<UserMemoryEntry> entries = new ArrayList<>();
             try (ResultSet rs = ps.executeQuery()) {

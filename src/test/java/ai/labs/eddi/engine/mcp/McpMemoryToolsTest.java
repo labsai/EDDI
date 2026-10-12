@@ -206,6 +206,8 @@ class McpMemoryToolsTest {
 
     @Test
     void deleteUserMemory_success() throws Exception {
+        when(userMemoryStore.findEntryById("entry-1")).thenReturn(Optional.of(new UserMemoryEntry("entry-1", "user1", "color", "blue", "fact",
+                Property.Visibility.self, "agent", List.of(), "conv", false, 0, Instant.now(), Instant.now())));
         when(jsonSerialization.serialize(any())).thenReturn("{\"status\":\"deleted\"}");
         var result = tools.deleteUserMemory("entry-1");
         verify(userMemoryStore).deleteEntry("entry-1");
