@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 
@@ -10,9 +10,9 @@ interface UnsavedChangesDialogProps {
   message?: string;
   /** Title. Defaults to "Unsaved Changes" */
   title?: string;
-  /** Label of the button that stays. Defaults to "Cancel" */
+  /** Label of the cancel button. Defaults to "Cancel". */
   cancelLabel?: string;
-  /** Label of the destructive button. Defaults to "Discard & Leave" */
+  /** Label of the confirm button. Defaults to "Discard & Leave". */
   confirmLabel?: string;
   /** Offers a primary "Save & leave" button when given */
   onSave?: () => void;
@@ -53,14 +53,24 @@ export function UnsavedChangesDialog({
     }
   }, [open]);
 
-  // Esc key cancels
+  // Esc key cancels.
+  //
+  // Registered in the CAPTURE phase and stopped there. This dialog is routinely
+  // opened on top of another one (an editor sheet, a create dialog), and those
+  // listen for Escape on `window` too: a bubble-phase listener here, even with
+  // stopPropagation, still left the other window listeners firing, so one Escape
+  // closed both dialogs and the user lost the very edit this one was protecting.
+  // Capture runs before any of them, and stopPropagation then ends the event.
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      e.preventDefault();
+      onCancel();
     }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [open, onCancel]);
 
   // Focus trap
@@ -101,7 +111,7 @@ export function UnsavedChangesDialog({
           aria-modal="true"
           aria-labelledby="unsaved-dialog-title"
           aria-describedby="unsaved-dialog-desc"
-          className="w-full max-w-md rounded-xl border bg-card shadow-2xl"
+          className="w-full max-w-sm rounded-xl border bg-card shadow-2xl"
           onKeyDown={handleKeyDown}
         >
           <div className="flex items-center gap-3 border-b border-border p-5">
@@ -159,57 +169,5 @@ export function UnsavedChangesDialog({
         </div>
       </div>
     </>
-  );
-}
-
-/**
- * The in-app navigation prompt for a page guarded by `useUnsavedChangesGuard`.
- * Renders nothing until a navigation away from the dirty page is held.
- */
-export function UnsavedChangesPrompt({
-  guard,
-  onSave,
-}: {
-  guard: { blocked: boolean; proceed: () => void; stay: () => void };
-  /**
-   * Offers "Save & leave". Resolve `true` once saved: the held navigation then
-   * continues (the blocker also lets it through by itself once the page is
-   * clean). `false` keeps the user on the page — the save reports its own error.
-   */
-  onSave?: () => Promise<boolean>;
-}) {
-  const { t } = useTranslation();
-  const [saving, setSaving] = useState(false);
-
-  async function saveAndLeave() {
-    if (!onSave) return;
-    setSaving(true);
-    try {
-      if (await onSave()) guard.proceed();
-    } catch {
-      // The save reports its own failure; stay so nothing is lost.
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!onSave) {
-    return <UnsavedChangesDialog open={guard.blocked} onConfirm={guard.proceed} onCancel={guard.stay} />;
-  }
-  return (
-    <UnsavedChangesDialog
-      open={guard.blocked}
-      title={t("editor.leaveTitle", "Leave with unsaved changes?")}
-      message={t(
-        "editor.leaveMessage",
-        "You have changes on this page that are not saved yet. Save them, discard them, or keep editing.",
-      )}
-      cancelLabel={t("editor.keepEditing", "Keep editing")}
-      confirmLabel={t("editor.discardChanges", "Discard changes")}
-      onConfirm={guard.proceed}
-      onCancel={guard.stay}
-      onSave={() => void saveAndLeave()}
-      isSaving={saving}
-    />
   );
 }

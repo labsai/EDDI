@@ -41,8 +41,7 @@ import {
   type AddExtensionResult,
 } from "@/components/editors/add-extension-dialog";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
-import { UnsavedChangesPrompt } from "@/components/ui/unsaved-changes-dialog";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { getAgent, updateAgent } from "@/lib/api/agents";
 import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
@@ -127,8 +126,6 @@ export function WorkflowDetailPage() {
     localExtensions !== null &&
     JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
 
-  // Warn on tab close/reload, and hold in-app navigation, when dirty
-  const unsavedGuard = useUnsavedChangesGuard(isDirty);
 
   // Save & Test support
   const { saveAndDeploy, isRunning: isSaveAndDeploying } = useSaveAndDeploy();
@@ -253,6 +250,10 @@ export function WorkflowDetailPage() {
     }
   }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, t]);
 
+  // Warn on tab close/reload, and hold in-app navigation, when dirty — with
+  // Save & leave, since this page can save on demand.
+  useUnsavedChangesGuard(isDirty, { onSave: handleSave });
+
   const handleSaveAndDeploy = useCallback(async () => {
     if (!isDirty || !localExtensions || !agentId || !currentAgentVer) return;
 
@@ -342,8 +343,8 @@ export function WorkflowDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " \u2713");
           setShowDeleteDialog(false);
-          // The workflow is gone; its unsaved edits have nothing left to protect.
-          unsavedGuard.allowNextNavigation();
+          // The document is gone — nothing left for the unsaved-changes guard to protect.
+          allowNextNavigation();
           navigate("/manage/workflows");
         },
         onError: (err) => toast.error(getErrorMessage(err)),
@@ -593,7 +594,6 @@ export function WorkflowDetailPage() {
         onConfirm={handleDelete}
         isPending={deleteMutation.isPending}
       />
-      <UnsavedChangesPrompt guard={unsavedGuard} onSave={handleSave} />
     </div>
   );
 }

@@ -29,16 +29,15 @@ resource editors:
 - The debounce timers and the per-agent save queue that existed only to make
   auto-save survivable are gone (`use-agent-section-save.ts` removed).
 
-**Leaving with unsaved edits.** Agent detail uses the data-router blocker that
-#939 introduced (`useUnsavedChangesGuard` + `UnsavedChangesPrompt`), and the
-prompt gains an optional `onSave`: pages that can save from it — agent detail
-and the workflow editor — offer **Keep editing / Discard changes / Save &
-leave**, and the held navigation continues only once the save landed. Pages
-without `onSave` keep the two-button prompt. (This branch first carried its own
-app-wide guard, written while the app was still on `<BrowserRouter>`; it was
-dropped in favour of #939's when that merged.) While a placeholder document from
-the previous version is on screen (#939's `configPending`), the draft takes no
-edits.
+**Leaving with unsaved edits.** The app holds in-app navigation with one router
+blocker and one prompt (`NavigationGuardDialog`, #968); a page only calls
+`useUnsavedChangesGuard`. This adds an optional `onSave` to that hook: when every
+dirty page can save on demand, the prompt also offers **Save & leave** and lets the
+navigation through only once the save landed. Agent detail and the workflow
+editor pass it. (This branch first carried its own app-wide guard, written while
+the app was still on `<BrowserRouter>`, then a per-page prompt after #939; both
+were dropped as #939 and #968 landed.) While a placeholder document from the
+previous version is on screen (#939's `configPending`), the draft takes no edits.
 
 **Also:** the "compat. gen 1" badge left the monospace id line, where it
 inherited the code font and duplicated the version chip; it now sits beside the
@@ -54,16 +53,18 @@ against the dialog border; it now has the `p-5` every other dialog body has.
 
 - One draft of the whole document rather than per-section drafts: one Save, one
   version, one diff, and the same shape as the workflow editor.
-- Save & leave lives on the shared `UnsavedChangesPrompt`, not on the agent
-  page, so any editor with a save that resolves to success can opt in.
+- Save & leave lives in the shared guard and prompt, not on the agent page, so
+  any editor whose save resolves to success can opt in with one argument.
 
 **Files:** [`agent-detail.tsx`](../../ui/manager/src/pages/agent-detail.tsx),
 [`agent-config-sections.tsx`](../../ui/manager/src/components/editors/agent-config-sections.tsx),
 [`agent-draft.ts`](../../ui/manager/src/lib/agent-draft.ts),
 [`unsaved-changes-dialog.tsx`](../../ui/manager/src/components/ui/unsaved-changes-dialog.tsx),
+[`use-unsaved-changes-guard.ts`](../../ui/manager/src/hooks/use-unsaved-changes-guard.ts),
+[`navigation-guard-dialog.tsx`](../../ui/manager/src/components/shared/navigation-guard-dialog.tsx),
 [`edit-grant-dialog.tsx`](../../ui/manager/src/components/secrets/edit-grant-dialog.tsx),
 [`compatibility-generation-badge.tsx`](../../ui/manager/src/components/agents/compatibility-generation-badge.tsx)
 
 ```decision-log
-| 2026-10-06 | Agent detail edits a draft saved by an explicit Save, with Save & leave on the shared unsaved-changes prompt | Every inline edit created an agent version and could not be undone | Keeping auto-save with an undo stack; a second, app-wide navigation guard beside #939's data-router blocker |
+| 2026-10-06 | Agent detail edits a draft saved by an explicit Save, with Save & leave on the app's one unsaved-changes prompt | Every inline edit created an agent version and could not be undone | Keeping auto-save with an undo stack; a second navigation guard beside the router's single blocker |
 ```

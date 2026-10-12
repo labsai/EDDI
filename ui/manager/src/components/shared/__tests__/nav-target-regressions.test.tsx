@@ -109,7 +109,7 @@ describe("command palette page and action entries", () => {
     [/^Logs$/, "/manage/logs"],
     [/^Audit Trail$/, "/manage/audit"],
     [/^User Data$/, "/manage/userdata"],
-    [/^Create New Agent$/, "/manage/agents?action=create"],
+    [/^Create New Agent$/, "/manage/agents/wizard"],
     [/^Open Chat$/, "/manage/chat"],
   ];
 

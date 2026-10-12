@@ -76,7 +76,11 @@
     "monitoring": "مراقبة المحادثات",
     "analytics": "التحليلات",
     "connections": "الاتصالات",
-    "workspaces": "مساحات العمل"
+    "workspaces": "مساحات العمل",
+    "breadcrumb": "مسار التنقل",
+    "checkingVersion": "جارٍ التحقق من الإصدار...",
+    "expandSidebar": "توسيع الشريط الجانبي",
+    "collapseSidebar": "طي الشريط الجانبي"
   },
   "theme": {
     "light": "فاتح",
@@ -970,9 +974,8 @@
     "savedNotLiveDescription": "لا يزال الوكيل قيد التشغيل يقدّم النسخة المنشورة. انشر لتفعيل هذا التغيير.",
     "deployNow": "نشر",
     "deployStarted": "بدأ النشر",
+    "stay": "البقاء",
     "invalidJsonNotSaved": "لم يتم الحفظ — JSON غير صالح: {{reason}}",
-    "leaveTitle": "المغادرة مع تغييرات غير محفوظة؟",
-    "leaveMessage": "توجد في هذه الصفحة تغييرات لم تُحفظ بعد. احفظها أو تجاهلها أو تابع التحرير.",
     "keepEditing": "متابعة التحرير",
     "discardChanges": "تجاهل التغييرات",
     "saveAndLeave": "حفظ ومغادرة",
@@ -2544,7 +2547,8 @@
       "title": "المساعدة والجولة",
       "platformTour": "جولة المنصة",
       "resetAll": "إعادة تعيين جميع الجولات",
-      "resetConfirm": "هل تريد إعادة تعيين تقدم الجولات؟"
+      "resetConfirm": "هل تريد إعادة تعيين تقدم الجولات؟",
+      "completed": "مكتمل"
     },
     "offer": {
       "message": "هل أنت جديد هنا؟ خذ {{page}}",
@@ -2577,7 +2581,8 @@
     "quickCreateTitle": "إنشاء سريع {{type}}",
     "quickCreateDesc": "عيّن اسماً ووصفاً، ونفّذ التكوين الدقيق لاحقاً.",
     "guidedSetup": "إعداد موجه",
-    "guidedSetupDesc": "معالج خطوة بخطوة من خيارات LLM والمطالبات والنشر."
+    "guidedSetupDesc": "معالج خطوة بخطوة من خيارات LLM والمطالبات والنشر.",
+    "guidedSetupDescGroup": "معالج خطوة بخطوة للفريق وأسلوب النقاش والموافقات الاختيارية — ويمكنه إنشاء وكلاء الأعضاء أيضًا."
   },
   "groups": {
     "actionConflict": "لا تزال عملية أخرى قيد التنفيذ، أو لم يعد هذا النقاش يقبل ذلك الإجراء. يرجى إعادة المحاولة.",
@@ -3564,14 +3569,61 @@
     "humanPrincipalIdPlaceholder": "معرّف تسجيل الدخول/الهوية الأساسية للمستخدم",
     "humanTurnSettingsHint": "يتوقف النقاش مؤقتًا وينتظر عندما يحين دور عضو بشري للحديث. حدد ما يحدث إذا لم يستجب في الوقت المحدد.",
     "humanTurnSettingsTitle": "إعدادات دور الأعضاء البشريين",
-    "humanTurnTimeoutInvalid": "ليست مدة صالحة بصيغة ISO-8601، مثل PT24H أو P1D.",
-    "humanTurnTimeoutLabel": "مهلة الدور (مدة بصيغة ISO-8601)",
-    "humanTurnTimeoutPlaceholder": "مثل PT24H — اتركه فارغًا للانتظار إلى أجل غير مسمى",
+    "humanTurnTimeoutInvalid": "أدخل رقمًا أكبر من الصفر.",
+    "humanTurnTimeoutLabel": "مهلة الدور",
+    "humanTurnTimeoutPlaceholder": "اتركه فارغًا للانتظار إلى أجل غير مسمى.",
     "memberTypeHuman": "بشري",
-    "memberPromptPlaceholder": "أنت {{name}}. قدّم تحليلًا ثاقبًا من منظور مجال تخصصك.",
-    "memberPromptPlaceholderRole": "أنت {{name}}، خبير في {{role}}. قدّم تحليلًا ثاقبًا من منظور مجال تخصصك.",
-    "moderatorPromptPlaceholder": "أنت مشرف حوار متمرّس. لخّص نقاش المجموعة في ملخص واضح ومتوازن…",
-    "modelPlaceholder": "مثال: {{model}}"
+    "modelPlaceholder": "مثال: {{model}}",
+    "stepTemplate": "قالب مبدئي",
+    "stepConfig": "الإعداد",
+    "stepMembers": "الأعضاء",
+    "stepReview": "المراجعة",
+    "stepsLabel": "تقدّم المعالج",
+    "stepAria": "الخطوة {{n}}: {{title}}",
+    "blockersTitle": "للمتابعة:",
+    "blockerName": "أدخل اسمًا للمجموعة.",
+    "blockerHitlPhases": "اختر مرحلة واحدة على الأقل للإيقاف المؤقت، أو أوقف الموافقة البشرية.",
+    "blockerHitlTimeout": "أدخل مهلة موافقة صالحة (مثل PT15M)، أو اختر سياسة مهلة أخرى.",
+    "blockerStyle": "اختر أسلوب نقاش يدعمه هذا الخادم.",
+    "blockerMemberName": "{{member}}: أضف اسم عرض.",
+    "blockerMemberPrincipal": "{{member}}: أدخل المعرّف الأساسي للشخص.",
+    "blockerMemberGroup": "{{member}}: اختر المجموعة المتداخلة.",
+    "blockerMemberAgent": "{{member}}: اختر وكيلًا موجودًا أو بدّل إلى «إنشاء جديد».",
+    "blockerMemberKey": "{{member}}: أضف مفتاح API لـ {{provider}} أو اختر مزوّدًا لا يحتاج إلى مفتاح (مثل Ollama).",
+    "blockerModeratorKey": "المشرف: أضف مفتاح API لـ {{provider}} أو اختر مزوّدًا لا يحتاج إلى مفتاح (مثل Ollama).",
+    "blockerTurnTimeout": "اضبط مهلة دور العضو البشري على رقم أكبر من الصفر، أو امسح الحقل.",
+    "memberFallbackName": "العضو {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "عصف ذهني مفتوح — كل وجهات النظر حول سؤال ما.",
+      "PEER_REVIEW": "مراجعة مسودة أو مقترح من عدة زوايا.",
+      "DEVIL_ADVOCATE": "اختبار خطة بقسوة قبل الالتزام بها.",
+      "DELPHI": "توقعات وتقديرات يُفترض أن تتقارب فيها الآراء المستقلة.",
+      "DEBATE": "الموازنة بين قرار وطرفين متعارضين.",
+      "TASK_FORCE": "التخطيط لعمل متعدد الخطوات وتنفيذه بمهام موزّعة.",
+      "NEGOTIATION": "التوصل إلى اتفاق بين أطراف ذات مصالح مختلفة."
+    },
+    "howItRuns": "كيف يعمل",
+    "roundsExplain": "الجولة هي أن يتحدث كل عضو مرة واحدة. تتيح الجولات الأكثر للأعضاء الرد على بعضهم، لكن كل جولة إضافية تزيد استدعاءات LLM والتكلفة.",
+    "roundsEstimate": "تقدير: نحو {{calls}} استدعاء لـ LLM في كل نقاش ({{members}} أعضاء × {{rounds}} جولات).",
+    "roundsEstimateModerator": "تقدير: نحو {{calls}} استدعاء لـ LLM في كل نقاش ({{members}} أعضاء × {{rounds}} جولات + مشرف واحد).",
+    "unitMinutes": "دقائق",
+    "unitHours": "ساعات",
+    "unitDays": "أيام",
+    "durationNoLimit": "بلا حد",
+    "durationUnit": "الوحدة",
+    "defaultMemberPrompt": "أنت {{name}}. قدّم رؤى واضحة وقابلة للتنفيذ من منظور مجال خبرتك.",
+    "defaultMemberPromptRole": "أنت {{name}}، متخصص في {{role}}. قدّم رؤى واضحة وقابلة للتنفيذ من منظور مجال خبرتك.",
+    "defaultMemberPromptNoName": "أنت عضو في هذه المجموعة. قدّم رؤى واضحة وقابلة للتنفيذ من منظور مجال خبرتك.",
+    "defaultModeratorPrompt": "أنت مشرف ماهر. لخّص نقاش المجموعة في ملخص واضح ومتوازن يشمل الرؤى الرئيسية ونقاط الاتفاق والخلافات المتبقية.",
+    "memberNameLabel": "اسم العرض",
+    "memberRoleLabel": "الدور",
+    "memberTypeLabel": "نوع العضو",
+    "bulkTitle": "المزوّد والمفتاح نفسهما لجميع الوكلاء الجدد",
+    "bulkHint": "يحتاج كل وكيل جديد إلى مزوّد LLM، ومعظم المزوّدين يتطلبون مفتاح API. املأه مرة واحدة هنا وطبّقه على الجميع؛ ويمكنك لاحقًا تغيير وكيل بعينه.",
+    "bulkApply": "تطبيق على جميع الوكلاء الجدد",
+    "apiKeyRequired": "يحتاج {{provider}} إلى مفتاح API قبل إنشاء هذا الوكيل.",
+    "presetsNote": "هذه قوالب مبدئية تملأ هذا المعالج. لاستخدام نقاش جاهز ومضبوط وإسناد وكلائك الحاليين إلى أدواره، راجع",
+    "presetsLink": "قوالب المجموعات"
   },
   "groupTemplates": {
     "advisoryBoard": "مجلس استشاري",
@@ -3631,7 +3683,9 @@
     "roleCount_zero": "{{count}} أدوار للتعيين",
     "roleCount_other": "{{count}} أدوار للتعيين",
     "empty": "لا توجد قوالب متاحة",
-    "emptyDescription": "لا يوفّر هذا الخادم أي قوالب مجموعات. لا يزال بإمكانك إنشاء مجموعة من الصفر عبر المعالج."
+    "emptyDescription": "لا يوفّر هذا الخادم أي قوالب مجموعات. لا يزال بإمكانك إنشاء مجموعة من الصفر عبر المعالج.",
+    "wizardNote": "تفضّل إنشاء وكلاء جدد أثناء العمل أو البناء من الصفر؟ يقدّم معالج المجموعات قوالب مبدئية أخف.",
+    "wizardLink": "افتح معالج المجموعات"
   },
   "channels": {
     "agentIdPlaceholder": "معرف الوكيل لمعالجة الرسائل",
@@ -4945,7 +4999,13 @@
     "inputTemplateTooLong": "قالب المطالبة محدود بـ {{max}} حرفاً.",
     "cronInvalid": "هذا ليس تعبير cron صالحًا.",
     "scheduleUnknown": "الجدولة غير متاحة",
-    "nextRun": "التالي {{when}}"
+    "nextRun": "التالي {{when}}",
+    "taskSubjectLabel": "الموضوع",
+    "taskDescriptionLabel": "الوصف",
+    "inputTemplateLabel": "قالب الموجّه",
+    "priorityTitle": "الأولوية {{n}} — تُختار الأرقام الأعلى أولًا",
+    "backlogNote": "تختار كل جولة إيقاعية المهام الأعلى أولوية أولًا (P5 قبل P1). لا يمكن تعديل المهمة أو إزالتها بعد إضافتها؛ تُكملها الجولة.",
+    "priorityHint": "تختار الجولة الإيقاعية الأرقام الأعلى أولًا. القيمة الافتراضية 0."
   },
   "workforceWizard": {
     "title": "فريق جديد"
@@ -5583,10 +5643,21 @@
     "impactReasonBreaking": "تغيير غير متوافق",
     "switchNotice": "انتقل الوكيل من v{{from}} إلى v{{to}}"
   },
+  "notFound": {
+    "title": "الصفحة غير موجودة",
+    "description": "لا يوجد شيء في هذا العنوان. ربما تم نقله، أو أن الرابط مكتوب بشكل خاطئ.",
+    "backToDashboard": "العودة إلى لوحة التحكم",
+    "backToWorkforce": "العودة إلى Workforce",
+    "chooseWorkspace": "اختيار مساحة عمل"
+  },
   "actionTags": {
     "remove": "إزالة {{action}}",
     "none": "لا توجد إجراءات",
     "inputLabel": "إجراء جديد",
     "add": "إضافة إجراء"
+  },
+  "wizardLeave": {
+    "title": "المغادرة دون إنشاء؟",
+    "message": "لم يُنشأ إعداد فريقك بعد، بما في ذلك الموجّهات ومفاتيح API التي أدخلتها، وسيُفقد."
   }
 }

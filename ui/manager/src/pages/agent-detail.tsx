@@ -66,7 +66,7 @@ import {
 import { parseVersionFromLocation } from "@/lib/api/location-version";
 import { agentKeys } from "@/lib/query-keys";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { UnsavedChangesDialog, UnsavedChangesPrompt } from "@/components/ui/unsaved-changes-dialog";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
@@ -284,9 +284,9 @@ export function AgentDetailPage() {
     setShowReviewDialog(false);
   }
 
-  // Tab close / reload, and leaving by any in-app navigation (the data router's
-  // blocker) — answered by the prompt below, which also offers Save & leave.
-  const unsavedGuard = useUnsavedChangesGuard(isDirty);
+  // Tab close / reload, and leaving by any in-app navigation — the app's one
+  // blocker asks, and offers Save & leave because this page can save on demand.
+  useUnsavedChangesGuard(isDirty, { onSave: saveDraft });
 
   // Ctrl/Cmd+S saves while there is something to save.
   useEffect(() => {
@@ -994,9 +994,6 @@ export function AgentDetailPage() {
           </div>
         </div>
       </AccessibleDialog>
-
-      {/* Leaving with unsaved edits */}
-      <UnsavedChangesPrompt guard={unsavedGuard} onSave={saveDraft} />
 
       {/* Discard confirmation */}
       <UnsavedChangesDialog
