@@ -18,7 +18,6 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
-import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -131,7 +130,7 @@ class RestAgentAdministrationUndeployResilienceTest {
     @Test
     @DisplayName("undeployThisAndAllPreviousAgentVersions carries on past a failing version and reports it")
     void continuesPastAFailingVersion() throws Exception {
-        doThrow(new ServiceException("boom")).when(agentFactory).undeployAgent(ENV, AGENT, 2);
+        doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(ENV, AGENT, 2);
 
         var failure = assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 3, false, true));
 
@@ -159,7 +158,7 @@ class RestAgentAdministrationUndeployResilienceTest {
     @Test
     @DisplayName("a single-version undeploy still fails on its first error")
     void singleVersionFailsAsBefore() throws Exception {
-        doThrow(new ServiceException("boom")).when(agentFactory).undeployAgent(ENV, AGENT, 2);
+        doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(ENV, AGENT, 2);
 
         assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 2, false, false));
     }
