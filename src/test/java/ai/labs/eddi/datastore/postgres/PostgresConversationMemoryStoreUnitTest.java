@@ -77,14 +77,14 @@ class PostgresConversationMemoryStoreUnitTest {
 
     @Test
     void storeSnapshot_existingConversation_updates() throws Exception {
-        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        ConversationMemorySnapshot snapshot = createSnapshot("00000000-0000-4000-8000-000000000001");
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
         String id = store.storeConversationMemorySnapshot(snapshot);
 
-        assertEquals("conv-123", id);
-        verify(preparedStatement).setString(5, "conv-123");
+        assertEquals("00000000-0000-4000-8000-000000000001", id);
+        verify(preparedStatement).setString(5, "00000000-0000-4000-8000-000000000001");
     }
 
     /**
@@ -94,7 +94,7 @@ class PostgresConversationMemoryStoreUnitTest {
      */
     @Test
     void storeSnapshot_fullUpdateRefusesAStoredEnded() throws Exception {
-        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        ConversationMemorySnapshot snapshot = createSnapshot("00000000-0000-4000-8000-000000000001");
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
@@ -114,8 +114,8 @@ class PostgresConversationMemoryStoreUnitTest {
         when(resultSet.next()).thenReturn(true, false);
         when(resultSet.getLong("rev")).thenReturn(4L);
 
-        assertEquals(4L, store.getRevision("conv-123"));
-        assertNull(store.getRevision("conv-123"));
+        assertEquals(4L, store.getRevision("00000000-0000-4000-8000-000000000001"));
+        assertNull(store.getRevision("00000000-0000-4000-8000-000000000001"));
         // Both paths - a row found and no row - must release the ResultSet.
         verify(resultSet, times(2)).close();
     }
@@ -131,7 +131,7 @@ class PostgresConversationMemoryStoreUnitTest {
      */
     @Test
     void storeSnapshot_conversationDeletedMidTurn_throwsResourceStoreException() throws Exception {
-        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        ConversationMemorySnapshot snapshot = createSnapshot("00000000-0000-4000-8000-000000000001");
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(0);
         ProbeResources probe = stubConversationExists(false);
@@ -139,7 +139,7 @@ class PostgresConversationMemoryStoreUnitTest {
         var thrown = assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.storeConversationMemorySnapshot(snapshot));
 
-        assertTrue(thrown.getMessage().contains("conv-123"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("00000000-0000-4000-8000-000000000001"), thrown.getMessage());
         assertTrue(thrown.getMessage().contains("NOT persisted"), thrown.getMessage());
         assertFalse(thrown instanceof ConcurrentConversationModificationException,
                 "an erased conversation has nothing to retry against — it must not be reported as a revision conflict");
@@ -154,7 +154,7 @@ class PostgresConversationMemoryStoreUnitTest {
      */
     @Test
     void storeSnapshot_concurrentWriter_throwsConcurrentModification() throws Exception {
-        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        ConversationMemorySnapshot snapshot = createSnapshot("00000000-0000-4000-8000-000000000001");
         snapshot.setRevision(4L);
         when(jsonSerialization.serialize(snapshot)).thenReturn("{\"test\":true}");
         when(preparedStatement.executeUpdate()).thenReturn(0);
@@ -163,7 +163,7 @@ class PostgresConversationMemoryStoreUnitTest {
         var thrown = assertThrows(ConcurrentConversationModificationException.class,
                 () -> store.storeConversationMemorySnapshot(snapshot));
 
-        assertEquals("conv-123", thrown.getConversationId());
+        assertEquals("00000000-0000-4000-8000-000000000001", thrown.getConversationId());
         assertEquals(4L, thrown.getExpectedRevision());
         assertEquals(4L, snapshot.getRevision(),
                 "a refused write must leave the snapshot on the revision it was derived from");
@@ -218,7 +218,7 @@ class PostgresConversationMemoryStoreUnitTest {
      */
     @Test
     void storeSnapshot_pureAppend_serializesTheSnapshotOnceForTheBody() throws Exception {
-        ConversationMemorySnapshot snapshot = createSnapshot("conv-123");
+        ConversationMemorySnapshot snapshot = createSnapshot("00000000-0000-4000-8000-000000000001");
         snapshot.setConversationSteps(new LinkedList<>(List.of(new ConversationMemorySnapshot.ConversationStepSnapshot())));
         snapshot.setConversationOutputs(new LinkedList<>(List.of(new ConversationOutput())));
         snapshot.setPersistedStepCount(0);
@@ -262,10 +262,10 @@ class PostgresConversationMemoryStoreUnitTest {
         snapshot.setConversationSteps(Collections.emptyList());
         when(jsonSerialization.deserialize("{\"agentId\":\"a1\"}", ConversationMemorySnapshot.class)).thenReturn(snapshot);
 
-        ConversationMemorySnapshot result = store.loadConversationMemorySnapshot("conv-1");
+        ConversationMemorySnapshot result = store.loadConversationMemorySnapshot("00000000-0000-4000-8000-000000000002");
 
         assertNotNull(result);
-        assertEquals("conv-1", result.getConversationId());
+        assertEquals("00000000-0000-4000-8000-000000000002", result.getConversationId());
     }
 
     @Test
@@ -273,13 +273,13 @@ class PostgresConversationMemoryStoreUnitTest {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(false);
 
-        assertNull(store.loadConversationMemorySnapshot("missing-id"));
+        assertNull(store.loadConversationMemorySnapshot("00000000-0000-4000-8000-000000000003"));
     }
 
     @Test
     void loadSnapshot_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
-        assertThrows(RuntimeException.class, () -> store.loadConversationMemorySnapshot("id"));
+        assertThrows(RuntimeException.class, () -> store.loadConversationMemorySnapshot("00000000-0000-4000-8000-000000000004"));
     }
 
     // ─── loadActiveConversationMemorySnapshot ───
@@ -310,33 +310,33 @@ class PostgresConversationMemoryStoreUnitTest {
     @Test
     void setConversationState_happyPath() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
-        assertDoesNotThrow(() -> store.setConversationState("conv-1", ConversationState.ENDED));
+        assertDoesNotThrow(() -> store.setConversationState("00000000-0000-4000-8000-000000000002", ConversationState.ENDED));
         verify(preparedStatement).setString(1, "ENDED");
     }
 
     @Test
     void setConversationState_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
-        assertThrows(RuntimeException.class, () -> store.setConversationState("conv", ConversationState.ENDED));
+        assertThrows(RuntimeException.class, () -> store.setConversationState("00000000-0000-4000-8000-000000000005", ConversationState.ENDED));
     }
 
     @Test
     void setConversationEndReason_patchesOnlyTheJsonField() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        store.setConversationEndReason("conv-1", "agent-version-retired");
+        store.setConversationEndReason("00000000-0000-4000-8000-000000000002", "agent-version-retired");
 
         verify(connection).prepareStatement(
                 "UPDATE conversation_memories SET data = jsonb_set(data, '{endReason}', to_jsonb(?::text)) WHERE id = ?::uuid");
         verify(preparedStatement).setString(1, "agent-version-retired");
-        verify(preparedStatement).setString(2, "conv-1");
+        verify(preparedStatement).setString(2, "00000000-0000-4000-8000-000000000002");
     }
 
     @Test
     void setConversationEndReason_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
 
-        assertThrows(RuntimeException.class, () -> store.setConversationEndReason("conv-1", "agent-version-retired"));
+        assertThrows(RuntimeException.class, () -> store.setConversationEndReason("00000000-0000-4000-8000-000000000002", "agent-version-retired"));
     }
 
     // ─── deleteConversationMemorySnapshot ───
@@ -344,13 +344,13 @@ class PostgresConversationMemoryStoreUnitTest {
     @Test
     void deleteSnapshot_happyPath() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
-        assertDoesNotThrow(() -> store.deleteConversationMemorySnapshot("conv-1"));
+        assertDoesNotThrow(() -> store.deleteConversationMemorySnapshot("00000000-0000-4000-8000-000000000002"));
     }
 
     @Test
     void deleteSnapshot_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
-        assertThrows(RuntimeException.class, () -> store.deleteConversationMemorySnapshot("conv"));
+        assertThrows(RuntimeException.class, () -> store.deleteConversationMemorySnapshot("00000000-0000-4000-8000-000000000005"));
     }
 
     // ─── getConversationState ───
@@ -361,7 +361,7 @@ class PostgresConversationMemoryStoreUnitTest {
         when(resultSet.next()).thenReturn(true);
         when(resultSet.getString("conversation_state")).thenReturn("READY");
 
-        assertEquals(ConversationState.READY, store.getConversationState("conv-1"));
+        assertEquals(ConversationState.READY, store.getConversationState("00000000-0000-4000-8000-000000000002"));
     }
 
     @Test
@@ -369,13 +369,13 @@ class PostgresConversationMemoryStoreUnitTest {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(false);
 
-        assertNull(store.getConversationState("missing"));
+        assertNull(store.getConversationState("00000000-0000-4000-8000-000000000006"));
     }
 
     @Test
     void getConversationState_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("error"));
-        assertThrows(RuntimeException.class, () -> store.getConversationState("conv"));
+        assertThrows(RuntimeException.class, () -> store.getConversationState("00000000-0000-4000-8000-000000000005"));
     }
 
     // ─── getActiveConversationCount ───
@@ -401,11 +401,11 @@ class PostgresConversationMemoryStoreUnitTest {
     void getEndedConversationIds_returnsList() throws Exception {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(true, true, false);
-        when(resultSet.getString("id")).thenReturn("conv-1", "conv-2");
+        when(resultSet.getString("id")).thenReturn("00000000-0000-4000-8000-000000000002", "conv-2");
 
         List<String> ids = store.getEndedConversationIds();
         assertEquals(2, ids.size());
-        assertEquals("conv-1", ids.get(0));
+        assertEquals("00000000-0000-4000-8000-000000000002", ids.get(0));
     }
 
     @Test
@@ -421,7 +421,7 @@ class PostgresConversationMemoryStoreUnitTest {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(false);
 
-        assertNull(store.readIncludingDeleted("id-1", 0));
+        assertNull(store.readIncludingDeleted("00000000-0000-4000-8000-000000000007", 0));
     }
 
     @Test
@@ -440,35 +440,35 @@ class PostgresConversationMemoryStoreUnitTest {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(false);
 
-        assertNull(store.read("id-1", 0));
+        assertNull(store.read("00000000-0000-4000-8000-000000000007", 0));
     }
 
     @Test
     void update_delegatesToStore() throws Exception {
-        ConversationMemorySnapshot snapshot = createSnapshot("conv-1");
+        ConversationMemorySnapshot snapshot = createSnapshot("00000000-0000-4000-8000-000000000002");
         when(jsonSerialization.serialize(snapshot)).thenReturn("{}");
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        Integer result = store.update("conv-1", 0, snapshot);
+        Integer result = store.update("00000000-0000-4000-8000-000000000002", 0, snapshot);
         assertEquals(0, result);
     }
 
     @Test
     void delete_delegatesToDeleteSnapshot() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
-        assertDoesNotThrow(() -> store.delete("conv-1", 0));
+        assertDoesNotThrow(() -> store.delete("00000000-0000-4000-8000-000000000002", 0));
     }
 
     @Test
     void deleteAllPermanently_delegatesToDeleteSnapshot() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
-        assertDoesNotThrow(() -> store.deleteAllPermanently("conv-1"));
+        assertDoesNotThrow(() -> store.deleteAllPermanently("00000000-0000-4000-8000-000000000002"));
     }
 
     @Test
     void getCurrentResourceId_returnsId() {
-        IResourceStore.IResourceId resourceId = store.getCurrentResourceId("conv-1");
-        assertEquals("conv-1", resourceId.getId());
+        IResourceStore.IResourceId resourceId = store.getCurrentResourceId("00000000-0000-4000-8000-000000000002");
+        assertEquals("00000000-0000-4000-8000-000000000002", resourceId.getId());
         assertEquals(0, resourceId.getVersion());
     }
 
@@ -478,11 +478,11 @@ class PostgresConversationMemoryStoreUnitTest {
     void getConversationIdsByUserId_returnsList() throws Exception {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(true, false);
-        when(resultSet.getString("id")).thenReturn("conv-1");
+        when(resultSet.getString("id")).thenReturn("00000000-0000-4000-8000-000000000002");
 
         List<String> ids = store.getConversationIdsByUserId("user-1");
         assertEquals(1, ids.size());
-        assertEquals("conv-1", ids.get(0));
+        assertEquals("00000000-0000-4000-8000-000000000002", ids.get(0));
     }
 
     @Test
