@@ -69,3 +69,10 @@ after the save-time checks had passed on the reference text.
 [`EmbeddingStoreFactory.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/EmbeddingStoreFactory.java),
 [`EmbeddingModelFactory.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/EmbeddingModelFactory.java),
 [`rag.md`](../rag.md).
+
+**Integration Tests fix (same branch):** `RagIngestionIT.replaceAccepted` still expected the `202`
+response's `kbId` to be the configuration's name (`ingestion-it-kb`); since this branch the response names
+the knowledge base by its id, as `docs/rag.md` documents. The IT now asserts the id, and a new
+`foreignKbIdRefused` case drives the `?kbId=` refusal through the real filter chain: another knowledge
+base's name is a `400`, this knowledge base's own name is still accepted. File:
+[`RagIngestionIT.java`](../../src/test/java/ai/labs/eddi/integration/RagIngestionIT.java).
