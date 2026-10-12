@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.bootstrap.LlmModule;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import io.micrometer.core.instrument.Counter;
@@ -203,7 +204,8 @@ public class SummarizationService {
 
             List<ChatMessage> messages = List.of(SystemMessage.from(instructions), UserMessage.from(content));
 
-            var response = model.chat(ChatRequest.builder().messages(messages).build());
+            var response = RetryConfiguration.executeWithDefaultRetry(() -> model.chat(ChatRequest.builder().messages(messages).build()),
+                    "Summarization");
 
             callCounter.increment();
 

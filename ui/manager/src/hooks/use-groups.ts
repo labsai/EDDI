@@ -12,7 +12,6 @@ import {
   deleteGroup,
   duplicateGroup,
   getDiscussionStyles,
-  startGroupDiscussion,
   getGroupConversation,
   listGroupConversations,
   deleteGroupConversation,
@@ -223,6 +222,7 @@ export function useDeleteGroup() {
     }: {
       id: string;
       version: number;
+      /** Hard delete (also removes the group's workspace) — only when the user explicitly chose it. */
       permanent?: boolean;
     }) => deleteGroup(id, version, permanent),
     onSuccess: () => {
@@ -268,24 +268,6 @@ export function useGroupConversation(groupId: string, conversationId: string) {
   });
 }
 
-export function useStartDiscussion() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      groupId,
-      question,
-      userId,
-    }: {
-      groupId: string;
-      question: string;
-      userId?: string;
-    }) => startGroupDiscussion(groupId, question, userId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: GROUP_CONVERSATIONS_KEY });
-    },
-  });
-}
-
 export function useDeleteGroupConversation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -309,13 +291,19 @@ export function useDeleteGroupWithMembers() {
       groupId,
       version,
       config,
+      permanent,
     }: {
       groupId: string;
       version: number;
       config: AgentGroupConfiguration;
-    }) => deleteGroupWithMembers(groupId, version, config),
-    onSuccess: () => {
+      /** Hard delete — only when the user explicitly chose it. Soft otherwise. */
+      permanent?: boolean;
+    }) => deleteGroupWithMembers(groupId, version, config, permanent),
+    // Settled, not success: a partial failure has still deleted something (the
+    // group on the soft path, some members on either), and the lists must say so.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
 }

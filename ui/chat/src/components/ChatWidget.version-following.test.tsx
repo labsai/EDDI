@@ -159,6 +159,7 @@ describe("ChatWidget — conversation ended by an agent update", () => {
     await send("hello?");
     await waitFor(() => expect(releaseRead).toBeDefined());
     fireEvent.click(screen.getByTestId("restart-btn"));
+    fireEvent.click(await screen.findByTestId("restart-confirm-yes"));
     await waitFor(() =>
       expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([u]) => String(u).includes("/start") && refused)).toBe(true),
     );

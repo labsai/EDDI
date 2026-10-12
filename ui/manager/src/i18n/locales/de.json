@@ -218,7 +218,9 @@
     "removeItem": "{{item}} entfernen",
     "stepOf": "Schritt {{current}} von {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "{{panel}} in der Größe ändern"
+    "resizePanel": "{{panel}} in der Größe ändern",
+    "deletePermanently": "Endgültig löschen",
+    "deletePermanentlyHint": "Kann nicht rückgängig gemacht werden. Ohne diese Option wird das Element nur als gelöscht markiert und bleibt wiederherstellbar, bis es bereinigt wird."
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",
@@ -458,7 +460,8 @@
       "notice": "Was der Chat den Personen mitteilt (leer lassen für den Standardtext)",
       "noticePlaceholder": "Gespräche mit diesem Agenten können von den Personen gelesen werden, die ihn betreuen, um ihn zu verbessern.",
       "versionNote": "Gilt für Gespräche mit der Version, die diese Änderung erzeugt, und allen späteren — nie für bereits Gesagtes. Slack, Teams und API-Clients können den Hinweis nicht anzeigen; wenn Personen diesen Agenten dort nutzen, erwähnen Sie es in der Begrüßung."
-    }
+    },
+    "copyUrl": "URL kopieren"
   },
   "wizard": {
     "title": "Agent-Assistent"
@@ -477,7 +480,7 @@
     "backToAgents": "Zurück zu Agents",
     "next": "Weiter",
     "back": "Zurück",
-    "createOnly": "Nur erstellen",
+    "createOnly": "Erstellen ohne Bereitstellung",
     "createAndDeploy": "Erstellen & Bereitstellen",
     "typeTitle": "Welche Art von Agent?",
     "typeDesc": "Wählen Sie den gewünschten Agent-Typ",
@@ -567,7 +570,25 @@
     "specUrlScheme": "Nur http://- und https://-URLs werden unterstützt",
     "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Schalten Sie die integrierten Werkzeuge aus, um alle zu deaktivieren.",
     "hfToken": "Hugging-Face-Token",
-    "hfTokenHint": "Nur für geschützte oder private Repositorys erforderlich. Es wird wie ein API-Schlüssel im Tresor gespeichert."
+    "hfTokenHint": "Nur für geschützte oder private Repositorys erforderlich. Es wird wie ein API-Schlüssel im Tresor gespeichert.",
+    "stepLabel": "Schritt {{n}} von {{total}}: {{name}}",
+    "createAndDeployProduction": "Erstellen und in Produktion bereitstellen",
+    "createAndDeployTest": "Erstellen und in Test bereitstellen",
+    "reviewKeyNotNeeded": "Für diesen Anbieter nicht erforderlich",
+    "reviewKeyNone": "Keiner",
+    "reviewKeyVault": "Tresor-Referenz {{ref}}",
+    "reviewKeyEntered": "Hier eingegeben",
+    "reviewApiKey": "API-Schlüssel",
+    "reviewBaseUrl": "Basis-URL",
+    "deployTarget": "Bereitstellungsziel",
+    "deployNoteProduction": "„Erstellen und bereitstellen“ schaltet den Agenten sofort in der Produktion live.",
+    "deployNoteTest": "„Erstellen und bereitstellen“ startet den Agenten in der Testumgebung; überführen Sie ihn in die Produktion, wenn Sie zufrieden sind.",
+    "step_type": "Typ",
+    "step_info": "Identität",
+    "step_llm": "Modell",
+    "step_apispec": "API-Spezifikation",
+    "step_features": "Funktionen",
+    "step_review": "Überprüfen"
   },
   "packages": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Workflow und alle seine Daten werden dauerhaft entfernt.",
@@ -772,7 +793,9 @@
     "reviewNoticeLabel": "Gesprächseinsicht",
     "sendRejected": "Ihre Nachricht wurde nicht gesendet: {{reason}}",
     "sendWhileLoading": "Ihre Nachricht wurde nicht gesendet: Die Konversation wird noch geladen. Versuchen Sie es gleich noch einmal.",
-    "turnFailed": "Der Agent konnte diese Nachricht nicht beantworten. Den Grund finden Sie im Server-Log oder im Audit-Trail der Konversation."
+    "turnFailed": "Der Agent konnte diese Nachricht nicht beantworten. Den Grund finden Sie im Server-Log oder im Audit-Trail der Konversation.",
+    "errorWithReason": "Fehler: {{reason}}",
+    "endConversationFailed": "Die Unterhaltung konnte nicht beendet werden: {{reason}}"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -883,7 +906,8 @@
     "savedNotLive": "Gespeichert — noch nicht aktiv",
     "savedNotLiveDescription": "Der laufende Agent liefert weiterhin die bereitgestellte Version. Zum Aktivieren bereitstellen.",
     "deployNow": "Bereitstellen",
-    "deployStarted": "Bereitstellung gestartet"
+    "deployStarted": "Bereitstellung gestartet",
+    "invalidJsonNotSaved": "Nicht gespeichert — das JSON ist ungültig: {{reason}}"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -918,7 +942,21 @@
     "noRules": "Keine Regeln in dieser Gruppe",
     "noConditions": "Keine Bedingungen",
     "sizeNoBound": "kein Limit",
-    "sizeBoundInvalid": "Muss eine ganze Zahl von -2147483648 bis 2147483647 sein oder leer für kein Limit."
+    "sizeBoundInvalid": "Muss eine ganze Zahl von -2147483648 bis 2147483647 sein oder leer für kein Limit.",
+    "moveUp": "{{name}} nach oben verschieben",
+    "moveDown": "{{name}} nach unten verschieben",
+    "configValueOf": "Wert von {{key}}",
+    "removeConfig": "{{key}} entfernen",
+    "toggleCondition": "Bedingungsdetails ein- oder ausblenden",
+    "commaActionsWarning": "Eine kommagetrennte Liste bedeutet hier UND: Alle aufgeführten Aktionen müssen in dieser Reihenfolge aufgetreten sein. Um eine von mehreren Aktionen zu treffen, fügen Sie unter einem ODER-Konnektor je Aktion eine Bedingung hinzu oder geben Sie eine gemeinsame Aktion aus.",
+    "changeTypeTitle": "Bedingungstyp ändern?",
+    "changeTypeDescription": "Der Wechsel zu {{type}} ersetzt die Einstellungen dieser Bedingung durch die Standardwerte dieses Typs. Die von Ihnen eingegebenen Werte gehen verloren.",
+    "changeTypeConfirm": "Typ ändern",
+    "toggleRule": "Regeldetails ein- oder ausblenden",
+    "thisRule": "diese Regel",
+    "noLastStepWarning": "Kein actionmatcher auf lastStep: Diese Regel kann in jedem Schritt der Konversation ausgelöst werden, nicht nur nach der erwarteten Aktion. Fügen Sie eine actionmatcher-Bedingung mit occurrence lastStep hinzu.",
+    "toggleGroup": "Gruppe ein- oder ausblenden",
+    "thisGroup": "diese Gruppe"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "Keine Endpunkte in der Spezifikation gefunden",
@@ -1356,7 +1394,22 @@
     "compatibleEndpointOverridden": "Endpunkt: {{url}}",
     "modelType": "Modelltyp",
     "paramName": "Parametername",
-    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren."
+    "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren.",
+    "toggleTask": "Aufgabendetails ein- oder ausblenden",
+    "noActionsWarning": "Diese Aufgabe hat keine Auslöseaktion und wird daher nie ausgeführt. Fügen Sie die Aktion hinzu, die Ihre Verhaltensregeln ausgeben, z. B. send_message.",
+    "model": "Modell",
+    "deploymentName": "Bereitstellungsname",
+    "modelName": "Modell",
+    "modelMissing": "Kein Modell festgelegt: Der Anbieter lehnt jede Anfrage ab.",
+    "apiKey": "API-Schlüssel",
+    "apiKeyNotNeeded": "Dieser Anbieter benötigt in der Regel keinen API-Schlüssel.",
+    "temperature": "Temperatur",
+    "temperaturePlaceholder": "Standard des Anbieters",
+    "temperatureInvalid": "Geben Sie eine Zahl ein, z. B. 0.7.",
+    "paramValueOf": "Wert von {{key}}",
+    "removeParam": "Parameter {{key}} entfernen",
+    "accessToken": "Zugriffstoken",
+    "authToken": "Hugging-Face-Token (optional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -1397,7 +1450,14 @@
     "maxLength": "Max. Länge",
     "maxLengthShort": "Max.",
     "validationMsgPlaceholder": "Validierungsfehlermeldung...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "nicht gespeichert; korrigieren Sie es oder leeren Sie das Feld",
+    "itemType": "Ausgabetyp",
+    "removeItem": "Ausgabeelement entfernen",
+    "removeQuickReply": "Schnellantwort entfernen",
+    "toggleOutput": "Ausgabedetails ein- oder ausblenden",
+    "timesOccurredLabel": "Anzahl Vorkommen",
+    "removeAlternativeGroup": "Alternativgruppe {{n}} entfernen"
   },
   "propertySetterEditor": {
     "setters": "Eigenschafts-Setter",
@@ -1421,7 +1481,10 @@
     "visibilityTitle": "Welche Agents diese longTerm-Eigenschaft sehen können",
     "editValue": "Wert bearbeiten",
     "toggleGroup": "Eigenschaftsgruppe umschalten",
-    "secretFromPathWarning": "Ein Secret wird nur im Tresor abgelegt, wenn es aus dem Wertfeld stammt. Über „Von Pfad“ gelesen oder anders angegeben, wird es im Klartext gespeichert – geben Sie es im Wertfeld ein oder wählen Sie einen anderen Bereich."
+    "secretFromPathWarning": "Ein Secret wird nur im Tresor abgelegt, wenn es aus dem Wertfeld stammt. Über „Von Pfad“ gelesen oder anders angegeben, wird es im Klartext gespeichert – geben Sie es im Wertfeld ein oder wählen Sie einen anderen Bereich.",
+    "scope": "Geltungsbereich",
+    "visibility": "Sichtbarkeit",
+    "removeProperty": "Eigenschaft entfernen"
   },
   "dictionaryEditor": {
     "language": "Sprache",
@@ -1536,7 +1599,8 @@
     "purgeError": "Löschen fehlgeschlagen",
     "empty": "Keine Coordinator-Daten verfügbar",
     "emptyHint": "Der Coordinator-Dienst startet möglicherweise noch. Daten erscheinen automatisch.",
-    "lastNSnapshots": "Letzte {{count}} Momentaufnahmen"
+    "lastNSnapshots": "Letzte {{count}} Momentaufnahmen",
+    "refreshInterval": "Intervall für automatische Aktualisierung"
   },
   "contentEditor": {
     "expand": "Erweitern",
@@ -2227,7 +2291,8 @@
       "readyTitle": "Bereit loszulegen?",
       "readySubtitle": "Sie können jede Tour später über das Hilfe-Menü neu starten",
       "startTour": "Tour starten",
-      "exploreOwn": "Ich schaue mich selbst um"
+      "exploreOwn": "Ich schaue mich selbst um",
+      "panelN": "Seite {{n}}"
     },
     "tour": {
       "back": "Zurück",
@@ -2496,7 +2561,7 @@
     "count_one": "{{count}} Gruppe",
     "count_other": "{{count}} Gruppen",
     "confirmDelete": "Diese Gruppe löschen?",
-    "confirmDeleteDesc": "Die Gruppenkonfiguration wird dauerhaft gelöscht.",
+    "confirmDeleteDesc": "Die Gruppe wird als gelöscht markiert und verschwindet aus dieser Liste.",
     "duplicateSuccess": "Gruppe dupliziert",
     "members": "Mitglieder",
     "discussionStyle": "Diskussionsstil",
@@ -2617,8 +2682,8 @@
     "deleteGroupOnlySuccess": "Gruppe gelöscht (Agenten behalten)",
     "deleteGroupOnlyWarning": "Dies löscht die Gruppe. Alle Mitglieds-Agenten werden behalten.",
     "deleteGroupAndAgents": "Gruppe + alle Agenten löschen",
-    "deleteWithMembersSuccess": "Gruppe und alle Mitglieds-Agenten gelöscht (Soft-Delete)",
-    "deleteWithMembersWarning": "Dies wird die Gruppe und alle {{count}} Mitglieds-Agenten per Soft-Delete löschen. Sie können wiederhergestellt werden.",
+    "deleteWithMembersSuccess": "Gruppe und alle Mitglieds-Agenten gelöscht",
+    "deleteWithMembersWarning": "Dies löscht die Gruppe und alle {{count}} Mitglieds-Agenten.",
     "hideDiscussions": "Diskussionsbereich ausblenden",
     "showDiscussions": "Diskussionsbereich einblenden",
     "hideConfig": "Konfigurationsbereich ausblenden",
@@ -2988,7 +3053,11 @@
       "humanNeedsId_one": "{{count}} menschliches Mitglied braucht die Benutzer-ID der Person.",
       "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person."
     },
-    "versionLookupFailed": "Die aktuelle Version dieser Gruppe konnte nicht ermittelt werden."
+    "versionLookupFailed": "Die aktuelle Version dieser Gruppe konnte nicht ermittelt werden.",
+    "deletePermanentlyHint": "Kann nicht rückgängig gemacht werden: Die Gruppe und ihr Arbeitsbereich (Backlog, Rhythmen und deren Zeitpläne) werden endgültig entfernt. Ohne diese Option wird die Gruppe nur als gelöscht markiert und bleibt wiederherstellbar, bis sie bereinigt wird.",
+    "deletePermanentlyWithMembersHint": "Kann nicht rückgängig gemacht werden: Die Gruppe, ihr Arbeitsbereich und alle Mitglieds-Agenten werden endgültig entfernt. Ohne diese Option werden sie nur als gelöscht markiert und bleiben wiederherstellbar, bis sie bereinigt werden.",
+    "deleteMembersFailedAfterGroup": "Die Gruppe wurde gelöscht, diese Mitglieds-Agenten jedoch nicht: {{ids}}. Löschen Sie sie auf der Seite „Agenten“.",
+    "deleteMembersFailedGroupKept": "Die Gruppe wurde behalten: Diese Mitglieds-Agenten konnten nicht gelöscht werden: {{ids}}. Versuchen Sie es erneut, um den Vorgang abzuschließen."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3120,7 +3189,11 @@
     "humanTurnTimeoutInvalid": "Keine gültige ISO-8601-Dauer, z. B. PT24H oder P1D.",
     "humanTurnTimeoutLabel": "Zug-Timeout (ISO-8601-Dauer)",
     "humanTurnTimeoutPlaceholder": "z. B. PT24H — leer lassen für unbegrenztes Warten",
-    "memberTypeHuman": "Mensch"
+    "memberTypeHuman": "Mensch",
+    "memberPromptPlaceholder": "Du bist {{name}}. Liefere fundierte Analysen aus der Perspektive deines Fachgebiets.",
+    "memberPromptPlaceholderRole": "Du bist {{name}}, Experte für {{role}}. Liefere fundierte Analysen aus der Perspektive deines Fachgebiets.",
+    "moderatorPromptPlaceholder": "Du bist ein erfahrener Moderator. Fasse die Diskussion der Gruppe klar und ausgewogen zusammen…",
+    "modelPlaceholder": "z.B. {{model}}"
   },
   "groupTemplates": {
     "advisoryBoard": "Beratungsgremium",
@@ -3205,7 +3278,9 @@
     "created": "Erstellt",
     "updated": "Aktualisiert",
     "sourceConversation": "Quell-Gespräch",
-    "conflicted": "Widerspruch"
+    "conflicted": "Widerspruch",
+    "deleteEntryTitle": "Diese Erinnerung löschen?",
+    "deleteEntryDesc": "„{{key}}“ wird für diesen Benutzer dauerhaft entfernt. Agenten rufen sie nicht mehr ab. Dies kann nicht rückgängig gemacht werden."
   },
   "properties": {
     "title": "Nutzereigenschaften",
@@ -3316,7 +3391,9 @@
     "partialBody": "Der Rest des Agenten wurde geschrieben. Diese Ressourcen blieben unverändert und erfordern Aufmerksamkeit.",
     "partialCounts": "{{created}} erstellt, {{updated}} aktualisiert, {{failed}} fehlgeschlagen.",
     "schedulesSkipped_one": "{{count}} Zeitplan im Archiv wurde nicht importiert, weil die Auswahl ihn nicht enthielt.",
-    "schedulesSkipped_other": "{{count}} Zeitpläne im Archiv wurden nicht importiert, weil die Auswahl sie nicht enthielt."
+    "schedulesSkipped_other": "{{count}} Zeitpläne im Archiv wurden nicht importiert, weil die Auswahl sie nicht enthielt.",
+    "moveUp": "Nach oben",
+    "moveDown": "Nach unten"
   },
   "syncPage": {
     "title": "Agenten-Synchronisierung",
@@ -3561,7 +3638,8 @@
     "groupLinkUnavailable": "Diese Gruppe wurde nicht gefunden, daher gibt es keinen verlässlichen Link dorthin.",
     "confirmApproveGroupDescription": "Die gesamte pausierte Phase freigeben und die Diskussion fortsetzen. Jede wartende Aufgabe wird mit freigegeben — für Einzelentscheidungen die Gruppe öffnen.",
     "confirmRejectGroupDescription": "Die gesamte pausierte Phase ablehnen. Jede wartende Aufgabe wird mit abgelehnt, und die Diskussion läuft nicht darüber hinaus weiter — für Einzelentscheidungen die Gruppe öffnen.",
-    "pauseChanged": "Diese Anfrage hat sich geändert, seit Sie sie geöffnet haben — es wurde nichts entschieden. Prüfen Sie sie erneut."
+    "pauseChanged": "Diese Anfrage hat sich geändert, seit Sie sie geöffnet haben — es wurde nichts entschieden. Prüfen Sie sie erneut.",
+    "regularTruncated": "Angezeigt werden die ersten {{limit}} Konversationsfreigaben — weitere stehen aus. Entscheiden Sie einige, um den Rest zu sehen."
   },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",
@@ -3591,7 +3669,9 @@
     "secretVault": "Geheimnistresor",
     "vaultDown": "Vault nicht verfügbar",
     "vaultUp": "Vault bereit",
-    "viewLogs": "Protokolle anzeigen"
+    "viewLogs": "Protokolle anzeigen",
+    "coordAdminOnly": "Koordinator: erfordert Admin",
+    "vaultAdminOnly": "Vault: erfordert Admin"
   },
   "errorBoundary": {
     "retry": "Erneut versuchen",
@@ -3672,7 +3752,10 @@
     "found_other": "{{count}} verwaiste Ressourcen gefunden",
     "scanIncomplete": "Dieser Scan wurde nicht abgeschlossen",
     "scanIncompleteBody": "Ressourcen, die noch verwendet werden, können als verwaist aufgeführt sein. Das Bereinigen ist gesperrt, bis ein Scan vollständig durchläuft.",
-    "confirmPurge": "Alle {{count}} verwaisten Ressourcen endgültig löschen? Dies kann nicht rückgängig gemacht werden."
+    "confirmPurge": "Alle {{count}} verwaisten Ressourcen endgültig löschen? Dies kann nicht rückgängig gemacht werden.",
+    "purgeIncompleteScan": "Nichts wurde gelöscht: EDDI konnte nicht vollständig prüfen, welche Ressourcen noch verwendet werden. Scannen Sie erneut und versuchen Sie es noch einmal.",
+    "purgeFailed": "Bereinigung fehlgeschlagen",
+    "scanFailed": "Der Scan ist fehlgeschlagen: {{reason}}"
   },
   "quotas": {
     "apiCallsMinute": "API-Aufrufe / Minute",
@@ -3685,7 +3768,6 @@
     "enabled": "Aktiviert",
     "enforcementOff": "Durchsetzung ist deaktiviert.",
     "enforcementOffHint": "Kontingente werden nicht durchgesetzt. Aktivieren Sie die Durchsetzung und speichern Sie, um die Limits anzuwenden.",
-    "limitHint": "-1 = unbegrenzt",
     "liveUsage": "Live-Nutzung",
     "maxAgentsPerTenant": "Max. Agenten / Mandant",
     "maxApiCallsPerMinute": "Max. API-Aufrufe / Minute",
@@ -3698,7 +3780,9 @@
     "resetSuccess": "Nutzungszähler zurückgesetzt",
     "saveSuccess": "Kontingent gespeichert",
     "tenantId": "Mandanten-ID",
-    "title": "Mandanten-Kontingente"
+    "title": "Mandanten-Kontingente",
+    "limitHintEmpty": "Leer oder -1 = unbegrenzt, 0 = gesperrt",
+    "invalidNumber": "Geben Sie eine Zahl ein oder lassen Sie das Feld für unbegrenzt leer."
   },
   "secretPicker": {
     "clearVault": "Vault-Referenz löschen",
@@ -4087,7 +4171,7 @@
       "deleteBoard": "Task Force auflösen",
       "deleteBoardDesc": "Entfernt diese Task-Force-Konfiguration. Die Agenten bleiben erhalten.",
       "deleteBoardAll": "Task Force + alle Agenten auflösen",
-      "deleteBoardAllDesc": "Entfernt diese Task Force und alle Mitglieds-Agenten dauerhaft.",
+      "deleteBoardAllDesc": "Diese Task Force und alle ihre Mitglieds-Agenten entfernen.",
       "unsavedChanges": "Sie haben ungespeicherte Änderungen",
       "templateSaved": "Als Vorlage gespeichert",
       "saveAsTemplate": "Als Vorlage speichern",
@@ -4095,8 +4179,8 @@
       "saveChanges": "Änderungen speichern",
       "deleteAllTitle": "Task Force und alle Agenten auflösen?",
       "deleteTitle": "Task Force auflösen?",
-      "deleteAllConfirm": "Dadurch werden diese Task Force und alle ihre Mitglieds-Agenten dauerhaft aufgelöst. Diese Aktion kann nicht rückgängig gemacht werden.",
-      "deleteConfirm": "Dadurch wird diese Task-Force-Konfiguration dauerhaft aufgelöst. Die Mitglieds-Agenten sind nicht betroffen.",
+      "deleteAllConfirm": "Dadurch wird diese Task Force aufgelöst und alle ihre Mitglieds-Agenten werden gelöscht.",
+      "deleteConfirm": "Dadurch wird diese Task Force aufgelöst. Die Mitglieds-Agenten sind nicht betroffen.",
       "title": "Einstellungen"
     },
     "nav": {
@@ -4152,11 +4236,11 @@
     },
     "dashboard": {
       "assembleTaskForce": "Task Force zusammenstellen",
-      "bulkDeleteConfirm": "Dies löst jede ausgewählte Task Force auf und kann nicht rückgängig gemacht werden.",
+      "bulkDeleteConfirm": "Dadurch werden alle ausgewählten Task Forces aufgelöst. Die Mitglieds-Agenten sind nicht betroffen.",
       "bulkDeleteTitle_one": "Diese Task Force auflösen?",
       "bulkDeleteTitle_other": "{{count}} Task Forces auflösen?",
       "cancel": "Abbrechen",
-      "deleteConfirm": "Möchten Sie diese Task Force wirklich auflösen? Diese Aktion kann nicht rückgängig gemacht werden.",
+      "deleteConfirm": "Möchten Sie diese Task Force wirklich auflösen? Die Mitglieds-Agenten sind nicht betroffen.",
       "deleteError": "Task Force konnte nicht gelöscht werden",
       "deletePartialFail": "{{success}} gelöscht, {{fail}} fehlgeschlagen",
       "deleteSelected": "Löschen",
@@ -4221,7 +4305,8 @@
       "tryDifferent": "Versuchen Sie einen anderen Suchbegriff",
       "untitled": "Konversation ohne Titel",
       "loadListError": "Konversationen konnten nicht geladen werden",
-      "rejected": "Abgelehnt"
+      "rejected": "Abgelehnt",
+      "deleteFailed": "Die Konversation konnte nicht gelöscht werden"
     },
     "insights": "Insights",
     "memberCount": "{{count}} Mitglieder",
@@ -5202,7 +5287,10 @@
     "legacyAdminOnly": "Nur für Administratoren sichtbar — sobald Eigentümer zugewiesen wurden",
     "lastChanged": "Zuletzt geändert von {{who}}",
     "neverChanged": "Hier noch nicht geändert",
-    "saved": "Einstellungen gespeichert"
+    "saved": "Einstellungen gespeichert",
+    "deleteVariableTitle": "Diese Variable löschen?",
+    "deleteVariableDescription": "Agenten, die sie verwenden, verlieren ihren Wert, bis sie erneut gespeichert wird. Dies kann nicht rückgängig gemacht werden.",
+    "legacyDefault": "Hier nicht festgelegt — der Standard gilt (für alle sichtbar)"
   },
   "cascadeSave": {
     "workflowChanged": "Workflow {{workflowId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
@@ -5245,5 +5333,11 @@
     "impactReasonLegacy": "älter als die Versionsfolge",
     "impactReasonBreaking": "inkompatible Änderung",
     "switchNotice": "Agent wechselte von v{{from}} zu v{{to}}"
+  },
+  "actionTags": {
+    "remove": "{{action}} entfernen",
+    "none": "Keine Aktionen",
+    "inputLabel": "Neue Aktion",
+    "add": "Aktion hinzufügen"
   }
 }
