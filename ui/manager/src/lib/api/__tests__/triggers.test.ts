@@ -3,7 +3,6 @@ import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
   getAllTriggers,
-  getTrigger,
   createTrigger,
   updateTrigger,
   deleteTrigger,
@@ -34,20 +33,6 @@ describe("triggers API", () => {
         )
       );
       await expect(getAllTriggers()).rejects.toMatchObject({ status: 500 });
-    });
-  });
-
-  describe("getTrigger", () => {
-    it("fetches a single trigger by intent", async () => {
-      const result = await getTrigger("booking_request");
-      expect(result).toBeDefined();
-      expect(result.intent).toBe("booking_request");
-    });
-
-    it("handles 404 for unknown intent", async () => {
-      await expect(getTrigger("unknown_intent")).rejects.toMatchObject({
-        status: 404,
-      });
     });
   });
 

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.schedule.model;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -110,6 +111,34 @@ public class ScheduleConfiguration {
     // it to false. No bean accessor, so it never reaches JSON or storage.
     private transient boolean allowSelfSchedulingProvided;
     private String createdBy;
+    /**
+     * The creator's team subjects when the schedule was created, so a fire can
+     * re-check that the creator may still USE the agent — honouring a share with
+     * one of their teams — with no request (and no token) around. Stamped from the
+     * authenticated caller on create and carried over on update; never taken from a
+     * request body.
+     */
+    private List<String> creatorTeams;
+    /** Whether the creator was an administrator when the schedule was created. */
+    private boolean creatorAdmin;
+
+    // -- Lifecycle --
+    /**
+     * Why the system disabled this schedule, or {@code null} when it is enabled or
+     * a person disabled it. Lets a redeploy re-enable exactly the schedules its
+     * undeploy disabled ({@link #DISABLED_BY_UNDEPLOY}) and leave alone the ones a
+     * user switched off — or that lost their access
+     * ({@link #DISABLED_ACCESS_REVOKED}).
+     */
+    private String disabledReason;
+
+    /** {@link #disabledReason}: the agent was undeployed. */
+    public static final String DISABLED_BY_UNDEPLOY = "agent-undeployed";
+    /**
+     * {@link #disabledReason}: at fire time the creator could no longer use the
+     * agent.
+     */
+    public static final String DISABLED_ACCESS_REVOKED = "access-revoked";
 
     // -- Metadata --
     private Map<String, Object> metadata;
@@ -356,6 +385,30 @@ public class ScheduleConfiguration {
 
     public void setCreatedBy(String createdBy) {
         this.createdBy = createdBy;
+    }
+
+    public List<String> getCreatorTeams() {
+        return creatorTeams;
+    }
+
+    public void setCreatorTeams(List<String> creatorTeams) {
+        this.creatorTeams = creatorTeams;
+    }
+
+    public boolean isCreatorAdmin() {
+        return creatorAdmin;
+    }
+
+    public void setCreatorAdmin(boolean creatorAdmin) {
+        this.creatorAdmin = creatorAdmin;
+    }
+
+    public String getDisabledReason() {
+        return disabledReason;
+    }
+
+    public void setDisabledReason(String disabledReason) {
+        this.disabledReason = disabledReason;
     }
 
     public Map<String, Object> getMetadata() {

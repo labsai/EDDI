@@ -20,7 +20,7 @@
 # the adapter can be demonstrated from a checkout.
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM maven:3.9-eclipse-temurin-25@sha256:1b1fc6d0168ea616afd1c861d6f32ec37c9ec2ffe88a0351b3771dd4ad86b0d8 AS build
+FROM maven:3.9-eclipse-temurin-26@sha256:b2c1ad85954592f9928e84327c65201f308ad9b5d8ed7d5b823717c97bf23fbb AS build
 
 WORKDIR /src
 

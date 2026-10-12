@@ -1127,6 +1127,7 @@ The Langchain task supports advanced pre-request and post-response processing fo
 - **postResponse.propertyInstructions**: Defines properties to be set based on the LLM response
   - **name**: The property name
   - **valueString**: The value to be assigned (supports templating)
+  - **fromObjectPath**: Read the value from the template data instead, e.g. the task's own response object (named by `responseObjectName`, or the task id). With `convertToObject: "true"` on the task that object is a map, and `"fromObjectPath": "aiOutput"` stores the whole object as the property, so `{properties.aiOutputObject.htmlResponseText}` resolves; a dotted path such as `aiOutput.htmlResponseText` stores a single field. The value is data and is never rendered as a template. A path that resolves to nothing stores an empty string.
   - **scope**: The scope of the property
 
 - **postResponse.outputBuildInstructions**: Configures how the response should be transformed into output (alternative to `addToOutput`)
@@ -1901,6 +1902,29 @@ When `convertToObject=true`, the LLM's JSON response is stored in conversation m
   }]
 }
 ```
+
+### How the reply is parsed (never throws)
+
+Models do not always answer with a bare JSON document. Under `convertToObject=true` EDDI normalises the reply with exactly three steps, in order, and nothing else:
+
+1. **Trim** surrounding whitespace.
+2. **Strip one surrounding markdown fence** — ```` ``` ```` or ```` ```json ```` (the language tag is case-insensitive).
+3. If it still does not parse, **extract the outermost balanced `{...}` or `[...]`** from the text (string- and escape-aware, so braces inside string values and `\"` do not confuse it) and parse that. This handles a prose prefix and/or suffix such as `Sure! Here you go: {...} Hope that helps.` An extracted fragment is accepted only if it is a JSON object with at least one key; a top-level array is accepted only when it is the whole (fence-stripped) reply. So prose like `Pick option [1] or [2].` or `The empty set {} is...` stays the raw string instead of being replaced by a fragment.
+
+Invalid JSON itself is **never "fixed"** — there is no trailing-comma repair or quote swapping. A reply either parses or it does not.
+
+**Invalid output no longer fails the turn.** A reply that is truncated mid-object, prose, or otherwise not JSON used to throw out of the LLM task and fail the whole turn (HTTP 500) after the model call had been paid for. It now keeps the behaviour that plain-text replies always had: the raw string is stored under `responseObjectName`, a WARN is logged (with an EDDI-generated reason such as `truncated JSON`, `not JSON`, `unbalanced braces` — never model output), and the pipeline continues. The same code path serves a conversation that resumes after a human-in-the-loop approval.
+
+Every `convertToObject` reply gets an outcome, recorded on the step under `llm:output:outcome:<taskId>` and counted in the Micrometer counter `eddi.llm.output` (tag `outcome`):
+
+| Outcome | Meaning |
+| --- | --- |
+| `valid` | Parsed as received (after trimming) |
+| `repaired` | Parsed only after fence stripping or extraction |
+| `invalid` | Not parseable; the raw string is stored |
+| `empty` | Null or blank reply; the raw value is stored |
+
+A rising `invalid` rate for one agent usually points at a prompt, schema or model-version problem. The key is not part of the public conversation snapshot.
 
 ### Debugging
 

@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.docs.DocsService;
+import io.quarkiverse.mcp.server.JsonRpcErrorCodes;
+import io.quarkiverse.mcp.server.McpException;
+import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -14,6 +17,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for McpDocResources, focusing on path traversal prevention.
@@ -33,7 +39,7 @@ class McpDocResourcesTest {
     @BeforeEach
     void setUp() throws Exception {
         docsService = docsServiceFor(tempDir.toString());
-        resources = new McpDocResources(docsService);
+        resources = new McpDocResources(docsService, null, false);
 
         // Create a test doc
         Files.writeString(tempDir.resolve("getting-started.md"), "# Getting Started\nHello!");
@@ -117,9 +123,46 @@ class McpDocResourcesTest {
     void listDocs_invalidDir_returnsError() throws Exception {
         // A mis-set eddi.docs.path must still read as a misconfiguration, not as an
         // index of zero documents — which would look like success.
-        var broken = new McpDocResources(docsServiceFor("/nonexistent/path"));
+        var broken = new McpDocResources(docsServiceFor("/nonexistent/path"), null, false);
 
         String result = broken.listDocs();
-        assertTrue(result.contains("Docs directory not found"));
+        assertTrue(result.contains("No documentation is available"));
+        // ...and without naming the server-side directory, which is deployment layout.
+        assertFalse(result.contains("/nonexistent/path"), result);
+    }
+
+    @Test
+    void withAuthOn_everyDocRoleMayRead() {
+        for (String role : McpRoles.DOCS) {
+            var identity = mock(SecurityIdentity.class);
+            when(identity.isAnonymous()).thenReturn(false);
+            when(identity.hasRole(role)).thenReturn(true);
+            var guarded = new McpDocResources(docsService, identity, true);
+            assertTrue(guarded.listDocs().contains("getting-started"), role);
+            assertTrue(guarded.readDoc("getting-started").contains("Hello!"), role);
+        }
+    }
+
+    @Test
+    void withAuthOn_aCallerWithoutADocRoleIsRefused() {
+        // McpDocTools and REST /administration/docs both refuse this caller; the
+        // resource view of the very same pages used to answer it.
+        var identity = mock(SecurityIdentity.class);
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.hasRole(anyString())).thenReturn(false);
+        var guarded = new McpDocResources(docsService, identity, true);
+
+        var listRefusal = assertThrows(McpException.class, guarded::listDocs);
+        assertEquals(JsonRpcErrorCodes.SECURITY_ERROR, listRefusal.getJsonRpcErrorCode());
+        var readRefusal = assertThrows(McpException.class, () -> guarded.readDoc("getting-started"));
+        assertEquals(JsonRpcErrorCodes.SECURITY_ERROR, readRefusal.getJsonRpcErrorCode());
+    }
+
+    @Test
+    void withAuthOn_anAnonymousCallerIsRefused() {
+        var identity = mock(SecurityIdentity.class);
+        when(identity.isAnonymous()).thenReturn(true);
+        var guarded = new McpDocResources(docsService, identity, true);
+        assertThrows(McpException.class, guarded::listDocs);
     }
 }

@@ -42,11 +42,19 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
  * undeploy-with-end already gives an editor. They used to carry no role at all,
  * which let any authenticated principal list every user's open conversation ids
  * and end any of them.
+ * <p>
+ * The per-conversation operations require some EDDI role (class level) on top
+ * of the owner check: whose conversation it is stays the owner check's
+ * question, but a token the realm issued with no EDDI role at all has no
+ * business here, and with
+ * {@code quarkus.security.jaxrs.deny-unannotated-endpoints} an unannotated
+ * method would be refused to everybody.
  *
  * @author ginccc
  */
 @Path("/conversationstore/conversations")
 @Tag(name = "Conversations / Store", description = "Query, delete, and manage conversation history")
+@RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver", "eddi-viewer"})
 public interface IRestConversationStore {
     /**
      * Lists conversations, newest first. {@code index} is a page of results: page
@@ -107,6 +115,47 @@ public interface IRestConversationStore {
     @RolesAllowed("eddi-admin")
     Integer permanentlyDeleteEndedConversationLogs(@QueryParam("deleteOlderThanDays") Integer deleteOlderThanDays)
             throws ResourceStoreException, ResourceNotFoundException, ResourceModifiedException;
+
+    /**
+     * Deployment-wide bulk end of idle conversations, run inside the database:
+     * every {@code READY} conversation whose last interaction is older than
+     * {@code inactiveForDays} days becomes {@code ENDED} with end reason
+     * {@code idle}, and the count is returned. Admin-only, and the age must be at
+     * least one day. Nothing is loaded into the application, so it is the way to
+     * clear a backlog of open conversations that the scheduled sweep cannot reach
+     * (for instance after it was switched off with
+     * {@code maximumLifeTimeOfIdleConversationsInDays=-1}).
+     * <p>
+     * Paused ({@code AWAITING_HUMAN}) conversations are never touched — a pending
+     * approval needs the HITL-aware end — and neither is a conversation with no
+     * timestamp at all, which cannot be proven idle. Conversation descriptors are
+     * not changed: retention keeps counting from the conversation's last
+     * interaction, as it does for conversations the sweep ends. {@code dryRun=true}
+     * ends nothing and returns what would be ended. Every call is recorded in the
+     * audit ledger.
+     *
+     * @param inactiveForDays
+     *            required, at least 1
+     * @param agentId
+     *            optional: restrict to one agent (every version)
+     * @param dryRun
+     *            count only
+     * @return {@code {"count": n, "dryRun": bool}}
+     */
+    @POST
+    @Path("end-inactive")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    Response endInactiveConversations(@Parameter(name = "inactiveForDays", required = true, example = "90",
+                                                 description = "End READY conversations whose last interaction is older than this many days (at least 1)")
+    @QueryParam("inactiveForDays") Integer inactiveForDays,
+                                      @Parameter(name = "agentId", required = false,
+                                                 description = "Restrict to one agent; omit for every agent")
+                                      @QueryParam("agentId") String agentId,
+                                      @Parameter(name = "dryRun", required = false, example = "true",
+                                                 description = "Only count what would be ended")
+                                      @QueryParam("dryRun")
+                                      @DefaultValue("false") boolean dryRun);
 
     /**
      * The open (not ENDED) conversations of an agent, across all owners. Requires

@@ -271,6 +271,7 @@ eddi_schedule_poll_count_total              # Poll cycles
 eddi_schedule_fire_count_total              # Schedules fired
 eddi_schedule_fire_failed_total             # Fire failures
 eddi_schedule_fire_skipped_total            # Fires the coordinator dropped without running the turn
+eddi_schedule_fire_timedout_total           # Fires interrupted at eddi.schedule.fire-timeout (recorded FAILED, retried)
 eddi_schedule_claim_conflict_total          # Claim conflicts (multi-instance)
 eddi_schedule_fire_deadlettered_total       # Dead-lettered schedules
 eddi_schedule_fire_duration_seconds         # Fire latency (timer)
@@ -457,6 +458,7 @@ expensive one.
 
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
+eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)
