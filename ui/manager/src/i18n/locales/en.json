@@ -218,7 +218,9 @@
     "removeItem": "Remove {{item}}",
     "stepOf": "Step {{current}} of {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "Resize {{panel}}"
+    "resizePanel": "Resize {{panel}}",
+    "deletePermanently": "Delete permanently",
+    "deletePermanentlyHint": "Cannot be undone. Without this, the item is only marked deleted and stays recoverable until it is purged."
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -485,7 +487,8 @@
       "notice": "What the chat tells people (leave empty for the standard wording)",
       "noticePlaceholder": "Conversations with this agent may be read by the people who maintain it, to improve it.",
       "versionNote": "Covers conversations on the version this change creates and later ones — never what was said before. Slack, Teams and API clients cannot show the notice; if people reach this agent there, say it in the greeting."
-    }
+    },
+    "copyUrl": "Copy URL"
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -504,7 +507,7 @@
     "backToAgents": "Back to Agents",
     "next": "Next",
     "back": "Back",
-    "createOnly": "Create Only",
+    "createOnly": "Create without deploying",
     "createAndDeploy": "Create & Deploy",
     "typeTitle": "What kind of agent?",
     "typeDesc": "Choose the type of agent you want to create",
@@ -594,7 +597,25 @@
     "specUrlScheme": "Only http:// and https:// URLs are supported",
     "lastToolHint": "At least one tool must stay selected. Turn built-in tools off to disable them all.",
     "hfToken": "Hugging Face token",
-    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key."
+    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key.",
+    "stepLabel": "Step {{n}} of {{total}}: {{name}}",
+    "createAndDeployProduction": "Create & deploy to production",
+    "createAndDeployTest": "Create & deploy to test",
+    "reviewKeyNotNeeded": "Not needed for this provider",
+    "reviewKeyNone": "None",
+    "reviewKeyVault": "Vault reference {{ref}}",
+    "reviewKeyEntered": "Entered here",
+    "reviewApiKey": "API key",
+    "reviewBaseUrl": "Base URL",
+    "deployTarget": "Deploy target",
+    "deployNoteProduction": "Create & deploy puts the agent live in production right away.",
+    "deployNoteTest": "Create & deploy starts the agent in the test environment; promote it to production when you are happy with it.",
+    "step_type": "Type",
+    "step_info": "Identity",
+    "step_llm": "Model",
+    "step_apispec": "API Spec",
+    "step_features": "Features",
+    "step_review": "Review"
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -799,7 +820,9 @@
     "reviewNoticeLabel": "Conversation review",
     "sendRejected": "Your message was not sent: {{reason}}",
     "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
-    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
+    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason.",
+    "errorWithReason": "Error: {{reason}}",
+    "endConversationFailed": "Could not end the conversation: {{reason}}"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -923,7 +946,8 @@
     "savedNotLive": "Saved — not yet live",
     "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
     "deployNow": "Deploy",
-    "deployStarted": "Deployment started"
+    "deployStarted": "Deployment started",
+    "invalidJsonNotSaved": "Not saved — the JSON is invalid: {{reason}}"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -958,7 +982,21 @@
     "noRules": "No rules in this group",
     "noConditions": "No conditions",
     "sizeNoBound": "no limit",
-    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit."
+    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit.",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "configValueOf": "Value of {{key}}",
+    "removeConfig": "Remove {{key}}",
+    "toggleCondition": "Show or hide condition details",
+    "commaActionsWarning": "A comma list here means AND: every listed action must have occurred, in that order. To match any one of several actions, add one condition per action under an OR connector, or emit a shared action.",
+    "changeTypeTitle": "Change condition type?",
+    "changeTypeDescription": "Switching to {{type}} replaces this condition's settings with that type's defaults. The values you entered are lost.",
+    "changeTypeConfirm": "Change type",
+    "toggleRule": "Show or hide rule details",
+    "thisRule": "this rule",
+    "noLastStepWarning": "No actionmatcher on lastStep: this rule can fire on any step of the conversation, not just after the action you expect. Add an actionmatcher condition with occurrence lastStep.",
+    "toggleGroup": "Show or hide group",
+    "thisGroup": "this group"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No endpoints found in the spec",
@@ -1405,7 +1443,22 @@
     "maxToolCallsPerTurn": "Max tool calls per turn",
     "maxToolCallsPerTurnDefault": "(default {{n}})",
     "maxToolCallsHint": "Calls past a cap are not run: each gets a NOT_EXECUTED result telling the model the limit was reached, and the model answers with what it has. Refused calls never reach the approval gate. The per-turn count includes calls made before an approval pause. -1 or 0 removes a cap. Needs EDDI 6.6 or later — leave blank on an older server.",
-    "maxToolCallsUncapped": "A cap is switched off: the model can run any number of tool calls there, bounded only by Max Tool Iterations."
+    "maxToolCallsUncapped": "A cap is switched off: the model can run any number of tool calls there, bounded only by Max Tool Iterations.",
+    "toggleTask": "Show or hide task details",
+    "noActionsWarning": "This task has no trigger action, so it never runs. Add the action your behavior rules emit, for example send_message.",
+    "model": "Model",
+    "deploymentName": "Deployment name",
+    "modelName": "Model",
+    "modelMissing": "No model set: the provider will reject every request.",
+    "apiKey": "API key",
+    "apiKeyNotNeeded": "This provider usually needs no API key.",
+    "temperature": "Temperature",
+    "temperaturePlaceholder": "Provider default",
+    "temperatureInvalid": "Enter a number, for example 0.7.",
+    "paramValueOf": "Value of {{key}}",
+    "removeParam": "Remove parameter {{key}}",
+    "accessToken": "Access token",
+    "authToken": "Hugging Face token (optional)"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -1446,7 +1499,14 @@
     "maxLength": "Max length",
     "maxLengthShort": "max",
     "validationMsgPlaceholder": "Validation error message...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "not saved; fix it or clear the field",
+    "itemType": "Output type",
+    "removeItem": "Remove output item",
+    "removeQuickReply": "Remove quick reply",
+    "toggleOutput": "Show or hide output details",
+    "timesOccurredLabel": "Times occurred",
+    "removeAlternativeGroup": "Remove alternative group {{n}}"
   },
   "propertySetterEditor": {
     "setters": "Property Setters",
@@ -1470,7 +1530,10 @@
     "visibilityTitle": "Which agents can see this longTerm property",
     "editValue": "Edit Value",
     "toggleGroup": "Toggle property group",
-    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope."
+    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope.",
+    "scope": "Scope",
+    "visibility": "Visibility",
+    "removeProperty": "Remove property"
   },
   "dictionaryEditor": {
     "language": "Language",
@@ -1585,7 +1648,8 @@
     "purgeError": "Failed to purge",
     "empty": "No coordinator data available",
     "emptyHint": "The coordinator service may still be starting up. Data will appear automatically.",
-    "lastNSnapshots": "Last {{count}} snapshots"
+    "lastNSnapshots": "Last {{count}} snapshots",
+    "refreshInterval": "Auto-refresh interval"
   },
   "contentEditor": {
     "expand": "Expand",
@@ -2388,7 +2452,8 @@
       "readyTitle": "Ready to Start?",
       "readySubtitle": "You can restart any tour from the sidebar Help menu",
       "startTour": "Start the Tour",
-      "exploreOwn": "I'll Explore on My Own"
+      "exploreOwn": "I'll Explore on My Own",
+      "panelN": "Panel {{n}}"
     },
     "tour": {
       "back": "Back",
@@ -2630,7 +2695,7 @@
     "count_one": "{{count}} group",
     "count_other": "{{count}} groups",
     "confirmDelete": "Delete this group?",
-    "confirmDeleteDesc": "This will permanently delete the group configuration.",
+    "confirmDeleteDesc": "The group is marked deleted and disappears from this list.",
     "duplicateSuccess": "Group duplicated",
     "members": "members",
     "discussionStyle": "Discussion Style",
@@ -2751,8 +2816,8 @@
     "deleteGroupOnlySuccess": "Group deleted (agents kept)",
     "deleteGroupOnlyWarning": "This will delete the group. All member agents will be kept.",
     "deleteGroupAndAgents": "Delete Group + All Agents",
-    "deleteWithMembersSuccess": "Group and all member agents deleted (soft-delete)",
-    "deleteWithMembersWarning": "This will soft-delete the group and all {{count}} member agents. They can be recovered.",
+    "deleteWithMembersSuccess": "Group and all member agents deleted",
+    "deleteWithMembersWarning": "This will delete the group and all {{count}} member agents.",
     "hideDiscussions": "Hide discussions panel",
     "showDiscussions": "Show discussions panel",
     "hideConfig": "Hide config panel",
@@ -3123,7 +3188,11 @@
       "humanNeedsId_other": "{{count}} human members need the person's user id.",
       "duplicateMember": "{{ids}} is listed more than once. A member holds one seat: two seats would share one member conversation and see each other's answers. Use a second agent for a second seat."
     },
-    "serverRefused": "The server refused this group:"
+    "serverRefused": "The server refused this group:",
+    "deletePermanentlyHint": "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.",
+    "deletePermanentlyWithMembersHint": "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged.",
+    "deleteMembersFailedAfterGroup": "The group was deleted, but these member agents could not be: {{ids}}. Delete them from the Agents page.",
+    "deleteMembersFailedGroupKept": "The group was kept: these member agents could not be deleted: {{ids}}. Try again to finish."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3255,7 +3324,11 @@
     "humanPrincipalId": "Principal ID",
     "humanPrincipalIdPlaceholder": "The user's login/principal id",
     "humanTurnSettingsHint": "The discussion pauses and waits when it's a human member's turn to speak. Choose what happens if they don't respond in time.",
-    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak."
+    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak.",
+    "memberPromptPlaceholder": "You are {{name}}. Provide insightful analysis from your domain perspective.",
+    "memberPromptPlaceholderRole": "You are {{name}}, a {{role}} expert. Provide insightful analysis from your domain perspective.",
+    "moderatorPromptPlaceholder": "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary…",
+    "modelPlaceholder": "e.g. {{model}}"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -3340,7 +3413,9 @@
     "created": "Created",
     "updated": "Updated",
     "sourceConversation": "Source Conversation",
-    "conflicted": "Conflicted"
+    "conflicted": "Conflicted",
+    "deleteEntryTitle": "Delete this memory?",
+    "deleteEntryDesc": "\"{{key}}\" is permanently removed for this user. Agents stop recalling it. This cannot be undone."
   },
   "properties": {
     "title": "User Properties",
@@ -3453,7 +3528,9 @@
     "schedulesSkipped_one": "{{count}} schedule in the archive was not imported, because the selection did not include it.",
     "schedulesSkipped_other": "{{count}} schedules in the archive were not imported, because the selection did not include them.",
     "mergeScopeDefaultSpace": "your default space",
-    "mergeScope": "This merge updates only resources you may edit in {{space}}. A copy of this agent in another workspace is never changed — the import creates your own copy instead. Switch space first to update the copy that lives there."
+    "mergeScope": "This merge updates only resources you may edit in {{space}}. A copy of this agent in another workspace is never changed — the import creates your own copy instead. Switch space first to update the copy that lives there.",
+    "moveUp": "Move up",
+    "moveDown": "Move down"
   },
   "sync": {
     "actionCreate": "New",
@@ -3685,7 +3762,8 @@
     "groupLinkUnavailable": "This group could not be located, so there is no safe link to it.",
     "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
     "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually.",
-    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again."
+    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again.",
+    "regularTruncated": "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3715,7 +3793,9 @@
     "secretVault": "Secret Vault",
     "vaultDown": "Vault unavailable",
     "vaultUp": "Vault ready",
-    "viewLogs": "View Logs"
+    "viewLogs": "View Logs",
+    "coordAdminOnly": "Coordinator: requires admin",
+    "vaultAdminOnly": "Vault: requires admin"
   },
   "errorBoundary": {
     "retry": "Try Again",
@@ -3808,7 +3888,10 @@
     "found_other": "{{count}} orphans found",
     "scanIncomplete": "This scan did not finish",
     "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
-    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone."
+    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
+    "purgeIncompleteScan": "Nothing was deleted: EDDI could not finish checking which resources are still in use. Re-scan and try again.",
+    "purgeFailed": "Purge failed",
+    "scanFailed": "The scan failed: {{reason}}"
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",
@@ -3821,7 +3904,6 @@
     "enabled": "Enabled",
     "enforcementOff": "Enforcement is off.",
     "enforcementOffHint": "Quotas are not being enforced. Enable enforcement and save to start applying limits.",
-    "limitHint": "-1 = unlimited",
     "liveUsage": "Live Usage",
     "maxAgentsPerTenant": "Max Agents / Tenant",
     "maxApiCallsPerMinute": "Max API Calls / Minute",
@@ -3834,7 +3916,9 @@
     "resetSuccess": "Usage counters reset",
     "saveSuccess": "Quota saved",
     "tenantId": "Tenant ID",
-    "title": "Tenant Quotas"
+    "title": "Tenant Quotas",
+    "limitHintEmpty": "Empty or -1 = unlimited, 0 = blocked",
+    "invalidNumber": "Enter a number, or leave the field empty for unlimited."
   },
   "secretPicker": {
     "clearVault": "Clear vault reference",
@@ -4182,7 +4266,7 @@
       "deleteBoard": "Dissolve Task Force",
       "deleteBoardDesc": "Remove this task force configuration. Agents will remain.",
       "deleteBoardAll": "Dissolve Task Force + All Agents",
-      "deleteBoardAllDesc": "Remove this task force and all member agents permanently.",
+      "deleteBoardAllDesc": "Remove this task force and all of its member agents.",
       "unsavedChanges": "You have unsaved changes",
       "templateSaved": "Saved as template",
       "saveAsTemplate": "Save as Template",
@@ -4190,8 +4274,8 @@
       "saveChanges": "Save Changes",
       "deleteAllTitle": "Dissolve Task Force & All Agents?",
       "deleteTitle": "Dissolve Task Force?",
-      "deleteAllConfirm": "This will permanently dissolve this task force and remove all its member agents. This action cannot be undone.",
-      "deleteConfirm": "This will permanently dissolve this task force configuration. Member agents will not be affected.",
+      "deleteAllConfirm": "This dissolves this task force and deletes all of its member agents.",
+      "deleteConfirm": "This dissolves this task force. Member agents are not affected.",
       "title": "Settings"
     },
     "nav": {
@@ -4247,11 +4331,11 @@
     },
     "dashboard": {
       "assembleTaskForce": "Assemble Task Force",
-      "bulkDeleteConfirm": "This dissolves every selected task force and cannot be undone.",
+      "bulkDeleteConfirm": "This dissolves every selected task force. Member agents are not affected.",
       "bulkDeleteTitle_one": "Dissolve this task force?",
       "bulkDeleteTitle_other": "Dissolve {{count}} task forces?",
       "cancel": "Cancel",
-      "deleteConfirm": "Are you sure you want to dissolve this task force? This action cannot be undone.",
+      "deleteConfirm": "Are you sure you want to dissolve this task force? Member agents are not affected.",
       "deleteError": "Failed to delete task force",
       "deletePartialFail": "{{success}} deleted, {{fail}} failed",
       "deleteSelected": "Delete",
@@ -4316,7 +4400,8 @@
       "tryDifferent": "Try a different search term",
       "untitled": "Untitled Conversation",
       "loadListError": "Failed to load conversations",
-      "rejected": "Rejected"
+      "rejected": "Rejected",
+      "deleteFailed": "Could not delete the conversation"
     },
     "insights": "Insights",
     "memberCount": "{{count}} members",
@@ -5297,7 +5382,10 @@
     "legacyAdminOnly": "Visible to administrators only — once owners have been assigned",
     "lastChanged": "Last changed by {{who}}",
     "neverChanged": "Not changed here yet",
-    "saved": "Settings saved"
+    "saved": "Settings saved",
+    "deleteVariableTitle": "Delete this variable?",
+    "deleteVariableDescription": "Agents that use it lose its value until it is stored again. This cannot be undone.",
+    "legacyDefault": "Not set here — the default applies (visible to everyone)"
   },
   "cascadeSave": {
     "workflowChanged": "Workflow {{workflowId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
@@ -5357,5 +5445,11 @@
     "kindBoolean": "Boolean",
     "kindObject": "Object (JSON)",
     "kindList": "List (JSON)"
+  },
+  "actionTags": {
+    "remove": "Remove {{action}}",
+    "none": "No actions",
+    "inputLabel": "New action",
+    "add": "Add action"
   }
 }

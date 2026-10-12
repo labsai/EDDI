@@ -4,7 +4,6 @@ import {
   getAdminActions,
   getAuditTrail,
   getAuditTrailByAgent,
-  getEntryCount,
 } from "@/lib/api/audit";
 
 /* ─── Query Keys ─── */
@@ -14,8 +13,6 @@ const KEYS = {
     ["audit", "trail", conversationId, skip, limit] as const,
   trailByAgent: (agentId: string, agentVersion: number | null | undefined, skip: number, limit: number) =>
     ["audit", "trail-by-agent", agentId, agentVersion, skip, limit] as const,
-  count: (conversationId: string) =>
-    ["audit", "count", conversationId] as const,
 };
 
 /* ─── Queries ─── */
@@ -58,14 +55,5 @@ export function useAdminActions(actor: string, pageSize = 100) {
       lastPage.length < pageSize ? undefined : allPages.reduce((n, page) => n + page.length, 0),
     retry: (failureCount, error) =>
       !(isApiError(error) && [401, 403, 404].includes(error.status)) && failureCount < 2,
-  });
-}
-
-/** Fetch audit entry count for a conversation. Disabled when conversationId is empty. */
-export function useAuditEntryCount(conversationId: string) {
-  return useQuery({
-    queryKey: KEYS.count(conversationId),
-    queryFn: () => getEntryCount(conversationId),
-    enabled: !!conversationId,
   });
 }

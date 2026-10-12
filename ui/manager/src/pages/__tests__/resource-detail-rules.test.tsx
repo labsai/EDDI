@@ -201,6 +201,8 @@ describe("Rules Editor", () => {
 
     const select = screen.getAllByTestId("condition-type-select")[0] as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "actionmatcher" } });
+    // The mock rule holds user input, so the switch asks before wiping it.
+    fireEvent.click(await screen.findByRole("button", { name: "Change type" }));
 
     await waitFor(() => {
       expect(select.value).toBe("actionmatcher");
@@ -217,6 +219,8 @@ describe("Rules Editor", () => {
 
     const select = screen.getAllByTestId("condition-type-select")[0] as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "occurrence" } });
+    // The mock rule holds user input, so the switch asks before wiping it.
+    fireEvent.click(await screen.findByRole("button", { name: "Change type" }));
 
     await waitFor(() => {
       expect(select.value).toBe("occurrence");
@@ -233,6 +237,8 @@ describe("Rules Editor", () => {
 
     const select = screen.getAllByTestId("condition-type-select")[0] as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "deploymentContext" } });
+    // The mock rule holds user input, so the switch asks before wiping it.
+    fireEvent.click(await screen.findByRole("button", { name: "Change type" }));
 
     await waitFor(() => {
       expect(select.value).toBe("deploymentContext");
@@ -249,6 +255,8 @@ describe("Rules Editor", () => {
 
     const select = screen.getAllByTestId("condition-type-select")[0] as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "negation" } });
+    // The mock rule holds user input, so the switch asks before wiping it.
+    fireEvent.click(await screen.findByRole("button", { name: "Change type" }));
 
     await waitFor(() => {
       expect(select.value).toBe("negation");
