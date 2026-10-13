@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
@@ -105,6 +106,18 @@ final class LlmFallbackHandler {
      */
     Fallback serve(Task task, Map<String, Object> templateData, IWritableConversationStep step, String trigger, Throwable failure,
                    boolean convertToObject, String conversationId) {
+        return serve(task, templateData, step, trigger, failure, convertToObject, conversationId, null, null);
+    }
+
+    /**
+     * As above, also naming the agent and (for a validation fallback, where there
+     * is no exception) what was being recovered from, for the one structured
+     * recovery log line (R11). {@code failureClass} defaults to the absorbed
+     * failure's class, or to {@code trigger}.
+     */
+    Fallback serve(Task task, Map<String, Object> templateData, IWritableConversationStep step, String trigger, Throwable failure,
+                   boolean convertToObject, String conversationId, String agentId, String failureClass) {
+        long started = System.nanoTime();
         String taskId = task.getId() != null ? task.getId() : "default";
         ResponseValidation config = task.getResponseValidation();
 
@@ -123,6 +136,8 @@ final class LlmFallbackHandler {
         if (meterRegistry != null) {
             meterRegistry.counter("eddi.llm.recovery", "action", "fallback", "outcome", "served", "trigger", trigger).increment();
         }
+        String recoveredFrom = failureClass != null ? failureClass : failure != null ? LlmFailureClassifier.classify(failure).cls().name() : trigger;
+        LlmRecoveryLog.log(conversationId, agentId, recoveredFrom, LlmRecoveryLog.FALLBACK, "served", 1, (System.nanoTime() - started) / 1_000_000L);
         return fallback;
     }
 
