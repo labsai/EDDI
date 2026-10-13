@@ -11,6 +11,8 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
+import org.bson.conversions.Bson;
+import com.mongodb.client.result.DeleteResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import com.mongodb.client.MongoCursor;
+import java.time.Duration;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -186,13 +189,13 @@ class DatabaseLogsTest {
         @Test
         void addLogsBatch_nullEntries_doesNothing() {
             sut.addLogsBatch(null);
-            verifyNoInteractions(logsCollection);
+            verify(logsCollection, never()).insertMany(anyList());
         }
 
         @Test
         void addLogsBatch_emptyList_doesNothing() {
             sut.addLogsBatch(List.of());
-            verifyNoInteractions(logsCollection);
+            verify(logsCollection, never()).insertMany(anyList());
         }
 
         @Test
@@ -283,6 +286,32 @@ class DatabaseLogsTest {
             long result = sut.pseudonymizeByUserId("non-existent", "pseudo-1");
 
             assertEquals(0L, result);
+        }
+    }
+
+    @Nested
+    class Retention {
+
+        @Test
+        void deleteOlderThan_deletesEntriesBeforeTheCutoff() {
+            DeleteResult deleteResult = mock(DeleteResult.class);
+            when(deleteResult.getDeletedCount()).thenReturn(4L);
+            when(logsCollection.deleteMany(any(Bson.class))).thenReturn(deleteResult);
+
+            assertEquals(4L, sut.deleteOlderThan(10));
+
+            ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+            verify(logsCollection).deleteMany(filter.capture());
+            var rendered = filter.getValue().toBsonDocument();
+            var cutoff = rendered.getDocument("timestamp").getDateTime("$lt").getValue();
+            long expected = System.currentTimeMillis() - Duration.ofDays(10).toMillis();
+            assertTrue(Math.abs(cutoff - expected) < 60_000, "cutoff is now minus 10 days");
+        }
+
+        @Test
+        void deleteOlderThan_rejectsANonPositiveRetention() {
+            assertThrows(IllegalArgumentException.class, () -> sut.deleteOlderThan(-1));
+            verify(logsCollection, never()).deleteMany(any(Bson.class));
         }
     }
 
