@@ -112,6 +112,8 @@ export function ConnectionsPage() {
     [connections],
   );
 
+  const deleteTargetName =
+    connections?.find((c) => c.id === deleteTarget?.id)?.connectionName ?? "";
   /** Hard delete — explicit opt-in; the store (and this dialog) default to soft. */
   const [deletePermanently, setDeletePermanently] = useState(false);
 
@@ -123,6 +125,11 @@ export function ConnectionsPage() {
         version: deleteTarget.version,
         permanent: deletePermanently,
       });
+      toast.success(
+        t("connections.deleted", "Connection \"{{name}}\" deleted", {
+          name: deleteTargetName,
+        }),
+      );
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
@@ -390,7 +397,13 @@ export function ConnectionsPage() {
           setDeleteTarget(null);
           setDeletePermanently(false);
         }}
-        title={t("connections.confirmDelete", "Delete this connection?")}
+        title={
+          deleteTargetName
+            ? t("connections.confirmDeleteNamed", "Delete connection \"{{name}}\"?", {
+                name: deleteTargetName,
+              })
+            : t("connections.confirmDelete", "Delete this connection?")
+        }
         description={t(
           "connections.confirmDeleteDesc",
           "Every account linked through it is unlinked at the same time — tokens must not outlive the connection that produced them. Agents referring to it by name will stop being able to authenticate.",

@@ -285,7 +285,7 @@ describe("SecretsPage", () => {
 
     await user.click(screen.getByTestId("delete-openai-api-key"));
     expect(screen.getByText("Delete Secret")).toBeInTheDocument();
-    expect(screen.getByTestId("confirm-delete-button")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-dialog-confirm")).toBeInTheDocument();
   });
 
   it("delete confirmation shows the secret key name", async () => {
@@ -321,6 +321,24 @@ describe("SecretsPage", () => {
     });
   });
 
+  it("moves focus into the delete dialog and closes it on Escape", async () => {
+    renderSecrets();
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByText("openai-api-key")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId("delete-openai-api-key"));
+    const dialog = await screen.findByRole("dialog");
+    // Focus lands inside the dialog (the hand-rolled overlay never took it,
+    // so Escape did nothing and Tab walked into the page behind).
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByText("Delete Secret")).not.toBeInTheDocument();
+    });
+  });
+
   it("executes delete when confirmed", async () => {
     renderSecrets();
     const user = userEvent.setup();
@@ -330,7 +348,7 @@ describe("SecretsPage", () => {
     });
 
     await user.click(screen.getByTestId("delete-openai-api-key"));
-    await user.click(screen.getByTestId("confirm-delete-button"));
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
 
     // Dialog should close after successful deletion
     await waitFor(() => {

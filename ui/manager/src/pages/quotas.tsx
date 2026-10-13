@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { useQuota, useQuotaUsage, useUpdateQuota, useResetUsage } from "@/hooks/use-quotas";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type { TenantQuota } from "@/lib/api/quotas";
 import { parseQuotaLimit } from "@/lib/quota-limit";
 
@@ -45,6 +46,10 @@ export function QuotasPage() {
   // Fields whose text is not a number yet (a lone "-", "1e"). Saving is blocked
   // while any is set: Number("-") is NaN, which the PUT would send as null.
   const [invalidFields, setInvalidFields] = useState<ReadonlySet<keyof TenantQuota>>(new Set());
+
+  // Closing the tab or navigating away with edits would silently discard them —
+  // the page already shows an "Unsaved changes" pill, so it must also guard.
+  useUnsavedChangesGuard(dirty);
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("quotas"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
@@ -217,7 +222,7 @@ export function QuotasPage() {
                     value={form.maxConversationsPerDay}
                     onChange={(v) => handleLimitChange("maxConversationsPerDay", v)}
                     hint={t("quotas.limitHintEmpty", "Empty or -1 = unlimited, 0 = blocked")}
-                    invalidMessage={t("quotas.invalidNumber", "Enter a number, or leave the field empty for unlimited.")}
+                    invalidMessage={t("quotas.invalidInteger", "Enter a whole number (0 or more), or leave empty for unlimited.")}
                     testId="quota-max-conversations"
                     dimmed={!form.enabled}
                   />
@@ -227,7 +232,7 @@ export function QuotasPage() {
                     value={form.maxAgentsPerTenant}
                     onChange={(v) => handleLimitChange("maxAgentsPerTenant", v)}
                     hint={t("quotas.limitHintEmpty", "Empty or -1 = unlimited, 0 = blocked")}
-                    invalidMessage={t("quotas.invalidNumber", "Enter a number, or leave the field empty for unlimited.")}
+                    invalidMessage={t("quotas.invalidInteger", "Enter a whole number (0 or more), or leave empty for unlimited.")}
                     testId="quota-max-agents"
                     dimmed={!form.enabled}
                   />
@@ -237,7 +242,7 @@ export function QuotasPage() {
                     value={form.maxApiCallsPerMinute}
                     onChange={(v) => handleLimitChange("maxApiCallsPerMinute", v)}
                     hint={t("quotas.limitHintEmpty", "Empty or -1 = unlimited, 0 = blocked")}
-                    invalidMessage={t("quotas.invalidNumber", "Enter a number, or leave the field empty for unlimited.")}
+                    invalidMessage={t("quotas.invalidInteger", "Enter a whole number (0 or more), or leave empty for unlimited.")}
                     testId="quota-max-api-calls"
                     dimmed={!form.enabled}
                   />
@@ -247,9 +252,10 @@ export function QuotasPage() {
                     value={form.maxMonthlyCostUsd}
                     onChange={(v) => handleLimitChange("maxMonthlyCostUsd", v)}
                     hint={t("quotas.limitHintEmpty", "Empty or -1 = unlimited, 0 = blocked")}
-                    invalidMessage={t("quotas.invalidNumber", "Enter a number, or leave the field empty for unlimited.")}
+                    invalidMessage={t("quotas.invalidAmount", "Enter an amount (0 or more), or leave empty for unlimited.")}
                     testId="quota-max-cost"
                     step={0.01}
+                    integer={false}
                     dimmed={!form.enabled}
                   />
                 </div>
@@ -384,6 +390,7 @@ function QuotaField({
   testId,
   step = 1,
   dimmed = false,
+  integer = true,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -394,6 +401,8 @@ function QuotaField({
   testId: string;
   step?: number;
   dimmed?: boolean;
+  /** Counts must be whole numbers; the cost limit takes decimals. */
+  integer?: boolean;
 }) {
   const id = useId();
   const hintId = `${id}-hint`;
@@ -402,14 +411,14 @@ function QuotaField({
   const [text, setText] = useState(() => String(value));
   // Follow the server value (load, save) unless the text already means it.
   useEffect(() => {
-    setText((prev) => (parseQuotaLimit(prev) === value ? prev : String(value)));
-  }, [value]);
+    setText((prev) => (parseQuotaLimit(prev, { integer }) === value ? prev : String(value)));
+  }, [value, integer]);
   // A number input reports half-typed text ("-", "1e") as "" with
   // `validity.badInput` set. Read as text, that "" would mean "empty", i.e.
   // unlimited, while the field still shows the "-" — so it is tracked apart.
   // (Writing "-" back into `value` would not work: the browser drops it.)
   const [badInput, setBadInput] = useState(false);
-  const invalid = badInput || parseQuotaLimit(text) === null;
+  const invalid = badInput || parseQuotaLimit(text, { integer }) === null;
 
   return (
     <div className={dimmed ? "opacity-60 transition-opacity" : "transition-opacity"}>
@@ -430,7 +439,7 @@ function QuotaField({
             const bad = e.target.validity?.badInput === true;
             setBadInput(bad);
             setText(e.target.value);
-            onChange(bad ? null : parseQuotaLimit(e.target.value));
+            onChange(bad ? null : parseQuotaLimit(e.target.value, { integer }));
           }}
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus:border-sidebar-accent focus:outline-none focus:ring-1 focus:ring-sidebar-accent aria-invalid:border-destructive"
         />

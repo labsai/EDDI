@@ -280,4 +280,16 @@ describe("TriggersPage", () => {
       expect(screen.getByTestId("trigger-save-btn")).toBeDisabled();
     });
   });
+
+  it("keeps Save disabled and says why while no agent is chosen", async () => {
+    renderPage();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("create-trigger-btn"));
+    expect(await screen.findByTestId("trigger-save-reason")).toHaveTextContent("Enter an intent");
+
+    await user.type(screen.getByTestId("trigger-intent-input"), "booking_request");
+    // Intent alone used to leave Save enabled; clicking it did nothing.
+    expect(screen.getByTestId("trigger-save-btn")).toBeDisabled();
+    expect(screen.getByTestId("trigger-save-reason")).toHaveTextContent("Choose at least one agent");
+  });
 });
