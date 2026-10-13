@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -17,8 +17,8 @@ export interface EditorSectionProps {
   accent?: string;
   variant?: "inline" | "card";
   /**
-   * Marks the section as holding unsaved edits — a pill beside the label (and
-   * a dot when the section is collapsed, so a closed section still says so).
+   * Marks the section as holding unsaved edits — a pill beside the label (shown
+   * on the header, so a collapsed section still says so).
    */
   modified?: boolean;
   children: React.ReactNode;
@@ -44,25 +44,36 @@ export function EditorSection({
       {t("editor.modified", "Modified")}
     </span>
   );
+  const panelId = useId();
 
   if (variant === "card") {
+    // The heading wraps the button (not the other way round): a heading inside a
+    // button is invalid and flattens to plain button text for assistive tech.
     return (
       <section className="rounded-xl border bg-card shadow-sm">
-        <button
-          type="button"
-          onClick={() => setOpen(!open)}
-          className="flex w-full items-center gap-2 border-b border-border p-5 text-start"
-        >
-          {open ? (
-            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-          )}
-          {Icon && <Icon className={`h-5 w-5 ${accent ?? "text-primary"}`} />}
-          <h2 className="text-lg font-semibold text-foreground">{label}</h2>
-          {modifiedPill}
-        </button>
-        {open && <div className="p-5 space-y-4">{children}</div>}
+        <h2 className="text-lg font-semibold text-foreground">
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            aria-controls={panelId}
+            className="flex w-full items-center gap-2 border-b border-border p-5 text-start"
+          >
+            {open ? (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            )}
+            {Icon && <Icon className={`h-5 w-5 ${accent ?? "text-primary"}`} aria-hidden="true" />}
+            {label}
+            {modifiedPill}
+          </button>
+        </h2>
+        {open && (
+          <div id={panelId} className="p-5 space-y-4">
+            {children}
+          </div>
+        )}
       </section>
     );
   }
@@ -72,6 +83,8 @@ export function EditorSection({
       <button
         type="button"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-controls={panelId}
         className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
       >
         {open ? (
@@ -83,7 +96,11 @@ export function EditorSection({
         {label}
         {modifiedPill}
       </button>
-      {open && <div className="space-y-2">{children}</div>}
+      {open && (
+        <div id={panelId} className="space-y-2">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

@@ -129,7 +129,10 @@ You can:
 - Look up conversations and read individual conversation transcripts.
 - Check deployment status for an agent in an environment.
 - Check coordinator status, read platform logs, and read quota settings.
-- Read the audit trail for an agent.
+- Read the audit trail for an agent, and the log of administrative actions —
+  who changed, deployed, imported, erased or was refused what, and when. A GDPR
+  erasure keeps a user's audit rows but replaces their content with a
+  "gdprRedaction" marker; that is expected, not damage.
 - Read EDDI's own documentation. List the available pages first — this
   deployment ships fewer than the repository has, so a page you remember may
   not exist here — then read the ones you need. Prefer citing the docs over
@@ -576,6 +579,22 @@ your tool schemas do not cover it, not as a routine first step:
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is always a \${vault:key-name}
   reference.
+- Tool-loop limits on an LLM task: maxToolIterations bounds rounds (default 10,
+  ceiling 100); maxToolCallsPerIteration bounds the calls run from ONE model
+  response (default 20) and maxToolCallsPerTurn the calls across the whole turn,
+  approval pauses included (default 100); -1 or 0 removes a call cap. A call past
+  a cap is not run: it is answered NOT_EXECUTED, never reaches the approval gate,
+  and the model answers with what it has — the usual answer to "why did only
+  some of my tools run?".
+- Property instructions (property setter, and preRequest/postResponse of
+  apicalls, mcpcalls and llm tasks) are typed by the field they set:
+  valueString (a template), valueInt, valueLong (beyond the int range),
+  valueFloat, valueDouble (full-precision decimal), valueBoolean, valueObject,
+  valueList. Set one per instruction — a typed field overwrites valueString. An
+  mcpcalls entry can cap how much of its tool result is stored with
+  maxResponseSizeInBytes (characters, default 2,000,000).
+- Groups seat each agent once: a member repeated by agentId, whatever its member
+  type, is refused on save with 400 — a second seat needs a second agent.
 - Behavior rules: conditions evaluated per turn that emit ACTIONS; output
   configs and api calls key off those action names.
 - Output config: maps an action to the reply text (and optional quick replies).
@@ -600,7 +619,9 @@ if the one you want is missing; this deployment may ship a subset):
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
-- memory: "conversation-memory", "user-memory", "properties"`;
+- memory: "conversation-memory", "user-memory", "properties"
+- embedding the chat widget in another site (iframe, frame-ancestors, token
+  hand-off with auth on, image CSP): "chat-ui-embedding"`;
 
 const BODY_HOW_TO_WORK = `How to work:
 - Prefer looking things up over asking. If the user names an agent, find it.

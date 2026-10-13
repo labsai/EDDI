@@ -50,6 +50,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
@@ -77,6 +78,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.*;
 import java.util.List;
@@ -691,6 +693,17 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * Sets this turn's deadline on the memory: the agent's {@code turnDeadlineMs}
+     * capped by the caller's header, counted from the request's arrival. Always
+     * assigns — a memory reused across turns must not carry the previous turn's
+     * deadline, nor keep one the next request does not ask for.
+     */
+    static void applyTurnDeadline(IConversationMemory memory, IAgent agent, InputData inputData, Clock clock, long arrivalEpochMs) {
+        memory.setTurnDeadline(TurnDeadline.forTurn(clock, arrivalEpochMs, agent.getTurnDeadlineMs(), agent.getTurnDeadlineReserveMs(),
+                inputData != null ? inputData.getRequestedTurnDeadlineMs() : null));
+    }
+
     @Override
     public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
@@ -798,6 +811,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onLlmRetry(String reason, int attempt) {
+                streamingHandler.onLlmRetry(reason, attempt);
+            }
+
+            @Override
             public void onComplete() {
                 // Handled separately after memory conversion
             }
@@ -829,6 +847,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             throws Exception {
 
         long startTime = System.nanoTime();
+        final long arrivalEpochMs = System.currentTimeMillis();
         rejectIfShuttingDown();
         // Assigned inside the try; the catch blocks need it, and the lambdas below
         // need an effectively-final alias (processingTurn).
@@ -914,6 +933,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
                 adoptResolvedAgentVersion(memory, agent);
+                applyTurnDeadline(memory, agent, inputData, Clock.systemUTC(), arrivalEpochMs);
                 // A streamed turn reports its progress through the sink on memory, which
                 // LifecycleManager and the tasks read.
                 if (listener.eventSink() != null) {

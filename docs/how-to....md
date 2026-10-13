@@ -4,9 +4,9 @@
 
 ## ...add an LLM to my agent?
 
-1. Create a LangChain configuration with your provider settings
-2. Add a behavior rule that triggers the LLM action (e.g., `send_to_ai`)
-3. Add the LangChain extension to your package/workflow
+1. Create an LLM task configuration (`langchain.json`, stored at `/llmstore/llms`) with your provider settings
+2. Add a behavior rule that emits the action the task listens for (e.g., `send_to_ai`)
+3. Add the LLM task as a step of the agent's workflow (`eddi://ai.labs.llm`)
 
 ```json
 {
@@ -26,7 +26,9 @@
 }
 ```
 
-See [LLM Integration](langchain.md) for the complete guide with all 12 supported providers.
+If the system message or output uses `{...}` placeholders, also add `eddi://ai.labs.templating` as the last workflow step.
+
+See [LLM Integration](langchain.md) for the complete guide with all 19 named providers (eleven model builders plus eight OpenAI-compatible providers with their own type; any other OpenAI-compatible endpoint works through `openai` with a `baseUrl`).
 
 ---
 
@@ -44,7 +46,7 @@ curl -X PUT http://localhost:7070/secretstore/secrets/default/MY_API_KEY \
   -d '{"value": "sk-abc123...", "description": "OpenAI production key"}'
 ```
 
-**In LangChain configs,** reference secrets using vault syntax:
+**In LLM task configurations (`langchain.json`),** reference secrets using vault syntax:
 
 ```json
 {

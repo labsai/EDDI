@@ -71,6 +71,7 @@ export function NavigationGuardDialog() {
         cancelLabel={t("editor.stay", "Stay")}
         confirmLabel={t("editor.discardAndLeave", "Discard & Leave")}
         onSave={save ? () => void saveAndLeave() : undefined}
+        saveLabel={t("editor.saveAndLeave", "Save & leave")}
         isSaving={saving}
       />
     </>

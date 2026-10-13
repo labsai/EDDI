@@ -1,7 +1,7 @@
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
 import type { Environment } from "@/lib/constants";
@@ -54,7 +54,10 @@ import {
   useDuplicateAgent,
   useAgentVersions,
   useUpdateAgent,
+  useUpdateAgentDescriptor,
 } from "@/hooks/use-agents";
+import { EditableTitle } from "@/components/shared/editable-title";
+import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import {
   agentJson,
@@ -190,6 +193,12 @@ export function AgentDetailPage() {
   const startConversationMutation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
+  // Production may be live at ANOTHER version than the one on screen (a save
+  // creates a new version nobody has deployed). Say so, rather than describing
+  // only the viewed version as "Not deployed" while v5 serves.
+  const productionEntry = envStatuses?.find((e) => e.environment === "production");
+  const liveElsewhereVersion =
+    status === "NOT_FOUND" && productionEntry?.status === "READY" ? productionEntry.deployedVersion : undefined;
   const config = statusIcons[status];
   const StatusIcon = config.icon;
   const statusLabels: Record<string, string> = {
@@ -198,7 +207,13 @@ export function AgentDetailPage() {
     ERROR: t("status.error", "Error"),
     NOT_FOUND: t("status.notDeployed", "Not deployed"),
   };
-  const statusLabel = statusLabels[status] ?? status;
+  const statusLabel =
+    liveElsewhereVersion !== undefined
+      ? t("agentDetail.liveElsewhere", "Live: v{{live}} · Viewing v{{viewing}} (not deployed)", {
+          live: liveElsewhereVersion,
+          viewing: resolvedVersion,
+        })
+      : (statusLabels[status] ?? status);
   const isDeployed = status === "READY";
   const isBusy = deployMutation.isPending || undeployMutation.isPending || status === "IN_PROGRESS";
 
@@ -212,6 +227,21 @@ export function AgentDetailPage() {
     [agent?.workflows]
   );
   const { data: latestVersions } = useLatestVersions(workflowUris);
+  // Workflow rows show names, not raw ids.
+  const { data: workflowDescriptors } = useWorkflowDescriptors(100, 0, "");
+  const workflowNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const d of workflowDescriptors ?? []) {
+      if (!d.name) continue;
+      try {
+        names.set(parseResourceUri(d.resource).id, d.name);
+      } catch {
+        // an unparseable descriptor cannot name a row
+      }
+    }
+    return names;
+  }, [workflowDescriptors]);
+  const renameMutation = useUpdateAgentDescriptor();
 
   // ── Draft ──
   const editable = draft ?? agent;
@@ -243,11 +273,9 @@ export function AgentDetailPage() {
       // Follow the version the save created. The mutation has already seeded
       // its cache with what was sent, so the page does not flash the old one.
       if (created !== null) setVersion(created);
-      toast.success(
-        created !== null
-          ? t("agentDetail.savedAsVersion", "Saved as version {{version}}", { version: created })
-          : t("agentDetail.saved", "Agent saved"),
-      );
+      // Every save writes a new agent version that is not what is serving: say
+      // which one, and offer the deploy that closes the gap.
+      showSavedNotLiveToast({ t, queryClient, agentId: id!, newAgentVersion: created });
       return true;
     } catch (err) {
       if (isApiError(err) && err.status === 409) {
@@ -467,9 +495,22 @@ export function AgentDetailPage() {
           <div className="flex items-center gap-3">
             <Bot className="h-8 w-8 text-primary" />
             <div>
-              <h1 className="text-3xl font-bold text-foreground">
-                {versions?.find(v => v.version === resolvedVersion)?.name || t("agentDetail.title", "Agent Detail")}
-              </h1>
+              <EditableTitle
+                name={versions?.find((v) => v.version === resolvedVersion)?.name}
+                description={versions?.find((v) => v.version === resolvedVersion)?.description}
+                fallback={t("agentDetail.title", "Agent Detail")}
+                canEdit={access.canEdit}
+                onSave={async ({ name, description }) => {
+                  // The list reads the newest version's descriptor, the header
+                  // the viewed one: keep both in step.
+                  const latest = versions?.[0]?.version ?? resolvedVersion;
+                  await renameMutation.mutateAsync({ id: id!, version: latest, name, description });
+                  if (latest !== resolvedVersion) {
+                    await renameMutation.mutateAsync({ id: id!, version: resolvedVersion, name, description });
+                  }
+                }}
+                data-testid="agent-title"
+              />
               <p className="font-mono text-sm text-muted-foreground" data-testid="agent-id">
                 {id}
               </p>
@@ -559,7 +600,9 @@ export function AgentDetailPage() {
               {isBusy
                 ? t("common.loading")
                 : isDeployed
-                  ? t("agents.undeploy")
+                  ? liveEnvironments.length > 1
+                    ? t("agents.undeployFromProduction", "Undeploy from production")
+                    : t("agents.undeploy")
                   : t("agents.deploy")}
             </button>
 
@@ -575,12 +618,19 @@ export function AgentDetailPage() {
                   drawerStore.setStep("deploying");
                   try {
                     await deployAgent("production", id!, resolvedVersion);
+                    let ready = false;
                     for (let i = 0; i < 15; i++) {
                       await new Promise(r => setTimeout(r, 2000));
                       const s = await getDeploymentStatus("production", id!, resolvedVersion);
-                      if (s.status === "READY") break;
-                      if (s.status === "ERROR") throw new Error("Deploy failed");
+                      if (s.status === "READY") {
+                        ready = true;
+                        break;
+                      }
+                      if (s.status === "ERROR") throw new Error(t("agents.deployError", "Deploy failed"));
                     }
+                    // Starting a conversation on an agent that never came up
+                    // fails further on with a message about something else.
+                    if (!ready) throw new Error(t("chatDrawer.timeout", "Deploy timed out"));
                     // Invalidate immediately after deployment is confirmed so
                     // caches are fresh even if the conversation start fails.
                     queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -770,7 +820,10 @@ export function AgentDetailPage() {
             const { id: wfId, version: wfVersion } = parseResourceUri(wfUri);
             const latestVer = latestVersions?.[wfId];
             const isStale = latestVer !== undefined && latestVer > wfVersion;
-            const workflowLink = `/manage/workflowview/${wfId}?agentId=${id}&agentVer=${resolvedVersion}`;
+            // The version THIS agent references, not whatever is newest: opened at
+            // the latest, a save could not change an agent pinned to an older one.
+            const workflowLink = `/manage/workflowview/${wfId}?version=${wfVersion}&agentId=${id}&agentVer=${resolvedVersion}`;
+            const workflowName = workflowNames.get(wfId);
             return (
               <div
                 key={wfUri}
@@ -789,8 +842,11 @@ export function AgentDetailPage() {
                   className="flex-1 min-w-0"
                 >
                   <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors truncate">
-                    {wfId}
+                    {workflowName ?? wfId}
                   </p>
+                  {workflowName && (
+                    <p className="font-mono text-[10px] text-muted-foreground truncate">{wfId}</p>
+                  )}
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                       v{wfVersion}
@@ -826,9 +882,11 @@ export function AgentDetailPage() {
                     onClick={() => handleRemoveWorkflow(wfUri)}
                     disabled={isSaving}
                     className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-                    title={t("common.delete")}
+                    title={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
+                    aria-label={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
+                    data-testid={`remove-workflow-${wfId}`}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -858,6 +916,8 @@ export function AgentDetailPage() {
       <A2ASection
         agent={doc}
         agentId={id!}
+        agentName={versions?.find((v) => v.version === resolvedVersion)?.name}
+        version={resolvedVersion}
         onChange={editAgent}
         disabled={isSaving}
         modified={touched("a2aEnabled", "description", "a2aSkills")}
@@ -1146,6 +1206,7 @@ function VersionSelect({
   /** While there are unsaved edits — switching would silently drop them. */
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   if (versions.length <= 1) {
     return (
       <span
@@ -1162,6 +1223,7 @@ function VersionSelect({
       value={current}
       onChange={(e) => onChange(Number(e.target.value))}
       disabled={disabled}
+      aria-label={t("editor.versionPicker", "Select version")}
       className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
       data-testid="version-picker"
     >
@@ -1458,6 +1520,8 @@ function RawConfigSection({ agent }: { agent: Agent }) {
 function A2ASection({
   agent,
   agentId,
+  agentName,
+  version,
   onChange,
   disabled,
   modified,
@@ -1465,6 +1529,10 @@ function A2ASection({
   /** The page's draft of the agent document. */
   agent: Agent;
   agentId: string;
+  /** The agent's name from its descriptor — the document does not carry it. */
+  agentName?: string;
+  /** The agent version being edited. */
+  version: number;
   /** Records an edit in the draft — nothing is saved until the page's Save. */
   onChange: AgentEdit;
   disabled: boolean;
@@ -1508,11 +1576,13 @@ function A2ASection({
 
   // Build a preview of the Agent Card (mirrors AgentCardService.java)
   const agentCard = {
-    name: `EDDI Agent ${agentId}`,
+    name: agentName || `EDDI Agent ${agentId}`,
     description: agent.description || "EDDI conversational AI agent",
     url: rpcUrl,
     provider: "EDDI",
-    version: "6.0.0",
+    // The agent version being edited — the card the server serves carries the
+    // platform's own version, which this page does not know.
+    version: String(version),
     capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: true },
     skills: (agent.a2aSkills && agent.a2aSkills.length > 0)
       ? agent.a2aSkills.map((s) => ({
@@ -1524,36 +1594,42 @@ function A2ASection({
   };
 
   const [isOpen, setIsOpen] = useState(false);
+  const panelId = useId();
+  const descriptionId = useId();
+  const skillsId = useId();
+  const skillInputId = useId();
 
   return (
     <section className="rounded-xl border bg-card shadow-sm" data-testid="a2a-section">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn(
-          "flex w-full items-center gap-2 p-5 text-start",
-          isOpen && "border-b border-border"
-        )}
-      >
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-        <Handshake className="h-5 w-5 text-primary" />
-        <h2 className="text-lg font-semibold text-foreground">
+      <h2 className="text-lg font-semibold text-foreground">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          aria-expanded={isOpen}
+          aria-controls={panelId}
+          className={cn(
+            "flex w-full items-center gap-2 p-5 text-start",
+            isOpen && "border-b border-border"
+          )}
+        >
+          {isOpen ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          )}
+          <Handshake className="h-5 w-5 text-primary" aria-hidden="true" />
           {t("agentDetail.a2aSection", "Agent-to-Agent (A2A)")}
-        </h2>
-        {modified && <ModifiedPill />}
-        {isEnabled && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <Link2 className="h-3 w-3" />
-            {t("agentDetail.a2aEnabled", "Enabled")}
-          </span>
-        )}
-      </button>
+          {modified && <ModifiedPill />}
+          {isEnabled && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <Link2 className="h-3 w-3" aria-hidden="true" />
+              {t("agentDetail.a2aEnabled", "Enabled")}
+            </span>
+          )}
+        </button>
+      </h2>
 
-      {isOpen && <div className="p-5">
+      {isOpen && <div id={panelId} className="p-5">
         {!isEnabled ? (
           /* ── Disabled state: CTA ── */
           <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -1579,10 +1655,11 @@ function A2ASection({
           <div className="space-y-5">
             {/* Description */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <label htmlFor={descriptionId} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aDescription", "Agent Description")}
               </label>
               <input
+                id={descriptionId}
                 type="text"
                 value={agent.description ?? ""}
                 onChange={(e) => onChange({ ...agent, description: e.target.value })}
@@ -1597,7 +1674,7 @@ function A2ASection({
 
             {/* Skills */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <label htmlFor={skillInputId} id={skillsId} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aSkills", "A2A Skills")}
               </label>
               <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1625,6 +1702,7 @@ function A2ASection({
               </div>
               <div className="flex gap-1.5">
                 <input
+                  id={skillInputId}
                   type="text"
                   value={skillInput}
                   onChange={(e) => setSkillInput(e.target.value)}
@@ -1642,18 +1720,20 @@ function A2ASection({
                   type="button"
                   onClick={handleAddSkill}
                   className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                  aria-label={t("agentDetail.a2aAddSkill", "Add skill")}
+                  data-testid="a2a-add-skill"
                 >
-                  <Plus className="h-3 w-3" />
+                  <Plus className="h-3 w-3" aria-hidden="true" />
                 </button>
               </div>
             </div>
 
             {/* Endpoints */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <p id={`${panelId}-endpoints`} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aEndpoints", "Endpoints")}
-              </label>
-              <div className="space-y-1.5">
+              </p>
+              <div className="space-y-1.5" role="group" aria-labelledby={`${panelId}-endpoints`}>
                 {[
                   { method: "GET", url: cardUrl, label: "card" },
                   { method: "POST", url: rpcUrl, label: "rpc" },
@@ -1691,6 +1771,7 @@ function A2ASection({
               <button
                 type="button"
                 onClick={() => setShowCard(!showCard)}
+                aria-expanded={showCard}
                 className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                 data-testid="a2a-card-toggle"
               >

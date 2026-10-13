@@ -7,6 +7,7 @@ package ai.labs.eddi.integrations.openai;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -68,6 +69,7 @@ class OpenAiConversationBridgeTest {
     private IConversationService conversationService;
     private IUserConversationStore userConversationStore;
     private IUserMemoryStore userMemoryStore;
+    private IConversationMemoryStore conversationMemoryStore;
     private OpenAiConversationBridge bridge;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -81,6 +83,7 @@ class OpenAiConversationBridgeTest {
         conversationService = mock(IConversationService.class);
         userConversationStore = mock(IUserConversationStore.class);
         userMemoryStore = mock(IUserMemoryStore.class);
+        conversationMemoryStore = mock(IConversationMemoryStore.class);
 
         when(conversationService.startConversation(any(), any(), any(), any()))
                 .thenReturn(new IConversationService.ConversationResult(
@@ -90,7 +93,7 @@ class OpenAiConversationBridgeTest {
         bridge = new OpenAiConversationBridge(conversationService, userConversationStore, userMemoryStore,
                 new OpenAiMessageMapper(objectMapper, 5),
                 OpenAiTestFixtures.config(b -> b.requestTimeoutSeconds = 2),
-                new SimpleMeterRegistry(), permissiveUseGuard());
+                new SimpleMeterRegistry(), permissiveUseGuard(), conversationMemoryStore);
         bridge.initMetrics();
     }
 
@@ -141,6 +144,27 @@ class OpenAiConversationBridgeTest {
     /** A prepared stateless turn — no store interaction needed. */
     private OpenAiConversationBridge.PreparedTurn statelessTurn() throws Exception {
         return bridge.prepare(statelessModel, simpleRequest(), headers(null), USER_ID);
+    }
+
+    @Test
+    void turnDeadlineHeaderIsCarriedOnTheInput() throws Exception {
+        var headers = headers(null);
+        headers.put("X-EDDI-Turn-Deadline-Ms", "20000");
+
+        var turn = bridge.prepare(statelessModel, simpleRequest(), headers, USER_ID);
+
+        assertEquals(20_000L, turn.inputData().getRequestedTurnDeadlineMs());
+    }
+
+    @Test
+    void unusableTurnDeadlineHeaderIsIgnored() throws Exception {
+        var headers = headers(null);
+        headers.put("X-EDDI-Turn-Deadline-Ms", "soon");
+
+        var turn = bridge.prepare(statelessModel, simpleRequest(), headers, USER_ID);
+
+        assertNull(turn.inputData().getRequestedTurnDeadlineMs());
+        assertNull(statelessTurn().inputData().getRequestedTurnDeadlineMs(), "absent header = no deadline");
     }
 
     private static int countOccurrences(String haystack, String needle) {
@@ -615,7 +639,8 @@ class OpenAiConversationBridgeTest {
 
         String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertFalse(body.contains("null"), "got: " + body);
-        assertTrue(body.contains("NullPointerException"));
+        assertTrue(body.contains(OpenAiConversationBridge.AGENT_FAILED_MESSAGE), body);
+        assertFalse(body.contains("NullPointerException"), body);
     }
 
     @Test
@@ -728,7 +753,7 @@ class OpenAiConversationBridgeTest {
                     b.requestTimeoutSeconds = 2;
                     b.adoptLegacyHeaderMappings = true;
                 }),
-                new SimpleMeterRegistry(), permissiveUseGuard());
+                new SimpleMeterRegistry(), permissiveUseGuard(), conversationMemoryStore);
         adopting.initMetrics();
         return adopting;
     }

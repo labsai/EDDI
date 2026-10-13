@@ -37,7 +37,13 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
-import { groupSaveProblems, uncoveredRolePhases, type GroupSaveProblem } from "@/lib/group-config";
+import {
+  groupSaveProblems,
+  idsTakenByOtherMembers,
+  optionsOfferedTo,
+  uncoveredRolePhases,
+  type GroupSaveProblem,
+} from "@/lib/group-config";
 import { GroupSaveProblems } from "@/components/groups/group-save-problems";
 import { getErrorMessage } from "@/lib/api-client";
 import {
@@ -1500,7 +1506,10 @@ function MembersStep({
             key={idx}
             member={member}
             index={idx}
-            agents={agents}
+            // An agent seated in another slot is not offered again: both seats
+            // would share one member conversation, and EDDI 6.6 refuses the save.
+            agents={optionsOfferedTo(agents, state.members, idx)}
+            takenIds={idsTakenByOtherMembers(state.members, idx)}
             styleColors={styleColors}
             onUpdate={(updates) => updateMember(idx, updates)}
             onRemove={() => removeMember(idx)}
@@ -1737,11 +1746,14 @@ function MemberCard({
   onUpdate,
   onRemove,
   onCreateAgent,
+  takenIds,
   t,
 }: {
   member: MemberSlot;
   index: number;
   agents: { id: string; name: string }[];
+  /** Ids other slots already hold — keyed by id whatever the member type. */
+  takenIds?: Set<string>;
   styleColors: typeof STYLE_COLORS[DiscussionStyle];
   onUpdate: (updates: Partial<MemberSlot>) => void;
   onRemove: () => void;
@@ -1889,6 +1901,7 @@ function MemberCard({
             <GroupMemberPicker
               agentId={member.agentId}
               onUpdate={onUpdate}
+              exclude={takenIds}
               t={t}
             />
           ) : member.memberType === "HUMAN" ? (
@@ -2458,10 +2471,12 @@ function ReviewStep({
 function GroupMemberPicker({
   agentId,
   onUpdate,
+  exclude,
   t,
 }: {
   agentId: string;
   onUpdate: (updates: Partial<MemberSlot>) => void;
+  exclude?: Set<string>;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const { data: groups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(100);
@@ -2507,7 +2522,7 @@ function GroupMemberPicker({
             )}
           >
             <option value="">{t("groupWizard.selectGroup", "Select existing group…")}</option>
-            {groups.map((group) => (
+            {groups.filter((group) => group.id === agentId || !exclude?.has(group.id)).map((group) => (
               <option key={group.id} value={group.id}>
                 {group.name || group.id.slice(0, 12)} ({group.memberCount} members)
               </option>

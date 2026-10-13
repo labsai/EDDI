@@ -56,7 +56,9 @@ describe("OrphansPage — failures", () => {
 
     await user.click(screen.getByTestId("scan-button"));
     await user.click(await screen.findByTestId("purge-button"));
-    await user.click(screen.getByTestId("confirm-purge-button"));
+    // The purge is confirmed by typing the number of orphans it will delete.
+    await user.type(screen.getByTestId("orphans-purge-confirm-input"), "5");
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
     const [title, options] = vi.mocked(toast.error).mock.calls[0]!;

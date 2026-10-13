@@ -28,6 +28,11 @@ resource editors:
   change survives the next Save.
 - The debounce timers and the per-agent save queue that existed only to make
   auto-save survivable are gone (`use-agent-section-save.ts` removed).
+- Merged with #967: Save shows its "Saved as vN — not live yet" toast with the
+  Deploy action (once per Save instead of once per edit); removing a workflow
+  no longer opens a confirmation, since it only changes the draft and Discard
+  restores it; #967's rename-in-place, live-version header, workflow names and
+  accessibility changes are kept.
 
 **Leaving with unsaved edits.** The app holds in-app navigation with one router
 blocker and one prompt (`NavigationGuardDialog`, #968); a page only calls

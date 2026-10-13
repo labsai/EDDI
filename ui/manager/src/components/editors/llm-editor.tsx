@@ -52,6 +52,7 @@ import { TaskMemorySection } from "./llm/task-memory-section";
 import { TaskRagSection } from "./llm/task-rag-section";
 import { TaskResponseValidationSection } from "./llm/task-response-validation-section";
 import { TaskToolApprovalsSection } from "./llm/task-tool-approvals-section";
+import { TaskToolCallLimits } from "./llm/task-tool-call-limits";
 
 // Re-export types so existing imports still work
 export type {
@@ -1576,6 +1577,9 @@ function TaskEditor({
                   {t("llmEditor.maxToolIterationsHint", "(default 10)")}
                 </span>
               </div>
+
+              {/* Tool-call caps (EDDI 6.6+) — bound calls, where iterations bound rounds */}
+              <TaskToolCallLimits task={task} onChange={onChange} readOnly={readOnly} />
 
               {/* Rate limiting */}
               <div className="border-t border-border pt-3 space-y-2">

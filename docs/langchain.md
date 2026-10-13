@@ -110,7 +110,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | Parameter                  | Type    | Description                                           | Default           |
 | -------------------------- | ------- | ----------------------------------------------------- | ----------------- |
 | **Core Parameters**        |         |                                                       |                   |
-| `apiKey`                   | string  | API key for the LLM provider                          | Required          |
+| `apiKey`                   | string  | API key for providers that authenticate with one: `openai`, `anthropic`, `gemini`, `mistral`, `azure-openai` and the OpenAI-compatible types. Prefer a `${vault:...}` reference over a plaintext key. Other providers authenticate differently and take no `apiKey`: `ollama` needs none, `bedrock` uses the AWS credential chain, `gemini-vertex` uses Google application default credentials, `oracle-genai` an OCI config profile (`configProfile`), `huggingface` an `accessToken` and `jlama` an optional `authToken` | Provider-specific |
 | `modelName`                | string  | Model identifier (e.g., "gpt-4o", "Claude")           | Provider-specific |
 | `systemMessage`            | string  | System message for LLM context                        | ""                |
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
@@ -247,7 +247,6 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
         "maxTokens": "16384",
         "timeout": "60000",
         "systemMessage": "You are a helpful assistant",
-        "includeFirstAgentMessage": "false",
         "addToOutput": "true"
       }
     }
@@ -255,8 +254,9 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 }
 ```
 
-> **`includeFirstAgentMessage` is deprecated and no longer needed for Anthropic.** This example keeps
-> `"false"` only because countless existing configs carry it. The advice it used to
+> **No `includeFirstAgentMessage` needed.** Older Anthropic examples set
+> `"includeFirstAgentMessage": "false"`; the parameter is deprecated (see
+> [Deprecated parameters](#deprecated-parameters)) and has no replacement. The advice it used to
 > illustrate — "Anthropic doesn't allow the first message to be from the agent, so set
 > this to `false`" — described a restriction the
 > [Messages API](https://platform.claude.com/docs/en/api/messages) no longer documents,
@@ -847,8 +847,9 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
-| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | (none) |
+| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onInvalidJson`, `onSchemaMismatch`, `onContextTooLong`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror); the `retry` action re-asks the model — see [Recovery policies](#recovery-policies-retry-where-it-helps) | (none) |
 | `onError`                  | object   | `{"action": "fallback" \| "error"}`. With `fallback`, a failed model phase serves the configured fallback and the turn completes normally instead of failing — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | `error` |
+| `circuitBreaker`           | object   | Opt-in per-model circuit breaker: `{"enabled": true, "window": 10, "threshold": 8, "coolDownMs": 60000}`. Skips a model that keeps failing with the same permanent class (invalid output, bad request, model not found; auth or quota at once) — see [Circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) | disabled |
 | **Retrieval (RAG)**        |          | Requires the agent's workflow to bind the knowledge base with an `eddi://ai.labs.rag` step — see [RAG](rag.md#configuration) | |
 | `knowledgeBases`           | object[] | Knowledge bases this task retrieves from, by `name`, each optionally overriding `maxResults` / `minScore`. The name must match a KB the workflow binds; an unmatched name is skipped silently | (none) |
 | `enableWorkflowRag`        | boolean  | Retrieve from **every** knowledge base the workflow binds, instead of listing them. Ignored when `knowledgeBases` contains at least one reference; an empty `knowledgeBases` array does **not** suppress it | false |
@@ -1359,6 +1360,64 @@ is not supported". A timeout, rate limit or 5xx (500 included) is rethrown inste
 self-hosted OpenAI-compatible gateway that answers an unsupported `response_format` with a **5xx**
 rather than a 4xx therefore fails the turn instead of falling back; set `jsonResponseFormat: "off"`
 on that task (see the provider matrix below) so the format is never sent.
+
+### Turn Deadline
+
+Retries, cascade steps and HTTP calls each have their own timeouts, and they multiply: three
+attempts of a 25-second model, a two-step cascade and a retried HTTP call can add up to minutes. A
+caller with a 60-second timeout then gives up while the engine is still working, and the late answer
+is never seen. A **turn deadline** makes every layer spend from one budget instead.
+
+```json
+{
+  "turnDeadlineMs": 55000,
+  "turnDeadlineReserveMs": 1500
+}
+```
+
+Both are **agent-level** settings (on the agent configuration, not on an LLM task). Unset
+`turnDeadlineMs` — the default — means no deadline: every layer applies only its own timeouts,
+exactly as before.
+
+| Setting                 | Description                                                                                                                  | Default |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `turnDeadlineMs`        | Wall-clock budget of one turn, counted from the request's arrival (time spent queued behind another turn counts)             | unset   |
+| `turnDeadlineReserveMs` | Kept back for the fallback answer and for persisting the turn; no model or HTTP work is started that would eat into it        | 1500    |
+
+**Per request.** A caller can send `X-EDDI-Turn-Deadline-Ms: <milliseconds>` on a conversation
+`say`, on the managed-conversation endpoint and on the OpenAI-compatible `/v1` chat endpoint. When
+the agent sets `turnDeadlineMs`, the header can only *shorten* it. When the agent sets none, the
+header alone enables a deadline, capped at 10 minutes. A missing, non-numeric or non-positive value
+is ignored (the request is never rejected over it). Only the `say`/`rerun` turn paths read it; a
+HITL resume starts a turn without one.
+
+**What spends from it**
+
+- **Model attempts** (`retry`): the first attempt always starts while any time remains; a *retry* only
+  starts when at least 3 seconds plus the reserve are left. Each attempt is bounded by what is left
+  after the reserve, and an attempt that overruns is abandoned and its call cancelled. A backoff —
+  or a provider `Retry-After` — that would leave no room for the next attempt is **not slept**: the
+  loop stops and the failure goes up, so a [model cascade](model-cascade.md) escalates, or the turn
+  falls back, while there is still time.
+- **Cascade**: `maxTotalDurationMs` is `min(configured, remaining - reserve)`, step timeouts are
+  clamped to the remaining budget, and no further step starts when under 3 seconds (plus reserve)
+  remain. Time already spent by earlier tasks is already gone from the remaining budget.
+- **HTTP calls** ([httpcalls](httpcalls.md)): each call's timeout is clamped to the remaining budget,
+  and `retryApiCallInstruction` retries that cannot fit (backoff plus a call of at least
+  `min(timeout, 3 s)`) are skipped. The first call is never skipped unless the deadline has already
+  passed, in which case the call fails fast with a clear message.
+
+Streaming (SSE) model calls keep their own streaming timeout and are not yet bounded by the turn
+deadline.
+
+**Metrics.** `eddi.llm.turn.deadline.exceeded{stage}` counts every time a layer stopped because of
+the deadline; `eddi.llm.cancelled{scope}` counts attempts and cascade steps abandoned on timeout.
+
+**Deploy-time warnings.** When an agent is loaded, the engine logs (once, never blocking) a warning
+if a task's model `timeout` is longer than its cascade step's `timeoutMs`, if `convertToObject` has no
+fallback path (no `responseValidation` fallback and no `onError` fallback), and — for agents that set
+`turnDeadlineMs` — if the static worst case (every LLM retry running to its timeout, plus the slowest
+httpcall of each httpcalls step with its retries) exceeds the deadline minus the reserve.
 
 ### Rolling Conversation Summary
 
@@ -2050,6 +2109,87 @@ Two things can leave a turn without a model answer: a `responseValidation` polic
 **The model never sees the fallback.** When the next turn's history is built for the model, the assistant message of a fallback turn is left out; the user's question stays. To keep the roles alternating (some providers reject two user messages in a row) the following user message is merged into it. The conversation log and the UI still show the fallback, and an output item the task itself adds under `addToOutput` carries `"fallback": true`. The rolling summary and the recall tool still see the turn.
 
 **Not covered:** the resume path after a human-in-the-loop tool approval does not apply `onError`; a failure there fails the turn as before.
+
+### Recovery policies: retry where it helps
+
+A reply the task cannot use is usually fixed by asking again, and the model that slipped is the cheapest one to ask. `responseValidation` therefore has a `retry` action. The order of recovery is always: **the model answers, the parser repairs what it can locally (fence stripping, extracting the object from surrounding prose — free), the same model is asked again with a corrective message (up to `maxRetries`), then a cascade escalates to the next model (which gets its own repair and re-asks, see [Model Cascade](model-cascade.md#format-recovery-and-escalation)), and after the last model `fallbackAction` applies.** Without a cascade it is the same without the escalation step.
+
+```json
+{
+  "convertToObject": "true",
+  "maxTokens": "2000",
+  "responseValidation": {
+    "enabled": true,
+    "onInvalidJson": "retry",
+    "onTruncation": "retry",
+    "onEmpty": "retry",
+    "onContextTooLong": "retry",
+    "maxRetries": 1,
+    "fallbackAction": "fallback",
+    "fallbackMessage": "Sorry, I could not answer that just now."
+  }
+}
+```
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `onEmpty`, `onTruncation`, `onContentFilter` | now also accept `retry` | `warn` |
+| `onInvalidJson` | A `convertToObject` reply that is not valid JSON after the local repair. `retry` re-asks with the corrective message; `warn`/`fallback`/`error` act as for the other policies | `ignore` (the raw string is stored, as before) |
+| `onSchemaMismatch` | A reply that parses but breaks the response shape (`responseSchema` or `nonBlankFields`, see above). `retry` re-asks like `onInvalidJson`, with the violation (for example `nonBlank: $.answer` or `schema: $.answer required`) as the corrective message's `{reason}`; `ignore` and `warn` keep the parsed object; `fallback` and `error` act as usual | `ignore` |
+| `onContextTooLong` | The provider refused the prompt as too long. `retry` re-sends **once** with the history window halved (half the `maxContextTokens`, or half the `conversationHistoryLimit`; when that is unlimited, half of the conversation). The anchored first steps (`anchorFirstSteps`) are kept. Any other value lets the failure propagate as before | `error` |
+| `maxRetries` | Same-model re-asks **per model** (per cascade step), shared by every `retry` policy. Clamped to `0..3`. `0` sends no re-ask (a cascade still escalates on invalid output). A cascade step overrides it with `steps[i].maxFormatRetries`, e.g. `0` for an expensive last-resort model | `1` |
+| `truncationRetryFactor` | The truncation re-ask runs **once** with the output-token cap multiplied by this (`maxTokens`, or `maxOutputTokens` for Gemini; Anthropic's built-in default counts). Clamped to `1..4` and never above 32768 tokens. If the cap is not configured (and the provider has no known default) there is nothing to raise and the re-ask is skipped | `2` |
+| `correctiveMessage` | The user message of an invalid-JSON re-ask. `{reason}` is replaced **literally** with EDDI's own reason (`not JSON`, `truncated JSON`, `no JSON object`, `unbalanced braces`, `invalid JSON syntax`). It is not a template and never receives model or user text | "Your previous reply could not be used: {reason}. Reply again with only the JSON object described in the instructions." (a neutral sentence for a task that does not return JSON) |
+| `maxRetryCostUsd` | Optional dollar cap on what the re-asks of one model may cost in total; a re-ask that would start at or above it is skipped. It is priced from the task's / step's `inputPricePer1M` / `outputPricePer1M`: **without prices it cannot fire**. Per-conversation cost ceilings (`ToolCostTracker`) are not consulted | (none) |
+| `minAttemptMs` | A re-ask only starts if the model's remaining time (the cascade step's `timeoutMs`; the turn deadline once there is one) is at least this. Otherwise the cascade escalates at once: serving the user in time beats insisting on the same model | `3000` |
+| `fallbackAction` | What happens when the re-asks (and every cascade step) did not help: `fallback` serves the [fallback](#fallback-answers-and-onerror), `error` fails the turn, `warn` keeps the reply | `fallback` |
+
+**What a re-ask sends.** For an invalid-JSON reply: the original messages, then the model's own bad reply as an **assistant** message (cut at 16,000 characters), then the corrective **user** message. Showing the model what to fix is standard corrective prompting; its words stay in the assistant role, and the user-role text is only what you configured plus EDDI's reason, so neither model output nor user input ever reaches a user- or system-role message. Empty, truncated and content-filtered replies are re-asked with the original request unchanged (a truncation with the larger token cap): there is nothing a corrective sentence would add. `onContentFilter: "retry"` is one more sample of the same request; it rarely helps.
+
+**Tools are never re-run.** In tool mode only the **final** model call is re-asked, over a transcript that already holds the tool calls and results. A tool request in the re-asked answer is ignored. Truncation and context-too-long retries are not available in tool mode (the loop reports no finish reason, and shrinking the prompt after tools ran would mean replaying them); empty and invalid-JSON re-asks are.
+
+**Streaming.** A task that may re-ask is **buffered**, not streamed: the tokens of an attempt that is then retried cannot be taken back. The final answer reaches the client once. An SSE event `llm_retry` with `{reason, attempt}` (`reason`: `empty`, `truncated`, `content_filter`, `invalid_json`, `schema_mismatch`, `context_too_long`) is sent before each re-ask so a UI can show "retrying…".
+
+**Cost.** Every attempt's tokens are summed into the turn's token usage and cost, so re-asks show up in the audit ledger and in `maxCostPerRun`. The step records `llm:retry:<taskId>` = `{reasks, unresolved}`. Metrics: `eddi.llm.recovery{action=retry|escalate, outcome, trigger}` (see [metrics](metrics.md)).
+
+**Not covered:** the resume path after a human-in-the-loop tool approval gets the parser's local repair but no re-asks. A model that keeps failing the same way is taken out by the [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing), which also switches off the same-model re-ask of invalid output.
+
+### Circuit breaker: skip a model that keeps failing
+
+Retries and re-asks fix an unlucky turn. They do nothing for a model that **cannot** answer: a revoked key, a retired model id, a prompt it always answers in prose. Every turn then pays a full attempt (and re-asks) to arrive at the same failure. The optional `circuitBreaker` takes such a model out for a while, so a cascade goes straight to its next step and a single-model task takes its `onError` path at once instead of spending the user's deadline.
+
+```json
+{
+  "circuitBreaker": { "enabled": true, "window": 10, "threshold": 8, "coolDownMs": 60000 },
+  "onError": { "action": "fallback" }
+}
+```
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `enabled` | The breaker is **off by default**: a task without it behaves exactly as before | `false` |
+| `window` | How many of the most recent *counted* turns are looked at (1..1000) | `10` |
+| `threshold` | How many of them must have failed with the **same class** to open the circuit (clamped to `1..window`) | `8` |
+| `coolDownMs` | How long an open circuit is skipped before one probe turn is let through (0..1 hour) | `60000` |
+
+**What counts.** A circuit belongs to one *(agent, agent version, provider, model)*; the model is the name it was actually built with, after `${vars:…}` and templating, so two cascade steps and two agents never share one. Only failures that would fail the same way again are counted:
+
+| Class | Opens the circuit |
+| --- | --- |
+| `INVALID_OUTPUT` — a `convertToObject` reply that is still not valid JSON, or still breaks the response shape, after its re-asks (looked at directly, so it needs no `responseValidation` policy) | when `threshold` of the last `window` counted turns share it |
+| `BAD_REQUEST`, `MODEL_NOT_FOUND` | when `threshold` of the last `window` counted turns share it |
+| `AUTH`, `QUOTA_EXHAUSTED` | at once, on the first one |
+
+Transient provider errors, rate limits and timeouts are **never** counted (and neither are context-too-long, empty replies or unclassified errors): they belong to the retry layer, and they neither fill nor drain the window. A reply that a re-ask fixed is a success.
+
+**While open.** The model is not called. A cascade skips to its next step (trace entry `status: circuit_open`, `eddi.llm.cascade.escalations{reason=circuit_open}`, a `cascade_escalation` SSE event with that reason), and a step that is still closed answers as usual. When no step is left (every step open, or a task with a single model) the task fails with a `LifecycleException` whose cause is an `LlmCircuitOpenException` carrying the class that opened the circuit (`getFailureClass()`), or, with [`onError: fallback`](#fallback-answers-and-onerror), serves the fallback without any model call.
+
+**Half-open.** After `coolDownMs`, **one** turn is let through as a probe (concurrent turns keep being skipped). A usable reply closes the circuit; a counted failure re-opens it for another cool-down; a probe that ends in something uncounted (a transient error, a human-in-the-loop pause) is handed on to the next turn. The probe never gets a same-model re-ask: a circuit that is open or half-open for invalid output switches the [re-ask](#recovery-policies-retry-where-it-helps) off, since repeating a known-bad pattern only burns the deadline.
+
+**Scope.** Circuits live in memory on each node and are shared by every conversation of that agent version; they are bounded (10,000) and forgotten after an hour without traffic. A restart resets them to closed. With several nodes each opens on its own traffic.
+
+**Alerting.** Each time a circuit **opens** (or re-opens) EDDI logs one ERROR line (`LLM circuit OPEN …`) with agent, version, provider, model, class and EDDI's reason, never model output. Going half-open and closing are logged at INFO. Metrics: `eddi.llm.circuit{state, class}` (transitions), `eddi.llm.circuit.skipped{class}` (turns that did not call the model) and the gauge `eddi.llm.circuit.open`; the Full Metrics dashboard has panels for them (see [metrics](metrics.md#llm-circuit-breaker-metrics)). A webhook or Slack notification is not built: there is no generic operator-notification hook to reuse yet, so alert from the log line or the metric.
+
 
 ### Debugging
 

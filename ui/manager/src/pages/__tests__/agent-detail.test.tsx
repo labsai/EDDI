@@ -593,7 +593,7 @@ describe("AgentDetailPage", () => {
 
     // Find the delete button within the workflow row
     // Each workflow card has a trash button
-    const trashButtons = screen.getAllByTitle("Delete");
+    const trashButtons = screen.getAllByRole("button", { name: "Remove workflow from agent" });
     expect(trashButtons.length).toBeGreaterThan(0);
     await user.click(trashButtons[0]!);
 
