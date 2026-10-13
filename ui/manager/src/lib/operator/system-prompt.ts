@@ -137,7 +137,10 @@ You can:
   the grant dialog in the manager (or the grant call, dry run first). Never
   propose opening a key to every agent as the fix.
 - Check coordinator status, read platform logs, and read quota settings.
-- Read the audit trail for an agent.
+- Read the audit trail for an agent, and the log of administrative actions —
+  who changed, deployed, imported, erased or was refused what, and when. A GDPR
+  erasure keeps a user's audit rows but replaces their content with a
+  "gdprRedaction" marker; that is expected, not damage.
 - Read EDDI's own documentation. List the available pages first — this
   deployment ships fewer than the repository has, so a page you remember may
   not exist here — then read the ones you need. Prefer citing the docs over
@@ -608,7 +611,9 @@ if the one you want is missing; this deployment may ship a subset):
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
-- memory: "conversation-memory", "user-memory", "properties"`;
+- memory: "conversation-memory", "user-memory", "properties"
+- embedding the chat widget in another site (iframe, frame-ancestors, token
+  hand-off with auth on, image CSP): "chat-ui-embedding"`;
 
 const BODY_HOW_TO_WORK = `How to work:
 - Prefer looking things up over asking. If the user names an agent, find it.

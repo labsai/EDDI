@@ -453,12 +453,28 @@ eddi_llm_cascade_confidence                 # Confidence scores (distribution su
 Mass at the last step means every turn pays for the cheap attempt *and* the
 expensive one.
 
+### LLM Circuit Breaker Metrics
+
+Full guide: [langchain.md](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing). Only recorded for tasks that set `circuitBreaker.enabled`.
+
+```text
+eddi_llm_circuit_total                      # State changes of a model's circuit; tags: state (open|half_open|closed), class (INVALID_OUTPUT|BAD_REQUEST|MODEL_NOT_FOUND|AUTH|QUOTA_EXHAUSTED — what opened it; none on a close)
+eddi_llm_circuit_skipped_total              # Turns that did not call the model because its circuit was open; tag: class
+eddi_llm_circuit_open                       # Gauge: circuits open or half-open on this node right now
+```
+
+Every `state="open"` is also one ERROR log line (`LLM circuit OPEN …`) naming the agent, version, provider, model, the class and EDDI's reason (never model output). Alert on `increase(eddi_llm_circuit_total{state="open"}[5m]) > 0`, or on `eddi_llm_circuit_open > 0` for a standing condition. The breakers are per node and in memory: with several nodes, each opens on its own traffic.
+
 ### Streaming Metrics
 
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
 eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty|schema_mismatch)
-eddi_llm_recovery_total                     # Turns answered with the configured fallback; tags: action (fallback), outcome (served), trigger (onError|validation)
+eddi_llm_recovery_total                     # Recovery actions of the LLM task; tags: action, outcome, trigger
+                                            #   action=fallback, outcome=served,  trigger=onError|validation   (a turn answered with the configured fallback)
+                                            #   action=retry,    outcome=recovered|still_invalid|failed|skipped_budget|skipped_no_time|skipped_cost|skipped_breaker,
+                                            #                    trigger=empty|truncated|content_filter|invalid_json|context_too_long   (a same-model re-ask)
+                                            #   action=escalate, outcome=invalid_output, trigger=...            (a cascade step handed over after its re-asks)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)
@@ -476,6 +492,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 eddi_attachment_forwarded_total             # Attachments converted to LLM content
 eddi_attachment_reinlined_total             # Extracted text stitched back into history
 eddi_attachment_errors_total                # Drops, cap-skips and capability gates
+eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: scope (conversation, user)
 ```
 
 ### HITL Metrics
@@ -579,6 +596,8 @@ eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; t
 eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
 eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
+eddi_openai_conversations_rolled_over_total # /v1 conversations ended at max-conversation-steps
+eddi_openai_chat_keys_total                 # Stateful /v1 requests by chat-key source; tag: source
 eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (send|stream|get|cancel|..., disabled when A2A is off), dialect (1.0|0.3|legacy|none), outcome (ok|error|invalid|busy)
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
@@ -639,6 +658,15 @@ without conversation affinity, where two nodes allocate the same per-conversatio
 positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
 [Chain sequences and multi-replica deployments](audit-ledger.md#chain-sequences-and-multi-replica-deployments).
 
+### Database Log Retention Metrics
+
+```text
+eddi_logs_db_retention_deleted_total        # Persisted log entries the retention sweep deleted
+```
+
+Stays at zero while `eddi.logs.db-retention-days` is off (the default). See
+[log-administration.md](log-administration.md#retention).
+
 ### Dream (Background Memory Consolidation) Metrics
 
 ```text
@@ -648,6 +676,7 @@ eddi_dream_entries_summarized_total         # Entries folded into a consolidatio
 eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
 eddi_dream_cycles_failed_total              # Dream cycles that aborted
 eddi_dream_summarization_failed_total       # LLM summarization steps that failed
+eddi_dream_conflicts_skipped_total          # Writes skipped because the memory changed during the cycle
 eddi_dream_duration_seconds                 # Dream cycle duration (timer)
 ```
 
@@ -664,6 +693,12 @@ a provider outage that does not present as a timeout. Confirm from the ERROR lin
 logs: it names the provider, the model and the configured parameter *keys*, which is enough to
 tell a missing `apiKey` from a wrong `llmModel` without exposing the value. If credentials are
 the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
+
+`eddi_dream_conflicts_skipped_total` counts the prunes, in-place overwrites and deletes a cycle
+did **not** make because the memory was written after the cycle read it — every Dream write is a
+compare-and-set on `updatedAt`, so the user's newer fact wins. Occasional increments are normal
+on active users; a steady rise means cycles keep racing live conversations, and scheduling them at
+a quieter hour helps.
 
 ### Conversation Summarization Metrics
 
