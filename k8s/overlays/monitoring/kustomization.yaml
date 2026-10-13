@@ -37,10 +37,11 @@ resources:
 # monitoring-stack.yaml, so editing a rule or a dashboard rolls the pod that
 # mounts it.
 #
-# The Full Metrics Reference ConfigMap is ~230 KB once escaped, close to the
-# 256 KiB limit of the last-applied-configuration annotation that client-side
-# `kubectl apply` writes. If a later dashboard pushes it over, apply with
-# `kubectl apply --server-side -k`, which keeps no such annotation.
+# The Full Metrics Reference outgrew the 256 KiB limit of the
+# last-applied-configuration annotation that client-side `kubectl apply` writes,
+# so it ships as two dashboards ("… (1/2)", "… (2/2)", linked to each other),
+# each in its own ConfigMap. The sync script splits it at a row boundary;
+# docs/monitoring/ keeps the single dashboard.
 configMapGenerator:
   - name: prometheus-rules
     files:
@@ -48,9 +49,12 @@ configMapGenerator:
   - name: grafana-dashboard-operations
     files:
       - dashboards/eddi-operations-dashboard.json
-  - name: grafana-dashboard-full-metrics
+  - name: grafana-dashboard-full-metrics-1
     files:
-      - dashboards/eddi-full-metrics-dashboard.json
+      - dashboards/eddi-full-metrics-dashboard-1.json
+  - name: grafana-dashboard-full-metrics-2
+    files:
+      - dashboards/eddi-full-metrics-dashboard-2.json
   - name: grafana-dashboard-observability
     files:
       - dashboards/eddi-grafana-dashboard.json

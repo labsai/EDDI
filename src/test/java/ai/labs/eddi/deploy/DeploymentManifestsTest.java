@@ -3149,8 +3149,22 @@ class DeploymentManifestsTest {
 
         private static final Path MONITORING_SOURCE = Path.of("docs", "monitoring");
         private static final Path COMPONENT = K8S.resolve("overlays/monitoring");
-        private static final List<String> DASHBOARDS = List.of("eddi-operations-dashboard.json",
-                "eddi-full-metrics-dashboard.json", "eddi-grafana-dashboard.json");
+        /** Dashboards copied to the component as they are. */
+        private static final List<String> DASHBOARDS = List.of("eddi-operations-dashboard.json", "eddi-grafana-dashboard.json");
+        /**
+         * Copied in two parts: minified, the Full Metrics Reference no longer fits the
+         * last-applied annotation (see {@link #dashboardConfigMapsFitClientSideApply}).
+         */
+        private static final String SPLIT_DASHBOARD = "eddi-full-metrics-dashboard.json";
+        private static final List<String> SPLIT_PARTS = List.of("eddi-full-metrics-dashboard-1.json",
+                "eddi-full-metrics-dashboard-2.json");
+
+        /** Every dashboard file the component ships. */
+        private static List<String> componentDashboards() {
+            List<String> all = new ArrayList<>(DASHBOARDS);
+            all.addAll(SPLIT_PARTS);
+            return all;
+        }
 
         /**
          * A datasource provisioned without a uid gets a random one, and the Operations
@@ -3182,7 +3196,7 @@ class DeploymentManifestsTest {
                 generated.put(generator.path("name").asText(), stringList(generator.path("files")));
             }
             assertEquals(List.of("eddi-alerts.yml"), generated.get("prometheus-rules"), "generators: " + generated);
-            for (String dashboard : DASHBOARDS) {
+            for (String dashboard : componentDashboards()) {
                 assertTrue(generated.values().stream().anyMatch(files -> files.contains("dashboards/" + dashboard)),
                         dashboard + " is generated into no ConfigMap: " + generated);
             }
@@ -3233,6 +3247,39 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * The split must lose and change nothing: the parts' panels, in order, are the
+         * source's panels, and every other field is the source's except the three the
+         * split sets — title, uid (part 1 keeps the source's, so links still land) and
+         * the links between the parts.
+         */
+        @Test
+        @DisplayName("the split Full Metrics Reference parts add up to the source dashboard")
+        void splitDashboardPartsAddUpToTheSource() throws IOException {
+            JsonNode source = JSON.readTree(MONITORING_SOURCE.resolve(SPLIT_DASHBOARD).toFile());
+            List<JsonNode> panels = new ArrayList<>();
+            List<String> uids = new ArrayList<>();
+            for (String part : SPLIT_PARTS) {
+                JsonNode copy = JSON.readTree(COMPONENT.resolve("dashboards").resolve(part).toFile());
+                copy.path("panels").forEach(panels::add);
+                uids.add(copy.path("uid").asText());
+                ObjectNode rest = copy.deepCopy();
+                ObjectNode expected = source.deepCopy();
+                for (String set : List.of("panels", "title", "uid", "links")) {
+                    rest.remove(set);
+                    expected.remove(set);
+                }
+                assertEquals(expected, rest, part + " differs from " + SPLIT_DASHBOARD
+                        + " beyond its title, uid and links — run python scripts/sync-monitoring-assets.py");
+            }
+            List<JsonNode> sourcePanels = new ArrayList<>();
+            source.path("panels").forEach(sourcePanels::add);
+            assertEquals(sourcePanels, panels, "the parts' panels are not the source's panels in order — run "
+                    + "python scripts/sync-monitoring-assets.py");
+            assertEquals(List.of(source.path("uid").asText(), source.path("uid").asText() + "-2"), uids,
+                    "part 1 must keep the source uid, so existing links and bookmarks still land");
+        }
+
+        /**
          * Client-side {@code kubectl apply} stores the whole object, JSON-escaped, in
          * the last-applied-configuration annotation, which is capped at 256 KiB. The
          * Full Metrics Reference is the largest ConfigMap the component generates; this
@@ -3242,7 +3289,7 @@ class DeploymentManifestsTest {
         @Test
         @DisplayName("each dashboard ConfigMap fits a client-side kubectl apply")
         void dashboardConfigMapsFitClientSideApply() throws IOException {
-            for (String dashboard : DASHBOARDS) {
+            for (String dashboard : componentDashboards()) {
                 String payload = read(COMPONENT.resolve("dashboards").resolve(dashboard));
                 int escaped = JSON.writeValueAsString(payload).getBytes(StandardCharsets.UTF_8).length;
                 assertTrue(escaped < 245_000, dashboard + " escapes to " + escaped + " bytes; the last-applied annotation "

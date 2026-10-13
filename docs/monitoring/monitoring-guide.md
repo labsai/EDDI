@@ -470,7 +470,11 @@ Prometheus datasource and scrape job name.
 
 The Kubernetes monitoring component provisions all three dashboards into the same
 "EDDI" folder (generated ConfigMaps, projected into Grafana's dashboard directory),
-and its Prometheus datasource has the fixed uid `prometheus`.
+and its Prometheus datasource has the fixed uid `prometheus`. There the Full Metrics
+Reference arrives as two dashboards, "(1/2)" and "(2/2)", linked to each other: as
+one, its ConfigMap no longer fits the 256 KiB annotation client-side `kubectl apply`
+writes. `scripts/sync-monitoring-assets.py` splits it at a row boundary; part 1 keeps
+the uid `eddi-metrics-all`.
 
 > **Percentile panels.** Only `eddi_pipeline_task_duration` and
 > `eddi_llm_request_duration` publish histogram buckets, so they are the only EDDI

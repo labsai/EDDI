@@ -78,3 +78,28 @@ No change. Nothing the operator calls changed: there is no REST or MCP change, a
 ```regression-note
 | 2026-10-03 | Dashboards queried series that do not exist (`eddi_nats_dead_letter_count`, `http_server_requests_seconds_bucket`, a `skill` label, `jvm_info`) and read "No data" forever | The coverage test only substring-matched the Full dashboard against registered meters; nothing checked queries against what a scrape contains | Every dashboard parsed; every query's series checked against registered meters plus a verified built-in list | (this branch) |
 ```
+
+## 🐛 fix(monitoring): split the Kubernetes copy of the Full Metrics Reference (2026-10-13)
+
+**Repo:** EDDI (`fix/observability`)
+
+Merging `main` grew the Full Metrics Reference past what one ConfigMap can carry
+through a client-side `kubectl apply`: minified and escaped it reached 247,445 bytes
+against this PR's own 245,000-byte budget (the last-applied annotation is capped at
+262,144). [`sync-monitoring-assets.py`](../../scripts/sync-monitoring-assets.py) now
+writes it to the monitoring component as two dashboards, split at the top-level row
+boundary that best balances their size (131 KB and 119 KB escaped). Part 1 keeps the
+uid `eddi-metrics-all`, so existing links and bookmarks still land; part 2 is
+`eddi-metrics-all-2`; each links to the other. `docs/monitoring/` keeps the single
+dashboard, which Compose and a manual import use.
+
+`DeploymentManifestsTest` checks that the parts' panels, concatenated, are the
+source's panels and that nothing else differs beyond title, uid and links (verified
+by dropping a panel from part 2: the test fails). Panel ids 174-177 were also each
+held by two panels, from parallel PRs taking the next free id; the later holders now
+have ids above the maximum.
+
+```decision-log
+| 2026-10-13 | The Kubernetes copy of the Full Metrics Reference ships as two linked dashboards | Keeps plain client-side `kubectl apply -k` working; the source dashboard is unchanged | Requiring `kubectl apply --server-side` (changes every operator's apply command); raising the test's budget (removes the headroom that caught this) |
+```
+

@@ -353,15 +353,17 @@ spec:
         - name: grafana-dashboard-provider
           configMap:
             name: grafana-dashboard-provider
-        # One ConfigMap per dashboard (the Full Metrics Reference alone is
-        # ~200 KB), projected into the single directory the provider reads.
+        # One ConfigMap per dashboard (the Full Metrics Reference is two, see
+        # the kustomization), projected into the single directory the provider reads.
         - name: grafana-dashboards
           projected:
             sources:
               - configMap:
                   name: grafana-dashboard-operations
               - configMap:
-                  name: grafana-dashboard-full-metrics
+                  name: grafana-dashboard-full-metrics-1
+              - configMap:
+                  name: grafana-dashboard-full-metrics-2
               - configMap:
                   name: grafana-dashboard-observability
 ---

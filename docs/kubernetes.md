@@ -643,8 +643,9 @@ rules loaded (`docs/monitoring/eddi-alerts.yml`, runbooks in the
 [monitoring guide](monitoring/monitoring-guide.md#alert-runbooks)) and Grafana with
 the Prometheus datasource (uid `prometheus`) and all three EDDI dashboards
 provisioned into an "EDDI" folder. The rules and dashboards come from generated
-ConfigMaps; the largest is ~230 KB once escaped, inside the 256 KiB limit of
-client-side `kubectl apply` — if you add to it, apply with `--server-side`:
+ConfigMaps, each inside the 256 KiB limit of client-side `kubectl apply`. To stay
+under it, the Full Metrics Reference ships as two linked dashboards, "(1/2)" and
+"(2/2)"; part 1 keeps its uid `eddi-metrics-all`:
 
 ```bash
 # Kustomize (with MongoDB + Auth + Monitoring)
