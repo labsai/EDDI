@@ -41,8 +41,7 @@ describe("SessionManagementSection — forking note", () => {
     renderWithProviders(
       <SessionManagementSection
         agent={{ workflows: [], channels: [] } as never}
-        agentId="a1"
-        version={1}
+        onChange={() => {}}
       />,
     );
     await userEvent.setup().click(screen.getByRole("button", { name: /Session Management/ }));

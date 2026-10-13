@@ -2,9 +2,11 @@ import { useTranslation } from "react-i18next";
 import { GitBranch } from "lucide-react";
 
 /**
- * The agent version's compatibility generation, compactly. Renders nothing for
- * a version stored before version following (no generation), which is
- * compatible only with itself.
+ * The agent version's compatibility generation, shown beside the version
+ * picker in the same height and weight — a quiet qualifier of the version, not
+ * a second headline. The label stays short; what a generation means is in the
+ * tooltip. Renders nothing for a version stored before version following (no
+ * generation), which is compatible only with itself.
  */
 export function CompatibilityGenerationBadge({ generation }: { generation: number | null | undefined }) {
   const { t } = useTranslation();
@@ -16,13 +18,13 @@ export function CompatibilityGenerationBadge({ generation }: { generation: numbe
   );
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+      className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground"
       title={tooltip}
       aria-label={tooltip}
       data-testid="compatibility-generation-badge"
     >
-      <GitBranch className="h-3 w-3" aria-hidden="true" />
-      {t("agentVersioning.generationBadge", "compat. gen {{generation}}", { generation })}
+      <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      {t("agentVersioning.generationBadge", "Generation {{generation}}", { generation })}
     </span>
   );
 }

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
@@ -11,15 +12,7 @@ import {
 } from "@/components/editors/agent-config-sections";
 import type { Agent } from "@/lib/api/agents";
 
-// Mock hooks. The sections save through `useAgentSectionSave` (versioning and
-// ordering are covered by its own test); here only what each section sends.
-const mockMutate = vi.fn();
-vi.mock("@/hooks/use-agent-section-save", () => ({
-  useAgentSectionSave: () => ({
-    mutate: mockMutate,
-    isPending: false,
-  }),
-}));
+const mockOnChange = vi.fn();
 
 vi.mock("@/hooks/use-capabilities", () => ({
   useSkills: () => ({
@@ -49,8 +42,6 @@ const baseAgent: Agent = {
   description: "A test agent",
 };
 
-const agentId = "agent-123";
-const version = 1;
 
 describe("SecurityIdentitySection", () => {
   beforeEach(() => {
@@ -59,7 +50,7 @@ describe("SecurityIdentitySection", () => {
 
   it("renders section label", () => {
     renderWithProviders(
-      <SecurityIdentitySection agent={baseAgent} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={baseAgent} onChange={mockOnChange} />
     );
     expect(screen.getByText("Security & Identity")).toBeInTheDocument();
   });
@@ -67,7 +58,7 @@ describe("SecurityIdentitySection", () => {
   it("shows identity section when expanded", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <SecurityIdentitySection agent={baseAgent} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Security & Identity"));
     expect(screen.getByTestId("identity-section")).toBeInTheDocument();
@@ -79,7 +70,7 @@ describe("SecurityIdentitySection", () => {
   it("shows security toggles section", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <SecurityIdentitySection agent={baseAgent} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Security & Identity"));
     expect(screen.getByTestId("security-toggles")).toBeInTheDocument();
@@ -94,7 +85,7 @@ describe("SecurityIdentitySection", () => {
       security: { signInterAgentMessages: true },
     };
     renderWithProviders(
-      <SecurityIdentitySection agent={agentWithFlag} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={agentWithFlag} onChange={mockOnChange} />
     );
     // Section auto-opens since defaultOpen depends on security flags being set
     expect(screen.getByTestId("security-flag-warning")).toBeInTheDocument();
@@ -112,7 +103,7 @@ describe("SecurityIdentitySection", () => {
       },
     };
     renderWithProviders(
-      <SecurityIdentitySection agent={agentWithKeys} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={agentWithKeys} onChange={mockOnChange} />
     );
     // Section auto-opens since agentDid is set
     expect(screen.getByText("Public Keys")).toBeInTheDocument();
@@ -128,7 +119,7 @@ describe("SecurityIdentitySection", () => {
       },
     };
     renderWithProviders(
-      <SecurityIdentitySection agent={agentWithLegacyKey} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={agentWithLegacyKey} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Security & Identity"));
     expect(screen.getByText(/Legacy key/)).toBeInTheDocument();
@@ -137,7 +128,7 @@ describe("SecurityIdentitySection", () => {
   it("shows confirmation dialog when enabling a security flag", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <SecurityIdentitySection agent={baseAgent} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Security & Identity"));
     // Click to enable signInterAgentMessages
@@ -148,10 +139,10 @@ describe("SecurityIdentitySection", () => {
     });
   });
 
-  it("calls mutate after confirming security flag dialog", async () => {
+  it("records the flag in the draft after confirming the dialog", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <SecurityIdentitySection agent={baseAgent} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Security & Identity"));
     await user.click(screen.getByTestId("security-flag-signInterAgentMessages"));
@@ -160,16 +151,9 @@ describe("SecurityIdentitySection", () => {
       expect(screen.getByText("Enable anyway")).toBeInTheDocument();
     });
     await user.click(screen.getByText("Enable anyway"));
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: agentId,
-        version,
-        agent: expect.objectContaining({
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           security: expect.objectContaining({ signInterAgentMessages: true }),
-        }),
-      }),
-      expect.anything()
-    );
+        }));
   });
 
   it("can toggle off a security flag without confirmation", async () => {
@@ -179,19 +163,14 @@ describe("SecurityIdentitySection", () => {
       security: { signInterAgentMessages: true },
     };
     renderWithProviders(
-      <SecurityIdentitySection agent={agentWithFlag} agentId={agentId} version={version} />
+      <SecurityIdentitySection agent={agentWithFlag} onChange={mockOnChange} />
     );
     // Section auto-opens
     await user.click(screen.getByTestId("security-flag-signInterAgentMessages"));
     // Should call mutate directly without dialog
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           security: expect.objectContaining({ signInterAgentMessages: false }),
-        }),
-      }),
-      expect.anything()
-    );
+        }));
   });
 });
 
@@ -202,7 +181,7 @@ describe("CapabilitiesSection", () => {
 
   it("renders section label", () => {
     renderWithProviders(
-      <CapabilitiesSection agent={baseAgent} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={baseAgent} onChange={mockOnChange} />
     );
     expect(screen.getByText("Capabilities")).toBeInTheDocument();
   });
@@ -210,7 +189,7 @@ describe("CapabilitiesSection", () => {
   it("shows add capability button when expanded", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <CapabilitiesSection agent={baseAgent} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Capabilities"));
     expect(screen.getByTestId("capabilities-section")).toBeInTheDocument();
@@ -225,7 +204,7 @@ describe("CapabilitiesSection", () => {
       ],
     };
     renderWithProviders(
-      <CapabilitiesSection agent={agentWithCaps} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={agentWithCaps} onChange={mockOnChange} />
     );
     // defaultOpen since caps.length > 0
     expect(screen.getByTestId("capability-entry-0")).toBeInTheDocument();
@@ -240,7 +219,7 @@ describe("CapabilitiesSection", () => {
       ],
     };
     renderWithProviders(
-      <CapabilitiesSection agent={agentWithCaps} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={agentWithCaps} onChange={mockOnChange} />
     );
     expect(screen.getByTestId("confidence-select-0")).toHaveValue("medium");
   });
@@ -248,7 +227,7 @@ describe("CapabilitiesSection", () => {
   it("shows autocomplete input", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <CapabilitiesSection agent={baseAgent} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Capabilities"));
     expect(screen.getByTestId("skill-autocomplete-input")).toBeInTheDocument();
@@ -257,7 +236,7 @@ describe("CapabilitiesSection", () => {
   it("shows autocomplete dropdown when typing", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <CapabilitiesSection agent={baseAgent} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Capabilities"));
     await user.type(screen.getByTestId("skill-autocomplete-input"), "sum");
@@ -268,24 +247,20 @@ describe("CapabilitiesSection", () => {
   it("adds a capability via autocomplete selection", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <CapabilitiesSection agent={baseAgent} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Capabilities"));
     // Type a skill name to enable the add button
     await user.type(screen.getByTestId("skill-autocomplete-input"), "custom-skill");
     await user.click(screen.getByTestId("add-capability-btn"));
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           capabilities: [
             expect.objectContaining({
               skill: "custom-skill",
               confidence: "medium",
             }),
           ],
-        }),
-      })
-    );
+        }));
   });
 
   it("changes confidence level for a capability", async () => {
@@ -297,18 +272,14 @@ describe("CapabilitiesSection", () => {
       ],
     };
     renderWithProviders(
-      <CapabilitiesSection agent={agentWithCaps} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={agentWithCaps} onChange={mockOnChange} />
     );
     await user.selectOptions(screen.getByTestId("confidence-select-0"), "high");
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           capabilities: [
             expect.objectContaining({ confidence: "high" }),
           ],
-        }),
-      })
-    );
+        }));
   });
 
   it("removes a capability", async () => {
@@ -320,16 +291,12 @@ describe("CapabilitiesSection", () => {
       ],
     };
     renderWithProviders(
-      <CapabilitiesSection agent={agentWithCaps} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={agentWithCaps} onChange={mockOnChange} />
     );
     await user.click(screen.getByTestId("remove-capability-0"));
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           capabilities: [],
-        }),
-      })
-    );
+        }));
   });
 
   it("shows capability attributes for entries with attributes", () => {
@@ -340,56 +307,56 @@ describe("CapabilitiesSection", () => {
       ],
     };
     renderWithProviders(
-      <CapabilitiesSection agent={agentWithAttrs} agentId={agentId} version={version} />
+      <CapabilitiesSection agent={agentWithAttrs} onChange={mockOnChange} />
     );
     // Capability entry is shown with attribute
     expect(screen.getByTestId("capability-entry-0")).toBeInTheDocument();
     expect(screen.getByText("translation")).toBeInTheDocument();
   });
 
-  describe("attribute edits (review: one debounce, never resurrect a removed key)", () => {
+  describe("attribute edits (review: never lose an edit, never resurrect a removed key)", () => {
     const withAttrs = (attributes: Record<string, string>): Agent => ({
       ...baseAgent,
       capabilities: [{ skill: "translation", confidence: "high", attributes }],
     });
     const sentAttributes = () =>
-      mockMutate.mock.calls.map(
-        ([arg]) => (arg as { agent: Agent }).agent.capabilities?.[0]?.attributes,
+      mockOnChange.mock.calls.map(([arg]) => (arg as Agent).capabilities?.[0]?.attributes);
+
+    /** Holds the draft the way the page does, so each edit renders back in. */
+    function Harness({ initial }: { initial: Agent }) {
+      const [agent, setAgent] = useState(initial);
+      return (
+        <CapabilitiesSection
+          agent={agent}
+          onChange={(next) => {
+            mockOnChange(next);
+            setAgent(next);
+          }}
+        />
       );
+    }
 
     beforeEach(() => vi.clearAllMocks());
 
-    it("saves an edit flushed by collapsing the editor — it used to be lost in a second timer", async () => {
+    it("keeps an edit when the editor is collapsed right after typing", async () => {
       const user = userEvent.setup();
-      renderWithProviders(
-        <CapabilitiesSection agent={withAttrs({ lang: "en" })} agentId={agentId} version={version} />,
-      );
+      renderWithProviders(<Harness initial={withAttrs({ lang: "en" })} />);
       await user.click(screen.getByTestId("capability-attributes-toggle-0"));
       const input = screen.getByTestId("attribute-value-lang");
       await user.clear(input);
       await user.type(input, "de");
-      // Collapse before the input's debounce fires: the row unmounts and flushes.
       await user.click(screen.getByTestId("capability-attributes-toggle-0"));
-      await new Promise((r) => setTimeout(r, 700));
-      expect(sentAttributes()).toContainEqual({ lang: "de" });
+      const sent = sentAttributes();
+      expect(sent[sent.length - 1]).toEqual({ lang: "de" });
     });
 
-    it("does not write back an attribute removed while its edit was pending", async () => {
+    it("does not write back an attribute removed right after it was edited", async () => {
       const user = userEvent.setup();
-      const { rerender } = renderWithProviders(
-        <CapabilitiesSection agent={withAttrs({ lang: "en", tone: "dry" })} agentId={agentId} version={version} />,
-      );
+      renderWithProviders(<Harness initial={withAttrs({ lang: "en", tone: "dry" })} />);
       await user.click(screen.getByTestId("capability-attributes-toggle-0"));
       await user.type(screen.getByTestId("attribute-value-lang"), "x");
       await user.click(screen.getByTestId("attribute-remove-lang"));
-      // The save lands: the row for `lang` unmounts and flushes its pending edit.
-      rerender(
-        <CapabilitiesSection agent={withAttrs({ tone: "dry" })} agentId={agentId} version={version} />,
-      );
-      await new Promise((r) => setTimeout(r, 1400));
       const sent = sentAttributes();
-      // Clicking Remove blurs the field first, which may save the edit; what
-      // must never happen is a save AFTER the removal that brings `lang` back.
       expect(sent[sent.length - 1]).toEqual({ tone: "dry" });
     });
   });
@@ -402,7 +369,7 @@ describe("UserMemorySection", () => {
 
   it("renders section label", () => {
     renderWithProviders(
-      <UserMemorySection agent={baseAgent} agentId={agentId} version={version} />
+      <UserMemorySection agent={baseAgent} onChange={mockOnChange} />
     );
     expect(screen.getByText("User Memory")).toBeInTheDocument();
   });
@@ -410,7 +377,7 @@ describe("UserMemorySection", () => {
   it("shows enable memory tools checkbox when expanded", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <UserMemorySection agent={baseAgent} agentId={agentId} version={version} />
+      <UserMemorySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("User Memory"));
     expect(screen.getByTestId("user-memory-section")).toBeInTheDocument();
@@ -423,7 +390,7 @@ describe("UserMemorySection", () => {
       enableMemoryTools: true,
     };
     renderWithProviders(
-      <UserMemorySection agent={agentWithMemory} agentId={agentId} version={version} />
+      <UserMemorySection agent={agentWithMemory} onChange={mockOnChange} />
     );
     // defaultOpen since enabled = true
     expect(screen.getByText("Default Visibility")).toBeInTheDocument();
@@ -436,15 +403,11 @@ describe("UserMemorySection", () => {
   it("toggles memory tools on", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <UserMemorySection agent={baseAgent} agentId={agentId} version={version} />
+      <UserMemorySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("User Memory"));
     await user.click(screen.getByText("Enable Memory Tools"));
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({ enableMemoryTools: true }),
-      })
-    );
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({ enableMemoryTools: true }));
   });
 
   it("shows On Cap Reached and Recall Order selects when memory enabled", () => {
@@ -453,7 +416,7 @@ describe("UserMemorySection", () => {
       enableMemoryTools: true,
     };
     renderWithProviders(
-      <UserMemorySection agent={agentWithMemory} agentId={agentId} version={version} />
+      <UserMemorySection agent={agentWithMemory} onChange={mockOnChange} />
     );
     expect(screen.getByText("On Cap Reached")).toBeInTheDocument();
     expect(screen.getByText("Recall Order")).toBeInTheDocument();
@@ -471,7 +434,7 @@ describe("UserMemorySection", () => {
       },
     };
     renderWithProviders(
-      <UserMemorySection agent={agentWithDream} agentId={agentId} version={version} />
+      <UserMemorySection agent={agentWithDream} onChange={mockOnChange} />
     );
     // Dream config fields should be visible
     expect(screen.getByText("Schedule (cron)")).toBeInTheDocument();
@@ -490,7 +453,7 @@ describe("UserMemorySection", () => {
       enableMemoryTools: true,
     };
     renderWithProviders(
-      <UserMemorySection agent={agentWithMemory} agentId={agentId} version={version} />
+      <UserMemorySection agent={agentWithMemory} onChange={mockOnChange} />
     );
     expect(screen.getByText("Max Key Length")).toBeInTheDocument();
     expect(screen.getByText("Max Value Length")).toBeInTheDocument();
@@ -505,7 +468,7 @@ describe("MemoryPolicySection", () => {
 
   it("renders section label", () => {
     renderWithProviders(
-      <MemoryPolicySection agent={baseAgent} agentId={agentId} version={version} />
+      <MemoryPolicySection agent={baseAgent} onChange={mockOnChange} />
     );
     expect(screen.getByText("Memory Policy")).toBeInTheDocument();
   });
@@ -513,7 +476,7 @@ describe("MemoryPolicySection", () => {
   it("shows SWD enable checkbox when expanded", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <MemoryPolicySection agent={baseAgent} agentId={agentId} version={version} />
+      <MemoryPolicySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Memory Policy"));
     expect(screen.getByTestId("memory-policy-section")).toBeInTheDocument();
@@ -531,7 +494,7 @@ describe("MemoryPolicySection", () => {
       },
     };
     renderWithProviders(
-      <MemoryPolicySection agent={agentWithSwd} agentId={agentId} version={version} />
+      <MemoryPolicySection agent={agentWithSwd} onChange={mockOnChange} />
     );
     // defaultOpen since enabled
     expect(screen.getByTestId("swd-on-failure")).toBeInTheDocument();
@@ -540,19 +503,15 @@ describe("MemoryPolicySection", () => {
   it("toggles SWD on", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <MemoryPolicySection agent={baseAgent} agentId={agentId} version={version} />
+      <MemoryPolicySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Memory Policy"));
     await user.click(screen.getByTestId("swd-enable"));
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           memoryPolicy: expect.objectContaining({
             strictWriteDiscipline: expect.objectContaining({ enabled: true }),
           }),
-        }),
-      })
-    );
+        }));
   });
 });
 
@@ -563,7 +522,7 @@ describe("SessionManagementSection", () => {
 
   it("renders section label", () => {
     renderWithProviders(
-      <SessionManagementSection agent={baseAgent} agentId={agentId} version={version} />
+      <SessionManagementSection agent={baseAgent} onChange={mockOnChange} />
     );
     expect(screen.getByText("Session Management")).toBeInTheDocument();
   });
@@ -571,7 +530,7 @@ describe("SessionManagementSection", () => {
   it("shows auto-snapshot checkbox when expanded", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <SessionManagementSection agent={baseAgent} agentId={agentId} version={version} />
+      <SessionManagementSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Session Management"));
     expect(screen.getByTestId("session-management-section")).toBeInTheDocument();
@@ -581,7 +540,7 @@ describe("SessionManagementSection", () => {
   it("shows forking disabled section", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <SessionManagementSection agent={baseAgent} agentId={agentId} version={version} />
+      <SessionManagementSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Session Management"));
     expect(screen.getByTestId("forking-enabled")).toBeDisabled();
@@ -592,19 +551,15 @@ describe("SessionManagementSection", () => {
   it("toggles auto-snapshot on", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <SessionManagementSection agent={baseAgent} agentId={agentId} version={version} />
+      <SessionManagementSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Session Management"));
     await user.click(screen.getByTestId("auto-snapshot-enabled"));
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           sessionManagement: expect.objectContaining({
             autoSnapshot: expect.objectContaining({ enabled: true }),
           }),
-        }),
-      })
-    );
+        }));
   });
 
   it("shows trigger on buttons when auto-snapshot is enabled", () => {
@@ -618,7 +573,7 @@ describe("SessionManagementSection", () => {
       },
     };
     renderWithProviders(
-      <SessionManagementSection agent={agentWithSnapshot} agentId={agentId} version={version} />
+      <SessionManagementSection agent={agentWithSnapshot} onChange={mockOnChange} />
     );
     // Section auto-opens since autoSnapshot.enabled = true
     expect(screen.getByText("Trigger On")).toBeInTheDocument();
@@ -634,7 +589,7 @@ describe("ChannelsSection", () => {
 
   it("renders section label", () => {
     renderWithProviders(
-      <ChannelsSection agent={baseAgent} agentId={agentId} version={version} />
+      <ChannelsSection agent={baseAgent} onChange={mockOnChange} />
     );
     expect(screen.getByText("Channel Connectors")).toBeInTheDocument();
   });
@@ -642,7 +597,7 @@ describe("ChannelsSection", () => {
   it("shows empty state when no channels configured", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <ChannelsSection agent={baseAgent} agentId={agentId} version={version} />
+      <ChannelsSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Channel Connectors"));
     expect(screen.getByText("No channels configured")).toBeInTheDocument();
@@ -651,7 +606,7 @@ describe("ChannelsSection", () => {
   it("shows add slack channel button when expanded", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <ChannelsSection agent={baseAgent} agentId={agentId} version={version} />
+      <ChannelsSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Channel Connectors"));
     expect(screen.getByTestId("add-slack-channel-btn")).toBeInTheDocument();
@@ -660,22 +615,18 @@ describe("ChannelsSection", () => {
   it("adds a slack channel when button is clicked", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <ChannelsSection agent={baseAgent} agentId={agentId} version={version} />
+      <ChannelsSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Channel Connectors"));
     await user.click(screen.getByTestId("add-slack-channel-btn"));
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agent: expect.objectContaining({
+    expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           channels: [
             expect.objectContaining({
               type: "slack",
               config: expect.objectContaining({ channelId: "" }),
             }),
           ],
-        }),
-      })
-    );
+        }));
   });
 
   it("shows slack channel card when channels configured", () => {
@@ -693,7 +644,7 @@ describe("ChannelsSection", () => {
       ],
     };
     renderWithProviders(
-      <ChannelsSection agent={agentWithChannels} agentId={agentId} version={version} />
+      <ChannelsSection agent={agentWithChannels} onChange={mockOnChange} />
     );
     // Section auto-opens since hasChannels = true
     expect(screen.getByTestId("slack-channel-0")).toBeInTheDocument();
@@ -704,7 +655,7 @@ describe("ChannelsSection", () => {
   it("shows setup guide button", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <ChannelsSection agent={baseAgent} agentId={agentId} version={version} />
+      <ChannelsSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Channel Connectors"));
     expect(screen.getByText("Slack Setup Guide")).toBeInTheDocument();
@@ -713,7 +664,7 @@ describe("ChannelsSection", () => {
   it("opens setup guide when clicked", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <ChannelsSection agent={baseAgent} agentId={agentId} version={version} />
+      <ChannelsSection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Channel Connectors"));
     await user.click(screen.getByText("Slack Setup Guide"));
@@ -736,7 +687,7 @@ describe("ChannelsSection", () => {
       ],
     };
     renderWithProviders(
-      <ChannelsSection agent={agentWithChannels} agentId={agentId} version={version} />
+      <ChannelsSection agent={agentWithChannels} onChange={mockOnChange} />
     );
     expect(screen.getByTestId("remove-channel-0")).toBeInTheDocument();
   });
