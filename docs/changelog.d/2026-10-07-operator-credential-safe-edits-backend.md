@@ -18,7 +18,7 @@ The way through is to not send what does not change:
 - **No new dependency.** `jakarta.json` (Parsson) is already on the classpath through `quarkus-rest`.
 - **Own path/media type, no collision.** `output` and `dictionary` already have a `PATCH /{id}` with `application/json` and a different body (`PatchInstruction` SET/DELETE); neither holds credential references, so they are untouched. The three stores here had no PATCH, so the same path with `application/json-patch+json` cannot clash. OpenAPI allows one PATCH operation per path, so a store that already has the other PATCH would need a sub-path.
 - **`PUT` stays.** It still works for documents without references and is what the Manager editors use.
-- **No server-side `toolApprovals` restriction.** The REST layer cannot tell the operator from a human admin using the same role, so a server-side refusal would also block legitimate API patches; the Manager's approval guard is the control, as it already is for `PUT` (see the Manager entry).
+- **Server-side approval guard.** `SelfUngatingGuard` (the check of an approved call before it executes, on the Slack, MCP and REST approval paths too) refused an llmstore write carrying `toolApprovals` as a key; a patch names the field in a path, which that test missed. It now also refuses a patch whose `path`/`from` names the field, whose `value` carries it, or that uses an operation other than add/replace/remove/test. The REST endpoint itself stays unrestricted: it cannot tell the operator from an admin with the same role.
 - **Bounded.** A patch is limited to 256 KiB and 200 operations.
 
 ### Files

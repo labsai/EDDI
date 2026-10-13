@@ -15,7 +15,7 @@ The operator's `llmstore` write grant was unusable for any LLM configuration wit
 
 ### Design decisions
 
-- **No server-side `toolApprovals` restriction.** The REST layer cannot tell the operator from an admin with the same role, so it would also block legitimate API patches; the Manager guard is the control, as it already is for `PUT`.
+- **Server-side too.** `SelfUngatingGuard` now judges patches the same way `gate-guard.ts` does (see the backend entry), so the rule holds on the Slack, MCP and REST approval paths, not only in the Manager. The REST endpoint itself stays unrestricted (it cannot tell the operator from an admin).
 - **`copy`/`move` are not reasoned about, they are refused.** Neither is needed to edit a configuration.
 - **`ragstore` is not patchable** because it is not writable; it takes the same three-part change when it is.
 
