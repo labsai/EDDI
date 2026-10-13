@@ -214,6 +214,7 @@ export function GroupDetailPage() {
     data: groupConfig,
     isLoading: configLoading,
     isError: configError,
+    error: configErr,
     refetch: refetchConfig,
   } = useGroup(resolvedVersion ? (groupId ?? "") : "", version);
 
@@ -572,7 +573,7 @@ export function GroupDetailPage() {
     return (
       <div className="space-y-4">
         <BackLink to="/manage/groups" label={t("groups.backToGroups", "Back to Groups")} />
-        <ErrorState message={t("common.error")} onRetry={() => refetchConfig()} retryLabel={t("common.retry")} />
+        <ErrorState error={configErr} message={t("common.error")} onRetry={() => refetchConfig()} retryLabel={t("common.retry")} />
       </div>
     );
   }

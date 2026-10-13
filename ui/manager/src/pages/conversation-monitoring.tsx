@@ -116,6 +116,7 @@ export function ConversationMonitoringPage() {
     data: active,
     isLoading,
     isError,
+    error,
     isFetching,
     refetch,
   } = useActiveConversations(agentId, version);
@@ -398,6 +399,7 @@ export function ConversationMonitoringPage() {
 
       {ready && isError && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}

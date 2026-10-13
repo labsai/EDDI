@@ -27,11 +27,12 @@ const DEFAULT_TENANT = "default";
 
 export function QuotasPage() {
   const { t } = useTranslation();
-  const { data: quota, isLoading: quotaLoading, isError: quotaError, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
+  const { data: quota, isLoading: quotaLoading, isError: quotaError, error: quotaErr, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
   const {
     data: usage,
     isLoading: usageLoading,
     isError: usageError,
+    error: usageErr,
     refetch: refetchUsage,
   } = useQuotaUsage(DEFAULT_TENANT);
   const updateMutation = useUpdateQuota();
@@ -202,6 +203,7 @@ export function QuotasPage() {
               {quotaError && !quota ? (
                 <div data-testid="quotas-config-error">
                   <ErrorState
+                    error={quotaErr}
                     message={t("common.error")}
                     onRetry={() => refetchQuota()}
                     retryLabel={t("common.retry")}
@@ -283,6 +285,7 @@ export function QuotasPage() {
               {usageError && !usageLoading && !usage && (
                 <div data-testid="quotas-usage-error">
                   <ErrorState
+                    error={usageErr}
                     message={t("common.error")}
                     onRetry={() => refetchUsage()}
                     retryLabel={t("common.retry")}

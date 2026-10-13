@@ -37,6 +37,7 @@ export function ChannelsPage() {
     data: channels,
     isLoading,
     isError,
+    error,
     refetch,
   } = useEnrichedChannelDescriptors();
   const deleteMutation = useDeleteChannel();
@@ -171,6 +172,7 @@ export function ChannelsPage() {
         // replacing usable rows with a full-page error on a focus blip is worse
         // than showing them. Only a failed INITIAL load has nothing to show.
         <ErrorState
+          error={error}
           message={t("common.error", "Something went wrong")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry", "Retry")}

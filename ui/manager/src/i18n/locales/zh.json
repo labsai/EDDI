@@ -25,7 +25,13 @@
     "profile": "个人资料",
     "guest": "访客",
     "userMenu": "用户菜单",
-    "signedIn": "已登录"
+    "signedIn": "已登录",
+    "authenticating": "正在验证身份…",
+    "initFailedTitle": "登录失败",
+    "initFailedBody": "Manager 无法完成登录。登录服务可能无法访问，或您的会话已被拒绝。",
+    "signInAgain": "重新登录",
+    "sessionExpiredTitle": "您的会话已过期。",
+    "sessionExpiredBody": "未保存的更改仍保留在此页面——请先复制所需内容，再重新登录。"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -224,7 +230,13 @@
     "versionShort": "v{{version}}",
     "resizePanel": "调整{{panel}}大小",
     "deletePermanently": "永久删除",
-    "deletePermanentlyHint": "无法撤消。不勾选此项时，该项仅被标记为已删除，在被清除前仍可恢复。"
+    "deletePermanentlyHint": "无法撤消。不勾选此项时，该项仅被标记为已删除，在被清除前仍可恢复。",
+    "errors": {
+      "network": "无法连接到 EDDI。请检查网络连接后重试。",
+      "unauthorized": "您的会话已过期，请重新登录。",
+      "forbidden": "您无权查看此内容。",
+      "notFound": "未找到——可能已被删除。"
+    }
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",
@@ -3184,7 +3196,11 @@
     "registeredSkills": "已注册技能",
     "noSkills": "未找到技能",
     "matchingAgents": "匹配的代理",
-    "noMatches": "该技能未找到匹配代理"
+    "noMatches": "该技能未找到匹配代理",
+    "searchLabel": "搜索技能",
+    "strategyLabel": "匹配策略",
+    "emptyTitle": "尚未注册任何能力",
+    "emptyDesc": "代理在配置中声明能力（技能）后会显示在这里。为代理添加能力后，它就会出现在此注册表中。"
   },
   "exportDialog": {
     "title": "导出智能体",
@@ -3741,7 +3757,18 @@
     "vaultUp": "Vault 就绪",
     "viewLogs": "查看日志",
     "coordAdminOnly": "协调器：需要管理员权限",
-    "vaultAdminOnly": "Vault：需要管理员权限"
+    "vaultAdminOnly": "Vault：需要管理员权限",
+    "vaultChecking": "正在检查保险库…",
+    "statsPartial": "部分计数无法加载——显示为不可用，而不是零。",
+    "countUnavailable": "无法加载",
+    "convState": {
+      "READY": "就绪",
+      "IN_PROGRESS": "进行中",
+      "ENDED": "已结束",
+      "EXECUTION_INTERRUPTED": "已中断",
+      "ERROR": "错误",
+      "AWAITING_HUMAN": "等待人工"
+    }
   },
   "errorBoundary": {
     "retry": "重试",
@@ -3829,7 +3856,9 @@
     "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。",
     "purgeIncompleteScan": "未删除任何内容：EDDI 未能完成对仍在使用的资源的检查。请重新扫描后再试。",
     "purgeFailed": "清理失败",
-    "scanFailed": "扫描失败：{{reason}}"
+    "scanFailed": "扫描失败：{{reason}}",
+    "reviewHint": "请先从列表中打开资源进行查看；列表中的所有孤立资源都会被删除。",
+    "typeToConfirm": "输入 {{count}} 以确认"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",

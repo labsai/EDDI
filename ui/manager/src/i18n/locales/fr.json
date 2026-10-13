@@ -25,7 +25,13 @@
     "profile": "Profil",
     "guest": "Invité",
     "userMenu": "Menu utilisateur",
-    "signedIn": "Session ouverte"
+    "signedIn": "Session ouverte",
+    "authenticating": "Authentification…",
+    "initFailedTitle": "Échec de la connexion",
+    "initFailedBody": "Le Manager n'a pas pu terminer la connexion. Le service d'authentification est peut-être injoignable ou votre session a été rejetée.",
+    "signInAgain": "Se reconnecter",
+    "sessionExpiredTitle": "Votre session a expiré.",
+    "sessionExpiredBody": "Les modifications non enregistrées sont toujours sur cette page — copiez ce dont vous avez besoin avant de vous reconnecter."
   },
   "nav": {
     "dashboard": "Tableau de bord",
@@ -224,7 +230,13 @@
     "versionShort": "v{{version}}",
     "resizePanel": "Redimensionner {{panel}}",
     "deletePermanently": "Supprimer définitivement",
-    "deletePermanentlyHint": "Action irréversible. Sans cette option, l'élément est seulement marqué comme supprimé et reste récupérable jusqu'à sa purge."
+    "deletePermanentlyHint": "Action irréversible. Sans cette option, l'élément est seulement marqué comme supprimé et reste récupérable jusqu'à sa purge.",
+    "errors": {
+      "network": "Impossible de joindre EDDI. Vérifiez votre connexion et réessayez.",
+      "unauthorized": "Votre session a expiré. Reconnectez-vous.",
+      "forbidden": "Vous n'avez pas l'autorisation de consulter ceci.",
+      "notFound": "Introuvable — il a peut-être été supprimé."
+    }
   },
   "agents": {
     "confirmDeleteDescription": "Cette action est irréversible. L'agent et toutes ses données seront définitivement supprimés.",
@@ -3220,7 +3232,11 @@
     "registeredSkills": "Compétences enregistrées",
     "noSkills": "Aucune compétence trouvée",
     "matchingAgents": "Agents correspondants",
-    "noMatches": "Aucun agent trouvé pour cette compétence"
+    "noMatches": "Aucun agent trouvé pour cette compétence",
+    "searchLabel": "Rechercher des compétences",
+    "strategyLabel": "Stratégie de correspondance",
+    "emptyTitle": "Aucune capacité enregistrée pour l'instant",
+    "emptyDesc": "Les agents apparaissent ici dès qu'ils déclarent des capacités (compétences) dans leur configuration. Ajoutez une capacité à un agent et elle apparaîtra dans ce registre."
   },
   "exportDialog": {
     "title": "Exporter l'agent",
@@ -3779,7 +3795,18 @@
     "vaultUp": "Vault prêt",
     "viewLogs": "Voir les journaux",
     "coordAdminOnly": "Coordinateur : réservé aux admins",
-    "vaultAdminOnly": "Vault : réservé aux admins"
+    "vaultAdminOnly": "Vault : réservé aux admins",
+    "vaultChecking": "Vérification du coffre…",
+    "statsPartial": "Certains compteurs n'ont pas pu être chargés — ils sont affichés comme indisponibles, et non comme zéro.",
+    "countUnavailable": "Impossible à charger",
+    "convState": {
+      "READY": "Prête",
+      "IN_PROGRESS": "En cours",
+      "ENDED": "Terminée",
+      "EXECUTION_INTERRUPTED": "Interrompue",
+      "ERROR": "Erreur",
+      "AWAITING_HUMAN": "En attente d'un humain"
+    }
   },
   "errorBoundary": {
     "retry": "Réessayer",
@@ -3870,7 +3897,9 @@
     "confirmPurge": "Supprimer définitivement les {{count}} ressources orphelines ? Cette action est irréversible.",
     "purgeIncompleteScan": "Rien n'a été supprimé : EDDI n'a pas pu terminer la vérification des ressources encore utilisées. Relancez l'analyse puis réessayez.",
     "purgeFailed": "Échec de la purge",
-    "scanFailed": "L'analyse a échoué : {{reason}}"
+    "scanFailed": "L'analyse a échoué : {{reason}}",
+    "reviewHint": "Ouvrez d'abord une ressource de la liste pour l'inspecter ; tous les orphelins de la liste sont supprimés.",
+    "typeToConfirm": "Saisissez {{count}} pour confirmer"
   },
   "quotas": {
     "apiCallsMinute": "Appels API / minute",

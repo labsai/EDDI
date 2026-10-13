@@ -155,7 +155,7 @@ export function ConversationsPage() {
     [versions]
   );
 
-  const { data: conversations, isLoading, isFetching, isError, refetch } =
+  const { data: conversations, isLoading, isFetching, isError, error, refetch } =
     useConversationDescriptors(
       pageSize,
       page,
@@ -321,6 +321,7 @@ export function ConversationsPage() {
 
       {isError && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}

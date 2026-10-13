@@ -583,6 +583,7 @@ export function AuditPage() {
   // Without this a 500 rendered the "No audit entries found" empty state — the
   // most misleading possible result on a compliance screen.
   const isError = headQuery.isError || pageQuery.isError;
+  const error = headQuery.error ?? pageQuery.error;
   const refetch = () => {
     void headQuery.refetch();
     if (skip > 0) void pageQuery.refetch();
@@ -992,6 +993,7 @@ export function AuditPage() {
       {/* Empty state - no results */}
       {hasSearched && !isLoading && isError && entries.length === 0 && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}
