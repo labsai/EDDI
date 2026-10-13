@@ -137,6 +137,7 @@ Always returns `1.0` — effectively disables confidence gating. The first step'
 | **Spent quota (e.g. a per-day quota)** | Not retried — a 429 that names a per-day quota or `insufficient_quota` escalates immediately (failure class `QUOTA_EXHAUSTED`). |
 | **Timeout** | The step is cancelled and the cascade escalates; a warning is logged. A step streamed live is exempt from cancellation — see [Streaming the Final Step](#streaming-the-final-step). |
 | **Other errors** | Logged; escalate to the next step. |
+| **Circuit open** | With the task's opt-in [`circuitBreaker`](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing), a step whose model keeps failing with the same permanent class (invalid output, bad request, model not found; auth or quota at once) is **skipped without a call** until its cool-down ends, then probed once. Per model: the other steps still run. Trace `status: circuit_open`. If the last step is open too, the best response so far is returned, else the turn fails with an `LlmCircuitOpenException` (or serves the `onError` fallback). |
 | **Duration / cost ceiling reached** | Stop escalating, return the best response so far. |
 | **All steps fail** | Return the best response seen so far, or throw `LifecycleException` if none produced a result. |
 
