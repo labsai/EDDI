@@ -322,6 +322,17 @@ fails fast instead of being sent. Without a deadline, nothing changes.
 
 Fire-and-forget calls are not bounded by it: they are built on the turn's thread but sent in the background and never awaited, so they add nothing to the turn's duration. LLM tool calls (including these httpcalls when used as tools) are clamped the same way — a tool is not started once the deadline has passed.
 
+### Turn deadline
+
+When the agent sets a [turn deadline](langchain.md#turn-deadline) (`turnDeadlineMs`, or the caller's
+`X-EDDI-Turn-Deadline-Ms` header), each call's `timeoutInMillis` is clamped to the time the turn has
+left after its reserve, and a `retryApiCallInstruction` retry is skipped when its backoff plus a call
+of `min(timeoutInMillis, 3 s)` no longer fits — the last response is then used as if the retries had
+been exhausted. The first call is always sent while the deadline has not passed; once it has, the call
+fails fast instead of being sent. Without a deadline, nothing changes.
+
+Fire-and-forget calls are not bounded by it: they are built on the turn's thread but sent in the background and never awaited, so they add nothing to the turn's duration. LLM tool calls (including these httpcalls when used as tools) are clamped the same way — a tool is not started once the deadline has passed.
+
 ### HttpCall API endpoints
 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |

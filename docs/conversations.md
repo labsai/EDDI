@@ -20,6 +20,58 @@ stops retries, cascade steps and HTTP calls that cannot finish in time and answe
 inside the budget. The agent's own `turnDeadlineMs` caps it; with none configured the header alone
 applies, up to 10 minutes. See [Turn Deadline](langchain.md#turn-deadline).
 
+### Failed turns: the `error` object
+
+When a turn fails (`conversationState: "ERROR"`), the response to the `say` keeps the status and the
+snapshot shape it always had, and carries a top-level `error`. It is one object everywhere: the same `error`
+is on every snapshot in the `ERROR` state, a plain read of the conversation as well as the response to a
+`say`:
+
+```json
+{ "conversationState": "ERROR",
+  "error": { "code": "RATE_LIMITED", "retryable": true, "retryAfterMs": 13000,
+             "message": "Task 'eddi://ai.labs.llm' failed: ...",
+             "taskId": "eddi://ai.labs.llm", "taskType": "langchain", "errorType": "LifecycleException" } }
+```
+
+- `code` is a failure class (`TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`,
+  `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`) when the failure was recognised as a provider or transport
+  failure, otherwise `TURN_FAILED`. An unexpected server fault is a `500` with
+  `{"error": {"code": "INTERNAL_ERROR", ...}}`.
+- `retryable` says whether sending the same request again can succeed; `retryAfterMs` is the provider's own
+  hint (`null` when it gave none) and is also sent as a `Retry-After` header (whole seconds).
+- `message` is a short, redacted digest: never a stack trace, a credential or a raw provider body. It is the
+  same sentence the streaming `task_failed` event carries.
+- `taskId`, `taskType` and `errorType` say which lifecycle task failed and how it was classified for metrics
+  and audit (for example `LifecycleException`), as the `task_failed` event does. They are omitted when the
+  error did not come from a task, such as a rejected idempotency key. A failed turn whose entry predates
+  `code`/`retryable` reports `code: "TURN_FAILED"`, `retryable: false`. The full per-task digest stays in
+  `conversationOutputs[…].taskErrors`.
+- The same object is on the final `done` event of a streaming `say`. The `/v1` OpenAI-compatible API keeps
+  its own error format, and the older refusals (`409`, `429`, `503`, ...) keep their existing bodies.
+- The endpoints produce JSON only, so there is no plain-text variant of the body.
+
+### Idempotent turns
+
+A caller whose timeout is shorter than a turn gives up and sends the request again. Send an
+`Idempotency-Key` header (or `X-EDDI-Request-Id`; the former wins) on `say`, a managed-conversation message
+or a streaming `say`, and the retry is answered instead of refused:
+
+- **Same key while the turn runs:** the request waits for that turn (up to `X-EDDI-Turn-Deadline-Ms`, at most
+  the agent timeout) and returns its result. No `409`, no second run. If the wait runs out it is answered like
+  today's busy conversation (`409`, retry shortly). The waiter gets the result in the shape the first request
+  asked for.
+- **Same key after the turn completed**, within `eddi.turns.idempotency.ttl-seconds` (default 600): the stored
+  answer, without running the pipeline again. The key is recorded on the turn's step in the database, so this
+  works after a restart and on any node, for as long as that step is among the conversation's latest 50.
+- **A different key, or none:** an ordinary turn (with the usual `409` while another turn is running).
+- Keys are scoped to the conversation, 1 to 128 printable ASCII characters; anything else is a `400`
+  (`INVALID_IDEMPOTENCY_KEY`).
+- A turn that **failed** is not remembered: retrying a failed request with the same key runs it again.
+- Waiting for a running turn works on the node that runs it; behind a multi-node (NATS) coordinator a
+  duplicate that lands on another node still meets `409` until the turn completes, after which the stored
+  answer is served everywhere. `0` for the TTL switches the feature off.
+
 ### How Conversations Work in EDDI
 
 When you create a conversation:

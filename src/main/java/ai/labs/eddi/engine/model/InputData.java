@@ -23,7 +23,25 @@ public class InputData {
     @JsonIgnore
     private Long requestedTurnDeadlineMs;
 
+    /**
+     * The caller's {@code Idempotency-Key} (or {@code X-EDDI-Request-Id}), already
+     * validated by the REST layer. Header-only: never read from or written to a
+     * request body.
+     */
+    @JsonIgnore
+    private String idempotencyKey;
+
     public InputData() {
+    }
+
+    @JsonIgnore
+    public String getIdempotencyKey() {
+        return idempotencyKey;
+    }
+
+    @JsonIgnore
+    public void setIdempotencyKey(String idempotencyKey) {
+        this.idempotencyKey = idempotencyKey;
     }
 
     public InputData(String input, Map<String, Context> context) {
