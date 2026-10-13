@@ -175,8 +175,9 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
   // ── Leaving the sheet ───────────────────────────────────────
 
 
-  // The dialog covers the four in-app exits. Reloading or closing the tab is
-  // a fifth, and the browser is the only thing that can ask about that one.
+  // The dialog covers the four in-app exits of the sheet. Reloading or closing
+  // the tab is a fifth (the browser asks), and navigating the PAGE away — a
+  // sidebar link, Back — a sixth, held by the router's blocker (prompt below).
   useUnsavedChangesGuard(isDirty);
 
   /**

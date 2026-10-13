@@ -183,7 +183,7 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
 
 ## Deployment
 
-- **Helm** (chart 2.5.0+): `eddi.messagingType=nats` with `nats.enabled=true`
+- **Helm** (chart 2.6.0+): `eddi.messagingType=nats` with `nats.enabled=true`
   (a three-node JetStream StatefulSet with client and route authentication and
   optional TLS) or
   `nats.externalUrl`; then `eddi.replicas > 1`, `autoscaling.enabled` and a

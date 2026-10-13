@@ -167,39 +167,55 @@ describe("ConversationMonitoringPage — purge ended", () => {
     expect(toast.success).toHaveBeenCalled();
   });
 
-  it("clamps the days input to a minimum of 1 (0 would purge ALL ended conversations)", async () => {
+  it("states that the purge covers all agents, in the section and the confirmation", async () => {
     renderWithProviders(<ConversationMonitoringPage />);
+    const user = userEvent.setup();
+
+    expect(screen.getByTestId("purge-scope-note")).toHaveTextContent(/every agent/);
+    await user.click(screen.getByTestId("purge-ended"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByTestId("purge-confirm-scope")).toHaveTextContent(
+      /ALL agents/
+    );
+    // The threshold is named in the confirmation too.
+    expect(dialog).toHaveTextContent(/30 days/);
+  });
+
+  it("lets the days field be emptied while typing instead of snapping to 1", async () => {
+    renderWithProviders(<ConversationMonitoringPage />);
+    const user = userEvent.setup();
+
+    const input = screen.getByTestId("purge-days") as HTMLInputElement;
+    await user.clear(input);
+    expect(input).toHaveValue(null);
+    await user.type(input, "90");
+    expect(input).toHaveValue(90);
+  });
+
+  it("rejects an empty or zero days value on submit and never purges", async () => {
+    let called = false;
+    server.use(
+      http.delete("*/conversationstore/conversations/", () => {
+        called = true;
+        return HttpResponse.json(0);
+      })
+    );
+    renderWithProviders(<ConversationMonitoringPage />);
+    const user = userEvent.setup();
 
     const input = screen.getByTestId("purge-days") as HTMLInputElement;
     expect(input).toHaveAttribute("min", "1");
 
-    // Trying to set 0 (which would purge every ENDED conversation) is clamped.
-    fireEvent.change(input, { target: { value: "0" } });
-    expect(input).toHaveValue(1);
-  });
-
-  it("purges with the clamped minimum of 1 day, never 0", async () => {
-    let purgeUrl = "";
-    server.use(
-      http.delete("*/conversationstore/conversations/", ({ request }) => {
-        purgeUrl = request.url;
-        return HttpResponse.json(0);
-      })
-    );
-
-    renderWithProviders(<ConversationMonitoringPage />);
-    const user = userEvent.setup();
-
-    fireEvent.change(screen.getByTestId("purge-days"), { target: { value: "0" } });
+    await user.clear(input);
     await user.click(screen.getByTestId("purge-ended"));
+    expect(screen.getByTestId("purge-days-error")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    const dialog = await screen.findByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Purge" }));
-
-    await waitFor(() => {
-      expect(purgeUrl).toContain("deleteOlderThanDays=1");
-    });
-    expect(purgeUrl).not.toContain("deleteOlderThanDays=0");
+    fireEvent.change(input, { target: { value: "0" } });
+    await user.click(screen.getByTestId("purge-ended"));
+    expect(screen.getByTestId("purge-days-error")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(called).toBe(false);
   });
 });
 

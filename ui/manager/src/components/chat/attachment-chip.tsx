@@ -95,7 +95,7 @@ export function PendingAttachmentChip({
           onClick={onRemove}
           className="absolute inset-e-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/60 hover:bg-muted hover:text-foreground"
           title={t("common.remove", "Remove")}
-          aria-label={`${t("common.remove", "Remove")} ${att.file.name}`}
+          aria-label={t("common.removeItem", { item: att.file.name, defaultValue: "Remove {{item}}" })}
           data-testid="attachment-remove"
         >
           <X className="h-3 w-3" />

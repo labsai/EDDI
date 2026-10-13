@@ -411,7 +411,7 @@ class AgentOrchestratorExtendedTest {
          */
         private void invokeSafeTemplateMerge(Map<String, Object> templateData, Map<String, Object> args)
                 throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = HttpCallToolsProvider.class.getDeclaredMethod(
                     "safeTemplateMerge", Map.class, Map.class);
             method.setAccessible(true);
             method.invoke(null, templateData, args);
@@ -508,7 +508,7 @@ class AgentOrchestratorExtendedTest {
                                                    List<ToolSpecification> builtInSpecs,
                                                    List<ToolSpecification> activeSpecs)
                 throws Exception {
-            Method method = AgentOrchestrator.class.getDeclaredMethod(
+            Method method = ToolLoopRunner.class.getDeclaredMethod(
                     "activateDiscoveredTools", String.class, List.class, List.class);
             method.setAccessible(true);
             method.invoke(orchestrator, discoverResult, builtInSpecs, activeSpecs);

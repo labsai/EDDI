@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
@@ -17,6 +19,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationStatus;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
@@ -38,9 +41,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.util.concurrent.atomic.AtomicReference;
 import java.time.Instant;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -339,8 +342,11 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
 
         Callable<Void> deployAgentCallable = () -> {
             try {
-                if (EnumSet.of(NOT_FOUND, ERROR).contains(checkDeploymentStatus(environment, agentId, version))) {
+                Status outcome = checkDeploymentStatus(environment, agentId, version);
+                if (EnumSet.of(NOT_FOUND, ERROR).contains(outcome)) {
+                    var reported = new AtomicReference<Status>();
                     agentFactory.deployAgent(environment, agentId, version, status -> {
+                        reported.set(status);
                         if (status == READY && autoDeploy) {
                             deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.deployed);
                         } else if (status == READY) {
@@ -352,12 +358,24 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                             }
                         }
                     });
+                    // AgentFactory.deployAgent does not throw on a failed deployment: a
+                    // store/workflow error or a vault-grant refusal marks the agent ERROR,
+                    // reports it to the callback and returns normally. Announcing READY
+                    // regardless told every waiter the agent was up and re-enabled its
+                    // schedules, which then failed on every fire.
+                    outcome = reported.get() != null ? reported.get() : checkDeploymentStatus(environment, agentId, version);
                 }
 
-                deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, READY));
-
-                // Lifecycle hook: auto-enable schedules for this agent
-                enableSchedulesForAgent(agentId);
+                if (outcome == READY) {
+                    deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, READY));
+                    // Lifecycle hook: re-enable the schedules the undeploy switched off.
+                    enableSchedulesForAgent(agentId);
+                } else if (outcome != IN_PROGRESS) {
+                    log.warnf("Deployment of agent %s v%s finished %s — not announcing READY and leaving its schedules as they are",
+                            sanitize(agentId), version, outcome);
+                    deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, ERROR));
+                }
+                // IN_PROGRESS: another caller's deployment owns the outcome and fires it.
 
             } catch (Exception e) {
                 handleDeploymentException(e, agentId, version, environment);
@@ -374,8 +392,6 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
 
         if (e instanceof ServiceException) {
             throwError(agentId, version, (ServiceException) e, "Error while deploying agent! (agentId=%s , version=%s)");
-        } else if (e instanceof IllegalAccessException) {
-            throwErrorForbidden(agentId, version, (IllegalAccessException) e);
         } else {
             throw sneakyThrow(e);
         }
@@ -415,44 +431,113 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             // evidence: another deployed version actually seen.
             final boolean agentLeavesEnvironment = deployedVersions(environment, agentId).stream()
                     .allMatch(deployed -> deployed >= lowestUndeployed && deployed <= highestUndeployed);
-            do {
-                Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(agentId, version);
-                Integer successor = activeConversationCount > 0
-                        ? compatibleDeployedVersion(environment, agentId, version, lowestUndeployed, highestUndeployed)
-                        : null;
-                if (successor != null) {
-                    // Nothing to end and nothing to refuse: these conversations move to the
-                    // compatible version on their next turn.
-                    log.infof("%d active conversation(s) of Agent %s v%d continue on compatible v%d", activeConversationCount,
-                            sanitize(agentId), version, successor);
-                } else if (activeConversationCount > 0) {
-                    if (endAllActiveConversations) {
-                        var activeConversations = restConversationStore.getActiveConversations(agentId, version);
-                        // Ending continues past a failed conversation and reports it in
-                        // a 500; do not undeploy on top of conversations still open.
-                        var endResponse = restConversationStore.endActiveConversations(activeConversations,
-                                IConversationService.END_REASON_AGENT_VERSION_RETIRED);
-                        if (endResponse != null && endResponse.getStatus() >= 300) {
-                            throw new IllegalStateException(String.format(
-                                    "Could not end every active conversation of agent %s (version %s) — not undeploying",
-                                    sanitize(agentId), version));
+            // With undeployThisAndAllPreviousAgentVersions one failing version used to
+            // abort
+            // the loop and leave every lower version deployed — and the caller with a 500
+            // that said nothing of the versions it never reached. Each version is now
+            // attempted, and the failures and refusals are reported together at the end. A
+            // single-version call has nothing to continue to, and fails as it always did.
+            final boolean continueOnFailure = lowestUndeployed < highestUndeployed;
+            final List<String> failures = new ArrayList<>();
+            final List<String> refusals = new ArrayList<>();
+            for (int current = highestUndeployed; current >= lowestUndeployed; current--) {
+                try {
+                    Response refusal = undeployVersion(environment, agentId, current, lowestUndeployed, highestUndeployed,
+                            Boolean.TRUE.equals(endAllActiveConversations), agentLeavesEnvironment);
+                    if (refusal != null) {
+                        if (!continueOnFailure) {
+                            return refusal;
                         }
-                    } else {
-                        var message = getConflictExplanations(agentId, version, activeConversationCount);
-                        return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
+                        refusals.add(String.valueOf(refusal.getEntity()));
                     }
+                } catch (Exception e) {
+                    if (!continueOnFailure) {
+                        throw e;
+                    }
+                    log.errorf(e, "Could not undeploy agent %s version %d — continuing with the lower versions", sanitize(agentId), current);
+                    failures.add("version " + current + ": " + e.getLocalizedMessage());
                 }
+            }
 
-                undeploy(environment, agentId, version, agentLeavesEnvironment);
-                log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", sanitize(agentId), version,
-                        environment));
-            } while (undeployThisAndAllPreviousAgentVersions && version-- > 1);
+            if (!failures.isEmpty()) {
+                throw new IllegalStateException(String.format("Could not undeploy every version of agent %s (%s)%s", sanitize(agentId),
+                        String.join("; ", failures), refusals.isEmpty() ? "" : " — and refused: " + String.join(" ", refusals)));
+            }
+            if (!refusals.isEmpty()) {
+                return Response.status(Response.Status.CONFLICT).entity(String.join("\n", refusals)).type(MediaType.TEXT_PLAIN).build();
+            }
 
             return Response.accepted().build();
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    private List<ConversationStatus> openConversationsOf(String agentId, int version) throws Exception {
+        var statuses = new ArrayList<ConversationStatus>();
+        String after = null;
+        while (true) {
+            var batch = conversationMemoryStore.loadOpenConversationActivity(agentId, version, after, 500);
+            if (batch.isEmpty()) {
+                return statuses;
+            }
+            for (var activity : batch) {
+                var status = new ConversationStatus();
+                status.setConversationId(activity.conversationId());
+                status.setAgentId(agentId);
+                status.setAgentVersion(version);
+                status.setConversationState(activity.conversationState());
+                statuses.add(status);
+            }
+            after = batch.getLast().conversationId();
+        }
+    }
+
+    /**
+     * Undeploys one version: ends or refuses its open conversations as the caller
+     * asked, then takes it out of service.
+     *
+     * @return {@code null} when the version was undeployed, or the 409 that refuses
+     *         it because it still has open conversations
+     */
+    private Response undeployVersion(Deployment.Environment environment, String agentId, int version, int lowestUndeployed,
+                                     int highestUndeployed, boolean endAllActiveConversations, boolean agentLeavesEnvironment)
+            throws Exception {
+        Long activeConversationCount = conversationMemoryStore.getActiveConversationCount(agentId, version);
+        Integer successor = activeConversationCount > 0
+                ? compatibleDeployedVersion(environment, agentId, version, lowestUndeployed, highestUndeployed)
+                : null;
+        if (successor != null) {
+            // Nothing to end and nothing to refuse: these conversations move to the
+            // compatible version on their next turn.
+            log.infof("%d active conversation(s) of Agent %s v%d continue on compatible v%d", activeConversationCount, sanitize(agentId), version,
+                    successor);
+        } else if (activeConversationCount > 0) {
+            if (endAllActiveConversations) {
+                // Listed as a projection, never as full conversations, and without the
+                // per-conversation descriptor read of the /active listing: ending needs only
+                // the ids (the access check on the agent is the one undeploy already made).
+                var activeConversations = openConversationsOf(agentId, version);
+                // Ending continues past a failed conversation and reports it in
+                // a 500; do not undeploy on top of conversations still open.
+                var endResponse = restConversationStore.endActiveConversations(activeConversations,
+                        IConversationService.END_REASON_AGENT_VERSION_RETIRED);
+                if (endResponse != null && endResponse.getStatus() >= 300) {
+                    throw new IllegalStateException(
+                            String.format("Could not end every active conversation of agent %s (version %s) — not undeploying",
+                                    sanitize(agentId), version));
+                }
+            } else {
+                var message = getConflictExplanations(agentId, version, activeConversationCount);
+                return Response.status(Response.Status.CONFLICT).entity(message).type(MediaType.TEXT_PLAIN).build();
+            }
+        }
+
+        undeploy(environment, agentId, version, agentLeavesEnvironment);
+        log.info(String.format("Successfully undeployed Agent (agentId=%s, agentVersion=%s, environment=%s)", sanitize(agentId), version,
+                environment));
+        return null;
     }
 
     /**
@@ -572,10 +657,6 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 if (disableSchedules) {
                     disableSchedulesForAgent(agentId);
                 }
-            } catch (ServiceException e) {
-                throwError(agentId, version, e, "Error while undeploying agent! (agentId=%s , version=%s)");
-            } catch (IllegalAccessException e) {
-                return throwErrorForbidden(agentId, version, e);
             } catch (Exception e) {
                 log.error(e.getLocalizedMessage(), e);
                 throw new InternalServerErrorException(e.getLocalizedMessage(), e);
@@ -592,6 +673,11 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         RuntimeUtilities.checkNotNull(version, "version");
+        // The single-agent twin of getDeploymentStatuses, which lists only agents the
+        // caller may USE. It had no check at all, so with workspaces enforced any
+        // editor could probe whether — and which versions of — another team's agents
+        // are deployed.
+        resourceAccessGuard.requireUseAccess(agentId, "agent");
 
         String status = checkDeploymentStatus(environment, agentId, version).toString();
 
@@ -647,8 +733,10 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 var agentId = latestAgent.getAgentId();
                 var agentVersion = latestAgent.getAgentVersion();
                 var documentDescriptor = documentDescriptorStore.readDescriptor(agentId, agentVersion);
-                agentDeploymentStatuses
-                        .add(new AgentDeploymentStatus(environment, agentId, agentVersion, latestAgent.getDeploymentStatus(), documentDescriptor));
+                var deploymentStatus = new AgentDeploymentStatus(environment, agentId, agentVersion, latestAgent.getDeploymentStatus(),
+                        documentDescriptor);
+                deploymentStatus.setWarnings(latestAgent.getDeploymentWarnings());
+                agentDeploymentStatuses.add(deploymentStatus);
             }
 
             agentDeploymentStatuses.sort(Comparator.comparing(o -> o.getDescriptor().getLastModifiedOn()));
@@ -675,20 +763,20 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         throw sneakyThrow(e);
     }
 
-    private Void throwErrorForbidden(String agentId, Integer version, IllegalAccessException e) {
-        String message = "Agent deployment is currently in progress! (agentId=%s , version=%s)";
-        message = String.format(message, sanitize(agentId), version);
-        log.error(message, e);
-        throw new WebApplicationException(new Throwable(message), Response.Status.FORBIDDEN.getStatusCode());
-    }
-
     // --- Schedule Lifecycle Hooks ---
 
+    /**
+     * Re-enables the schedules {@link #disableSchedulesForAgent} switched off —
+     * those marked {@code disabledReason=agent-undeployed} — and nothing else. It
+     * used to re-enable every disabled schedule of the agent on every deploy,
+     * including a no-op redeploy, so a schedule a user had deliberately switched
+     * off (or one disabled because its creator lost access) came back on its own.
+     */
     private void enableSchedulesForAgent(String agentId) {
         try {
             var schedules = scheduleStore.readSchedulesByAgentId(agentId);
             for (var schedule : schedules) {
-                if (!schedule.isEnabled()) {
+                if (!schedule.isEnabled() && ScheduleConfiguration.DISABLED_BY_UNDEPLOY.equals(schedule.getDisabledReason())) {
                     var nextFire = schedule.getNextFire() != null ? schedule.getNextFire() : Instant.now();
                     scheduleStore.setScheduleEnabled(schedule.getId(), true, nextFire);
                     log.infof("[SCHEDULE] Auto-enabled schedule '%s' (id=%s) on Agent %s deploy", sanitize(schedule.getName()),
@@ -700,12 +788,21 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         }
     }
 
+    /**
+     * Switches the agent's schedules off while it is undeployed, marking each
+     * {@code disabledReason=agent-undeployed} so the next deploy restores exactly
+     * these. HITL approval timeouts are left armed: they belong to a waiting
+     * conversation, not to the agent's cadence, and a timeout that falls due while
+     * the agent is away is re-armed until it is back (SchedulePollerService).
+     * Disabling one here and re-enabling it on redeploy used to fire it at once,
+     * ahead of its due time.
+     */
     private void disableSchedulesForAgent(String agentId) {
         try {
             var schedules = scheduleStore.readSchedulesByAgentId(agentId);
             for (var schedule : schedules) {
-                if (schedule.isEnabled()) {
-                    scheduleStore.setScheduleEnabled(schedule.getId(), false, null);
+                if (schedule.isEnabled() && !HitlSchedules.isHitlTimeout(schedule.getMetadata())) {
+                    scheduleStore.setScheduleEnabled(schedule.getId(), false, null, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
                     log.infof("[SCHEDULE] Auto-disabled schedule '%s' (id=%s) on Agent %s undeploy", sanitize(schedule.getName()),
                             sanitize(schedule.getId()), sanitize(agentId));
                 }

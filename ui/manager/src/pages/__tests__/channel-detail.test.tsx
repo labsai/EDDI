@@ -187,6 +187,22 @@ describe("ChannelDetailPage", () => {
 
   // ─── Interaction tests ──────────────────────────────────────────────────
 
+  it("keeps a card's unsaved input with that card when a card above it is removed", async () => {
+    // Cards were keyed by index: removing the first handed its local state (a
+    // half-typed trigger) to whichever card slid into its slot.
+    renderChannelDetail("ch2", 2);
+    const user = userEvent.setup();
+    await screen.findByTestId("target-card-2");
+
+    await user.type(screen.getByTestId("target-trigger-input-1"), "half-typed");
+    await user.click(screen.getByTestId("remove-target-0"));
+
+    await waitFor(() => expect(screen.queryByTestId("target-card-2")).not.toBeInTheDocument());
+    expect((screen.getByTestId("target-name-0") as HTMLInputElement).value).toBe("review-panel");
+    expect((screen.getByTestId("target-trigger-input-0") as HTMLInputElement).value).toBe("half-typed");
+    expect((screen.getByTestId("target-trigger-input-1") as HTMLInputElement).value).toBe("");
+  });
+
   it("removes a target card when remove button is clicked", async () => {
     renderChannelDetail();
     const user = userEvent.setup();

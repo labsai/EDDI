@@ -139,7 +139,12 @@ export function CoordinatorPage() {
             </div>
           </div>
         ) : overview.isError && !data ? (
-          <ErrorState message={t("common.error", "Something went wrong")} onRetry={() => overview.refetch()} retryLabel={t("common.retry", "Retry")} />
+          <ErrorState
+            error={overview.error}
+            message={t("common.error", "Something went wrong")}
+            onRetry={() => overview.refetch()}
+            retryLabel={t("common.retry", "Retry")}
+          />
         ) : !data ? null : activeTab === "overview" ? (
           <div className="space-y-6">
             <ClusterVerdictCard overview={data} />

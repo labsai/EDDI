@@ -11,6 +11,7 @@
 
 import { encodeSegment, request, requestJson } from "./http";
 import type { ConversationState } from "@/types";
+import { t } from "@/i18n";
 
 export interface PendingToolCall {
   callId: string;
@@ -109,11 +110,9 @@ export function gatedToolNames(status: ApprovalStatus): string[] {
 /** One line explaining why the turn stalled. */
 export function pauseHeadline(status: ApprovalStatus): string {
   const tools = gatedToolNames(status);
-  if (tools.length === 1) {
-    return `A reviewer must approve "${tools[0]}" before I can continue.`;
-  }
+  if (tools.length === 1) return t("paused.headline.tool", { tool: tools[0] });
   if (tools.length > 1) {
-    return `A reviewer must approve these actions before I can continue: ${tools.join(", ")}.`;
+    return t("paused.headline.tools", { tools: tools.join(", ") });
   }
 
   const details = status.pauseDetails;
@@ -122,8 +121,8 @@ export function pauseHeadline(status: ApprovalStatus): string {
     status.pauseReason;
 
   return reason
-    ? `A reviewer must approve this step before I can continue — ${reason}.`
-    : "A reviewer must approve this step before I can continue.";
+    ? t("paused.headline.reason", { reason })
+    : t("paused.headline");
 }
 
 /**

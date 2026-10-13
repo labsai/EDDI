@@ -9,6 +9,7 @@ import { AgentPicker } from "@/components/shared/agent-picker";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 import { ProviderSelect } from "@/components/shared/provider-select";
+import { isProvisionableBySetup } from "@/lib/model-suggestions";
 import {
   memberIssue,
   effectiveLlm,
@@ -105,6 +106,9 @@ function LlmFields({
             onChange({ provider: providerId, model: prov?.defaultModel ?? "" });
           }}
           className={cn(inputClass, "border-input")}
+          // Setup cannot configure every provider (Vertex AI needs a project
+          // and location it has no field for).
+          include={isProvisionableBySetup}
           // Only a per-advisor field can be left blank (to inherit); the
           // defaults block always names a provider, since a blank one would
           // just be anthropic on the server anyway.
@@ -188,6 +192,7 @@ function MemberCard({
   llmDefaults,
   onUpdate,
   onRemove,
+  takenAgentIds,
 }: {
   member: MemberSlot;
   canRemove: boolean;
@@ -196,6 +201,8 @@ function MemberCard({
   llmDefaults: LlmDefaults;
   onUpdate: (updated: MemberSlot) => void;
   onRemove: () => void;
+  /** Agents other advisors already are — one agent holds one seat (EDDI 6.6+ refuses a repeat). */
+  takenAgentIds?: ReadonlySet<string>;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -391,6 +398,7 @@ function MemberCard({
               <AgentPicker
                 value={member.agentId}
                 onChange={(id) => update({ agentId: id })}
+                excludeIds={takenAgentIds}
                 id={`agent-${member.id}`}
                 aria-invalid={(showErrors && issue === "agent") || undefined}
                 aria-describedby={
@@ -466,6 +474,21 @@ function MemberCard({
       )}
     </div>
   );
+}
+
+/**
+ * The agents every OTHER advisor stands for: an existing agent's id, or the id
+ * a new advisor was already provisioned as. A seat is keyed by agent id, so a
+ * second seat for the same agent would share its member conversation.
+ */
+function seatedAgentIds(members: MemberSlot[], index: number): Set<string> {
+  const taken = new Set<string>();
+  members.forEach((m, i) => {
+    if (i === index) return;
+    const id = (m.mode === "existing" ? m.agentId : m.createdAgentId)?.trim();
+    if (id) taken.add(id);
+  });
+  return taken;
 }
 
 // ─── TeamBuilder (exported) ─────────────────────────────────────────────────
@@ -634,6 +657,7 @@ function TeamBuilder({
             llmDefaults={llmDefaults}
             onUpdate={(updated) => updateMember(index, updated)}
             onRemove={() => removeMember(index)}
+            takenAgentIds={seatedAgentIds(members, index)}
           />
         ))}
       </div>

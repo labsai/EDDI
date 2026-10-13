@@ -288,7 +288,7 @@ kubectl apply -k k8s/examples/postgres-ha/
                │
     ┌──────────▼──────────┐    ┌─────────────┐
     │  EDDI Deployment     │───▶│  MongoDB    │
-    │  (labsai/eddi:6.4.0) │    │ StatefulSet │
+    │  (labsai/eddi:6.5.0) │    │ StatefulSet │
     │                      │    └─────────────┘
     │  replicas: 1         │    ┌─────────────┐
     │  (N with NATS)       │───▶│ PostgreSQL  │
@@ -573,6 +573,22 @@ and caches live in the JVM. The Helm chart refuses `eddi.replicas` above 1,
 rolls out with `Recreate` so two JVMs never share the database. Scale **vertically**
 via `eddi.resources`.
 
+### Upgrades replace the pod (no surge)
+
+With in-memory messaging the EDDI Deployment uses the **`Recreate`** strategy (Helm
+chart: `eddi.updateStrategy`, empty by default, which picks per messaging type; the
+Kustomize base and `quickstart.yaml` likewise): an upgrade stops the running pod
+before the new one starts, so each upgrade is unavailable for as long as EDDI takes to
+boot and become ready. A `RollingUpdate` would avoid that only by running **two EDDI
+JVMs against the same database** for the length of every rollout — and everything a
+single node keeps per process (the per-conversation turn lock, replay-protection
+nonces, rate limits and cost budgets, the agent and workflow caches, HITL crash
+recovery) diverges between them in that window. The chart therefore refuses
+`RollingUpdate` with in-memory messaging. For upgrades without downtime run cluster
+mode, where the chart (and the `nats` Kustomize component) roll with `maxSurge: 1`,
+`maxUnavailable: 0`: the old and the new pod coordinate through NATS like any two
+replicas.
+
 ### Cluster mode (horizontal scaling)
 
 With `eddi.messaging.type=nats` the **published image** runs as a cluster: any number
@@ -631,7 +647,7 @@ The first switch of an existing release from in-memory to `nats` should roll out
 Each replica's node id is its pod name (`EDDI_CLUSTER_NODE_ID`), and the pods are
 spread over nodes and zones. Every path balances freely except `/mcp`: an MCP session
 lives on the replica that opened it, so route `/mcp` with client or cookie affinity on
-your ingress (see [Clustering → Residual limitations](clustering.md#residual-limitations)). `nats.buildProfileImage` from charts before 2.5.0 is no
+your ingress (see [Clustering → Residual limitations](clustering.md#residual-limitations)). `nats.buildProfileImage` from charts before 2.6.0 is no
 longer read — the published image selects cluster mode at runtime.
 
 ## Monitoring

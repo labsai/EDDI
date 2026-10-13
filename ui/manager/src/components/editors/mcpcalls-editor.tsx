@@ -83,6 +83,12 @@ export interface McpCall {
   saveResponse?: boolean;
   responseObjectName?: string;
   continueOnError?: boolean;
+  /**
+   * How much of the tool result is kept in conversation memory, in characters
+   * (EDDI 6.6+). A longer result is truncated before it is stored. Unset or
+   * ≤ 0 means the server default, {@link DEFAULT_MCP_MAX_RESPONSE_SIZE}.
+   */
+  maxResponseSizeInBytes?: number;
   retry?: McpRetryConfiguration;
   preRequest?: McpPreRequest;
   postResponse?: McpPostResponse;
@@ -248,6 +254,7 @@ function TagListInput({
   placeholder?: string;
   testId?: string;
 }) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
 
   const add = () => {
@@ -264,18 +271,18 @@ function TagListInput({
         {label}
       </label>
       <div className="flex flex-wrap gap-1.5">
-        {tags.map((t, i) => (
+        {tags.map((tag, i) => (
           <span
             key={i}
             className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
           >
-            {t}
+            {tag}
             {!readOnly && (
               <button
                 type="button"
                 onClick={() => onChange(tags.filter((_, j) => j !== i))}
                 className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                aria-label={`Remove ${t}`}
+                aria-label={t("common.removeItem", { item: tag, defaultValue: "Remove {{item}}" })}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -423,6 +430,55 @@ function DiscoveredToolsPanel({
 
 // ─── Retry (RetryConfiguration) sub-form ─────────────────────────────────────
 
+/** Server default for `maxResponseSizeInBytes` — `McpCall.DEFAULT_MAX_RESPONSE_SIZE_IN_BYTES`, the httpcall default. */
+const DEFAULT_MCP_MAX_RESPONSE_SIZE = 2_000_000;
+
+/**
+ * The cap on how much of a rule-triggered MCP result is stored in conversation
+ * memory (EDDI 6.6+). Memory is loaded on every turn, and a call returning
+ * megabytes used to be stored whole on every step it ran. Left blank it is not
+ * written at all, so an older backend's strict parser is never handed it.
+ */
+function McpMaxResponseSize({
+  call,
+  onChange,
+  readOnly,
+}: {
+  call: McpCall;
+  onChange: (c: McpCall) => void;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const id = useId();
+  const hintId = useId();
+  return (
+    <div className="space-y-1" data-testid="mcp-max-response-size">
+      <div className="flex flex-wrap items-center gap-2">
+        <label htmlFor={id} className="text-xs text-foreground">
+          {t("mcpcallsEditor.maxResponseSize", "Max stored response size (characters)")}
+        </label>
+        <NumberInput
+          id={id}
+          integer
+          value={call.maxResponseSizeInBytes}
+          onChange={(v) => onChange({ ...call, maxResponseSizeInBytes: v })}
+          readOnly={readOnly}
+          placeholder={String(DEFAULT_MCP_MAX_RESPONSE_SIZE)}
+          aria-describedby={hintId}
+          className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring aria-[invalid=true]:border-destructive"
+          data-testid="mcp-max-response-size-input"
+        />
+      </div>
+      <p id={hintId} className="text-[10px] text-muted-foreground">
+        {t(
+          "mcpcallsEditor.maxResponseSizeHint",
+          "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs EDDI 6.6 or later.",
+        )}
+      </p>
+    </div>
+  );
+}
+
 function McpRetryEditor({
   retry,
   onChange,
@@ -472,7 +528,7 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.maxAttempts", "Max Attempts")}
           </label>
-          <NumberInput placeholder="3" integer
+          <NumberInput aria-label={t("mcpcallsEditor.maxAttempts", "Max Attempts")} placeholder="3" integer
             min={1}
             value={retry.maxAttempts}
             onChange={(v) =>
@@ -487,7 +543,7 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.backoffDelayMs", "Backoff Delay (ms)")}
           </label>
-          <NumberInput placeholder="1000" integer
+          <NumberInput aria-label={t("mcpcallsEditor.backoffDelayMs", "Backoff Delay (ms)")} placeholder="1000" integer
             min={0}
             value={retry.backoffDelayMs}
             onChange={(v) =>
@@ -502,7 +558,7 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.backoffMultiplier", "Backoff Multiplier")}
           </label>
-          <NumberInput placeholder="2.0"
+          <NumberInput aria-label={t("mcpcallsEditor.backoffMultiplier", "Backoff Multiplier")} placeholder="2.0"
             min={1}
             step={0.1}
             value={retry.backoffMultiplier}
@@ -518,7 +574,7 @@ function McpRetryEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("mcpcallsEditor.maxBackoffDelayMs", "Max Backoff (ms)")}
           </label>
-          <NumberInput placeholder="10000" integer
+          <NumberInput aria-label={t("mcpcallsEditor.maxBackoffDelayMs", "Max Backoff (ms)")} placeholder="10000" integer
             min={0}
             value={retry.maxBackoffDelayMs}
             onChange={(v) =>
@@ -655,7 +711,7 @@ function McpCallEditor({
               <FileText className="h-3 w-3" />
               {t("mcpcallsEditor.description", "Description")}
             </label>
-            <input
+            <input aria-label={t("mcpcallsEditor.description", "Description")}
               type="text"
               value={call.description ?? ""}
               onChange={(e) => onChange({ ...call, description: e.target.value })}
@@ -674,7 +730,7 @@ function McpCallEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.toolName", "Tool Name")}
             </label>
-            <input
+            <input aria-label={t("mcpcallsEditor.toolName", "Tool Name")}
               type="text"
               value={call.toolName ?? ""}
               onChange={(e) =>
@@ -820,6 +876,10 @@ function McpCallEditor({
               />
             )}
           </div>
+
+          {(call.saveResponse ?? true) && (
+            <McpMaxResponseSize call={call} onChange={onChange} readOnly={readOnly} />
+          )}
 
           {/* Error handling */}
           <div>
@@ -1044,7 +1104,7 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.displayName", "Display Name")}
             </label>
-            <input
+            <input aria-label={t("mcpcallsEditor.displayName", "Display Name")}
               type="text"
               value={data.name ?? ""}
               onChange={(e) => update({ name: e.target.value })}
@@ -1092,7 +1152,7 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.transport", "Transport")}
             </label>
-            <select
+            <select aria-label={t("mcpcallsEditor.transport", "Transport")}
               value={data.transport ?? "http"}
               onChange={(e) => update({ transport: e.target.value })}
               disabled={readOnly}
@@ -1107,7 +1167,7 @@ export function McpCallsEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("mcpcallsEditor.timeoutMs", "Timeout (ms)")}
             </label>
-            <NumberInput placeholder="30000" integer
+            <NumberInput aria-label={t("mcpcallsEditor.timeoutMs", "Timeout (ms)")} placeholder="30000" integer
               value={data.timeoutMs}
               onChange={(v) =>
                 update({ timeoutMs: v })

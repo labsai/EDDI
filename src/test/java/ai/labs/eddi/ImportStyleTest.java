@@ -70,13 +70,12 @@ class ImportStyleTest {
      * The only permitted inline FQNs, each a genuine collision where one of two
      * same-named types can only be written in full.
      * <ul>
-     * <li>The two {@code HistorizedResourceStore} files declare a class whose
-     * simple name collides with the superclass it extends.</li>
+     * <li>None at present: every former entry (the two
+     * {@code HistorizedResourceStore} files, {@code NatsConversationCoordinator})
+     * has since been removed.</li>
      * </ul>
      */
-    private static final Set<String> ALLOWED = Set.of(
-            "src/main/java/ai/labs/eddi/datastore/mongo/HistorizedResourceStore.java",
-            "src/main/java/ai/labs/eddi/datastore/mongo/ModifiableHistorizedResourceStore.java");
+    private static final Set<String> ALLOWED = Set.of();
 
     /** Blanks out comments and string literals so neither is ever matched. */
     private static String stripNonCode(String source) {

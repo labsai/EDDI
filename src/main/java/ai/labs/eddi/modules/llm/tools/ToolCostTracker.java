@@ -194,20 +194,6 @@ public class ToolCostTracker {
         }
     }
 
-    /**
-     * Track cost for a tool call whose configured slug is unknown — the tool is
-     * priced under its own name.
-     *
-     * <p>
-     * Retained for callers outside the agent dispatch loop (and for tools where
-     * dispatch name and slug are genuinely the same string). The live path uses
-     * {@link #trackToolCall(ToolInvocation, String)}.
-     * </p>
-     */
-    public double trackToolCall(String toolName, String conversationId) {
-        return trackToolCall(ToolInvocation.of(toolName), conversationId);
-    }
-
     // ---- cluster mode: per-conversation totals shared by every node ----
 
     /** Field-injected; null in tests built with {@code new}. */

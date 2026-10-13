@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.engine.hitl;
 
-import java.util.function.Predicate;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -28,9 +28,9 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 
 /**
  * Startup observer that REPAIRS HITL state after a crash or restart — it never
@@ -541,11 +541,7 @@ public class HitlCrashRecoveryObserver {
             schedule.setEnabled(true);
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(Map.of(
-                    HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
-                    HitlSchedules.METADATA_POLICY_KEY, policyName,
-                    HitlSchedules.METADATA_SURFACE_KEY, surface,
-                    HitlSchedules.METADATA_CONVERSATION_ID_KEY, conversationId));
+            schedule.setMetadata(HitlSchedules.timeoutMetadata(policyName, surface, conversationId, HitlDecision.pauseIdOf(pausedAt)));
             scheduleStore.createSchedule(schedule);
 
             // Re-check AFTER creating: a resume/cancel landing between the sweep

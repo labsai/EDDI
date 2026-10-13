@@ -34,12 +34,15 @@ interface SessionLogState {
   entries: LogEntry[];
   connected: boolean;
   seeded: boolean;
+  /** The reconnect budget is spent: the stream is down and will not retry by itself. */
+  exhausted: boolean;
 }
 
 export const useSessionLogStore = create<SessionLogState>(() => ({
   entries: [],
   connected: false,
   seeded: false,
+  exhausted: false,
 }));
 
 // ─── Lazy, reference-counted SSE ─────────────────────────────────────────────
@@ -48,6 +51,7 @@ let eventSource: BearerEventSource | null = null;
 let refCount = 0;
 
 function openStream() {
+  useSessionLogStore.setState({ exhausted: false });
   try {
     eventSource = createLogEventSource(); // no filters — capture everything
 
@@ -79,11 +83,11 @@ function openStream() {
     };
 
     eventSource.onexhausted = () => {
-      useSessionLogStore.setState({ connected: false, seeded: true });
+      useSessionLogStore.setState({ connected: false, seeded: true, exhausted: true });
     };
 
     eventSource.onopen = async () => {
-      useSessionLogStore.setState({ connected: true });
+      useSessionLogStore.setState({ connected: true, exhausted: false });
 
       // Reseed on EVERY open, not just the first. The stream only carries what
       // happens while it is open: after the last viewer leaves (the socket
@@ -130,6 +134,16 @@ export function connect(): () => void {
     released = true;
     disconnect();
   };
+}
+
+/**
+ * Start over after the reconnect budget was spent — the "Reconnect" button.
+ * A no-op with no subscribers, since nothing is showing the stream.
+ */
+export function reconnect(): void {
+  if (refCount === 0) return;
+  eventSource?.close();
+  openStream();
 }
 
 /** Release one subscription; closes the stream when the last one leaves. */

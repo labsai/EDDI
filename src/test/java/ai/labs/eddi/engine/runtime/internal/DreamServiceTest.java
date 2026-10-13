@@ -59,6 +59,17 @@ class DreamServiceTest {
         // write that DreamService rolls back.
         when(store.upsert(any(UserMemoryEntry.class))).thenAnswer(invocation -> "created-" + UUID.randomUUID());
         when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenAnswer(invocation -> "created-" + UUID.randomUUID());
+        // Dream's deletes and in-place overwrites are compare-and-set now. These
+        // tests are about everything else, so an unchanged entry is the default:
+        // the conditional write succeeds and is observable as the plain write.
+        lenient().when(store.deleteEntryIfUnchanged(anyString(), any())).thenAnswer(invocation -> {
+            store.deleteEntry(invocation.getArgument(0));
+            return true;
+        });
+        lenient().when(store.replaceIfUnchanged(anyString(), any(UserMemoryEntry.class), any())).thenAnswer(invocation -> {
+            store.upsert(invocation.getArgument(1));
+            return true;
+        });
     }
 
     // === Existing tests (updated for new constructor) ===
@@ -771,21 +782,86 @@ class DreamServiceTest {
     }
 
     /**
-     * An upsert that returns no id is an unconfirmed write: it must roll the group
-     * back rather than be counted as a created entry and let the originals go.
+     * Seen in review: Dream overwrote a reused original in place with a blind
+     * upsert, so a fact the conversation wrote to that entry during the LLM call
+     * was replaced by a consolidation of the older value. The overwrite is a
+     * compare-and-set now; when it loses, the group is rolled back, nothing is
+     * deleted and the conflict is counted.
      */
     @Test
-    void summarize_upsertReturnsNoId_rollsBackAndKeepsOriginals() throws Exception {
+    void summarize_reusedOriginalChangedBeforeReplace_isNotOverwritten_groupRolledBack() throws Exception {
         enableSummarization();
         dreamConfig.setSummarizeMinEntries(3);
         when(store.getAllEntries("user-1")).thenReturn(makeEntries(4, "preference", "agent-1"));
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(llmResult("[{\"key\":\"key-0\",\"value\":\"black, no sugar, oat milk, large\"}]"));
-        when(store.upsert(any(UserMemoryEntry.class))).thenReturn(null);
+        doReturn(false).when(store).replaceIfUnchanged(anyString(), any(UserMemoryEntry.class), any());
 
         var result = dreamService.process("user-1", "agent-1", dreamConfig);
 
         assertEquals(0, result.entriesSummarized());
+        assertEquals(1, result.conflictsSkipped());
+        verify(store, never()).deleteEntry(anyString());
+        verify(store, never()).deleteEntryIfUnchanged(anyString(), any());
+        verify(store, never()).upsert(any(UserMemoryEntry.class));
+    }
+
+    @Test
+    void summarize_originalRewrittenDuringTheLlmCall_groupSkippedUntouched() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeMinEntries(3);
+        var snapshot = makeEntries(4, "preference", "agent-1");
+        var rewritten = new ArrayList<>(snapshot);
+        var changed = snapshot.get(2);
+        rewritten.set(2, new UserMemoryEntry(changed.id(), changed.userId(), changed.key(), "a newer fact", changed.category(),
+                changed.visibility(), changed.sourceAgentId(), changed.groupIds(), changed.sourceConversationId(), false, 0, changed.createdAt(),
+                changed.updatedAt().plusSeconds(5)));
+        // The cycle reads the snapshot; by the time the consolidation is written the
+        // conversation has rewritten one of the originals.
+        when(store.getAllEntries("user-1")).thenReturn(snapshot, rewritten);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"merged\",\"value\":\"black, no sugar\"}]"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesSummarized());
+        assertEquals(1, result.conflictsSkipped());
+        verify(store, never()).insertIfAbsent(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntryIfUnchanged(anyString(), any());
+    }
+
+    @Test
+    void summarize_originalRewrittenAfterTheConsolidationWasWritten_isKeptNotDeleted() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeMinEntries(3);
+        var entries = makeEntries(4, "preference", "agent-1");
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\":\"merged\",\"value\":\"black, no sugar\"}]"));
+        String rewrittenId = entries.get(1).id();
+        doAnswer(invocation -> !rewrittenId.equals(invocation.getArgument(0))).when(store).deleteEntryIfUnchanged(anyString(), any());
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(1, result.conflictsSkipped());
+        verify(store).deleteEntryIfUnchanged(rewrittenId, entries.get(1).updatedAt());
+        verify(store, never()).deleteEntry(anyString());
+        // 3 of 4 originals deleted, 1 entry created: a net reduction of 2.
+        assertEquals(2, result.entriesSummarized());
+    }
+
+    @Test
+    void prune_entryRewrittenSinceTheCycleReadIt_isNotPruned() throws Exception {
+        Instant stale = Instant.now().minus(Duration.ofDays(60));
+        var entry = new UserMemoryEntry("e1", "user-1", "old", "v", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, stale,
+                stale);
+        when(store.getAllEntries("user-1")).thenReturn(List.of(entry));
+        doReturn(false).when(store).deleteEntryIfUnchanged("e1", stale);
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertEquals(0, result.entriesPruned());
+        assertEquals(1, result.conflictsSkipped());
         verify(store, never()).deleteEntry(anyString());
     }
 
@@ -1166,8 +1242,8 @@ class DreamServiceTest {
     void estimateCost_withTokenUsage() {
         var result = new SummarizationService.SummarizationResult("summary", 500, 100);
         double cost = DreamService.estimateCost(result, 0);
-        // 600 tokens * $0.01/1K = $0.006
-        assertEquals(0.006, cost, 0.0001);
+        // 500 input tokens at $15/1M + 100 output tokens at $75/1M (the upper bound)
+        assertEquals(0.015, cost, 0.000001);
     }
 
     @Test
@@ -1175,8 +1251,9 @@ class DreamServiceTest {
         var result = new SummarizationService.SummarizationResult("a]b".repeat(100), 0, 0);
         int inputLength = 500; // simulate 500-char input
         double cost = DreamService.estimateCost(result, inputLength);
-        // (500 input + 300 output) / 4 = 200 estimated tokens * $0.01/1K = $0.002
-        assertEquals(0.002, cost, 0.0001);
+        // ceil(500 / 3) = 167 input tokens at $15/1M + 300 / 3 = 100 output tokens at
+        // $75/1M
+        assertEquals(0.010005, cost, 0.000001);
     }
 
     @Test

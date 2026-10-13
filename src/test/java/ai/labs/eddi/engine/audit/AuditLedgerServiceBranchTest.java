@@ -565,16 +565,21 @@ class AuditLedgerServiceBranchTest {
         service.shutdown();
     }
     @Test
-    @DisplayName("the gdpr-stop of an erasure on another node marks the user here, so later entries are pseudonymised")
+    @DisplayName("the gdpr-stop of an erasure on another node marks the user here, so later entries are pseudonymised and redacted")
     void remoteErasureStopMarksTheUser() {
         var service = new AuditLedgerService(auditStore, true, 60,
                 Optional.empty(), "deadletter.jsonl", false, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
                 true, 500, meterRegistry, null, null, new ObjectMapper());
-        assertEquals("user1", service.pseudonymiseIfErased(entry("1", "c1", "a1")).userId(), "nobody erased yet");
+        AuditEntry untouched = service.pseudonymiseIfErased(entry("1", "c1", "a1"), false);
+        assertEquals("user1", untouched.userId(), "nobody erased yet");
+        assertNull(untouched.input().get(AuditLedgerService.REDACTION_MARKER_KEY));
 
         assertEquals(0, service.stopInFlightWorkByHash(KvKeys.sha256("user1")));
 
-        assertNotEquals("user1", service.pseudonymiseIfErased(entry("2", "c1", "a1")).userId());
+        AuditEntry late = service.pseudonymiseIfErased(entry("2", "c1", "a1"), false);
+        assertNotEquals("user1", late.userId());
+        assertNotNull(late.input().get(AuditLedgerService.REDACTION_MARKER_KEY),
+                "an entry of a user erased on another node is redacted like one erased here (erasure-mode=redact)");
         assertEquals(0, service.stopInFlightWork("user1"), "on the erasing node the cascade marks the user itself");
     }
     @Test

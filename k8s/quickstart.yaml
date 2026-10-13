@@ -161,7 +161,7 @@ spec:
         fsGroup: 999
       containers:
         - name: mongodb
-          image: mongo:7.0
+          image: mongo:7.0.43
           ports:
             - containerPort: 27017
               name: mongo
@@ -250,18 +250,19 @@ metadata:
   namespace: eddi
   labels:
     app.kubernetes.io/name: eddi
-    app.kubernetes.io/version: "6.4.0"
+    app.kubernetes.io/version: "6.5.0"
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: eddi
 spec:
   # ⚠️  MUST stay 1 — EDDI serialises conversation turns with a JVM-local lock,
   # so a second replica silently loses writes. See k8s/base/eddi-deployment.yaml.
   replicas: 1
+  # Recreate, not RollingUpdate: a surge pod would run a second EDDI JVM against
+  # the same database for the length of every rollout, and everything EDDI keeps
+  # node-local (turn locks, replay nonces, rate limits, caches, HITL crash
+  # recovery) would diverge between the two. Each upgrade costs a boot instead.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: eddi
@@ -270,7 +271,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: eddi
-        app.kubernetes.io/version: "6.4.0"
+        app.kubernetes.io/version: "6.5.0"
         app.kubernetes.io/component: server
         app.kubernetes.io/part-of: eddi
       annotations:
@@ -310,7 +311,7 @@ spec:
         - name: eddi
           # Immutable patch tag, not the mutable ":6". Append @sha256:<digest>
           # after `cosign verify`ing the release to pin exactly what CI signed.
-          image: labsai/eddi:6.4.0
+          image: labsai/eddi:6.5.0
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

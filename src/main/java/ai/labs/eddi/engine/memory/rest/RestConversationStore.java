@@ -18,6 +18,8 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
@@ -34,6 +36,8 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.scheduler.Scheduled;
@@ -59,6 +63,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Set;
+import java.util.UUID;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
@@ -133,6 +138,15 @@ public class RestConversationStore implements IRestConversationStore {
     static final int MIN_RETENTION_DAYS = 1;
 
     /**
+     * Smallest idle age the bulk end of inactive conversations accepts: zero would
+     * end every open conversation in the deployment.
+     */
+    static final int MIN_INACTIVE_DAYS = 1;
+
+    /** Open conversations read per batch when listing an agent's active ones. */
+    private static final int ACTIVE_LISTING_BATCH_SIZE = 500;
+
+    /**
      * Fallback actor recorded when deleting a conversation ends it and there is no
      * named caller — the HITL cancellation audit carries the actor if the
      * conversation was paused (G4). A named caller is recorded as themselves.
@@ -170,10 +184,25 @@ public class RestConversationStore implements IRestConversationStore {
     Instance<AutoVaultedSecrets> autoVaultedSecretsInstance;
 
     /**
+     * Field-injected like the other late additions, so the unit tests that build
+     * this store directly need no ledger; {@code null} there means no auditing.
+     */
+    @Inject
+    AuditLedgerService auditLedgerService;
+
+    /**
      * Optional for the same reason; absent means no EDDI 5 migration is in play.
      */
     @Inject
     Instance<V6RenameMigration> v6RenameMigrationInstance;
+
+    /**
+     * Channel conversation mappings ({@code /v1}, Slack); optional so the unit
+     * tests that construct this store directly need none. Absent means mappings are
+     * not swept with their conversations.
+     */
+    @Inject
+    Instance<IUserConversationStore> userConversationStoreInstance;
 
     /**
      * The operator's confirmation that 6.x's retention may delete ended
@@ -406,7 +435,8 @@ public class RestConversationStore implements IRestConversationStore {
      * so a foreign row is rejected here without its conversation ever being read; a
      * legacy row with no recorded owner is decided in {@link #conversationAdmits},
      * once the conversation supplies its owner. A fully unowned (null both ways)
-     * conversation stays visible, matching OwnershipValidator.requireOwnerOrAdmin.
+     * conversation is listed to administrators only, matching
+     * ConversationAccessGuard.
      *
      * @return the conversation's id, or {@code null} when the row is not listed
      */
@@ -960,6 +990,7 @@ public class RestConversationStore implements IRestConversationStore {
                     if (!deleteAutoVaultedSecretsForConversation(endedConversationId)) {
                         continue; // kept, with its secret references, for the next run
                     }
+                    deleteChannelMappingsForConversation(endedConversationId);
                     documentDescriptorStore.deleteAllDescriptor(endedConversationId);
                     conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
                     deleteAttachmentsForConversation(endedConversationId);
@@ -1039,22 +1070,87 @@ public class RestConversationStore implements IRestConversationStore {
         // list them, and an id is all the per-conversation endpoints are keyed on.
         resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
 
-        List<ConversationMemorySnapshot> conversationMemorySnapshots;
         List<ConversationStatus> conversationStatuses = new LinkedList<>();
 
-        conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
-        for (var snapshot : conversationMemorySnapshots) {
-            ConversationStatus conversationStatus = new ConversationStatus();
-            String conversationId = snapshot.getId();
-            conversationStatus.setConversationId(conversationId);
-            conversationStatus.setAgentId(agentId);
-            conversationStatus.setAgentVersion(agentVersion != null ? agentVersion : snapshot.getAgentVersion());
-            conversationStatus.setConversationState(snapshot.getConversationState());
-            conversationStatus.setLastInteraction(lastInteractionOf(conversationId));
-            conversationStatuses.add(conversationStatus);
+        // Projected, in batches: never the conversations themselves. This listing used
+        // to load every open conversation in full, which ran a JVM with tens of
+        // thousands of open conversations out of heap.
+        String afterConversationId = null;
+        while (true) {
+            var batch = conversationMemoryStore.loadOpenConversationActivity(agentId, agentVersion, afterConversationId, ACTIVE_LISTING_BATCH_SIZE);
+            if (batch.isEmpty()) {
+                break;
+            }
+            for (var activity : batch) {
+                ConversationStatus conversationStatus = new ConversationStatus();
+                String conversationId = activity.conversationId();
+                conversationStatus.setConversationId(conversationId);
+                conversationStatus.setAgentId(agentId);
+                conversationStatus.setAgentVersion(agentVersion != null ? agentVersion : activity.agentVersion());
+                conversationStatus.setConversationState(activity.conversationState());
+                conversationStatus.setLastInteraction(lastInteractionOf(conversationId));
+                conversationStatuses.add(conversationStatus);
+            }
+            afterConversationId = batch.getLast().conversationId();
         }
 
         return conversationStatuses;
+    }
+
+    /**
+     * Ends idle {@code READY} conversations in the database — see
+     * {@link IRestConversationStore#endInactiveConversations}. The only work here
+     * is validation, the store call and the audit entry.
+     */
+    @Override
+    public Response endInactiveConversations(Integer inactiveForDays, String agentId, boolean dryRun) {
+        if (inactiveForDays == null || inactiveForDays < MIN_INACTIVE_DAYS) {
+            throw new BadRequestException("inactiveForDays is required and must be at least " + MIN_INACTIVE_DAYS
+                    + " — a smaller value would end every open conversation in the deployment");
+        }
+        String agent = isNullOrEmpty(agentId) ? null : agentId;
+        Instant idleSince = Instant.now().minus(Duration.ofDays(inactiveForDays));
+        String actor = conversationAccessGuard.callerActor(BULK_END_ACTOR);
+        long count;
+        try {
+            count = conversationMemoryStore.endIdleConversations(idleSince, agent, IConversationService.END_REASON_IDLE, dryRun);
+        } catch (ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+        log.info(format("%s %d conversation(s) idle for more than %d day(s)%s (by %s)", dryRun ? "Dry run: would end" : "Ended", count,
+                inactiveForDays, agent == null ? "" : " of agent " + sanitize(agent), sanitize(actor)));
+        auditEndInactive(actor, inactiveForDays, agent, dryRun, count);
+
+        var result = new LinkedHashMap<String, Object>();
+        result.put("count", count);
+        result.put("dryRun", dryRun);
+        return Response.ok(result, MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * Records the bulk end in the audit ledger — a deployment-wide mutation that
+     * ends other people's conversations must be attributable. Never fails the
+     * operation: the conversations are already ended.
+     */
+    private void auditEndInactive(String actor, int inactiveForDays, String agentId, boolean dryRun, long count) {
+        if (auditLedgerService == null || !auditLedgerService.isEnabled()) {
+            return;
+        }
+        try {
+            var output = new LinkedHashMap<String, Object>();
+            output.put("eventType", "conversations.end-inactive");
+            output.put("actor", actor);
+            output.put("inactiveForDays", inactiveForDays);
+            output.put("agentId", agentId);
+            output.put("dryRun", dryRun);
+            output.put("count", count);
+            output.put("endReason", IConversationService.END_REASON_IDLE);
+            auditLedgerService.submit(new AuditEntry(UUID.randomUUID().toString(), null, agentId, null, actor, null, 0, "ai.labs.admin", "admin", 0,
+                    0, Map.of("eventType", "conversations.end-inactive"), output, null, null, List.of("conversations.end-inactive"), 0.0,
+                    Instant.now(), null, null));
+        } catch (Exception e) {
+            log.warn(format("Could not audit the bulk end of inactive conversations: %s", sanitize(e.getMessage())));
+        }
     }
 
     /**
@@ -1076,6 +1172,13 @@ public class RestConversationStore implements IRestConversationStore {
             }
         }
     }
+
+    /**
+     * The end reasons a caller may record. A closed list rather than free text: the
+     * reason is stored on the conversation and shown to its user by clients, so it
+     * must be a code they know, never caller-supplied prose.
+     */
+    static final Set<String> ACCEPTED_END_REASONS = Set.of(IConversationService.END_REASON_AGENT_VERSION_RETIRED);
 
     /**
      * Ends the listed conversations. Only the conversation ids are read from the
@@ -1118,13 +1221,6 @@ public class RestConversationStore implements IRestConversationStore {
      * to the snapshot.
      * </p>
      */
-    /**
-     * The end reasons a caller may record. A closed list rather than free text: the
-     * reason is stored on the conversation and shown to its user by clients, so it
-     * must be a code they know, never caller-supplied prose.
-     */
-    static final Set<String> ACCEPTED_END_REASONS = Set.of(IConversationService.END_REASON_AGENT_VERSION_RETIRED);
-
     @Override
     public Response endActiveConversations(List<ConversationStatus> conversationStatuses, String endReason) {
         if (conversationStatuses == null) {
@@ -1282,6 +1378,39 @@ public class RestConversationStore implements IRestConversationStore {
      * Delete any binary attachments stored for a conversation. Silently skips if no
      * attachment storage is configured.
      */
+    /**
+     * Delete the channel mappings ({@code (intent, userId)} rows of
+     * {@link IUserConversationStore}) that point at a conversation the retention
+     * sweep is deleting. Nothing else removes them: a {@code /v1} client that sends
+     * no chat id and no history opens a new conversation — and a new mapping — per
+     * distinct message, and the sweep deleted the conversations but left every row.
+     * Runs before the descriptor is deleted, because the descriptor names the owner
+     * whose mappings are read. Best effort: a mapping left behind is stale, not
+     * wrong — the next message of that chat finds its conversation gone and
+     * replaces it.
+     */
+    void deleteChannelMappingsForConversation(String conversationId) {
+        if (userConversationStoreInstance == null || !userConversationStoreInstance.isResolvable()) {
+            return;
+        }
+        try {
+            ConversationDescriptor descriptor = conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+            String userId = descriptor == null ? null : descriptor.getUserId();
+            if (isNullOrEmpty(userId)) {
+                return;
+            }
+            IUserConversationStore mappings = userConversationStoreInstance.get();
+            for (UserConversation mapping : mappings.getAllForUser(userId)) {
+                if (conversationId.equals(mapping.getConversationId())) {
+                    mappings.deleteUserConversationIfMatches(mapping.getIntent(), userId, conversationId);
+                }
+            }
+        } catch (Exception e) {
+            log.warn(format("Failed to delete the channel mappings of conversation %s: %s",
+                    sanitize(conversationId), sanitize(e.getMessage())));
+        }
+    }
+
     private void deleteAttachmentsForConversation(String conversationId) {
         if (attachmentStorageInstance.isResolvable()) {
             try {

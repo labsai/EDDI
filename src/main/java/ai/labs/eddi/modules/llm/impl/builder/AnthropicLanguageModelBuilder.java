@@ -42,7 +42,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
      * generates what it needs); the timeout parameter is the real cost safety net,
      * not this ceiling.
      */
-    private static final int DEFAULT_MAX_TOKENS = 16384;
+    public static final int DEFAULT_MAX_TOKENS = 16384;
 
     @Override
     public Set<String> recognisedParameters() {
@@ -76,6 +76,9 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
         if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
             builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
         }
+
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
 
         return builder.build();
     }

@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -51,6 +52,26 @@ public interface IAgent {
     }
 
     /**
+     * The agent's {@code turnDeadlineMs}; {@code null} when no deadline is
+     * configured.
+     *
+     * @since 6.6.0
+     */
+    default Long getTurnDeadlineMs() {
+        return null;
+    }
+
+    /**
+     * The agent's {@code turnDeadlineReserveMs}; {@code null} means the engine
+     * default.
+     *
+     * @since 6.6.0
+     */
+    default Long getTurnDeadlineReserveMs() {
+        return null;
+    }
+
+    /**
      * Memory policy from agent deployment. {@code null} when no policy is
      * configured.
      *
@@ -70,5 +91,16 @@ public interface IAgent {
      */
     default Integer getCompatibilityGeneration() {
         return null;
+    }
+
+    /**
+     * Advisory findings of the deploy-time compatibility lint, one line each; empty
+     * when the agent is clean or has not been checked. They never affect the
+     * deployment status.
+     *
+     * @since 6.6.0
+     */
+    default List<String> getDeploymentWarnings() {
+        return List.of();
     }
 }

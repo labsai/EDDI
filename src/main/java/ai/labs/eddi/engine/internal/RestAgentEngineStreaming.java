@@ -118,6 +118,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     @Inject
     ClientContextGuard clientContextGuard = ClientContextGuard.strict();
 
+    /** Reads {@code X-EDDI-Turn-Deadline-Ms}; nullable in unit tests. */
+    @Inject
+    TurnDeadlineHeaderReader turnDeadlineHeaderReader;
+
     @Inject
     public RestAgentEngineStreaming(IConversationService conversationService,
             ConversationAccessGuard conversationAccessGuard,
@@ -158,6 +162,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // Engine-reserved context keys are only ever set by EDDI itself — see
         // ClientContextGuard. Same boundary as the non-streaming twin.
         clientContextGuard.strip(inputData);
+        if (turnDeadlineHeaderReader != null) {
+            turnDeadlineHeaderReader.apply(inputData);
+        }
 
         // Every outbound frame goes through this stream, which doubles as the
         // client-disconnect detector — see SseStream.
@@ -217,6 +224,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                                                         long durationMs) {
                             stream.sendJson("cascade_escalation",
                                     new CascadeEscalationEvent(fromStep, toStep, finite(confidence), finite(threshold), reason, durationMs));
+                        }
+
+                        @Override
+                        public void onLlmRetry(String reason, int attempt) {
+                            stream.sendJson("llm_retry", new LlmRetryEvent(reason, attempt));
                         }
 
                         @Override
@@ -538,6 +550,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     /** Typed payload for the {@code cascade_step_start} SSE event. */
     private record CascadeStepStartEvent(int stepIndex, String modelType, String modelName, int totalSteps) {
+    }
+
+    /** Typed payload for the {@code llm_retry} SSE event. */
+    private record LlmRetryEvent(String reason, int attempt) {
     }
 
     /** Typed payload for the {@code cascade_escalation} SSE event. */

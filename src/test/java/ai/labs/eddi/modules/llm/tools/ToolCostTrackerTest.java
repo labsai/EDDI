@@ -151,7 +151,7 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("should return 0 for unknown tool")
         void unknownToolCost() {
-            double cost = tracker.trackToolCall("myCustomTool", "conv-1");
+            double cost = tracker.trackToolCall(ToolInvocation.of("myCustomTool"), "conv-1");
             assertEquals(0.0, cost, 0.0001);
         }
 
@@ -175,7 +175,7 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("the legacy String overload prices the name as its own slug")
         void legacyOverloadDelegates() {
-            assertEquals(0.001, tracker.trackToolCall("websearch", "conv-legacy"), 0.0001);
+            assertEquals(0.001, tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-legacy"), 0.0001);
             assertEquals(0.001, tracker.getConversationCosts("conv-legacy").getTotalCost(), 0.0001);
         }
     }
@@ -267,9 +267,9 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("should track call count per tool")
         void callCount() {
-            tracker.trackToolCall("websearch", "conv-1");
-            tracker.trackToolCall("websearch", "conv-2");
-            tracker.trackToolCall("websearch", "conv-3");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-1");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-2");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-3");
 
             var metrics = tracker.getToolCosts("websearch");
             assertNotNull(metrics);
@@ -292,9 +292,9 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("should track costs per conversation")
         void conversationCosts() {
-            tracker.trackToolCall("websearch", "conv-A");
-            tracker.trackToolCall("calculator", "conv-A");
-            tracker.trackToolCall("websearch", "conv-B");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-A");
+            tracker.trackToolCall(ToolInvocation.of("calculator"), "conv-A");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-B");
 
             var convA = tracker.getConversationCosts("conv-A");
             assertNotNull(convA);
@@ -309,9 +309,9 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("should track tool usage map per conversation")
         void toolUsageMap() {
-            tracker.trackToolCall("websearch", "conv-usage");
-            tracker.trackToolCall("websearch", "conv-usage");
-            tracker.trackToolCall("calculator", "conv-usage");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-usage");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-usage");
+            tracker.trackToolCall(ToolInvocation.of("calculator"), "conv-usage");
 
             var usage = tracker.getConversationCosts("conv-usage").getToolUsage();
             assertEquals(2, usage.get("websearch"));
@@ -338,7 +338,7 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("should return true when under budget")
         void underBudget() {
-            tracker.trackToolCall("websearch", "budget-conv"); // $0.001
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "budget-conv"); // $0.001
             assertTrue(tracker.isWithinBudget("budget-conv", 0.01));
         }
 
@@ -347,7 +347,7 @@ class ToolCostTrackerTest {
         void overBudget() {
             // Each websearch costs $0.001
             for (int i = 0; i < 10; i++) {
-                tracker.trackToolCall("websearch", "expensive-conv");
+                tracker.trackToolCall(ToolInvocation.of("websearch"), "expensive-conv");
             }
             // Total: $0.01 — budget is $0.005
             assertFalse(tracker.isWithinBudget("expensive-conv", 0.005));
@@ -361,7 +361,7 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("should not evict when under limit")
         void noEvictionUnderLimit() {
-            tracker.trackToolCall("tool", "conv-1");
+            tracker.trackToolCall(ToolInvocation.of("tool"), "conv-1");
             tracker.evictIfNeeded();
             assertNotNull(tracker.getConversationCosts("conv-1"));
         }
@@ -389,7 +389,7 @@ class ToolCostTrackerTest {
             int expectedRemovals = idleCount + activeCount - (int) (cap * 0.9);
 
             for (int i = 0; i < idleCount; i++) {
-                tracker.trackToolCall("websearch", "idle-" + i);
+                tracker.trackToolCall(ToolInvocation.of("websearch"), "idle-" + i);
             }
 
             // A measurable gap so that every "active" entry is unambiguously newer than
@@ -397,7 +397,7 @@ class ToolCostTrackerTest {
             Thread.sleep(5);
 
             for (int i = 0; i < activeCount; i++) {
-                tracker.trackToolCall("websearch", "active-" + i);
+                tracker.trackToolCall(ToolInvocation.of("websearch"), "active-" + i);
             }
 
             int survivingIdle = countSurviving("idle-", idleCount);
@@ -428,7 +428,7 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("resetConversation should remove conversation entry")
         void resetConversation() {
-            tracker.trackToolCall("websearch", "conv-reset");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-reset");
             assertNotNull(tracker.getConversationCosts("conv-reset"));
 
             tracker.resetConversation("conv-reset");
@@ -438,7 +438,7 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("resetAll should clear everything")
         void resetAll() {
-            tracker.trackToolCall("websearch", "conv-all");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-all");
             tracker.resetAll();
 
             assertEquals(0.0, tracker.getTotalCost(), 0.0001);
@@ -454,7 +454,7 @@ class ToolCostTrackerTest {
         @Test
         @DisplayName("should produce formatted summary string")
         void formattedSummary() {
-            tracker.trackToolCall("websearch", "conv-1");
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-1");
             String summary = tracker.getCostSummary();
             assertTrue(summary.contains("Tool Cost Summary"));
             assertTrue(summary.contains("Total Cost"));

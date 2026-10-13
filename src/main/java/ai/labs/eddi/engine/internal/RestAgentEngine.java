@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
+import ai.labs.eddi.engine.exception.IllegalArgumentExceptionMapper;
 import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
@@ -98,6 +99,14 @@ public class RestAgentEngine implements IRestAgentEngine {
      */
     @Inject
     ClientContextGuard clientContextGuard = ClientContextGuard.strict();
+
+    /**
+     * Reads {@code X-EDDI-Turn-Deadline-Ms}. Field-injected and nullable for the
+     * same reason as the guard above: directly constructed unit tests have no
+     * request to read it from.
+     */
+    @Inject
+    TurnDeadlineHeaderReader turnDeadlineHeaderReader;
 
     @Inject
     public RestAgentEngine(IConversationService conversationService,
@@ -246,6 +255,11 @@ public class RestAgentEngine implements IRestAgentEngine {
         response.setTimeout(agentTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
 
+        // The caller's own budget for this turn — read here, on the request thread.
+        if (turnDeadlineHeaderReader != null) {
+            turnDeadlineHeaderReader.apply(inputData);
+        }
+
         // onSkipped: the queued turn was dropped without consuming the input
         // (pause/busy committed after the request was accepted) — answer honestly
         // with 409 instead of letting the request run into the timeout handler.
@@ -372,6 +386,14 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .entity(Map.of("error", "capacity_exceeded",
                             "message", e.getMessage() != null ? e.getMessage() : "Service temporarily unavailable"))
                     .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build());
+        } catch (IllegalArgumentException e) {
+            // A malformed conversation id (the store rejects it before any lookup) or
+            // another invalid argument. GET on the same id already answers 400 through
+            // IllegalArgumentExceptionMapper; this path is resumed through an
+            // AsyncResponse, which no mapper sees, so the catch-all below turned it
+            // into a 500 with an ERROR stack trace for what is a client mistake.
+            LOGGER.debugf("Rejected turn for conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            response.resume(IllegalArgumentExceptionMapper.responseOf(e));
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("An internal error occurred");

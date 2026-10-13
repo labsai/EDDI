@@ -40,14 +40,19 @@ eddi:
   # would let two turns of one conversation run at once. See docs/clustering.md.
   replicas: 1
 
-  # Deployment update strategy: "", "Recreate" or "RollingUpdate" — or the
-  # Deployment's own strategy object ({type: RollingUpdate, rollingUpdate:
+  # How an upgrade replaces the running pod: "", "Recreate" or "RollingUpdate" —
+  # or the Deployment's own strategy object ({type: RollingUpdate, rollingUpdate:
   # {maxSurge: 1, maxUnavailable: 0}}); both shapes are accepted.
-  # Empty (the default) picks per messaging type: Recreate for in-memory — a
-  # rollout must not run two single-node JVMs against one database — and
-  # RollingUpdate (maxSurge 1, maxUnavailable 0) for nats, where a rolling update
-  # is safe: the old and the new pod coordinate through NATS like any two
-  # replicas. RollingUpdate with in-memory messaging is refused.
+  #
+  # Empty (the default) picks per messaging type. In-memory: Recreate, which stops
+  # the old pod before the new one starts — each upgrade costs the time EDDI takes
+  # to boot and become ready, but two EDDI JVMs never run against one database
+  # (everything single-node EDDI keeps per process — the per-conversation turn
+  # lock, replay-protection nonces, rate limits and cost budgets, the agent and
+  # workflow caches, HITL crash recovery — would diverge between them).
+  # RollingUpdate with in-memory messaging is therefore refused; use cluster mode.
+  # nats: RollingUpdate (maxSurge 1, maxUnavailable 0), which is safe there — the
+  # old and the new pod coordinate through NATS like any two replicas.
   updateStrategy: ""
 
   # Pod termination grace. Empty picks 75 s in cluster mode (it must exceed
@@ -206,11 +211,13 @@ eddi:
     type: ClusterIP
     port: 7070
 
-  # Who may read /q/metrics. Empty keeps EDDI's default, "authenticated":
-  # with OIDC on, a Prometheus without a token gets 401. "permit" opens this
-  # one path — only where /q/metrics cannot be reached from outside the
-  # cluster (the chart's ingress routes every path, /q/* included, unless you
-  # change ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
+  # Who may read /q/metrics. Empty keeps EDDI's default, "eddi-metrics-reader":
+  # with OIDC on, the scrape needs a token carrying the eddi-admin or
+  # eddi-metrics realm role (a Prometheus without a token gets 401, one without
+  # the role 403). "authenticated" admits any token; "permit" opens this one
+  # path — only where /q/metrics cannot be reached from outside the cluster
+  # (the chart's ingress routes every path, /q/* included, unless you change
+  # ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
   metrics:
     httpPolicy: ""
 
@@ -232,7 +239,7 @@ mongodb:
   enabled: true
   image:
     repository: mongo
-    tag: "7.0"
+    tag: "7.0.43"
   # Root credentials for the in-chart MongoDB. The database runs WITH
   # authentication (--auth) and EDDI connects as this user — an unauthenticated
   # in-cluster MongoDB is reachable by any pod that can resolve its Service.
@@ -361,7 +368,7 @@ keycloak:
   enabled: false
   image:
     repository: quay.io/keycloak/keycloak
-    tag: "26.0"
+    tag: "26.8.0"
   adminUsername: admin
   # REQUIRED when keycloak.enabled=true — no default is shipped.
   # Generate: openssl rand -base64 24

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -315,6 +316,31 @@ class AgentOrchestratorResumeToolLoopTest {
 
         assertEquals(approver, callerDuringApprovedCall.get(), "the call the approver saw runs with their credentials");
         assertNull(callerDuringContinuation.get(), "nothing after it inherits them");
+    }
+
+    @Test
+    @DisplayName("an approved call executes inside ApprovedCallScope, so the request it finally sends is held to the self-ungating rule")
+    void approvedCallRunsInsideApprovedCallScope() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), anyString())).thenReturn(true);
+        var scopedDuringApprovedCall = new AtomicReference<Boolean>();
+        var scopedDuringContinuation = new AtomicReference<Boolean>();
+        when(calculatorTool.calculate("6*7")).thenAnswer(inv -> {
+            scopedDuringApprovedCall.set(ApprovedCallScope.isActive());
+            return "42";
+        });
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenAnswer(inv -> {
+            scopedDuringContinuation.set(ApprovedCallScope.isActive());
+            return text("42");
+        });
+
+        orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        assertEquals(Boolean.TRUE, scopedDuringApprovedCall.get(), "the approved execution is scoped");
+        assertEquals(Boolean.FALSE, scopedDuringContinuation.get(), "the continuation is not");
     }
 
     @Test
@@ -737,6 +763,39 @@ class AgentOrchestratorResumeToolLoopTest {
         assertEquals(2, newBatch.getPauseCountThisTurn(), "pauseCountThisTurn carries from old + 1");
         // first approved call still executed
         verify(calculatorTool, times(1)).calculate("6*7");
+    }
+
+    @Test
+    @DisplayName("per-turn cap: the calls made before the pause count against it after the resume")
+    void perTurnCapCountsCallsMadeBeforeThePause() throws Exception {
+        var task = twoToolTask();
+        task.setMaxToolCallsPerTurn(3);
+        var approved = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(approved));
+        // Three calls already ran before the pause; the approved one is the fourth.
+        List<Map<String, Object>> before = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            before.add(Map.of("type", "tool_call", "tool", "getCurrentDateTime"));
+        }
+        batch.setTraceSoFar(before);
+
+        when(journalStore.tryClaim(anyString(), anyString(), eq("c1"), anyString(), anyString())).thenReturn(true);
+        when(calculatorTool.calculate("6*7")).thenReturn("42");
+
+        var dateRequest = ToolExecutionRequest.builder().id("c9").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(dateRequest)).thenReturn(text("done"));
+
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        assertEquals("done", result.response());
+        verify(calculatorTool, times(1)).calculate("6*7");
+        // Over the cap of 3 (three before the pause plus the approved call): refused.
+        verify(dateTimeTool, never()).getCurrentDateTime(anyString());
+        assertTrue(result.trace().stream().anyMatch(step -> "tool_call_capped".equals(step.get("type"))),
+                "the refused call is traced as capped");
+        assertEquals(3, result.trace().stream().filter(step -> "getCurrentDateTime".equals(step.get("tool"))
+                && "tool_call".equals(step.get("type"))).count(), "the pre-pause entries appear exactly once");
     }
 
     @Test

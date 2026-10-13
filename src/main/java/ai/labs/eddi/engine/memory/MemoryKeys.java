@@ -152,6 +152,16 @@ public final class MemoryKeys {
     public static final String AUDIT_TOKEN_USAGE = "audit:token_usage";
 
     /**
+     * Why the model stopped, when it stopped abnormally: {@code "length"} (cut off
+     * at the output-token limit) or {@code "content_filter"} (withheld by the
+     * provider). Written by LlmTask only in those two cases; read by the
+     * OpenAI-compatible adapter as the response's {@code finish_reason}. Not an
+     * {@code audit:} key on purpose — those are withheld from the detailed snapshot
+     * the adapter reads.
+     */
+    public static final String LLM_FINISH_REASON = "llm:finish_reason";
+
+    /**
      * Turn-total tool-execution evidence, shaped {@code {"calls": [ … ]}} where
      * each entry is a tool-trace record augmented with its originating
      * {@code llmTaskId}. Accumulated by LlmTask, read by LifecycleManager into
@@ -188,6 +198,22 @@ public final class MemoryKeys {
      * @since 6.1.0
      */
     public static final String AUDIT_CASCADE_MODEL = "audit:cascade_model";
+
+    // ---- LLM task failure handling ----
+
+    /**
+     * Prefix of the step flag {@code llm:fallback:<taskId>} = {@code true}, set
+     * when the LLM task served its configured fallback instead of a model answer.
+     * The conversation history built for the model skips the assistant turn of a
+     * step carrying it, so the model never learns from its own apology.
+     */
+    public static final String LLM_FALLBACK_PREFIX = "llm:fallback:";
+
+    /**
+     * Prefix of {@code llm:error:<taskId>} = {@code {class, message}} (redacted,
+     * truncated), recorded when {@code onError: fallback} absorbed a failure.
+     */
+    public static final String LLM_ERROR_PREFIX = "llm:error:";
 
     // ---- Output ----
 

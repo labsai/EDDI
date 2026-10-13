@@ -84,7 +84,7 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `maxEntriesPerUser` | `int` | `500` | Maximum memory entries per user |
+| `maxEntriesPerUser` | `int` | `500` | Maximum memory entries per user. Enforced across concurrent writers: the count is checked before a new fact is written and again after it, so two conversations of the same user saving at the same moment cannot leave the user above the cap — the insert that lands over it is undone (`reject`) or makes room by evicting one more of its agent's oldest entries (`evict_oldest`) |
 | `maxRecallEntries` | `int` | `50` | Maximum entries returned by recall |
 | `recallOrder` | `String` | `"most_recent"` | `"most_recent"` (by updatedAt) or `"most_accessed"` (by accessCount) |
 | `onCapReached` | `String` | `"evict_oldest"` | `"reject"` (refuse a **new** entry once `maxEntriesPerUser` is reached — updating an existing one is always allowed, it adds no row) or `"evict_oldest"` (permanently delete this agent's oldest entries to make room — entries owned by other agents are never evicted) |
@@ -116,7 +116,9 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `preserveAgentProvenance` | `boolean` | `false` | Sub-group by `sourceAgentId` (preserves per-agent provenance) |
 | `maxSummarizationCalls` | `int` | `10` | **Deprecated** — prefer `maxCostPerRun`. Still honoured as a secondary backstop *if you set it explicitly*, because silently dropping a bound an operator wrote is worse than enforcing a redundant one. A call count is a poor budget: consolidations differ wildly in cost. |
 | `summarizationPrompt` | `String` | *(built-in)* | Custom LLM instructions for consolidation |
-| `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle — the primary ceiling |
+| `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle — the primary ceiling. A soft cap: it is checked before each consolidation call against the **estimated** spend so far (see `inputPricePer1M`) |
+| `inputPricePer1M` | `Double` | *(unset)* | USD price per 1M input tokens of `llmModel`, used to estimate spend against `maxCostPerRun`. Unset: an upper bound of **$15** is assumed — the input list price of the most expensive mainstream tier (Claude Opus) — so the estimate errs high and a run stops early rather than late. Set both prices to make the budget accurate |
+| `outputPricePer1M` | `Double` | *(unset)* | USD price per 1M output tokens of `llmModel`. Unset: an upper bound of **$75** (Claude Opus output). When the provider reports no token usage, tokens are estimated at 3 characters each |
 | `crossAgentMaintenance` | `boolean` | `false` | By default a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `true` to let it maintain the user's whole memory set across agents — otherwise agent A's retention setting would delete agent B's memories, and A's model endpoint would see B's private text. |
 | `llmProvider` | `String` | `"anthropic"` | LLM provider for dream operations |
 | `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations. Passed under the key the provider reads (`model` for Ollama, `modelId` for Bedrock/HuggingFace/Vertex, `deploymentName` for Azure, `modelName` otherwise) |
@@ -164,6 +166,16 @@ terms on anything that is not a letter or digit, and an entry matches when
 **every** term appears (case-insensitively) in its key or its value — so
 `"dog name"`, `"dog_name"` and `"dog-name"` all find the key `dog_name`.
 Punctuation-only queries match nothing.
+
+"Its value" means a **string** value, or a string element of an **array** value.
+Numbers, booleans and the fields of an object value are not searched — `true` or
+`42` finds nothing, and neither does a field name inside an object value. This is
+the same on MongoDB and PostgreSQL (PostgreSQL used to match the value's JSON text,
+so `true` found every boolean entry). The search returns the newest **200**
+matches at most (`IUserMemoryStore.MAX_FILTER_RESULTS`); the agent's visibility
+filter is applied to those, so a user with many matching entries from other agents
+can see fewer here. The REST `search` endpoint and the `search_user_memories` MCP
+tool use the same search and the same cap.
 
 ```
 Parameters:
@@ -217,7 +229,7 @@ Base path: `/usermemorystore/memories`
 |---|---|---|
 | `GET` | `/{userId}` | Get all memories for a user |
 | `GET` | `/{userId}/visible?agentId=&groupId=&order=&limit=` | Get memories visible to a specific agent |
-| `GET` | `/{userId}/search?q=` | Search memories by keyword |
+| `GET` | `/{userId}/search?q=` | Search memories by keyword — string values and keys, newest 200 at most (see [`searchMemory`](#searchmemory)) |
 | `GET` | `/{userId}/category/{category}` | Get memories filtered by category |
 | `GET` | `/{userId}/key/{key}` | Get a specific memory by key |
 | `PUT` | `/` | Upsert a memory entry (JSON body) — validated, see below |
@@ -260,14 +272,16 @@ curl "http://localhost:7070/usermemorystore/memories/user-123/visible?agentId=ag
 
 | Tool | Role | Description |
 |---|---|---|
-| `list_user_memories` | `eddi-viewer` | List all entries for a user |
-| `get_visible_memories` | `eddi-viewer` | Get entries visible to a specific agent |
-| `search_user_memories` | `eddi-viewer` | Search by keyword |
-| `get_memory_by_key` | `eddi-viewer` | Look up by key name |
-| `count_user_memories` | `eddi-viewer` | Count entries |
+| `list_user_memories` | conversation tier¹ | List all entries for a user |
+| `get_visible_memories` | conversation tier¹ | Get entries visible to a specific agent |
+| `search_user_memories` | conversation tier¹ | Search by keyword |
+| `get_memory_by_key` | conversation tier¹ | Look up by key name |
+| `count_user_memories` | conversation tier¹ | Count entries |
 | `upsert_user_memory` | `eddi-admin` | Insert or update an entry (`groupIds` — comma-separated — for `group` visibility) |
-| `delete_user_memory` | `eddi-admin` | Delete a specific entry |
+| `delete_user_memory` | `eddi-admin` | Delete a specific entry; an id that names no entry is an error |
 | `delete_all_user_memories` | `eddi-admin` | Delete all memories except the `_gdpr_` bookkeeping entries (requires `CONFIRM`) |
+
+¹ Any of `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`; a non-admin reads only their own `userId`. See [MCP Server → Role Mapping](mcp-server.md#role-mapping).
 
 ### GDPR Compliance
 
@@ -284,6 +298,8 @@ The Dream service performs background maintenance on user memories:
 2. **Contradiction Detection** — Identifies entries with the same key but different values (e.g., `language=English` from Agent A vs `language=German` from Agent B). Detection is read-only, so unlike pruning and summarization it looks past the firing agent's own entries: every entry is considered for a key the firing agent holds (a disagreement between two *other* agents is not its to report). The log names the key and agents at INFO; the conflicting values are logged at DEBUG only. V1 uses key-based matching; future versions will use LLM-driven semantic analysis.
 
 3. **Interaction Summarization** — When `summarizeInteractions=true`, compresses multiple related facts into consolidated summaries using the configured LLM. Entries are grouped by the `summarizeGroupBy` strategy (per-category or all together), and each group above `summarizeMinEntries` is distilled toward `summarizeTargetEntries` entries. Safety guarantees: every write target is resolved before anything is written; new entries are inserted before originals are deleted; an original that receives a consolidated entry (the model reused its key) is updated in place and **not** deleted; a key that would overwrite a memory outside the group skips the group untouched; duplicate keys in the answer are merged; a failed insert restores any original it overwrote; an answer that only repeats originals verbatim may drop an original only when it duplicated a kept value (otherwise it merged nothing and the group is skipped); LLM failures or invalid responses preserve the original entries.
+
+4. **Concurrent writes win.** A cycle reads the user's memories, then spends seconds in the LLM call before it writes. Every write it makes is therefore conditional on the memory being exactly as it was read — a compare-and-set on `updatedAt`, one atomic statement on MongoDB and PostgreSQL: a stale entry the conversation rewrote in the meantime is not pruned; a group any of whose originals changed during the LLM call is skipped untouched; an original rewritten after the consolidation was written is kept rather than deleted (the duplicate is reconciled by the next cycle). Each skip is counted as `conflictsSkipped` in the cycle's completion log line and on `eddi.dream.conflicts.skipped`. Earlier releases deleted and overwrote by id, so a fact the user stated during the cycle could be lost.
 
 ### Scheduling a Dream Cycle
 
@@ -317,6 +333,7 @@ The Dream service exposes Micrometer metrics (Prometheus names at `/q/metrics` r
 | `eddi.dream.entries.summarized` | Counter | Entries reduced by LLM consolidation |
 | `eddi.dream.cycles.failed` | Counter | Cycles that were rejected or ended with an error |
 | `eddi.dream.summarization.failed` | Counter | Consolidation LLM calls that failed |
+| `eddi.dream.conflicts.skipped` | Counter | Prunes, overwrites and deletes skipped because the memory was written after the cycle read it — the newer fact is kept |
 | `eddi.dream.duration` | Timer | Duration of dream cycles |
 
 ## Migration from Legacy Properties

@@ -344,16 +344,6 @@ export function extractAgentSwitch(
   return typeof from === "number" && typeof to === "number" ? { from, to } : null;
 }
 
-export interface ConversationMemorySnapshot {
-  agentId: string;
-  agentVersion: number;
-  conversationId: string;
-  conversationState: ConversationState;
-  environment: string;
-  conversationSteps: Record<string, unknown>[];
-  conversationProperties?: Record<string, unknown>;
-}
-
 /** Parse conversation resource URI to extract ID */
 export function parseConversationUri(resource: string): string {
   try {
@@ -461,14 +451,6 @@ export function getSimpleConversationLog(
   });
   return api.get<SimpleConversationMemorySnapshot>(
     `/conversationstore/conversations/simple/${conversationId}?${params.toString()}`
-  );
-}
-
-export function getRawConversationLog(
-  conversationId: string
-): Promise<ConversationMemorySnapshot> {
-  return api.get<ConversationMemorySnapshot>(
-    `/conversationstore/conversations/${conversationId}`
   );
 }
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.nlp;
 
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.TestMemoryFactory;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
@@ -62,7 +63,7 @@ class InputParserTaskInterruptTest {
         // Never inherit a stale flag from an earlier test on this JUnit thread.
         Thread.interrupted();
         task = new InputParserTask(mock(IExpressionProvider.class), new HashMap<>(), new HashMap<>(),
-                new HashMap<>(), new ObjectMapper());
+                new HashMap<>(), new ObjectMapper(), mock(IResourceClientLibrary.class));
     }
 
     @AfterEach

@@ -126,14 +126,22 @@ class ConfigurationReferenceCoverageTest {
      * a defect waiting to be found, not an exemption.
      */
     private static final Set<String> DECLARED_BUT_UNREAD = Set.of(
-            // The next three are read by Quarkus HTTP configuration through
+            // The next four are read by Quarkus HTTP configuration through
             // ${...} expressions in application.properties, not by Java: the /chat
-            // CSP filter's frame-ancestors, the application CSP's connect-src, and
-            // the /q/metrics permission policy. CspPolicyTest pins the first two to
-            // their filters, MetricsHttpPolicyConfigTest the third to its rule.
+            // CSP filter's frame-ancestors and img-src, the application CSP's
+            // connect-src, and the /q/metrics permission policy. CspPolicyTest pins
+            // the first three to their filters, MetricsHttpPolicyConfigTest the
+            // last to its rule.
             "eddi.chat.frame-ancestors",
+            "eddi.chat.img-sources",
             "eddi.csp.extra-connect-sources",
-            "eddi.metrics.http-policy");
+            "eddi.metrics.http-policy",
+            // Read the same way, by the roles-allowed of the named policies the
+            // metrics and API-description rules use, and by the api-docs rule's
+            // policy. MetricsHttpPolicyConfigTest pins each to its rule.
+            "eddi.metrics.roles-allowed",
+            "eddi.api-docs.http-policy",
+            "eddi.api-docs.roles-allowed");
 
     @Test
     @DisplayName("every eddi.* property the code reads is in the configuration reference")

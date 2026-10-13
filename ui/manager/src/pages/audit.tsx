@@ -1,8 +1,13 @@
 import { formatUsd } from "@/lib/utils";
 import { displayUserInput } from "@/lib/api/conversations";
-import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useHasRole } from "@/hooks/use-auth";
+import { AdminActionsView } from "@/components/audit/admin-actions-view";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
+import { formatDateTimeWithZone, toIsoWithOffset } from "@/lib/date-format";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {
   ShieldCheck,
   Search,
@@ -37,6 +42,7 @@ import {
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import type { AuditEntry } from "@/lib/api/audit";
+import { mergeById } from "@/lib/audit-pages";
 import { useDeployedAgents } from "@/hooks/use-chat";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -115,29 +121,18 @@ function groupByConversation(entries: AuditEntry[]): Map<string, AuditEntry[]> {
   return groups;
 }
 
+/**
+ * Full date, seconds and UTC offset. Audit rows used to show a bare time of day,
+ * and conversation headers month/day/hour:minute: no year, no seconds, no zone,
+ * on a compliance screen where "when exactly" is the point. The ISO-8601 form
+ * is in each timestamp's title.
+ */
 function formatTimestamp(ts: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date(ts));
-  } catch {
-    return ts;
-  }
+  return formatDateTimeWithZone(ts);
 }
 
 function formatFullTimestamp(ts: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(ts));
-  } catch {
-    return ts;
-  }
+  return formatDateTimeWithZone(ts);
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -329,7 +324,7 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
             {entry.environment}
           </span>
         )}
-        <span>{formatTimestamp(entry.timestamp)}</span>
+        <span title={toIsoWithOffset(entry.timestamp)}>{formatTimestamp(entry.timestamp)}</span>
       </div>
 
       {/* Expandable detail sections */}
@@ -455,7 +450,7 @@ function ConversationGroup({
             {conversationId.length > 24 ? `${conversationId.slice(0, 12)}…${conversationId.slice(-8)}` : conversationId}
           </span>
           {firstTs && (
-            <span className="ms-2 text-xs text-muted-foreground">
+            <span className="ms-2 text-xs text-muted-foreground" title={toIsoWithOffset(firstTs)}>
               {formatFullTimestamp(firstTs)}
             </span>
           )}
@@ -531,98 +526,239 @@ function LoadingSkeleton() {
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
+type AuditView = "trail" | "admin";
+
+/**
+ * The audit ledger, in two views: the pipeline trail (what agents did, per agent
+ * or conversation) and the administrative actions (who changed what through the
+ * REST API — EDDI 6.6+). `?view=admin` opens the second directly, so a link can
+ * point at it.
+ */
 export function AuditPage() {
+  const { t } = useTranslation();
+  const [params, setParams] = useSearchParams();
+  // GET /auditstore/admin-actions is eddi-admin only. The tab is not offered to
+  // anyone else (useHasRole is true for everyone when auth is off); the view's own
+  // 401/403 state stays as the fallback for a role the token does not show.
+  const isAdmin = useHasRole("eddi-admin");
+  const view: AuditView = isAdmin && params.get("view") === "admin" ? "admin" : "trail";
+  const select = (next: AuditView) => {
+    const updated = new URLSearchParams(params);
+    if (next === "admin") updated.set("view", "admin");
+    else updated.delete("view");
+    setParams(updated, { replace: true });
+  };
+
+  const tabs = !isAdmin ? null : (
+    <div role="tablist" aria-label={t("audit.views", "Audit views")} className="flex gap-1 border-b border-border">
+      {(
+        [
+          ["trail", t("audit.tabTrail", "Pipeline trail")],
+          ["admin", t("audit.tabAdminActions", "Administrative actions")],
+        ] as const
+      ).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          id={`audit-tab-${key}`}
+          aria-selected={view === key}
+          aria-controls={`audit-panel-${key}`}
+          tabIndex={view === key ? 0 : -1}
+          onClick={() => select(key)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+              e.preventDefault();
+              const next = key === "trail" ? "admin" : "trail";
+              select(next);
+              document.getElementById(`audit-tab-${next}`)?.focus();
+            }
+          }}
+          className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            view === key
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+          data-testid={`audit-tab-${key}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (view === "admin") {
+    return (
+      <div className="space-y-6" data-testid="audit-page">
+        <AuditHeader />
+        {tabs}
+        <div role="tabpanel" id="audit-panel-admin" aria-labelledby="audit-tab-admin">
+          <AdminActionsView />
+        </div>
+      </div>
+    );
+  }
+  return <AuditTrailView tabs={tabs} />;
+}
+
+function AuditHeader({ actions }: { actions?: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+          <ShieldCheck className="h-5 w-5 text-primary" />
+        </div>
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold text-foreground">
+            {t("audit.title", "Audit Trail")}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {t("audit.description", "Browse the immutable audit ledger for compliance and debugging.")}
+          </p>
+        </div>
+        {actions}
+      </div>
+    </div>
+  );
+}
+
+function AuditTrailView({ tabs }: { tabs: ReactNode | null }) {
   const { t } = useTranslation();
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("audit"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
   // Default to agent mode (primary), conversation is secondary
-  const [mode, setMode] = useState<SearchMode>("agent");
-  const [conversationId, setConversationId] = useState("");
-  const [searchValue, setSearchValue] = useState("");
+  // The search lives in the URL (?mode=&agent=&version=&conversation=) so a
+  // reload keeps it and an audit view can be shared. Seeded once from the URL;
+  // the effect below writes changes back.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initial] = useState(() => {
+    const m: SearchMode = searchParams.get("mode") === "conversation" ? "conversation" : "agent";
+    const v = parseInt(searchParams.get("version") ?? "", 10);
+    return {
+      mode: m,
+      // `agentId` is the older name other pages still link with (the Workforce
+      // agent panel); `agent` wins and the URL is normalised to it on sync.
+      agent: searchParams.get("agent") ?? searchParams.get("agentId") ?? "",
+      version: searchParams.get("version") ?? "",
+      activeVersion: isNaN(v) ? undefined : v,
+      conversation: searchParams.get("conversation") ?? "",
+    };
+  });
+  const [mode, setMode] = useState<SearchMode>(initial.mode);
+  const [conversationId, setConversationId] = useState(initial.conversation);
+  const [searchValue, setSearchValue] = useState(initial.conversation);
 
   // Agent mode state — search triggers immediately on selection
-  const [selectedAgentId, setSelectedAgentId] = useState("");
-  const [agentVersion, setAgentVersion] = useState("");
-  const [activeAgentId, setActiveAgentId] = useState("");
-  const [activeAgentVersion, setActiveAgentVersion] = useState<number | undefined>();
+  const [selectedAgentId, setSelectedAgentId] = useState(initial.agent);
+  const [agentVersion, setAgentVersion] = useState(initial.version);
+  const [activeAgentId, setActiveAgentId] = useState(initial.agent);
+  const [activeAgentVersion, setActiveAgentVersion] = useState<number | undefined>(
+    initial.agent ? initial.activeVersion : undefined,
+  );
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (mode === "conversation") {
+      next.set("mode", "conversation");
+      if (searchValue) next.set("conversation", searchValue);
+    } else {
+      if (activeAgentId) next.set("agent", activeAgentId);
+      if (activeAgentId && agentVersion) next.set("version", agentVersion);
+    }
+    setSearchParams(next, { replace: true });
+  }, [mode, searchValue, activeAgentId, agentVersion, setSearchParams]);
 
   const [skip, setSkip] = useState(0);
 
-  // Queries
-  const convQuery = useAuditTrail(
-    mode === "conversation" ? searchValue : "",
+  // Queries. The NEWEST page (offset 0) has a query of its own that stays
+  // mounted however far the user has paged, so auto-refresh and window-focus
+  // refetches always re-read the head of the trail — the only place new rows
+  // appear. "Load more" pages use a second query at the current offset; it is
+  // disabled at offset 0, where it would only duplicate the head query.
+  const headConv = useAuditTrail(mode === "conversation" ? searchValue : "", 0, PAGE_SIZE);
+  const headAgent = useAuditTrailByAgent(
+    mode === "agent" ? activeAgentId : "",
+    activeAgentVersion,
+    0,
+    PAGE_SIZE,
+  );
+  const pageConv = useAuditTrail(
+    mode === "conversation" && skip > 0 ? searchValue : "",
     skip,
     PAGE_SIZE,
   );
-  const agentQuery = useAuditTrailByAgent(
-    mode === "agent" ? activeAgentId : "",
+  const pageAgent = useAuditTrailByAgent(
+    mode === "agent" && skip > 0 ? activeAgentId : "",
     activeAgentVersion,
     skip,
     PAGE_SIZE,
   );
+  const headQuery = mode === "conversation" ? headConv : headAgent;
+  const pageQuery = mode === "conversation" ? pageConv : pageAgent;
 
-  const pageEntries = mode === "conversation" ? convQuery.data : agentQuery.data;
-  const isLoading = mode === "conversation" ? convQuery.isLoading : agentQuery.isLoading;
+  const headEntries = headQuery.data;
+  const pageEntries = pageQuery.data;
+  const isLoading = headQuery.isLoading;
   // Without this a 500 rendered the "No audit entries found" empty state — the
   // most misleading possible result on a compliance screen.
-  const isError = mode === "conversation" ? convQuery.isError : agentQuery.isError;
-  const refetch = () => (mode === "conversation" ? convQuery.refetch() : agentQuery.refetch());
-  const isFetching = mode === "conversation" ? convQuery.isFetching : agentQuery.isFetching;
+  const isError = headQuery.isError || pageQuery.isError;
+  const error = headQuery.error ?? pageQuery.error;
+  const refetch = () => {
+    void headQuery.refetch();
+    if (skip > 0) void pageQuery.refetch();
+  };
+  const isFetching = headQuery.isFetching || pageQuery.isFetching;
   const hasSearched = mode === "conversation" ? !!searchValue : !!activeAgentId;
 
   // ─── Paging accumulator ──────────────────────────────────────
-  // `skip` lives in the react-query key, so each "Load more" fetches a fresh
-  // window. Keep every fetched page (keyed by its skip offset) and render the
-  // flattened union so paging *appends* rather than replacing earlier rows.
-  const [pages, setPages] = useState<Record<number, AuditEntry[]>>({});
+  // One flat list, deduplicated by entry id. The ledger is newest-first and
+  // offset-paged, so every row written after page 1 was read shifts every later
+  // page down: a page-per-offset map showed the shifted rows twice. Merging by
+  // id makes overlap harmless, and the next offset is simply how many distinct
+  // rows are loaded — the loaded rows are always a contiguous run from the head.
+  const [loaded, setLoaded] = useState<AuditEntry[]>([]);
+  // Whether the last page read (head or "Load more") came back full.
+  const [lastPageFull, setLastPageFull] = useState(false);
 
   // When the newest page (skip 0) last arrived. Only that page can bring rows
   // newer than a verification report; older pages are covered (or not) by
   // `uncoveredCount`.
   const [headFetchedAt, setHeadFetchedAt] = useState(0);
-  const trailUpdatedAt = mode === "conversation" ? convQuery.dataUpdatedAt : agentQuery.dataUpdatedAt;
+  const trailUpdatedAt = headQuery.dataUpdatedAt;
 
   // Reset the accumulator whenever the search context changes. `skip` is reset
   // by whatever changes the context (the search handlers *and* the mode
   // toggles) so that it lands in the SAME render batch as the context change.
-  // Resetting it here instead would be too late: the merge effect below would
-  // run once more with the stale offset and immediately re-populate the
-  // accumulator this effect just cleared.
   useEffect(() => {
-    setPages({});
+    setLoaded([]);
+    setLastPageFull(false);
     setHeadFetchedAt(0);
   }, [mode, searchValue, activeAgentId, activeAgentVersion]);
 
-  // Merge each freshly-fetched page. Same-skip refetches (auto-refresh) replace
-  // that page; a new skip appends a page.
+  // The head page: new rows go in front, rows already loaded stay where they are.
+  // `skip` is read but deliberately not a dependency: paging must not re-merge
+  // the head, and a head refresh after paging must not reset `hasMore`.
+  const skipRef = useRef(skip);
+  skipRef.current = skip;
   useEffect(() => {
-    if (!pageEntries) return;
-    setPages((prev) => {
-      if (prev[skip] === pageEntries) return prev;
-      return { ...prev, [skip]: pageEntries };
-    });
-    if (skip === 0) setHeadFetchedAt(trailUpdatedAt);
-  }, [pageEntries, skip, trailUpdatedAt]);
+    if (!headEntries) return;
+    setLoaded((prev) => mergeById(headEntries, prev));
+    if (skipRef.current === 0) setLastPageFull(headEntries.length >= PAGE_SIZE);
+    setHeadFetchedAt(trailUpdatedAt);
+  }, [headEntries, trailUpdatedAt]);
 
-  const entries = useMemo(
-    () =>
-      Object.keys(pages)
-        .map(Number)
-        .sort((a, b) => a - b)
-        .flatMap((k) => pages[k]!),
-    [pages],
-  );
+  // A "Load more" page: appended, minus anything already loaded.
+  useEffect(() => {
+    if (!pageEntries || skipRef.current === 0) return;
+    setLoaded((prev) => mergeById(prev, pageEntries));
+    setLastPageFull(pageEntries.length >= PAGE_SIZE);
+  }, [pageEntries]);
 
-  // Only show the "Load more" affordance while the highest-skip page came back
-  // full (a partial page means we've reached the end).
-  const hasMore = useMemo(() => {
-    const skips = Object.keys(pages).map(Number);
-    if (skips.length === 0) return false;
-    const maxSkip = Math.max(...skips);
-    return (pages[maxSkip]?.length ?? 0) >= PAGE_SIZE;
-  }, [pages]);
+  const entries = loaded;
+  const hasMore = lastPageFull;
 
   // Skeleton only for the very first page; later pages keep prior rows visible.
   const showInitialLoading = isLoading && entries.length === 0;
@@ -718,7 +854,8 @@ export function AuditPage() {
     for (const problem of verification.data?.problems ?? []) map.set(problem.entryId, problem.status);
     return map;
   }, [verification.data]);
-  const activeQueryFn = mode === "conversation" ? convQuery.refetch : agentQuery.refetch;
+  // Auto-refresh re-reads the head page, wherever the user has paged to.
+  const activeQueryFn = headQuery.refetch;
   const autoRefreshRef = useRef(autoRefresh);
   autoRefreshRef.current = autoRefresh;
 
@@ -744,30 +881,37 @@ export function AuditPage() {
   }, [entries, searchValue, activeAgentId]);
 
   // Data for dropdowns
+  // Every agent, not just the deployed ones: the ledger outlives deployments,
+  // so an agent that was undeployed last week still has an audit trail. The
+  // deployed ones are listed first, in their own group.
   const { data: deployedAgents } = useDeployedAgents();
+  const { data: allAgentPages } = useAllAgentDescriptors();
+  const agentOptions = useMemo(() => {
+    const deployedIds = new Set((deployedAgents ?? []).map((a) => a.id));
+    const all = allAgentPages ? groupAgentsByName(allAgentPages.pages.flat()) : [];
+    const known = new Set(all.map((a) => a.id));
+    // An agent in the URL that the list does not (yet) contain must stay selectable.
+    const extra = (deployedAgents ?? []).filter((a) => !known.has(a.id));
+    const merged = [...all, ...extra].map((a) => ({ id: a.id, name: a.name || a.id }));
+    const byName = (x: { name: string }, y: { name: string }) => x.name.localeCompare(y.name);
+    return {
+      deployed: merged.filter((a) => deployedIds.has(a.id)).sort(byName),
+      other: merged.filter((a) => !deployedIds.has(a.id)).sort(byName),
+      all: merged,
+    };
+  }, [deployedAgents, allAgentPages]);
 
   // Find agent name for display
   const activeAgentName = useMemo(() => {
-    if (!activeAgentId || !deployedAgents) return null;
-    return deployedAgents.find((a) => a.id === activeAgentId)?.name ?? null;
-  }, [activeAgentId, deployedAgents]);
+    if (!activeAgentId) return null;
+    return agentOptions.all.find((a) => a.id === activeAgentId)?.name ?? null;
+  }, [activeAgentId, agentOptions]);
 
   return (
     <div className="space-y-6" data-testid="audit-page">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-            <ShieldCheck className="h-5 w-5 text-primary" />
-          </div>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold text-foreground">
-              {t("audit.title", "Audit Trail")}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {t("audit.description", "Browse the immutable audit ledger for compliance and debugging.")}
-            </p>
-          </div>
+      <AuditHeader
+        actions={
           <div className="flex items-center gap-2">
             {/* Export */}
             <button
@@ -781,8 +925,10 @@ export function AuditPage() {
               {t("audit.export", "Export")}
             </button>
           </div>
-        </div>
-      </div>
+        }
+      />
+      {tabs}
+      <div role={tabs ? "tabpanel" : undefined} id="audit-panel-trail" aria-labelledby={tabs ? "audit-tab-trail" : undefined} className="space-y-6">
 
       {/* Search bar */}
       <div className="rounded-xl border border-border bg-card p-4">
@@ -834,11 +980,24 @@ export function AuditPage() {
                   data-testid="agent-input"
                 >
                   <option value="">{t("audit.selectAgent", "Select an agent…")}</option>
-                  {deployedAgents?.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name || agent.id}
-                    </option>
-                  ))}
+                  {agentOptions.deployed.length > 0 && (
+                    <optgroup label={t("audit.agentsDeployed", "Deployed")}>
+                      {agentOptions.deployed.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {agentOptions.other.length > 0 && (
+                    <optgroup label={t("audit.agentsNotDeployed", "Not deployed")}>
+                      {agentOptions.other.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
                 <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               </div>
@@ -978,6 +1137,7 @@ export function AuditPage() {
       {/* Empty state - no results */}
       {hasSearched && !isLoading && isError && entries.length === 0 && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}
@@ -1034,7 +1194,7 @@ export function AuditPage() {
             <div className="flex justify-center">
               <button
                 type="button"
-                onClick={() => setSkip((s) => s + PAGE_SIZE)}
+                onClick={() => setSkip(entries.length)}
                 className="rounded-lg bg-foreground/5 px-6 py-2 text-sm font-medium text-foreground/60 transition-all hover:bg-foreground/10 hover:text-foreground/80"
                 data-testid="load-more"
               >
@@ -1045,6 +1205,7 @@ export function AuditPage() {
         </div>
         </AuditProblemsContext.Provider>
       )}
+      </div>
     </div>
   );
 }
