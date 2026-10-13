@@ -38,7 +38,8 @@ async function runErasure() {
   const user = userEvent.setup();
   await user.type(screen.getByTestId("gdpr-user-id"), "user-123");
   await user.click(screen.getByTestId("gdpr-delete-btn"));
-  await user.click(await screen.findByText(/Yes, Delete All Data/i));
+  await user.type(await screen.findByTestId("gdpr-confirm-input"), "user-123");
+  await user.click(screen.getByText(/Yes, Delete All Data/i));
   return screen.findByTestId("gdpr-results");
 }
 

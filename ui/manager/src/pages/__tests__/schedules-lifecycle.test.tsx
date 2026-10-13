@@ -190,7 +190,9 @@ describe("SchedulesPage — the server's reason for refusing a save", () => {
     await user.click(await screen.findByTestId("edit-chat-1"));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByTestId("schedule-submit-btn"));
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Failed to update schedule"));
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Failed to update schedule", { description: "boom (HTTP 500)" }),
+    );
     expect(within(dialog).queryByTestId("schedule-server-error")).not.toBeInTheDocument();
   });
 });

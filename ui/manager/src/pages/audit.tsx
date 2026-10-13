@@ -6,7 +6,6 @@ import { useHasRole } from "@/hooks/use-auth";
 import { AdminActionsView } from "@/components/audit/admin-actions-view";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
 import { formatDateTimeWithZone, toIsoWithOffset } from "@/lib/date-format";
 import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {
