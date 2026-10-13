@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -124,8 +125,7 @@ public class RestClusterAdmin implements IRestClusterAdmin {
         Consumer<ActivityEvent> listener = event -> send(sink, sse.newEventBuilder().name("activity").mediaType(MediaType.APPLICATION_JSON_TYPE)
                 .data(ActivityEvent.class, forCaller(event, admin)).build());
         if (!activity.addListener(listener, admin)) {
-            sink.send(sse.newEventBuilder().name("busy").data("too many subscribers on this node").build())
-                    .whenComplete((_, _) -> sink.close());
+            closeAfter(sink.send(sse.newEventBuilder().name("busy").data("too many subscribers on this node").build()), sink, "busy");
             return;
         }
         streams.put(sink, listener);
@@ -181,10 +181,21 @@ public class RestClusterAdmin implements IRestClusterAdmin {
         }, PING_SECONDS, PING_SECONDS, TimeUnit.SECONDS);
     }
 
+    /**
+     * Closes the stream once the final event has been sent, and also when sending
+     * it failed: a failed send is only logged, the sink is closed either way.
+     */
+    private static void closeAfter(CompletionStage<?> sent, SseEventSink sink, String event) {
+        sent.exceptionally(error -> {
+            LOGGER.debugf(error, "Could not send the %s event before closing the stream", event);
+            return null;
+        }).thenRun(sink::close);
+    }
+
     private void expire(SseEventSink sink) {
         drop(sink);
         if (!sink.isClosed()) {
-            sink.send(pingSse.newEventBuilder().name("expired").data("token expired").build()).whenComplete((_, _) -> sink.close());
+            closeAfter(sink.send(pingSse.newEventBuilder().name("expired").data("token expired").build()), sink, "expired");
         }
     }
 

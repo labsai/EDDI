@@ -19,4 +19,6 @@
   returns with fall-through returns. `mock_llm.py` gains
   a `main()` that holds the request log open for the life of the server.
 
-No behaviour changes.
+- `RestClusterAdmin` closes the activity stream after its last `busy` or `expired` event through one `closeAfter` helper. A failed send is logged at debug and the sink is still closed, so the callback no longer declares parameters it ignores.
+
+Behaviour is unchanged apart from two diagnostics: a failed final SSE event is logged at debug, and the cluster demo prints a failed node-log export to stderr.
