@@ -38,7 +38,11 @@ running *now*. It now has a live lookup:
 
 ### Not done
 
-- `ui/manager/src/test/mocks/openapi-operations.json` is a generated snapshot of a 6.4.0
-  backend and was not edited; refresh it with `npm run openapi:refresh` against a build with this change.
-- Manager vitest was not run (no `node_modules` in this checkout). Backend: `BuildInfoTest`,
-  `McpToolFilterCoverageTest`, `ImportStyleTest` pass.
+- Manager vitest was not run locally (no `node_modules` in this checkout); CI runs it. Backend:
+  `BuildInfoTest`, `McpToolFilterCoverageTest`, `ImportStyleTest` pass.
+
+### Also in this change
+
+- `ui/manager/src/test/mocks/openapi-operations.json` refreshed from the `OpenAPI Snapshot` job's
+  artifact, and `operator-revision.json` bumped to revision 9 (the operator's prompt and allow-list
+  changed, which is what makes an operator update reach existing deployments).
