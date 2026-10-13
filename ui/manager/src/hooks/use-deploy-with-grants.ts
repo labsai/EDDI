@@ -389,8 +389,15 @@ export async function runDeployManyWithGrants(options: DeployManyOptions): Promi
 
 /**
  * {@link runDeployWithGrants} for a component: tracks whether a deploy is
- * running and refreshes every agent query once it ends, whatever the outcome —
- * a refused deploy changes the deployment status as surely as a good one.
+ * running and refreshes every agent query once the deploy has an outcome —
+ * deployed, refused or cancelled alike, since a refusal changes the deployment
+ * status as surely as a success.
+ *
+ * Not when the request itself throws (an HTTP error, a network failure): the
+ * backend then changed nothing, and refetching every agent query on the way out
+ * of an error only re-renders the page after the caller has already reported
+ * it. In tests that refetch landed during the after-test toast drain, and a
+ * slow CI runner failed the drain ("a sonner toast is still in the DOM").
  */
 export function useDeployWithGrants() {
   const queryClient = useQueryClient();
@@ -402,12 +409,13 @@ export function useDeployWithGrants() {
       runningRef.current += 1;
       setIsRunning(true);
       try {
-        return await runDeployWithGrants(options);
+        const result = await runDeployWithGrants(options);
+        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+        void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+        return result;
       } finally {
         runningRef.current -= 1;
         if (runningRef.current === 0) setIsRunning(false);
-        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
-        void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
       }
     },
     [queryClient],
@@ -418,12 +426,13 @@ export function useDeployWithGrants() {
       runningRef.current += 1;
       setIsRunning(true);
       try {
-        return await runDeployManyWithGrants(options);
+        const result = await runDeployManyWithGrants(options);
+        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+        void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+        return result;
       } finally {
         runningRef.current -= 1;
         if (runningRef.current === 0) setIsRunning(false);
-        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
-        void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
       }
     },
     [queryClient],

@@ -292,3 +292,55 @@ describe("useDeployWithGrants", () => {
     expect(calls).toEqual(["preflight", `put ${KEY}`, "deploy wait=true"]);
   });
 });
+
+describe("useDeployWithGrants — query refresh", () => {
+  function Probe({ onDone }: { onDone: (r: unknown) => void }) {
+    const { deploy } = useDeployWithGrants();
+    return (
+      <button
+        onClick={() =>
+          deploy({ agentId: AGENT, version: 1, environment: "production" }).then(onDone, (err: unknown) => onDone(err))
+        }
+      >
+        go
+      </button>
+    );
+  }
+
+  function renderProbe() {
+    const queryClient = createTestQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const done = vi.fn();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Probe onDone={done} />
+      </QueryClientProvider>,
+    );
+    return { invalidate, done };
+  }
+
+  it("refreshes the agent queries once a refused deploy has its outcome", async () => {
+    server.use(
+      http.get("*/administration/:env/deploy/:agentId/preflight", () => HttpResponse.json(preflight({ ready: true, grantIssues: [] }))),
+      http.post("*/administration/:env/deploy/:agentId", () =>
+        HttpResponse.json({ status: "ERROR", agentId: AGENT, version: 1, error: "broken workflow" }),
+      ),
+    );
+    const { invalidate, done } = renderProbe();
+    await userEvent.setup().click(screen.getByText("go"));
+    await waitFor(() => expect(done).toHaveBeenCalled());
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["chat", "deployedAgents"] });
+  });
+
+  it("does not refetch on the way out of a deploy request that failed", async () => {
+    server.use(
+      http.get("*/administration/:env/deploy/:agentId/preflight", () => HttpResponse.json(preflight({ ready: true, grantIssues: [] }))),
+      http.post("*/administration/:env/deploy/:agentId", () => HttpResponse.json({ message: "no such version" }, { status: 400 })),
+    );
+    const { invalidate, done } = renderProbe();
+    await userEvent.setup().click(screen.getByText("go"));
+    await waitFor(() => expect(done).toHaveBeenCalled());
+    expect(done.mock.calls[0]![0]).toBeInstanceOf(Error);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+});

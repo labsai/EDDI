@@ -42,6 +42,9 @@ A vault secret's grant (`allowedAgents`) lists agent ids, and an id exists only 
   - the preflight endpoint is on the operator's read allow-list. The append-grant endpoint is deliberately not, because no LLM may widen a grant. The prompt explains `failure`. The operator revision moved from 2 to 3.
 - `ui/manager/src/test/mocks/openapi-operations.json` is refreshed from this branch's backend (6.6.0, the two new operations).
 
+- `useDeployWithGrants` refreshes the agent queries once a deploy has an outcome (deployed, refused or cancelled), not on the way out of a deploy request that threw: nothing changed on the backend, and that refetch landed in the after-test toast drain on slow CI runners (`resource-detail-save-not-live.test.tsx` failed there about every other run).
+- The shared "saved — not live yet" toast (`lib/save-not-live-toast.ts`, added on main meanwhile) deploys through the grant flow too, so the studio, workflow and agent-section saves ask about a restricted key before deploying.
+
 ### Still open
 
 - `pages/group-wizard.tsx` and `pages/workforce/workforce-wizard.tsx` still create member agents with `deploy: true`. Their refused deploys now carry the reason, but they do not yet go through the grant dialog.
