@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
-import { useNavigate, Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { X } from "lucide-react";
@@ -37,6 +37,7 @@ import {
   ReviewLaunch,
   type CreationProgressItem,
 } from "@/components/workforce/wizard/review-launch";
+import { useLeaveConfirm } from "@/components/workforce/wizard/use-leave-confirm";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -67,7 +68,6 @@ function emptySlot(
 
 function WorkforceWizard() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const setupAgent = useSetupAgent();
   const createGroup = useCreateGroup();
   const creatingRef = useRef(false);
@@ -96,6 +96,11 @@ function WorkforceWizard() {
   const [creationProgress, setCreationProgress] = useState<
     CreationProgressItem[]
   >([]);
+
+  // A configured team — prompts and API keys included — is lost on reload or
+  // when leaving, until it is created. Picking a template is the first edit;
+  // a successful create releases the guard through `leaveNow`.
+  const { requestLeave, leaveNow, dialog: leaveDialog } = useLeaveConfirm(selectedTemplate !== null);
 
   // Filtered by backend support — see TemplatePicker. Resolved here as well so
   // a `?template=` deep link cannot apply a template the picker is hiding.
@@ -183,7 +188,7 @@ function WorkforceWizard() {
 
   const handleBack = useCallback(() => {
     if (currentStep === 0) {
-      navigate("/workforce");
+      requestLeave("/workforce");
       return;
     }
     // Leaving the team step drops its "you tried to continue" state, so a
@@ -195,7 +200,7 @@ function WorkforceWizard() {
     if (currentStep === 1) setShowTeamErrors(false);
     if (currentStep === 2) setCreationProgress([]);
     setCurrentStep((s) => s - 1);
-  }, [currentStep, navigate]);
+  }, [currentStep, requestLeave]);
 
   // Move focus to the first flagged control after a failed Next. Read from the
   // DOM rather than threaded through props: the flagged field can be any of a
@@ -452,7 +457,7 @@ function WorkforceWizard() {
       setIsCreating(false);
       creatingRef.current = false;
 
-      navigate(`/workforce/${newGroupId}?version=1`);
+      leaveNow(`/workforce/${newGroupId}?version=1`);
     } catch (err) {
       const message = getErrorMessage(err);
       updateProgress(Workforce_PROGRESS_ID, {
@@ -476,7 +481,7 @@ function WorkforceWizard() {
     boardName,
     boardDescription,
     createGroup,
-    navigate,
+    leaveNow,
     llmDefaults,
     // Read in the custom build path to reproduce a saved template's style and
     // round count. Omitting it would let this callback close over a stale value.
@@ -499,6 +504,13 @@ function WorkforceWizard() {
       <div className="flex items-center justify-end mb-4">
         <Link
           to="/workforce"
+          onClick={(e) => {
+            // Plain left click only: a modified click opens another tab and
+            // leaves this wizard (and its unsaved team) where it is.
+            if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            e.preventDefault();
+            requestLeave("/workforce");
+          }}
           className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           aria-label={t("Workforce.wizard.cancel", "Cancel")}
         >
@@ -597,6 +609,7 @@ function WorkforceWizard() {
         </div>
       )}
       </div>
+      {leaveDialog}
     </div>
   );
 }

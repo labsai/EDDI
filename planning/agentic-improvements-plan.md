@@ -1,5 +1,7 @@
 # EDDI v6 — Agentic Improvements Plan
 
+> **Status (2026-10-02): partly superseded — re-verify before acting.** The status table below dates from 2026-04-17. Since then behavioural counterweights (`CounterweightService`), multimodal attachments ([`docs/attachments-guide.md`](../docs/attachments-guide.md)) and capability routing have shipped; session snapshots and forking have not (AGENTS.md §3).
+
 > **Scope.** Capability-based A2A routing, cryptographic agent identity, multimodal context attachments, behavioral counterweights, MCP governance, and session safety (snapshots + forking).
 >
 > **Governing Principles.** All work MUST conform to the Nine Pillars in [`docs/project-philosophy.md`](../docs/project-philosophy.md) and the engine rules in [`AGENTS.md`](../AGENTS.md). Java is the engine; configuration is logic; security is architecture.

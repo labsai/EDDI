@@ -88,8 +88,8 @@ applies in dev mode only.
 
 ### Graceful shutdown
 
-Tuned for Kubernetes rolling updates: EDDI reports itself not-ready first, waits
-for the load balancer to notice, then drains in-flight conversations.
+Tuned for Kubernetes pod replacement (an upgrade, an eviction, a reschedule): EDDI reports itself
+not-ready first, waits for the load balancer to notice, then drains in-flight conversations.
 
 | Property | Default | Description |
 |---|---|---|

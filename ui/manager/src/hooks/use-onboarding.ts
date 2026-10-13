@@ -142,6 +142,8 @@ interface OnboardingState {
   prevStep: () => void;
   skipChapter: () => void;
   completeChapter: () => void;
+  /** End the active chapter WITHOUT marking it done (navigated away, target gone). */
+  abandonChapter: () => void;
   restartChapter: (id: TourChapterId) => void;
 
   // Actions — Offer bar
@@ -216,6 +218,12 @@ export const useOnboarding = create<OnboardingState>((set, get) => {
         next.add(activeChapter);
         set({ activeChapter: null, currentStep: 0, completedChapters: next });
       }
+    },
+
+    abandonChapter: () => {
+      // Not `skipChapter`: that records the chapter as done, which would hide it
+      // from the offer bar for a tour the user never actually saw.
+      if (get().activeChapter) set({ activeChapter: null, currentStep: 0 });
     },
 
     restartChapter: (id) => {

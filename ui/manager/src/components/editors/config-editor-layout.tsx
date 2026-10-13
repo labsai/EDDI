@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { UnsavedChangesDialog, UnsavedChangesPrompt } from "@/components/ui/unsaved-changes-dialog";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { JsonEditor } from "./json-editor";
 import { VersionPicker, type VersionInfo } from "./version-picker";
@@ -132,7 +132,7 @@ export function ConfigEditorLayout({
 
   // Navigation guard — the browser prompt on close/reload, and the in-app
   // prompt (rendered below) for links, Back and navigate() calls.
-  const unsavedGuard = useUnsavedChangesGuard(isDirty && !readOnly);
+  useUnsavedChangesGuard(isDirty && !readOnly);
 
   const handleDiscard = useCallback(() => {
     setEditedData(data);
@@ -396,7 +396,6 @@ export function ConfigEditorLayout({
         title={t("editor.discardTitle", "Discard Changes?")}
         message={t("editor.discardMessage", "Are you sure you want to discard all unsaved changes? This action cannot be undone.")}
       />
-      <UnsavedChangesPrompt guard={unsavedGuard} />
 
     </div>
   );
