@@ -121,6 +121,9 @@ that set `degraded.turns=reject`. Security state always fails closed.
   database is the shared bottleneck.
 - **Timings**: keep `lease.acquire-timeout` (45 s) below
   `systemRuntime.agentTimeoutInSeconds` (60 s) and above `lease.ttl` (20 s).
+  An agent's turn deadline (`turnDeadlineMs`, or the caller's `X-EDDI-Turn-Deadline-Ms`)
+  counts from the request's arrival, so time a turn spends waiting for its lease is
+  spent from that budget too.
 
 ## Runbook
 
@@ -145,7 +148,7 @@ API behind it, and why each action is safe, is in
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `ADMIN` (console
 replay claims and drain state), `NONCES`, `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_TASKS`,
-`A2A_CONTEXTS`, `A2A_STATES`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`; object store: `ARCHIVES`;
+`A2A_CONTEXTS`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`; object store: `ARCHIVES`;
 streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects
 `eddi.<prefix>.ops.>`). EDDI's own subjects live under `eddi.<prefix>.>`.
 

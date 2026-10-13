@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.caching;
 
+import ai.labs.eddi.engine.a2a.A2AModels.A2ATaskRecord;
+import ai.labs.eddi.engine.a2a.A2AModels.TaskState;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.DownSharedKv;
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -57,6 +60,18 @@ class SharedKvCacheTest {
         assertEquals("conv-1", nodeB.get("task-1"));
         nodeB.remove("task-1");
         assertNull(nodeA.get("task-1"));
+    }
+
+    @Test
+    @DisplayName("an A2A task record (main's IA2ATaskStore value) written on one node is read whole on another")
+    void a2aTaskRecordsTravel() {
+        var kv = new InMemorySharedKv("A2A_TASKS", Duration.ofMinutes(5));
+        ICache<String, A2ATaskRecord> nodeA = new SharedKvCache<>(local("a"), kv, false);
+        ICache<String, A2ATaskRecord> nodeB = new SharedKvCache<>(local("b"), kv, false);
+        var record = new A2ATaskRecord("task-1", "ctx-1", "conv-1", "agent-1", TaskState.input_required, "needs input", null, "hi",
+                Instant.parse("2026-10-13T10:15:30Z"), "gen-1");
+        nodeA.put("task-1", record);
+        assertEquals(record, nodeB.get("task-1"), "every field, the enum and the timestamp survive the bucket");
     }
 
     @Test

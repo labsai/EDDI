@@ -41,7 +41,6 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             "nonce-replay-protection", "NONCES",
             "a2aTaskMapping", "A2A_TASKS",
             "a2aTaskMapping:context", "A2A_CONTEXTS",
-            "a2aTaskMapping:state", "A2A_STATES",
             "paginated-tool-responses", "TOOL_PAGES",
             "slack-event-dedup", "DEDUP",
             "channel-thread-locks", "CHANNEL");
