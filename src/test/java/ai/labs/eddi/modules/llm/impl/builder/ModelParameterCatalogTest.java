@@ -26,6 +26,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -469,9 +470,15 @@ class ModelParameterCatalogTest {
         @Test
         @DisplayName("a rejected maxTokens is carried over as maxCompletionTokens, unless that is configured")
         void migratesTheOutputCap() {
-            var migrated = CATALOG.adapt("openai", Map.of("modelName", "gpt-5", "maxTokens", "4000"), true).parameters();
+            var migratedResult = CATALOG.adapt("openai", Map.of("modelName", "gpt-5", "maxTokens", "4000"), true);
+            var migrated = migratedResult.parameters();
             assertFalse(migrated.containsKey("maxTokens"));
             assertEquals("4000", migrated.get("maxCompletionTokens"));
+            assertEquals("maxCompletionTokens", migratedResult.findings().getFirst().migratedTo(),
+                    "the finding says where the value went, so the log does not claim it was not sent");
+
+            var explicitFinding = CATALOG.adapt("openai", Map.of("modelName", "gpt-5", "maxTokens", "4000", "maxCompletionTokens", "9"), true);
+            assertNull(explicitFinding.findings().getFirst().migratedTo());
 
             var azure = CATALOG.adapt("azure-openai", Map.of("baseModel", "o3", "deploymentName", "my-deploy", "maxTokens", "4000"), true)
                     .parameters();

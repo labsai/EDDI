@@ -80,6 +80,8 @@ export interface RawParam {
   wire?: string;
   body?: boolean;
   header?: string;
+  /** For type `json`: the top-level shape the value must have (object when absent). */
+  jsonShape?: "object" | "array";
   rules?: RawRule[];
   source: string;
 }

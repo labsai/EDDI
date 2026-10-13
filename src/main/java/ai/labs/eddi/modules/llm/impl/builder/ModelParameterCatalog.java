@@ -88,7 +88,7 @@ public final class ModelParameterCatalog {
             "connection", "advanced");
     private static final Set<String> PROVIDER_FIELDS = Set.of("displayName", "inherits", "params");
     private static final Set<String> PARAM_FIELDS = Set.of("key", "type", "group", "label", "description", "enum", "min", "max",
-            "default", "wire", "body", "header", "rules", "source");
+            "default", "wire", "body", "header", "jsonShape", "rules", "source");
     private static final Set<String> RULE_FIELDS = Set.of("models", "effect", "note", "when", "unless", "migrateTo");
     private static final Set<String> CONDITION_FIELDS = Set.of("key", "values", "whenUnset");
 
@@ -166,8 +166,8 @@ public final class ModelParameterCatalog {
      *            sent as this HTTP header rather than a body field
      */
     public record Param(String key, String type, String group, String label, String description, List<String> enumValues,
-            Double min, Double max, String defaultValue, String wire, boolean body, String header, List<Rule> rules,
-            String source) {
+            Double min, Double max, String defaultValue, String wire, boolean body, String header, String jsonShape,
+            List<Rule> rules, String source) {
         public Param {
             enumValues = enumValues == null ? List.of() : List.copyOf(enumValues);
             rules = rules == null ? List.of() : List.copyOf(rules);
@@ -175,7 +175,7 @@ public final class ModelParameterCatalog {
 
         Param withoutRules() {
             return new Param(key, type, group, label, description, enumValues, min, max, defaultValue, wire, body, header,
-                    List.of(), source);
+                    jsonShape, List.of(), source);
         }
     }
 
@@ -186,8 +186,12 @@ public final class ModelParameterCatalog {
      * @param removed
      *            whether the parameter was taken out of the map handed to the
      *            builder
+     * @param migratedTo
+     *            the parameter its value was carried over to when the rule renames
+     *            it ({@code maxTokens} to {@code maxCompletionTokens}), else
+     *            {@code null}
      */
-    public record Finding(String key, String model, Effect effect, boolean removed, String note) {
+    public record Finding(String key, String model, Effect effect, boolean removed, String note, String migratedTo) {
     }
 
     /** The map to hand to the builder, and what was found on the way. */
@@ -387,8 +391,18 @@ public final class ModelParameterCatalog {
                 rules.add(parseRule(r, where + ": rule " + index++));
             }
         }
-        return new Param(key, type, group, label, description, enumValues, min, max, defaultValue, wire, body, header, rules,
-                source);
+        String jsonShape = optionalText(node, "jsonShape", where);
+        if (jsonShape != null && !"json".equals(type)) {
+            throw new IllegalStateException(where + ": \"jsonShape\" is only meaningful for type json");
+        }
+        if (jsonShape != null && !"object".equals(jsonShape) && !"array".equals(jsonShape)) {
+            throw new IllegalStateException(where + ": jsonShape must be object or array, got '" + jsonShape + "'");
+        }
+        if (jsonShape == null && "json".equals(type)) {
+            jsonShape = "object";
+        }
+        return new Param(key, type, group, label, description, enumValues, min, max, defaultValue, wire, body, header, jsonShape,
+                rules, source);
     }
 
     private static Rule parseRule(JsonNode node, String where) {
@@ -629,6 +643,7 @@ public final class ModelParameterCatalog {
             for (Rule rule : param.rules()) {
                 if (rule.matches(model, parameters)) {
                     boolean remove = rule.effect() == Effect.REJECTED && dropRejected;
+                    String migratedTo = null;
                     if (remove) {
                         if (reduced == null) {
                             reduced = new HashMap<>(parameters);
@@ -636,9 +651,10 @@ public final class ModelParameterCatalog {
                         String removed = reduced.remove(key);
                         if (rule.migrateTo() != null && trimmedOrNull(parameters.get(rule.migrateTo())) == null) {
                             reduced.put(rule.migrateTo(), removed);
+                            migratedTo = rule.migrateTo();
                         }
                     }
-                    findings.add(new Finding(key, model, rule.effect(), remove, rule.note()));
+                    findings.add(new Finding(key, model, rule.effect(), remove, rule.note(), migratedTo));
                     break;
                 }
             }

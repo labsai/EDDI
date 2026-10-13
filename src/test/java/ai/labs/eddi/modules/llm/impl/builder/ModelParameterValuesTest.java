@@ -284,6 +284,20 @@ class ModelParameterValuesTest {
     }
 
     @Nested
+    @DisplayName("intMap")
+    class IntMap {
+
+        @Test
+        @DisplayName("accepts integers; rejects fractions and out-of-range values instead of truncating them")
+        void exactIntegersOnly() {
+            assertEquals(Map.of("42", 5, "7", -100), ModelParameterValues.intMap(Map.of("logitBias", "{\"42\":5,\"7\":-100.0}"), "logitBias"));
+            assertNull(ModelParameterValues.intMap(Map.of("logitBias", "{\"42\":1.9}"), "logitBias"));
+            assertNull(ModelParameterValues.intMap(Map.of("logitBias", "{\"42\":3000000000}"), "logitBias"));
+            assertNull(ModelParameterValues.intMap(Map.of("logitBias", "{\"42\":\"5\"}"), "logitBias"));
+        }
+    }
+
+    @Nested
     @DisplayName("deepMerge")
     class DeepMerge {
 

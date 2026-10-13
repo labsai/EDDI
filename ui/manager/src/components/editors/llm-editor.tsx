@@ -55,10 +55,12 @@ import { TaskToolApprovalsSection } from "./llm/task-tool-approvals-section";
 import { TaskToolCallLimits } from "./llm/task-tool-call-limits";
 import { ModelSettingsSection } from "./llm/model-settings-section";
 import { ParameterVerdictNote } from "./llm/model-settings/parameter-verdict-note";
+import { numberProblem } from "./llm/model-settings/model-settings-utils";
 import {
   PARAMETER_CATALOG,
   catalogKeys,
   evaluateParameter,
+  findParam,
   findProvider,
   rejectedForEveryValue,
 } from "@/lib/llm-parameter-catalog";
@@ -247,6 +249,14 @@ function TaskEditor({
   // String(): a value typed in the JSON tab can be a number ("temperature": 0.7).
   const modelValue = String(task.parameters?.[modelKey] ?? "");
   const temperatureValue = String(task.parameters?.temperature ?? "");
+  // The provider's own range for temperature (Anthropic stops at 1, OpenAI at 2);
+  // without a catalogued range only "is it a non-negative number" is checked.
+  const temperatureRange = findParam(PARAMETER_CATALOG, task.type, "temperature");
+  const temperatureProblem = !isTemperature(temperatureValue)
+    ? "notNumber"
+    : temperatureRange
+      ? numberProblem(temperatureValue, temperatureRange)
+      : null;
   const providerInfo = getProviderConfig(task.type ?? "");
   const modelListId = `${uid}-models`;
 
@@ -496,14 +506,18 @@ function TaskEditor({
                       readOnly={readOnly}
                       disabled={temperatureLocked}
                       placeholder={t("llmEditor.temperaturePlaceholder", "Provider default")}
-                      aria-invalid={isTemperature(temperatureValue) ? undefined : true}
+                      aria-invalid={temperatureProblem ? true : undefined}
                       className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                       data-testid="llm-temperature"
                       data-param-anchor={temperatureAnchor}
                     />
-                    {!isTemperature(temperatureValue) && (
-                      <p className="text-[11px] text-destructive" role="alert">
-                        {t("llmEditor.temperatureInvalid", "Enter a number, for example 0.7.")}
+                    {temperatureProblem && (
+                      <p className="text-[11px] text-destructive dark:text-red-400" role="alert" data-testid="llm-temperature-error">
+                        {temperatureProblem === "belowMin"
+                          ? t("llmEditor.modelSettings.belowMin", "Must be at least {{min}}.", { min: temperatureRange?.min })
+                          : temperatureProblem === "aboveMax"
+                            ? t("llmEditor.modelSettings.aboveMax", "Must be at most {{max}}.", { max: temperatureRange?.max })
+                            : t("llmEditor.temperatureInvalid", "Enter a number, for example 0.7.")}
                       </p>
                     )}
                     <ParameterVerdictNote

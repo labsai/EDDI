@@ -11,6 +11,7 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.math.BigDecimal;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -104,7 +105,7 @@ final class ModelParameterValues {
         try {
             return Integer.valueOf(raw);
         } catch (NumberFormatException e) {
-            return rejected(key, raw, "integer");
+            return rejected(key, "integer");
         }
     }
 
@@ -117,7 +118,7 @@ final class ModelParameterValues {
         try {
             return Long.valueOf(raw);
         } catch (NumberFormatException e) {
-            return rejected(key, raw, "long");
+            return rejected(key, "long");
         }
     }
 
@@ -130,7 +131,7 @@ final class ModelParameterValues {
         try {
             return Double.valueOf(raw);
         } catch (NumberFormatException e) {
-            return rejected(key, raw, "decimal");
+            return rejected(key, "decimal");
         }
     }
 
@@ -283,7 +284,7 @@ final class ModelParameterValues {
         if ("false".equalsIgnoreCase(raw)) {
             return Boolean.FALSE;
         }
-        return rejected(key, raw, "boolean");
+        return rejected(key, "boolean");
     }
 
     /** The trimmed value, or {@code null} when absent or blank. */
@@ -313,8 +314,7 @@ final class ModelParameterValues {
                 return candidate;
             }
         }
-        LOGGER.warnv("LLM parameter ''{0}'' is not one of {1} (''{2}'') — falling back to the model default.",
-                sanitize(key), allowed, sanitize(raw));
+        LOGGER.warnv("LLM parameter ''{0}'' is not one of {1} — falling back to the model default.", sanitize(key), allowed);
         return null;
     }
 
@@ -339,7 +339,7 @@ final class ModelParameterValues {
                     }
                 }
             } catch (JsonProcessingException e) {
-                return rejected(key, "(unparseable)", "JSON array of strings");
+                return rejected(key, "JSON array of strings");
             }
         } else {
             for (String item : raw.split(",")) {
@@ -372,7 +372,7 @@ final class ModelParameterValues {
             });
             return parsed == null || parsed.isEmpty() ? null : parsed;
         } catch (JsonProcessingException e) {
-            return rejected(key, "(unparseable)", "JSON object");
+            return rejected(key, "JSON object");
         }
     }
 
@@ -414,7 +414,7 @@ final class ModelParameterValues {
         try {
             return JSON.readValue(raw, Object.class);
         } catch (JsonProcessingException e) {
-            return rejected(key, "(unparseable)", "JSON value");
+            return rejected(key, "JSON value");
         }
     }
 
@@ -427,9 +427,14 @@ final class ModelParameterValues {
         Map<String, Integer> result = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : raw.entrySet()) {
             if (!(entry.getValue() instanceof Number number)) {
-                return rejected(key, "(non-numeric value)", "JSON object of integers");
+                return rejected(key, "JSON object of integers");
             }
-            result.put(entry.getKey(), number.intValue());
+            try {
+                // exact: 1.9 must not become 1, nor 3000000000 wrap around
+                result.put(entry.getKey(), new BigDecimal(number.toString()).intValueExact());
+            } catch (ArithmeticException | NumberFormatException e) {
+                return rejected(key, "JSON object of integers");
+            }
         }
         return result;
     }
@@ -446,9 +451,12 @@ final class ModelParameterValues {
         return raw.isEmpty() ? null : raw;
     }
 
-    private static <T> T rejected(String key, String raw, String expected) {
-        LOGGER.warnv("LLM parameter ''{0}'' is not a valid {1} (''{2}'') — falling back to the model default.",
-                sanitize(key), expected, sanitize(raw));
+    /**
+     * Only the key and the expected type are logged, never the value: a parameter
+     * can carry a credential or a URL with one.
+     */
+    private static <T> T rejected(String key, String expected) {
+        LOGGER.warnv("LLM parameter ''{0}'' is not a valid {1} — falling back to the model default.", sanitize(key), expected);
         return null;
     }
 }

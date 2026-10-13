@@ -1554,7 +1554,8 @@
       "addValue": "Type a value and press Enter",
       "listInvalid": "Not a JSON array of strings or a comma-separated list.",
       "jsonSyntax": "Not valid JSON yet.",
-      "jsonShape": "Must be a JSON object or array.",
+      "jsonObject": "Must be a JSON object, such as { \"name\": \"value\" }.",
+      "jsonArray": "Must be a JSON array, such as [ … ].",
       "formatJson": "Format",
       "range": "{{min}} to {{max}}",
       "atLeast": "at least {{min}}",
@@ -1599,7 +1600,8 @@
       }
     },
     "otherParams": "Other parameters",
-    "otherParamsHint": "Parameters not listed under Model settings, such as baseUrl, timeout or logRequests, or keys left over from another provider."
+    "otherParamsHint": "Parameters not listed under Model settings, such as baseUrl, timeout or logRequests, or keys left over from another provider.",
+    "cascadeStepModel": "Step {{n}} model"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",

@@ -326,13 +326,10 @@ function StringListControl({ param, value, onChange, inherited, disabled, readOn
 function JsonControl({ param, value, onChange, inherited, disabled, readOnly, id, describedBy, testId }: ParameterControlProps) {
   const { t } = useTranslation();
   const raw = value ?? "";
-  const problem = jsonProblem(raw);
+  const shape = param.jsonShape ?? "object";
+  const problem = jsonProblem(raw, shape);
   const errorId = `${id}-error`;
-  const placeholder = inherited?.trim()
-    ? inherited
-    : param.key === "plugins"
-      ? '[{"id":"web"}]'
-      : "{}";
+  const placeholder = inherited?.trim() ? inherited : shape === "array" ? "[]" : "{}";
   return (
     <div className="space-y-1">
       <textarea
@@ -355,7 +352,9 @@ function JsonControl({ param, value, onChange, inherited, disabled, readOnly, id
           <p id={errorId} className="flex-1 text-[11px] text-destructive dark:text-red-400" role="alert" data-testid={`${testId}-error`}>
             {problem === "syntax"
               ? t("llmEditor.modelSettings.jsonSyntax", "Not valid JSON yet.")
-              : t("llmEditor.modelSettings.jsonShape", "Must be a JSON object or array.")}
+              : problem === "notArray"
+                ? t("llmEditor.modelSettings.jsonArray", "Must be a JSON array, such as [ … ].")
+                : t("llmEditor.modelSettings.jsonObject", "Must be a JSON object, such as { \"name\": \"value\" }.")}
           </p>
         )}
         {!problem && raw.trim() !== "" && !readOnly && !disabled && (

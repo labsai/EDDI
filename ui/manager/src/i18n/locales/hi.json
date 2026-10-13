@@ -1512,7 +1512,8 @@
       "addValue": "मान लिखें और Enter दबाएँ",
       "listInvalid": "न स्ट्रिंग्स का JSON ऐरे है, न अल्पविराम से अलग सूची।",
       "jsonSyntax": "अभी मान्य JSON नहीं है।",
-      "jsonShape": "JSON ऑब्जेक्ट या ऐरे होना चाहिए।",
+      "jsonObject": "JSON ऑब्जेक्ट होना चाहिए, जैसे { \"name\": \"value\" }।",
+      "jsonArray": "JSON ऐरे होना चाहिए, जैसे [ … ]।",
       "formatJson": "फ़ॉर्मैट करें",
       "range": "{{min}} से {{max}}",
       "atLeast": "कम से कम {{min}}",
@@ -1557,7 +1558,8 @@
       }
     },
     "otherParams": "अन्य पैरामीटर",
-    "otherParamsHint": "वे पैरामीटर जो मॉडल सेटिंग्स में नहीं हैं, जैसे baseUrl, timeout या logRequests, या किसी दूसरे प्रदाता से बची कुंजियाँ।"
+    "otherParamsHint": "वे पैरामीटर जो मॉडल सेटिंग्स में नहीं हैं, जैसे baseUrl, timeout या logRequests, या किसी दूसरे प्रदाता से बची कुंजियाँ।",
+    "cascadeStepModel": "चरण {{n}} का मॉडल"
   },
   "outputEditor": {
     "labelPlaceholder": "लिंक लेबल...",

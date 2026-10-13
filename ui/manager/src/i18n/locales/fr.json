@@ -1528,7 +1528,8 @@
       "addValue": "Saisissez une valeur puis appuyez sur Entrée",
       "listInvalid": "Ni un tableau JSON de chaînes, ni une liste séparée par des virgules.",
       "jsonSyntax": "Pas encore du JSON valide.",
-      "jsonShape": "Doit être un objet ou un tableau JSON.",
+      "jsonObject": "Doit être un objet JSON, par exemple { \"name\": \"value\" }.",
+      "jsonArray": "Doit être un tableau JSON, par exemple [ … ].",
       "formatJson": "Mettre en forme",
       "range": "de {{min}} à {{max}}",
       "atLeast": "au moins {{min}}",
@@ -1577,7 +1578,8 @@
       }
     },
     "otherParams": "Autres paramètres",
-    "otherParamsHint": "Paramètres absents des réglages du modèle, comme baseUrl, timeout ou logRequests, ou clés restées d’un autre fournisseur."
+    "otherParamsHint": "Paramètres absents des réglages du modèle, comme baseUrl, timeout ou logRequests, ou clés restées d’un autre fournisseur.",
+    "cascadeStepModel": "Modèle de l’étape {{n}}"
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",

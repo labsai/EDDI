@@ -1512,7 +1512,8 @@
       "addValue": "พิมพ์ค่าแล้วกด Enter",
       "listInvalid": "ไม่ใช่อาร์เรย์ JSON ของสตริงหรือรายการที่คั่นด้วยจุลภาค",
       "jsonSyntax": "ยังไม่ใช่ JSON ที่ถูกต้อง",
-      "jsonShape": "ต้องเป็นออบเจ็กต์หรืออาร์เรย์ JSON",
+      "jsonObject": "ต้องเป็นออบเจ็กต์ JSON เช่น { \"name\": \"value\" }",
+      "jsonArray": "ต้องเป็นอาร์เรย์ JSON เช่น [ … ]",
       "formatJson": "จัดรูปแบบ",
       "range": "{{min}} ถึง {{max}}",
       "atLeast": "อย่างน้อย {{min}}",
@@ -1557,7 +1558,8 @@
       }
     },
     "otherParams": "พารามิเตอร์อื่น",
-    "otherParamsHint": "พารามิเตอร์ที่ไม่อยู่ในการตั้งค่าโมเดล เช่น baseUrl, timeout หรือ logRequests หรือคีย์ที่เหลือจากผู้ให้บริการอื่น"
+    "otherParamsHint": "พารามิเตอร์ที่ไม่อยู่ในการตั้งค่าโมเดล เช่น baseUrl, timeout หรือ logRequests หรือคีย์ที่เหลือจากผู้ให้บริการอื่น",
+    "cascadeStepModel": "โมเดลของขั้นที่ {{n}}"
   },
   "outputEditor": {
     "labelPlaceholder": "ป้ายลิงก์...",

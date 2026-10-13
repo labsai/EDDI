@@ -324,7 +324,11 @@ public class ChatModelRegistry {
     private Map<String, String> adaptToModel(String type, Map<String, String> resolvedParams) {
         var adapted = parameterCatalog.adapt(type, resolvedParams, dropRejectedParameters);
         for (var finding : adapted.findings()) {
-            if (finding.removed()) {
+            if (finding.migratedTo() != null) {
+                LOGGER.warnv("LLM parameter ''{0}'' is not accepted by {1} model ''{2}'': {3} (sent as ''{4}'' instead)",
+                        sanitize(finding.key()), sanitize(type), sanitize(finding.model()), finding.note(),
+                        sanitize(finding.migratedTo()));
+            } else if (finding.removed()) {
                 LOGGER.warnv("LLM parameter ''{0}'' was not sent to {1} model ''{2}'': {3} "
                         + "(set eddi.llm.parameter-catalog.drop-rejected=false to send it anyway)",
                         sanitize(finding.key()), sanitize(type), sanitize(finding.model()), finding.note());

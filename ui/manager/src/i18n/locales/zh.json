@@ -1512,7 +1512,8 @@
       "addValue": "输入一个值后按回车",
       "listInvalid": "既不是字符串 JSON 数组，也不是逗号分隔的列表。",
       "jsonSyntax": "尚不是有效的 JSON。",
-      "jsonShape": "必须是 JSON 对象或数组。",
+      "jsonObject": "必须是 JSON 对象，例如 { \"name\": \"value\" }。",
+      "jsonArray": "必须是 JSON 数组，例如 [ … ]。",
       "formatJson": "格式化",
       "range": "{{min}} 到 {{max}}",
       "atLeast": "至少 {{min}}",
@@ -1557,7 +1558,8 @@
       }
     },
     "otherParams": "其他参数",
-    "otherParamsHint": "未列在模型设置中的参数，例如 baseUrl、timeout 或 logRequests，或其他提供商遗留的键。"
+    "otherParamsHint": "未列在模型设置中的参数，例如 baseUrl、timeout 或 logRequests，或其他提供商遗留的键。",
+    "cascadeStepModel": "第 {{n}} 步的模型"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",

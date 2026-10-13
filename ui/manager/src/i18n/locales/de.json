@@ -1512,7 +1512,8 @@
       "addValue": "Wert eingeben und Enter drücken",
       "listInvalid": "Weder ein JSON-Array aus Zeichenketten noch eine kommagetrennte Liste.",
       "jsonSyntax": "Noch kein gültiges JSON.",
-      "jsonShape": "Muss ein JSON-Objekt oder -Array sein.",
+      "jsonObject": "Muss ein JSON-Objekt sein, etwa { \"name\": \"value\" }.",
+      "jsonArray": "Muss ein JSON-Array sein, etwa [ … ].",
       "formatJson": "Formatieren",
       "range": "{{min}} bis {{max}}",
       "atLeast": "mindestens {{min}}",
@@ -1557,7 +1558,8 @@
       }
     },
     "otherParams": "Weitere Parameter",
-    "otherParamsHint": "Parameter, die nicht unter Modelleinstellungen stehen, etwa baseUrl, timeout oder logRequests, oder Schlüssel, die von einem anderen Anbieter übrig sind."
+    "otherParamsHint": "Parameter, die nicht unter Modelleinstellungen stehen, etwa baseUrl, timeout oder logRequests, oder Schlüssel, die von einem anderen Anbieter übrig sind.",
+    "cascadeStepModel": "Modell für Schritt {{n}}"
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",

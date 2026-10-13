@@ -104,7 +104,7 @@ def esc(text):
     return str(text).replace("|", "\\|").replace("\n", " ")
 
 
-def resolved_params(catalog, provider_id, seen=None):
+def resolved_params(catalog, provider_id):
     provider = catalog["providers"][provider_id]
     parent = provider.get("inherits")
     params = {}

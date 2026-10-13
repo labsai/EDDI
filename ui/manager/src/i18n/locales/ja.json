@@ -1512,7 +1512,8 @@
       "addValue": "値を入力して Enter キーを押します",
       "listInvalid": "文字列の JSON 配列でもカンマ区切りのリストでもありません。",
       "jsonSyntax": "まだ有効な JSON ではありません。",
-      "jsonShape": "JSON オブジェクトまたは配列である必要があります。",
+      "jsonObject": "JSON オブジェクトである必要があります（例: { \"name\": \"value\" }）。",
+      "jsonArray": "JSON 配列である必要があります（例: [ … ]）。",
       "formatJson": "整形",
       "range": "{{min}}〜{{max}}",
       "atLeast": "{{min}} 以上",
@@ -1557,7 +1558,8 @@
       }
     },
     "otherParams": "その他のパラメーター",
-    "otherParamsHint": "モデル設定にないパラメーター（baseUrl、timeout、logRequests など）や、別のプロバイダーから残ったキーです。"
+    "otherParamsHint": "モデル設定にないパラメーター（baseUrl、timeout、logRequests など）や、別のプロバイダーから残ったキーです。",
+    "cascadeStepModel": "ステップ {{n}} のモデル"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",

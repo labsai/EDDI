@@ -3322,7 +3322,8 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "description": "OpenRouter plugins such as web search, as a JSON array like [{\"id\":\"web\"}].",
           "wire": "plugins",
           "body": true,
-          "source": "https://openrouter.ai/docs/guides/features/plugins/web-search"
+          "source": "https://openrouter.ai/docs/guides/features/plugins/web-search",
+          "jsonShape": "array"
         },
         {
           "key": "appReferer",

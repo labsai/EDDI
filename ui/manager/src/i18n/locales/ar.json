@@ -1576,7 +1576,8 @@
       "addValue": "اكتب قيمة واضغط Enter",
       "listInvalid": "ليست مصفوفة JSON من النصوص ولا قائمة مفصولة بفواصل.",
       "jsonSyntax": "ليست JSON صالحًا بعد.",
-      "jsonShape": "يجب أن تكون كائن JSON أو مصفوفة.",
+      "jsonObject": "يجب أن يكون كائن JSON، مثل { \"name\": \"value\" }.",
+      "jsonArray": "يجب أن تكون مصفوفة JSON، مثل [ … ].",
       "formatJson": "تنسيق",
       "range": "من {{min}} إلى {{max}}",
       "atLeast": "{{min}} على الأقل",
@@ -1637,7 +1638,8 @@
       }
     },
     "otherParams": "معاملات أخرى",
-    "otherParamsHint": "معاملات غير مدرجة في إعدادات النموذج، مثل baseUrl أو timeout أو logRequests، أو مفاتيح متبقية من مزوّد آخر."
+    "otherParamsHint": "معاملات غير مدرجة في إعدادات النموذج، مثل baseUrl أو timeout أو logRequests، أو مفاتيح متبقية من مزوّد آخر.",
+    "cascadeStepModel": "نموذج الخطوة {{n}}"
   },
   "outputEditor": {
     "labelPlaceholder": "تسمية الرابط...",

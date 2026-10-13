@@ -174,7 +174,7 @@ describe("ModelSettingsSection", () => {
 
     await user.clear(input("customHeaders"));
     await user.type(input("customHeaders"), "42");
-    expect(screen.getByTestId(`${P}-param-customHeaders-input-error`)).toHaveTextContent("object or array");
+    expect(screen.getByTestId(`${P}-param-customHeaders-input-error`)).toHaveTextContent("JSON object");
   });
 
   it("edits a stringList as chips, reading a comma list and writing a JSON array", async () => {
@@ -327,5 +327,22 @@ describe("ModelSettingsSection", () => {
 
     await user.click(screen.getByTestId(`${P}-param-seed-reset`));
     expect(onChange.mock.lastCall![0]).toEqual({ modelName: "gpt-5", topP: 0.9, store: true, metadata: { a: 1 } });
+  });
+
+  it("requires each JSON parameter's declared shape", async () => {
+    renderWithProviders(<Harness type="openai" initial={{ modelName: "gpt-4o", customHeaders: "[]" }} />);
+    // Headers are a map: an array is refused even though it is valid JSON.
+    expect(screen.getByTestId(`${P}-param-customHeaders-input-error`)).toHaveTextContent("JSON object");
+    expect(input("customHeaders")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("requires an array for OpenRouter plugins and refuses an object", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Harness type="openrouter" initial={{ modelName: "openrouter/auto", plugins: "{}" }} />);
+    expect(screen.getByTestId(`${P}-param-plugins-input-error`)).toHaveTextContent("JSON array");
+    expect(input("plugins")).toHaveAttribute("placeholder", "[]");
+    await user.clear(input("plugins"));
+    await user.type(input("plugins"), '[[{{"id":"web"}]');
+    expect(screen.queryByTestId(`${P}-param-plugins-input-error`)).not.toBeInTheDocument();
   });
 });

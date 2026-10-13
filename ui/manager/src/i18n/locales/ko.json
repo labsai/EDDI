@@ -1512,7 +1512,8 @@
       "addValue": "값을 입력하고 Enter 키를 누르세요",
       "listInvalid": "문자열 JSON 배열도 쉼표로 구분된 목록도 아닙니다.",
       "jsonSyntax": "아직 올바른 JSON이 아닙니다.",
-      "jsonShape": "JSON 객체 또는 배열이어야 합니다.",
+      "jsonObject": "JSON 객체여야 합니다(예: { \"name\": \"value\" }).",
+      "jsonArray": "JSON 배열이어야 합니다(예: [ … ]).",
       "formatJson": "정리",
       "range": "{{min}}~{{max}}",
       "atLeast": "{{min}} 이상",
@@ -1557,7 +1558,8 @@
       }
     },
     "otherParams": "기타 매개변수",
-    "otherParamsHint": "모델 설정에 없는 매개변수(예: baseUrl, timeout, logRequests) 또는 다른 제공자에서 남은 키입니다."
+    "otherParamsHint": "모델 설정에 없는 매개변수(예: baseUrl, timeout, logRequests) 또는 다른 제공자에서 남은 키입니다.",
+    "cascadeStepModel": "{{n}}단계 모델"
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",

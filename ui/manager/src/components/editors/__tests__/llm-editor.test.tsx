@@ -1405,4 +1405,24 @@ describe("LlmEditor model settings panel", () => {
     expect(screen.getByTestId("llm-temperature-verdict")).toHaveAttribute("data-state", "rejected");
     expect(screen.getByTestId("llm-model-settings-param-topP")).toHaveAttribute("data-configured");
   });
+
+  it.each([
+    ["anthropic", "claude-sonnet-4-5", "1.5", "Must be at most 1."],
+    ["openai", "gpt-4o", "2.5", "Must be at most 2."],
+    ["openai", "gpt-4o", "-1", "Enter a number, for example 0.7."],
+  ])("checks temperature against %s's catalog range", (type, model, value, message) => {
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", modelName: model, temperature: value }, type)} onChange={onChange} />);
+    expect(screen.getByTestId("llm-temperature")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("llm-temperature-error")).toHaveTextContent(message);
+  });
+
+  it.each([
+    ["openai", "gpt-4o", "1.5"],
+    ["ollama", "llama3", "5"], // no catalogued maximum: only "a non-negative number" is checked
+  ])("accepts a temperature inside %s's range", (type, model, value) => {
+    const key = type === "ollama" ? "model" : "modelName";
+    renderWithProviders(<LlmEditor data={task({ systemMessage: "", [key]: model, temperature: value }, type)} onChange={onChange} />);
+    expect(screen.getByTestId("llm-temperature")).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByTestId("llm-temperature-error")).not.toBeInTheDocument();
+  });
 });

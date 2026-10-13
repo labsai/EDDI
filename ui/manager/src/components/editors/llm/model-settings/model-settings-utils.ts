@@ -82,17 +82,24 @@ export function serializeStringList(items: readonly string[]): string | undefine
   return items.length === 0 ? undefined : JSON.stringify(items);
 }
 
-export type JsonProblem = "syntax" | "shape" | null;
+export type JsonProblem = "syntax" | "notObject" | "notArray" | null;
 
-/** A `json` parameter must parse, and be an object or an array (never a bare scalar). */
-export function jsonProblem(raw: string): JsonProblem {
+/**
+ * A `json` parameter must parse and have the shape its catalog entry declares:
+ * a JSON object unless `jsonShape` says array (OpenRouter's `plugins`). The
+ * backend reads headers, metadata and the like as a map, so `[]` there is as
+ * wrong as `{}` where a list is expected.
+ */
+export function jsonProblem(raw: string, shape: "object" | "array" = "object"): JsonProblem {
   if (raw.trim() === "") return null;
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(raw);
-    return parsed !== null && typeof parsed === "object" ? null : "shape";
+    parsed = JSON.parse(raw);
   } catch {
     return "syntax";
   }
+  if (shape === "array") return Array.isArray(parsed) ? null : "notArray";
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? null : "notObject";
 }
 
 export type NumberProblem = "notNumber" | "notInteger" | "belowMin" | "aboveMax" | null;
