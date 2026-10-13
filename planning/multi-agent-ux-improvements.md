@@ -2,7 +2,7 @@
 
 > **Based on**: Research paper — *"Architecting Multi-Agent User Experiences in Enterprise Workspaces: Integrating EDDI v6.0.0-RC1 into Slack and Microsoft Teams"* (source removed during docs cleanup)
 >
-> **Status**: Planning (pre-approval)
+> **Status**: Mostly implemented. `maxTurns` and the Slack integration shipped 2026-04-15, the HITL framework 2026-06-30 and Slack HITL approvals 2026-07-03. Not built: the Microsoft Teams adapter, a generic channel-adapter interface and the feedback store.
 
 ---
 

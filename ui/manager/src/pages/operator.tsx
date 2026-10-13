@@ -695,6 +695,8 @@ export function OperatorPage() {
           onDecide={handleDecide}
           blockedCalls={blockedCalls}
           renderCallExtra={renderCallExtra}
+          draft={chat.draft}
+          onDraftChange={chat.setDraft}
           isVisible={tab === "chat"}
           isRestoring={isPicking}
           isReadOnly={chat.isReadOnly}

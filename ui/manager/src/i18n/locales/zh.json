@@ -25,7 +25,13 @@
     "profile": "个人资料",
     "guest": "访客",
     "userMenu": "用户菜单",
-    "signedIn": "已登录"
+    "signedIn": "已登录",
+    "authenticating": "正在验证身份…",
+    "initFailedTitle": "登录失败",
+    "initFailedBody": "Manager 无法完成登录。登录服务可能无法访问，或您的会话已被拒绝。",
+    "signInAgain": "重新登录",
+    "sessionExpiredTitle": "您的会话已过期。",
+    "sessionExpiredBody": "未保存的更改仍保留在此页面——请先复制所需内容，再重新登录。"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -76,7 +82,11 @@
     "monitoring": "对话监控",
     "analytics": "分析",
     "connections": "连接",
-    "workspaces": "工作区"
+    "workspaces": "工作区",
+    "breadcrumb": "面包屑导航",
+    "checkingVersion": "正在检查版本...",
+    "expandSidebar": "展开侧边栏",
+    "collapseSidebar": "收起侧边栏"
   },
   "theme": {
     "light": "浅色",
@@ -220,7 +230,13 @@
     "versionShort": "v{{version}}",
     "resizePanel": "调整{{panel}}大小",
     "deletePermanently": "永久删除",
-    "deletePermanentlyHint": "无法撤消。不勾选此项时，该项仅被标记为已删除，在被清除前仍可恢复。"
+    "deletePermanentlyHint": "无法撤消。不勾选此项时，该项仅被标记为已删除，在被清除前仍可恢复。",
+    "errors": {
+      "network": "无法连接到 EDDI。请检查网络连接后重试。",
+      "unauthorized": "您的会话已过期，请重新登录。",
+      "forbidden": "您无权查看此内容。",
+      "notFound": "未找到——可能已被删除。"
+    }
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",
@@ -696,7 +712,13 @@
     "purgeSuccess_other": "已清除 {{count}} 个已结束对话",
     "purgeSuccess_one": "已清除 {{count}} 个已结束对话",
     "endStateUnavailable": "无法重新检查对话的当前状态，因此未结束任何对话。请重试。",
-    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。"
+    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。",
+    "noMoreResults": "没有更多结果",
+    "backToPreviousPage": "返回上一页",
+    "purgeTitleAll": "清理已结束的对话 – 所有智能体",
+    "purgeScopeNote": "不仅限于上方选中的智能体：将删除所有智能体已结束的对话。",
+    "confirmPurgeScope": "适用于所有智能体，而不仅是上方选中的智能体。",
+    "purgeDaysInvalid": "请输入不小于 1 的整数天数。"
   },
   "conversationDetail": {
     "backToConversations": "返回对话列表",
@@ -714,7 +736,9 @@
     "totalCost": "总成本",
     "cacheHitRate": "缓存命中率",
     "endReasonRetired": "已结束：该智能体版本已被停用",
-    "stepAgentVersion": "由智能体版本 {{version}} 回答"
+    "stepAgentVersion": "由智能体版本 {{version}} 回答",
+    "searchTranscriptLabel": "搜索对话记录",
+    "matchCount": "匹配的步骤：{{matches}}"
   },
   "chat": {
     "hide": "隐藏",
@@ -795,7 +819,10 @@
     "sendWhileLoading": "您的消息未发送：对话仍在加载中。请稍后再试。",
     "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。",
     "errorWithReason": "错误：{{reason}}",
-    "endConversationFailed": "无法结束对话：{{reason}}"
+    "endConversationFailed": "无法结束对话：{{reason}}",
+    "searchAgents": "搜索智能体",
+    "noAgentMatches": "没有与搜索匹配的智能体",
+    "transcript": "对话"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -907,6 +934,7 @@
     "savedNotLiveDescription": "运行中的智能体仍在使用已部署的版本。请部署以使此更改生效。",
     "deployNow": "部署",
     "deployStarted": "部署已开始",
+    "stay": "留下",
     "invalidJsonNotSaved": "未保存 — JSON 无效：{{reason}}"
   },
   "rulesEditor": {
@@ -1653,7 +1681,7 @@
     "stepsCount": "{{count}} 步骤",
     "noConversationsFound": "未找到对话",
     "useConversationId": "使用ID: {{id}}",
-    "searchLogs": "搜索日志…",
+    "searchLogs": "搜索已加载的条目…",
     "errors": "错误",
     "warnings": "警告",
     "infos": "信息",
@@ -1665,7 +1693,17 @@
     "stateActive": "活跃",
     "stateError": "错误",
     "stateEnded": "已结束",
-    "loadOlder": "加载更早的条目"
+    "loadOlder": "加载更早的条目",
+    "reconnect": "重新连接",
+    "streamDisconnected": "已与日志流断开连接。",
+    "errorCount_other": "{{count}} 个错误",
+    "warnCount_other": "{{count}} 个警告",
+    "copied": "日志条目已复制",
+    "noMatches": "已加载的条目中没有与搜索匹配的内容。",
+    "noMatchesHint": "搜索仅覆盖此处已加载的条目。请加载更早的条目或调整筛选条件以查看更早的内容。",
+    "searchLogsLabel": "搜索已加载的日志条目",
+    "errorCount_one": "{{count}} 个错误",
+    "warnCount_one": "{{count}} 个警告"
   },
   "secrets": {
     "loadError": "无法加载密钥",
@@ -1885,7 +1923,9 @@
     },
     "views": "审计视图",
     "tabTrail": "流水线记录",
-    "tabAdminActions": "管理操作"
+    "tabAdminActions": "管理操作",
+    "agentsDeployed": "已部署",
+    "agentsNotDeployed": "未部署"
   },
   "schedules": {
     "cronHelp": "5 字段格式：分 时 日 月 星期",
@@ -2026,7 +2066,8 @@
     "serverRefusedUpdate": "服务器拒绝了此更改：",
     "serverRefusedCreate": "服务器拒绝了此计划：",
     "disabledAccessRevokedHintBy": "其创建者（{{user}}）已无法再使用此智能体，因此停止触发。请重新与其共享该智能体——或以有权使用者的身份重新创建计划——然后启用。",
-    "finishedOneShot": "一次性计划：已运行并完成。"
+    "finishedOneShot": "一次性计划：已运行并完成。",
+    "oneTimeHelpZone": "仅在此时刻触发一次，然后完成。按 {{zone}} 时间解读（即下方的时区）。"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -2119,7 +2160,9 @@
     "connected": "已连接",
     "disconnected": "已断开",
     "logOutput": "日志输出",
-    "noMatch": "没有日志符合您的筛选条件"
+    "noMatch": "没有日志符合您的筛选条件",
+    "errorsAnnounce_one": "日志中有 {{count}} 个错误",
+    "errorsAnnounce_other": "日志中有 {{count}} 个错误"
   },
   "promptViewer": {
     "error": "加载提示词数据失败",
@@ -2523,7 +2566,8 @@
       "title": "帮助与导览",
       "platformTour": "平台导览",
       "resetAll": "重置所有导览进度",
-      "resetConfirm": "您确定要重置所有导览进度吗？"
+      "resetConfirm": "您确定要重置所有导览进度吗？",
+      "completed": "已完成"
     },
     "offer": {
       "message": "初次来到这里？花点时间看看：{{page}}",
@@ -2546,7 +2590,8 @@
   },
   "stream": {
     "live": "实时",
-    "reconnecting": "重新连接中…"
+    "reconnecting": "重新连接中…",
+    "disconnected": "已断开"
   },
   "createOrWizard": {
     "title": "新 {{type}}",
@@ -2556,7 +2601,8 @@
     "quickCreateTitle": "快速创建 {{type}}",
     "quickCreateDesc": "定义名称和描述，稍后配置详细信息。",
     "guidedSetup": "配置向导",
-    "guidedSetupDesc": "使用分步向导设置LLM模型、提示词及默认规则。"
+    "guidedSetupDesc": "使用分步向导设置LLM模型、提示词及默认规则。",
+    "guidedSetupDescGroup": "按步骤设置团队、讨论方式和可选审批的向导，也可以一并创建成员智能体。"
   },
   "groups": {
     "actionConflict": "另一个操作仍在进行中，或此讨论不再接受该操作。请重试。",
@@ -3135,10 +3181,28 @@
       "duplicateMember": "{{ids}} 被列出了不止一次。一个成员只占一个席位：两个席位会共用一个成员会话并看到彼此的回答。第二个席位请使用第二个智能体。"
     },
     "serverRefused": "服务器拒绝了此群组：",
+    "versionLookupFailed": "无法获取此群组的当前版本。",
     "deletePermanentlyHint": "无法撤消：群组及其工作区（待办事项、节奏及其计划任务）将被永久删除。不勾选此项时，群组仅被标记为已删除，在被清除前仍可恢复。",
     "deletePermanentlyWithMembersHint": "无法撤消：群组、其工作区以及所有成员代理将被永久删除。不勾选此项时，它们仅被标记为已删除，在被清除前仍可恢复。",
     "deleteMembersFailedAfterGroup": "群组已删除，但以下成员代理无法删除：{{ids}}。请在“代理”页面中删除它们。",
-    "deleteMembersFailedGroupKept": "群组已保留：以下成员代理无法删除：{{ids}}。请重试以完成操作。"
+    "deleteMembersFailedGroupKept": "群组已保留：以下成员代理无法删除：{{ids}}。请重试以完成操作。",
+    "transcriptLabel": "讨论记录",
+    "announceAwaitingApproval": "讨论已暂停，正在等待你的批准。",
+    "announceAwaitingHuman": "讨论正在等待某位成员的回复。",
+    "newMessages": "新消息",
+    "finishEditingFirst": "请先保存或取消你正在编辑的部分",
+    "editBasics": "编辑名称、成员和设置",
+    "humanTurnResuming": "已记录你的回复。讨论正在恢复——此页面会跟随讨论进展，并每隔几秒更新一次。",
+    "composerMode": "如何处理你的消息",
+    "composerModeNew": "新讨论",
+    "composerModeContinue": "继续此讨论",
+    "loadMoreDiscussions": "加载更早的讨论",
+    "confirmDeleteLiveDiscussionDescription": "此讨论仍在运行。它将被停止，其记录及全部内容会被永久删除，且无法撤销。",
+    "discardEditsTitle": "放弃未保存的修改？",
+    "discardEditsDescription": "配置中的某一部分仍在编辑。关闭面板会放弃你在其中所做的更改。",
+    "discardEditsConfirm": "放弃",
+    "keepEditing": "继续编辑",
+    "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3191,7 +3255,10 @@
     "sourceConversation": "来源对话",
     "conflicted": "有冲突",
     "deleteEntryTitle": "删除此记忆？",
-    "deleteEntryDesc": "将为该用户永久删除“{{key}}”。智能体将不再记起它。此操作无法撤销。"
+    "deleteEntryDesc": "将为该用户永久删除“{{key}}”。智能体将不再记起它。此操作无法撤销。",
+    "deleteAllDescUser": "这将永久删除用户“{{userId}}”的全部 {{total}} 条记忆条目，此操作无法撤销。",
+    "toggleDetails": "显示或隐藏 {{key}} 的详情",
+    "deleteEntryLabel": "删除记忆条目 {{key}}"
   },
   "properties": {
     "title": "用户属性",
@@ -3227,7 +3294,9 @@
     "deleted": "触发器已删除",
     "deleteTitle": "删除触发器",
     "deleteDesc": "确定要永久删除意图「{{intent}}」的触发器吗？",
-    "searchPlaceholder": "按意图或代理 ID 筛选…"
+    "searchPlaceholder": "按意图或代理 ID 筛选…",
+    "needIntent": "请输入意图后再保存。",
+    "needAgent": "请至少选择一个智能体后再保存。"
   },
   "capabilities": {
     "agentCount": "智能体",
@@ -3244,7 +3313,11 @@
     "registeredSkills": "已注册技能",
     "noSkills": "未找到技能",
     "matchingAgents": "匹配的代理",
-    "noMatches": "该技能未找到匹配代理"
+    "noMatches": "该技能未找到匹配代理",
+    "searchLabel": "搜索技能",
+    "strategyLabel": "匹配策略",
+    "emptyTitle": "尚未注册任何能力",
+    "emptyDesc": "代理在配置中声明能力（技能）后会显示在这里。为代理添加能力后，它就会出现在此注册表中。"
   },
   "exportDialog": {
     "title": "导出智能体",
@@ -3486,14 +3559,61 @@
     "humanPrincipalIdPlaceholder": "用户的登录/主体 ID",
     "humanTurnSettingsHint": "轮到人类成员发言时，讨论会暂停并等待。请选择如果他们未能及时回应会发生什么。",
     "humanTurnSettingsTitle": "人类成员发言设置",
-    "humanTurnTimeoutInvalid": "不是有效的 ISO-8601 时长，例如 PT24H 或 P1D。",
-    "humanTurnTimeoutLabel": "发言超时（ISO-8601 时长）",
-    "humanTurnTimeoutPlaceholder": "例如 PT24H——留空表示无限期等待",
+    "humanTurnTimeoutInvalid": "请输入大于零的数字。",
+    "humanTurnTimeoutLabel": "发言超时",
+    "humanTurnTimeoutPlaceholder": "留空表示无限期等待。",
     "memberTypeHuman": "人类",
-    "memberPromptPlaceholder": "你是 {{name}}。请从你所在领域的视角提供有见地的分析。",
-    "memberPromptPlaceholderRole": "你是 {{name}}，一位 {{role}} 专家。请从你所在领域的视角提供有见地的分析。",
-    "moderatorPromptPlaceholder": "你是一位经验丰富的主持人。请将小组讨论整合成清晰、平衡的总结…",
-    "modelPlaceholder": "例如 {{model}}"
+    "modelPlaceholder": "例如 {{model}}",
+    "stepTemplate": "预设",
+    "stepConfig": "设置",
+    "stepMembers": "成员",
+    "stepReview": "审核",
+    "stepsLabel": "向导进度",
+    "stepAria": "第 {{n}} 步：{{title}}",
+    "blockersTitle": "要继续：",
+    "blockerName": "请输入群组名称。",
+    "blockerHitlPhases": "请至少选择一个暂停阶段，或关闭人工审批。",
+    "blockerHitlTimeout": "请输入有效的审批超时（例如 PT15M），或选择其他超时策略。",
+    "blockerStyle": "请选择此服务器支持的讨论方式。",
+    "blockerMemberName": "{{member}}：请添加显示名称。",
+    "blockerMemberPrincipal": "{{member}}：请输入此人的主体 ID。",
+    "blockerMemberGroup": "{{member}}：请选择嵌套的群组。",
+    "blockerMemberAgent": "{{member}}：请选择现有智能体，或切换为“新建”。",
+    "blockerMemberKey": "{{member}}：请为 {{provider}} 添加 API 密钥，或选择无需密钥的提供商（例如 Ollama）。",
+    "blockerModeratorKey": "主持人：请为 {{provider}} 添加 API 密钥，或选择无需密钥的提供商（例如 Ollama）。",
+    "blockerTurnTimeout": "请将人工发言超时设为大于零的数字，或清空。",
+    "memberFallbackName": "成员 {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "开放式头脑风暴——汇集对一个问题的各种视角。",
+      "PEER_REVIEW": "从多个角度评审草稿或提案。",
+      "DEVIL_ADVOCATE": "在做出承诺之前对方案进行压力测试。",
+      "DELPHI": "适用于希望独立意见趋于一致的预测与估算。",
+      "DEBATE": "在两个对立立场之间权衡决策。",
+      "TASK_FORCE": "通过分配任务来规划并完成多步骤工作。",
+      "NEGOTIATION": "在利益不同的各方之间达成一致。"
+    },
+    "howItRuns": "运行方式",
+    "roundsExplain": "一轮是指每位成员各发言一次。轮数越多，成员之间的互相回应越充分，但每多一轮就会增加 LLM 调用和成本。",
+    "roundsEstimate": "预计：每次讨论约 {{calls}} 次 LLM 调用（{{members}} 位成员 × {{rounds}} 轮）。",
+    "roundsEstimateModerator": "预计：每次讨论约 {{calls}} 次 LLM 调用（{{members}} 位成员 × {{rounds}} 轮 + 1 次主持人调用）。",
+    "unitMinutes": "分钟",
+    "unitHours": "小时",
+    "unitDays": "天",
+    "durationNoLimit": "无限制",
+    "durationUnit": "单位",
+    "defaultMemberPrompt": "你是 {{name}}。请从你的专业角度提供清晰、可执行的见解。",
+    "defaultMemberPromptRole": "你是 {{name}}，专长是 {{role}}。请从你的专业角度提供清晰、可执行的见解。",
+    "defaultMemberPromptNoName": "你是本群组的成员。请从你的专业角度提供清晰、可执行的见解。",
+    "defaultModeratorPrompt": "你是一位经验丰富的主持人。请将群组的讨论综合成一份清晰、平衡的总结，涵盖关键见解、达成一致之处和仍存在的分歧。",
+    "memberNameLabel": "显示名称",
+    "memberRoleLabel": "角色",
+    "memberTypeLabel": "成员类型",
+    "bulkTitle": "为所有新智能体使用相同的提供商和密钥",
+    "bulkHint": "每个新智能体都需要一个 LLM 提供商，大多数提供商还需要 API 密钥。在此填写一次并应用到全部；之后仍可单独修改某个智能体。",
+    "bulkApply": "应用到所有新智能体",
+    "apiKeyRequired": "创建此智能体前，{{provider}} 需要 API 密钥。",
+    "presetsNote": "这些是用于填充本向导的入门预设。如要使用经过调优的打包讨论，并把现有智能体分配到其角色，请参阅",
+    "presetsLink": "群组模板"
   },
   "groupTemplates": {
     "advisoryBoard": "顾问团",
@@ -3549,7 +3669,9 @@
     "roleCount_other": "{{count}} 个待分配角色",
     "roleCount_one": "{{count}} 个待分配角色",
     "empty": "没有可用的模板",
-    "emptyDescription": "此服务器未附带群组模板。你仍可使用向导从零创建群组。"
+    "emptyDescription": "此服务器未附带群组模板。你仍可使用向导从零创建群组。",
+    "wizardNote": "想边做边创建新智能体，或从零开始？群组向导提供更轻量的入门预设。",
+    "wizardLink": "打开群组向导"
   },
   "channels": {
     "agentIdPlaceholder": "处理消息的代理 ID",
@@ -3722,7 +3844,10 @@
     "confirmApproveGroupDescription": "批准整个暂停阶段并继续讨论。该暂停下等待的每项任务都会一并批准；如需逐项决定，请打开该群组。",
     "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。",
     "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。",
-    "regularTruncated": "仅显示前 {{limit}} 个对话审批，还有更多待处理。处理部分审批后即可看到其余审批。"
+    "regularTruncated": "仅显示前 {{limit}} 个对话审批，还有更多待处理。处理部分审批后即可看到其余审批。",
+    "conversationColumn": "对话",
+    "groupReviewLoadError": "无法加载该讨论。",
+    "groupReviewNoEntries": "目前还没有任何发言。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -3754,7 +3879,18 @@
     "vaultUp": "Vault 就绪",
     "viewLogs": "查看日志",
     "coordAdminOnly": "协调器：需要管理员权限",
-    "vaultAdminOnly": "Vault：需要管理员权限"
+    "vaultAdminOnly": "Vault：需要管理员权限",
+    "vaultChecking": "正在检查保险库…",
+    "statsPartial": "部分计数无法加载——显示为不可用，而不是零。",
+    "countUnavailable": "无法加载",
+    "convState": {
+      "READY": "就绪",
+      "IN_PROGRESS": "进行中",
+      "ENDED": "已结束",
+      "EXECUTION_INTERRUPTED": "已中断",
+      "ERROR": "错误",
+      "AWAITING_HUMAN": "等待人工"
+    }
   },
   "errorBoundary": {
     "retry": "重试",
@@ -3824,7 +3960,11 @@
       "auditLedger": "无法替换所有审计记录中的用户 ID。请在数据库可访问后再次执行擦除。",
       "databaseLogs": "无法对数据库日志条目进行假名化。请再次执行擦除；日志保留策略也会随时间删除它们。",
       "generic": "此步骤未完成。请在修复服务器日志中指出的原因后再次执行擦除——可以安全重复。"
-    }
+    },
+    "noDataFoundToast": "未找到该用户 ID 的数据，未删除任何内容。",
+    "noDataFoundTitle": "未找到该用户 ID 的数据",
+    "noDataFoundBody": "未删除“{{userId}}”的任何内容。请检查 ID 是否有拼写错误，然后重试。",
+    "confirmTypeLabel": "请输入用户 ID“{{userId}}”以确认"
   },
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
@@ -3850,7 +3990,9 @@
     "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。",
     "purgeIncompleteScan": "未删除任何内容：EDDI 未能完成对仍在使用的资源的检查。请重新扫描后再试。",
     "purgeFailed": "清理失败",
-    "scanFailed": "扫描失败：{{reason}}"
+    "scanFailed": "扫描失败：{{reason}}",
+    "reviewHint": "请先从列表中打开资源进行查看；列表中的所有孤立资源都会被删除。",
+    "typeToConfirm": "输入 {{count}} 以确认"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",
@@ -3877,7 +4019,8 @@
     "tenantId": "租户 ID",
     "title": "租户配额",
     "limitHintEmpty": "留空或 -1 = 不限，0 = 禁止",
-    "invalidNumber": "请输入数字，或留空表示不限。"
+    "invalidInteger": "请输入整数（0 或更大），或留空表示不限制。",
+    "invalidAmount": "请输入金额（0 或更大），或留空表示不限制。"
   },
   "secretPicker": {
     "clearVault": "清除保管库引用",
@@ -4831,7 +4974,13 @@
     "inputTemplateTooLong": "提示模板限制为 {{max}} 个字符。",
     "cronInvalid": "这不是有效的 cron 表达式。",
     "scheduleUnknown": "无法获取排程",
-    "nextRun": "下次 {{when}}"
+    "nextRun": "下次 {{when}}",
+    "taskSubjectLabel": "主题",
+    "taskDescriptionLabel": "描述",
+    "inputTemplateLabel": "提示词模板",
+    "priorityTitle": "优先级 {{n}}——数字越大越先被选取",
+    "backlogNote": "每次节奏运行都会优先选取优先级最高的任务（P5 先于 P1）。任务添加后无法编辑或删除，由运行来完成。",
+    "priorityHint": "节奏运行会优先选取数字较大的任务。0 为默认值。"
   },
   "workforceWizard": {
     "title": "新建团队"
@@ -5172,7 +5321,9 @@
     "bindingCallerSuppliedBody": "调用系统随请求交付各用户自己的凭据，EDDI 不存储任何内容。代理只能做该用户在目标系统能做的事，并且此连接不会出现在 MCP 和 A2A 发现中。",
     "confirmAuthChange": "更改此连接的认证方式？",
     "confirmAuthChangeDesc": "通过此连接关联的账户将无法再解析——授权属于产生它的流程。只要仍有账户关联，EDDI 就会拒绝更改并说明数量；请先取消关联，或新建一个连接并让用户改为关联它。",
-    "confirmAuthChangeAccept": "更改"
+    "confirmAuthChangeAccept": "更改",
+    "deleted": "连接“{{name}}”已删除",
+    "confirmDeleteNamed": "删除连接“{{name}}”？"
   },
   "extensionTypes": {
     "parser": "输入解析器",
@@ -5446,10 +5597,21 @@
     "kindObject": "对象（JSON）",
     "kindList": "列表（JSON）"
   },
+  "notFound": {
+    "title": "页面未找到",
+    "description": "此地址没有任何内容。它可能已被移动，或者链接输入有误。",
+    "backToDashboard": "返回仪表板",
+    "backToWorkforce": "返回 Workforce",
+    "chooseWorkspace": "选择工作区"
+  },
   "actionTags": {
     "remove": "移除 {{action}}",
     "none": "无动作",
     "inputLabel": "新动作",
     "add": "添加动作"
+  },
+  "wizardLeave": {
+    "title": "不创建就离开？",
+    "message": "你的团队设置（包括输入的提示词和 API 密钥）尚未创建，离开后将丢失。"
   }
 }

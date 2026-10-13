@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationS
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -228,6 +229,14 @@ public class ConversationMemoryUtilities {
     }
 
     /**
+     * Whether everything under {@code key} is masked as a credential. The token
+     * counts are exempt: the name contains "token", which would mask three numbers.
+     */
+    private static boolean isCredentialValueKey(String key) {
+        return !MemoryKeys.AUDIT_TOKEN_USAGE.equals(key) && SecretRedactionFilter.isCredentialFieldName(key);
+    }
+
+    /**
      * Whether a step/output key must be withheld from the caller-controlled
      * {@code returnDetailed} projection. Covers audit records (compiled system
      * prompts), raw model traces and raw error bodies — none of which are meant for
@@ -235,6 +244,12 @@ public class ConversationMemoryUtilities {
      */
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
+            return false;
+        }
+        // The token counts are the one audit entry meant for the caller: the /v1
+        // adapter builds its `usage` block from them. They hold three numbers, no
+        // prompt text — unlike the rest of audit:*.
+        if (MemoryKeys.AUDIT_TOKEN_USAGE.equals(key)) {
             return false;
         }
         return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error");
@@ -313,6 +328,28 @@ public class ConversationMemoryUtilities {
         return value;
     }
 
+    /**
+     * The reason an ERROR turn failed, taken from the last digest the failing task
+     * left in the latest turn's {@code taskErrors}; {@code null} when the
+     * conversation is not in ERROR or nothing was reported (strict write's
+     * {@code exclude_all} deliberately reports nothing).
+     */
+    static SimpleConversationMemorySnapshot.TurnError turnError(ConversationState state, List<ConversationOutput> outputs) {
+        if (state != ConversationState.ERROR || outputs == null || outputs.isEmpty()) {
+            return null;
+        }
+        Object errors = outputs.getLast().get(TASK_ERRORS);
+        if (!(errors instanceof List<?> list) || list.isEmpty() || !(list.getLast() instanceof Map<?, ?> digest)) {
+            return null;
+        }
+        return new SimpleConversationMemorySnapshot.TurnError(stringOrNull(digest.get("taskId")), stringOrNull(digest.get("taskType")),
+                stringOrNull(digest.get("errorType")), stringOrNull(digest.get("text")));
+    }
+
+    private static String stringOrNull(Object value) {
+        return value != null ? value.toString() : null;
+    }
+
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
                                                                                    boolean returnDetailed, boolean returnCurrentStepOnly) {
 
@@ -350,7 +387,7 @@ public class ConversationMemoryUtilities {
                     if (isSensitiveDetailedKey(key)) {
                         continue;
                     }
-                    newConversationOutput.put(key, redactDetailedValue(source.get(key), SecretRedactionFilter.isCredentialFieldName(key)));
+                    newConversationOutput.put(key, redactDetailedValue(source.get(key), isCredentialValueKey(key)));
                 }
                 newConversationOutputs.add(newConversationOutput);
                 continue;
@@ -373,6 +410,8 @@ public class ConversationMemoryUtilities {
                 }
             }
         }
+
+        newSnapshot.setError(turnError(newSnapshot.getConversationState(), allOutputs));
 
         var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
         int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;
@@ -406,7 +445,7 @@ public class ConversationMemoryUtilities {
 
                     var result = secretTurn ? maskedSecretTurnValue(key, resultSnapshot.getResult(), needles) : resultSnapshot.getResult();
                     if (returnDetailed) {
-                        result = redactDetailedValue(result, SecretRedactionFilter.isCredentialFieldName(key));
+                        result = redactDetailedValue(result, isCredentialValueKey(key));
                     }
                     simpleConversationStep.getConversationStep()
                             .add(new ConversationStepData(key, result, resultSnapshot.getTimestamp(), resultSnapshot.getOriginWorkflowId()));

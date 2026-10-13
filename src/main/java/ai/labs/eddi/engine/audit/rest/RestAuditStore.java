@@ -88,6 +88,12 @@ public class RestAuditStore implements IRestAuditStore {
     }
 
     @Override
+    public List<AuditEntry> getAdminActions(String actor, int skip, int limit) {
+        String actorFilter = actor == null || actor.isBlank() ? null : actor.trim();
+        return auditStore.getEntriesByTask(AuditLedgerService.ADMIN_ACTION_TASK_ID, actorFilter, clampSkip(skip), clampReadLimit(limit));
+    }
+
+    @Override
     public long getEntryCount(String conversationId) {
         return auditStore.countByConversation(conversationId);
     }

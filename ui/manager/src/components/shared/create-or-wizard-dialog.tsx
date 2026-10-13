@@ -83,10 +83,15 @@ export function CreateOrWizardDialog({
                 {t("createOrWizard.guidedSetup", "Guided Setup")}
               </h3>
               <p className="mt-1 text-sm text-muted-foreground leading-relaxed">
-                {t(
-                  "createOrWizard.guidedSetupDesc",
-                  "Step-by-step wizard with LLM provider, prompts, and deployment."
-                )}
+                {type === "group"
+                  ? t(
+                      "createOrWizard.guidedSetupDescGroup",
+                      "Step-by-step wizard for the team, discussion style, and optional approvals — it can create the member agents too."
+                    )
+                  : t(
+                      "createOrWizard.guidedSetupDesc",
+                      "Step-by-step wizard with LLM provider, prompts, and deployment."
+                    )}
               </p>
             </div>
           </button>

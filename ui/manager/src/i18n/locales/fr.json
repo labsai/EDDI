@@ -25,7 +25,13 @@
     "profile": "Profil",
     "guest": "Invité",
     "userMenu": "Menu utilisateur",
-    "signedIn": "Session ouverte"
+    "signedIn": "Session ouverte",
+    "authenticating": "Authentification…",
+    "initFailedTitle": "Échec de la connexion",
+    "initFailedBody": "Le Manager n'a pas pu terminer la connexion. Le service d'authentification est peut-être injoignable ou votre session a été rejetée.",
+    "signInAgain": "Se reconnecter",
+    "sessionExpiredTitle": "Votre session a expiré.",
+    "sessionExpiredBody": "Les modifications non enregistrées sont toujours sur cette page — copiez ce dont vous avez besoin avant de vous reconnecter."
   },
   "nav": {
     "dashboard": "Tableau de bord",
@@ -76,7 +82,11 @@
     "monitoring": "Suivi des conversations",
     "analytics": "Analyses",
     "connections": "Connexions",
-    "workspaces": "Espaces de travail"
+    "workspaces": "Espaces de travail",
+    "breadcrumb": "Fil d'Ariane",
+    "checkingVersion": "Vérification de la version...",
+    "expandSidebar": "Développer la barre latérale",
+    "collapseSidebar": "Réduire la barre latérale"
   },
   "theme": {
     "light": "Clair",
@@ -220,7 +230,13 @@
     "versionShort": "v{{version}}",
     "resizePanel": "Redimensionner {{panel}}",
     "deletePermanently": "Supprimer définitivement",
-    "deletePermanentlyHint": "Action irréversible. Sans cette option, l'élément est seulement marqué comme supprimé et reste récupérable jusqu'à sa purge."
+    "deletePermanentlyHint": "Action irréversible. Sans cette option, l'élément est seulement marqué comme supprimé et reste récupérable jusqu'à sa purge.",
+    "errors": {
+      "network": "Impossible de joindre EDDI. Vérifiez votre connexion et réessayez.",
+      "unauthorized": "Votre session a expiré. Reconnectez-vous.",
+      "forbidden": "Vous n'avez pas l'autorisation de consulter ceci.",
+      "notFound": "Introuvable — il a peut-être été supprimé."
+    }
   },
   "agents": {
     "confirmDeleteDescription": "Cette action est irréversible. L'agent et toutes ses données seront définitivement supprimés.",
@@ -704,7 +720,13 @@
     "purgeSuccess_one": "{{count}} conversation terminée purgée",
     "purgeSuccess_other": "{{count}} conversations terminées purgées",
     "endStateUnavailable": "Impossible de revérifier l'état actuel des conversations ; aucune n'a donc été terminée. Réessayez.",
-    "endStateChanged": "Une conversation sélectionnée attend maintenant une approbation. Vérifiez la sélection et confirmez à nouveau."
+    "endStateChanged": "Une conversation sélectionnée attend maintenant une approbation. Vérifiez la sélection et confirmez à nouveau.",
+    "noMoreResults": "Plus aucun résultat",
+    "backToPreviousPage": "Retour à la page précédente",
+    "purgeTitleAll": "Purger les conversations terminées – tous les agents",
+    "purgeScopeNote": "Cela ne se limite pas à l'agent sélectionné ci-dessus : les conversations terminées de tous les agents sont supprimées.",
+    "confirmPurgeScope": "S'applique à TOUS les agents, pas seulement à celui sélectionné ci-dessus.",
+    "purgeDaysInvalid": "Saisissez un nombre entier de jours, 1 ou plus."
   },
   "conversationDetail": {
     "backToConversations": "Retour aux conversations",
@@ -722,7 +744,9 @@
     "totalCost": "Coût total",
     "cacheHitRate": "Taux de cache",
     "endReasonRetired": "Terminée : la version de l’agent a été retirée",
-    "stepAgentVersion": "Réponse de la version {{version}} de l’agent"
+    "stepAgentVersion": "Réponse de la version {{version}} de l’agent",
+    "searchTranscriptLabel": "Rechercher dans la transcription",
+    "matchCount": "Étapes correspondantes : {{matches}}"
   },
   "chat": {
     "hide": "Masquer",
@@ -805,7 +829,10 @@
     "sendWhileLoading": "Votre message n'a pas été envoyé : la conversation est encore en cours de chargement. Réessayez dans un instant.",
     "turnFailed": "L'agent n'a pas pu répondre à ce message. Consultez le journal du serveur ou la piste d'audit de la conversation pour en connaître la raison.",
     "errorWithReason": "Erreur : {{reason}}",
-    "endConversationFailed": "Impossible de terminer la conversation : {{reason}}"
+    "endConversationFailed": "Impossible de terminer la conversation : {{reason}}",
+    "searchAgents": "Rechercher des agents",
+    "noAgentMatches": "Aucun agent ne correspond à votre recherche",
+    "transcript": "Conversation"
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -921,6 +948,7 @@
     "savedNotLiveDescription": "L'agent en cours d'exécution sert toujours la version déployée. Déployez pour appliquer ce changement.",
     "deployNow": "Déployer",
     "deployStarted": "Déploiement lancé",
+    "stay": "Rester",
     "invalidJsonNotSaved": "Non enregistré — le JSON est invalide : {{reason}}"
   },
   "rulesEditor": {
@@ -1667,7 +1695,7 @@
     "stepsCount": "{{count}} étapes",
     "noConversationsFound": "Aucune conversation trouvée",
     "useConversationId": "Utiliser l'ID: {{id}}",
-    "searchLogs": "Rechercher les logs…",
+    "searchLogs": "Rechercher dans les entrées chargées…",
     "errors": "erreurs",
     "warnings": "avertissements",
     "infos": "info",
@@ -1679,7 +1707,19 @@
     "stateActive": "Actif",
     "stateError": "Erreur",
     "stateEnded": "Terminé",
-    "loadOlder": "Charger les entrées plus anciennes"
+    "loadOlder": "Charger les entrées plus anciennes",
+    "reconnect": "Se reconnecter",
+    "streamDisconnected": "Déconnecté du flux de journaux.",
+    "errorCount_one": "{{count}} erreur",
+    "errorCount_many": "{{count}} d'erreurs",
+    "errorCount_other": "{{count}} erreurs",
+    "warnCount_one": "{{count}} avertissement",
+    "warnCount_many": "{{count}} d'avertissements",
+    "warnCount_other": "{{count}} avertissements",
+    "copied": "Entrée de journal copiée",
+    "noMatches": "Aucune entrée chargée ne correspond à votre recherche.",
+    "noMatchesHint": "La recherche ne porte que sur les entrées déjà chargées ici. Chargez des entrées plus anciennes ou ajustez les filtres pour remonter plus loin.",
+    "searchLogsLabel": "Rechercher dans les entrées de journal chargées"
   },
   "secrets": {
     "loadError": "Impossible de charger les secrets",
@@ -1907,7 +1947,9 @@
     },
     "views": "Vues d'audit",
     "tabTrail": "Trace du pipeline",
-    "tabAdminActions": "Actions administratives"
+    "tabAdminActions": "Actions administratives",
+    "agentsDeployed": "Déployés",
+    "agentsNotDeployed": "Non déployés"
   },
   "schedules": {
     "cronHelp": "Format à 5 champs : minute heure jour-du-mois mois jour-de-la-semaine",
@@ -2048,7 +2090,8 @@
     "serverRefusedUpdate": "Le serveur a refusé cette modification :",
     "serverRefusedCreate": "Le serveur a refusé cette planification :",
     "disabledAccessRevokedHintBy": "Son créateur ({{user}}) ne peut plus utiliser cet agent, elle ne se déclenche donc plus. Partagez à nouveau l'agent avec lui — ou recréez la planification au nom de quelqu'un qui peut l'utiliser — puis activez-la.",
-    "finishedOneShot": "Planification unique : elle s'est exécutée et est terminée."
+    "finishedOneShot": "Planification unique : elle s'est exécutée et est terminée.",
+    "oneTimeHelpZone": "Se déclenche une seule fois à cet instant, puis se termine. Interprété à l'heure de {{zone}} (le fuseau horaire ci-dessous)."
   },
   "cascadeTrace": {
     "title": "Cascade de modèles",
@@ -2141,7 +2184,10 @@
     "connected": "Connecté",
     "disconnected": "Déconnecté",
     "logOutput": "Sortie du journal",
-    "noMatch": "Aucun journal ne correspond à votre filtre"
+    "noMatch": "Aucun journal ne correspond à votre filtre",
+    "errorsAnnounce_one": "{{count}} erreur dans le journal",
+    "errorsAnnounce_many": "{{count}} d'erreurs dans le journal",
+    "errorsAnnounce_other": "{{count}} erreurs dans le journal"
   },
   "promptViewer": {
     "error": "Échec du chargement des données du prompt",
@@ -2545,7 +2591,8 @@
       "title": "Aide & Visite",
       "platformTour": "Démarrer la visite guidée",
       "resetAll": "Réinitialiser les visites",
-      "resetConfirm": "Remettre à zéro l'historique des visites guidées ?"
+      "resetConfirm": "Remettre à zéro l'historique des visites guidées ?",
+      "completed": "Terminé"
     },
     "offer": {
       "message": "Nouveau par ici ? Suivez la {{page}}",
@@ -2568,7 +2615,8 @@
   },
   "stream": {
     "live": "En direct",
-    "reconnecting": "Reconnexion…"
+    "reconnecting": "Reconnexion…",
+    "disconnected": "Déconnecté"
   },
   "createOrWizard": {
     "title": "Nouveau {{type}}",
@@ -2578,7 +2626,8 @@
     "quickCreateTitle": "Création rapide de {{type}}",
     "quickCreateDesc": "Définissez un nom, puis configurez plus tard.",
     "guidedSetup": "Assistant de configuration",
-    "guidedSetupDesc": "Configuration pas à pas : fournisseur LLM, prompts et déploiement."
+    "guidedSetupDesc": "Configuration pas à pas : fournisseur LLM, prompts et déploiement.",
+    "guidedSetupDescGroup": "Assistant pas à pas pour l'équipe, le style de discussion et les approbations facultatives — il peut aussi créer les agents membres."
   },
   "groups": {
     "actionConflict": "Une autre opération est encore en cours, ou cette discussion n'accepte plus cette action. Veuillez réessayer.",
@@ -3171,10 +3220,28 @@
       "duplicateMember": "{{ids}} figure plusieurs fois. Un membre occupe un seul siège : deux sièges partageraient une même conversation de membre et verraient les réponses l'un de l'autre. Utilisez un second agent pour un second siège."
     },
     "serverRefused": "Le serveur a refusé ce groupe :",
+    "versionLookupFailed": "Impossible de déterminer la version actuelle de ce groupe.",
     "deletePermanentlyHint": "Action irréversible : le groupe et son espace de travail (tâches en attente, cadences et leurs planifications) sont supprimés définitivement. Sans cette option, le groupe est seulement marqué comme supprimé et reste récupérable jusqu'à sa purge.",
     "deletePermanentlyWithMembersHint": "Action irréversible : le groupe, son espace de travail et tous les agents membres sont supprimés définitivement. Sans cette option, ils sont seulement marqués comme supprimés et restent récupérables jusqu'à leur purge.",
     "deleteMembersFailedAfterGroup": "Le groupe a été supprimé, mais pas ces agents membres : {{ids}}. Supprimez-les depuis la page Agents.",
-    "deleteMembersFailedGroupKept": "Le groupe a été conservé : ces agents membres n'ont pas pu être supprimés : {{ids}}. Réessayez pour terminer."
+    "deleteMembersFailedGroupKept": "Le groupe a été conservé : ces agents membres n'ont pas pu être supprimés : {{ids}}. Réessayez pour terminer.",
+    "transcriptLabel": "Transcription de la discussion",
+    "announceAwaitingApproval": "La discussion est en pause et attend votre approbation.",
+    "announceAwaitingHuman": "La discussion attend la réponse d'un membre.",
+    "newMessages": "Nouveaux messages",
+    "finishEditingFirst": "Enregistrez ou annulez d'abord la section en cours de modification",
+    "editBasics": "Modifier le nom, les membres et les paramètres",
+    "humanTurnResuming": "Votre réponse a été enregistrée. La discussion reprend : cette page la suit et se met à jour toutes les quelques secondes.",
+    "composerMode": "Que faire de votre message",
+    "composerModeNew": "Nouvelle discussion",
+    "composerModeContinue": "Poursuivre cette discussion",
+    "loadMoreDiscussions": "Charger les discussions plus anciennes",
+    "confirmDeleteLiveDiscussionDescription": "Cette discussion est toujours en cours. Elle est arrêtée, et la transcription ainsi que tout son contenu sont supprimés définitivement. Cette action est irréversible.",
+    "discardEditsTitle": "Abandonner les modifications non enregistrées ?",
+    "discardEditsDescription": "Une section de la configuration est encore en cours de modification. Fermer le panneau abandonne vos changements dans cette section.",
+    "discardEditsConfirm": "Abandonner",
+    "keepEditing": "Continuer la modification",
+    "streamInterrupted": "La connexion en direct a été perdue. Affichage de la discussion enregistrée, qui continue de se mettre à jour tant qu'elle est en cours."
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -3227,7 +3294,10 @@
     "sourceConversation": "Conversation source",
     "conflicted": "En conflit",
     "deleteEntryTitle": "Supprimer ce souvenir ?",
-    "deleteEntryDesc": "« {{key}} » est définitivement supprimé pour cet utilisateur. Les agents ne s'en souviendront plus. Cette action est irréversible."
+    "deleteEntryDesc": "« {{key}} » est définitivement supprimé pour cet utilisateur. Les agents ne s'en souviendront plus. Cette action est irréversible.",
+    "deleteAllDescUser": "Cela supprime définitivement les {{total}} entrées de mémoire de l'utilisateur « {{userId}} ». Cette action est irréversible.",
+    "toggleDetails": "Afficher ou masquer les détails de {{key}}",
+    "deleteEntryLabel": "Supprimer l'entrée de mémoire {{key}}"
   },
   "properties": {
     "title": "Propriétés utilisateur",
@@ -3263,7 +3333,9 @@
     "deleted": "Déclencheur supprimé",
     "deleteTitle": "Supprimer le déclencheur",
     "deleteDesc": "Supprimer définitivement le déclencheur pour l’intention « {{intent}} » ?",
-    "searchPlaceholder": "Filtrer par intention ou ID d’agent…"
+    "searchPlaceholder": "Filtrer par intention ou ID d’agent…",
+    "needIntent": "Saisissez une intention pour enregistrer.",
+    "needAgent": "Choisissez au moins un agent pour enregistrer."
   },
   "capabilities": {
     "agentCount": "Agents",
@@ -3280,7 +3352,11 @@
     "registeredSkills": "Compétences enregistrées",
     "noSkills": "Aucune compétence trouvée",
     "matchingAgents": "Agents correspondants",
-    "noMatches": "Aucun agent trouvé pour cette compétence"
+    "noMatches": "Aucun agent trouvé pour cette compétence",
+    "searchLabel": "Rechercher des compétences",
+    "strategyLabel": "Stratégie de correspondance",
+    "emptyTitle": "Aucune capacité enregistrée pour l'instant",
+    "emptyDesc": "Les agents apparaissent ici dès qu'ils déclarent des capacités (compétences) dans leur configuration. Ajoutez une capacité à un agent et elle apparaîtra dans ce registre."
   },
   "exportDialog": {
     "title": "Exporter l'agent",
@@ -3523,14 +3599,61 @@
     "humanPrincipalIdPlaceholder": "Identifiant de connexion/principal de l'utilisateur",
     "humanTurnSettingsHint": "La discussion se met en pause et attend lorsque c'est le tour d'un membre humain de parler. Choisissez ce qui se passe s'il ne répond pas à temps.",
     "humanTurnSettingsTitle": "Paramètres du tour des membres humains",
-    "humanTurnTimeoutInvalid": "Durée ISO-8601 non valide, par exemple PT24H ou P1D.",
-    "humanTurnTimeoutLabel": "Délai du tour (durée ISO-8601)",
-    "humanTurnTimeoutPlaceholder": "ex. PT24H — laisser vide pour une attente indéfinie",
+    "humanTurnTimeoutInvalid": "Saisissez un nombre supérieur à zéro.",
+    "humanTurnTimeoutLabel": "Délai par tour",
+    "humanTurnTimeoutPlaceholder": "Laissez vide pour attendre indéfiniment.",
     "memberTypeHuman": "Humain",
-    "memberPromptPlaceholder": "Tu es {{name}}. Fournis une analyse pertinente du point de vue de ton domaine.",
-    "memberPromptPlaceholderRole": "Tu es {{name}}, expert en {{role}}. Fournis une analyse pertinente du point de vue de ton domaine.",
-    "moderatorPromptPlaceholder": "Tu es un modérateur expérimenté. Synthétise la discussion du groupe en un résumé clair et équilibré…",
-    "modelPlaceholder": "ex. {{model}}"
+    "modelPlaceholder": "ex. {{model}}",
+    "stepTemplate": "Préréglage",
+    "stepConfig": "Configuration",
+    "stepMembers": "Membres",
+    "stepReview": "Vérification",
+    "stepsLabel": "Progression de l'assistant",
+    "stepAria": "Étape {{n}} : {{title}}",
+    "blockersTitle": "Pour continuer :",
+    "blockerName": "Saisissez un nom de groupe.",
+    "blockerHitlPhases": "Sélectionnez au moins une phase où faire une pause, ou désactivez l'approbation humaine.",
+    "blockerHitlTimeout": "Saisissez un délai d'approbation valide (par exemple PT15M) ou choisissez une autre politique de délai.",
+    "blockerStyle": "Choisissez un style de discussion pris en charge par ce serveur.",
+    "blockerMemberName": "{{member}} : ajoutez un nom d'affichage.",
+    "blockerMemberPrincipal": "{{member}} : saisissez l'identifiant principal de la personne.",
+    "blockerMemberGroup": "{{member}} : choisissez le groupe imbriqué.",
+    "blockerMemberAgent": "{{member}} : choisissez un agent existant ou passez à Créer un nouveau.",
+    "blockerMemberKey": "{{member}} : ajoutez une clé API pour {{provider}} ou choisissez un fournisseur qui n'en demande pas (par exemple Ollama).",
+    "blockerModeratorKey": "Modérateur : ajoutez une clé API pour {{provider}} ou choisissez un fournisseur qui n'en demande pas (par exemple Ollama).",
+    "blockerTurnTimeout": "Définissez le délai de tour humain sur un nombre supérieur à zéro, ou videz-le.",
+    "memberFallbackName": "Membre {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "Remue-méninges ouvert — chaque point de vue sur une question.",
+      "PEER_REVIEW": "Examiner un brouillon ou une proposition sous plusieurs angles.",
+      "DEVIL_ADVOCATE": "Mettre un plan à l'épreuve avant de s'engager.",
+      "DELPHI": "Prévisions et estimations où des avis indépendants doivent converger.",
+      "DEBATE": "Peser une décision avec deux camps opposés.",
+      "TASK_FORCE": "Planifier et mener un travail en plusieurs étapes avec des tâches attribuées.",
+      "NEGOTIATION": "Parvenir à un accord entre des parties aux intérêts différents."
+    },
+    "howItRuns": "Comment ça se déroule",
+    "roundsExplain": "Un tour correspond à une prise de parole de chaque membre. Plus de tours permettent aux membres de se répondre, mais chaque tour supplémentaire ajoute des appels LLM et des coûts.",
+    "roundsEstimate": "Estimation : environ {{calls}} appels LLM par discussion ({{members}} membres × {{rounds}} tours).",
+    "roundsEstimateModerator": "Estimation : environ {{calls}} appels LLM par discussion ({{members}} membres × {{rounds}} tours + 1 modérateur).",
+    "unitMinutes": "minutes",
+    "unitHours": "heures",
+    "unitDays": "jours",
+    "durationNoLimit": "Aucune limite",
+    "durationUnit": "Unité",
+    "defaultMemberPrompt": "Vous êtes {{name}}. Apportez des analyses claires et exploitables depuis votre domaine d'expertise.",
+    "defaultMemberPromptRole": "Vous êtes {{name}}, spécialiste de {{role}}. Apportez des analyses claires et exploitables depuis votre domaine d'expertise.",
+    "defaultMemberPromptNoName": "Vous êtes membre de ce groupe. Apportez des analyses claires et exploitables depuis votre domaine d'expertise.",
+    "defaultModeratorPrompt": "Vous êtes un modérateur expérimenté. Synthétisez la discussion du groupe en un résumé clair et équilibré qui reprend les points clés, les accords et les désaccords restants.",
+    "memberNameLabel": "Nom d'affichage",
+    "memberRoleLabel": "Rôle",
+    "memberTypeLabel": "Type de membre",
+    "bulkTitle": "Même fournisseur et même clé pour tous les nouveaux agents",
+    "bulkHint": "Chaque nouvel agent a besoin d'un fournisseur LLM et, pour la plupart, d'une clé API. Saisissez-les une fois ici et appliquez-les à tous ; vous pourrez ensuite modifier un agent individuellement.",
+    "bulkApply": "Appliquer à tous les nouveaux agents",
+    "apiKeyRequired": "{{provider}} nécessite une clé API avant de pouvoir créer cet agent.",
+    "presetsNote": "Ce sont des préréglages qui remplissent cet assistant. Pour utiliser une discussion prête à l'emploi et affecter vos agents existants à ses rôles, consultez",
+    "presetsLink": "Modèles de groupe"
   },
   "groupTemplates": {
     "advisoryBoard": "Comité consultatif",
@@ -3587,7 +3710,9 @@
     "roleCount_one": "{{count}} rôle à attribuer",
     "roleCount_other": "{{count}} rôles à attribuer",
     "empty": "Aucun modèle disponible",
-    "emptyDescription": "Ce serveur ne fournit aucun modèle de groupe. Vous pouvez tout de même créer un groupe de zéro avec l'assistant."
+    "emptyDescription": "Ce serveur ne fournit aucun modèle de groupe. Vous pouvez tout de même créer un groupe de zéro avec l'assistant.",
+    "wizardNote": "Vous préférez créer de nouveaux agents au fil de l'eau ou partir de zéro ? L'assistant de groupe propose des préréglages plus légers.",
+    "wizardLink": "Ouvrir l'assistant de groupe"
   },
   "channels": {
     "agentIdPlaceholder": "ID de l’agent pour traiter les messages",
@@ -3760,7 +3885,10 @@
     "confirmApproveGroupDescription": "Approuver toute la phase en pause et reprendre la discussion. Chaque tâche en attente est approuvée avec elle ; ouvrez le groupe pour les décider une par une.",
     "confirmRejectGroupDescription": "Rejeter toute la phase en pause. Chaque tâche en attente est rejetée avec elle et la discussion ne va pas plus loin ; ouvrez le groupe pour les décider une par une.",
     "pauseChanged": "Cette demande a changé depuis que vous l'avez ouverte — rien n'a été décidé. Examinez-la de nouveau.",
-    "regularTruncated": "Affichage des {{limit}} premières approbations de conversation — d'autres sont en attente. Traitez-en quelques-unes pour voir les suivantes."
+    "regularTruncated": "Affichage des {{limit}} premières approbations de conversation — d'autres sont en attente. Traitez-en quelques-unes pour voir les suivantes.",
+    "conversationColumn": "Conversation",
+    "groupReviewLoadError": "La discussion n'a pas pu être chargée.",
+    "groupReviewNoEntries": "Rien n'a encore été dit."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",
@@ -3792,7 +3920,18 @@
     "vaultUp": "Vault prêt",
     "viewLogs": "Voir les journaux",
     "coordAdminOnly": "Coordinateur : réservé aux admins",
-    "vaultAdminOnly": "Vault : réservé aux admins"
+    "vaultAdminOnly": "Vault : réservé aux admins",
+    "vaultChecking": "Vérification du coffre…",
+    "statsPartial": "Certains compteurs n'ont pas pu être chargés — ils sont affichés comme indisponibles, et non comme zéro.",
+    "countUnavailable": "Impossible à charger",
+    "convState": {
+      "READY": "Prête",
+      "IN_PROGRESS": "En cours",
+      "ENDED": "Terminée",
+      "EXECUTION_INTERRUPTED": "Interrompue",
+      "ERROR": "Erreur",
+      "AWAITING_HUMAN": "En attente d'un humain"
+    }
   },
   "errorBoundary": {
     "retry": "Réessayer",
@@ -3864,7 +4003,11 @@
       "auditLedger": "L'identifiant utilisateur n'a pas pu être remplacé dans toutes les lignes d'audit. Relancez l'effacement une fois la base de données accessible.",
       "databaseLogs": "Les entrées de journal en base n'ont pas pu être pseudonymisées. Relancez l'effacement ; la rétention des journaux les supprime aussi avec le temps.",
       "generic": "Cette étape n'est pas terminée. Relancez l'effacement une fois la cause indiquée dans le journal du serveur corrigée — c'est sans risque."
-    }
+    },
+    "noDataFoundToast": "Aucune donnée trouvée pour cet identifiant utilisateur – rien n'a été supprimé.",
+    "noDataFoundTitle": "Aucune donnée trouvée pour cet identifiant utilisateur",
+    "noDataFoundBody": "Rien n'a été supprimé pour « {{userId}} ». Vérifiez l'identifiant (faute de frappe ?) puis réessayez.",
+    "confirmTypeLabel": "Saisissez l'identifiant utilisateur « {{userId}} » pour confirmer"
   },
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend EDDI pour des données réelles."
@@ -3891,7 +4034,9 @@
     "confirmPurge": "Supprimer définitivement les {{count}} ressources orphelines ? Cette action est irréversible.",
     "purgeIncompleteScan": "Rien n'a été supprimé : EDDI n'a pas pu terminer la vérification des ressources encore utilisées. Relancez l'analyse puis réessayez.",
     "purgeFailed": "Échec de la purge",
-    "scanFailed": "L'analyse a échoué : {{reason}}"
+    "scanFailed": "L'analyse a échoué : {{reason}}",
+    "reviewHint": "Ouvrez d'abord une ressource de la liste pour l'inspecter ; tous les orphelins de la liste sont supprimés.",
+    "typeToConfirm": "Saisissez {{count}} pour confirmer"
   },
   "quotas": {
     "apiCallsMinute": "Appels API / minute",
@@ -3918,7 +4063,8 @@
     "tenantId": "ID du locataire",
     "title": "Quotas de locataire",
     "limitHintEmpty": "Vide ou -1 = illimité, 0 = bloqué",
-    "invalidNumber": "Saisissez un nombre, ou laissez le champ vide pour illimité."
+    "invalidInteger": "Saisissez un nombre entier (0 ou plus), ou laissez vide pour illimité.",
+    "invalidAmount": "Saisissez un montant (0 ou plus), ou laissez vide pour illimité."
   },
   "secretPicker": {
     "clearVault": "Effacer la référence vault",
@@ -4880,7 +5026,13 @@
     "inputTemplateTooLong": "Le modèle de prompt est limité à {{max}} caractères.",
     "cronInvalid": "Cette expression cron n'est pas valide.",
     "scheduleUnknown": "Planification indisponible",
-    "nextRun": "prochaine {{when}}"
+    "nextRun": "prochaine {{when}}",
+    "taskSubjectLabel": "Sujet",
+    "taskDescriptionLabel": "Description",
+    "inputTemplateLabel": "Modèle de prompt",
+    "priorityTitle": "Priorité {{n}} — les nombres les plus élevés passent en premier",
+    "backlogNote": "Chaque exécution de cadence prend d'abord les tâches de plus haute priorité (P5 avant P1). Une tâche ne peut être ni modifiée ni supprimée une fois ajoutée ; une exécution la termine.",
+    "priorityHint": "Les nombres les plus élevés sont pris en premier par une exécution de cadence. 0 est la valeur par défaut."
   },
   "workforceWizard": {
     "title": "Nouvelle équipe"
@@ -5221,7 +5373,9 @@
     "bindingCallerSuppliedBody": "Le système appelant transmet l'identifiant de chaque utilisateur avec la requête et EDDI ne stocke rien. L'agent ne peut faire que ce que cet utilisateur peut faire sur la cible, et cette connexion est exclue de la découverte MCP et A2A.",
     "confirmAuthChange": "Changer la façon dont cette connexion s'authentifie ?",
     "confirmAuthChangeDesc": "Les comptes liés via cette connexion cesseront de se résoudre — une autorisation appartient au flux qui l'a produite. EDDI refuse le changement tant qu'un compte reste lié et indique combien ; déliez-les d'abord, ou créez une nouvelle connexion et laissez les gens lier celle-ci.",
-    "confirmAuthChangeAccept": "Changer"
+    "confirmAuthChangeAccept": "Changer",
+    "deleted": "Connexion \"{{name}}\" supprimée",
+    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?"
   },
   "extensionTypes": {
     "parser": "Analyseur d’entrée",
@@ -5505,10 +5659,21 @@
     "kindObject": "Objet (JSON)",
     "kindList": "Liste (JSON)"
   },
+  "notFound": {
+    "title": "Page introuvable",
+    "description": "Il n'y a rien à cette adresse. Elle a peut-être été déplacée, ou le lien contient une faute de frappe.",
+    "backToDashboard": "Retour au tableau de bord",
+    "backToWorkforce": "Retour à Workforce",
+    "chooseWorkspace": "Choisir un espace de travail"
+  },
   "actionTags": {
     "remove": "Supprimer {{action}}",
     "none": "Aucune action",
     "inputLabel": "Nouvelle action",
     "add": "Ajouter l'action"
+  },
+  "wizardLeave": {
+    "title": "Quitter sans créer ?",
+    "message": "La configuration de votre équipe, y compris les prompts et clés API saisis, n'a pas encore été créée et sera perdue."
   }
 }

@@ -29,8 +29,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 /**
@@ -78,6 +82,27 @@ class GroupTemplateServiceTest {
     void setUp() {
         service = new GroupTemplateService(new ObjectMapper());
         service.loadTemplates();
+    }
+
+    @Test
+    @DisplayName("a packaged template that will not convert is an internal failure, without the mapper's text")
+    void unreadableTemplateConfigIsInternal() throws Exception {
+        // Review finding: the mapper's message (model classes, field paths) used to
+        // travel in an IllegalArgumentException, which callers report verbatim as a
+        // validation refusal.
+        ObjectMapper failing = spy(new ObjectMapper());
+        doThrow(new IllegalArgumentException("Cannot deserialize value of type `ai.labs.eddi.configs.groups.model.AgentGroupConfiguration`"))
+                .when(failing).treeToValue(any(), eq(AgentGroupConfiguration.class));
+        var broken = new GroupTemplateService(failing);
+        broken.loadTemplates();
+        String templateId = broken.list().getFirst().templateId();
+        Map<String, String> assignments = new HashMap<>();
+        broken.find(templateId).manifest().requiredRoles().forEach(r -> assignments.put(r.role(), "aaaaaaaaaaaaaaaaaaaaaaaa"));
+
+        var thrown = assertThrows(IllegalStateException.class, () -> broken.instantiate(templateId, null, assignments));
+
+        assertFalse(thrown.getMessage().contains("ai.labs.eddi"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains(templateId), thrown.getMessage());
     }
 
     /** Dummy hex agent ids for every role a template declares. */

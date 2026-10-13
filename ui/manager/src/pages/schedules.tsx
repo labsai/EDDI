@@ -1,5 +1,6 @@
 import { formatUsd } from "@/lib/utils";
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useId, Fragment } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
@@ -28,7 +29,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueries } from "@tanstack/react-query";
-import { isApiError } from "@/lib/api-client";
+import { isApiError, getErrorMessage } from "@/lib/api-client";
+import { AgentPicker } from "@/components/shared/agent-picker";
+import { useAgentNames } from "@/hooks/use-agent-names";
+import { zonedLocalInputToIso, isoToZonedLocalInput } from "@/lib/date-format";
 import {
   useSchedules,
   useCreateSchedule,
@@ -52,8 +56,6 @@ import {
   isValidCron,
   nextCronFires,
   cronMinIntervalSeconds,
-  isoToLocalInput,
-  localInputToIso,
   listTimeZones,
   CRON_PRESETS,
   DEFAULT_TIME_ZONE,
@@ -464,7 +466,7 @@ function FailedFiresPanel({
   schedules?: ScheduleConfiguration[];
 }) {
   const { t } = useTranslation();
-  const { data: failed, isLoading, isError, refetch } = useFailedFires();
+  const { data: failed, isLoading, isError, error, refetch } = useFailedFires();
   const retryMutation = useRetryDeadLetter();
   const dismissMutation = useDismissDeadLetter();
 
@@ -527,8 +529,8 @@ function FailedFiresPanel({
     retryMutation.mutate(scheduleId, {
       onSuccess: () =>
         toast.success(t("schedules.retrySuccess", "Schedule re-queued")),
-      onError: () =>
-        toast.error(t("schedules.retryError", "Failed to retry schedule")),
+      onError: (err) =>
+        toast.error(t("schedules.retryError", "Failed to retry schedule"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -536,8 +538,8 @@ function FailedFiresPanel({
     dismissMutation.mutate(scheduleId, {
       onSuccess: () =>
         toast.success(t("schedules.dismissSuccess", "Dead letter dismissed")),
-      onError: () =>
-        toast.error(t("schedules.dismissError", "Failed to dismiss dead letter")),
+      onError: (err) =>
+        toast.error(t("schedules.dismissError", "Failed to dismiss dead letter"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -569,6 +571,7 @@ function FailedFiresPanel({
               "No failed fires" — telling an operator nothing is broken at the
               exact moment the check for broken things failed. */}
           <ErrorState
+            error={error}
             message={t("common.error")}
             onRetry={() => refetch()}
             retryLabel={t("common.retry")}
@@ -709,6 +712,7 @@ function ScheduleFormDialog({
   onClose: () => void;
 }) {
   const { t, i18n } = useTranslation();
+  const uid = useId();
   const createMutation = useCreateSchedule();
   const updateMutation = useUpdateSchedule();
   const isEdit = editing != null;
@@ -774,7 +778,9 @@ function ScheduleFormDialog({
     setAgentVersion(s.agentVersion ?? 0);
     setCronExpression(s.cronExpression ?? "0 9 * * MON-FRI");
     setHeartbeatInterval(s.heartbeatIntervalSeconds ?? 300);
-    setOneTimeAt(isoToLocalInput(s.oneTimeAt));
+    // The wall clock is shown in the schedule's own zone, matching how the
+    // input is read back (see zonedLocalInputToIso below).
+    setOneTimeAt(isoToZonedLocalInput(s.oneTimeAt, s.timeZone ?? DEFAULT_TIME_ZONE));
     setTimeZone(s.timeZone ?? DEFAULT_TIME_ZONE);
     setMessage(s.message ?? "");
     setEnvironment(s.environment ?? "production");
@@ -868,7 +874,7 @@ function ScheduleFormDialog({
     (formMode === "cron"
       ? cronError == null
       : formMode === "oneTime"
-        ? localInputToIso(oneTimeAt) != null
+        ? zonedLocalInputToIso(oneTimeAt, timeZone) != null
         : heartbeatError == null);
 
   const isPending = createMutation.isPending || updateMutation.isPending;
@@ -907,7 +913,15 @@ function ScheduleFormDialog({
     if (formMode === "cron") {
       config.cronExpression = cronExpression.trim();
     } else if (formMode === "oneTime") {
-      config.oneTimeAt = localInputToIso(oneTimeAt) ?? undefined;
+      // An unchanged stored instant is kept as is: the zone-local text drops the
+      // offset, so across a DST fall-back hour it cannot name the same instant.
+      const unchanged =
+        latest?.oneTimeAt != null &&
+        (latest.timeZone ?? DEFAULT_TIME_ZONE) === timeZone &&
+        isoToZonedLocalInput(latest.oneTimeAt, timeZone) === oneTimeAt;
+      config.oneTimeAt = unchanged
+        ? latest.oneTimeAt
+        : (zonedLocalInputToIso(oneTimeAt, timeZone) ?? undefined);
     } else {
       config.heartbeatIntervalSeconds = heartbeatInterval;
     }
@@ -934,7 +948,7 @@ function ScheduleFormDialog({
     const failed = (fallback: string) => (err: unknown) => {
       const reason = invalidScheduleReason(err);
       if (reason) setServerError(reason);
-      else toast.error(fallback);
+      else toast.error(fallback, { description: getErrorMessage(err) });
     };
     if (isEdit && editing?.id) {
       updateMutation.mutate(
@@ -998,7 +1012,7 @@ function ScheduleFormDialog({
         <div className="space-y-4">
           {/* Name */}
           <div>
-            <label className={labelCls}>{t("schedules.name", "Name")}</label>
+            <label htmlFor={`${uid}-name`} className={labelCls}>{t("schedules.name", "Name")}</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -1007,16 +1021,21 @@ function ScheduleFormDialog({
                 "e.g. Daily health check"
               )}
               className={inputCls}
+              id={`${uid}-name`}
               data-testid="schedule-name-input"
             />
           </div>
 
           {/* Trigger Type Tabs */}
           <div>
-            <label className={labelCls}>
+            <span id={`${uid}-trigger`} className={`${labelCls}`}>
               {t("schedules.triggerType", "Trigger Type")}
-            </label>
-            <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
+            </span>
+            <div
+              role="group"
+              aria-labelledby={`${uid}-trigger`}
+              className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1"
+            >
               {modeTabs.map(({ mode, label, Icon }) => (
                 <button
                   key={mode}
@@ -1025,6 +1044,7 @@ function ScheduleFormDialog({
                     if (mode === "heartbeat") setStrategy("persistent");
                   }}
                   data-testid={`trigger-${mode}`}
+                  aria-pressed={formMode === mode}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all ${
                     formMode === mode
                       ? "bg-primary text-primary-foreground shadow-sm"
@@ -1041,7 +1061,7 @@ function ScheduleFormDialog({
           {/* Timing: Cron */}
           {formMode === "cron" && (
             <div>
-              <label className={labelCls}>
+              <label htmlFor={`${uid}-cron`} className={labelCls}>
                 {t("schedules.cronExpression", "Cron Expression")}
               </label>
               <div className="mb-2 flex flex-wrap gap-1">
@@ -1067,6 +1087,7 @@ function ScheduleFormDialog({
                 onChange={(e) => setCronExpression(e.target.value)}
                 placeholder="0 9 * * MON-FRI"
                 className={`${inputCls} font-mono`}
+                id={`${uid}-cron`}
                 data-testid="cron-input"
               />
               {cronError ? (
@@ -1111,7 +1132,7 @@ function ScheduleFormDialog({
           {/* Timing: One-time */}
           {formMode === "oneTime" && (
             <div>
-              <label className={labelCls}>
+              <label htmlFor={`${uid}-onetime`} className={labelCls}>
                 {t("schedules.oneTimeAt", "Date & time")}
               </label>
               <input
@@ -1119,12 +1140,18 @@ function ScheduleFormDialog({
                 value={oneTimeAt}
                 onChange={(e) => setOneTimeAt(e.target.value)}
                 className={inputCls}
+                id={`${uid}-onetime`}
+                aria-describedby={`${uid}-onetime-help`}
                 data-testid="onetime-input"
               />
-              <p className="mt-1 text-xs text-muted-foreground/70">
+              <p
+                id={`${uid}-onetime-help`}
+                className="mt-1 text-xs text-muted-foreground/70"
+              >
                 {t(
-                  "schedules.oneTimeHelp",
-                  "Fires once at this moment, then completes. Interpreted in your local time."
+                  "schedules.oneTimeHelpZone",
+                  "Fires once at this moment, then completes. Read as {{zone}} time (the Time Zone below).",
+                  { zone: timeZone }
                 )}
               </p>
             </div>
@@ -1133,7 +1160,7 @@ function ScheduleFormDialog({
           {/* Timing: Heartbeat */}
           {formMode === "heartbeat" && (
             <div>
-              <label className={labelCls}>
+              <label htmlFor={`${uid}-interval`} className={labelCls}>
                 {t("schedules.interval", "Interval (seconds)")}
               </label>
               <input
@@ -1142,6 +1169,7 @@ function ScheduleFormDialog({
                 value={heartbeatInterval}
                 onChange={(e) => setHeartbeatInterval(Number(e.target.value))}
                 className={inputCls}
+                id={`${uid}-interval`}
                 data-testid="heartbeat-input"
               />
               {heartbeatError && (
@@ -1157,7 +1185,7 @@ function ScheduleFormDialog({
 
           {/* Time Zone */}
           <div>
-            <label className={`${labelCls} flex items-center gap-1.5`}>
+            <label htmlFor={`${uid}-tz`} className={`${labelCls} flex items-center gap-1.5`}>
               <Globe className="h-3.5 w-3.5" />
               {t("schedules.timeZone", "Time Zone")}
             </label>
@@ -1165,6 +1193,7 @@ function ScheduleFormDialog({
               value={timeZone}
               onChange={(e) => setTimeZone(e.target.value)}
               className={inputCls}
+              id={`${uid}-tz`}
               data-testid="timezone-select"
             >
               {timeZones.map((tz) => (
@@ -1178,22 +1207,21 @@ function ScheduleFormDialog({
           {/* Agent ID + Version */}
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className={labelCls}>
+              <label htmlFor={`${uid}-agent`} className={labelCls}>
                 {t("schedules.agentId", "Agent ID")}
               </label>
-              <input
+              <AgentPicker
+                id={`${uid}-agent`}
                 value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
+                onChange={setAgentId}
                 placeholder={t(
                   "schedules.agentIdPlaceholder",
                   "Enter agent ID..."
                 )}
-                className={inputCls}
-                data-testid="agent-id-input"
               />
             </div>
             <div className="w-32">
-              <label className={labelCls}>
+              <label htmlFor={`${uid}-version`} className={labelCls}>
                 {t("schedules.agentVersion", "Version")}
               </label>
               <input
@@ -1202,6 +1230,7 @@ function ScheduleFormDialog({
                 value={agentVersion}
                 onChange={(e) => setAgentVersion(Number(e.target.value))}
                 className={inputCls}
+                id={`${uid}-version`}
                 data-testid="agent-version-input"
                 title={t("schedules.agentVersionHint", "0 = latest deployed")}
               />
@@ -1210,10 +1239,11 @@ function ScheduleFormDialog({
 
           {/* Environment */}
           <div>
-            <label className={labelCls}>
+            <label htmlFor={`${uid}-env`} className={labelCls}>
               {t("schedules.environment", "Environment")}
             </label>
             <select
+              id={`${uid}-env`}
               value={environment}
               onChange={(e) => setEnvironment(e.target.value)}
               className={inputCls}
@@ -1227,7 +1257,7 @@ function ScheduleFormDialog({
 
           {/* Message */}
           <div>
-            <label className={labelCls}>
+            <label htmlFor={`${uid}-message`} className={labelCls}>
               {t("schedules.message", "Message")}
             </label>
             <input
@@ -1238,13 +1268,14 @@ function ScheduleFormDialog({
                 "Message to send to agent"
               )}
               className={inputCls}
+              id={`${uid}-message`}
               data-testid="message-input"
             />
           </div>
 
           {/* User ID */}
           <div>
-            <label className={labelCls}>
+            <label htmlFor={`${uid}-userid`} className={labelCls}>
               {t("schedules.userId", "User ID")}
             </label>
             <input
@@ -1252,13 +1283,14 @@ function ScheduleFormDialog({
               onChange={(e) => setUserId(e.target.value)}
               placeholder={t("schedules.userIdPlaceholder", "system:scheduler")}
               className={inputCls}
+              id={`${uid}-userid`}
               data-testid="userid-input"
             />
           </div>
 
           {/* Max cost per fire */}
           <div>
-            <label className={labelCls}>
+            <label htmlFor={`${uid}-maxcost`} className={labelCls}>
               {t("schedules.maxCostPerFire", "Max cost per fire")}
             </label>
             <div className="flex items-center gap-3">
@@ -1280,6 +1312,7 @@ function ScheduleFormDialog({
                 disabled={unlimitedCost}
                 onChange={(e) => setMaxCost(Number(e.target.value))}
                 className={`${inputCls} flex-1 disabled:opacity-50`}
+                id={`${uid}-maxcost`}
                 data-testid="maxcost-input"
               />
             </div>
@@ -1288,7 +1321,7 @@ function ScheduleFormDialog({
           {/* Conversation Strategy (cron / one-time only) */}
           {formMode !== "heartbeat" && (
             <div>
-              <label className={labelCls}>
+              <label htmlFor={`${uid}-strategy`} className={labelCls}>
                 {t("schedules.conversationStrategy", "Conversation Strategy")}
               </label>
               <select
@@ -1297,6 +1330,7 @@ function ScheduleFormDialog({
                   setStrategy(e.target.value as "new" | "persistent")
                 }
                 className={inputCls}
+                id={`${uid}-strategy`}
                 data-testid="strategy-select"
               >
                 <option value="new">
@@ -1315,9 +1349,8 @@ function ScheduleFormDialog({
           {/* Persistent conversation id (only when persistent) */}
           {(formMode === "heartbeat" || strategy === "persistent") && (
             <div>
-              <label className={labelCls}>
-                {t(
-                  "schedules.persistentConversationId",
+              <label htmlFor={`${uid}-pconv`} className={labelCls}>
+                {t("schedules.persistentConversationId",
                   "Persistent conversation ID"
                 )}
               </label>
@@ -1331,6 +1364,7 @@ function ScheduleFormDialog({
                   "Auto-generated if left blank"
                 )}
                 className={`${inputCls} ${isEdit ? "cursor-not-allowed opacity-70" : ""}`}
+                id={`${uid}-pconv`}
                 data-testid="persistent-conv-input"
               />
               {isEdit && (
@@ -1405,16 +1439,21 @@ export function SchedulesPage() {
     return () => clearTimeout(timer);
   }, [maybeAutoStart]);
 
-  const { data: schedules, isLoading, isError, refetch } = useSchedules();
+  const { data: schedules, isLoading, isError, error, refetch } = useSchedules();
   const { data: failedFires } = useFailedFires();
   const deleteMutation = useDeleteSchedule();
   const toggleMutation = useToggleSchedule();
   const fireMutation = useFireNow();
   const retryMutation = useRetryDeadLetter();
 
-  const [activeTab, setActiveTab] = useState<"schedules" | "failed">(
-    "schedules"
-  );
+  // The active tab lives in the URL (?tab=failed) so a reload or shared link
+  // lands on the same one.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab: "schedules" | "failed" =
+    searchParams.get("tab") === "failed" ? "failed" : "schedules";
+  const setActiveTab = (tab: "schedules" | "failed") =>
+    setSearchParams(tab === "failed" ? { tab } : {}, { replace: true });
+  const { nameOf } = useAgentNames();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ScheduleConfiguration | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -1466,8 +1505,8 @@ export function SchedulesPage() {
               ? t("schedules.disabled", "Schedule disabled")
               : t("schedules.enabled", "Schedule enabled")
           ),
-        onError: () =>
-          toast.error(t("schedules.toggleError", "Failed to toggle schedule")),
+        onError: (err) =>
+          toast.error(t("schedules.toggleError", "Failed to toggle schedule"), { description: getErrorMessage(err) }),
       }
     );
   };
@@ -1487,9 +1526,9 @@ export function SchedulesPage() {
           toast.success(t("schedules.fired", "Schedule fired successfully"));
         }
       },
-      onError: () => {
+      onError: (err) => {
         setConfirmFireId(null);
-        toast.error(t("schedules.fireError", "Failed to fire schedule"));
+        toast.error(t("schedules.fireError", "Failed to fire schedule"), { description: getErrorMessage(err) });
       },
     });
   };
@@ -1507,8 +1546,8 @@ export function SchedulesPage() {
         toast.success(t("schedules.deleteSuccess", "Schedule deleted"));
         setConfirmDeleteId(null);
       },
-      onError: () =>
-        toast.error(t("schedules.deleteError", "Failed to delete schedule")),
+      onError: (err) =>
+        toast.error(t("schedules.deleteError", "Failed to delete schedule"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -1516,8 +1555,8 @@ export function SchedulesPage() {
     retryMutation.mutate(id, {
       onSuccess: () =>
         toast.success(t("schedules.retrySuccess", "Schedule re-queued")),
-      onError: () =>
-        toast.error(t("schedules.retryError", "Failed to retry schedule")),
+      onError: (err) =>
+        toast.error(t("schedules.retryError", "Failed to retry schedule"), { description: getErrorMessage(err) }),
     });
   };
 
@@ -1723,6 +1762,7 @@ export function SchedulesPage() {
                   Gated on having no rows: once rows are loaded a failed 10s poll
                   shows the inline stale notice above instead of wiping them. */}
               <ErrorState
+                error={error}
                 message={t("common.error")}
                 onRetry={() => refetch()}
                 retryLabel={t("common.retry")}
@@ -1819,7 +1859,11 @@ export function SchedulesPage() {
                               {s.triggerType === "HEARTBEAT"
                                 ? `Every ${s.heartbeatIntervalSeconds}s`
                                 : s.oneTimeAt
-                                  ? new Date(s.oneTimeAt).toLocaleString()
+                                  ? formatInstantInZone(
+                                      s.oneTimeAt,
+                                      s.timeZone ?? DEFAULT_TIME_ZONE,
+                                      true
+                                    )
                                   : s.cronExpression}
                             </code>
                             {s.cronDescription && (
@@ -1829,7 +1873,18 @@ export function SchedulesPage() {
                             )}
                           </td>
                           <td className="px-5 py-3">
-                            <code className="text-xs text-foreground">
+                            {nameOf(s.agentId) !== s.agentId && (
+                              <span className="block text-sm text-foreground">
+                                {nameOf(s.agentId)}
+                              </span>
+                            )}
+                            <code
+                              className={
+                                nameOf(s.agentId) !== s.agentId
+                                  ? "text-[10px] text-muted-foreground"
+                                  : "text-xs text-foreground"
+                              }
+                            >
                               {s.agentId}
                             </code>
                           </td>
@@ -1862,6 +1917,16 @@ export function SchedulesPage() {
                             {formatInstantInZone(
                               s.lastFired,
                               s.timeZone ?? DEFAULT_TIME_ZONE
+                            )}
+                            {/* Same zone label as the Next Fire column. */}
+                            {s.lastFired != null && (
+                              <span
+                                className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground/60"
+                                data-testid={`lastfired-timezone-${s.id}`}
+                              >
+                                <Globe className="h-3 w-3" />
+                                {s.timeZone ?? DEFAULT_TIME_ZONE}
+                              </span>
                             )}
                           </td>
                           <td className="px-5 py-3">

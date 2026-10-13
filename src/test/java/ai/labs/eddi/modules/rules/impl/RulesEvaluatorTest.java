@@ -156,19 +156,16 @@ class RulesEvaluatorTest {
 
     @Test
     void evaluate_nullRuleSet_throwsIllegalArgument() {
-        var evaluator = new RulesEvaluator();
+        var evaluator = new RulesEvaluator(null, false, false);
         assertThrows(IllegalArgumentException.class, () -> evaluator.evaluate(memory));
     }
 
-    // --- Setters ---
+    // --- Constructor ---
 
     @Test
-    void settersAndGetters() {
-        var evaluator = new RulesEvaluator();
+    void constructorSetsTheImmutableState() {
         var ruleSet = new RuleSet();
-        evaluator.setRuleSet(ruleSet);
-        evaluator.setAppendActions(true);
-        evaluator.setExpressionsAsActions(true);
+        var evaluator = new RulesEvaluator(ruleSet, true, true);
         assertSame(ruleSet, evaluator.getRuleSet());
         assertTrue(evaluator.isAppendActions());
         assertTrue(evaluator.isExpressionsAsActions());

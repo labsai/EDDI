@@ -1,8 +1,11 @@
 # Compliance Data Flow Diagram
 
 > **Audience**: Compliance auditors, DPOs, and deployers performing risk
-> assessments. This document provides a single-page overview of how data
-> flows through EDDI, where it's stored, and where encryption is applied.
+> assessments. This is the **canonical data inventory** for EDDI: how data
+> flows through it, where it is stored, what leaves the deployment, and what an
+> erasure does to each store. The [GDPR](gdpr-compliance.md),
+> [HIPAA](hipaa-compliance.md) and [incident response](incident-response.md)
+> guides link here instead of repeating it.
 
 ---
 
@@ -26,9 +29,9 @@
 │              │ tion      │ │ Memory   │  │   Ledger    │  │  Vault     │ │
 │              │ Memory    │ │ Store    │  │             │  │            │ │
 │              │           │ │          │  │  HMAC-signed│  │ AES-256-GCM│ │
-│              │ PII: Yes  │ │ PII: Yes │  │  Write-once │  │ Envelope   │ │
-│              │ Encrypted:│ │ Encrypted│  │  PII: Yes** │  │ encryption │ │
-│              │ TDE*      │ │ TDE*     │  │  Encrypted: │  │            │ │
+│              │ PII: Yes  │ │ PII: Yes │  │  (when a key│  │ Envelope   │ │
+│              │ Encrypted:│ │ Encrypted│  │  is set)    │  │ encryption │ │
+│              │ TDE*      │ │ TDE*     │  │  PII: Yes** │  │            │ │
 │              │           │ │          │  │  TDE*       │  │ PII: No    │ │
 │              └─────┬─────┘ └─────┬───┘  └──────┬──────┘  └────────────┘ │
 │                    │             │              │                         │
@@ -43,45 +46,97 @@
 │                          │ encryption  │                                  │
 │                          └─────────────┘                                  │
 │                                                                           │
-│              ** Audit userId is pseudonymized on GDPR erasure             │
+│   ** Audit rows are kept on GDPR erasure; their content is redacted and   │
+│      the userId pseudonymized (see "What an erasure does" below)          │
 └──────────────────────────────┬────────────────────────────────────────────┘
                                │
-                               │ HTTPS (conversation content)
-                               │ Only when LLM Task executes
+                               │ Configured transport (https:// or http://
+                               │ base URL) — conversation content LEAVES
+                               │ the deployment whenever an LLM call runs
                                ▼
                     ┌──────────────────────┐
                     │    LLM Provider      │
+                    │  (per agent config)  │
                     │                      │
-                    │  Receives:           │
-                    │  • User message      │
-                    │  • Chat history      │
-                    │  • System prompt     │
-                    │                      │
-                    │  Does NOT receive:   │
-                    │  • User IDs          │
-                    │  • API keys          │
-                    │  • Other sessions    │
+                    │  See "What reaches   │
+                    │  the LLM provider"   │
                     └──────────────────────┘
 ```
 
 ---
 
+## What reaches the LLM provider
+
+**Conversation content leaves your deployment.** Every LLM call sends data to
+the provider configured on the agent — unless that provider is self-hosted
+(Ollama, jlama, or an OpenAI-compatible server you run), it is a third party
+and a processor (GDPR) or sub-Business Associate (HIPAA) that needs a contract.
+EDDI does not store what it sends beyond its own conversation memory and audit
+ledger, but the provider's retention is governed by the provider's terms.
+
+**Transport security is the configured endpoint's.** The hosted providers' SDK
+defaults are `https://`, but a `baseUrl` an agent configures (Ollama, an
+OpenAI-compatible server, a proxy) is used as given — EDDI blocks cloud-metadata
+addresses there, not plain HTTP. A remote `http://` base URL sends the prompt,
+the history and tool results unencrypted. Use `https://` for any endpoint
+reached over a network you do not control.
+
+**Always sent, on every LLM call:**
+
+- the agent's system prompt, **after templating**
+- the current user message, and any attachment passed to a multimodal model
+- the conversation history window of **this** conversation (rolling summaries
+  included, when the agent uses them)
+- the names, descriptions and argument schemas of the tools the agent may call
+
+**Sent when the agent's configuration makes it so:**
+
+| Source | When | What it can contain |
+|---|---|---|
+| Prompt templates | the system prompt or a tool body references it | `{properties.*}` — the user's persistent memories are loaded into the properties at conversation start, including `global` memories **other agents** wrote about the same user and `group` memories of the conversation's group; `{userInfo.userId}`; `{conversationInfo.*}`, `{context.*}`, `{snippets.*}`, `{vars.*}` |
+| Memory tools (`enableMemoryTools`) | the model calls `recallMemories` / `searchMemory` | this agent's own memories, plus every `global` memory any agent wrote about the user and the group's `group` memories |
+| RAG | a knowledge base is attached | chunks retrieved from the ingested documents |
+| HTTP calls, MCP and A2A tools | the model calls the tool | the tool's response, whatever the external service returns |
+| Group discussions | the agent is a group member | other members' contributions and the group context |
+| Background LLM jobs | configured on the agent or group | conversation summarization sends conversation history; [Dream](user-memory.md#dream-consolidation) consolidation sends the user's memories; cascade judges and group facilitators/summarizers send the turn they assess |
+
+**Not sent by EDDI on its own:** a user identifier or account metadata (EDDI
+sets no `user` field on provider requests — an identifier reaches the provider
+only if a template or a tool result puts it into the text), other users'
+conversations, vault secrets (unless a template resolves one into prompt text)
+and API keys other than the provider's own authentication.
+
+"No data from other agents reaches the LLM" is therefore **not** a property of
+EDDI: `global` user memories are shared across agents by design, and a
+`longTerm` property of an agent **without a `userMemoryConfig`** is stored as
+`global` — so by default it is loaded into every other agent's conversations
+with that user. To keep an agent's memories private, give it a
+`userMemoryConfig` (its `defaultVisibility` is `self`) and leave `global` out of
+`guardrails.allowedVisibilities` (the default) — and check what the agents you
+deploy alongside it write as `global`.
+
+Provider data residency: [PRIVACY.md](../PRIVACY.md); provider BAAs:
+[HIPAA guide](hipaa-compliance.md#llm-provider-baa-requirements).
+
+---
+
 ## Data Store Inventory
 
-| Data Store | Contains PII | Encryption | Retention | Deletable | Regulatory Notes |
+| Data Store | Contains PII | Encryption | Retention | On GDPR erasure | Regulatory Notes |
 |---|---|---|---|---|---|
-| **Conversation Memory** | ✅ userId, chat content | TDE (deployer) | 365 days default (configurable) | ✅ GDPR cascade | Primary PII store |
-| **User Memory** | ✅ userId, structured facts | TDE (deployer) | Until deleted | ✅ GDPR cascade | Cross-conversation state |
-| **Managed Conversations** | ✅ userId, intent mappings | TDE (deployer) | Until deleted | ✅ GDPR cascade | Routing metadata |
-| **Attachments** | ✅ user-uploaded images, PDFs, audio | TDE (deployer) | With owning conversation | ✅ GDPR cascade | GridFS or PostgreSQL blobs; potential PHI |
-| **Conversation Checkpoints** | ✅ copy of conversation properties | TDE (deployer) | With owning conversation | ✅ GDPR cascade | Same PII as the conversation |
-| **Group Conversations** | ✅ multi-agent transcripts | TDE (deployer) | Until deleted | ✅ GDPR cascade | Group discussion content |
-| **Shared Artifacts** | ✅ user/agent-authored content | TDE (deployer) | Until deleted | ✅ GDPR cascade | Owned by the creating user |
-| **HITL Tool Journal** | ✅ tool name, capped tool result, approver identity | TDE (deployer) | With owning conversation | ✅ GDPR cascade | Human-approval audit trail |
-| **Schedules** | ✅ userId, trigger payloads | TDE (deployer) | Until deleted | ✅ GDPR cascade | Owned by the creating user |
-| **Audit Ledger** | ✅ userId (pseudonymized on erasure) | TDE (deployer) + HMAC | Indefinite | ❌ Pseudonymized only | EU AI Act Art. 17/19 |
-| **Database Logs** | ✅ userId (pseudonymized on erasure) | TDE (deployer) | Configurable | ❌ Pseudonymized only | Operational data |
-| **Secrets Vault** | ❌ API keys only | AES-256-GCM (application-level) | Until rotated/deleted | ✅ Via REST API | Credentials only |
+| **Conversation Memory** | ✅ userId, chat content | TDE (deployer) | Ended conversations: 365 days default (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`) | ✅ Deleted | Primary PII store |
+| **User Memory** | ✅ userId, structured facts | TDE (deployer) | Kept until deleted; `eddi.usermemories.deleteOlderThanDays` (default `-1`, off) | ✅ Deleted | Cross-conversation state |
+| **Managed Conversations** | ✅ userId, intent mappings | TDE (deployer) | Until deleted | ✅ Deleted | Routing metadata |
+| **Attachments** | ✅ user-uploaded images, PDFs, audio | TDE (deployer) | With owning conversation | ✅ Deleted | GridFS or PostgreSQL blobs; potential PHI |
+| **Conversation Checkpoints** | ✅ copy of conversation properties | TDE (deployer) | With owning conversation | ✅ Deleted | Same PII as the conversation |
+| **Group Conversations** | ✅ multi-agent transcripts | TDE (deployer) | Until deleted | ✅ Deleted | Group discussion content |
+| **Shared Artifacts** | ✅ user/agent-authored content | TDE (deployer) | Until deleted | ✅ Deleted | Owned by the creating user |
+| **HITL Tool Journal** | ✅ tool name, capped tool result, approver identity | TDE (deployer) | With owning conversation | ✅ Deleted | Human-approval audit trail |
+| **Schedules** | ✅ userId, trigger payloads | TDE (deployer) | Until deleted | ✅ Deleted | Owned by the creating user |
+| **Audit Ledger** | ✅ userId, prompts, responses, LLM detail, tool calls; admin actions name their actor | TDE (deployer) + HMAC (when a key is set) | Indefinite — no application-level expiry | ⚠️ Rows kept; content **redacted**, userId **pseudonymized** (`eddi.audit.erasure-mode`) | EU AI Act Arts. 12/19 record-keeping |
+| **Audit dead-letter sink** | ✅ whole audit entries | Deployer | Never expired by EDDI | ❌ Not reached | Only written when the ledger cannot persist; see [GDPR guide](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it) |
+| **Database Logs** | ✅ userId; WARN/ERROR message text | TDE (deployer) | `eddi.logs.db-retention-days` (default `-1`: kept until deleted) | ⚠️ userId pseudonymized; message text kept | Operational data |
+| **Secrets Vault** | ❌ API keys only (plus `scope: "secret"` property values, deleted on erasure) | AES-256-GCM (application-level) | Until rotated/deleted | ✅ Auto-vaulted user secrets deleted | Credentials only |
 
 ---
 
@@ -91,22 +146,25 @@
 User Input (may contain PII)
     │
     ├──▶ Stored in Conversation Memory (MongoDB/PostgreSQL)
-    │        └─ Retention: configurable (default 365 days)
-    │        └─ Auto-deleted after retention period
-    │        └─ Or: GDPR cascade delete (immediate)
+    │        └─ Ended conversations deleted after the retention period (default 365 days)
+    │        └─ Or: GDPR erasure (immediate)
     │
-    ├──▶ Extracted to User Memory (if PropertySetter configured)
-    │        └─ Retention: until deleted
-    │        └─ Or: GDPR cascade delete (immediate)
+    ├──▶ Extracted to User Memory (property setter longTerm, memory tools)
+    │        └─ Retention: until deleted (optional age-based sweep)
+    │        └─ Or: GDPR erasure (immediate)
     │
-    ├──▶ Sent to LLM Provider (if LLM task triggers)
-    │        └─ Transient: not stored by EDDI after response
-    │        └─ Provider retention: per provider's data policy
+    ├──▶ Sent to the LLM provider (whenever an LLM call runs — see above)
+    │        └─ Not stored by EDDI beyond its own memory and audit ledger
+    │        └─ Provider retention: per the provider's terms
     │
-    ├──▶ Logged in Audit Ledger (userId + task data)
-    │        └─ Retention: indefinite (EU AI Act)
-    │        └─ userId pseudonymized on GDPR erasure (SHA-256)
-    │        └─ HMAC integrity hash prevents tampering
+    ├──▶ Recorded in the Audit Ledger (userId + task input/output/LLM detail/tool calls)
+    │        └─ Retention: indefinite (EU AI Act record-keeping)
+    │        └─ GDPR erasure: rows kept, content redacted, userId pseudonymized
+    │        └─ HMAC integrity hash (when a key is configured) detects tampering
+    │
+    ├──▶ Mentioned in Database Logs (WARN/ERROR entries for the turn)
+    │        └─ Retention: eddi.logs.db-retention-days (off by default)
+    │        └─ GDPR erasure: userId pseudonymized
     │
     └──▶ Secret-scoped values → Secrets Vault
              └─ Vault reference replaces plaintext in memory
@@ -122,41 +180,32 @@ User Input (may contain PII)
 | **In Transit** | TLS 1.2+ | Deployer (reverse proxy or direct) | All HTTP/SSE/MCP traffic |
 | **At Rest (credentials)** | AES-256-GCM envelope encryption | EDDI Secrets Vault | API keys, tokens, passwords |
 | **At Rest (data)** | Transparent Data Encryption (TDE) | Deployer (database config) | Conversations, memories, audit, logs |
-| **Audit Integrity** | HMAC-SHA256 | EDDI (derived from vault master key) | Tamper detection on audit entries |
+| **Audit Integrity** | HMAC-SHA256 | EDDI — **only when** `EDDI_VAULT_MASTER_KEY` or `EDDI_AUDIT_HMAC_KEY` is set; `eddi.compliance.audit-signing-required=true` makes a missing key a startup failure | Tamper detection on audit entries |
 
 ---
 
-## GDPR Erasure Cascade
+## What an erasure does
 
-When `DELETE /admin/gdpr/{userId}` is called:
+`DELETE /admin/gdpr/{userId}` deletes the user's data from every store above
+marked "Deleted" — the step-by-step list, the response fields and how to read
+`complete` are in the [GDPR guide](gdpr-compliance.md#1-right-to-erasure-gdpr-art-17--ccpa-1798105).
+Two stores are kept rather than deleted:
 
-```
- 1. User Memories ─────────────── PERMANENTLY DELETED
- 2. Attachments (binary blobs) ── PERMANENTLY DELETED
- 3. HITL Tool Journal ─────────── PERMANENTLY DELETED
- 4. Conversation Descriptors ──── PERMANENTLY DELETED
- 5. Conversation Checkpoints ──── PERMANENTLY DELETED
- 6. Conversation Snapshots ────── PERMANENTLY DELETED
- 7. Managed Conversation Maps ─── PERMANENTLY DELETED (cache invalidated)
- 8. Group Conversations ───────── PERMANENTLY DELETED
- 9. Shared Artifacts ──────────── PERMANENTLY DELETED
-10. Schedules ────────────────── PERMANENTLY DELETED
-11. Database Logs ────────────── userId → SHA-256 PSEUDONYMIZED
-12. Audit Ledger ─────────────── userId → SHA-256 PSEUDONYMIZED
-    Audit Ledger Event ───────── GDPR_ERASURE entry written (immutable)
-```
-
-Steps 2–5 run before the conversation snapshots are deleted because they
-reference conversation IDs that the bulk delete removes.
-
-Steps 11–12 retain operational and compliance data with the `userId` replaced by
-`AuditHmac.pseudonymFor(userId)` — a prefix plus the hex SHA-256 of the identifier.
+- **Audit ledger** — every row stays, so the record of what ran and when, and
+  the per-conversation chain, survive. The row's prompt, response, LLM detail
+  and tool calls are replaced by a redaction marker and its userId by a keyed
+  pseudonym; a row that verified before is re-signed so it still verifies. See
+  [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion).
+- **Database logs** — the userId is replaced by `gdpr-erased:<sha256(userId)>`.
+  The log message text is not rewritten; bound it with
+  `eddi.logs.db-retention-days`.
 
 > **This is pseudonymisation, not anonymisation, and the distinction is legal as
-> well as technical.** The digest is deterministic and unsalted, so anyone holding
-> a list of candidate user IDs can hash each one and match it against the stored
-> value. It defeats casual browsing of the audit trail; it does not defeat an
-> adversary who can enumerate or guess identifiers.
+> well as technical.** The database-log pseudonym is a deterministic, unsalted
+> digest: anyone holding a list of candidate user IDs can hash each one and match
+> it against the stored value. The audit ledger's v5 pseudonym is keyed
+> (`gdpr-erased:k1:<HMAC(key, userId)>`) and cannot be recomputed without the
+> ledger's key — but whoever holds the key can.
 >
 > Under GDPR Art. 4(5) pseudonymised data remains **personal data** and stays in
 > scope. Do not treat these records as anonymised, and do not disclose them on

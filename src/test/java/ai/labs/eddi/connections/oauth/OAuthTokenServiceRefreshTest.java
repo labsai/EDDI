@@ -25,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -46,6 +47,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -94,10 +96,40 @@ class OAuthTokenServiceRefreshTest {
         // protocol, not the crypto, and a real vault here would need a master key.
         // It answers with a generation-qualified dekId because that is what the real
         // vault returns, and the grant is expected to store it verbatim.
-        lenient().when(secretProvider.seal(anyString(), anyString()))
-                .thenAnswer(i -> new ISecretProvider.SealedValue("sealed:" + i.getArgument(1), "iv", ACTIVE_DEK));
-        lenient().when(secretProvider.unseal(anyString(), any()))
-                .thenAnswer(i -> i.<ISecretProvider.SealedValue>getArgument(1).ciphertext().substring("sealed:".length()));
+        //
+        // The "ciphertext" also records the AAD context it was sealed with
+        // (sealed:<context>#<plaintext>), and opening it under any other context
+        // fails, as GCM would. A value without a recorded context is a grant sealed
+        // before binding existed and opens under any context, as the real vault's
+        // legacy fallback does.
+        lenient().when(secretProvider.sealAll(anyString(), any(), any())).thenAnswer(i -> {
+            List<String> plaintexts = i.getArgument(1);
+            List<String> contexts = i.getArgument(2);
+            List<ISecretProvider.SealedValue> sealed = new ArrayList<>();
+            for (int n = 0; n < plaintexts.size(); n++) {
+                sealed.add(plaintexts.get(n) == null
+                        ? null
+                        : new ISecretProvider.SealedValue("sealed:" + contexts.get(n) + "#" + plaintexts.get(n), "iv", ACTIVE_DEK));
+            }
+            return sealed;
+        });
+        lenient().when(secretProvider.unseal(anyString(), any(), anyString())).thenAnswer(i -> openFake(i.getArgument(1), i.getArgument(2)));
+    }
+
+    /**
+     * Opens a value the fake {@code sealAll} above produced — see the comment
+     * there.
+     */
+    private static String openFake(ISecretProvider.SealedValue sealed, String context) throws ISecretProvider.SecretProviderException {
+        String body = sealed.ciphertext().substring("sealed:".length());
+        int hash = body.lastIndexOf('#');
+        if (hash < 0) {
+            return body;
+        }
+        if (!body.substring(0, hash).equals(context)) {
+            throw new ISecretProvider.SecretProviderException("authentication tag mismatch");
+        }
+        return body.substring(hash + 1);
     }
 
     private OAuthTokenService service() {
@@ -228,7 +260,7 @@ class OAuthTokenServiceRefreshTest {
         assertEquals(0, tokenRequests.get());
 
         var sealed = ArgumentCaptor.forClass(ISecretProvider.SealedValue.class);
-        verify(secretProvider).unseal(eq(TENANT), sealed.capture());
+        verify(secretProvider).unseal(eq(TENANT), sealed.capture(), anyString());
         assertEquals(STORED_DEK, sealed.getValue().dekId(),
                 "a row the last rotation has not swept yet must be opened with the generation it names, not with whichever is newest");
     }
@@ -269,9 +301,10 @@ class OAuthTokenServiceRefreshTest {
 
         assertEquals("fresh-access", service().accessToken(connection(), PRINCIPAL));
 
-        assertEquals("sealed:old-refresh", grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getEncryptedRefreshToken(),
+        assertEquals("sealed:" + ConnectionGrant.refreshTokenContext(CONNECTION, PRINCIPAL) + "#old-refresh",
+                grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getEncryptedRefreshToken(),
                 "overwriting it with null would make the NEXT refresh impossible");
-        verify(secretProvider, times(1)).unseal(eq(TENANT), any());
+        verify(secretProvider, times(1)).unseal(eq(TENANT), any(), anyString());
     }
 
     @Test
@@ -287,13 +320,14 @@ class OAuthTokenServiceRefreshTest {
         // doAnswer/doReturn, not when(...): when() CALLS the mock, and the answer
         // installed in setUp dereferences its argument, so re-stubbing this way would
         // throw inside the stubbing line itself.
-        doAnswer(i -> i.<ISecretProvider.SealedValue>getArgument(1).ciphertext().substring("sealed:".length()))
+        doAnswer(i -> openFake(i.getArgument(1), i.getArgument(2)))
                 .doReturn(null)
-                .when(secretProvider).unseal(anyString(), any());
+                .when(secretProvider).unseal(anyString(), any(), anyString());
 
         assertEquals("fresh-access", service().accessToken(connection(), PRINCIPAL));
 
-        assertEquals("sealed:old-refresh", grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getEncryptedRefreshToken(),
+        assertEquals("sealed:" + ConnectionGrant.refreshTokenContext(CONNECTION, PRINCIPAL) + "#old-refresh",
+                grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getEncryptedRefreshToken(),
                 "a second unseal would have returned null here and silently dropped the refresh token");
     }
 
@@ -308,6 +342,26 @@ class OAuthTokenServiceRefreshTest {
 
         assertEquals(ACTIVE_DEK, grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow().getDekId(),
                 "the tenant id named no key at all; the row must say which generation opens its ciphertext");
+    }
+
+    @Test
+    @DisplayName("both tokens of a grant are sealed in one call, each bound to its own row and field")
+    void sealsBothTokensTogetherAndBound() throws Exception {
+        seedExpiredGrant();
+        when(tokenClient.refresh(any(), anyString(), anyString()))
+                .thenReturn(new TokenResponse("fresh-access", "new-refresh", Duration.ofHours(1), List.of()));
+
+        service().accessToken(connection(), PRINCIPAL);
+
+        // One sealAll, never two seals: two calls could straddle a DEK rotation and
+        // leave the refresh token under a generation the row does not name.
+        verify(secretProvider, times(1)).sealAll(eq(TENANT), eq(List.of("fresh-access", "new-refresh")),
+                eq(List.of(ConnectionGrant.accessTokenContext(CONNECTION, PRINCIPAL),
+                        ConnectionGrant.refreshTokenContext(CONNECTION, PRINCIPAL))));
+        verify(secretProvider, never()).seal(anyString(), anyString());
+        // And it reads back: the access token opens under the context the read side
+        // derives from the stored row.
+        assertEquals("fresh-access", service().accessToken(connection(), PRINCIPAL));
     }
 
     @Test
@@ -509,7 +563,7 @@ class OAuthTokenServiceRefreshTest {
         // arguments while the stub is being recorded.
         doAnswer(i -> {
             throw new ISecretProvider.SecretProviderException("DEK generation not available");
-        }).when(secretProvider).unseal(anyString(), argThat(sealed -> sealed != null && "unopenable".equals(sealed.ciphertext())));
+        }).when(secretProvider).unseal(anyString(), argThat(sealed -> sealed != null && "unopenable".equals(sealed.ciphertext())), anyString());
 
         var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
 
@@ -535,7 +589,7 @@ class OAuthTokenServiceRefreshTest {
         grantStore.seed(grant);
         doAnswer(i -> {
             throw new ISecretProvider.SecretProviderException("vault sealed");
-        }).when(secretProvider).unseal(anyString(), any());
+        }).when(secretProvider).unseal(anyString(), any(), anyString());
 
         var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
 

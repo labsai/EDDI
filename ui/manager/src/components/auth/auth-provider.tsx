@@ -7,6 +7,9 @@ import {
   type ReactNode,
 } from "react";
 import Keycloak from "keycloak-js";
+import { useTranslation } from "react-i18next";
+import { AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { getAuthConfig, type AuthConfig } from "@/lib/auth-config";
 import { api } from "@/lib/api-client";
 import {
@@ -50,6 +53,7 @@ function KeycloakAuthProvider({
   config: AuthConfig;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const [keycloak] = useState(
     () =>
       new Keycloak({
@@ -63,6 +67,13 @@ function KeycloakAuthProvider({
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
+  // Keycloak could not be initialised: nothing can load without a token, so the
+  // app is replaced by a sign-in prompt instead of a wall of failed requests.
+  const [initFailed, setInitFailed] = useState(false);
+  // The session ended mid-use (refresh token expired or revoked). Reported as a
+  // banner over the still-mounted app, never an automatic logout: a redirect
+  // would throw away whatever the user had typed but not saved.
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // Preserve the ID token across token refreshes.
   // keycloak-js deletes `keycloak.idToken` when the refresh token endpoint
@@ -71,35 +82,63 @@ function KeycloakAuthProvider({
   // actually invalidating the SSO session — the user silently re-authenticates.
   const idTokenRef = useRef<string | undefined>(undefined);
 
+  /**
+   * The one `keycloak.init()` call, shared by every run of the effect below.
+   *
+   * keycloak-js refuses a second `init()` on the same instance. React's
+   * StrictMode mounts effects twice in development, so the second run threw
+   * "A 'Keycloak' instance can only be initialized once", reported auth as
+   * failed, and the first run — the one that succeeded — was ignored because
+   * its cleanup had already marked it unmounted: every authenticated `npm run
+   * dev` session stayed signed out. Both runs now await the same promise.
+   */
+  const initRef = useRef<Promise<boolean> | null>(null);
+
   // Initialize Keycloak
   useEffect(() => {
     let mounted = true;
 
     const initKeycloak = async () => {
       try {
-        // Set up token refresh before init
-        keycloak.onTokenExpired = () => {
-          keycloak
-            .updateToken(30)
-            .then(() => {
-              if (mounted && keycloak.token) {
-                api.setAuthToken(keycloak.token);
-                // Keep idTokenRef in sync — Keycloak may or may not return a
-                // new id_token in the refresh response. We always preserve the
-                // most recent one so logout can send id_token_hint.
-                if (keycloak.idToken) {
-                  idTokenRef.current = keycloak.idToken;
-                }
-                if (import.meta.env.DEV) console.log("[EDDI Auth] Token refreshed");
-              }
-            })
-            .catch(() => {
-              console.warn("[EDDI Auth] Token refresh failed, logging out");
-              keycloak.logout({ redirectUri: `${window.location.origin}/manage` });
-            });
+        // Renew the token. Shared by keycloak's own expiry timer and by the
+        // API client, which calls it before each request (a token that expired
+        // while the tab was throttled is otherwise only noticed as a 401) and
+        // once more, forced, after a 401.
+        const syncTokens = (refreshed: boolean) => {
+          if (!mounted || !keycloak.token) return false;
+          api.setAuthToken(keycloak.token);
+          // Keep idTokenRef in sync — Keycloak may or may not return a
+          // new id_token in the refresh response. We always preserve the
+          // most recent one so logout can send id_token_hint.
+          if (keycloak.idToken) {
+            idTokenRef.current = keycloak.idToken;
+          }
+          // A refresh that works again (a transient failure, a retry) means the
+          // session is alive: take the expired banner down.
+          if (refreshed) setSessionExpired(false);
+          return true;
+        };
+        const refresh = async (force: boolean) => {
+          const refreshed = await keycloak.updateToken(force ? -1 : 30);
+          return syncTokens(refreshed);
         };
 
-        const auth = await keycloak.init({
+        keycloak.onTokenExpired = () => {
+          refresh(false)
+            .then((ok) => {
+              if (ok && import.meta.env.DEV) console.log("[EDDI Auth] Token refreshed");
+            })
+            .catch(() => {
+              console.warn("[EDDI Auth] Token refresh failed, session expired");
+              if (mounted) setSessionExpired(true);
+            });
+        };
+        api.setTokenRefresher(refresh);
+        api.setUnauthorizedHandler(() => {
+          if (mounted) setSessionExpired(true);
+        });
+
+        initRef.current ??= keycloak.init({
           onLoad: "login-required",
           checkLoginIframe: false,
           pkceMethod: "S256",
@@ -110,10 +149,12 @@ function KeycloakAuthProvider({
           // seeing a generic "TypeError: Failed to fetch").
           responseMode: "query",
         });
+        const auth = await initRef.current;
 
         if (!mounted) return;
 
         setAuthenticated(auth);
+        if (!auth) setInitFailed(true);
 
         if (auth && keycloak.token) {
           api.setAuthToken(keycloak.token);
@@ -159,6 +200,7 @@ function KeycloakAuthProvider({
         console.error("[EDDI Auth] Keycloak init failed:", error);
         setLoading(false);
         setAuthenticated(false);
+        setInitFailed(true);
       }
     };
 
@@ -166,6 +208,8 @@ function KeycloakAuthProvider({
 
     return () => {
       mounted = false;
+      api.setTokenRefresher(null);
+      api.setUnauthorizedHandler(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -210,13 +254,59 @@ function KeycloakAuthProvider({
       >
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-muted border-t-primary" />
-          <p className="text-sm text-muted-foreground">Authenticating…</p>
+          <p className="text-sm text-muted-foreground">{t("auth.loading", "Authenticating…")}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (initFailed) {
+    return (
+      <div
+        className="flex h-screen items-center justify-center bg-background px-4"
+        data-testid="auth-error"
+      >
+        <div className="flex max-w-md flex-col items-center gap-4 text-center">
+          <AlertTriangle className="h-10 w-10 text-destructive" />
+          <h1 className="text-lg font-semibold text-foreground">
+            {t("auth.initFailedTitle", "Sign-in failed")}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {t(
+              "auth.initFailedBody",
+              "The Manager could not complete sign-in. The login service may be unreachable or your session may have been rejected.",
+            )}
+          </p>
+          <Button onClick={login} data-testid="auth-sign-in-again">
+            {t("auth.signInAgain", "Sign in again")}
+          </Button>
         </div>
       </div>
     );
   }
 
   return (
-    <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={contextValue}>
+      {sessionExpired && (
+        <div
+          role="alert"
+          className="fixed inset-x-0 top-0 z-[100] flex flex-wrap items-center justify-center gap-3 border-b border-warning/40 bg-warning/15 px-4 py-2 text-sm text-foreground backdrop-blur"
+          data-testid="session-expired-banner"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
+          <span>
+            <strong>{t("auth.sessionExpiredTitle", "Your session has expired.")}</strong>{" "}
+            {t(
+              "auth.sessionExpiredBody",
+              "Unsaved changes are still on this page — copy anything you need before signing in again.",
+            )}
+          </span>
+          <Button size="sm" onClick={login} data-testid="auth-sign-in-again">
+            {t("auth.signInAgain", "Sign in again")}
+          </Button>
+        </div>
+      )}
+      {children}
+    </AuthContext.Provider>
   );
 }

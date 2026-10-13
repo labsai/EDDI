@@ -20,7 +20,7 @@
       "expressions" : "get_started"
     }, {
       "value" : "Not now",
-      "expressions" : "exit_conversation, CONVERSATION_END"
+      "expressions" : "exit_conversation"
     } ]
   }, {
     "action" : "ask_for_agent_name",

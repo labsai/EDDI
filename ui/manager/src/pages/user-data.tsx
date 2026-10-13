@@ -30,9 +30,30 @@ export function UserDataPage() {
     TABS.includes(initialTab) ? initialTab : "memories",
   );
 
+  // One user id for all three tabs, kept in the URL: switching tabs (or
+  // reloading) used to drop it and make the admin retype it.
+  const userId = searchParams.get("user") ?? "";
+  const setUserId = (next: string) =>
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (next) params.set("user", next);
+        else params.delete("user");
+        return params;
+      },
+      { replace: true },
+    );
+
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab);
-    setSearchParams({ tab }, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.set("tab", tab);
+        return params;
+      },
+      { replace: true },
+    );
   };
 
   const tabLabels: Record<Tab, string> = {
@@ -72,6 +93,9 @@ export function UserDataPage() {
             <button
               key={tab}
               role="tab"
+              id={`tab-${tab}`}
+              // The visible label is hidden on narrow screens, so name the tab.
+              aria-label={tabLabels[tab]}
               aria-selected={isActive}
               aria-controls={`panel-${tab}`}
               onClick={() => handleTabChange(tab)}
@@ -85,6 +109,7 @@ export function UserDataPage() {
             >
               <Icon
                 className={cn("h-4 w-4", isActive ? TAB_COLORS[tab] : "")}
+                aria-hidden="true"
               />
               <span className="hidden sm:inline">{tabLabels[tab]}</span>
             </button>
@@ -98,9 +123,19 @@ export function UserDataPage() {
         id={`panel-${activeTab}`}
         aria-labelledby={`tab-${activeTab}`}
       >
-        {activeTab === "memories" && <UserMemoryPage embedded />}
-        {activeTab === "properties" && <PropertiesPage embedded />}
-        {activeTab === "conversations" && <UserConversationsPage embedded />}
+        {activeTab === "memories" && (
+          <UserMemoryPage embedded userId={userId} onUserIdChange={setUserId} />
+        )}
+        {activeTab === "properties" && (
+          <PropertiesPage embedded userId={userId} onUserIdChange={setUserId} />
+        )}
+        {activeTab === "conversations" && (
+          <UserConversationsPage
+            embedded
+            userId={userId}
+            onUserIdChange={setUserId}
+          />
+        )}
       </div>
     </div>
   );

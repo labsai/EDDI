@@ -1,6 +1,6 @@
 # Multi-Tenancy Architecture Plan
 
-**Status:** Planning  
+**Status:** Partly implemented. Shipped: tenant quotas on Mongo and Postgres stores ([`docs/tenant-quotas.md`](../docs/tenant-quotas.md), `/administration/quotas/{tenantId}`) and per-user/team workspaces ([`docs/workspaces.md`](../docs/workspaces.md), which scope by owner, not by tenant). Not built: the tenant context and resolver (everything runs as `eddi.tenant.default-id`), Strategy B's row-level isolation, tenant-scoped authorization and tenant lifecycle.  
 **Created:** 2026-04-17  
 **Scope:** Backend (EDDI repo) — no frontend changes
 
