@@ -357,7 +357,10 @@ describe("postMessage token handshake", () => {
     try {
       renderAt("/chat/production/agent-1?tokenOrigin=https://host.example");
 
-      expect(host.post).toHaveBeenCalledWith({ type: "eddi-chat-ready" }, "https://host.example");
+      expect(host.post).toHaveBeenCalledWith(
+        { type: "eddi-chat-ready", protocol: 1 },
+        "https://host.example",
+      );
       expect(host.post.mock.calls.every(([, origin]) => origin !== "*")).toBe(true);
       // Nothing started yet.
       expect(backend.calls.some((c) => c.url.includes("/start"))).toBe(false);
