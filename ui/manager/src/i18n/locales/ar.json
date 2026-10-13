@@ -374,9 +374,6 @@
     "userMemory": "ذاكرة المستخدم",
     "userMemoryDesc": "ذاكرة دائمة لكل مستخدم مع أدوات LLM (تذكّر/استرجاع/نسيان). يعمل استمرار خصائص longTerm الأساسي دائماً بغض النظر عن هذا الخيار.",
     "viewingOldVersion": "أنت تعرض الإصدار {{current}}. الأحدث هو الإصدار {{latest}}.",
-    "workflowAdded": "تمت إضافة مسار العمل",
-    "workflowRemoved": "تمت إزالة مسار العمل",
-    "workflowUpdated": "تم تحديث مسار العمل إلى أحدث إصدار",
     "title": "تفاصيل Agent",
     "backToAgents": "العودة إلى Agents",
     "packages": "مسارات العمل",
@@ -487,10 +484,15 @@
     "copyUrl": "نسخ عنوان URL",
     "liveElsewhere": "مُفعَّل: v{{live}} · عرض v{{viewing}} (غير منشور)",
     "removeWorkflow": "إزالة سير العمل من الوكيل",
-    "confirmRemoveWorkflow": "إزالة سير العمل من هذا الوكيل؟",
-    "confirmRemoveWorkflowDescription": "تتم إزالة {{name}} من هذا الوكيل في إصدار جديد للوكيل غير مُفعَّل بعد. لا يُحذف سير العمل نفسه.",
-    "removeWorkflowConfirm": "إزالة",
-    "a2aAddSkill": "إضافة مهارة"
+    "a2aAddSkill": "إضافة مهارة",
+    "saveConflict": "تم تغيير هذا الوكيل في مكان آخر منذ أن فتحته. تغييراتك محفوظة: راجعها ثم احفظ مرة أخرى.",
+    "saveBeforeDeploy": "احفظ تغييراتك أو تجاهلها قبل النشر",
+    "reviewChanges": "مراجعة التغييرات",
+    "unsavedSections": "أقسام بها تغييرات غير محفوظة: {{count}}",
+    "reviewChangesTitle": "تغييرات غير محفوظة على الإصدار {{version}}",
+    "savedVersion": "المحفوظ v{{version}}",
+    "yourChanges": "تغييراتك",
+    "discardMessage": "ستعود كل التغييرات غير المحفوظة في هذه الصفحة إلى ما يحتويه الإصدار {{version}}."
   },
   "wizard": {
     "title": "معالج Agent"
@@ -1033,7 +1035,11 @@
     "invalidJsonSave": "لم يتم الحفظ — ملف JSON غير صالح. صحّحه في تبويب JSON.",
     "versionLockedDirty": "احفظ تغييراتك أو تجاهلها للتبديل بين الإصدارات",
     "savedAsVersion": "تم الحفظ كـ v{{version}} — غير مُفعَّل بعد",
-    "updateAgentAndSave": "تحديث الوكيل والحفظ"
+    "updateAgentAndSave": "تحديث الوكيل والحفظ",
+    "keepEditing": "متابعة التحرير",
+    "discardChanges": "تجاهل التغييرات",
+    "saveAndLeave": "حفظ ومغادرة",
+    "modified": "معدَّل"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -5855,7 +5861,7 @@
     "compatibleHint": "فقط للتغييرات التي لا يمكن أن تُفسد محادثة جارية، مثل صياغة الموجّه أو نموذج مختلف. اتركه دون تحديد إذا تمت إعادة تسمية الخصائص أو الإجراءات أو خطوات سير العمل أو حذفها.",
     "compatibleLegacyNote": "الإصدار الحالي أقدم من ميزة تتبّع الإصدارات، لذا تبقى المحادثات الجارية عليه. يربط الحفظ المتوافق التالي السلسلة.",
     "compatibleUnknownNote": "المحادثات على إصدار أقدم من ميزة تتبّع الإصدارات تبقى عليه.",
-    "generationBadge": "جيل التوافق {{generation}}",
+    "generationBadge": "الجيل {{generation}}",
     "generationTooltip": "جيل التوافق {{generation}}: إصدارات هذا الوكيل التي تحمل الجيل نفسه متوافقة، لذا تنتقل المحادثة الجارية إلى أحدث إصدار منشور في دورها التالي. الحفظ غير المتوافق يبدأ جيلًا جديدًا.",
     "impactTitle": "نشر v{{version}} في {{environment}} — المحادثات الجارية",
     "impactFollow_zero": "{{count}} محادثة نشطة على v{{from}} ستستمر على v{{to}}",

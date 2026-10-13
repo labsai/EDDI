@@ -1,10 +1,11 @@
-import { useContext, useEffect } from "react";
+import { useContext, useEffect, useState } from "react";
 import { UNSAFE_DataRouterContext, useBlocker } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import {
   anyGuardDirty,
   consumeNavigationBypass,
+  saveAllDirtyGuards,
   useNavigationGuardStore,
 } from "@/hooks/use-unsaved-changes-guard";
 
@@ -44,6 +45,21 @@ export function NavigationGuardDialog() {
   const { t } = useTranslation();
   const pending = useNavigationGuardStore((s) => s.pending);
   const hasDataRouter = useContext(UNSAFE_DataRouterContext) != null;
+  const [saving, setSaving] = useState(false);
+  // Read when the prompt opens: whether every dirty page can save from here.
+  const save = pending ? saveAllDirtyGuards() : null;
+
+  async function saveAndLeave() {
+    if (!save || !pending) return;
+    setSaving(true);
+    try {
+      if (await save()) pending.proceed();
+    } catch {
+      // The save reports its own failure; stay so nothing is lost.
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <>
@@ -54,6 +70,9 @@ export function NavigationGuardDialog() {
         onCancel={() => pending?.reset()}
         cancelLabel={t("editor.stay", "Stay")}
         confirmLabel={t("editor.discardAndLeave", "Discard & Leave")}
+        onSave={save ? () => void saveAndLeave() : undefined}
+        saveLabel={t("editor.saveAndLeave", "Save & leave")}
+        isSaving={saving}
       />
     </>
   );

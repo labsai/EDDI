@@ -193,8 +193,6 @@ export function WorkflowDetailPage() {
     localExtensions !== null &&
     JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
 
-  // Warn on tab close/reload, and hold in-app navigation, when dirty
-  useUnsavedChangesGuard(isDirty);
 
   // Save & Test support
   const { saveAndDeploy, isRunning: isSaveAndDeploying } = useSaveAndDeploy();
@@ -409,8 +407,9 @@ export function WorkflowDetailPage() {
     [t],
   );
 
-  const handleSave = useCallback(async () => {
-    if (!isDirty || !localExtensions || readOnly) return;
+  /** Saves the edits. Resolves whether they landed (Save & leave waits on it). */
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    if (!isDirty || !localExtensions || readOnly) return true;
     try {
       const result = await persist();
       if (agentId && result.newAgentVersion !== undefined) {
@@ -420,10 +419,16 @@ export function WorkflowDetailPage() {
         type: "success",
         text: t("packageEditor.saved", "Workflow saved successfully"),
       });
+      return true;
     } catch (err) {
       reportSaveError(err);
+      return false;
     }
   }, [isDirty, localExtensions, readOnly, persist, agentId, queryClient, reportSaveError, t]);
+
+  // Warn on tab close/reload, and hold in-app navigation, when dirty — with
+  // Save & leave, since this page can save on demand.
+  useUnsavedChangesGuard(isDirty, { onSave: handleSave });
 
   const handleSaveAndDeploy = useCallback(async () => {
     if (!isDirty || !localExtensions || !agentId || !currentAgentVer || readOnly) return;
@@ -736,7 +741,7 @@ export function WorkflowDetailPage() {
           {/* Save */}
           {!readOnly && (
           <button
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             disabled={!isDirty || updateMutation.isPending || isSaveAndDeploying}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
             data-testid="save-btn"
