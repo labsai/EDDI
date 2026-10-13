@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.TurnError;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
@@ -340,20 +341,15 @@ public class ConversationMemoryUtilities {
      * conversation is not in ERROR or nothing was reported (strict write's
      * {@code exclude_all} deliberately reports nothing).
      */
-    static SimpleConversationMemorySnapshot.TurnError turnError(ConversationState state, List<ConversationOutput> outputs) {
+    static TurnError turnError(ConversationState state, List<ConversationOutput> outputs) {
         if (state != ConversationState.ERROR || outputs == null || outputs.isEmpty()) {
             return null;
         }
         Object errors = outputs.getLast().get(TASK_ERRORS);
-        if (!(errors instanceof List<?> list) || list.isEmpty() || !(list.getLast() instanceof Map<?, ?> digest)) {
+        if (!(errors instanceof List<?> list) || list.isEmpty()) {
             return null;
         }
-        return new SimpleConversationMemorySnapshot.TurnError(stringOrNull(digest.get("taskId")), stringOrNull(digest.get("taskType")),
-                stringOrNull(digest.get("errorType")), stringOrNull(digest.get("text")));
-    }
-
-    private static String stringOrNull(Object value) {
-        return value != null ? value.toString() : null;
+        return TurnError.fromTaskError(list.getLast());
     }
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
