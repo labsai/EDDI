@@ -19,4 +19,8 @@ public record Choice(int index,
         @JsonProperty("finish_reason") String finishReason) {
 
     public static final String FINISH_STOP = "stop";
+    /** The model hit its output-token limit; the text is cut off. */
+    public static final String FINISH_LENGTH = "length";
+    /** The provider withheld or cut the answer under its content policy. */
+    public static final String FINISH_CONTENT_FILTER = "content_filter";
 }

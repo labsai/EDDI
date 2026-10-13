@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DISCUSSION_STYLES,
@@ -12,7 +12,6 @@ import {
   deleteGroup,
   duplicateGroup,
   getDiscussionStyles,
-  startGroupDiscussion,
   getGroupConversation,
   listGroupConversations,
   deleteGroupConversation,
@@ -72,22 +71,43 @@ export function useGroup(id: string, version?: number) {
  *
  * `undefined` while the lookup is in flight, so callers leave `useGroup`
  * disabled instead of fetching version 1 in the meantime. A failed lookup falls
- * back to 1, the old behaviour, rather than blocking the page on it.
+ * back to 1, the old behaviour, rather than blocking the page on it — pages
+ * that edit or delete the group use {@link useGroupVersionLookup} instead and
+ * show the failure.
  */
 export function useResolvedGroupVersion(
   groupId: string | undefined,
   urlVersion: string | null,
 ): number | undefined {
+  const { version, lookupFailed } = useGroupVersionLookup(groupId, urlVersion);
+  if (version !== undefined) return version;
+  return lookupFailed ? 1 : undefined;
+}
+
+/**
+ * As {@link useResolvedGroupVersion}, but a failed current-version lookup is
+ * reported (`lookupFailed`, with `retry`) instead of being turned into version
+ * 1. Loading version 1 of a group that is on version 4 shows a stale document,
+ * and every save or delete from it 409s — a page that writes must say the
+ * lookup failed and offer a retry, not guess.
+ */
+export function useGroupVersionLookup(
+  groupId: string | undefined,
+  urlVersion: string | null,
+): { version: number | undefined; lookupFailed: boolean; retry: () => void } {
   const explicit = urlVersion != null && /^[1-9]\d*$/.test(urlVersion) ? Number(urlVersion) : undefined;
-  const { data, isError } = useQuery({
+  const { data, isError, refetch } = useQuery({
     queryKey: [...GROUPS_KEY, groupId, "currentVersion"],
     queryFn: () => getGroupCurrentVersion(groupId!),
     enabled: !!groupId && explicit === undefined,
     staleTime: 30_000,
   });
-  if (explicit !== undefined) return explicit;
-  if (typeof data === "number" && data > 0) return data;
-  return isError ? 1 : undefined;
+  const retry = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+  if (explicit !== undefined) return { version: explicit, lookupFailed: false, retry };
+  if (typeof data === "number" && data > 0) return { version: data, lookupFailed: false, retry };
+  return { version: undefined, lookupFailed: isError, retry };
 }
 
 export function useDiscussionStyles() {
@@ -202,6 +222,7 @@ export function useDeleteGroup() {
     }: {
       id: string;
       version: number;
+      /** Hard delete (also removes the group's workspace) — only when the user explicitly chose it. */
       permanent?: boolean;
     }) => deleteGroup(id, version, permanent),
     onSuccess: () => {
@@ -247,24 +268,6 @@ export function useGroupConversation(groupId: string, conversationId: string) {
   });
 }
 
-export function useStartDiscussion() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      groupId,
-      question,
-      userId,
-    }: {
-      groupId: string;
-      question: string;
-      userId?: string;
-    }) => startGroupDiscussion(groupId, question, userId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: GROUP_CONVERSATIONS_KEY });
-    },
-  });
-}
-
 export function useDeleteGroupConversation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -288,13 +291,19 @@ export function useDeleteGroupWithMembers() {
       groupId,
       version,
       config,
+      permanent,
     }: {
       groupId: string;
       version: number;
       config: AgentGroupConfiguration;
-    }) => deleteGroupWithMembers(groupId, version, config),
-    onSuccess: () => {
+      /** Hard delete — only when the user explicitly chose it. Soft otherwise. */
+      permanent?: boolean;
+    }) => deleteGroupWithMembers(groupId, version, config, permanent),
+    // Settled, not success: a partial failure has still deleted something (the
+    // group on the soft path, some members on either), and the lists must say so.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
     },
   });
 }

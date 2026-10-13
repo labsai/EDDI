@@ -53,6 +53,7 @@ export async function purgeDeadLetters(): Promise<number> {
 export function createCoordinatorEventSource(): BearerEventSource {
   return new BearerEventSource(
     `${window.location.origin}${BASE}/stream`,
-    api.getAuthHeader()
+    // Re-read on every reconnect so a refreshed token is used (see HeaderSource).
+    () => api.getAuthHeader()
   );
 }

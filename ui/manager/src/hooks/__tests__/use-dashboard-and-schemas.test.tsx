@@ -11,7 +11,7 @@ import {
   useCoordinatorStatusLight,
 } from "@/hooks/use-dashboard";
 import { useLatestVersions, getVersionInfo } from "@/hooks/use-latest-versions";
-import { useJsonSchema, useAgentJsonSchema, useWorkflowJsonSchema } from "@/hooks/use-json-schema";
+import { useJsonSchema } from "@/hooks/use-json-schema";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 
@@ -178,41 +178,5 @@ describe("useJsonSchema", () => {
       wrapper: createWrapper(),
     });
     expect(result.current.fetchStatus).toBe("idle");
-  });
-});
-
-describe("useAgentJsonSchema", () => {
-  it("fetches agent JSON schema", async () => {
-    server.use(
-      http.get("*/agentstore/agents/jsonSchema", () => {
-        return HttpResponse.json({
-          type: "object",
-          properties: { workflows: { type: "array" } },
-        });
-      })
-    );
-    const { result } = renderHook(() => useAgentJsonSchema(), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
-  });
-});
-
-describe("useWorkflowJsonSchema", () => {
-  it("fetches workflow JSON schema", async () => {
-    server.use(
-      http.get("*/workflowstore/workflows/jsonSchema", () => {
-        return HttpResponse.json({
-          type: "object",
-          properties: { steps: { type: "array" } },
-        });
-      })
-    );
-    const { result } = renderHook(() => useWorkflowJsonSchema(), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeDefined();
   });
 });

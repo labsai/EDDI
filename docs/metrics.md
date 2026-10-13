@@ -150,6 +150,7 @@ eddi_conversation_redo_count_total          # Redo operations
 eddi_conversation_agent_version_switch_count_total  # Conversations moved to another compatible version of their agent
 eddi_conversation_store_conflict_count_total  # Writes refused: another writer changed the conversation first
 eddi_processing_conversation_count          # Currently active (gauge)
+eddi_conversation_abandoned_running         # Turns the agent-timeout watchdog gave up on that are still running (gauge, normally 0)
 
 eddi_conversation_start_duration_seconds    # Start latency (timer)
 eddi_conversation_end_duration_seconds      # End latency (timer)
@@ -271,6 +272,7 @@ eddi_schedule_poll_count_total              # Poll cycles
 eddi_schedule_fire_count_total              # Schedules fired
 eddi_schedule_fire_failed_total             # Fire failures
 eddi_schedule_fire_skipped_total            # Fires the coordinator dropped without running the turn
+eddi_schedule_fire_timedout_total           # Fires interrupted at eddi.schedule.fire-timeout (recorded FAILED, retried)
 eddi_schedule_claim_conflict_total          # Claim conflicts (multi-instance)
 eddi_schedule_fire_deadlettered_total       # Dead-lettered schedules
 eddi_schedule_fire_duration_seconds         # Fire latency (timer)
@@ -490,6 +492,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 eddi_attachment_forwarded_total             # Attachments converted to LLM content
 eddi_attachment_reinlined_total             # Extracted text stitched back into history
 eddi_attachment_errors_total                # Drops, cap-skips and capability gates
+eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: scope (conversation, user)
 ```
 
 ### HITL Metrics
@@ -575,6 +578,7 @@ eddi_vault_rotate_count_total               # Key rotations
 eddi_vault_grant_update_count_total         # allowedAgents edited without the value (PUT .../grant)
 eddi_vault_delete_count_total               # Secrets deleted
 eddi_vault_errors_count_total               # Vault operation failures
+eddi_vault_reseal_failures_total            # Sealed rows a DEK rotation could not open and skipped; tag: participant
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits
 eddi_vault_cache_misses_total               # Resolved-secret cache misses
 eddi_vault_resolve_errors_total             # Resolution failures seen by SecretResolver
@@ -592,6 +596,11 @@ eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; t
 eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
 eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
+eddi_openai_conversations_rolled_over_total # /v1 conversations ended at max-conversation-steps
+eddi_openai_chat_keys_total                 # Stateful /v1 requests by chat-key source; tag: source
+eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (send|stream|get|cancel|..., disabled when A2A is off), dialect (1.0|0.3|legacy|none), outcome (ok|error|invalid|busy)
+eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
+eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 ```

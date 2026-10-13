@@ -8,7 +8,7 @@ on:
     branches: [main]
 
 # Three pushes to a PR branch used to leave three full pipelines in flight —
-# three `mvn clean test` runs over ~19,800 tests, three Testcontainers runs,
+# three `mvn clean test` runs over 20,000+ tests, three Testcontainers runs,
 # three CodeQL builds — with the superseded ones never cancelled, so an older
 # run could report onto a commit that is no longer the head. Pushes to main and
 # tag pushes are NOT cancelled: a release must never be interrupted mid-publish.
@@ -2369,7 +2369,7 @@ jobs:
           set -uo pipefail
           MONGO_URI="mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 
-          docker run -d --name eddi-boot-mongodb --network host mongo:7.0.14
+          docker run -d --name eddi-boot-mongodb --network host mongo:7.0.43
           MONGO_READY=0
           for _ in $(seq 1 30); do
             if docker exec eddi-boot-mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
@@ -2380,7 +2380,7 @@ jobs:
             sleep 1
           done
           # Fail here rather than falling through. Without this branch a runner that
-          # cannot pull or start mongo:7.0.14 (a Docker Hub hiccup, a full disk) ends
+          # cannot pull or start mongo:7.0.43 (a Docker Hub hiccup, a full disk) ends
           # up reported as "The built image did not become ready within 90s - refusing
           # to publish", which blames the image for someone else's outage.
           if [ "$MONGO_READY" != "1" ]; then
@@ -2563,7 +2563,7 @@ jobs:
           # a 7.x-specific regression could not be caught here at all.
           docker run -d --name mongodb \
             --network host \
-            mongo:7.0.14
+            mongo:7.0.43
           echo "Waiting for MongoDB..."
           for i in $(seq 1 15); do
             if docker exec mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -775,6 +776,8 @@ public class LlmTask implements ILifecycleTask {
             }
         }
 
+        recordAbnormalFinish(currentStep, responseMetadata);
+
         if (fallbackServed != null && eventSink != null && !addToOutputExplicitlyFalse && !modelTextStreamed) {
             eventSink.onToken(fallbackServed.text());
         } else if (retryPolicy != null && fallbackServed == null && eventSink != null && !addToOutputExplicitlyFalse && responseContent != null) {
@@ -835,6 +838,11 @@ public class LlmTask implements ILifecycleTask {
             currentStep.storeData(modelNameData);
 
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
+        } else if (responseMetadata != null && responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+            // The turn's token counts are also the caller's: the OpenAI-compatible /v1
+            // adapter reports them as `usage`. Recorded without the rest of the audit
+            // evidence when the ledger is off (eddi.audit.enabled=false).
+            accumulateTokenUsage(currentStep, tokenUsage);
         }
 
         // Store tool trace if available
@@ -1111,6 +1119,41 @@ public class LlmTask implements ILifecycleTask {
             accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
         }
         accumulateToolCalls(currentStep, toolTrace, task.getId());
+    }
+
+    /**
+     * Leaves {@link MemoryKeys#LLM_FINISH_REASON} on the step when the model's
+     * answer was cut off at its token limit ({@code length}) or filtered by the
+     * provider ({@code content_filter}), so a caller can report it — the
+     * OpenAI-compatible {@code /v1} adapter turns it into {@code finish_reason}. A
+     * normal finish writes nothing, so a later sub-task of the same turn cannot
+     * overwrite an earlier truncation with "stop".
+     */
+    private void recordAbnormalFinish(IWritableConversationStep currentStep, Map<String, Object> responseMetadata) {
+        String reason = abnormalFinishReason(responseMetadata);
+        if (reason != null) {
+            currentStep.storeData(dataFactory.createData(MemoryKeys.LLM_FINISH_REASON, reason));
+        }
+    }
+
+    /**
+     * {@code "length"} or {@code "content_filter"} when the response metadata says
+     * the model stopped for that reason — as the executors' {@code warning} or as
+     * the provider's raw {@code finishReason} — otherwise {@code null}.
+     */
+    static String abnormalFinishReason(Map<String, Object> responseMetadata) {
+        if (responseMetadata == null) {
+            return null;
+        }
+        Object warning = responseMetadata.get("warning");
+        String finishReason = String.valueOf(responseMetadata.get("finishReason"));
+        if ("truncated".equals(warning) || "LENGTH".equalsIgnoreCase(finishReason)) {
+            return "length";
+        }
+        if ("content_filter".equals(warning) || "CONTENT_FILTER".equalsIgnoreCase(finishReason)) {
+            return "content_filter";
+        }
+        return null;
     }
 
     private void accumulateTokenUsage(IWritableConversationStep currentStep, Map<?, ?> delta) {
@@ -1623,6 +1666,11 @@ public class LlmTask implements ILifecycleTask {
             // calls (see the comment above) — the pre-pause segment is not recoverable
             // here, so a paused turn's ledger entry under-reports by that segment.
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
+        } else if (responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+            // The turn's token counts are also the caller's: the OpenAI-compatible /v1
+            // adapter reports them as `usage`. Recorded without the rest of the audit
+            // evidence when the ledger is off (eddi.audit.enabled=false).
+            accumulateTokenUsage(currentStep, tokenUsage);
         }
 
         // Tool trace (mirror executeTask)
@@ -1667,7 +1715,7 @@ public class LlmTask implements ILifecycleTask {
      * Parameters that should NOT be processed by the template engine (credentials,
      * secrets).
      */
-    private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
+    public static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
 
     /**
      * A configuration reference MENTIONED in an LLM parameter —
@@ -1680,7 +1728,7 @@ public class LlmTask implements ILifecycleTask {
      * Qute namespace resolver — so to Qute every one of them is an unresolvable
      * namespaced expression, not just {@code vault}.
      */
-    static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
+    public static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
      * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
@@ -2229,7 +2277,7 @@ public class LlmTask implements ILifecycleTask {
 
         Object uriObj = configuration.get(KEY_URI);
         if (!isNullOrEmpty(uriObj)) {
-            URI uri = URI.create(uriObj.toString());
+            URI uri = ResourceUris.require(uriObj, ID);
 
             try {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);

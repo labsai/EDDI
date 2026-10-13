@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -41,9 +42,20 @@ import java.util.concurrent.TimeoutException;
  * can expire and be stolen by another instance (see
  * {@link IScheduleStore#tryClaim}) while the original, possibly-wedged fire may
  * still commit, so a fire can run more than once. Fire targets are therefore
- * expected to be idempotent — HITL timeout fires resolve via a state CAS
- * (resume/cancel) and no-op on a duplicate. Implements exponential backoff on
- * failure with dead-lettering after max retries.
+ * expected to be idempotent — HITL timeout fires carry the id of the pause they
+ * were armed for and resolve via a state CAS (resume/cancel), so a duplicate
+ * finds nothing left to decide. Implements exponential backoff on failure with
+ * dead-lettering after max retries — except for HITL approval timeouts, which
+ * are re-armed at {@code eddi.schedule.hitl-timeout-retry-interval} and never
+ * dead-lettered (see {@link #onFireFailed}).
+ * <p>
+ * <b>Lease versus fire timeout.</b> A running fire is bounded by
+ * {@code eddi.schedule.fire-timeout} (plus a short grace for its bookkeeping);
+ * the claim's lease must outlast that, or another poll — this instance's next
+ * one included — reclaims a schedule whose fire is still running and starts a
+ * second copy. {@link #init} enforces {@code lease-timeout > fire-timeout +
+ * grace} and raises the effective lease, with a warning, when the configuration
+ * says otherwise.
  * <p>
  * Supports two trigger types:
  * <ul>
@@ -75,6 +87,36 @@ public class SchedulePollerService {
     private final String defaultTimeZone;
     private final Duration fireLogRetention;
 
+    /**
+     * How long one fire may run before the batch stops waiting for it and cancels
+     * it. The same property {@link ScheduleFireExecutor} bounds a conversation turn
+     * with, so the two cannot disagree.
+     */
+    @ConfigProperty(name = "eddi.schedule.fire-timeout", defaultValue = "5m")
+    Duration fireTimeout = Duration.ofMinutes(5);
+
+    /**
+     * Time a fire is given past {@link #fireTimeout} to record its own outcome
+     * (fire log, state write) before the batch cancels it.
+     */
+    Duration batchGrace = Duration.ofSeconds(30);
+
+    /**
+     * When a HITL approval timeout's decision could not be applied yet (store blip,
+     * node draining, a decision in flight), how long until it is tried again.
+     */
+    @ConfigProperty(name = "eddi.schedule.hitl-timeout-retry-interval", defaultValue = "2m")
+    Duration hitlTimeoutRetryInterval = Duration.ofMinutes(2);
+
+    /** Margin the effective lease keeps above {@code fireTimeout + batchGrace}. */
+    static final Duration LEASE_MARGIN = Duration.ofMinutes(1);
+
+    /**
+     * The lease actually used: the configured one, raised in {@link #init} when it
+     * would expire while a fire can still legitimately be running.
+     */
+    private Duration effectiveLeaseTimeout;
+
     private String instanceId;
     private Counter pollCounter;
     private Counter fireCounter;
@@ -84,11 +126,12 @@ public class SchedulePollerService {
     private Counter deadLetterCounter;
     private Counter fireLogsPrunedCounter;
     private Timer fireDurationTimer;
+    private Counter fireTimedOutCounter;
 
     @Inject
     public SchedulePollerService(IScheduleStore scheduleStore, ScheduleFireExecutor fireExecutor, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.schedule.enabled", defaultValue = "true") boolean schedulingEnabled,
-            @ConfigProperty(name = "eddi.schedule.lease-timeout", defaultValue = "5m") Duration leaseTimeout,
+            @ConfigProperty(name = "eddi.schedule.lease-timeout", defaultValue = "10m") Duration leaseTimeout,
             @ConfigProperty(name = "eddi.schedule.max-retries", defaultValue = "5") int maxRetries,
             @ConfigProperty(name = "eddi.schedule.backoff-base-seconds", defaultValue = "15") int backoffBaseSeconds,
             @ConfigProperty(name = "eddi.schedule.backoff-multiplier", defaultValue = "4") int backoffMultiplier,
@@ -106,6 +149,7 @@ public class SchedulePollerService {
         this.configuredInstanceId = configuredInstanceId;
         this.defaultTimeZone = defaultTimeZone;
         this.fireLogRetention = fireLogRetention;
+        this.effectiveLeaseTimeout = leaseTimeout;
     }
 
     @PostConstruct
@@ -130,9 +174,19 @@ public class SchedulePollerService {
         deadLetterCounter = meterRegistry.counter("eddi.schedule.fire.deadlettered");
         fireLogsPrunedCounter = meterRegistry.counter("eddi.schedule.firelog.pruned");
         fireDurationTimer = meterRegistry.timer("eddi.schedule.fire.duration");
+        fireTimedOutCounter = meterRegistry.counter("eddi.schedule.fire.timedout");
+
+        effectiveLeaseTimeout = effectiveLease(leaseTimeout, batchDeadline());
+        if (!effectiveLeaseTimeout.equals(leaseTimeout)) {
+            LOGGER.warnf("eddi.schedule.lease-timeout (%s) does not outlast eddi.schedule.fire-timeout (%s) plus %s of grace — "
+                    + "a schedule would be reclaimable while its fire is still running, and fire twice. "
+                    + "Using a lease of %s instead; set eddi.schedule.lease-timeout above the fire timeout to silence this.",
+                    leaseTimeout, fireTimeout, batchGrace, effectiveLeaseTimeout);
+        }
 
         if (schedulingEnabled) {
-            LOGGER.infof("Schedule poller initialized (instance=%s, leaseTimeout=%s, maxRetries=%d)", instanceId, leaseTimeout, maxRetries);
+            LOGGER.infof("Schedule poller initialized (instance=%s, leaseTimeout=%s, fireTimeout=%s, maxRetries=%d)", instanceId,
+                    effectiveLeaseTimeout, fireTimeout, maxRetries);
         } else {
             LOGGER.info("Schedule poller DISABLED (eddi.schedule.enabled=false)");
         }
@@ -142,6 +196,29 @@ public class SchedulePollerService {
      * Main poll loop — runs at the configured interval. Finds due schedules, claims
      * them atomically, and fires.
      */
+    /** How long a batch waits for its fires: the fire timeout plus the grace. */
+    Duration batchDeadline() {
+        Duration timeout = fireTimeout != null ? fireTimeout : Duration.ofMinutes(5);
+        Duration grace = batchGrace != null ? batchGrace : Duration.ZERO;
+        return timeout.plus(grace);
+    }
+
+    /**
+     * The lease to use: the configured one if it outlasts {@code batchDeadline},
+     * otherwise {@code batchDeadline + LEASE_MARGIN}.
+     */
+    static Duration effectiveLease(Duration configuredLease, Duration batchDeadline) {
+        if (configuredLease != null && configuredLease.compareTo(batchDeadline) > 0) {
+            return configuredLease;
+        }
+        return batchDeadline.plus(LEASE_MARGIN);
+    }
+
+    /** The lease in force — exposed for tests and the status endpoint. */
+    public Duration getEffectiveLeaseTimeout() {
+        return effectiveLeaseTimeout;
+    }
+
     @Scheduled(every = "${eddi.schedule.poll-interval:15s}", identity = "schedule-poller")
     void pollDueSchedules() {
         if (!schedulingEnabled) {
@@ -152,7 +229,7 @@ public class SchedulePollerService {
 
         try {
             Instant now = Instant.now();
-            Instant leaseExpiry = now.minus(leaseTimeout);
+            Instant leaseExpiry = now.minus(effectiveLeaseTimeout);
 
             List<ScheduleConfiguration> dueSchedules = scheduleStore.findDueSchedules(now, leaseExpiry, maxRetries);
 
@@ -283,22 +360,28 @@ public class SchedulePollerService {
             for (ScheduleConfiguration schedule : claimed) {
                 futures.add(executor.submit(() -> fireClaimedSchedule(schedule)));
             }
-            // Bound the WHOLE batch by ONE shared deadline, not leaseTimeout per
-            // future: a per-future bound in this sequential loop would let N stalled
-            // fires pin the poll thread for up to N*leaseTimeout (hours for a large
-            // batch), defeating the point of the timeout. leaseTimeout is the window
-            // after which another instance may reclaim these schedules anyway
-            // (findDueSchedules' leaseExpiredFilter), so waiting longer serves no
-            // purpose. On per-future timeout, cancel (best-effort interrupt) and move on.
-            long deadlineNanos = System.nanoTime() + Math.max(leaseTimeout.toNanos(), 1_000_000L);
+            // Bound the WHOLE batch by ONE shared deadline, not a timeout per future:
+            // a per-future bound in this sequential loop would let N stalled fires pin
+            // the poll thread for N times as long (hours for a large batch), defeating
+            // the point of the timeout. The deadline is the FIRE timeout plus a grace,
+            // and deliberately not the lease: when the two were equal, a fire that ran
+            // to the deadline was interrupted at the very moment its claim became
+            // stealable, so a long Dream run was both cut short and re-fired. init()
+            // keeps the lease strictly longer than this deadline. On timeout, cancel
+            // (best-effort interrupt) and move on.
+            Duration deadline = batchDeadline();
+            long deadlineNanos = System.nanoTime() + Math.max(deadline.toNanos(), 1_000_000L);
             for (Future<?> future : futures) {
                 long remainingMs = Math.max(0L, (deadlineNanos - System.nanoTime()) / 1_000_000L);
                 try {
                     future.get(remainingMs, TimeUnit.MILLISECONDS);
                 } catch (TimeoutException e) {
                     future.cancel(true);
-                    LOGGER.errorf("[SCHEDULE] Dispatched fire task exceeded the batch lease deadline (%s) — cancelling; "
-                            + "the schedule will become reclaimable once its lease expires", leaseTimeout);
+                    fireTimedOutCounter.increment();
+                    LOGGER.errorf("[SCHEDULE] A fire exceeded eddi.schedule.fire-timeout (%s, plus %s grace) and was interrupted. "
+                            + "It is recorded FAILED and retried with backoff; raise eddi.schedule.fire-timeout for jobs that "
+                            + "legitimately run longer (the lease follows it). If it ignores the interrupt, its schedule becomes "
+                            + "reclaimable once the %s lease expires.", fireTimeout, batchGrace, effectiveLeaseTimeout);
                 } catch (Exception e) {
                     LOGGER.errorf(e, "[SCHEDULE] Dispatched fire task failed unexpectedly");
                 }
@@ -479,6 +562,10 @@ public class SchedulePollerService {
     }
 
     private void onFireFailed(ScheduleConfiguration schedule) {
+        if (HitlSchedules.isHitlTimeout(schedule.getMetadata())) {
+            rearmHitlTimeout(schedule);
+            return;
+        }
         try {
             int newFailCount = schedule.getFailCount() + 1;
             if (newFailCount >= maxRetries) {
@@ -497,6 +584,34 @@ public class SchedulePollerService {
             }
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Error handling failure for schedule %s", schedule.getId());
+        }
+    }
+
+    /**
+     * A HITL approval timeout whose decision could not be applied yet is re-armed,
+     * not retried toward a dead letter.
+     * <p>
+     * The ordinary retry ladder (15 s, 1 min, 4 min, 16 min, dead letter) assumes
+     * the failure is the schedule's own. Here it almost never is: the cause is
+     * transient and outside the schedule (a store blip, a node draining for
+     * shutdown, a concurrent decision), and the timeout must still apply once it
+     * passes. Dead-lettering it — or, as before, logging the fire COMPLETED and
+     * disabling the one-shot — turned a finite AUTO_REJECT/AUTO_APPROVE/ABORT
+     * policy into wait-forever until the next restart. So the row goes back to
+     * PENDING at a fixed interval, with {@code failCount} untouched; every attempt
+     * stays visible as a FAILED fire log with its reason. A timeout whose
+     * conversation is gone or already decided completes normally instead (see
+     * {@code HitlTimeoutHandler}).
+     */
+    private void rearmHitlTimeout(ScheduleConfiguration schedule) {
+        try {
+            Instant retryAt = Instant.now().plus(hitlTimeoutRetryInterval);
+            scheduleStore.markSkipped(schedule.getId(), schedule.getFireId(), retryAt);
+            fireFailedCounter.increment();
+            LOGGER.warnf("[SCHEDULE] HITL approval timeout '%s' (id=%s) could not be applied yet — re-armed for %s",
+                    schedule.getName(), schedule.getId(), retryAt);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Could not re-arm HITL approval timeout %s", schedule.getId());
         }
     }
 
@@ -537,7 +652,7 @@ public class SchedulePollerService {
      */
     public boolean claimForManualFire(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException {
         Instant now = Instant.now();
-        return tryClaimFor(schedule, now, now.minus(leaseTimeout));
+        return tryClaimFor(schedule, now, now.minus(effectiveLeaseTimeout));
     }
 
     /**

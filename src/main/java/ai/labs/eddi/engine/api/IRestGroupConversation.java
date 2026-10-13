@@ -315,7 +315,9 @@ public interface IRestGroupConversation {
 
             @Size(max = MAX_ATTACHMENTS_PER_REQUEST,
                   message = "'attachments' must contain at most {max} entries")
-            @Valid List<AttachmentRef> attachments) {
+            // @Valid on the type argument, not the list: on the container it is
+            // deprecated (Hibernate Validator HV000271, logged three times per boot).
+            List<@Valid AttachmentRef> attachments) {
         public DiscussRequest(String question, String userId) {
             this(question, userId, null);
         }

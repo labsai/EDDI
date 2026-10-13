@@ -27,6 +27,8 @@ import { RequestPreview } from "@/components/operator/request-preview";
 import {
   usePendingApprovals,
   useAllGroupPendingApprovals,
+  isPendingApprovalsCapped,
+  PENDING_APPROVALS_LIMIT,
   useResumeConversation,
   useCancelConversation,
   useApproveGroupPhase,
@@ -417,6 +419,9 @@ export function ApprovalsPage() {
   const isApprover = isAdmin || isApproverRole;
   const queryClient = useQueryClient();
   const { data: regular, isLoading, isError, refetch } = usePendingApprovals();
+  // The 1:1 list is capped and the endpoint cannot page: say so rather than
+  // present the first N as the whole queue.
+  const regularTruncated = isPendingApprovalsCapped(regular);
   const { data: groupPendings, isLoading: groupsLoading, isError: groupsError, truncated: groupsTruncated } = useAllGroupPendingApprovals();
   const resumeMutation = useResumeConversation();
   const cancelMutation = useCancelConversation();
@@ -811,6 +816,16 @@ export function ApprovalsPage() {
             ? t("hitl.scopeAll", "Showing all pending approvals across the system.")
             : t("hitl.scopeOwn", "Showing pending approvals for your conversations.")}
         </span>
+        {regularTruncated && (
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="approvals-regular-truncated">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            {t(
+              "hitl.regularTruncated",
+              "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest.",
+              { limit: PENDING_APPROVALS_LIMIT },
+            )}
+          </span>
+        )}
         {groupsTruncated && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="approvals-truncated">
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />

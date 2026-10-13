@@ -77,6 +77,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  * @author ginccc
  */
 @ApplicationScoped
+@McpErrorResults
 public class McpAdminTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpAdminTools.class);
@@ -120,8 +121,9 @@ public class McpAdminTools {
             + "Returns the deployment status.")
     public String deployAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number to deploy (required)") Integer version,
-                              @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                              @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
+                                       defaultValue = "production") String environment) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             var env = parseEnvironment(environment);
             int ver = version != null ? version : 1;
@@ -181,9 +183,11 @@ public class McpAdminTools {
     @Tool(name = "undeploy_agent", description = "Undeploy a Agent from an environment. Optionally end all active conversations.")
     public String undeployAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                                 @ToolArg(description = "Version number to undeploy (required)") Integer version,
-                                @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment,
-                                @ToolArg(description = "End all active conversations? (default: false)") Boolean endConversations) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
+                                         defaultValue = "production") String environment,
+                                @ToolArg(description = "End all active conversations? (default: false)", required = false,
+                                         defaultValue = "false") Boolean endConversations) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             var env = parseEnvironment(environment);
             int ver = version != null ? version : 1;
@@ -200,8 +204,9 @@ public class McpAdminTools {
     @Tool(name = "get_deployment_status", description = "Get the deployment status of a specific Agent version in an environment.")
     public String getDeploymentStatus(@ToolArg(description = "Agent ID (required)") String agentId,
                                       @ToolArg(description = "Version number (required)") Integer version,
-                                      @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                      @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
+                                               defaultValue = "production") String environment) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             var env = parseEnvironment(environment);
             int ver = version != null ? version : 1;
@@ -219,9 +224,10 @@ public class McpAdminTools {
 
     @Tool(name = "list_workflows", description = "List all workflow configurations. "
             + "Returns a JSON array of workflow descriptors with name, description, and IDs.")
-    public String listWorkflows(@ToolArg(description = "Optional filter string to search workflow names") String filter,
-                                @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
-        requireRole(identity, authEnabled, "eddi-admin");
+    public String listWorkflows(@ToolArg(description = "Filter string to search workflow names (optional)", required = false) String filter,
+                                @ToolArg(description = "Maximum number of results (default: 20)", required = false,
+                                         defaultValue = "20") Integer limit) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
@@ -237,10 +243,10 @@ public class McpAdminTools {
             + "The Agent is created and its descriptor is updated with the provided name and description. "
             + "Returns the Agent ID and Location URI of the newly created agent.")
     public String createAgent(@ToolArg(description = "Agent name (required)") String name,
-                              @ToolArg(description = "Agent description (optional)") String description,
-                              @ToolArg(description = "Comma-separated list of package URIs to include (optional, "
-                                      + "format: eddi://ai.labs.workflow/workflowstore/workflows/ID?version=1)") String workflowUris) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                              @ToolArg(description = "Agent description (optional)", required = false) String description,
+                              @ToolArg(description = "Comma-separated list of package URIs to include (optional, format: eddi://ai.labs.workflow/workflowstore/workflows/ID?version=1)",
+                                       required = false) String workflowUris) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (name == null || name.isBlank())
             return errorJson("Agent name is required");
         try {
@@ -290,9 +296,11 @@ public class McpAdminTools {
     @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced packages and resources.")
     public String deleteAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
-                              @ToolArg(description = "Permanently delete? (default: false)") Boolean permanent,
-                              @ToolArg(description = "Cascade-delete packages and resources? (default: false)") Boolean cascade) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                              @ToolArg(description = "Permanently delete? (default: false)", required = false,
+                                       defaultValue = "false") Boolean permanent,
+                              @ToolArg(description = "Cascade-delete packages and resources? (default: false)", required = false,
+                                       defaultValue = "false") Boolean cascade) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
@@ -311,12 +319,13 @@ public class McpAdminTools {
             + "individual resource tools (read_workflow, read_resource) and the REST API directly.")
     public String updateAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
-                              @ToolArg(description = "New Agent name (optional)") String name,
-                              @ToolArg(description = "New Agent description (optional)") String description,
-                              @ToolArg(description = "Redeploy the Agent after update? (default: false)") Boolean redeploy,
-                              @ToolArg(description = "Environment for redeployment: "
-                                      + "'production' (default) or 'test'") String environment) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                              @ToolArg(description = "New Agent name (optional)", required = false) String name,
+                              @ToolArg(description = "New Agent description (optional)", required = false) String description,
+                              @ToolArg(description = "Redeploy the Agent after update? (default: false)", required = false,
+                                       defaultValue = "false") Boolean redeploy,
+                              @ToolArg(description = "Environment for redeployment: 'production' (default) or 'test'", required = false,
+                                       defaultValue = "production") String environment) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             if (agentId == null || agentId.isBlank())
                 return errorJson("agentId is required");
@@ -365,12 +374,12 @@ public class McpAdminTools {
             + "Returns the list of package extensions (parser, behavior, langchain, httpcalls, output, etc.) "
             + "with their types and resource URIs. Use this to understand what's inside an agent's workflow.")
     public String readWorkflow(@ToolArg(description = "Workflow ID (required)") String workflowId,
-                               @ToolArg(description = "Version number (default: 1)") Integer version) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                               @ToolArg(description = "Version number (default: latest)", required = false) Integer version) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (workflowId == null || workflowId.isBlank())
             return errorJson("workflowId is required");
         try {
-            int ver = version != null ? version : 1;
+            int ver = version != null && version > 0 ? version : getRestStore(IRestWorkflowStore.class).getCurrentVersion(workflowId);
             WorkflowConfiguration config = getRestStore(IRestWorkflowStore.class).readWorkflow(workflowId, ver);
             if (config == null) {
                 return errorJson("Workflow not found: " + workflowId + " version " + ver);
@@ -395,14 +404,14 @@ public class McpAdminTools {
                                @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
                                        + "'propertysetter', 'dictionaries', or 'rag' (required)") String resourceType,
                                @ToolArg(description = "Resource ID (required)") String resourceId,
-                               @ToolArg(description = "Version number (default: 1)") Integer version) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                               @ToolArg(description = "Version number (default: latest)", required = false) Integer version) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceType == null || resourceType.isBlank())
             return errorJson("resourceType is required");
         if (resourceId == null || resourceId.isBlank())
             return errorJson("resourceId is required");
         try {
-            int ver = version != null ? version : 1;
+            int ver = version != null && version > 0 ? version : currentVersionByType(resourceType.trim().toLowerCase(), resourceId);
             Object config = readResourceByType(resourceType.trim().toLowerCase(), resourceId, ver);
             if (config == null) {
                 return errorJson("Resource not found: " + resourceType + "/" + resourceId + " version " + ver);
@@ -447,6 +456,26 @@ public class McpAdminTools {
         };
     }
 
+    /**
+     * The latest version of a resource, for the read tools whose {@code version}
+     * argument defaults to "latest". Same type dispatch as
+     * {@link #readResourceByType}.
+     */
+    private int currentVersionByType(String type, String id) {
+        return switch (type) {
+            case "behavior" -> getRestStore(IRestRuleSetStore.class).getCurrentVersion(id);
+            case "langchain" -> getRestStore(IRestLlmStore.class).getCurrentVersion(id);
+            case "httpcalls" -> getRestStore(IRestApiCallsStore.class).getCurrentVersion(id);
+            case "mcpcalls" -> getRestStore(IRestMcpCallsStore.class).getCurrentVersion(id);
+            case "output" -> getRestStore(IRestOutputStore.class).getCurrentVersion(id);
+            case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).getCurrentVersion(id);
+            case "dictionaries" -> getRestStore(IRestDictionaryStore.class).getCurrentVersion(id);
+            case "rag" -> getRestStore(IRestRagStore.class).getCurrentVersion(id);
+            default -> throw new IllegalArgumentException("Unknown resource type: " + type
+                    + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries, rag");
+        };
+    }
+
     // ==================== Phase 8a.2: Resource CRUD + Batch Cascade
     // ====================
 
@@ -459,7 +488,7 @@ public class McpAdminTools {
                                  @ToolArg(description = "Resource ID (required)") String resourceId,
                                  @ToolArg(description = "Current version number (required)") Integer version,
                                  @ToolArg(description = "Full JSON configuration body (required)") String config) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceType == null || resourceType.isBlank())
             return errorJson("resourceType is required");
         if (resourceId == null || resourceId.isBlank())
@@ -495,7 +524,7 @@ public class McpAdminTools {
                                  @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
                                          + "'propertysetter', or 'dictionaries' (required)") String resourceType,
                                  @ToolArg(description = "Full JSON configuration body (required)") String config) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceType == null || resourceType.isBlank())
             return errorJson("resourceType is required");
         if (config == null || config.isBlank())
@@ -530,8 +559,9 @@ public class McpAdminTools {
                                          + "'propertysetter', or 'dictionaries' (required)") String resourceType,
                                  @ToolArg(description = "Resource ID (required)") String resourceId,
                                  @ToolArg(description = "Current version number (required)") Integer version,
-                                 @ToolArg(description = "Permanently delete? (default: false)") Boolean permanent) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                 @ToolArg(description = "Permanently delete? (default: false)", required = false,
+                                          defaultValue = "false") Boolean permanent) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceType == null || resourceType.isBlank())
             return errorJson("resourceType is required");
         if (resourceId == null || resourceId.isBlank())
@@ -556,20 +586,14 @@ public class McpAdminTools {
             + "This replaces ALL URIs in-memory and saves each package/agent ONCE — no wasteful intermediate versions.")
     public String applyAgentChanges(@ToolArg(description = "Agent ID (required)") String agentId,
                                     @ToolArg(description = "Current Agent version (required)") Integer agentVersion,
-                                    @ToolArg(description = "JSON array of URI mappings: [{\"oldUri\":"
-                                            + "\"eddi://...?version=1\",\"newUri\":"
-                                            + "\"eddi://...?version=2\"}, ...]") String resourceMappings,
-                                    @ToolArg(description = "Redeploy the Agent after cascading changes? (default: false)") Boolean redeploy,
-                                    @ToolArg(description = "Environment for redeployment: "
-                                            + "'production' (default) or 'test'") String environment,
-                                    @ToolArg(description = "Is the new Agent version compatible with the one it replaces? "
-                                            + "true = conversations already running switch to it on their next turn once it is "
-                                            + "deployed. Only for changes that cannot break a conversation in progress, e.g. prompt "
-                                            + "wording or a different model. false (the default) = a breaking change: running "
-                                            + "conversations stay on their version. Choose false if properties or actions were "
-                                            + "renamed or removed, or if the new version needs conversation state older "
-                                            + "conversations do not have.") Boolean compatible) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                    @ToolArg(description = "JSON array of URI mappings (required): [{\"oldUri\":\"eddi://...?version=1\",\"newUri\":\"eddi://...?version=2\"}, ...]") String resourceMappings,
+                                    @ToolArg(description = "Redeploy the Agent after cascading changes? (default: false)", required = false,
+                                             defaultValue = "false") Boolean redeploy,
+                                    @ToolArg(description = "Environment for redeployment: 'production' (default) or 'test'", required = false,
+                                             defaultValue = "production") String environment,
+                                    @ToolArg(description = "Is the new Agent version compatible with the one it replaces? true = conversations already running switch to it on their next turn once it is deployed. Only for changes that cannot break a conversation in progress, e.g. prompt wording or a different model. false (the default) = a breaking change: running conversations stay on their version. Choose false if properties or actions were renamed or removed, or if the new version needs conversation state older conversations do not have.",
+                                             required = false, defaultValue = "false") Boolean compatible) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         if (resourceMappings == null || resourceMappings.isBlank())
@@ -713,12 +737,12 @@ public class McpAdminTools {
             + "Walks Agent → packages → extensions and returns a flat summary with all resource IDs, types, and URIs. "
             + "This is the fastest way to understand an agent's full configuration before making changes.")
     public String listAgentResources(@ToolArg(description = "Agent ID (required)") String agentId,
-                                     @ToolArg(description = "Agent version (default: 1)") Integer version) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                     @ToolArg(description = "Agent version (default: latest)", required = false) Integer version) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
-            int ver = version != null ? version : 1;
+            int ver = version != null && version > 0 ? version : getRestStore(IRestAgentStore.class).getCurrentVersion(agentId);
 
             // Read Agent config
             var localAgentStore = getRestStore(IRestAgentStore.class);
@@ -920,7 +944,7 @@ public class McpAdminTools {
             + "Returns all configured intents with their Agent deployments. "
             + "Agent triggers enable intent-based conversation management via chat_managed.")
     public String listAgentTriggers() {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             var triggerStore = getRestStore(IRestAgentTriggerStore.class);
             List<AgentTriggerConfiguration> triggers = triggerStore.readAllAgentTriggers();
@@ -940,7 +964,7 @@ public class McpAdminTools {
             + "The config must include: intent (string) and agentDeployments (array of {agentId, environment}).")
     public String createAgentTrigger(@ToolArg(description = "Full JSON configuration: "
             + "{\"intent\":\"...\",\"agentDeployments\":[{\"agentId\":\"...\",\"environment\":\"production\"}]} (required)") String config) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (config == null || config.isBlank())
             return errorJson("config is required");
         try {
@@ -969,7 +993,7 @@ public class McpAdminTools {
                                              + "{\"intent\":\"...\",\"agentDeployments\":"
                                              + "[{\"agentId\":\"...\",\"environment\":"
                                              + "\"production\"}]} (required)") String config) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (intent == null || intent.isBlank())
             return errorJson("intent is required");
         if (config == null || config.isBlank())
@@ -991,7 +1015,7 @@ public class McpAdminTools {
 
     @Tool(name = "delete_agent_trigger", description = "Delete a Agent trigger for a given intent.")
     public String deleteAgentTrigger(@ToolArg(description = "Intent to delete (required)") String intent) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (intent == null || intent.isBlank())
             return errorJson("intent is required");
         try {
@@ -1014,19 +1038,24 @@ public class McpAdminTools {
             + "For CRON: provide cronExpression. For HEARTBEAT: provide heartbeatIntervalSeconds. "
             + "Returns the created schedule with human-readable description and next fire time.")
     public String createSchedule(@ToolArg(description = "Agent ID to trigger (required)") String agentId,
-                                 @ToolArg(description = "Trigger type: 'CRON' (default) or 'HEARTBEAT'") String triggerType,
-                                 @ToolArg(description = "5-field cron expression, e.g. '0 9 * * MON-FRI' (required for CRON)") String cron,
-                                 @ToolArg(description = "Heartbeat interval in seconds, e.g. 300 "
-                                         + "for 5 min (required for HEARTBEAT)") Long heartbeatIntervalSeconds,
-                                 @ToolArg(description = "Message text to send to the Agent on each fire "
-                                         + "(required for CRON, defaults to 'heartbeat' for HEARTBEAT)") String message,
+                                 @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON, or HEARTBEAT when only heartbeatIntervalSeconds is given)",
+                                          required = false) String triggerType,
+                                 @ToolArg(description = "5-field cron expression, e.g. '0 9 * * MON-FRI' (optional; required for CRON)",
+                                          required = false) String cron,
+                                 @ToolArg(description = "Heartbeat interval in seconds, e.g. 300 for 5 min (optional; required for HEARTBEAT)",
+                                          required = false) Long heartbeatIntervalSeconds,
+                                 @ToolArg(description = "Message text to send to the Agent on each fire (optional; required for CRON, defaults to 'heartbeat' for HEARTBEAT)",
+                                          required = false) String message,
                                  @ToolArg(description = "Human-readable name for this schedule (required)") String name,
-                                 @ToolArg(description = "IANA time zone, e.g. 'Europe/Vienna' (default: UTC)") String timeZone,
-                                 @ToolArg(description = "Conversation strategy: 'new' or 'persistent' "
-                                         + "(CRON defaults to 'new', HEARTBEAT defaults to 'persistent')") String conversationStrategy,
-                                 @ToolArg(description = "User identity for the scheduled message (default: 'system:scheduler')") String userId,
-                                 @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                 @ToolArg(description = "IANA time zone, e.g. 'Europe/Vienna' (default: UTC)", required = false,
+                                          defaultValue = "UTC") String timeZone,
+                                 @ToolArg(description = "Conversation strategy: 'new' or 'persistent' (default: 'new' for CRON, 'persistent' for HEARTBEAT)",
+                                          required = false) String conversationStrategy,
+                                 @ToolArg(description = "User identity for the scheduled message (default: 'system:scheduler')", required = false,
+                                          defaultValue = "system:scheduler") String userId,
+                                 @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
+                                          defaultValue = "production") String environment) {
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         if (name == null || name.isBlank())
@@ -1113,8 +1142,8 @@ public class McpAdminTools {
 
     @Tool(name = "list_schedules", description = "List all scheduled Agent triggers. "
             + "Returns schedules with name, type, agent, cron/interval, status, next fire time, and fire count. " + "Optionally filter by agentId.")
-    public String listSchedules(@ToolArg(description = "Filter by Agent ID (optional)") String agentId) {
-        requireRole(identity, authEnabled, "eddi-admin");
+    public String listSchedules(@ToolArg(description = "Filter by Agent ID (optional)", required = false) String agentId) {
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         try {
             List<ScheduleConfiguration> schedules;
             if (agentId != null && !agentId.isBlank()) {
@@ -1160,7 +1189,7 @@ public class McpAdminTools {
     @Tool(name = "read_schedule", description = "Read a schedule's full configuration including fire history. "
             + "Returns the schedule config, human-readable description, and recent fire logs.")
     public String readSchedule(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (scheduleId == null || scheduleId.isBlank())
             return errorJson("scheduleId is required");
         try {
@@ -1199,7 +1228,7 @@ public class McpAdminTools {
 
     @Tool(name = "delete_schedule", description = "Delete a scheduled Agent trigger.")
     public String deleteSchedule(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (scheduleId == null || scheduleId.isBlank())
             return errorJson("scheduleId is required");
         try {
@@ -1214,7 +1243,7 @@ public class McpAdminTools {
     @Tool(name = "fire_schedule_now", description = "Manually trigger a schedule fire immediately. "
             + "Useful for testing or one-off executions. Returns the fire result with conversation ID.")
     public String fireScheduleNow(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (scheduleId == null || scheduleId.isBlank())
             return errorJson("scheduleId is required");
         try {
@@ -1290,7 +1319,7 @@ public class McpAdminTools {
     @Tool(name = "retry_failed_schedule", description = "Re-queue a dead-lettered schedule for another fire attempt. "
             + "Use after investigating and fixing the cause of failure.")
     public String retryFailedSchedule(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (scheduleId == null || scheduleId.isBlank())
             return errorJson("scheduleId is required");
         try {
@@ -1308,9 +1337,10 @@ public class McpAdminTools {
     @Tool(name = "list_channel_integrations", description = "List all channel integration configurations. "
             + "Returns descriptors with name, channelType, and target count.")
     public String listChannelIntegrations(
-                                          @ToolArg(description = "Optional filter string") String filter,
-                                          @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                          @ToolArg(description = "Filter string (optional)", required = false) String filter,
+                                          @ToolArg(description = "Maximum number of results (default: 20)", required = false,
+                                                   defaultValue = "20") Integer limit) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             int limitInt = limit != null ? limit : 20;
             String filterStr = filter != null ? filter : "";
@@ -1328,14 +1358,14 @@ public class McpAdminTools {
             + "Returns the full config with targets, triggers, platformConfig, and observe mode settings.")
     public String readChannelIntegration(
                                          @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
-                                         @ToolArg(description = "Version number (default: latest)") Integer version) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                         @ToolArg(description = "Version number (default: latest)", required = false) Integer version) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceId == null || resourceId.isBlank())
             return errorJson("resourceId is required");
         try {
             var channelStore = getRestStore(
                     IRestChannelIntegrationStore.class);
-            int ver = version != null ? version : channelStore.getCurrentVersion(resourceId);
+            int ver = version != null && version > 0 ? version : channelStore.getCurrentVersion(resourceId);
             var config = channelStore.readChannel(resourceId, ver);
 
             var result = new LinkedHashMap<String, Object>();
@@ -1354,7 +1384,7 @@ public class McpAdminTools {
             + "Returns the new resource ID and URI.")
     public String createChannelIntegration(
                                            @ToolArg(description = "Full JSON configuration body (required)") String config) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (config == null || config.isBlank())
             return errorJson("config is required");
         try {
@@ -1387,7 +1417,7 @@ public class McpAdminTools {
                                            @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
                                            @ToolArg(description = "Current version number (required)") Integer version,
                                            @ToolArg(description = "Full JSON configuration body (required)") String config) {
-        requireRole(identity, authEnabled, "eddi-admin");
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceId == null || resourceId.isBlank())
             return errorJson("resourceId is required");
         if (config == null || config.isBlank())
@@ -1420,8 +1450,9 @@ public class McpAdminTools {
     public String deleteChannelIntegration(
                                            @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
                                            @ToolArg(description = "Current version number (required)") Integer version,
-                                           @ToolArg(description = "Permanently delete? (default: false)") Boolean permanent) {
-        requireRole(identity, authEnabled, "eddi-admin");
+                                           @ToolArg(description = "Permanently delete? (default: false)", required = false,
+                                                    defaultValue = "false") Boolean permanent) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceId == null || resourceId.isBlank())
             return errorJson("resourceId is required");
         try {

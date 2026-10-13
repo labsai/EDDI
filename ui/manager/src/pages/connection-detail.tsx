@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
@@ -32,7 +33,7 @@ import {
   useUpdateConnection,
   useDeleteConnection,
 } from "@/hooks/use-connections";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { getErrorMessage } from "@/lib/api-client";
 import { commitPending } from "@/lib/chip-values";
 import { authTypeLabel } from "@/lib/connection-labels";
@@ -230,12 +231,11 @@ export function ConnectionDetailPage() {
     pendingScope.trim() !== "" ||
     pendingOrigin.trim() !== "";
 
-  // Covers tab close and reload. In-app navigation is guarded explicitly below
-  // — on this page's own two exits, the back link and the linked-accounts link
-  // — because the app uses <BrowserRouter> and React Router's blocker needs the
-  // data router. Leaving by the sidebar or the command palette is not guarded,
-  // here or anywhere else in the app; that is a gap in the router setup rather
-  // than in this page.
+  // Covers tab close and reload (`beforeunload`) AND in-app navigation: the
+  // app-level blocker in NavigationGuardDialog holds any path change, from the
+  // sidebar, the command palette or Back, while this page is dirty. The explicit
+  // `leaveFor` prompt below remains for this page's own two exits (the back link
+  // and the linked-accounts link), where the page confirms before navigating.
   useUnsavedChangesGuard(isDirty);
 
   /** Leave for `to`, asking first when there are unsaved edits. */
@@ -384,12 +384,16 @@ export function ConnectionDetailPage() {
     }
   };
 
+  /** Hard delete — explicit opt-in; the store (and this dialog) default to soft. */
+  const [deletePermanently, setDeletePermanently] = useState(false);
+
   const handleDelete = async () => {
     if (!id) return;
     try {
-      await deleteMutation.mutateAsync({ id, version });
+      await deleteMutation.mutateAsync({ id, version, permanent: deletePermanently });
       // Deliberately `navigate`, not `leaveFor`: the document is gone, so there
       // is nothing left for an "unsaved changes" prompt to protect.
+      allowNextNavigation();
       navigate("/manage/connections");
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -824,24 +828,37 @@ export function ConnectionDetailPage() {
 
       <AlertDialog
         open={deleteOpen}
-        onOpenChange={setDeleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) setDeletePermanently(false);
+        }}
         title={t("connections.confirmDelete", "Delete this connection?")}
         description={t(
           "connections.confirmDeleteDesc",
           "Every account linked through it is unlinked at the same time — tokens must not outlive the connection that produced them. Agents referring to it by name will stop being able to authenticate.",
         )}
         onConfirm={() => void handleDelete()}
-        confirmLabel={t("common.delete", "Delete")}
+        confirmLabel={
+          deletePermanently
+            ? t("common.deletePermanently", "Delete permanently")
+            : t("common.delete", "Delete")
+        }
         cancelLabel={t("common.cancel", "Cancel")}
         isPending={deleteMutation.isPending}
-      />
+      >
+        <PermanentDeleteOption checked={deletePermanently} onChange={setDeletePermanently} />
+      </AlertDialog>
 
       <UnsavedChangesDialog
         open={pendingExit !== null}
         onConfirm={() => {
           const to = pendingExit;
           setPendingExit(null);
-          if (to) navigate(to);
+          if (to) {
+            // Discard was just confirmed here; the route guard must not ask again.
+            allowNextNavigation();
+            navigate(to);
+          }
         }}
         onCancel={() => setPendingExit(null)}
       />

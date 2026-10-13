@@ -132,7 +132,8 @@ public class CreateSubAgentTool {
                                  @P("LLM provider (e.g. 'openai', 'anthropic'). Optional — inherits parent if omitted") String provider,
                                  @P("Model name (e.g. 'gpt-4o'). Optional — inherits parent if omitted") String model,
                                  @P("Optional initial message to send to the agent after creation") String initialMessage,
-                                 @P("If true, the agent will be retained after the discussion ends. Default: false") Boolean retain) {
+                                 @P(value = "If true, the agent will be retained after the discussion ends. Default: false",
+                                    required = false) Boolean retain) {
 
         try {
             // --- Guardrail: creation allowed ---

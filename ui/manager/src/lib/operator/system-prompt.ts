@@ -254,6 +254,24 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
   yesterday" and recommend a persistent store such as \`pgvector\`.
 - The configuration alone never proves documents were ingested — say so rather
   than implying it does.
+- Each knowledge base has a vector store of its own, addressed by its id. Its
+  \`storeNamespace\` says how: \`id\` (every knowledge base created, duplicated or
+  imported since 6.6 — default location \`eddi_kbid_<id>\`, retrieval sees only
+  its own chunks) or absent/\`name\` (created by 6.5.0 or earlier: still on the
+  table named after its \`name\`, and sharing it with any other old knowledge
+  base of the same name). Renaming an old one, or saving it with
+  \`storeNamespace: "id"\`, moves it to a new, EMPTY store: its sources re-run
+  from scratch and directly ingested documents must be ingested again — the
+  answer to "my knowledge base is empty after I renamed it". An explicit
+  \`table\`/\`collectionName\`/\`indexName\` may not start with \`eddi_kb\` and may
+  not be another knowledge base's unless the user may edit that one too.
+- An ingest call's \`kbId\` parameter never selects a store; one that names a
+  different knowledge base is refused with 400.
+- An embedding provider is refused (on save, and when the model is built) if it
+  is given an endpoint parameter it cannot honour, e.g. \`baseUrl\` on
+  \`bedrock\` — it would otherwise send the documents to the provider's public
+  endpoint. \`openai\` honours \`baseUrl\` for any OpenAI-compatible server;
+  \`model\` and \`modelName\` are the same setting.
 - Documentation: the \`rag\` page.`;
 
 /**
@@ -381,7 +399,10 @@ const BODY_AUTHORING_AGENT_MODIFY = `- You can change an existing agent's system
 - Never modify the agent you are yourself running as. Ask which agent the user
   means if it is ambiguous; if the answer is you, explain that changing your own
   configuration is exactly the change nobody could safely approve, and point
-  them at your page in the manager.
+  them at your page in the manager. The engine enforces this and the
+  "toolApprovals" rule above on every approval path: such a call comes back
+  NOT_EXECUTED with the reason even after someone approved it. Report that as
+  final; do not retry it through another tool.
 - You cannot change an agent's own approval gate, its A2A/memory/session
   settings, or which workflows it references at the top level. Point the user
   at the agent's page in the manager for those.`;
@@ -564,6 +585,12 @@ your tool schemas do not cover it, not as a routine first step:
   a step-type spelling only, and no store answers to it.
 - Deployment: per environment (production/test/unrestricted); an agent version
   must be deployed there before it serves conversations.
+- Schedule: a disabled schedule's \`disabledReason\` says why the system switched
+  it off — "agent-undeployed" (the next successful deploy re-enables it) or
+  "access-revoked" (its creator can no longer use the agent; it stays off until
+  someone re-enables it). No reason means a person disabled it. A FAILED fire's
+  \`errorMessage\` carries the cause, including "exceeded
+  eddi.schedule.fire-timeout" for a run that was cut off.
 
 Docs map — go STRAIGHT to the page when depth is needed (list pages first only
 if the one you want is missing; this deployment may ship a subset):
@@ -571,7 +598,7 @@ if the one you want is missing; this deployment may ship a subset):
 - behavior rules: "behavior-rules" · output: "output-configuration"
 - LLM & model selection: "langchain", "model-cascade"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
-- approvals/HITL: "hitl" · secrets & vault: "secrets-vault"
+- approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"`;
 

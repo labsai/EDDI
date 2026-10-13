@@ -44,6 +44,24 @@ eddi:
   # undetected. Scale vertically via eddi.resources instead.
   replicas: 1
 
+  # How an upgrade replaces the running pod. Recreate (the default) stops the old
+  # pod before the new one starts: each upgrade costs the time EDDI takes to boot
+  # and become ready, but two EDDI JVMs never run against one database.
+  #
+  # RollingUpdate with maxSurge: 1 starts the new pod first, so for the length of
+  # every rollout two JVMs serve side by side and everything EDDI keeps node-local
+  # diverges between them: the per-conversation turn lock, replay-protection
+  # nonces, rate limits and cost budgets, the agent/workflow caches, and HITL
+  # crash recovery, which runs on the new pod while the old one is still
+  # mid-turn. Opt into it only if that window is acceptable to you:
+  #   updateStrategy:
+  #     type: RollingUpdate
+  #     rollingUpdate:
+  #       maxSurge: 1
+  #       maxUnavailable: 0
+  updateStrategy:
+    type: Recreate
+
   # Vault master key — encrypts API keys and secrets. REQUIRED.
   # ⚠️  If you lose this key, encrypted secrets are UNRECOVERABLE
   # Generate: openssl rand -base64 24
@@ -193,11 +211,13 @@ eddi:
     type: ClusterIP
     port: 7070
 
-  # Who may read /q/metrics. Empty keeps EDDI's default, "authenticated":
-  # with OIDC on, a Prometheus without a token gets 401. "permit" opens this
-  # one path — only where /q/metrics cannot be reached from outside the
-  # cluster (the chart's ingress routes every path, /q/* included, unless you
-  # change ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
+  # Who may read /q/metrics. Empty keeps EDDI's default, "eddi-metrics-reader":
+  # with OIDC on, the scrape needs a token carrying the eddi-admin or
+  # eddi-metrics realm role (a Prometheus without a token gets 401, one without
+  # the role 403). "authenticated" admits any token; "permit" opens this one
+  # path — only where /q/metrics cannot be reached from outside the cluster
+  # (the chart's ingress routes every path, /q/* included, unless you change
+  # ingress.hosts[].paths). See docs/monitoring/monitoring-guide.md.
   metrics:
     httpPolicy: ""
 
@@ -219,7 +239,7 @@ mongodb:
   enabled: true
   image:
     repository: mongo
-    tag: "7.0"
+    tag: "7.0.43"
   # Root credentials for the in-chart MongoDB. The database runs WITH
   # authentication (--auth) and EDDI connects as this user — an unauthenticated
   # in-cluster MongoDB is reachable by any pod that can resolve its Service.
@@ -324,7 +344,7 @@ keycloak:
   enabled: false
   image:
     repository: quay.io/keycloak/keycloak
-    tag: "26.0"
+    tag: "26.8.0"
   adminUsername: admin
   # REQUIRED when keycloak.enabled=true — no default is shipped.
   # Generate: openssl rand -base64 24

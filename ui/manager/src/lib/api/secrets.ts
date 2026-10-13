@@ -124,6 +124,12 @@ export interface VaultHealth {
   action?: string;
   /** Present when 503 — documentation URL */
   docs?: string;
+  /**
+   * The caller may not read vault health (401/403 — the endpoint is
+   * `eddi-admin` only). Says nothing about the vault itself: it was reported as
+   * "Vault unavailable" to every editor, which read as an outage.
+   */
+  forbidden?: boolean;
 }
 
 /* ─── API Functions ─── */
@@ -290,6 +296,9 @@ export async function getVaultHealth(): Promise<VaultHealth> {
     const res = await fetch(`${api.getBaseUrl()}${BASE}/health`, {
       headers: api.getAuthHeader(),
     });
+    if (res.status === 401 || res.status === 403) {
+      return { status: "DOWN", provider: "unknown", available: false, forbidden: true };
+    }
     const data = await res.json();
     if (res.status === 503) {
       // Backend returns { error, reason, action, docs } on 503
