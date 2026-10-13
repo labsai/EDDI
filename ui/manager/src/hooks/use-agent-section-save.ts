@@ -1,6 +1,8 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
+import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
 import { useUpdateAgent } from "./use-agents";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { getAgent, type Agent } from "@/lib/api/agents";
@@ -93,6 +95,7 @@ function setPending(state: AgentSaveState, delta: number) {
  */
 export function useAgentSectionSave(agentId: string, version: number, agent: Agent) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const { mutateAsync } = useUpdateAgent();
 
   const subscribe = useCallback(
@@ -124,6 +127,9 @@ export function useAgentSectionSave(agentId: string, version: number, agent: Age
             created === null
               ? null
               : { base: chained ? last.base : version, saved: created, agent: document };
+          // Every section save writes a whole new agent version, and nothing on
+          // screen said so: say which one, and that it is not what is serving.
+          showSavedNotLiveToast({ t, queryClient, agentId, newAgentVersion: created });
           options?.onSuccess?.();
         } catch (err) {
           if (isApiError(err) && err.status === 409) {
@@ -169,7 +175,7 @@ export function useAgentSectionSave(agentId: string, version: number, agent: Age
         }
       }
     },
-    [agentId, version, agent, mutateAsync, queryClient],
+    [agentId, version, agent, mutateAsync, queryClient, t],
   );
 
   return { mutate, isPending };

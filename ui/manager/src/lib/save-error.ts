@@ -37,7 +37,7 @@ export function describeSaveError(err: unknown, t: TFunction): string {
     case "agentWorkflowMismatch":
       return t(
         "cascadeSave.agentWorkflowMismatch",
-        "Agent {{agentId}} (version {{version}}) references workflow {{workflowId}} at version {{found}}, not version {{expected}}. The agent changed since this page was opened. Reload it. Nothing was saved.",
+        "Agent {{agentId}} (version {{version}}) uses workflow {{workflowId}} at version {{found}}, but this page was opened at version {{expected}}. Nothing was saved. Update the agent to use the new workflow version, or open version {{found}}.",
         p,
       );
     case "agentMissingWorkflow":
