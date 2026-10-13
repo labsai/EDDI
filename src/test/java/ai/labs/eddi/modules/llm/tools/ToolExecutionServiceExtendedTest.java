@@ -134,8 +134,8 @@ class ToolExecutionServiceExtendedTest {
                         throw new RuntimeException("boom");
                     }, false, false, false, 0);
 
-            assertTrue(result.contains("Error executing tool"));
-            assertTrue(result.contains("boom"));
+            assertTrue(ToolExecutionService.isInternalFailure(result, "myTool"), result);
+            assertFalse(result.contains("boom"), "raw exception text stays in the log");
         }
     }
 

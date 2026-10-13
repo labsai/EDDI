@@ -8,11 +8,14 @@ import {
   useRef,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   type KeyboardEvent,
 } from "react";
 import { Eye, EyeOff, LoaderCircle, Lock, LockOpen, Paperclip, SendHorizontal, X } from "lucide-react";
-import { useChatState, useChatDispatch } from "@/store/chat-store";
+import { useChatState, useChatDispatch, useComposerConversationRef, DEFAULT_PLACEHOLDER } from "@/store/chat-store";
+import { isImeComposing } from "@/ime";
+import { t } from "@/i18n";
 import {
   uploadAttachment,
   deleteAttachment,
@@ -21,6 +24,39 @@ import {
 } from "@/api/attachments-api";
 import { ApiError, errorPayload } from "@/api/http";
 
+/** Delay before the one retry of a failed background attachment delete. */
+export const DISCARD_RETRY_MS = 2_000;
+
+/**
+ * Delete an attachment nobody will send — removed by the user, or uploaded into
+ * a conversation that was abandoned before the upload finished. A background
+ * cleanup: the chip is already gone, so there is nothing for the user to act
+ * on, and a banner for it would only be noise.
+ *
+ * A transient failure (network, 5xx, 429) gets one retry. A 4xx means the file
+ * is already gone or not ours to delete, so it is not retried. Whatever is
+ * still left is logged and lives as long as its conversation does: deleting
+ * the conversation, the ended-conversation retention sweep and GDPR erasure
+ * all remove its attachments.
+ */
+export function discardAttachment(conversationId: string, storageRef: string): void {
+  const permanent = (err: unknown) =>
+    err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 429;
+  deleteAttachment(conversationId, storageRef).catch((first: unknown) => {
+    if (permanent(first)) return;
+    setTimeout(() => {
+      deleteAttachment(conversationId, storageRef).catch((second: unknown) => {
+        if (permanent(second)) return;
+        console.warn(
+          `[eddi-chat] could not delete attachment ${storageRef} from conversation ${conversationId}; ` +
+            "it is removed with the conversation",
+          second,
+        );
+      });
+    }, DISCARD_RETRY_MS);
+  });
+}
+
 /** Turn an upload failure into copy that names the actual reason. */
 function describeUploadFailure(err: unknown, fileName: string): string {
   if (err instanceof ApiError) {
@@ -28,29 +64,35 @@ function describeUploadFailure(err: unknown, fileName: string): string {
     // Quarkus enforces its own request-body cap before the attachment layer
     // runs, so an oversize upload can arrive as a bare 413 with no envelope.
     if (err.status === 413 || code === "ATTACHMENT_TOO_LARGE") {
-      return `${fileName} is too large to upload.`;
+      return t("attach.tooLarge", { file: fileName });
     }
     if (err.status === 401 || err.status === 403) {
-      return `You are not allowed to attach files to this conversation.`;
+      return t("attach.notAllowed");
     }
     // ATTACHMENT_REJECTED is a catch-all: a declared-vs-detected MIME mismatch
     // (there is no type allowlist), the per-conversation file-count and byte
     // quotas, empty files — and on Postgres any wrapped SQLException, so an
     // outage arrives dressed as a rejection too. Only the server's own text
     // separates them, so prefer it to a guess.
-    if (message) return `${fileName} was rejected — ${message}`;
-    if (code) return `${fileName} was rejected.`;
+    if (message) return t("attach.rejectedWhy", { file: fileName, message });
+    if (code) return t("attach.rejected", { file: fileName });
   }
-  return `Failed to upload ${fileName}.`;
+  return t("attach.failed", { file: fileName });
 }
 
 interface ChatInputProps {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
   conversationId?: string | null;
+  /**
+   * Bumped by the parent when focus should land in the composer — after the
+   * agent-requested field it replaced goes away. Not focused on mount: an
+   * embedded widget must not grab the host page's focus when it loads.
+   */
+  focusSignal?: number;
 }
 
-export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }: ChatInputProps) {
   const { isProcessing, config, isSecretMode, pendingAttachments, restoreDraft } =
     useChatState();
   const dispatch = useChatDispatch();
@@ -67,6 +109,21 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   const isUploading = uploading.length > 0;
   const [secretVisible, setSecretVisible] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** Set when a secret send swaps the password field for the textarea. */
+  const refocusAfterSecretRef = useRef(false);
+
+  useEffect(() => {
+    if (focusSignal > 0) textareaRef.current?.focus();
+  }, [focusSignal]);
+
+  // Leaving secret mode unmounts the focused password field; without this the
+  // next thing a keyboard user types goes nowhere.
+  useEffect(() => {
+    if (!isSecretMode && refocusAfterSecretRef.current) {
+      refocusAfterSecretRef.current = false;
+      textareaRef.current?.focus();
+    }
+  }, [isSecretMode]);
 
   // A turn the server refused (409) was never consumed — put the text back so
   // the user does not have to retype it.
@@ -91,6 +148,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
     onSend(trimmed, isSecretMode);
     setValue("");
     if (isSecretMode) {
+      refocusAfterSecretRef.current = true;
       dispatch({ type: "TOGGLE_SECRET_MODE" });
       setSecretVisible(false);
     }
@@ -110,7 +168,8 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      // Enter that confirms an IME candidate (CJK, many phone keyboards) is not "send".
+      if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
         e.preventDefault();
         handleSend();
       }
@@ -141,6 +200,30 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
   const attachBtnRef = useRef<HTMLButtonElement>(null);
   const chipsRef = useRef<HTMLDivElement>(null);
   const uploadSeq = useRef(0);
+  /** The conversation the composer belongs to right now, for upload continuations. */
+  // Synced in the commit itself, not during render and not in a passive
+  // effect. Not during render: a render React discards would leave an id the
+  // user never saw, and an upload finishing then would be deleted from a
+  // conversation that is still open. Not in useEffect: a passive effect can
+  // run after the commit, and an upload settling in that gap would still see
+  // the old id and stage its file into the new conversation. A layout effect
+  // runs synchronously as part of the commit, so no continuation can see a
+  // committed conversation change before this ref has followed it.
+  //
+  // The ref belongs to the ChatProvider, not to this instance (see
+  // useComposerConversationRef). The composer is unmounted while an agent's
+  // input field is open and remounted afterwards. An upload that settles
+  // meanwhile is still staged when the conversation has not changed: the chip
+  // is waiting when the composer returns. But when the composer comes back for
+  // a NEW conversation, the fresh instance writes the new id here, and the old
+  // upload is discarded. Deliberately no cleanup on unmount: an unmount alone
+  // does not change the conversation, and clearing the ref would delete a file
+  // the user attached to the conversation they are still in.
+  const ownConversationRef = useRef<string | null | undefined>(conversationId);
+  const currentConversationRef = useComposerConversationRef() ?? ownConversationRef;
+  useLayoutEffect(() => {
+    currentConversationRef.current = conversationId;
+  }, [conversationId, currentConversationRef]);
   const atCapacity =
     pendingAttachments.length + uploading.length >= MAX_ATTACHMENTS_PER_TURN;
 
@@ -170,6 +253,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         message: {
           id: `error-${Date.now()}-${Math.random()}`,
           role: "agent",
+          kind: "notice",
           content: `⚠️ ${sentence}`,
           timestamp: Date.now(),
         },
@@ -220,9 +304,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
       const room =
         MAX_ATTACHMENTS_PER_TURN - pendingAttachments.length - uploading.length;
       if (room <= 0) {
-        notify(
-          `You can attach at most ${MAX_ATTACHMENTS_PER_TURN} files per message.`,
-        );
+        notify(t("attach.maxFiles", { max: MAX_ATTACHMENTS_PER_TURN }));
         return;
       }
       const accepted = picked.slice(0, room);
@@ -230,11 +312,13 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         // Name the casualties: slice() keeps FileList order, which is
         // OS-determined, so "2 not attached" leaves the user guessing which.
         notify(
-          `You can attach at most ${MAX_ATTACHMENTS_PER_TURN} files per message. ` +
-            `Not attached: ${picked
-              .slice(room)
-              .map((f) => f.name)
-              .join(", ")}`,
+          `${t("attach.maxFiles", { max: MAX_ATTACHMENTS_PER_TURN })} ` +
+            t("attach.notAttached", {
+              files: picked
+                .slice(room)
+                .map((f) => f.name)
+                .join(", "),
+            }),
         );
       }
 
@@ -250,14 +334,22 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         staged.map(async ({ file, id }) => {
           try {
             const result = await uploadAttachment(conversationId, file);
+            // New conversation while the upload was in flight: the file now
+            // belongs to the abandoned one. Staging it would attach another
+            // conversation's blob to the next message. Drop it and free the
+            // quota it took.
+            if (currentConversationRef.current !== conversationId) {
+              discardAttachment(conversationId, result.storageRef);
+              return;
+            }
             // Stage it. The ref reaches the agent as an attachment_N context
             // entry when the next message is sent — embedding it in the message
             // text was silently ignored by the backend.
             dispatch({ type: "ADD_ATTACHMENT", attachment: result });
             announce(
               result.forwardableInline === false
-                ? `${file.name} attached, but it is too large to send directly — the assistant may not be able to read it.`
-                : `${file.name} attached.`,
+                ? t("attach.doneLarge", { file: file.name })
+                : t("attach.done", { file: file.name }),
             );
           } catch (err) {
             notify(describeUploadFailure(err, file.name));
@@ -269,6 +361,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
     },
     [
       conversationId,
+      currentConversationRef,
       dispatch,
       notify,
       announce,
@@ -297,14 +390,15 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
       // skipping it leaves the file in the store for the life of the
       // conversation, counting against the per-conversation file and byte
       // quotas until the user can no longer attach anything at all.
-      // Fire-and-forget: the chip goes regardless of what the server says.
+      // The chip goes regardless of what the server says; discardAttachment
+      // retries a transient failure once and logs what is left.
       // Prefer the id the upload reported over whatever is current now.
       const owner = a.conversationId ?? conversationId;
       if (owner) {
-        deleteAttachment(owner, storageRef).catch(() => {});
+        discardAttachment(owner, storageRef);
       }
       dispatch({ type: "REMOVE_ATTACHMENT", storageRef });
-      announce(`${fileName} removed.`);
+      announce(t("attach.removed", { file: fileName }));
     },
     [conversationId, dispatch, announce],
   );
@@ -339,8 +433,12 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
                 // gives a screen-reader user no way to tell them apart.
                 aria-label={
                   duplicateNames.has(a.fileName)
-                    ? `Remove ${a.fileName} (${i + 1} of ${pendingAttachments.length})`
-                    : `Remove ${a.fileName}`
+                    ? t("attach.removeNth", {
+                        file: a.fileName,
+                        n: i + 1,
+                        total: pendingAttachments.length,
+                      })
+                    : t("attach.remove", { file: a.fileName })
                 }
                 aria-describedby={
                   a.forwardableInline === false ? `warn-${a.storageRef}` : undefined
@@ -356,7 +454,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
                   className="chat-attachments__warn"
                   data-testid="attachment-warn"
                 >
-                  too large to send directly
+                  {t("attach.chipLarge")}
                 </span>
               )}
             </span>
@@ -372,7 +470,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
                 <LoaderCircle className="chat-attachments__icon chat-icon-spin" size="1em" /> {u.name}
               </span>
               {/* The spinner is the only visual difference from a staged chip. */}
-              <span className="chat-sr-only">Uploading</span>
+              <span className="chat-sr-only">{t("attach.uploading")}</span>
             </span>
           ))}
         </div>
@@ -396,9 +494,13 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         // Gate on the cap, not on "an upload is running" — blocking the whole
         // button while one large file uploads defeats the parallel batch.
         disabled={!conversationId || atCapacity || isProcessing || disabled}
-        title={atCapacity ? `Attachment limit (${MAX_ATTACHMENTS_PER_TURN}) reached` : "Attach file"}
+        title={
+          atCapacity
+            ? t("input.attachLimit", { max: MAX_ATTACHMENTS_PER_TURN })
+            : t("input.attach")
+        }
         data-testid="chat-attach-btn"
-        aria-label={isUploading ? "Attach file (upload in progress)" : "Attach file"}
+        aria-label={isUploading ? t("input.attachBusy") : t("input.attach")}
       >
         {isUploading ? (
           <LoaderCircle className="chat-icon-spin" size="1em" />
@@ -411,9 +513,14 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         type="button"
         className={`chat-input__secret-toggle ${isSecretMode ? "chat-input__secret-toggle--active" : ""}`}
         onClick={toggleSecretMode}
-        title={isSecretMode ? "Secret mode ON — input will be encrypted" : "Toggle secret mode"}
+        // The label is fixed and the state is aria-pressed, so a screen reader
+        // hears "Secret mode, toggle button, pressed" instead of a verb that
+        // flips. A turn in flight keeps the mode it was sent with.
+        disabled={isProcessing}
+        title={isSecretMode ? t("input.secretOn") : t("input.secretOff")}
         data-testid="chat-secret-toggle"
-        aria-label="Toggle secret mode"
+        aria-label={t("input.secretToggle")}
+        aria-pressed={isSecretMode}
       >
         {isSecretMode ? <Lock size="1em" /> : <LockOpen size="1em" />}
       </button>
@@ -427,8 +534,9 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Enter secret value..."
+            placeholder={t("input.secretPlaceholder")}
             disabled={disabled}
+            aria-label={t("input.label")}
             className="chat-input__secret-field"
             autoComplete="off"
           />
@@ -436,8 +544,8 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             type="button"
             className="chat-input__eye-toggle"
             onClick={() => setSecretVisible((v) => !v)}
-            title={secretVisible ? "Hide" : "Show"}
-            aria-label={secretVisible ? "Hide secret" : "Show secret"}
+            title={secretVisible ? t("input.hide") : t("input.show")}
+            aria-label={secretVisible ? t("input.secretHide") : t("input.secretShow")}
             data-testid="chat-eye-toggle"
           >
             {/* Shows the action, like the aria-label: an open eye reveals. */}
@@ -455,7 +563,12 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             handleInput();
           }}
           onKeyDown={handleKeyDown}
-          placeholder={config.placeholder ?? "Type a message..."}
+          placeholder={
+            config.placeholder && config.placeholder !== DEFAULT_PLACEHOLDER
+              ? config.placeholder
+              : t("input.placeholder")
+          }
+          aria-label={t("input.label")}
           disabled={disabled}
           rows={1}
           className="chat-input__textarea"
@@ -467,7 +580,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
         onClick={handleSend}
         disabled={!canSend}
         className={`chat-input__send ${canSend ? "chat-input__send--active" : "chat-input__send--disabled"}`}
-        aria-label="Send message"
+        aria-label={t("input.send")}
       >
         {isProcessing ? (
           <span className="chat-input__spinner" />

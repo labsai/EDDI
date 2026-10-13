@@ -35,7 +35,10 @@ public interface IRestRagIngestion {
     Response ingestDocument(@PathParam("id") String ragConfigId,
                             @Parameter(name = "version", required = true, example = "1")
                             @QueryParam("version") Integer version,
-                            @Parameter(name = "kbId", description = "Knowledge base ID (defaults to RAG config name)")
+                            @Parameter(name = "kbId", deprecated = true,
+                                       description = "Deprecated, and never selects a store: documents always go to the knowledge "
+                                               + "base in the path. Accepted only when it names that knowledge base (its id or its "
+                                               + "name); any other value is refused with 400")
                             @QueryParam("kbId") String kbId,
                             @Parameter(name = "documentName",
                                        description = "Display name for the document")

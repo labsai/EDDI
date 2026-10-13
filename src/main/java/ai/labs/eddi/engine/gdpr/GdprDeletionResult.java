@@ -62,6 +62,10 @@ import java.util.Map;
  *            name
  * @param completedAt
  *            timestamp of completion
+ * @param auditEntriesRedacted
+ *            audit ledger entries whose recorded content (prompt, response, LLM
+ *            detail, tool calls) was replaced by a redaction marker; 0 under
+ *            {@code eddi.audit.erasure-mode=pseudonymize}, which keeps it
  *
  * @author ginccc
  * @since 6.0.0
@@ -83,7 +87,22 @@ public record GdprDeletionResult(
         long autoVaultedSecretsDeleted,
         List<String> failedSteps,
         Instant completedAt,
-        Map<String, Long> additionalDeleted) {
+        Map<String, Long> additionalDeleted,
+        long auditEntriesRedacted) {
+
+    /**
+     * Compatibility constructor for the shape that predates
+     * {@code auditEntriesRedacted}, reported as 0.
+     */
+    public GdprDeletionResult(String userId, long memoriesDeleted, long conversationsDeleted, long conversationMappingsDeleted,
+            long logsPseudonymized, long auditEntriesPseudonymized, long attachmentsDeleted, long journalEntriesDeleted,
+            long checkpointsDeleted, long groupConversationsDeleted, long sharedArtifactsDeleted, long schedulesDeleted,
+            long connectionGrantsDeleted, long autoVaultedSecretsDeleted, List<String> failedSteps, Instant completedAt,
+            Map<String, Long> additionalDeleted) {
+        this(userId, memoriesDeleted, conversationsDeleted, conversationMappingsDeleted, logsPseudonymized, auditEntriesPseudonymized,
+                attachmentsDeleted, journalEntriesDeleted, checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
+                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, completedAt, additionalDeleted, 0);
+    }
 
     /**
      * Compatibility constructor for the shape that predates

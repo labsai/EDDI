@@ -7,11 +7,13 @@ package ai.labs.eddi.modules.llm.impl;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.TokenCountEstimator;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.openai.OpenAiTokenCountEstimator;
 import jakarta.enterprise.context.ApplicationScoped;
+import org.jboss.logging.Logger;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Resolves the appropriate {@link TokenCountEstimator} based on model type.
@@ -21,7 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <ul>
  * <li>{@code openai} / {@code azure-openai} → {@link OpenAiTokenCountEstimator}
- * (tiktoken-based, accurate)</li>
+ * (tiktoken-based, accurate) when jtokkit knows the model name, otherwise the
+ * approximate estimator</li>
  * <li>All other providers → {@link ApproximateTokenCountEstimator} (chars / 4
  * heuristic)</li>
  * </ul>
@@ -29,28 +32,72 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class TokenCounterFactory {
 
-    private final Map<String, TokenCountEstimator> estimatorCache = new ConcurrentHashMap<>();
+    private static final Logger LOGGER = Logger.getLogger(TokenCounterFactory.class);
+
+    /** Model used when an OpenAI-family task names none. */
+    static final String DEFAULT_OPENAI_MODEL = "gpt-4o";
+
+    /**
+     * Upper bound on distinct model names remembered. Model names come from agent
+     * configuration (and, through global variables, can change at runtime), so the
+     * set is not fixed; a map keyed on them must not grow for the JVM lifetime.
+     */
+    static final int MAX_CACHED_ESTIMATORS = 256;
+
+    private static final TokenCountEstimator APPROXIMATE = new ApproximateTokenCountEstimator();
+
+    private final Cache<String, TokenCountEstimator> estimatorCache = Caffeine.newBuilder().maximumSize(MAX_CACHED_ESTIMATORS).build();
 
     /**
      * Get a token count estimator for the given model type.
+     *
+     * <p>
+     * Never throws. {@link OpenAiTokenCountEstimator} refuses to construct for a
+     * model name jtokkit does not know — every Azure deployment name
+     * ({@code my-gpt4-prod}), every OpenAI-compatible endpoint serving a non-OpenAI
+     * model, every model released after the jtokkit version on the classpath — and
+     * that exception used to escape from here straight through
+     * {@code LlmTask.executeTask}, failing every turn of an agent that set
+     * {@code maxContextTokens}. Such a model is counted approximately instead,
+     * which is what every non-OpenAI provider already gets.
+     * </p>
      *
      * @param modelType
      *            LLM provider type (e.g. "openai", "anthropic", "gemini")
      * @param modelName
      *            optional model name for provider-specific resolution (e.g.
      *            "gpt-4o")
-     * @return a TokenCountEstimator instance (cached per model type)
+     * @return a TokenCountEstimator instance (cached per model type and name)
      */
     public TokenCountEstimator getEstimator(String modelType, String modelName) {
         if (modelType == null) {
-            return estimatorCache.computeIfAbsent("__approximate__", k -> new ApproximateTokenCountEstimator());
+            return APPROXIMATE;
         }
 
         return switch (modelType.toLowerCase()) {
-            case "openai", "azure-openai" -> estimatorCache.computeIfAbsent("openai:" + (modelName != null ? modelName : "gpt-4o"),
-                    k -> new OpenAiTokenCountEstimator(modelName != null ? modelName : "gpt-4o"));
-            default -> estimatorCache.computeIfAbsent("__approximate__", k -> new ApproximateTokenCountEstimator());
+            case "openai", "azure-openai" -> {
+                String model = modelName != null && !modelName.isBlank() ? modelName : DEFAULT_OPENAI_MODEL;
+                yield estimatorCache.get("openai:" + model, key -> openAiOrApproximate(model));
+            }
+            default -> APPROXIMATE;
         };
+    }
+
+    /**
+     * The tiktoken estimator for {@code modelName}, or the approximate one when
+     * jtokkit cannot build it. Probed once, so a model that constructs but cannot
+     * count is caught here rather than in the middle of a turn.
+     */
+    static TokenCountEstimator openAiOrApproximate(String modelName) {
+        try {
+            var estimator = new OpenAiTokenCountEstimator(modelName);
+            estimator.estimateTokenCountInText("probe");
+            return estimator;
+        } catch (RuntimeException unknownModel) {
+            LOGGER.infof("No tiktoken encoding for model '%s' (%s); counting its tokens approximately (chars / 4)",
+                    sanitize(modelName), sanitize(unknownModel.getMessage()));
+            return APPROXIMATE;
+        }
     }
 
     /**

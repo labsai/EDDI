@@ -2,11 +2,17 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck, Info } from "lucide-react";
 import { EditorSection } from "../editor-section";
 import type { TaskSectionProps } from "./task-section-props";
-import type { ResponseValidation, ResponseValidationAction } from "./types";
+import type { ResponseValidation, ResponseValidationAction, RetryableResponseValidationAction } from "./types";
 import { RESPONSE_VALIDATION_ACTIONS } from "./types";
 
 /** Policy fields on `responseValidation`, in display order. */
-type PolicyField = keyof Omit<ResponseValidation, "enabled">;
+type PolicyField = {
+  [K in keyof ResponseValidation]-?: ResponseValidation[K] extends
+    | RetryableResponseValidationAction
+    | undefined
+    ? K
+    : never;
+}[keyof ResponseValidation];
 
 interface PolicyMeta {
   field: PolicyField;

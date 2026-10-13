@@ -5,7 +5,6 @@ import {
   auditToolCalls,
   getAuditTrail,
   getAuditTrailByAgent,
-  getEntryCount,
 } from "../audit";
 
 describe("audit API", () => {
@@ -58,15 +57,6 @@ describe("audit API", () => {
     it("passes custom skip and limit", async () => {
       const result = await getAuditTrailByAgent("agent1", undefined, 10, 50);
       expect(result).toBeDefined();
-    });
-  });
-
-  // ─── getEntryCount ─────────────────────────────────────────────
-  describe("getEntryCount", () => {
-    it("returns the count of audit entries", async () => {
-      const result = await getEntryCount("conv1");
-      expect(result).toBeDefined();
-      expect(typeof result).toBe("number");
     });
   });
 });

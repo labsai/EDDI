@@ -1,6 +1,6 @@
 import { ReviewNotice } from "@/components/chat/review-notice";
 import { useAgentReviewProfile } from "@/hooks/use-agent-review-profile";
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
 import { useSearchParams, Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { Environment } from "@/lib/constants";
@@ -36,6 +36,7 @@ import { DebugDrawer } from "@/components/debugger/debug-drawer";
 import { useDebugStore, isInternalTask, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/ime";
 import { InputHint } from "@/components/chat/input-hint";
 import { SecretInputField } from "./secret-input-field";
 import {
@@ -73,6 +74,11 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const agentSelectorRef = useRef<HTMLDivElement>(null);
+  const agentTriggerRef = useRef<HTMLButtonElement>(null);
+  const agentSearchRef = useRef<HTMLInputElement>(null);
+  const [agentFilter, setAgentFilter] = useState("");
+  const [agentHighlight, setAgentHighlight] = useState(0);
+  const agentListboxId = useId();
 
   const [contextOpen, setContextOpen] = useState(false);
 
@@ -210,6 +216,43 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   }, []);
 
 
+  // Agents matching the selector's search box (name, id or description).
+  const visibleAgents = useMemo(() => {
+    const q = agentFilter.trim().toLowerCase();
+    if (!q) return deployedAgents ?? [];
+    return (deployedAgents ?? []).filter(
+      (a) =>
+        a.name?.toLowerCase().includes(q) ||
+        a.id.toLowerCase().includes(q) ||
+        a.description?.toLowerCase().includes(q),
+    );
+  }, [deployedAgents, agentFilter]);
+
+  const openAgentSelector = useCallback(() => {
+    setAgentFilter("");
+    const idx = (deployedAgents ?? []).findIndex((a) => a.id === selectedAgentId);
+    setAgentHighlight(Math.max(0, idx));
+    setAgentSelectorOpen(true);
+  }, [deployedAgents, selectedAgentId]);
+
+  const closeAgentSelector = useCallback((returnFocus: boolean) => {
+    setAgentSelectorOpen(false);
+    if (returnFocus) agentTriggerRef.current?.focus();
+  }, []);
+
+  // Focus the search box when the list opens.
+  useEffect(() => {
+    if (agentSelectorOpen) agentSearchRef.current?.focus();
+  }, [agentSelectorOpen]);
+
+  // Keep the highlighted option scrolled into view.
+  useEffect(() => {
+    if (!agentSelectorOpen) return;
+    document
+      .getElementById(`${agentListboxId}-opt-${agentHighlight}`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [agentSelectorOpen, agentHighlight, agentListboxId]);
+
   const handleSelectAgent = useCallback(
     (agentId: string, agentName: string) => {
       setSelectedAgent(agentId, agentName);
@@ -332,7 +375,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   // wiped by that read or be read half-done — so every entry point below waits.
   const conversationBusy = stepMovePending || rerunConversation.isPending;
   const lastMessage = messages[messages.length - 1];
-  const showRerun = lastMessage?.role === "agent" && (lastMessage.content ?? "").includes("⚠️ Error");
+  const showRerun = lastMessage?.role === "agent" && lastMessage.isError === true;
 
   const handleRerun = useCallback(() => {
     rerunConversation.mutate(undefined, {
@@ -382,11 +425,21 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
           {/* Agent selector */}
           <div ref={agentSelectorRef} className="relative flex-1">
             <button
-              onClick={() => setAgentSelectorOpen((p) => !p)}
+              ref={agentTriggerRef}
+              onClick={() =>
+                agentSelectorOpen ? closeAgentSelector(false) : openAgentSelector()
+              }
+              onKeyDown={(e) => {
+                if (!agentSelectorOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+                  e.preventDefault();
+                  openAgentSelector();
+                }
+              }}
               className="flex w-full items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm transition-colors hover:bg-muted"
               data-testid="agent-selector"
               aria-haspopup="listbox"
               aria-expanded={agentSelectorOpen}
+              aria-controls={agentSelectorOpen ? agentListboxId : undefined}
             >
               <Bot className="h-4 w-4 text-muted-foreground" />
               <span
@@ -407,10 +460,61 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
             {/* Dropdown */}
             {agentSelectorOpen && (
+              <div className="absolute inset-s-0 top-full z-50 mt-1 w-full rounded-lg border border-border bg-popover shadow-lg">
+              <input
+                ref={agentSearchRef}
+                type="text"
+                role="combobox"
+                aria-expanded="true"
+                aria-controls={agentListboxId}
+                aria-autocomplete="list"
+                aria-activedescendant={
+                  visibleAgents[agentHighlight]
+                    ? `${agentListboxId}-opt-${agentHighlight}`
+                    : undefined
+                }
+                aria-label={t("chat.searchAgents", "Search agents")}
+                placeholder={t("chat.searchAgents", "Search agents")}
+                value={agentFilter}
+                onChange={(e) => {
+                  setAgentFilter(e.target.value);
+                  setAgentHighlight(0);
+                }}
+                onKeyDown={(e) => {
+                  // Keys that belong to an IME composition are not shortcuts.
+                  if (isImeComposing(e)) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setAgentHighlight((h) => Math.min(h + 1, Math.max(visibleAgents.length - 1, 0)));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setAgentHighlight((h) => Math.max(h - 1, 0));
+                  } else if (e.key === "Home") {
+                    e.preventDefault();
+                    setAgentHighlight(0);
+                  } else if (e.key === "End") {
+                    e.preventDefault();
+                    setAgentHighlight(Math.max(visibleAgents.length - 1, 0));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const agent = visibleAgents[agentHighlight];
+                    if (agent && !isImeComposing(e)) handleSelectAgent(agent.id, agent.name || agent.id);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    closeAgentSelector(true);
+                  } else if (e.key === "Tab") {
+                    closeAgentSelector(false);
+                  }
+                }}
+                className="m-1 h-8 w-[calc(100%-0.5rem)] rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                data-testid="agent-search"
+              />
               <div
+                id={agentListboxId}
                 role="listbox"
                 aria-label={t("chat.selectAgent")}
-                className="absolute inset-s-0 top-full z-50 mt-1 w-full max-h-80 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg"
+                className="max-h-72 overflow-y-auto p-1"
               >
                 {agentsLoading ? (
                   <div className="flex items-center justify-center py-3">
@@ -420,16 +524,24 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                   <p className="px-3 py-2 text-xs text-muted-foreground">
                     {t("chat.noAgents")}
                   </p>
+                ) : visibleAgents.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="agent-search-empty">
+                    {t("chat.noAgentMatches", "No agents match your search")}
+                  </p>
                 ) : (
-                  deployedAgents.map((agent) => (
+                  visibleAgents.map((agent, i) => (
                     <button
                       key={agent.resource}
+                      id={`${agentListboxId}-opt-${i}`}
                       role="option"
+                      tabIndex={-1}
                       aria-selected={agent.id === selectedAgentId}
                       data-testid={`agent-option-${agent.id}`}
                       onClick={() => handleSelectAgent(agent.id, agent.name || agent.id)}
+                      onMouseEnter={() => setAgentHighlight(i)}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted min-w-0",
+                        i === agentHighlight && "bg-muted",
                         agent.id === selectedAgentId &&
                           "bg-primary/10 text-primary font-medium"
                       )}
@@ -446,6 +558,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                     </button>
                   ))
                 )}
+              </div>
               </div>
             )}
           </div>
@@ -482,7 +595,18 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 <MessageSquarePlus className="h-4 w-4" />
               </button>
               <button
-                onClick={() => endConversation.mutate()}
+                onClick={() =>
+                  // The id on screen at click time, not whatever is current
+                  // when the request returns.
+                  endConversation.mutate(conversationId, {
+                    onError: (err) =>
+                      toast.error(
+                        t("chat.endConversationFailed", "Could not end the conversation: {{reason}}", {
+                          reason: getErrorMessage(err),
+                        }),
+                      ),
+                  })
+                }
                 className="flex h-9 w-9 items-center justify-center rounded-lg text-destructive/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                 title={t("chat.endConversation")}
                 data-testid="end-conversation"
@@ -496,7 +620,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
         {/* Conversation context header */}
         {conversationId && contextOpen && (
           <div className="flex items-center gap-4 border-b border-border/50 bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
-            <div className="flex items-center gap-1" title="Conversation ID">
+            <div className="flex items-center gap-1" title={t("chat.context.conversationId", "Conversation ID")}>
               <Hash className="h-3 w-3" />
               <button
                 onClick={() => {
@@ -509,11 +633,11 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 {conversationId.slice(0, 12)}…
               </button>
             </div>
-            <div className="flex items-center gap-1" title="Steps">
+            <div className="flex items-center gap-1" title={t("chat.context.stepCount", "turns")}>
               <ListOrdered className="h-3 w-3" />
               <span>{messages.filter((m) => m.role === "user").length} {t("chat.context.stepCount", "turns")}</span>
             </div>
-            <div className="flex items-center gap-1" title="Started">
+            <div className="flex items-center gap-1" title={t("chat.context.startTime", "Started")}>
               <Clock className="h-3 w-3" />
               <span>
                 {messages[0]
@@ -557,6 +681,12 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
           ref={scrollContainerRef}
           className="h-full overflow-y-auto"
           onScroll={handleScroll}
+          // The transcript is a log: new agent messages are announced as they
+          // arrive instead of being silent to a screen reader.
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label={t("chat.transcript", "Conversation")}
         >
           {!selectedAgentId ? (
             <EmptyState />
@@ -879,6 +1009,8 @@ function ChatInputWithSecretToggle({
               : "text-muted-foreground hover:bg-muted hover:text-foreground"
           )}
           title={isSecretMode ? t("chat.secretModeOn", "Secret mode ON") : t("chat.secretModeOff", "Toggle secret mode")}
+          aria-label={isSecretMode ? t("chat.secretModeOn", "Secret mode ON") : t("chat.secretModeOff", "Toggle secret mode")}
+          aria-pressed={isSecretMode}
           data-testid="chat-secret-toggle"
         >
           {isSecretMode ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
@@ -923,7 +1055,7 @@ function ChatInputWithSecretToggle({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
                   e.preventDefault();
                   handleSend();
                 }
@@ -943,7 +1075,10 @@ function ChatInputWithSecretToggle({
             <button
               type="button"
               onClick={() => setSecretVisible(!secretVisible)}
-              className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={disabled}
+              aria-label={secretVisible ? t("chat.hide", "Hide") : t("chat.show", "Show")}
+              aria-pressed={secretVisible}
               data-testid="chat-eye-toggle"
             >
               {secretVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
@@ -961,7 +1096,7 @@ function ChatInputWithSecretToggle({
               handleInput();
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
                 e.preventDefault();
                 handleSend();
               }

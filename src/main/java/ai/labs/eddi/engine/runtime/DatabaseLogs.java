@@ -9,12 +9,16 @@ import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Indexes;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -47,6 +51,8 @@ public class DatabaseLogs implements IDatabaseLogs {
     public DatabaseLogs(MongoDatabase database) {
         RuntimeUtilities.checkNotNull(database, "database");
         logsCollection = database.getCollection(COLLECTION_NAME);
+        // Backs both the newest-first read and the retention sweep's range delete.
+        logsCollection.createIndex(Indexes.descending(TIMESTAMP));
     }
 
     @Override
@@ -133,6 +139,15 @@ public class DatabaseLogs implements IDatabaseLogs {
 
         return ret;
     }
+    @Override
+    public long deleteOlderThan(int olderThanDays) {
+        if (olderThanDays <= 0) {
+            throw new IllegalArgumentException("olderThanDays must be positive, got " + olderThanDays);
+        }
+        Date cutoff = Date.from(Instant.now().minus(Duration.ofDays(olderThanDays)));
+        return logsCollection.deleteMany(Filters.lt(TIMESTAMP, cutoff)).getDeletedCount();
+    }
+
     @Override
     public long pseudonymizeByUserId(String userId, String pseudonym) {
         return logsCollection.updateMany(

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.properties;
 
+import java.time.Instant;
 import java.util.Objects;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.Properties;
@@ -255,6 +256,52 @@ public interface IUserMemoryStore {
     void deleteEntry(String entryId) throws IResourceStore.ResourceStoreException;
 
     /**
+     * Deletes an entry only if it has not been written since it was read — its
+     * {@code updatedAt} still equals {@code expectedUpdatedAt} (null matches an
+     * entry stored without one).
+     * <p>
+     * For a background writer that decided to delete an entry from a snapshot and
+     * must not delete a newer fact written in the meantime: Dream reads a user's
+     * memories, spends seconds in an LLM call, then deletes by id — and a plain
+     * {@link #deleteEntry} there removed whatever the conversation had stored under
+     * that id since. This default checks and then deletes, so a concurrent writer
+     * can still slip in between; both stores override it with a single conditional
+     * delete.
+     *
+     * @return true if the entry was deleted; false if it changed or is gone
+     */
+    default boolean deleteEntryIfUnchanged(String entryId, Instant expectedUpdatedAt) throws IResourceStore.ResourceStoreException {
+        Optional<UserMemoryEntry> current = findEntryById(entryId);
+        if (current.isEmpty() || !Objects.equals(current.get().updatedAt(), expectedUpdatedAt)) {
+            return false;
+        }
+        deleteEntry(entryId);
+        return true;
+    }
+
+    /**
+     * Overwrites the value, category, visibility, group ids, source conversation
+     * and conflict flag of the entry {@code entryId} with those of {@code entry} —
+     * only if the stored entry's {@code updatedAt} still equals
+     * {@code expectedUpdatedAt}. Its id, user, key, owner, creation time and access
+     * count are kept; {@code updatedAt} becomes now. The compare-and-set
+     * counterpart of {@link #upsert} onto an existing entry, for the same reason as
+     * {@link #deleteEntryIfUnchanged}. Refuses a reserved key like {@link #upsert}.
+     *
+     * @return true if the entry was written; false if it changed or is gone
+     */
+    default boolean replaceIfUnchanged(String entryId, UserMemoryEntry entry, Instant expectedUpdatedAt)
+            throws IResourceStore.ResourceStoreException {
+        rejectReservedKey(entry.key());
+        Optional<UserMemoryEntry> current = findEntryById(entryId);
+        if (current.isEmpty() || !Objects.equals(current.get().updatedAt(), expectedUpdatedAt)) {
+            return false;
+        }
+        upsert(entry);
+        return true;
+    }
+
+    /**
      * Finds a memory entry by its ID. Used for ownership validation before
      * deletion.
      *
@@ -292,7 +339,21 @@ public interface IUserMemoryStore {
     String TEAM_OWNER_PREFIX = "group:";
 
     /**
-     * Text filter across keys and values (v1: regex, v2: semantic search).
+     * Most entries {@link #filterEntries} returns for a non-blank query. The search
+     * is reachable by an LLM tool and by MCP, and a one-letter query matches almost
+     * every entry of a user who has many.
+     */
+    int MAX_FILTER_RESULTS = 200;
+
+    /**
+     * Text filter across keys and values: every term of {@code query} (see
+     * {@code MemorySearchTerms}) must appear, case-insensitively, in the entry's
+     * key, in its value when that is a string, or in a string element of its value
+     * when that is an array. Numbers, booleans and the keys or values of an object
+     * value are not searched — the same on both datastores (PostgreSQL used to
+     * match against the value's JSON text, so {@code "true"} found every boolean
+     * and a key name inside an object value matched). Newest first, at most
+     * {@link #MAX_FILTER_RESULTS} entries. A blank query returns every entry.
      */
     List<UserMemoryEntry> filterEntries(String userId, String query) throws IResourceStore.ResourceStoreException;
 

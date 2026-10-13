@@ -18,7 +18,7 @@
 #     indistinguishable from data loss to the person looking at the screen;
 #   * `"27017:27017"` bound a second host port next to the base's
 #     `127.0.0.1:27017` (different host_ip, so both survive the merge);
-#   * `mongo:7.0` floated where the base pins `mongo:7.0.14`.
+#   * `mongo:7.0` floated where the base pins an exact patch release.
 #
 # If you want a standalone NATS + MongoDB + EDDI stack, compose the base file in
 # rather than duplicating its services here.

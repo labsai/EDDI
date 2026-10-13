@@ -168,6 +168,14 @@ export interface GroupStreamState {
    */
   interrupted: boolean;
   /**
+   * The server has answered this request with at least one frame. False from
+   * the moment a start/continue/approve is issued until then, so a failure with
+   * `connected` still false means the request was refused before anything ran —
+   * the composer keeps (or restores) what the user typed — and a "streaming
+   * live" confirmation is only honest once this is true.
+   */
+  connected: boolean;
+  /**
    * Stop was pressed before the backend had named the conversation, so there
    * was nothing to cancel yet. The cancel is sent as soon as `group_start`
    * supplies the id; until then the UI shows the stop as in progress.
@@ -222,6 +230,7 @@ const initialState: GroupStreamState = {
   memberCosts: new Map(),
   stances: new Map(),
   interrupted: false,
+  connected: false,
   cancelRequested: false,
   cancelError: null,
   roundStartIndex: 0,
@@ -458,6 +467,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       state: "IN_PROGRESS",
       conversationId: gcId,
       interrupted: false,
+      connected: false,
       cancelRequested: false,
       cancelError: null,
       hitlPause: null,
@@ -494,6 +504,7 @@ export const useGroupStreamStore = create<GroupStreamStore>((set, get) => ({
       error: null,
       errorKind: null,
       interrupted: false,
+      connected: false,
       cancelRequested: false,
       cancelError: null,
       startedAt: (s.conversationId === gcId ? s.startedAt : null) ?? new Date().toISOString(),
@@ -667,6 +678,7 @@ async function consumeStream(
 
   try {
     for await (const event of events) {
+      if (!sawEvent) setState((s) => (s.connected ? s : { ...s, connected: true }));
       sawEvent = true;
       const isDone = handleSSEEvent(event, setState);
       if (isDone) {
@@ -744,6 +756,37 @@ export function useStreamingGroupIds(): string[] {
       .join(","),
   );
   return useMemo(() => (joined ? joined.split(",") : []), [joined]);
+}
+
+/**
+ * Resolves once the request just issued for `groupId` is known to have been
+ * accepted (`true`: the first frame arrived) or refused (`false`: it failed
+ * before any frame, or was aborted/reset first). Composers use it to hold on to
+ * what the user typed until the server has actually taken it, and to confirm
+ * "streaming live" only once something connected.
+ */
+export function whenStreamAccepted(groupId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const settled = (s: GroupStreamState | undefined): boolean | null => {
+      if (!s) return false;
+      if (s.connected) return true;
+      if (!s.isStreaming) return false;
+      return null;
+    };
+    const initial = settled(useGroupStreamStore.getState().streams[groupId]);
+    if (initial !== null) return resolve(initial);
+    const unsubscribe = useGroupStreamStore.subscribe((store) => {
+      const result = settled(store.streams[groupId]);
+      if (result === null) return;
+      unsubscribe();
+      resolve(result);
+    });
+  });
+}
+
+/** The message of the failure the group's stream last reported, if any. */
+export function streamErrorOf(groupId: string): string | null {
+  return useGroupStreamStore.getState().streams[groupId]?.error ?? null;
 }
 
 // ─── Hook ───────────────────────────────────────────────────────

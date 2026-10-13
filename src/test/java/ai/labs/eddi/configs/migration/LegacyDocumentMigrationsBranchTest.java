@@ -188,16 +188,16 @@ class LegacyDocumentMigrationsBranchTest {
         }
 
         @Test
-        @DisplayName("a Long below Integer.MIN_VALUE is preserved, not wrapped around")
+        @DisplayName("a Long below Integer.MIN_VALUE goes to valueLong, not wrapped around")
         void longBelowIntRangeIsPreserved() {
             long tooSmall = Integer.MIN_VALUE - 1L;
             var document = propertySetterDoc(legacyProperty("offset", tooSmall));
 
-            assertNull(LegacyDocumentMigrations.propertySetter().migrate(document),
-                    "no field can hold it, so the document must be reported unchanged rather than rewritten");
+            assertNotNull(LegacyDocumentMigrations.propertySetter().migrate(document));
             var property = setPropertiesOf(document).getFirst();
-            assertEquals(tooSmall, property.get("value"), "the value must survive under its original key");
+            assertEquals(tooSmall, property.get("valueLong"), "the value must survive at full width");
             assertFalse(property.containsKey("valueInt"), "narrowing it to an int would silently corrupt the value");
+            assertFalse(property.containsKey("value"));
         }
     }
 

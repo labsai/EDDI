@@ -6,11 +6,13 @@ package ai.labs.eddi.connections.grants;
 
 import ai.labs.eddi.secrets.ISecretProvider.SealedValue;
 import ai.labs.eddi.secrets.SealedDataRotationParticipant;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.function.UnaryOperator;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Carries OAuth grants across a DEK rotation.
@@ -32,11 +34,16 @@ public class ConnectionGrantResealer implements SealedDataRotationParticipant {
 
     private static final Logger LOGGER = Logger.getLogger(ConnectionGrantResealer.class);
 
+    /** Grants a DEK rotation could not open and skipped; see {@link #resealAll}. */
+    static final String RESEAL_FAILURES_METRIC = "eddi.vault.reseal.failures";
+
     private final IConnectionGrantStore grantStore;
+    private final Counter resealFailures;
 
     @Inject
-    public ConnectionGrantResealer(IConnectionGrantStore grantStore) {
+    public ConnectionGrantResealer(IConnectionGrantStore grantStore, MeterRegistry meterRegistry) {
         this.grantStore = grantStore;
+        this.resealFailures = meterRegistry.counter(RESEAL_FAILURES_METRIC, "participant", "connection-grants");
     }
 
     @Override
@@ -60,13 +67,27 @@ public class ConnectionGrantResealer implements SealedDataRotationParticipant {
      * already rotated away, and log the user out.
      */
     @Override
-    public int resealAll(String tenantId, String activeDekId, UnaryOperator<SealedValue> resealer) {
+    public int resealAll(String tenantId, String activeDekId, Resealer resealer) {
         int outstanding = 0;
         for (ConnectionGrant grant : grantStore.findByTenant(tenantId)) {
-            if (!migrate(tenantId, grant, activeDekId, resealer)) {
+            boolean moved;
+            try {
+                moved = migrate(tenantId, grant, activeDekId, resealer);
+            } catch (RuntimeException e) {
+                // One grant that will not open — corrupt ciphertext, a generation that
+                // is gone — used to end the sweep here, stranding every grant after it
+                // on the old generation as well, rotation after rotation. It is
+                // skipped and counted instead; the rest of the tenant moves on.
+                moved = false;
+                resealFailures.increment();
+                LOGGER.warnf("DEK rotation for tenant '%s': the grant for connection '%s' could not be re-sealed and was skipped (%s)."
+                        + " It keeps its current generation; the user may need to reconnect if it cannot be opened at all.",
+                        sanitize(tenantId), sanitize(grant.getConnectionName()), e.getClass().getSimpleName());
+            }
+            if (!moved) {
                 outstanding++;
                 LOGGER.debugf("Grant for connection '%s' stayed on an older DEK generation; the next rotation will move it",
-                        grant.getConnectionName());
+                        sanitize(grant.getConnectionName()));
             }
         }
         return outstanding;
@@ -103,7 +124,7 @@ public class ConnectionGrantResealer implements SealedDataRotationParticipant {
      *
      * @return whether the grant is on the active generation when this returns
      */
-    private boolean migrate(String tenantId, ConnectionGrant grant, String activeDekId, UnaryOperator<SealedValue> resealer) {
+    private boolean migrate(String tenantId, ConnectionGrant grant, String activeDekId, Resealer resealer) {
         ConnectionGrant current = grant;
         for (int attempt = 0; attempt < 2; attempt++) {
             if (current == null) {
@@ -115,8 +136,10 @@ public class ConnectionGrantResealer implements SealedDataRotationParticipant {
                 return true;
             }
             long expectedVersion = current.getVersion();
-            SealedValue access = resealer.apply(sealedAccessToken(current));
-            SealedValue refresh = resealer.apply(sealedRefreshToken(current));
+            SealedValue access = resealer.reseal(sealedAccessToken(current),
+                    ConnectionGrant.accessTokenContext(current.getConnectionName(), current.getPrincipal()));
+            SealedValue refresh = resealer.reseal(sealedRefreshToken(current),
+                    ConnectionGrant.refreshTokenContext(current.getConnectionName(), current.getPrincipal()));
             current.setEncryptedAccessToken(access == null ? null : access.ciphertext());
             current.setAccessTokenIv(access == null ? null : access.iv());
             current.setEncryptedRefreshToken(refresh == null ? null : refresh.ciphertext());

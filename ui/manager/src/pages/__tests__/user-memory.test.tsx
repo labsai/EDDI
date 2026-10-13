@@ -431,7 +431,7 @@ describe("UserMemoryPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Delete All Memories")).toBeInTheDocument();
       expect(
-        screen.getByText(/permanently delete ALL memory entries/)
+        screen.getByText(/permanently deletes all 3 memory entries for user "user-123"/)
       ).toBeInTheDocument();
     });
   });
@@ -497,9 +497,45 @@ describe("UserMemoryPage", () => {
 
     await user.click(screen.getByTestId("delete-memory-mem-1"));
 
+    // Deleting is permanent, so a single entry is confirmed first, like "Delete All".
+    expect(await screen.findByText("Delete this memory?")).toBeInTheDocument();
+    expect(deleteCalled).toBe(false);
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
+
     await waitFor(() => {
       expect(deleteCalled).toBe(true);
     });
+  });
+
+  it("cancelling the entry confirmation deletes nothing", async () => {
+    let deleteCalled = false;
+    server.use(
+      http.delete("*/usermemorystore/memories/entry/:entryId", () => {
+        deleteCalled = true;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    const user = await enterUserIdAndLoad();
+    await user.click(screen.getByTestId("delete-memory-mem-1"));
+    await user.click(screen.getByTestId("alert-dialog-cancel"));
+    expect(deleteCalled).toBe(false);
+    expect(screen.queryByText("Delete this memory?")).not.toBeInTheDocument();
+  });
+
+  it("only the row being deleted is disabled while its delete is pending", async () => {
+    server.use(
+      http.delete("*/usermemorystore/memories/entry/:entryId", async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    const user = await enterUserIdAndLoad();
+    await user.click(screen.getByTestId("delete-memory-mem-1"));
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
+    await waitFor(() => {
+      expect(screen.getByTestId("delete-memory-mem-1")).toBeDisabled();
+    });
+    expect(screen.getByTestId("delete-memory-mem-2")).not.toBeDisabled();
   });
 
   // ─── Confirm delete all flow ───────────────────────────────────────────
@@ -624,6 +660,41 @@ describe("UserMemoryPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("No memory entries found")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Single-entry delete is confirmed; the row toggle is a real button ──
+
+  describe("single-entry delete and the row toggle", () => {
+    // Regression: the trash icon deleted the entry on the spot.
+    it("asks before deleting one entry, and deletes only on confirm", async () => {
+      const deleted: string[] = [];
+      server.use(
+        http.delete("*/usermemorystore/memories/entry/:entryId", ({ params }) => {
+          deleted.push(String(params.entryId));
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+      const user = await enterUserIdAndLoad();
+
+      await user.click(screen.getByTestId("delete-memory-mem-1"));
+      expect(await screen.findByTestId("alert-dialog-confirm")).toBeInTheDocument();
+      expect(deleted).toEqual([]);
+
+      await user.click(screen.getByTestId("alert-dialog-confirm"));
+      await waitFor(() => expect(deleted).toEqual(["mem-1"]));
+    });
+
+    // Regression: the expandable row was a clickable div — no keyboard, no state.
+    it("expands from the keyboard and reports its state", async () => {
+      const user = await enterUserIdAndLoad();
+      const toggle = screen.getByTestId("memory-expand-toggle-mem-1");
+
+      expect(toggle.tagName).toBe("BUTTON");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      toggle.focus();
+      await user.keyboard("{Enter}");
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
     });
   });
 });

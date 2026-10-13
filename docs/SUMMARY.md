@@ -57,6 +57,7 @@
 - [Connections](connections.md)
 - [Slack Integration](slack-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
+- [Embedding the Chat UI](chat-ui-embedding.md)
 
 ## Security & Compliance
 
@@ -80,6 +81,7 @@
 - [Configuration Reference](configuration-reference.md)
 - [Upgrading from EDDI 5.x](upgrading-from-5x.md)
 - [Upgrading from EDDI 6.4](upgrading-from-6.4.md)
+- [Upgrading from EDDI 6.5](upgrading-from-6.5.md)
 - [Docker](docker.md)
 - [Kubernetes](kubernetes.md)
 - [RedHat OpenShift](redhat-openshift.md)

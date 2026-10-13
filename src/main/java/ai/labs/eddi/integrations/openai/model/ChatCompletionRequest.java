@@ -15,10 +15,10 @@ import java.util.List;
  * <p>
  * Only the fields EDDI acts on are modelled. Everything else a client may send
  * ({@code temperature}, {@code max_tokens}, {@code top_p}, {@code tools},
- * {@code tool_choice}, {@code metadata}, {@code files}, …) is deliberately
- * ignored rather than rejected — model parameters and tools belong to the
- * agent's {@code langchain.json}, and a 400 on an unknown field would break
- * clients that always send them.
+ * {@code tool_choice}, {@code files}, …) is deliberately ignored rather than
+ * rejected — model parameters and tools belong to the agent's
+ * {@code langchain.json}, and a 400 on an unknown field would break clients
+ * that always send them.
  * <p>
  * {@code user} is typed as {@link JsonNode} on purpose: the OpenAI spec says it
  * is a string, but Open WebUI sends an <em>object</em>
@@ -33,7 +33,11 @@ public record ChatCompletionRequest(String model,
         Boolean stream,
         @JsonProperty("stream_options") StreamOptions streamOptions,
         Boolean stateless,
-        JsonNode user) {
+        JsonNode user,
+        JsonNode metadata) {
+
+    /** The {@code metadata} entry naming the chat a request belongs to. */
+    public static final String METADATA_CHAT_ID = "chat_id";
 
     /** Whether the client asked for an SSE stream. {@code stream} is nullable. */
     public boolean isStreaming() {
@@ -81,6 +85,73 @@ public record ChatCompletionRequest(String model,
             JsonNode id = user.get("id");
             if (id != null && id.isTextual() && !id.asText().isBlank()) {
                 return id.asText();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@code metadata.chat_id}, or {@code null} when absent, blank or not a string.
+     * {@code metadata} is an OpenAI field (string-to-string, up to 16 entries);
+     * EDDI reads this one entry as an explicit chat key and ignores the rest.
+     */
+    public String metadataChatId() {
+        if (metadata == null || !metadata.isObject()) {
+            return null;
+        }
+        JsonNode value = metadata.get(METADATA_CHAT_ID);
+        if (value == null || !value.isTextual() || value.asText().isBlank()) {
+            return null;
+        }
+        return value.asText().trim();
+    }
+
+    /**
+     * Whether the request carries earlier turns of the chat — any assistant
+     * message, or more than one user message. A client that resends its history
+     * (the OpenAI convention) sends none on its first turn and some on every later
+     * one.
+     */
+    public boolean hasHistory() {
+        if (messages == null) {
+            return false;
+        }
+        int userMessages = 0;
+        for (ChatMessage message : messages) {
+            if (message == null) {
+                continue;
+            }
+            if ("assistant".equals(message.role())) {
+                return true;
+            }
+            if ("user".equals(message.role()) && ++userMessages > 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The first {@code role: "user"} message, or {@code null}. Together with the
+     * first system message it identifies a chat whose client sends no chat id: both
+     * are resent unchanged on every turn.
+     */
+    public ChatMessage firstUserMessage() {
+        return firstMessageWithRole("user");
+    }
+
+    /** The first {@code role: "system"} message, or {@code null}. */
+    public ChatMessage firstSystemMessage() {
+        return firstMessageWithRole("system");
+    }
+
+    private ChatMessage firstMessageWithRole(String role) {
+        if (messages == null) {
+            return null;
+        }
+        for (ChatMessage message : messages) {
+            if (message != null && role.equals(message.role())) {
+                return message;
             }
         }
         return null;
