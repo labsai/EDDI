@@ -42,7 +42,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
      * generates what it needs); the timeout parameter is the real cost safety net,
      * not this ceiling.
      */
-    private static final int DEFAULT_MAX_TOKENS = 16384;
+    public static final int DEFAULT_MAX_TOKENS = 16384;
 
     @Override
     public Set<String> recognisedParameters() {
