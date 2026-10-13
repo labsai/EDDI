@@ -191,6 +191,10 @@ data:
   EDDI_CHAT_FRAME_ANCESTORS: {{ . | quote }}
   {{- end }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
+  {{- with .Values.eddi.tracing.otlpEndpoint }}
+  QUARKUS_OTEL_SDK_DISABLED: "false"
+  QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: {{ . | quote }}
+  {{- end }}
   {{- /*
     With OIDC off, AuthStartupGuard refuses a production boot unless the escape
     hatch is set, and HighValueSurfaceGuard additionally refuses to expose /mcp

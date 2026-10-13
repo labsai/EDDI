@@ -148,6 +148,7 @@ two.
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are ended after this many days without a turn. A daily sweep does it, first run five minutes after boot; it only changes the state to `ENDED` and deletes nothing, and a conversation paused for human approval is never ended. **`-1` (or `0`) disables it**: no conversation is ended for idleness, and startup logs that it is off. The same sweep still undeploys an old agent version once no conversation on it is active, whatever this is set to |
 | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days since their last interaction. Soft-deleted conversations (deleted without `deletePermanently`) are ended and follow the same clock |
 | `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
+| `eddi.turns.idempotency.ttl-seconds` | `600` | How long a completed turn stays recognisable by its `Idempotency-Key` / `X-EDDI-Request-Id`, so a retried `say` returns the stored answer instead of running again. `0` disables idempotent turns. See [Conversations](conversations.md#idempotent-turns) |
 | `eddi.usermemories.deleteOlderThanDays` | `-1` | Persistent user memories older than this are deleted. **`-1` disables the sweep** — memories are kept forever until you set a positive number. Relevant to [GDPR](gdpr-compliance.md) and [HIPAA](hipaa-compliance.md) |
 | `eddi.conversation.client-context.permitted-reserved-keys` | *(empty)* | Comma-separated engine-reserved context keys that clients are allowed to set. Empty (the default) drops all of them from client-supplied context. Only `groupId`, `groupConversationId`, `groupDepth`, `groupTranscript`, `dynamicAgentConfig`, `dynamicCreatedAgentIds` and `delegationDepth` are recognized; anything else is ignored. Set this only where every caller is trusted — see [Passing Context Information](passing-context-information.md#reserved-context-keys) |
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations |
@@ -313,6 +314,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
+| `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
 | `eddi.hitl.crash-recovery.enabled` | `true` | Restore paused conversations after a restart |
 | `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution |
 | `eddi.mcp.hitl.mutations.enabled` | `true` | Allow approve/reject decisions through the MCP surface |
@@ -515,6 +517,20 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.logs.db-retention-initial-delay` | `4m` | Delay before the first sweep after startup |
 | `eddi.docs.enabled` | `true` | Serve EDDI's own docs at `/administration/docs`, as MCP resources (`eddi://docs/*`) and as the `list_docs`/`read_docs` MCP tools. One switch covers all three. The content is the public repository documentation, so this is an exposure policy, not a secrecy control |
 | `eddi.docs.path` | `docs` | Directory the above is served from |
+
+---
+
+## Metrics & tracing
+
+`eddi.metrics.http-policy` (who may read `/q/metrics`) is under [Security & authentication](#security--authentication). The rest of the telemetry configuration is Quarkus' own; these are the settings EDDI ships or that an operator usually changes. The alert rules and dashboards that read the metrics are described in [monitoring-guide.md](monitoring/monitoring-guide.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `quarkus.otel.sdk.disabled` | `true` | Tracing is off until a collector exists. Set `false` (env `QUARKUS_OTEL_SDK_DISABLED=false`) together with the endpoint below; `docker-compose.monitoring.yml` and the Helm chart's `tracing.otlpEndpoint` value (under `eddi:`) do both |
+| `quarkus.otel.exporter.otlp.endpoint` | `http://localhost:4317` | OTLP gRPC endpoint spans are exported to |
+| `quarkus.micrometer.binder.http-server.max-uri-tags` | see `application.properties` | Distinct `uri` tag values `http_server_requests_seconds_*` may carry; requests past the cap are not measured. `http.server.requests` publishes no histogram buckets on purpose — buckets would multiply every one of these series — so the dashboards chart HTTP latency as mean and peak |
+| `quarkus.datasource.metrics.enabled` | `true` | Build-time. Publishes the Agroal pool meters (`agroal_*`) for the PostgreSQL datastore; on the MongoDB datastore the datasource is inactive and nothing is registered. MongoDB pool meters (`mongodb_driver_pool_*`) come from a listener on EDDI's own client and need no setting |
+| `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |
 
 ---
 

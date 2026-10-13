@@ -1047,6 +1047,27 @@ class AuditLedgerServiceTest {
         verify(auditStore, never()).appendBatch(anyList());
     }
 
+    /**
+     * The drop counter only moves once the queue is already full. Depth against
+     * capacity is the warning before it, and an alert rule divides one by the other
+     * — so both must be on the registry, and the capacity must survive a GC (the
+     * {@code gauge(name, Integer)} overload holds the box weakly).
+     */
+    @Test
+    @DisplayName("queue depth and capacity are exposed as gauges")
+    void queueDepthAndCapacityAreGauges() {
+        var svc = AuditLedgerService.createForTesting(auditStore, true, 60, null, meterRegistry, 500);
+        svc.init();
+
+        for (int i = 0; i < 3; i++) {
+            svc.submit(entry("id-" + i, "conv-1", "agent-1"));
+        }
+        System.gc();
+
+        assertEquals(3.0, meterRegistry.get("eddi_audit_queue_depth").gauge().value());
+        assertEquals(500.0, meterRegistry.get("eddi_audit_queue_capacity").gauge().value());
+    }
+
     // ==================== G18 x G20: drops must not forge a tamper verdict ====
 
     /**

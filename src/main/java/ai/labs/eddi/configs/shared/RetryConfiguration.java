@@ -310,6 +310,13 @@ public class RetryConfiguration {
                 if (e instanceof ToolApprovalRequiredException tare) {
                     throw tare;
                 }
+                // A cancelled attempt (a cascade step timed out, the thread was interrupted)
+                // is not a provider failure: surface it as the interrupt it is, so callers
+                // do not classify it UNKNOWN and pay a second provider call for it.
+                if (e instanceof InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new LifecycleException.LifecycleInterruptedException(actionDescription + " interrupted", ie);
+                }
                 lastException = e;
 
                 if (attempt < maxAttempts) {
@@ -396,6 +403,9 @@ public class RetryConfiguration {
             throw ee;
         } catch (InterruptedException ie) {
             future.cancel(true);
+            // future.get cleared the flag; cooperative cancellation checks upstream need
+            // it.
+            Thread.currentThread().interrupt();
             throw ie;
         }
     }
