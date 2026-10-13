@@ -3142,7 +3142,24 @@
     "deletePermanentlyHint": "No se puede deshacer: el grupo y su espacio de trabajo (pendientes, cadencias y sus programaciones) se eliminan definitivamente. Sin esta opción, el grupo solo se marca como eliminado y sigue siendo recuperable hasta que se purgue.",
     "deletePermanentlyWithMembersHint": "No se puede deshacer: el grupo, su espacio de trabajo y todos los agentes miembros se eliminan definitivamente. Sin esta opción, solo se marcan como eliminados y siguen siendo recuperables hasta que se purguen.",
     "deleteMembersFailedAfterGroup": "El grupo se eliminó, pero estos agentes miembros no: {{ids}}. Elimínelos desde la página Agentes.",
-    "deleteMembersFailedGroupKept": "El grupo se conservó: estos agentes miembros no se pudieron eliminar: {{ids}}. Vuelva a intentarlo para terminar."
+    "deleteMembersFailedGroupKept": "El grupo se conservó: estos agentes miembros no se pudieron eliminar: {{ids}}. Vuelva a intentarlo para terminar.",
+    "transcriptLabel": "Transcripción de la discusión",
+    "announceAwaitingApproval": "La discusión está en pausa y espera tu aprobación.",
+    "announceAwaitingHuman": "La discusión está esperando la respuesta de un miembro.",
+    "newMessages": "Mensajes nuevos",
+    "finishEditingFirst": "Guarda o cancela primero la sección que estás editando",
+    "editBasics": "Editar nombre, miembros y ajustes",
+    "humanTurnResuming": "Se registró tu respuesta. La discusión se está reanudando: esta página la sigue y se actualiza cada pocos segundos.",
+    "composerMode": "Qué hacer con tu mensaje",
+    "composerModeNew": "Nueva discusión",
+    "composerModeContinue": "Continuar esta discusión",
+    "loadMoreDiscussions": "Cargar discusiones anteriores",
+    "confirmDeleteLiveDiscussionDescription": "Esta discusión sigue en curso. Se detiene y la transcripción con todo su contenido se elimina de forma permanente. No se puede deshacer.",
+    "discardEditsTitle": "¿Descartar los cambios sin guardar?",
+    "discardEditsDescription": "Aún se está editando una sección de la configuración. Si cierras el panel, se descartan los cambios que hiciste en ella.",
+    "discardEditsConfirm": "Descartar",
+    "keepEditing": "Seguir editando",
+    "streamInterrupted": "Se perdió la conexión en directo. Se muestra la discusión guardada, que se sigue actualizando mientras está en curso."
   },
   "taskBoard": {
     "title": "Tablero de tareas",
@@ -3784,7 +3801,10 @@
     "confirmApproveGroupDescription": "Aprobar toda la fase en pausa y reanudar el debate. Cada tarea pendiente se aprueba con ella; abre el grupo para decidirlas una por una.",
     "confirmRejectGroupDescription": "Rechazar toda la fase en pausa. Cada tarea pendiente se rechaza con ella y el debate no continúa más allá; abre el grupo para decidirlas una por una.",
     "pauseChanged": "Esta solicitud cambió desde que la abriste: no se decidió nada. Revísala de nuevo.",
-    "regularTruncated": "Se muestran las primeras {{limit}} aprobaciones de conversación; hay más pendientes. Resuelve algunas para ver el resto."
+    "regularTruncated": "Se muestran las primeras {{limit}} aprobaciones de conversación; hay más pendientes. Resuelve algunas para ver el resto.",
+    "conversationColumn": "Conversación",
+    "groupReviewLoadError": "No se pudo cargar la discusión.",
+    "groupReviewNoEntries": "Todavía no se ha dicho nada."
   },
   "chatDrawer": {
     "deploying": "Desplegando agente…",

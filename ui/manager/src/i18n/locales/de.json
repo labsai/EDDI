@@ -3103,7 +3103,24 @@
     "deletePermanentlyHint": "Kann nicht rückgängig gemacht werden: Die Gruppe und ihr Arbeitsbereich (Backlog, Rhythmen und deren Zeitpläne) werden endgültig entfernt. Ohne diese Option wird die Gruppe nur als gelöscht markiert und bleibt wiederherstellbar, bis sie bereinigt wird.",
     "deletePermanentlyWithMembersHint": "Kann nicht rückgängig gemacht werden: Die Gruppe, ihr Arbeitsbereich und alle Mitglieds-Agenten werden endgültig entfernt. Ohne diese Option werden sie nur als gelöscht markiert und bleiben wiederherstellbar, bis sie bereinigt werden.",
     "deleteMembersFailedAfterGroup": "Die Gruppe wurde gelöscht, diese Mitglieds-Agenten jedoch nicht: {{ids}}. Löschen Sie sie auf der Seite „Agenten“.",
-    "deleteMembersFailedGroupKept": "Die Gruppe wurde behalten: Diese Mitglieds-Agenten konnten nicht gelöscht werden: {{ids}}. Versuchen Sie es erneut, um den Vorgang abzuschließen."
+    "deleteMembersFailedGroupKept": "Die Gruppe wurde behalten: Diese Mitglieds-Agenten konnten nicht gelöscht werden: {{ids}}. Versuchen Sie es erneut, um den Vorgang abzuschließen.",
+    "transcriptLabel": "Diskussionsverlauf",
+    "announceAwaitingApproval": "Die Diskussion ist pausiert und wartet auf Ihre Freigabe.",
+    "announceAwaitingHuman": "Die Diskussion wartet auf die Antwort eines Mitglieds.",
+    "newMessages": "Neue Nachrichten",
+    "finishEditingFirst": "Speichern oder verwerfen Sie zuerst den Abschnitt, den Sie gerade bearbeiten",
+    "editBasics": "Name, Mitglieder und Einstellungen bearbeiten",
+    "humanTurnResuming": "Ihre Antwort wurde erfasst. Die Diskussion wird fortgesetzt – diese Seite folgt ihr und aktualisiert sich alle paar Sekunden.",
+    "composerMode": "Was soll mit Ihrer Nachricht geschehen?",
+    "composerModeNew": "Neue Diskussion",
+    "composerModeContinue": "Diese Diskussion fortsetzen",
+    "loadMoreDiscussions": "Ältere Diskussionen laden",
+    "confirmDeleteLiveDiscussionDescription": "Diese Diskussion läuft noch. Sie wird gestoppt, und der Verlauf samt allem Inhalt wird dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    "discardEditsTitle": "Ungespeicherte Änderungen verwerfen?",
+    "discardEditsDescription": "Ein Abschnitt der Konfiguration wird noch bearbeitet. Wenn Sie das Panel schließen, gehen Ihre Änderungen dort verloren.",
+    "discardEditsConfirm": "Verwerfen",
+    "keepEditing": "Weiter bearbeiten",
+    "streamInterrupted": "Die Live-Verbindung wurde unterbrochen. Angezeigt wird die gespeicherte Diskussion, die sich weiter aktualisiert, solange sie läuft."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3743,7 +3760,10 @@
     "confirmApproveGroupDescription": "Die gesamte pausierte Phase freigeben und die Diskussion fortsetzen. Jede wartende Aufgabe wird mit freigegeben — für Einzelentscheidungen die Gruppe öffnen.",
     "confirmRejectGroupDescription": "Die gesamte pausierte Phase ablehnen. Jede wartende Aufgabe wird mit abgelehnt, und die Diskussion läuft nicht darüber hinaus weiter — für Einzelentscheidungen die Gruppe öffnen.",
     "pauseChanged": "Diese Anfrage hat sich geändert, seit Sie sie geöffnet haben — es wurde nichts entschieden. Prüfen Sie sie erneut.",
-    "regularTruncated": "Angezeigt werden die ersten {{limit}} Konversationsfreigaben — weitere stehen aus. Entscheiden Sie einige, um den Rest zu sehen."
+    "regularTruncated": "Angezeigt werden die ersten {{limit}} Konversationsfreigaben — weitere stehen aus. Entscheiden Sie einige, um den Rest zu sehen.",
+    "conversationColumn": "Konversation",
+    "groupReviewLoadError": "Die Diskussion konnte nicht geladen werden.",
+    "groupReviewNoEntries": "Es wurde noch nichts gesagt."
   },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",

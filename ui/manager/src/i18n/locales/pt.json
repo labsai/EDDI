@@ -3142,7 +3142,24 @@
     "deletePermanentlyHint": "Não pode ser desfeito: o grupo e seu espaço de trabalho (lista de pendências, cadências e seus agendamentos) são removidos definitivamente. Sem esta opção, o grupo é apenas marcado como excluído e continua recuperável até ser expurgado.",
     "deletePermanentlyWithMembersHint": "Não pode ser desfeito: o grupo, seu espaço de trabalho e todos os agentes membros são removidos definitivamente. Sem esta opção, eles são apenas marcados como excluídos e continuam recuperáveis até serem expurgados.",
     "deleteMembersFailedAfterGroup": "O grupo foi excluído, mas estes agentes membros não: {{ids}}. Exclua-os na página Agentes.",
-    "deleteMembersFailedGroupKept": "O grupo foi mantido: estes agentes membros não puderam ser excluídos: {{ids}}. Tente novamente para concluir."
+    "deleteMembersFailedGroupKept": "O grupo foi mantido: estes agentes membros não puderam ser excluídos: {{ids}}. Tente novamente para concluir.",
+    "transcriptLabel": "Transcrição da discussão",
+    "announceAwaitingApproval": "A discussão está em pausa e aguarda a sua aprovação.",
+    "announceAwaitingHuman": "A discussão está a aguardar a resposta de um membro.",
+    "newMessages": "Novas mensagens",
+    "finishEditingFirst": "Guarde ou cancele primeiro a secção que está a editar",
+    "editBasics": "Editar nome, membros e definições",
+    "humanTurnResuming": "A sua resposta foi registada. A discussão está a ser retomada — esta página acompanha-a e atualiza-se a cada poucos segundos.",
+    "composerMode": "O que fazer com a sua mensagem",
+    "composerModeNew": "Nova discussão",
+    "composerModeContinue": "Continuar esta discussão",
+    "loadMoreDiscussions": "Carregar discussões mais antigas",
+    "confirmDeleteLiveDiscussionDescription": "Esta discussão ainda está a decorrer. Será interrompida e a transcrição, com todo o seu conteúdo, é removida permanentemente. Não é possível anular.",
+    "discardEditsTitle": "Descartar alterações não guardadas?",
+    "discardEditsDescription": "Uma secção da configuração ainda está a ser editada. Fechar o painel descarta as alterações feitas nela.",
+    "discardEditsConfirm": "Descartar",
+    "keepEditing": "Continuar a editar",
+    "streamInterrupted": "A ligação em direto perdeu-se. A mostrar a discussão guardada, que continua a atualizar enquanto decorre."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -3784,7 +3801,10 @@
     "confirmApproveGroupDescription": "Aprovar toda a fase em pausa e retomar a discussão. Cada tarefa pendente é aprovada com ela — abra o grupo para as decidir individualmente.",
     "confirmRejectGroupDescription": "Rejeitar toda a fase em pausa. Cada tarefa pendente é rejeitada com ela e a discussão não avança para além dela — abra o grupo para as decidir individualmente.",
     "pauseChanged": "Este pedido mudou desde que o abriu — nada foi decidido. Reveja-o novamente.",
-    "regularTruncated": "A mostrar as primeiras {{limit}} aprovações de conversas — há mais pendentes. Decida algumas para ver as restantes."
+    "regularTruncated": "A mostrar as primeiras {{limit}} aprovações de conversas — há mais pendentes. Decida algumas para ver as restantes.",
+    "conversationColumn": "Conversa",
+    "groupReviewLoadError": "Não foi possível carregar a discussão.",
+    "groupReviewNoEntries": "Ainda não foi dito nada."
   },
   "chatDrawer": {
     "deploying": "Implantando agente…",
