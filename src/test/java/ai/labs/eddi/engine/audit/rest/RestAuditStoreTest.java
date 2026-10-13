@@ -559,4 +559,16 @@ class RestAuditStoreTest {
         assertEquals(List.of(1L), report.undeliveredSequences());
         assertTrue(report.tamperingSuspected());
     }
+
+    @Test
+    @DisplayName("getAdminActions lists the ai.labs.admin records, optionally of one actor, with clamped paging")
+    void getAdminActions_delegatesByTaskId() {
+        var expected = List.of(sampleEntry());
+        when(auditStore.getEntriesByTask(AuditLedgerService.ADMIN_ACTION_TASK_ID, "admin-ann", 0, 1_000)).thenReturn(expected);
+
+        assertEquals(expected, restAuditStore.getAdminActions(" admin-ann ", -5, 5_000));
+        restAuditStore.getAdminActions("", 0, 0);
+
+        verify(auditStore).getEntriesByTask(AuditLedgerService.ADMIN_ACTION_TASK_ID, null, 0, 100);
+    }
 }

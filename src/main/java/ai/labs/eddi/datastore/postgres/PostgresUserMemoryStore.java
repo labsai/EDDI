@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
+import java.time.Instant;
 import java.util.*;
 import ai.labs.eddi.engine.audit.AuditHmac;
 import ai.labs.eddi.utils.RuntimeUtilities;
@@ -393,6 +394,46 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete memory entry", e);
+        }
+    }
+
+    /**
+     * One conditional {@code DELETE}. {@code IS NOT DISTINCT FROM} lets a null
+     * expectation match a row stored without a timestamp.
+     */
+    @Override
+    public boolean deleteEntryIfUnchanged(String entryId, Instant expectedUpdatedAt) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "DELETE FROM usermemories WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, entryId);
+            ps.setTimestamp(2, expectedUpdatedAt != null ? Timestamp.from(expectedUpdatedAt) : null);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to conditionally delete memory entry", e);
+        }
+    }
+
+    @Override
+    public boolean replaceIfUnchanged(String entryId, UserMemoryEntry entry, Instant expectedUpdatedAt)
+            throws IResourceStore.ResourceStoreException {
+        IUserMemoryStore.rejectReservedKey(entry.key());
+        ensureSchema();
+        String sql = "UPDATE usermemories SET value = ?::jsonb, category = ?, visibility = ?, group_ids = ?::jsonb,"
+                + " source_conversation_id = ?, conflicted = ?, updated_at = CURRENT_TIMESTAMP"
+                + " WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(2, entry.category());
+            ps.setString(3, entry.visibility() != null ? entry.visibility().name() : Visibility.self.name());
+            ps.setString(4, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(5, entry.sourceConversationId());
+            ps.setBoolean(6, entry.conflicted());
+            ps.setString(7, entryId);
+            ps.setTimestamp(8, expectedUpdatedAt != null ? Timestamp.from(expectedUpdatedAt) : null);
+            return ps.executeUpdate() == 1;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to conditionally replace memory entry", e);
         }
     }
 
