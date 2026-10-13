@@ -13512,7 +13512,7 @@
       ]
     },
     {
-      "id": 178,
+      "id": 197,
       "type": "row",
       "title": "RAG Ingestion",
       "collapsed": true,
@@ -13524,7 +13524,7 @@
       },
       "panels": [
         {
-          "id": 179,
+          "id": 198,
           "type": "timeseries",
           "title": "Segments stored by knowledge base",
           "datasource": {
@@ -13600,7 +13600,7 @@
           }
         },
         {
-          "id": 180,
+          "id": 199,
           "type": "timeseries",
           "title": "Ingestion errors by source",
           "datasource": {
@@ -13676,7 +13676,7 @@
           }
         },
         {
-          "id": 181,
+          "id": 200,
           "type": "timeseries",
           "title": "Files accepted by upload source",
           "datasource": {
