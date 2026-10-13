@@ -12,6 +12,7 @@ import io.quarkus.arc.DefaultBean;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
@@ -19,12 +20,15 @@ import java.io.IOException;
 import java.sql.*;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * PostgreSQL implementation of {@link IAuditStore}.
  * <p>
  * Uses a dedicated {@code audit_ledger} table with INSERT-only semantics. No
- * UPDATE or DELETE operations — enforces the write-once contract.
+ * DELETE at all, and UPDATE only for the two GDPR Art. 17 mutations the
+ * contract permits: {@link #pseudonymizeByUserId} and {@link #redactEntry}.
  * <p>
  * Activated via {@code @DefaultBean}.
  *
@@ -34,6 +38,8 @@ import java.util.*;
 @ApplicationScoped
 @DefaultBean
 public class PostgresAuditStore implements IAuditStore {
+
+    private static final Logger LOGGER = Logger.getLogger(PostgresAuditStore.class);
 
     /**
      * {@code conversation_id}, {@code AGENT_ID} and {@code AGENT_VERSION} are
@@ -113,32 +119,43 @@ public class PostgresAuditStore implements IAuditStore {
     private static final String CREATE_INDEX_TS = "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_ledger (created_at DESC)";
 
     /**
-     * GDPR export and erasure both scan the ledger by {@code user_id} — it is the
-     * largest, append-only, never-pruned table in the system, and both operations
-     * are legally deadline-bound. Without this index they are sequential scans.
+     * The two indexes over the whole ledger that arrived after it already had
+     * production data: {@code idx_audit_user} (GDPR export and erasure scan by
+     * {@code user_id}) and {@code idx_audit_task} (the administrative-action
+     * listing). They are built {@code CONCURRENTLY}, in the background — see
+     * {@link #buildLateIndexes()}.
      * <p>
-     * <strong>Upgrade note — read before deploying onto a large ledger.</strong> On
-     * the first start after this change the index is built on the existing table
-     * from {@link #ensureSchema()}, which runs lazily on the first
-     * {@code appendBatch}/{@code appendEntry}/{@code getEntries} — that is, on the
-     * audit-ledger-writer thread, holding this class's monitor. A plain
-     * (non-{@code CONCURRENTLY}) {@code CREATE INDEX} takes a {@code SHARE} lock,
-     * so for the duration of the build audit inserts block, the ledger's queue
-     * fills toward its bound, and REST audit reads wait on the same monitor. On a
-     * multi-million-row table that is minutes.
-     * <p>
-     * {@code CREATE INDEX CONCURRENTLY} is <em>not</em> illegal here —
-     * {@code ensureSchema} issues its statements on a plain autocommit
-     * {@link Statement}, not inside a transaction block, which is the only thing
-     * PostgreSQL forbids it in. It is avoided for the other reason: on failure it
-     * leaves an INVALID index behind, and nothing in this class would notice or
-     * repair one. Operators of large existing ledgers who cannot take the pause
-     * should build {@code idx_audit_user} with {@code CREATE INDEX CONCURRENTLY}
-     * out of band <em>before</em> deploying and check {@code pg_index.indisvalid};
-     * {@code IF NOT EXISTS} then makes this statement a no-op. Written up for
-     * operators in {@code docs/audit-ledger.md}.
+     * They used to be plain {@code CREATE INDEX} statements in
+     * {@link #ensureSchema()}, which runs lazily on the first audit write, on the
+     * audit-ledger-writer thread, holding this class's monitor. A plain build takes
+     * a {@code SHARE} lock, so on a multi-million-row ledger audit inserts blocked
+     * for minutes, the ledger's queue filled toward its bound and REST audit reads
+     * waited on the monitor. Operators had to build them out of band before
+     * deploying.
      */
-    private static final String CREATE_INDEX_USER = "CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_ledger (user_id)";
+    static final List<String[]> LATE_INDEXES = List.of(
+            new String[]{"idx_audit_user", "audit_ledger (user_id)"},
+            new String[]{"idx_audit_task", "audit_ledger (task_id, created_at DESC)"});
+
+    /**
+     * First half of the advisory-lock key of a late index build (ASCII "eaud"). The
+     * second half is the index name's hash, so two replicas never build the same
+     * index at once while different indexes do not wait for each other.
+     */
+    private static final int INDEX_LOCK_CLASS = 0x65617564;
+
+    /** Delays before the retries of a late-index build that failed transiently. */
+    private static final long[] INDEX_RETRY_DELAYS_MILLIS = {30_000L, 120_000L, 600_000L};
+
+    /**
+     * Where {@link #buildLateIndexes()} runs. A virtual thread in production; a
+     * unit test that drives this store with mocked JDBC swaps it for a no-op or a
+     * synchronous call, so the build's statements do not interleave with the ones
+     * it verifies.
+     */
+    Consumer<Runnable> indexBuildLauncher = task -> Thread.ofVirtual().name("pg-audit-index-build").start(task);
+
+    private final AtomicBoolean lateIndexBuildStarted = new AtomicBoolean();
 
     /**
      * {@code ON CONFLICT (id) DO NOTHING} makes the insert idempotent, which is
@@ -208,11 +225,106 @@ public class PostgresAuditStore implements IAuditStore {
             stmt.execute(CREATE_INDEX_CONV_SEQ);
             stmt.execute(CREATE_INDEX_AGENT);
             stmt.execute(CREATE_INDEX_TS);
-            stmt.execute(CREATE_INDEX_USER);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize audit_ledger table", e);
         }
+        if (lateIndexBuildStarted.compareAndSet(false, true)) {
+            indexBuildLauncher.accept(this::buildLateIndexesWithRetries);
+        }
+    }
+
+    private void buildLateIndexesWithRetries() {
+        for (int attempt = 0;; attempt++) {
+            try {
+                buildLateIndexes();
+                return;
+            } catch (SQLException e) {
+                if (attempt >= INDEX_RETRY_DELAYS_MILLIS.length) {
+                    LOGGER.warnf("Could not build the audit ledger indexes %s (%s). GDPR export/erasure and the admin-action listing "
+                            + "fall back to scans until the next restart retries; or build them by hand (docs/audit-ledger.md).",
+                            lateIndexNames(), e.getMessage());
+                    return;
+                }
+                LOGGER.infof("Audit index build failed (%s, SQLState %s); retrying in %d s", e.getMessage(), e.getSQLState(),
+                        INDEX_RETRY_DELAYS_MILLIS[attempt] / 1000);
+                try {
+                    Thread.sleep(INDEX_RETRY_DELAYS_MILLIS[attempt]);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
+     * Builds every {@link #LATE_INDEXES} entry with {@code CREATE INDEX
+     * CONCURRENTLY}, which does not block writes. Each build holds a session
+     * advisory lock, so replicas starting together do not build the same index
+     * twice (the loser gets an exception and retries later, by which time the index
+     * exists and the statement is a no-op). An index an interrupted build left
+     * INVALID is dropped and rebuilt — the one failure mode {@code CONCURRENTLY}
+     * has that a plain build does not, and the reason it used to be avoided here. A
+     * build that ends INVALID throws, so it is retried rather than trusted.
+     */
+    void buildLateIndexes() throws SQLException {
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            conn.setAutoCommit(true); // CREATE INDEX CONCURRENTLY refuses to run inside a transaction
+            for (String[] index : LATE_INDEXES) {
+                String name = index[0];
+                int key = name.hashCode();
+                if (!tryIndexLock(conn, key)) {
+                    throw new SQLException("another instance is building " + name, "55P03");
+                }
+                try (Statement stmt = conn.createStatement()) {
+                    if (Boolean.FALSE.equals(isIndexValid(conn, name))) {
+                        LOGGER.infof("Rebuilding audit index %s, left invalid by an interrupted build", name);
+                        stmt.execute("DROP INDEX CONCURRENTLY IF EXISTS " + name);
+                    }
+                    stmt.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS " + name + " ON " + index[1]);
+                    if (!Boolean.TRUE.equals(isIndexValid(conn, name))) {
+                        throw new SQLException("index " + name + " is not valid after its build", "55000");
+                    }
+                } finally {
+                    releaseIndexLock(conn, key);
+                }
+            }
+        }
+    }
+
+    /** {@code pg_index.indisvalid} of an index, or null when it does not exist. */
+    static Boolean isIndexValid(Connection conn, String indexName) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)")) {
+            ps.setString(1, indexName);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getBoolean(1) : null;
+            }
+        }
+    }
+
+    private static boolean tryIndexLock(Connection conn, int key) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT pg_try_advisory_lock(?, ?)")) {
+            ps.setInt(1, INDEX_LOCK_CLASS);
+            ps.setInt(2, key);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        }
+    }
+
+    private static void releaseIndexLock(Connection conn, int key) {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT pg_advisory_unlock(?, ?)")) {
+            ps.setInt(1, INDEX_LOCK_CLASS);
+            ps.setInt(2, key);
+            ps.execute();
+        } catch (SQLException e) {
+            LOGGER.warnf("Could not release the audit index lock: %s", e.getMessage());
+        }
+    }
+
+    private static List<String> lateIndexNames() {
+        return LATE_INDEXES.stream().map(index -> index[0]).toList();
     }
 
     @Override
@@ -313,6 +425,25 @@ public class PostgresAuditStore implements IAuditStore {
         return queryEntries(sql, userId, limit, skip);
     }
 
+    @Override
+    public List<AuditEntry> getEntriesByTask(String taskId, String userId, int skip, int limit) {
+        ensureSchema();
+        if (userId == null) {
+            String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger WHERE task_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+            return queryEntries(sql, taskId, limit, skip);
+        }
+        String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger WHERE task_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, taskId);
+            ps.setString(2, userId);
+            ps.setInt(3, limit);
+            ps.setInt(4, skip);
+            return readEntries(ps);
+        } catch (SQLException | IOException e) {
+            throw new RuntimeException("Failed to query audit entries by task", e);
+        }
+    }
+
     // -- Internal helpers --
 
     private void setEntryParams(PreparedStatement ps, AuditEntry entry) throws SQLException, IOException {
@@ -400,6 +531,42 @@ public class PostgresAuditStore implements IAuditStore {
     }
 
     // === GDPR ===
+
+    /**
+     * Rewrites {@code user_id}, the {@code data} payload (which carries input,
+     * output, LLM detail, tool calls and actions), {@code hmac} and
+     * {@code agent_signature} of one row — see {@link IAuditStore#redactEntry}.
+     * {@code IS NOT DISTINCT FROM} makes the HMAC condition match an unsigned row
+     * (SQL NULL) as well as a signed one.
+     */
+    @Override
+    public boolean redactEntry(AuditEntry redacted, String expectedHmac) {
+        ensureSchema();
+        var data = new LinkedHashMap<String, Object>();
+        if (redacted.input() != null)
+            data.put("input", redacted.input());
+        if (redacted.output() != null)
+            data.put("output", redacted.output());
+        if (redacted.llmDetail() != null)
+            data.put("llmDetail", redacted.llmDetail());
+        if (redacted.toolCalls() != null)
+            data.put("toolCalls", redacted.toolCalls());
+        if (redacted.actions() != null)
+            data.put("actions", redacted.actions());
+        String sql = "UPDATE audit_ledger SET user_id = ?, data = ?::jsonb, hmac = ?, agent_signature = ?"
+                + " WHERE id = ?::uuid AND hmac IS NOT DISTINCT FROM ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, redacted.userId());
+            ps.setString(2, jsonSerialization.serialize(data));
+            ps.setString(3, redacted.hmac());
+            ps.setString(4, redacted.agentSignature());
+            ps.setString(5, redacted.id());
+            ps.setString(6, expectedHmac);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException | IOException e) {
+            throw new RuntimeException("Failed to redact audit entry", e);
+        }
+    }
 
     /**
      * v5 rows sign a <em>keyed</em> pseudonym, so each key's rows get the pseudonym
