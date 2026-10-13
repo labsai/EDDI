@@ -7,6 +7,7 @@ package ai.labs.eddi.integrations.openai;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -68,6 +69,7 @@ class OpenAiConversationBridgeTest {
     private IConversationService conversationService;
     private IUserConversationStore userConversationStore;
     private IUserMemoryStore userMemoryStore;
+    private IConversationMemoryStore conversationMemoryStore;
     private OpenAiConversationBridge bridge;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -81,6 +83,7 @@ class OpenAiConversationBridgeTest {
         conversationService = mock(IConversationService.class);
         userConversationStore = mock(IUserConversationStore.class);
         userMemoryStore = mock(IUserMemoryStore.class);
+        conversationMemoryStore = mock(IConversationMemoryStore.class);
 
         when(conversationService.startConversation(any(), any(), any(), any()))
                 .thenReturn(new IConversationService.ConversationResult(
@@ -90,7 +93,7 @@ class OpenAiConversationBridgeTest {
         bridge = new OpenAiConversationBridge(conversationService, userConversationStore, userMemoryStore,
                 new OpenAiMessageMapper(objectMapper, 5),
                 OpenAiTestFixtures.config(b -> b.requestTimeoutSeconds = 2),
-                new SimpleMeterRegistry(), permissiveUseGuard());
+                new SimpleMeterRegistry(), permissiveUseGuard(), conversationMemoryStore);
         bridge.initMetrics();
     }
 
@@ -615,7 +618,8 @@ class OpenAiConversationBridgeTest {
 
         String body = out.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertFalse(body.contains("null"), "got: " + body);
-        assertTrue(body.contains("NullPointerException"));
+        assertTrue(body.contains(OpenAiConversationBridge.AGENT_FAILED_MESSAGE), body);
+        assertFalse(body.contains("NullPointerException"), body);
     }
 
     @Test
@@ -728,7 +732,7 @@ class OpenAiConversationBridgeTest {
                     b.requestTimeoutSeconds = 2;
                     b.adoptLegacyHeaderMappings = true;
                 }),
-                new SimpleMeterRegistry(), permissiveUseGuard());
+                new SimpleMeterRegistry(), permissiveUseGuard(), conversationMemoryStore);
         adopting.initMetrics();
         return adopting;
     }

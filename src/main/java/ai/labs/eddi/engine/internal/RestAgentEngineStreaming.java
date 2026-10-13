@@ -220,6 +220,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         }
 
                         @Override
+                        public void onLlmRetry(String reason, int attempt) {
+                            stream.sendJson("llm_retry", new LlmRetryEvent(reason, attempt));
+                        }
+
+                        @Override
                         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
                             stream.markTerminal();
                             try {
@@ -538,6 +543,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     /** Typed payload for the {@code cascade_step_start} SSE event. */
     private record CascadeStepStartEvent(int stepIndex, String modelType, String modelName, int totalSteps) {
+    }
+
+    /** Typed payload for the {@code llm_retry} SSE event. */
+    private record LlmRetryEvent(String reason, int attempt) {
     }
 
     /** Typed payload for the {@code cascade_escalation} SSE event. */

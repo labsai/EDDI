@@ -57,6 +57,7 @@
 - [Connections](connections.md)
 - [Slack Integration](slack-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
+- [Embedding the Chat UI](chat-ui-embedding.md)
 
 ## Security & Compliance
 

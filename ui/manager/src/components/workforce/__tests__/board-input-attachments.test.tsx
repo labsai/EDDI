@@ -90,3 +90,16 @@ describe("BoardInput attachments", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 });
+
+describe("BoardInput — while a send is pending", () => {
+  it("locks the picker and chip removal, since the request would not carry a late file", async () => {
+    const onSend = vi.fn(() => new Promise<boolean>(() => {}));
+    renderWithProviders(<BoardInput onSend={onSend} />);
+    await attach(pickFile());
+    await userEvent.type(screen.getByRole("textbox"), "Ship it?");
+    await userEvent.click(screen.getByTestId("board-send"));
+
+    expect(screen.getByRole("button", { name: "Attach file" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Remove notes\.txt/ })).toBeDisabled();
+  });
+});
