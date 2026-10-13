@@ -485,6 +485,8 @@ eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
 eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
 eddi_llm_failure_total                      # Failed cascade steps by failure class; tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
+eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|httpcall|httpcall_retry)
+eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
 eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
@@ -495,6 +497,18 @@ eddi_llm_cascade_confidence                 # Confidence scores (distribution su
 `step="0"` means the cheap model is carrying the load, which is the entire point.
 Mass at the last step means every turn pays for the cheap attempt *and* the
 expensive one.
+
+### LLM Circuit Breaker Metrics
+
+Full guide: [langchain.md](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing). Only recorded for tasks that set `circuitBreaker.enabled`.
+
+```text
+eddi_llm_circuit_total                      # State changes of a model's circuit; tags: state (open|half_open|closed), class (INVALID_OUTPUT|BAD_REQUEST|MODEL_NOT_FOUND|AUTH|QUOTA_EXHAUSTED — what opened it; none on a close)
+eddi_llm_circuit_skipped_total              # Turns that did not call the model because its circuit was open; tag: class
+eddi_llm_circuit_open                       # Gauge: circuits open or half-open on this node right now
+```
+
+Every `state="open"` is also one ERROR log line (`LLM circuit OPEN …`) naming the agent, version, provider, model, the class and EDDI's reason (never model output). Alert on `increase(eddi_llm_circuit_total{state="open"}[5m]) > 0`, or on `eddi_llm_circuit_open > 0` for a standing condition. The breakers are per node and in memory: with several nodes, each opens on its own traffic.
 
 ### Streaming Metrics
 
@@ -717,6 +731,15 @@ without conversation affinity, where two nodes allocate the same per-conversatio
 positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
 [Chain sequences and multi-replica deployments](audit-ledger.md#chain-sequences-and-multi-replica-deployments).
 
+### Database Log Retention Metrics
+
+```text
+eddi_logs_db_retention_deleted_total        # Persisted log entries the retention sweep deleted
+```
+
+Stays at zero while `eddi.logs.db-retention-days` is off (the default). See
+[log-administration.md](log-administration.md#retention).
+
 ### Dream (Background Memory Consolidation) Metrics
 
 ```text
@@ -726,6 +749,7 @@ eddi_dream_entries_summarized_total         # Entries folded into a consolidatio
 eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
 eddi_dream_cycles_failed_total              # Dream cycles that aborted
 eddi_dream_summarization_failed_total       # LLM summarization steps that failed
+eddi_dream_conflicts_skipped_total          # Writes skipped because the memory changed during the cycle
 eddi_dream_duration_seconds                 # Dream cycle duration (timer)
 ```
 
@@ -742,6 +766,12 @@ a provider outage that does not present as a timeout. Confirm from the ERROR lin
 logs: it names the provider, the model and the configured parameter *keys*, which is enough to
 tell a missing `apiKey` from a wrong `llmModel` without exposing the value. If credentials are
 the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
+
+`eddi_dream_conflicts_skipped_total` counts the prunes, in-place overwrites and deletes a cycle
+did **not** make because the memory was written after the cycle read it — every Dream write is a
+compare-and-set on `updatedAt`, so the user's newer fact wins. Occasional increments are normal
+on active users; a steady rise means cycles keep racing live conversations, and scheduling them at
+a quieter hour helps.
 
 ### Conversation Summarization Metrics
 

@@ -137,6 +137,7 @@ Always returns `1.0` — effectively disables confidence gating. The first step'
 | **Spent quota (e.g. a per-day quota)** | Not retried — a 429 that names a per-day quota or `insufficient_quota` escalates immediately (failure class `QUOTA_EXHAUSTED`). |
 | **Timeout** | The step is cancelled and the cascade escalates; a warning is logged. A step streamed live is exempt from cancellation — see [Streaming the Final Step](#streaming-the-final-step). |
 | **Other errors** | Logged; escalate to the next step. |
+| **Circuit open** | With the task's opt-in [`circuitBreaker`](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing), a step whose model keeps failing with the same permanent class (invalid output, bad request, model not found; auth or quota at once) is **skipped without a call** until its cool-down ends, then probed once. Per model: the other steps still run. Trace `status: circuit_open`. If the last step is open too, the best response so far is returned, else the turn fails with an `LlmCircuitOpenException` (or serves the `onError` fallback). |
 | **Duration / cost ceiling reached** | Stop escalating, return the best response so far. |
 | **All steps fail** | Return the best response seen so far, or throw `LifecycleException` if none produced a result. |
 
@@ -181,9 +182,25 @@ The full per-step trace is stored in conversation memory under `langchain:cascad
 
 If `responseMetadataObjectName` is set, the cascade populates it with real token usage plus `cascadeCostUsd`, `cascadeModel` (`provider/model`), `cascadeStep`, and `cascadeConfidence`.
 
+### Turn deadline and request timeouts
+
+Inside an agent's [turn deadline](langchain.md#turn-deadline) the cascade's own budget shrinks to
+`min(maxTotalDurationMs, remaining - reserve)`, each step's timeout is clamped to what is left, and a
+further step is not started when less than 3 seconds (plus the reserve) remain — the best answer so
+far is returned instead.
+
+A step's `timeoutMs` also bounds the provider request itself: the model built for the step has its
+`timeout` parameter clamped to the step's `timeoutMs` (rounded up to whole seconds up to 10 s, and to
+5-second steps above, so a deadline that shrinks every turn does not create a model per millisecond).
+Without that, cancelling the waiting future left the HTTP call running — billed, and holding a thread
+— for the model's full `timeout`. A model `timeout` already at or below the step's is left alone.
+Setting a model `timeout` longer than its step's `timeoutMs` is reported as a deploy-time warning;
+set them equal. `eddi.llm.cancelled{scope=cascade_step}` counts steps cancelled on timeout, and the
+trace of a clamped step carries `modelTimeoutClampedMs`.
+
 ### Metrics (Micrometer, `/q/metrics`)
 
-`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`).
+`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`), `eddi.llm.turn.deadline.exceeded` (tag `stage`), `eddi.llm.cancelled` (tag `scope`).
 
 ## Audit Trail
 

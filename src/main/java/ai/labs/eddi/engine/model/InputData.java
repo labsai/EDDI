@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -13,6 +15,13 @@ import java.util.Map;
 public class InputData {
     private String input = "";
     private Map<String, Context> context = new HashMap<>();
+
+    /**
+     * The caller's requested turn budget (the {@code X-EDDI-Turn-Deadline-Ms}
+     * header), set by the REST layer. Never read from or written to a request body.
+     */
+    @JsonIgnore
+    private Long requestedTurnDeadlineMs;
 
     public InputData() {
     }
@@ -36,5 +45,15 @@ public class InputData {
 
     public void setContext(Map<String, Context> context) {
         this.context = context;
+    }
+
+    @JsonIgnore
+    public Long getRequestedTurnDeadlineMs() {
+        return requestedTurnDeadlineMs;
+    }
+
+    @JsonIgnore
+    public void setRequestedTurnDeadlineMs(Long requestedTurnDeadlineMs) {
+        this.requestedTurnDeadlineMs = requestedTurnDeadlineMs;
     }
 }
