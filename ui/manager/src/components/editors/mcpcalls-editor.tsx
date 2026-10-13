@@ -248,6 +248,7 @@ function TagListInput({
   placeholder?: string;
   testId?: string;
 }) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
 
   const add = () => {
@@ -264,18 +265,18 @@ function TagListInput({
         {label}
       </label>
       <div className="flex flex-wrap gap-1.5">
-        {tags.map((t, i) => (
+        {tags.map((tag, i) => (
           <span
             key={i}
             className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
           >
-            {t}
+            {tag}
             {!readOnly && (
               <button
                 type="button"
                 onClick={() => onChange(tags.filter((_, j) => j !== i))}
                 className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                aria-label={`Remove ${t}`}
+                aria-label={t("common.removeItem", { item: tag, defaultValue: "Remove {{item}}" })}
               >
                 <X className="h-3 w-3" />
               </button>

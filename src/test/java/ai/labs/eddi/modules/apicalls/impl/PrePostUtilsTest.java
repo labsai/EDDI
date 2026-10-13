@@ -449,7 +449,8 @@ class PrePostUtilsTest {
 
             prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
 
-            verify(conversationProperties).put(eq("emptyProp"), any(Property.class));
+            // A path that resolves to nothing writes nothing — as in the property setter.
+            verify(conversationProperties, never()).put(eq("emptyProp"), any(Property.class));
         }
     }
 

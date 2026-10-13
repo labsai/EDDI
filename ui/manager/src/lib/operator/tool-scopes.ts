@@ -55,8 +55,8 @@ const WORKFLOW_EXTENSION_STORES = [
  * document in which one nested field among forty silently disables every future
  * approval — reviewed, technically, but not reviewably.
  *
- * **What makes it safe.** `gate-guard.ts` refuses, as a hard control rather
- * than a warning label, any llmstore write whose body carries a
+ * **What makes it safe.** `gate-guard.ts` refuses in the Manager's approval UI,
+ * as a control rather than a warning label, any llmstore write whose body carries a
  * `toolApprovals` key at all (and any whose body cannot be read in full to
  * prove it does not). A body with no task-level `toolApprovals` resolves to
  * `null`, so the agent-level gate applies — the operator can therefore change
@@ -70,6 +70,12 @@ const WORKFLOW_EXTENSION_STORES = [
  * operator rewrites the document without it. That is a narrowing of one task's
  * special protection, never an ungated agent, and the write is still approved
  * by a human who can see the whole document.
+ *
+ * Where that refusal holds: `gate-guard.ts` runs in the browser, so it binds
+ * approvals decided in the Manager. A pause approved over REST, MCP or a Slack
+ * approval channel never reaches it — the server-side validation of the approved
+ * call is the enforcement there, and the client guard is defence in depth. Do
+ * not cite it as the reason the grant is safe on every approval path.
  *
  * An escalation flag would NOT have been sufficient — `escalation-flags.ts` is
  * an attention aid by its own explicit design ("not a security control"), and a
@@ -236,7 +242,8 @@ export const READ_ENDPOINTS: readonly string[] = [
  * - `POST`/`PUT` on `llmstore` — the agent's prompt, model and tool switches.
  *   This is the ONE writable store whose document CAN carry a gate
  *   (`Task.toolApprovals`), so it is bound only in combination with
- *   `gate-guard.ts`, which hard-refuses any llmstore write carrying that field.
+ *   `gate-guard.ts`, which refuses (in the Manager's approval UI; the server
+ *   enforces it on every other approval path) any llmstore write carrying that field.
  *   See {@link WRITABLE_EXTENSION_STORES} for the full reasoning and the
  *   residual. Do not grant this without that guard.
  * - `POST /administration/agents/setup` and `.../setup-api` — build a whole
@@ -267,7 +274,8 @@ export const READ_ENDPOINTS: readonly string[] = [
  *
  * `llmstore` writes ARE granted, and are the one exception to that rule: its
  * `Task.toolApprovals` carries a gate too, but the exception is bought by a
- * separate control rather than by an argument. `gate-guard.ts` refuses any
+ * separate control rather than by an argument (a client-side one — defence in
+ * depth behind the server's own check). `gate-guard.ts` refuses any
  * llmstore write that carries the field, or that cannot be shown not to —
  * which converts "was the gate weakened" from an unanswerable diff question
  * into an answerable property of the body alone. Do not grant `llmstore`

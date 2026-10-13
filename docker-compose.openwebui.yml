@@ -67,7 +67,7 @@ services:
       start_period: 30s
 
   mongodb:
-    image: mongo:7.0.14
+    image: mongo:7.0.43
     environment:
       - "MONGO_INITDB_ROOT_USERNAME=eddi"
       - "MONGO_INITDB_ROOT_PASSWORD=changeme"

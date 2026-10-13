@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +22,8 @@ import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Web search tool that integrates with search APIs. Supports Google Custom
@@ -57,7 +60,8 @@ public class WebSearchTool {
     }
 
     @Tool("Searches the web for current information on any topic. Returns relevant search results with titles and snippets.")
-    public String searchWeb(@P("query") String query, @P("maxResults") Integer maxResults) {
+    public String searchWeb(@P("Search terms") String query,
+                            @P(value = "Maximum number of results, 1-10 (default 5)", required = false) Integer maxResults) {
 
         if (maxResults == null || maxResults < 1) {
             maxResults = 5;
@@ -67,7 +71,7 @@ public class WebSearchTool {
         }
 
         try {
-            LOGGER.info("Searching web for: " + query);
+            LOGGER.debugf("Searching web for: %s", sanitize(query));
 
             String results;
             if ("google".equalsIgnoreCase(searchProvider) && googleApiKey.isPresent() && googleCx.isPresent()) {
@@ -77,14 +81,14 @@ public class WebSearchTool {
                 results = searchWithDuckDuckGo(query, maxResults);
             }
 
-            LOGGER.debug("Search completed for: " + query);
+            LOGGER.debugf("Search completed for: %s", sanitize(query));
             return results;
 
         } catch (Exception e) {
             // The message can name the request URI, and Google's carries the API key.
             String error = redactApiKey(String.valueOf(e.getMessage()));
-            LOGGER.error("Web search error for query '" + query + "': " + error);
-            return "Error: Could not perform web search - " + error;
+            LOGGER.warnf("Web search failed for query '%s': %s", sanitize(query), sanitize(error));
+            throw new ToolFailureException("Error: Could not perform web search - " + error);
         }
     }
 
@@ -230,14 +234,15 @@ public class WebSearchTool {
     }
 
     @Tool("Searches for news articles on a specific topic")
-    public String searchNews(@P("query") String query, @P("maxResults") Integer maxResults) {
+    public String searchNews(@P("News topic to search for") String query,
+                             @P(value = "Maximum number of results, 1-10 (default 5)", required = false) Integer maxResults) {
 
         // Add "news" keyword to regular search for better results
         return searchWeb(query + " news", maxResults);
     }
 
     @Tool("Searches Wikipedia for information on a topic")
-    public String searchWikipedia(@P("query") String query) {
+    public String searchWikipedia(@P("Topic to look up on Wikipedia") String query) {
 
         try {
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
@@ -251,8 +256,8 @@ public class WebSearchTool {
             return formatWikipediaResults(body, query);
 
         } catch (Exception e) {
-            LOGGER.error("Wikipedia search error: " + e.getMessage(), e);
-            return "Error: Could not search Wikipedia - " + e.getMessage();
+            LOGGER.warnf(e, "Wikipedia search failed for query '%s'", sanitize(query));
+            throw new ToolFailureException("Error: Could not search Wikipedia - " + e.getMessage());
         }
     }
 

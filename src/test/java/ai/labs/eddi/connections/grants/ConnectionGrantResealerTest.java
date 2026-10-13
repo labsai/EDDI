@@ -5,7 +5,9 @@
 package ai.labs.eddi.connections.grants;
 
 import ai.labs.eddi.secrets.ISecretProvider.SealedValue;
+import ai.labs.eddi.secrets.SealedDataRotationParticipant.Resealer;
 import ai.labs.eddi.secrets.model.EncryptedDek;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,12 +15,10 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -40,11 +40,13 @@ class ConnectionGrantResealerTest {
 
     private InMemoryConnectionGrantStore store;
     private ConnectionGrantResealer resealer;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
         store = new InMemoryConnectionGrantStore();
-        resealer = new ConnectionGrantResealer(store);
+        meterRegistry = new SimpleMeterRegistry();
+        resealer = new ConnectionGrantResealer(store, meterRegistry);
     }
 
     /**
@@ -53,13 +55,18 @@ class ConnectionGrantResealerTest {
      * detectable — which is the whole reason a grant carries its own {@code dekId},
      * and the property the assertion inside this operator pins.
      */
-    private static UnaryOperator<SealedValue> rekeyTo(String activeDekId) {
-        return sealed -> {
+    private static Resealer rekeyTo(String activeDekId) {
+        return (sealed, context) -> {
             if (sealed == null || sealed.ciphertext() == null) {
                 return sealed;
             }
             String[] parts = sealed.ciphertext().split(":", 2);
             assertEquals(parts[0], sealed.dekId(), "a value must be opened with the generation it was actually sealed under");
+            // access-<principal> / refresh-<principal>: the context must name this
+            // row's own field, or the re-sealed value is bound to the wrong place
+            String field = parts[1].substring(0, parts[1].indexOf('-'));
+            assertTrue(context.startsWith("connection-grant|" + field + "|"), "bound to the wrong field: " + context);
+            assertTrue(context.endsWith(":" + parts[1].substring(field.length() + 1)), "bound to the wrong principal: " + context);
             return new SealedValue(activeDekId + ":" + parts[1], "iv-" + activeDekId, activeDekId);
         };
     }
@@ -67,7 +74,7 @@ class ConnectionGrantResealerTest {
     /** Replaces the store with one that writes inside the sweep's guard window. */
     private void raceDuringSweep(int times, Runnable interference) {
         store = new RacingStore(times, interference);
-        resealer = new ConnectionGrantResealer(store);
+        resealer = new ConnectionGrantResealer(store, meterRegistry);
     }
 
     private ConnectionGrant grant(String connectionName, String principal, String dekId, boolean withRefreshToken) {
@@ -213,30 +220,29 @@ class ConnectionGrantResealerTest {
     }
 
     @Test
-    @DisplayName("a re-seal failure ends the sweep, and every row it did not reach still opens")
-    void aFailedResealLeavesEveryRowReadable() {
-        // Deliberately NOT the old prepare-then-commit contract. The new generation
-        // is already committed when this runs and the old one is never deleted, so a
-        // half-swept tenant is one part-way through a migration, not one whose
-        // grants no key opens. Rotation catches this, counts the participant as
-        // incomplete, and reports that re-running is safe.
+    @DisplayName("one grant that cannot be re-sealed is skipped and counted; the sweep carries on")
+    void aBadGrantDoesNotStopTheSweep() {
+        // Review finding: the first grant whose re-seal threw ended the sweep, so one
+        // corrupt row stranded every grant after it on the old generation — rotation
+        // after rotation. Whichever grant the store hands over first fails here, so
+        // the assertion does not depend on iteration order.
         store.upsert(grant("jira", "alice", GEN_1, true));
         store.upsert(grant("drive", "bob", GEN_1, true));
+        store.upsert(grant("mail", "carol", GEN_1, true));
 
-        UnaryOperator<SealedValue> rekey = rekeyTo(GEN_2);
-        // The third call is the second grant's access token, whichever grant the
-        // store happens to hand over first — so this does not depend on iteration
-        // order to leave exactly one row migrated.
+        Resealer rekey = rekeyTo(GEN_2);
         var calls = new AtomicInteger();
-        assertThrows(IllegalStateException.class, () -> resealer.resealAll(TENANT, GEN_2, sealed -> {
-            if (calls.incrementAndGet() == 3) {
+        int outstanding = resealer.resealAll(TENANT, GEN_2, (sealed, context) -> {
+            if (calls.incrementAndGet() == 1) {
                 throw new IllegalStateException("crypto failure");
             }
-            return rekey.apply(sealed);
-        }));
+            return rekey.reseal(sealed, context);
+        });
 
+        assertEquals(1, outstanding, "the bad grant is reported, not hidden");
         long migrated = store.findByTenant(TENANT).stream().filter(g -> GEN_2.equals(g.getDekId())).count();
-        assertEquals(1, migrated, "a row the sweep already moved stays moved");
+        assertEquals(2, migrated, "every other grant still moved");
+        assertEquals(1.0, meterRegistry.get("eddi.vault.reseal.failures").counter().count(), 1e-9);
         for (ConnectionGrant grant : store.findByTenant(TENANT)) {
             assertTrue(grant.getEncryptedAccessToken().startsWith(grant.getDekId() + ":"),
                     "every row must still name the generation its ciphertext is sealed under: " + grant);

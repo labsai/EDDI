@@ -36,14 +36,14 @@ class ToolRateLimiterTest {
         @Test
         @DisplayName("should allow first call")
         void firstCallAllowed() {
-            assertTrue(rateLimiter.tryAcquire("testTool"));
+            assertTrue(rateLimiter.tryAcquire("testTool", 100));
         }
 
         @Test
         @DisplayName("should allow multiple calls within default limit (100)")
         void multipleCallsWithinLimit() {
             for (int i = 0; i < 50; i++) {
-                assertTrue(rateLimiter.tryAcquire("testTool"), "Call " + i + " should be allowed");
+                assertTrue(rateLimiter.tryAcquire("testTool", 100), "Call " + i + " should be allowed");
             }
         }
 
@@ -52,10 +52,10 @@ class ToolRateLimiterTest {
         void denyAtBoundary() {
             // Exhaust default limit (100)
             for (int i = 0; i < 100; i++) {
-                assertTrue(rateLimiter.tryAcquire("exhaustTool"));
+                assertTrue(rateLimiter.tryAcquire("exhaustTool", 100));
             }
             // 101st call should be denied
-            assertFalse(rateLimiter.tryAcquire("exhaustTool"));
+            assertFalse(rateLimiter.tryAcquire("exhaustTool", 100));
         }
     }
 
