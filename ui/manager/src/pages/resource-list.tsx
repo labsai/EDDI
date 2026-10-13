@@ -56,7 +56,7 @@ export function ResourceListPage() {
 
   const rt = getResourceType(type ?? "");
 
-  const { data: items, isLoading, isError, refetch } = useResourceDescriptors(
+  const { data: items, isLoading, isError, error, refetch } = useResourceDescriptors(
     type ?? "",
     100,
     0,
@@ -185,6 +185,7 @@ export function ResourceListPage() {
 
       {isError && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}
