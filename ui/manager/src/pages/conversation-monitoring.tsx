@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Bot,
   ArrowLeft,
@@ -55,13 +55,47 @@ export function ConversationMonitoringPage() {
     AWAITING_HUMAN: t("hitl.awaitingHuman", "Awaiting Human"),
   };
 
-  const [agentId, setAgentId] = useState("");
-  const [version, setVersion] = useState<number | undefined>(undefined);
+  // Agent and version live in the URL so a reload or shared link keeps the view.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const agentId = searchParams.get("agent") ?? "";
+  const versionParam = Number(searchParams.get("version"));
+  const version =
+    Number.isInteger(versionParam) && versionParam > 0 ? versionParam : undefined;
+  const updateParams = useCallback(
+    (patch: Record<string, string | null>) =>
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const [k, v] of Object.entries(patch)) {
+            if (v === null || v === "") next.delete(k);
+            else next.set(k, v);
+          }
+          return next;
+        },
+        { replace: true }
+      ),
+    [setSearchParams]
+  );
+  // Versions belong to one agent: changing the agent drops the version (the
+  // effect below then picks the new agent's latest) and the selection.
+  const setAgentId = (next: string) => {
+    updateParams({ agent: next, version: null });
+    setSelected(new Set());
+  };
+  const setVersion = useCallback(
+    (next: number | undefined) =>
+      updateParams({ version: next ? String(next) : null }),
+    [updateParams]
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmEnd, setConfirmEnd] = useState(false);
 
-  // Purge (admin) state
+  // Purge (admin) state. The days field is free text while editing — clearing
+  // it to type a new number must not snap back to 1 — and is validated when
+  // the admin presses Purge.
+  const [purgeDaysInput, setPurgeDaysInput] = useState("30");
   const [purgeDays, setPurgeDays] = useState(30);
+  const [purgeDaysError, setPurgeDaysError] = useState(false);
   const [confirmPurge, setConfirmPurge] = useState(false);
 
   const { data: versions } = useAgentVersions(agentId);
@@ -76,13 +110,7 @@ export function ConversationMonitoringPage() {
     if (version == null && versionOptions.length > 0) {
       setVersion(versionOptions[0]!.version);
     }
-  }, [versionOptions, version]);
-
-  // Reset version + selection whenever the agent changes.
-  useEffect(() => {
-    setVersion(undefined);
-    setSelected(new Set());
-  }, [agentId]);
+  }, [versionOptions, version, setVersion]);
 
   const {
     data: active,
@@ -226,6 +254,17 @@ export function ConversationMonitoringPage() {
       },
     });
     return true;
+  }
+
+  function requestPurge() {
+    const days = Number(purgeDaysInput);
+    if (!purgeDaysInput.trim() || !Number.isInteger(days) || days < 1) {
+      setPurgeDaysError(true);
+      return;
+    }
+    setPurgeDaysError(false);
+    setPurgeDays(days);
+    setConfirmPurge(true);
   }
 
   function confirmPurgeEnded() {
@@ -469,15 +508,27 @@ export function ConversationMonitoringPage() {
       )}
 
       {/* Admin — bulk purge of ENDED conversations */}
-      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-        <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+      {/* Not scoped to the agent picker above: the backend purges every agent's
+          ended conversations, so this is its own, clearly labelled section. */}
+      <section
+        className="mt-10 rounded-xl border border-destructive/30 bg-card p-5 shadow-sm"
+        aria-labelledby="purge-heading"
+        data-testid="purge-section"
+      >
+        <h2 id="purge-heading" className="flex items-center gap-2 text-lg font-semibold text-foreground">
           <Trash2 className="h-5 w-5 text-destructive" />
-          {t("conversations.purgeTitle", "Purge ended conversations")}
+          {t("conversations.purgeTitleAll", "Purge ended conversations — all agents")}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {t(
             "conversations.purgeDesc",
             "Permanently delete ENDED conversations whose last activity is older than the given number of days."
+          )}
+        </p>
+        <p className="mt-1 text-sm font-medium text-destructive" data-testid="purge-scope-note">
+          {t(
+            "conversations.purgeScopeNote",
+            "This is not limited to the agent selected above: it deletes ended conversations of every agent."
           )}
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -488,15 +539,20 @@ export function ConversationMonitoringPage() {
             id="purge-days"
             type="number"
             min={1}
-            value={purgeDays}
-            onChange={(e) => setPurgeDays(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
+            value={purgeDaysInput}
+            onChange={(e) => {
+              setPurgeDaysInput(e.target.value);
+              setPurgeDaysError(false);
+            }}
+            aria-invalid={purgeDaysError}
+            aria-describedby={purgeDaysError ? "purge-days-error" : undefined}
             data-testid="purge-days"
             className="h-9 w-24 rounded-md border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <Button
             variant="destructive"
             size="sm"
-            onClick={() => setConfirmPurge(true)}
+            onClick={requestPurge}
             disabled={purgeMutation.isPending}
             data-testid="purge-ended"
           >
@@ -504,7 +560,12 @@ export function ConversationMonitoringPage() {
             {t("conversations.purgeAction", "Purge")}
           </Button>
         </div>
-      </div>
+        {purgeDaysError && (
+          <p id="purge-days-error" role="alert" className="mt-2 text-sm text-destructive" data-testid="purge-days-error">
+            {t("conversations.purgeDaysInvalid", "Enter a whole number of days, 1 or more.")}
+          </p>
+        )}
+      </section>
 
       {/* End-selected confirmation */}
       <AlertDialog
@@ -565,7 +626,14 @@ export function ConversationMonitoringPage() {
         cancelLabel={t("common.cancel")}
         onConfirm={confirmPurgeEnded}
         isPending={purgeMutation.isPending}
-      />
+      >
+        <p
+          className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-foreground"
+          data-testid="purge-confirm-scope"
+        >
+          {t("conversations.confirmPurgeScope", "Applies to ALL agents, not only the one selected above.")}
+        </p>
+      </AlertDialog>
     </div>
   );
 }
