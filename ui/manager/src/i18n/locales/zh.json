@@ -25,7 +25,13 @@
     "profile": "个人资料",
     "guest": "访客",
     "userMenu": "用户菜单",
-    "signedIn": "已登录"
+    "signedIn": "已登录",
+    "authenticating": "正在验证身份…",
+    "initFailedTitle": "登录失败",
+    "initFailedBody": "Manager 无法完成登录。登录服务可能无法访问，或您的会话已被拒绝。",
+    "signInAgain": "重新登录",
+    "sessionExpiredTitle": "您的会话已过期。",
+    "sessionExpiredBody": "未保存的更改仍保留在此页面——请先复制所需内容，再重新登录。"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -224,7 +230,13 @@
     "versionShort": "v{{version}}",
     "resizePanel": "调整{{panel}}大小",
     "deletePermanently": "永久删除",
-    "deletePermanentlyHint": "无法撤消。不勾选此项时，该项仅被标记为已删除，在被清除前仍可恢复。"
+    "deletePermanentlyHint": "无法撤消。不勾选此项时，该项仅被标记为已删除，在被清除前仍可恢复。",
+    "errors": {
+      "network": "无法连接到 EDDI。请检查网络连接后重试。",
+      "unauthorized": "您的会话已过期，请重新登录。",
+      "forbidden": "您无权查看此内容。",
+      "notFound": "未找到——可能已被删除。"
+    }
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",
@@ -700,7 +712,13 @@
     "purgeSuccess_other": "已清除 {{count}} 个已结束对话",
     "purgeSuccess_one": "已清除 {{count}} 个已结束对话",
     "endStateUnavailable": "无法重新检查对话的当前状态，因此未结束任何对话。请重试。",
-    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。"
+    "endStateChanged": "所选对话中有一个现在正在等待审批。请检查所选内容并再次确认。",
+    "noMoreResults": "没有更多结果",
+    "backToPreviousPage": "返回上一页",
+    "purgeTitleAll": "清理已结束的对话 – 所有智能体",
+    "purgeScopeNote": "不仅限于上方选中的智能体：将删除所有智能体已结束的对话。",
+    "confirmPurgeScope": "适用于所有智能体，而不仅是上方选中的智能体。",
+    "purgeDaysInvalid": "请输入不小于 1 的整数天数。"
   },
   "conversationDetail": {
     "backToConversations": "返回对话列表",
@@ -718,7 +736,9 @@
     "totalCost": "总成本",
     "cacheHitRate": "缓存命中率",
     "endReasonRetired": "已结束：该智能体版本已被停用",
-    "stepAgentVersion": "由智能体版本 {{version}} 回答"
+    "stepAgentVersion": "由智能体版本 {{version}} 回答",
+    "searchTranscriptLabel": "搜索对话记录",
+    "matchCount": "匹配的步骤：{{matches}}"
   },
   "chat": {
     "hide": "隐藏",
@@ -799,7 +819,10 @@
     "sendWhileLoading": "您的消息未发送：对话仍在加载中。请稍后再试。",
     "turnFailed": "智能体无法回答此消息。请查看服务器日志或对话的审计记录以了解原因。",
     "errorWithReason": "错误：{{reason}}",
-    "endConversationFailed": "无法结束对话：{{reason}}"
+    "endConversationFailed": "无法结束对话：{{reason}}",
+    "searchAgents": "搜索智能体",
+    "noAgentMatches": "没有与搜索匹配的智能体",
+    "transcript": "对话"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -1649,7 +1672,7 @@
     "stepsCount": "{{count}} 步骤",
     "noConversationsFound": "未找到对话",
     "useConversationId": "使用ID: {{id}}",
-    "searchLogs": "搜索日志…",
+    "searchLogs": "搜索已加载的条目…",
     "errors": "错误",
     "warnings": "警告",
     "infos": "信息",
@@ -1661,7 +1684,17 @@
     "stateActive": "活跃",
     "stateError": "错误",
     "stateEnded": "已结束",
-    "loadOlder": "加载更早的条目"
+    "loadOlder": "加载更早的条目",
+    "reconnect": "重新连接",
+    "streamDisconnected": "已与日志流断开连接。",
+    "errorCount_other": "{{count}} 个错误",
+    "warnCount_other": "{{count}} 个警告",
+    "copied": "日志条目已复制",
+    "noMatches": "已加载的条目中没有与搜索匹配的内容。",
+    "noMatchesHint": "搜索仅覆盖此处已加载的条目。请加载更早的条目或调整筛选条件以查看更早的内容。",
+    "searchLogsLabel": "搜索已加载的日志条目",
+    "errorCount_one": "{{count}} 个错误",
+    "warnCount_one": "{{count}} 个警告"
   },
   "secrets": {
     "loadError": "无法加载密钥",
@@ -1844,7 +1877,9 @@
       "reasonUncovered": "{{count}} 条已加载的条目早于已检查的范围",
       "unverifiedTitle": "未完全验证",
       "unverifiedDesc": "没有签名被证伪，但并非所有内容都能检查：{{reasons}}。"
-    }
+    },
+    "agentsDeployed": "已部署",
+    "agentsNotDeployed": "未部署"
   },
   "schedules": {
     "cronHelp": "5 字段格式：分 时 日 月 星期",
@@ -1975,7 +2010,8 @@
     "systemManaged": "系统",
     "systemManagedHint": "由 EDDI 管理（知识库摄取、记忆整合或团队节奏）。请在其定义处修改，而不是在这里。",
     "persistentConversationIdLocked": "在创建计划时设置。服务器会保留各次触发一直追加到的那个对话。",
-    "failedScheduleGone": "该计划已不存在"
+    "failedScheduleGone": "该计划已不存在",
+    "oneTimeHelpZone": "仅在此时刻触发一次，然后完成。按 {{zone}} 时间解读（即下方的时区）。"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -2068,7 +2104,9 @@
     "connected": "已连接",
     "disconnected": "已断开",
     "logOutput": "日志输出",
-    "noMatch": "没有日志符合您的筛选条件"
+    "noMatch": "没有日志符合您的筛选条件",
+    "errorsAnnounce_one": "日志中有 {{count}} 个错误",
+    "errorsAnnounce_other": "日志中有 {{count}} 个错误"
   },
   "promptViewer": {
     "error": "加载提示词数据失败",
@@ -2472,7 +2510,8 @@
   },
   "stream": {
     "live": "实时",
-    "reconnecting": "重新连接中…"
+    "reconnecting": "重新连接中…",
+    "disconnected": "已断开"
   },
   "createOrWizard": {
     "title": "新 {{type}}",
@@ -3064,7 +3103,24 @@
     "deletePermanentlyHint": "无法撤消：群组及其工作区（待办事项、节奏及其计划任务）将被永久删除。不勾选此项时，群组仅被标记为已删除，在被清除前仍可恢复。",
     "deletePermanentlyWithMembersHint": "无法撤消：群组、其工作区以及所有成员代理将被永久删除。不勾选此项时，它们仅被标记为已删除，在被清除前仍可恢复。",
     "deleteMembersFailedAfterGroup": "群组已删除，但以下成员代理无法删除：{{ids}}。请在“代理”页面中删除它们。",
-    "deleteMembersFailedGroupKept": "群组已保留：以下成员代理无法删除：{{ids}}。请重试以完成操作。"
+    "deleteMembersFailedGroupKept": "群组已保留：以下成员代理无法删除：{{ids}}。请重试以完成操作。",
+    "transcriptLabel": "讨论记录",
+    "announceAwaitingApproval": "讨论已暂停，正在等待你的批准。",
+    "announceAwaitingHuman": "讨论正在等待某位成员的回复。",
+    "newMessages": "新消息",
+    "finishEditingFirst": "请先保存或取消你正在编辑的部分",
+    "editBasics": "编辑名称、成员和设置",
+    "humanTurnResuming": "已记录你的回复。讨论正在恢复——此页面会跟随讨论进展，并每隔几秒更新一次。",
+    "composerMode": "如何处理你的消息",
+    "composerModeNew": "新讨论",
+    "composerModeContinue": "继续此讨论",
+    "loadMoreDiscussions": "加载更早的讨论",
+    "confirmDeleteLiveDiscussionDescription": "此讨论仍在运行。它将被停止，其记录及全部内容会被永久删除，且无法撤销。",
+    "discardEditsTitle": "放弃未保存的修改？",
+    "discardEditsDescription": "配置中的某一部分仍在编辑。关闭面板会放弃你在其中所做的更改。",
+    "discardEditsConfirm": "放弃",
+    "keepEditing": "继续编辑",
+    "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -3117,7 +3173,10 @@
     "sourceConversation": "来源对话",
     "conflicted": "有冲突",
     "deleteEntryTitle": "删除此记忆？",
-    "deleteEntryDesc": "将为该用户永久删除“{{key}}”。智能体将不再记起它。此操作无法撤销。"
+    "deleteEntryDesc": "将为该用户永久删除“{{key}}”。智能体将不再记起它。此操作无法撤销。",
+    "deleteAllDescUser": "这将永久删除用户“{{userId}}”的全部 {{total}} 条记忆条目，此操作无法撤销。",
+    "toggleDetails": "显示或隐藏 {{key}} 的详情",
+    "deleteEntryLabel": "删除记忆条目 {{key}}"
   },
   "properties": {
     "title": "用户属性",
@@ -3153,7 +3212,9 @@
     "deleted": "触发器已删除",
     "deleteTitle": "删除触发器",
     "deleteDesc": "确定要永久删除意图「{{intent}}」的触发器吗？",
-    "searchPlaceholder": "按意图或代理 ID 筛选…"
+    "searchPlaceholder": "按意图或代理 ID 筛选…",
+    "needIntent": "请输入意图后再保存。",
+    "needAgent": "请至少选择一个智能体后再保存。"
   },
   "capabilities": {
     "agentCount": "智能体",
@@ -3170,7 +3231,11 @@
     "registeredSkills": "已注册技能",
     "noSkills": "未找到技能",
     "matchingAgents": "匹配的代理",
-    "noMatches": "该技能未找到匹配代理"
+    "noMatches": "该技能未找到匹配代理",
+    "searchLabel": "搜索技能",
+    "strategyLabel": "匹配策略",
+    "emptyTitle": "尚未注册任何能力",
+    "emptyDesc": "代理在配置中声明能力（技能）后会显示在这里。为代理添加能力后，它就会出现在此注册表中。"
   },
   "exportDialog": {
     "title": "导出智能体",
@@ -3695,7 +3760,10 @@
     "confirmApproveGroupDescription": "批准整个暂停阶段并继续讨论。该暂停下等待的每项任务都会一并批准；如需逐项决定，请打开该群组。",
     "confirmRejectGroupDescription": "拒绝整个暂停阶段。等待该暂停的每项任务都会一并被拒绝，讨论也不会继续往下进行。如需逐项决定，请打开该群组。",
     "pauseChanged": "此请求在你打开后已发生变化 — 未做出任何决定。请重新审核。",
-    "regularTruncated": "仅显示前 {{limit}} 个对话审批，还有更多待处理。处理部分审批后即可看到其余审批。"
+    "regularTruncated": "仅显示前 {{limit}} 个对话审批，还有更多待处理。处理部分审批后即可看到其余审批。",
+    "conversationColumn": "对话",
+    "groupReviewLoadError": "无法加载该讨论。",
+    "groupReviewNoEntries": "目前还没有任何发言。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -3727,7 +3795,18 @@
     "vaultUp": "Vault 就绪",
     "viewLogs": "查看日志",
     "coordAdminOnly": "协调器：需要管理员权限",
-    "vaultAdminOnly": "Vault：需要管理员权限"
+    "vaultAdminOnly": "Vault：需要管理员权限",
+    "vaultChecking": "正在检查保险库…",
+    "statsPartial": "部分计数无法加载——显示为不可用，而不是零。",
+    "countUnavailable": "无法加载",
+    "convState": {
+      "READY": "就绪",
+      "IN_PROGRESS": "进行中",
+      "ENDED": "已结束",
+      "EXECUTION_INTERRUPTED": "已中断",
+      "ERROR": "错误",
+      "AWAITING_HUMAN": "等待人工"
+    }
   },
   "errorBoundary": {
     "retry": "重试",
@@ -3785,7 +3864,11 @@
     "failedConversations_other": "有 {{count}} 个会话无法读取，未包含在数据包中。",
     "conversationsTruncated_one": "会话已被截断 — 该用户共有 {{count}} 个。",
     "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。",
-    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。"
+    "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。",
+    "noDataFoundToast": "未找到该用户 ID 的数据，未删除任何内容。",
+    "noDataFoundTitle": "未找到该用户 ID 的数据",
+    "noDataFoundBody": "未删除“{{userId}}”的任何内容。请检查 ID 是否有拼写错误，然后重试。",
+    "confirmTypeLabel": "请输入用户 ID“{{userId}}”以确认"
   },
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
@@ -3811,7 +3894,9 @@
     "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。",
     "purgeIncompleteScan": "未删除任何内容：EDDI 未能完成对仍在使用的资源的检查。请重新扫描后再试。",
     "purgeFailed": "清理失败",
-    "scanFailed": "扫描失败：{{reason}}"
+    "scanFailed": "扫描失败：{{reason}}",
+    "reviewHint": "请先从列表中打开资源进行查看；列表中的所有孤立资源都会被删除。",
+    "typeToConfirm": "输入 {{count}} 以确认"
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",
@@ -3838,7 +3923,8 @@
     "tenantId": "租户 ID",
     "title": "租户配额",
     "limitHintEmpty": "留空或 -1 = 不限，0 = 禁止",
-    "invalidNumber": "请输入数字，或留空表示不限。"
+    "invalidInteger": "请输入整数（0 或更大），或留空表示不限制。",
+    "invalidAmount": "请输入金额（0 或更大），或留空表示不限制。"
   },
   "secretPicker": {
     "clearVault": "清除保管库引用",
@@ -5146,7 +5232,9 @@
     "bindingCallerSuppliedBody": "调用系统随请求交付各用户自己的凭据，EDDI 不存储任何内容。代理只能做该用户在目标系统能做的事，并且此连接不会出现在 MCP 和 A2A 发现中。",
     "confirmAuthChange": "更改此连接的认证方式？",
     "confirmAuthChangeDesc": "通过此连接关联的账户将无法再解析——授权属于产生它的流程。只要仍有账户关联，EDDI 就会拒绝更改并说明数量；请先取消关联，或新建一个连接并让用户改为关联它。",
-    "confirmAuthChangeAccept": "更改"
+    "confirmAuthChangeAccept": "更改",
+    "deleted": "连接“{{name}}”已删除",
+    "confirmDeleteNamed": "删除连接“{{name}}”？"
   },
   "extensionTypes": {
     "parser": "输入解析器",

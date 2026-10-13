@@ -44,6 +44,10 @@ A **Schedule** defines when and how often an agent fires:
 A `CRON` schedule carrying `oneTimeAt` instead of `cronExpression` fires **once** at that instant
 rather than recurring. Exactly one of the two is required.
 
+In the Manager's schedule form the one-time **Date & time** is read as wall-clock time in the
+schedule's selected **Time Zone** (not the browser's zone) and stored as the corresponding UTC
+instant in `oneTimeAt`; the list shows it back in that same zone.
+
 ### Conversation Strategies
 
 A schedule belongs to its agent, not to a version: a `new` fire starts on the latest deployed

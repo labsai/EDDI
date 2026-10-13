@@ -9,6 +9,7 @@ import {
   setBaseUrl,
   ApiError,
   errorPayload,
+  setUnauthorizedHandler,
 } from "./http";
 import { captureFetch, mockFetchResponse } from "@/test-utils/sse";
 
@@ -69,6 +70,74 @@ describe("auth token", () => {
     await request("/agents/x", undefined, "ctx");
 
     expect(new Headers(calls[0].init?.headers).has("Authorization")).toBe(false);
+  });
+});
+
+describe("401 handler", () => {
+  afterEach(() => setUnauthorizedHandler(null));
+
+  /** fetch answering 401 to `staleToken` (or no token) and 200 otherwise. */
+  function fetchRejecting(staleToken: string | null) {
+    const seen: Array<string | null> = [];
+    globalThis.fetch = ((_url: string, init?: RequestInit) => {
+      const auth = new Headers(init?.headers).get("Authorization");
+      seen.push(auth);
+      const ok = auth !== null && auth !== `Bearer ${staleToken}`;
+      return Promise.resolve(new Response(ok ? "{}" : "", { status: ok ? 200 : 401 }));
+    }) as typeof fetch;
+    return seen;
+  }
+
+  it("repeats a 401 once with the token the handler installed", async () => {
+    setAuthToken("expired");
+    const seen = fetchRejecting("expired");
+    const rejected: Array<string | null> = [];
+    setUnauthorizedHandler(async (token) => {
+      rejected.push(token);
+      setAuthToken("fresh");
+      return true;
+    });
+
+    const res = await request("/agents/x", { method: "POST", body: "{}" }, "ctx");
+
+    expect(res.status).toBe(200);
+    expect(rejected).toEqual(["expired"]);
+    expect(seen).toEqual(["Bearer expired", "Bearer fresh"]);
+  });
+
+  it("surfaces the 401 when the handler has no fresh token", async () => {
+    const seen = fetchRejecting(null);
+    setUnauthorizedHandler(async () => false);
+
+    const err = await request("/agents/x", undefined, "ctx").catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(401);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("retries at most once", async () => {
+    globalThis.fetch = (() => Promise.resolve(new Response("", { status: 401 }))) as typeof fetch;
+    let calls = 0;
+    setUnauthorizedHandler(async () => {
+      calls += 1;
+      return true;
+    });
+
+    const err = await request("/agents/x", undefined, "ctx").catch((e) => e);
+
+    expect((err as ApiError).status).toBe(401);
+    expect(calls).toBe(1);
+  });
+
+  it("does not consult the handler for a 403", async () => {
+    mockFetchResponse(403);
+    let called = false;
+    setUnauthorizedHandler(async () => (called = true));
+
+    await request("/agents/x", undefined, "ctx").catch(() => undefined);
+
+    expect(called).toBe(false);
   });
 });
 

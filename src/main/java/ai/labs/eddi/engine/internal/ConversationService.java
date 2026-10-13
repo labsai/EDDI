@@ -798,6 +798,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onLlmRetry(String reason, int attempt) {
+                streamingHandler.onLlmRetry(reason, attempt);
+            }
+
+            @Override
             public void onComplete() {
                 // Handled separately after memory conversion
             }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.engine.attachments.AttachmentQuotas;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import io.quarkus.arc.DefaultBean;
@@ -27,6 +28,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Stores attachment data in an {@code attachments} table using {@code BYTEA}
  * columns. The {@code storage_ref} is a random UUID (unguessable). Access
  * grants are held in a {@code grants TEXT[]} column and die with the row.
+ * <p>
+ * Quotas are checked and the row inserted in one transaction holding a
+ * transaction-scoped advisory lock per quota scope (conversation, then user),
+ * so two concurrent uploads cannot both pass the check.
  *
  * @since 6.0.0
  */
@@ -52,6 +57,10 @@ public class PostgresAttachmentStore implements IAttachmentStore {
     private static final String ADD_GRANTS_COLUMN = "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS grants TEXT[] NOT NULL DEFAULT '{}'";
     private static final String CREATE_INDEX_CONV = "CREATE INDEX IF NOT EXISTS idx_attach_conv ON attachments (conversation_id)";
     private static final String CREATE_INDEX_TENANT = "CREATE INDEX IF NOT EXISTS idx_attach_tenant ON attachments (tenant_id)";
+    private static final String ADD_USER_COLUMN = "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS user_id TEXT";
+    private static final String CREATE_INDEX_USER = "CREATE INDEX IF NOT EXISTS idx_attach_user ON attachments (user_id)";
+    private static final String ADVISORY_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))";
+    private static final String LOCK_KEY_PREFIX = "eddi-attachments-quota:";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
@@ -64,6 +73,12 @@ public class PostgresAttachmentStore implements IAttachmentStore {
 
     @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-conversation", defaultValue = "104857600") // 100 MB
     long maxTotalBytesPerConversation;
+
+    @ConfigProperty(name = "eddi.attachments.max-per-user", defaultValue = "0")
+    long maxPerUser;
+
+    @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-user", defaultValue = "0")
+    long maxTotalBytesPerUser;
 
     @Inject
     public PostgresAttachmentStore(Instance<DataSource> dataSourceInstance) {
@@ -78,6 +93,8 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             stmt.execute(ADD_GRANTS_COLUMN);
             stmt.execute(CREATE_INDEX_CONV);
             stmt.execute(CREATE_INDEX_TENANT);
+            stmt.execute(ADD_USER_COLUMN);
+            stmt.execute(CREATE_INDEX_USER);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);
@@ -86,7 +103,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
 
     @Override
     public Attachment store(byte[] bytes, String declaredMime, String filename,
-                            String conversationId, String tenantId)
+                            String conversationId, String tenantId, String userId)
             throws AttachmentStoreException {
 
         if (bytes == null || bytes.length == 0) {
@@ -99,7 +116,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
 
         // MIME validation
         String detectedMime = MimeValidator.detectMime(bytes);
-        if (!MimeValidator.isCompatible(declaredMime, detectedMime)) {
+        if (!MimeValidator.isCompatibleContent(declaredMime, bytes)) {
             throw new AttachmentStoreException(
                     "MIME type mismatch: declared='%s', detected='%s'".formatted(declaredMime, detectedMime));
         }
@@ -108,21 +125,16 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         String storageRef = UUID.randomUUID().toString();
 
         ensureSchema();
-        enforceQuota(conversationId, bytes.length);
+        boolean conversationQuota = maxPerConversation > 0 || maxTotalBytesPerConversation > 0;
+        boolean userQuota = userId != null && (maxPerUser > 0 || maxTotalBytesPerUser > 0);
 
-        String sql = "INSERT INTO attachments "
-                + "(storage_ref, conversation_id, tenant_id, filename, mime_type, size_bytes, data) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, storageRef);
-            ps.setString(2, conversationId);
-            ps.setString(3, tenantId);
-            ps.setString(4, filename);
-            ps.setString(5, resolvedMime);
-            ps.setLong(6, bytes.length);
-            ps.setBytes(7, bytes);
-            ps.executeUpdate();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            if (!conversationQuota && !userQuota) {
+                insert(conn, storageRef, conversationId, tenantId, userId, filename, resolvedMime, bytes);
+            } else {
+                insertWithinQuota(conn, conversationQuota, userQuota, storageRef, conversationId, tenantId, userId, filename,
+                        resolvedMime, bytes);
+            }
         } catch (SQLException e) {
             throw new AttachmentStoreException("Failed to store attachment", e);
         }
@@ -281,30 +293,83 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         }
     }
 
-    private void enforceQuota(String conversationId, long incomingBytes) throws AttachmentStoreException {
-        if (maxPerConversation <= 0 && maxTotalBytesPerConversation <= 0) {
-            return;
+    private static void insert(Connection conn, String storageRef, String conversationId, String tenantId, String userId,
+                               String filename, String mime, byte[] bytes)
+            throws SQLException {
+        String sql = "INSERT INTO attachments "
+                + "(storage_ref, conversation_id, tenant_id, user_id, filename, mime_type, size_bytes, data) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, storageRef);
+            ps.setString(2, conversationId);
+            ps.setString(3, tenantId);
+            ps.setString(4, userId);
+            ps.setString(5, filename);
+            ps.setString(6, mime);
+            ps.setLong(7, bytes.length);
+            ps.setBytes(8, bytes);
+            ps.executeUpdate();
         }
-        String sql = "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE conversation_id = ?";
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, conversationId);
+    }
+
+    /**
+     * Check the quotas and insert in one transaction, serialised per quota scope by
+     * {@code pg_advisory_xact_lock}. The check used to run on its own connection
+     * before the insert, so N concurrent uploads at {@code limit - 1} all saw room
+     * and all inserted. The locks are always taken conversation first, then user,
+     * so two uploads can never wait on each other in a cycle; they are released by
+     * the commit or rollback.
+     */
+    private void insertWithinQuota(Connection conn, boolean conversationQuota, boolean userQuota, String storageRef,
+                                   String conversationId, String tenantId, String userId, String filename, String mime,
+                                   byte[] bytes)
+            throws SQLException, AttachmentStoreException {
+        boolean autoCommit = conn.getAutoCommit();
+        conn.setAutoCommit(false);
+        try {
+            if (conversationQuota) {
+                advisoryLock(conn, "conversation:" + conversationId);
+            }
+            if (userQuota) {
+                advisoryLock(conn, "user:" + userId);
+            }
+            if (conversationQuota) {
+                long[] usage = usage(conn, "conversation_id = ?", conversationId);
+                AttachmentQuotas.checkUsage(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage, bytes.length, maxPerConversation,
+                        maxTotalBytesPerConversation);
+            }
+            if (userQuota) {
+                long[] usage = usage(conn, "user_id = ?", userId);
+                AttachmentQuotas.checkUsage(AttachmentQuotaExceededException.SCOPE_USER, usage, bytes.length, maxPerUser, maxTotalBytesPerUser);
+            }
+            insert(conn, storageRef, conversationId, tenantId, userId, filename, mime, bytes);
+            conn.commit();
+        } catch (SQLException | AttachmentStoreException | RuntimeException e) {
+            conn.rollback();
+            throw e;
+        } finally {
+            conn.setAutoCommit(autoCommit);
+        }
+    }
+
+    private static void advisoryLock(Connection conn, String key) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(ADVISORY_LOCK)) {
+            ps.setString(1, LOCK_KEY_PREFIX + key);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
-                long count = rs.getLong(1);
-                long totalBytes = rs.getLong(2);
-                if (maxPerConversation > 0 && count >= maxPerConversation) {
-                    throw new AttachmentStoreException(
-                            "Attachment quota exceeded for conversation: %d/%d files. Delete some attachments first."
-                                    .formatted(count, maxPerConversation));
-                }
-                if (maxTotalBytesPerConversation > 0 && totalBytes + incomingBytes > maxTotalBytesPerConversation) {
-                    throw new AttachmentStoreException(
-                            "Attachment storage quota exceeded for conversation: %d + %d bytes exceeds limit of %d. Delete some attachments first."
-                                    .formatted(totalBytes, incomingBytes, maxTotalBytesPerConversation));
-                }
             }
-        } catch (SQLException e) {
-            throw new AttachmentStoreException("Failed to check attachment quota", e);
+        }
+    }
+
+    /** {count, totalBytes} of the rows matching {@code where}. */
+    private static long[] usage(Connection conn, String where, String value) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM attachments WHERE " + where)) {
+            ps.setString(1, value);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return new long[]{rs.getLong(1), rs.getLong(2)};
+            }
         }
     }
 

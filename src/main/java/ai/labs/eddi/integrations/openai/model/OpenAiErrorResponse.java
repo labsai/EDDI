@@ -35,6 +35,8 @@ public record OpenAiErrorResponse(OpenAiError error) {
     public static final String CODE_INVALID_REQUEST_FIELD = "invalid_request_field";
     public static final String CODE_INVALID_REQUEST_BODY = "invalid_request_body";
     public static final String CODE_TIMEOUT = "timeout";
+    /** The agent's pipeline failed the turn (conversation state ERROR). */
+    public static final String CODE_AGENT_ERROR = "agent_error";
 
     public static OpenAiErrorResponse of(String message, String type, String code) {
         return new OpenAiErrorResponse(new OpenAiError(message, type, null, code));

@@ -83,6 +83,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `confidenceThreshold` | Double | `null` | Minimum confidence to accept this step. Below it, escalate. **A non-last step should set a threshold** (a null threshold there is always-accepted, making later steps unreachable — flagged with a deploy-time warning). The last step's threshold is ignored (always accepted). |
 | `timeoutMs` | long | `30000` | Per-step timeout in milliseconds, for **buffered** (non-streamed) steps — also bounded by the remaining `maxTotalDurationMs` budget. A step streamed live ignores this and instead runs under an internal ~120 s bound (see [Streaming the Final Step](#streaming-the-final-step)). |
 | `inputPricePer1M` / `outputPricePer1M` | double | cascade default | Per-step token pricing (overrides the cascade-level default). |
+| `maxFormatRetries` | int | task `responseValidation.maxRetries` | Same-model corrective re-asks this step gets before the cascade escalates (`0..3`). `0` for an expensive last-resort model. See [Format recovery and escalation](#format-recovery-and-escalation). |
 
 > **Merge note:** Step parameters are merged over base task parameters (step wins). Steps only specify overrides (e.g., a different `model`); shared params like `systemMessage` are inherited.
 >
@@ -141,16 +142,28 @@ Always returns `1.0` — effectively disables confidence gating. The first step'
 
 The cascade tracks the "best response" seen so far — if a later step fails but an earlier step produced a usable response, that response is returned rather than throwing.
 
+## Format recovery and escalation
+
+When the task's `responseValidation` has a `retry` policy (see [Recovery policies](langchain.md#recovery-policies-retry-where-it-helps)), a step whose reply is unusable (invalid JSON, empty, truncated, filtered) does **not** escalate immediately. The order is cheapest first:
+
+1. the step's model answers;
+2. the parser repairs what it can locally;
+3. the **same model** is asked again with a corrective message, up to `maxRetries` (the step's `maxFormatRetries` wins), within the step's own `timeoutMs`: if less than `minAttemptMs` remains, the re-ask is skipped;
+4. if the reply is still unusable, the cascade **escalates** to the next step with the reason **`invalid_output`**, and that step runs the same sequence with its own re-asks;
+5. after the last step, `fallbackAction` applies (default: the configured fallback).
+
+An escalation for this reason shows up as `status: escalated`, `reason: invalid_output`, `invalidOutput` (`empty`, `truncated`, `content_filter` or `invalid_json`) and `formatRetries` on the step's trace entry, as `eddi.llm.cascade.escalations{reason=invalid_output}`, as `eddi.llm.recovery{action=escalate, outcome=invalid_output}`, and as a `cascade_escalation` SSE event with `reason: "invalid_output"`. An unusable step never outranks a usable answer: if the last step is unusable and an earlier step produced a usable (low-confidence) answer, that answer is returned. A step that may re-ask is buffered even when it would otherwise stream live; an `llm_retry` SSE event `{reason, attempt}` precedes each re-ask. In agent mode only the step's final model call is re-asked; no tool runs twice.
+
 ## SSE Events
 
-Two SSE event types provide real-time visibility, emitted through `ConversationEventSink` → `StreamingResponseHandler` → the `/agents/{conversationId}/stream` SSE endpoint:
+Three SSE event types provide real-time visibility, emitted through `ConversationEventSink` → `StreamingResponseHandler` → the `/agents/{conversationId}/stream` SSE endpoint:
 
 | Event | Fields |
 |---|---|
 | `cascade_step_start` | `stepIndex`, `modelType`, `modelName`, `totalSteps` |
 | `cascade_escalation` | `fromStep`, `toStep`, `confidence`, `threshold`, `reason`, `durationMs` |
 
-`reason` is one of `low_confidence`, `timeout`, `error`, `retryable_error`.
+`reason` is one of `low_confidence`, `timeout`, `error`, `retryable_error`, `invalid_output`. A third event, `llm_retry` (`reason`, `attempt`), is sent before a same-model re-ask (see [Format recovery and escalation](#format-recovery-and-escalation)).
 
 ## Streaming the Final Step
 

@@ -25,7 +25,13 @@
     "profile": "Profile",
     "guest": "Guest",
     "userMenu": "User menu",
-    "signedIn": "Signed in"
+    "signedIn": "Signed in",
+    "authenticating": "Authenticating…",
+    "initFailedTitle": "Sign-in failed",
+    "initFailedBody": "The Manager could not complete sign-in. The login service may be unreachable or your session may have been rejected.",
+    "signInAgain": "Sign in again",
+    "sessionExpiredTitle": "Your session has expired.",
+    "sessionExpiredBody": "Unsaved changes are still on this page — copy anything you need before signing in again."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -224,7 +230,13 @@
     "versionShort": "v{{version}}",
     "resizePanel": "Resize {{panel}}",
     "deletePermanently": "Delete permanently",
-    "deletePermanentlyHint": "Cannot be undone. Without this, the item is only marked deleted and stays recoverable until it is purged."
+    "deletePermanentlyHint": "Cannot be undone. Without this, the item is only marked deleted and stays recoverable until it is purged.",
+    "errors": {
+      "network": "Can't reach EDDI. Check your connection and try again.",
+      "unauthorized": "Your session has expired. Sign in again.",
+      "forbidden": "You don't have permission to view this.",
+      "notFound": "Not found — it may have been deleted."
+    }
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -252,7 +264,8 @@
   },
   "stream": {
     "live": "Live",
-    "reconnecting": "Reconnecting…"
+    "reconnecting": "Reconnecting…",
+    "disconnected": "Disconnected"
   },
   "agents": {
     "confirmDeleteDescription": "This action cannot be undone. The agent and all its data will be permanently removed.",
@@ -728,7 +741,13 @@
     "purgeSuccess_one": "Purged {{count}} ended conversation",
     "purgeSuccess_other": "Purged {{count}} ended conversations",
     "endStateUnavailable": "Could not re-check the conversations' current state, so nothing was ended. Try again.",
-    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again."
+    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again.",
+    "noMoreResults": "No more results",
+    "backToPreviousPage": "Back to previous page",
+    "purgeTitleAll": "Purge ended conversations — all agents",
+    "purgeScopeNote": "This is not limited to the agent selected above: it deletes ended conversations of every agent.",
+    "confirmPurgeScope": "Applies to ALL agents, not only the one selected above.",
+    "purgeDaysInvalid": "Enter a whole number of days, 1 or more."
   },
   "conversationDetail": {
     "backToConversations": "Back to Conversations",
@@ -746,7 +765,9 @@
     "totalCost": "Total Cost",
     "cacheHitRate": "Cache Hit Rate",
     "endReasonRetired": "Ended: the agent version was retired",
-    "stepAgentVersion": "Answered by agent version {{version}}"
+    "stepAgentVersion": "Answered by agent version {{version}}",
+    "searchTranscriptLabel": "Search the transcript",
+    "matchCount": "Matching steps: {{matches}}"
   },
   "chat": {
     "hide": "Hide",
@@ -827,7 +848,10 @@
     "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
     "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason.",
     "errorWithReason": "Error: {{reason}}",
-    "endConversationFailed": "Could not end the conversation: {{reason}}"
+    "endConversationFailed": "Could not end the conversation: {{reason}}",
+    "searchAgents": "Search agents",
+    "noAgentMatches": "No agents match your search",
+    "transcript": "Conversation"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -1690,7 +1714,7 @@
     "stepsCount": "{{count}} steps",
     "noConversationsFound": "No conversations found",
     "useConversationId": "Use ID: {{id}}",
-    "searchLogs": "Search logs…",
+    "searchLogs": "Search loaded entries…",
     "errors": "errors",
     "warnings": "warns",
     "infos": "info",
@@ -1702,7 +1726,17 @@
     "stateActive": "Active",
     "stateError": "Error",
     "stateEnded": "Ended",
-    "loadOlder": "Load older entries"
+    "loadOlder": "Load older entries",
+    "reconnect": "Reconnect",
+    "streamDisconnected": "Disconnected from the log stream.",
+    "errorCount_one": "{{count}} error",
+    "errorCount_other": "{{count}} errors",
+    "warnCount_one": "{{count}} warning",
+    "warnCount_other": "{{count}} warnings",
+    "copied": "Log entry copied",
+    "noMatches": "No loaded entries match your search.",
+    "noMatchesHint": "Search only covers the entries already loaded here. Load older entries or adjust the filters to look further back.",
+    "searchLogsLabel": "Search the loaded log entries"
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -1926,7 +1960,9 @@
       "reasonUncovered": "{{count}} loaded entry(ies) older than the checked window",
       "unverifiedTitle": "Not fully verified",
       "unverifiedDesc": "No signature was disproven, but not everything could be checked: {{reasons}}."
-    }
+    },
+    "agentsDeployed": "Deployed",
+    "agentsNotDeployed": "Not deployed"
   },
   "schedules": {
     "cronHelp": "5-field format: minute hour day-of-month month day-of-week",
@@ -2057,7 +2093,8 @@
     "systemManaged": "System",
     "systemManagedHint": "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
     "persistentConversationIdLocked": "Set when the schedule is created. The server keeps the conversation the fires have been appending to.",
-    "failedScheduleGone": "Schedule no longer exists"
+    "failedScheduleGone": "Schedule no longer exists",
+    "oneTimeHelpZone": "Fires once at this moment, then completes. Read as {{zone}} time (the Time Zone below)."
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -2150,7 +2187,9 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "logOutput": "Log output",
-    "noMatch": "No logs match your filter"
+    "noMatch": "No logs match your filter",
+    "errorsAnnounce_one": "{{count}} error in the log",
+    "errorsAnnounce_other": "{{count}} errors in the log"
   },
   "promptViewer": {
     "error": "Failed to load prompt data",
@@ -3118,7 +3157,24 @@
     "deletePermanentlyHint": "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.",
     "deletePermanentlyWithMembersHint": "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged.",
     "deleteMembersFailedAfterGroup": "The group was deleted, but these member agents could not be: {{ids}}. Delete them from the Agents page.",
-    "deleteMembersFailedGroupKept": "The group was kept: these member agents could not be deleted: {{ids}}. Try again to finish."
+    "deleteMembersFailedGroupKept": "The group was kept: these member agents could not be deleted: {{ids}}. Try again to finish.",
+    "transcriptLabel": "Discussion transcript",
+    "announceAwaitingApproval": "The discussion is paused and waiting for your approval.",
+    "announceAwaitingHuman": "The discussion is waiting for a member's response.",
+    "newMessages": "New messages",
+    "finishEditingFirst": "Save or cancel the section you are editing first",
+    "editBasics": "Edit name, members and settings",
+    "humanTurnResuming": "Your response was recorded. The discussion is resuming — this page follows it and updates every few seconds.",
+    "composerMode": "What to do with your message",
+    "composerModeNew": "New discussion",
+    "composerModeContinue": "Continue this discussion",
+    "loadMoreDiscussions": "Load older discussions",
+    "confirmDeleteLiveDiscussionDescription": "This discussion is still running. It is stopped, and the transcript and everything in it are removed permanently. This cannot be undone.",
+    "discardEditsTitle": "Discard unsaved edits?",
+    "discardEditsDescription": "A section of the configuration is still being edited. Closing the panel discards what you changed there.",
+    "discardEditsConfirm": "Discard",
+    "keepEditing": "Keep editing",
+    "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3390,7 +3446,10 @@
     "sourceConversation": "Source Conversation",
     "conflicted": "Conflicted",
     "deleteEntryTitle": "Delete this memory?",
-    "deleteEntryDesc": "\"{{key}}\" is permanently removed for this user. Agents stop recalling it. This cannot be undone."
+    "deleteEntryDesc": "\"{{key}}\" is permanently removed for this user. Agents stop recalling it. This cannot be undone.",
+    "deleteAllDescUser": "This permanently deletes all {{total}} memory entries for user \"{{userId}}\". This cannot be undone.",
+    "toggleDetails": "Show or hide details for {{key}}",
+    "deleteEntryLabel": "Delete memory entry {{key}}"
   },
   "properties": {
     "title": "User Properties",
@@ -3426,7 +3485,9 @@
     "deleted": "Trigger deleted",
     "deleteTitle": "Delete Trigger",
     "deleteDesc": "Permanently delete the trigger for intent \"{{intent}}\"?",
-    "searchPlaceholder": "Filter by intent or agent ID..."
+    "searchPlaceholder": "Filter by intent or agent ID...",
+    "needIntent": "Enter an intent to save.",
+    "needAgent": "Choose at least one agent to save."
   },
   "capabilities": {
     "agentCount": "Agents",
@@ -3443,7 +3504,11 @@
     "registeredSkills": "Registered Skills",
     "noSkills": "No skills found",
     "matchingAgents": "Matching Agents",
-    "noMatches": "No agents found for this skill"
+    "noMatches": "No agents found for this skill",
+    "searchLabel": "Search skills",
+    "strategyLabel": "Match strategy",
+    "emptyTitle": "No capabilities registered yet",
+    "emptyDesc": "Agents appear here once they declare capabilities (skills) in their configuration. Add a capability to an agent and it shows up in this registry."
   },
   "exportDialog": {
     "title": "Export Agent",
@@ -3736,7 +3801,10 @@
     "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
     "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually.",
     "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again.",
-    "regularTruncated": "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest."
+    "regularTruncated": "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest.",
+    "conversationColumn": "Conversation",
+    "groupReviewLoadError": "The discussion could not be loaded.",
+    "groupReviewNoEntries": "Nothing has been said yet."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3768,7 +3836,18 @@
     "vaultUp": "Vault ready",
     "viewLogs": "View Logs",
     "coordAdminOnly": "Coordinator: requires admin",
-    "vaultAdminOnly": "Vault: requires admin"
+    "vaultAdminOnly": "Vault: requires admin",
+    "vaultChecking": "Vault checking…",
+    "statsPartial": "Some counts could not be loaded — they are shown as unavailable, not zero.",
+    "countUnavailable": "Could not be loaded",
+    "convState": {
+      "READY": "Ready",
+      "IN_PROGRESS": "In progress",
+      "ENDED": "Ended",
+      "EXECUTION_INTERRUPTED": "Interrupted",
+      "ERROR": "Error",
+      "AWAITING_HUMAN": "Awaiting human"
+    }
   },
   "errorBoundary": {
     "retry": "Try Again",
@@ -3826,7 +3905,11 @@
     "conversationsTruncated_other": "Conversations were capped — the user has {{count}} in total.",
     "failedConversations_one": "{{count}} conversation could not be read and is absent from the bundle.",
     "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
-    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled."
+    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled.",
+    "noDataFoundToast": "No data found for this user id — nothing was deleted.",
+    "noDataFoundTitle": "No data found for this user id",
+    "noDataFoundBody": "Nothing was deleted for \"{{userId}}\". Check the id for typos, then try again.",
+    "confirmTypeLabel": "Type the user id \"{{userId}}\" to confirm"
   },
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
@@ -3852,7 +3935,9 @@
     "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
     "purgeIncompleteScan": "Nothing was deleted: EDDI could not finish checking which resources are still in use. Re-scan and try again.",
     "purgeFailed": "Purge failed",
-    "scanFailed": "The scan failed: {{reason}}"
+    "scanFailed": "The scan failed: {{reason}}",
+    "reviewHint": "Open a resource from the list to inspect it first; every orphan on the list is deleted.",
+    "typeToConfirm": "Type {{count}} to confirm"
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",
@@ -3879,7 +3964,8 @@
     "tenantId": "Tenant ID",
     "title": "Tenant Quotas",
     "limitHintEmpty": "Empty or -1 = unlimited, 0 = blocked",
-    "invalidNumber": "Enter a number, or leave the field empty for unlimited."
+    "invalidInteger": "Enter a whole number (0 or more), or leave empty for unlimited.",
+    "invalidAmount": "Enter an amount (0 or more), or leave empty for unlimited."
   },
   "secretPicker": {
     "clearVault": "Clear vault reference",
@@ -5146,7 +5232,9 @@
     "bindingCallerSuppliedBody": "The calling system hands over each user's own credential with the request and EDDI stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
     "confirmAuthChange": "Change how this connection authenticates?",
     "confirmAuthChangeDesc": "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. EDDI refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
-    "confirmAuthChangeAccept": "Change it"
+    "confirmAuthChangeAccept": "Change it",
+    "deleted": "Connection \"{{name}}\" deleted",
+    "confirmDeleteNamed": "Delete connection \"{{name}}\"?"
   },
   "extensionTypes": {
     "parser": "Input Parser",
