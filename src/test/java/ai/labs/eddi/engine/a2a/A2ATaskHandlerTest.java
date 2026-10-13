@@ -809,8 +809,8 @@ class A2ATaskHandlerTest {
         @DisplayName("task first, tokens as chunks, the settled task last")
         void eventsInOrder() throws Exception {
             doAnswer(invocation -> {
-                InputData input = invocation.getArgument(6);
-                StreamingResponseHandler streaming = invocation.getArgument(7);
+                InputData input = invocation.getArgument(4);
+                StreamingResponseHandler streaming = invocation.getArgument(5);
                 streaming.onToken("Hel");
                 streaming.onToken("lo");
                 var turn = new SimpleConversationMemorySnapshot();
@@ -818,7 +818,7 @@ class A2ATaskHandlerTest {
                 turn.setConversationOutputs(List.of(output(taskIdOf(input), "Hello")));
                 streaming.onComplete(turn);
                 return null;
-            }).when(conversationService).sayStreaming(any(), anyString(), anyString(), any(), any(), any(), any(), any());
+            }).when(conversationService).sayStreaming(anyString(), any(), any(), any(), any(), any());
             List<StreamEvent> events = new ArrayList<>();
 
             handler.stream(AGENT, send("Hi"), events::add);
@@ -837,10 +837,10 @@ class A2ATaskHandlerTest {
         @DisplayName("a streaming error settles the task as failed")
         void errorFails() throws Exception {
             doAnswer(invocation -> {
-                StreamingResponseHandler streaming = invocation.getArgument(7);
+                StreamingResponseHandler streaming = invocation.getArgument(5);
                 streaming.onError(new RuntimeException("boom"));
                 return null;
-            }).when(conversationService).sayStreaming(any(), anyString(), anyString(), any(), any(), any(), any(), any());
+            }).when(conversationService).sayStreaming(anyString(), any(), any(), any(), any(), any());
             List<StreamEvent> events = new ArrayList<>();
 
             handler.stream(AGENT, send("Hi"), events::add);
