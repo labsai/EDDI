@@ -80,7 +80,7 @@ risk management system.
 | Detailed description of system elements | Agent configuration (JSON) | ✅ Available |
 | Information about training data | N/A — EDDI uses pre-trained models | ℹ️ Provider responsibility |
 | Capabilities and limitations | Agent config + system prompt | ✅ Available |
-| Automatic logging / record-keeping | Immutable audit ledger | ✅ Available |
+| Automatic logging / record-keeping | Append-only audit ledger — no row is ever deleted; a GDPR erasure redacts the erased user's content in place and keeps the row | ✅ Available |
 
 **Deployer action**: Maintain technical documentation that references EDDI's
 architecture docs and your agent configuration.
@@ -117,16 +117,21 @@ submits the APPROVED/REJECTED decision through
 
 | Requirement | EDDI Feature | Status |
 |---|---|---|
-| Immutable decision traceability | HMAC-signed audit ledger | ✅ Available |
+| Decision traceability | HMAC-signed, append-only audit ledger (rows are never deleted; GDPR erasure redacts content in place) | ✅ Available |
 | What data was read by each task | Audit entry `input` field | ✅ Available |
 | What data was produced | Audit entry `output` field | ✅ Available |
 | LLM prompts and responses | Audit entry `llmDetail` field | ✅ Available |
 | Tool invocations and results | Audit entry `toolCalls` field | ✅ Available |
 | Timing and cost | Audit entry `durationMs` + `cost` fields | ✅ Available |
-| Tamper detection | HMAC-SHA256 integrity hash on every entry | ✅ Available |
+| Tamper detection | HMAC-SHA256 integrity hash on every entry — **only when a signing key is configured** (`EDDI_VAULT_MASTER_KEY` or `EDDI_AUDIT_HMAC_KEY`) | ⚙️ Requires configuration |
+| Who changed the system | Administrative actions (configuration, deployment, vault, backup, GDPR) recorded with their caller | ✅ Available |
 
 This is EDDI's strongest compliance area. The audit ledger was specifically
-designed for EU AI Act compliance.
+designed for EU AI Act compliance. Two limits to plan for: a GDPR erasure keeps
+the erased user's rows but replaces their `input`/`output`/`llmDetail`/`toolCalls`
+with a redaction marker (`eddi.audit.erasure-mode`, see
+[audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion)), and the
+ledger does not record reads.
 
 ---
 
@@ -137,7 +142,9 @@ designed for EU AI Act compliance.
 - [ ] **Risk classification**: Determine the risk level of each agent
 - [ ] **Transparency notice**: Inform users they are interacting with AI
 - [ ] **Audit ledger**: Ensure `eddi.audit.enabled=true` (default)
-- [ ] **Vault master key**: Set `EDDI_VAULT_MASTER_KEY` for HMAC audit signing
+- [ ] **Vault master key**: Set `EDDI_VAULT_MASTER_KEY` for HMAC audit signing,
+      and `eddi.compliance.audit-signing-required=true` so a deployment without a
+      key refuses to start rather than writing unsigned entries
 
 ### High-Risk Deployments
 
